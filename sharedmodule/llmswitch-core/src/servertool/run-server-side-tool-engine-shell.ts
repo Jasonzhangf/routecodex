@@ -7,12 +7,15 @@ import { extractToolCallsFromResponseStage } from './extract-tool-calls-shell.js
 import { runServertoolEntryPreflight } from './entry-preflight-shell.js';
 import { runServertoolResponseStagePrePass } from './response-stage-prepass-shell.js';
 import { runServertoolExecutionStage } from './execution-stage-shell.js';
-import { asServertoolJsonObject, resolveServertoolEntryContext } from './entry-context-shell.js';
+import { resolveServertoolEntryContext } from './entry-context-shell.js';
 
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
-  const base = asServertoolJsonObject(options.chatResponse);
+  const base =
+    options.chatResponse && typeof options.chatResponse === 'object' && !Array.isArray(options.chatResponse)
+      ? options.chatResponse
+      : null;
   const entryPreflight = runServertoolEntryPreflight({ options, base });
   if (entryPreflight.action === 'return_result') {
     return entryPreflight.result;

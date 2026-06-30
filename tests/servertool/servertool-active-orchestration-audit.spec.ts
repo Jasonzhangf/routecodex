@@ -206,10 +206,11 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts',
-    forbidden: [],
+    forbidden: [
+      'export function asServertoolJsonObject(',
+    ],
     required: [
       'resolveServertoolEntryContext',
-      'asServertoolJsonObject',
       'planServertoolEntryContextWithNative',
       'const includeToolCallNames =',
     ],
@@ -323,7 +324,6 @@ const TARGETS = [
       'runServertoolResponseStagePrePass(',
       'runServertoolExecutionStage(',
       'resolveServertoolEntryContext(',
-      'asServertoolJsonObject(',
       'const entryPreflightPlan = planServertoolEntryPreflightWithNative({',
       "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {",
       "if (entryPreflightPlan.action === 'throw_client_disconnected') {",

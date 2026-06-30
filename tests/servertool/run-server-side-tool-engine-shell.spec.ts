@@ -23,10 +23,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/entry-context-shell.js',
   () => ({
-    resolveServertoolEntryContext,
-    asServertoolJsonObject: jest.fn((value: unknown) =>
-      value && typeof value === 'object' && !Array.isArray(value) ? (value as any) : null
-    )
+    resolveServertoolEntryContext
   })
 );
 

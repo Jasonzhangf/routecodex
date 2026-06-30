@@ -1,6 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
 import {
-  asServertoolJsonObject,
   resolveServertoolEntryContext
 } from '../../sharedmodule/llmswitch-core/src/servertool/entry-context-shell.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
@@ -30,8 +29,8 @@ describe('entry-context-shell', () => {
     );
 
     expect(source).toContain('export function resolveServertoolEntryContext(');
-    expect(source).toContain('export function asServertoolJsonObject(');
     expect(source).toContain('planServertoolEntryContextWithNative');
+    expect(source).not.toContain('export function asServertoolJsonObject(');
     expect(source).not.toContain('function tokenSetFromNativePlan(');
     expect(source).not.toContain('.trim().toLowerCase()');
   });
@@ -80,13 +79,6 @@ describe('entry-context-shell', () => {
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
       base: { ok: true } as any
     })).toThrow('Servertool entry context requires metadata center runtime_control.providerProtocol');
-  });
-
-  test('returns null for non-object payloads', () => {
-    expect(asServertoolJsonObject(null)).toBeNull();
-    expect(asServertoolJsonObject([])).toBeNull();
-    expect(asServertoolJsonObject('x')).toBeNull();
-    expect(asServertoolJsonObject({ ok: true })).toEqual({ ok: true });
   });
 
   test('prefers bound metadata center runtimeControl.providerProtocol over explicit options.providerProtocol', () => {

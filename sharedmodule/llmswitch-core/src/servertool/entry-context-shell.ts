@@ -80,7 +80,3 @@ export function resolveServertoolEntryContext(args: {
     excludeAutoHookIds
   };
 }
-
-export function asServertoolJsonObject(value: unknown): JsonObject | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : null;
-}

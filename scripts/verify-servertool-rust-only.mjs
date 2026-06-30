@@ -5180,7 +5180,6 @@ function checkServertoolRustOutcomeCloseout() {
   const entryContextShell = readRequired(TS_ENTRY_CONTEXT_SHELL);
   for (const marker of [
     'export function resolveServertoolEntryContext(',
-    'export function asServertoolJsonObject(',
     'planServertoolEntryContextWithNative',
     'const includeToolCallNames =',
     'const excludeToolCallNames =',
@@ -5191,6 +5190,17 @@ function checkServertoolRustOutcomeCloseout() {
       fail(
         'servertool-entry-context-shell-owner',
         `entry-context-shell.ts must keep entry context owner marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'export function asServertoolJsonObject(',
+    'asServertoolJsonObject(',
+  ]) {
+    if (entryContextShell.includes(marker)) {
+      fail(
+        'servertool-entry-context-shell-owner',
+        `entry-context-shell.ts must not restore local object helper marker ${marker}`
       );
     }
   }
