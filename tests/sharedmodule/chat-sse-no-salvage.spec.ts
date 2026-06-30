@@ -136,4 +136,55 @@ describe('chat SSE no-salvage boundary', () => {
       prompt_tokens_details: { cached_tokens: 3 }
     });
   });
+
+  it('allows inert tail chunks after a valid response is established instead of failing on empty terminal noise', async () => {
+    const sseText = [
+      'event: chat_chunk',
+      'data: {"id":"chatcmpl_tail_noise","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"logprobs":null,"finish_reason":"stop"}]}',
+      '',
+      'event: chat_chunk',
+      'data: {"id":"","object":"","created":0,"model":"gpt-4o-mini","choices":[],"usage":null}',
+      '',
+      'event: chat_chunk',
+      'data: {"id":"","object":"chat.completion.chunk","created":0,"model":"","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":5,"total_tokens":17}}',
+      '',
+      'event: chat.done',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    const output = await converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_tail_noise_after_valid_chunk',
+      model: 'gpt-4o-mini'
+    });
+
+    expect(output.id).toBe('chatcmpl_tail_noise');
+    expect(output.model).toBe('gpt-4o-mini');
+    expect(output.choices[0]?.message?.content).toContain('hello');
+    expect(output.usage).toEqual({
+      prompt_tokens: 12,
+      completion_tokens: 5,
+      total_tokens: 17
+    });
+  });
+
+  it('still fails when the first chunk has empty id and no established response context', async () => {
+    const sseText = [
+      'event: chat_chunk',
+      'data: {"id":"","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":5,"total_tokens":17}}',
+      '',
+      'event: chat.done',
+      'data: [DONE]',
+      ''
+    ].join('\n');
+
+    const converter = new ChatSseToJsonConverter();
+    await expect(converter.convertSseToJson(Readable.from([sseText]), {
+      requestId: 'req_chat_first_chunk_empty_id',
+      model: 'gpt-4o-mini'
+    })).rejects.toMatchObject({
+      requestExecutorProviderErrorStage: 'provider.sse_decode'
+    });
+  });
 });

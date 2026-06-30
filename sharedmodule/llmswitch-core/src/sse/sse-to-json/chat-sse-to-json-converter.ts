@@ -497,8 +497,8 @@ export class ChatSseToJsonConverter {
         }
         const chunk = parsed as ChatCompletionChunk;
 
-        // 验证chunk格式
-        this.validateChatChunk(chunk);
+        // 允许 provider 在终止前发送 inert tail/usage-only chunk，但首个语义块仍必须完整。
+        this.validateChatChunk(chunk, context);
 
         // 初始化响应结构（如果是第一个chunk）
         if (!context.currentResponse.id && chunk.id) {
@@ -1187,8 +1187,22 @@ export class ChatSseToJsonConverter {
   /**
    * 验证Chat chunk
    */
-  private validateChatChunk(chunk: ChatCompletionChunk): void {
+  private validateChatChunk(chunk: ChatCompletionChunk, context: SseToChatJsonContext): void {
+    const hasEstablishedResponse =
+      typeof context.currentResponse.id === 'string'
+      && context.currentResponse.id.trim().length > 0
+      && typeof context.currentResponse.created === 'number'
+      && Number.isFinite(context.currentResponse.created)
+      && context.currentResponse.created > 0
+      && typeof context.currentResponse.model === 'string'
+      && context.currentResponse.model.trim().length > 0;
+    const hasNoChoices = Array.isArray(chunk.choices) && chunk.choices.length === 0;
+    const allowInertTailChunk = hasEstablishedResponse && hasNoChoices;
+
     if (typeof chunk.id !== 'string' || !chunk.id.trim()) {
+      if (allowInertTailChunk) {
+        return;
+      }
       throw ErrorUtils.createError(
         'Invalid chat completion chunk id',
         CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
@@ -1197,6 +1211,9 @@ export class ChatSseToJsonConverter {
     }
 
     if (!chunk.object || chunk.object !== 'chat.completion.chunk') {
+      if (allowInertTailChunk) {
+        return;
+      }
       throw ErrorUtils.createError(
         'Invalid chat completion chunk object',
         CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
@@ -1205,6 +1222,9 @@ export class ChatSseToJsonConverter {
     }
 
     if (typeof chunk.created !== 'number' || !Number.isFinite(chunk.created) || chunk.created <= 0) {
+      if (allowInertTailChunk) {
+        return;
+      }
       throw ErrorUtils.createError(
         'Invalid chat completion chunk created timestamp',
         CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
@@ -1213,6 +1233,9 @@ export class ChatSseToJsonConverter {
     }
 
     if (typeof chunk.model !== 'string' || !chunk.model.trim()) {
+      if (allowInertTailChunk) {
+        return;
+      }
       throw ErrorUtils.createError(
         'Invalid chat completion chunk model',
         CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
