@@ -5667,6 +5667,17 @@ function checkServertoolResponseStageGateThinShell() {
     responseStageFinalizeShell,
     'runServertoolResponseStageAutoHookPass'
   );
+  for (const marker of [
+    "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
+    'return passthroughResult;',
+  ]) {
+    if (responseStageFinalizeShell.includes(marker)) {
+      fail(
+        'servertool-response-stage-finalize-shell-no-local-carrier',
+        `response-stage-finalize-shell.ts must not restore local carrier marker ${marker}`
+      );
+    }
+  }
 
   const responseStagePrePassShell = readRequired(TS_RESPONSE_STAGE_PREPASS_SHELL);
   assertContains(

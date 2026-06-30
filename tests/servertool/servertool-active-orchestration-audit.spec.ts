@@ -107,12 +107,14 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts',
-    forbidden: [],
+    forbidden: [
+      "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
+      'return passthroughResult;',
+    ],
     required: [
       'planServertoolResponseStageGateWithNative',
       'runServertoolResponseStageAutoHookPass',
-      "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
-      'return passthroughResult;',
+      "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
     ],
   },
   {
