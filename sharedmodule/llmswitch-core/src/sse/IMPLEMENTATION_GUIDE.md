@@ -36,7 +36,7 @@ src/sse/
 │   ├── serializers/                 # StreamWriter 使用的协议事件序列化函数
 │   │   ├── anthropic-event-serializer.ts
 │   │   ├── gemini-event-serializer.ts
-│   │   └── responses-event-serializer.ts
+│   │   └── # Responses wire codec owned by native router-hotpath
 │   ├── utils/                       # 工具函数
 │   │   ├── index.ts
 │   │   ├── time-utils.ts

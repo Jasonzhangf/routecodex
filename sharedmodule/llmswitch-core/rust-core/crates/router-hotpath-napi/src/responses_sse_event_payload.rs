@@ -569,6 +569,37 @@ fn read_sequence_number(input: &Map<String, Value>) -> Option<Value> {
     input.get("sequenceNumber").cloned()
 }
 
+fn supported_responses_sse_event_type(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "response.created"
+            | "response.in_progress"
+            | "response.reasoning_text.delta"
+            | "response.reasoning_text.done"
+            | "response.reasoning_signature.delta"
+            | "response.reasoning_image.delta"
+            | "response.reasoning_summary_part.added"
+            | "response.reasoning_summary_part.done"
+            | "response.reasoning_summary_text.delta"
+            | "response.reasoning_summary_text.done"
+            | "response.content_part.added"
+            | "response.content_part.done"
+            | "response.output_item.added"
+            | "response.output_item.done"
+            | "response.output_text.delta"
+            | "response.output_text.done"
+            | "response.function_call_arguments.delta"
+            | "response.function_call_arguments.done"
+            | "response.required_action"
+            | "response.completed"
+            | "response.done"
+            | "response.error"
+            | "response.cancelled"
+            | "response.failed"
+            | "response.incomplete"
+    )
+}
+
 fn data_object(input: &Map<String, Value>, event_type: &str) -> Result<Map<String, Value>, String> {
     match input.get("data") {
         Some(Value::Object(map)) => Ok(map.clone()),
@@ -616,6 +647,163 @@ pub fn canonicalize_responses_sse_event_payload_json(input_json: String) -> Resu
     let output = canonicalize_responses_sse_event_payload(input)?;
     serde_json::to_string(&output)
         .map_err(|error| format!("Failed to serialize Responses SSE event JSON: {}", error))
+}
+
+pub fn serialize_responses_sse_event_to_wire(event: Value) -> Result<String, String> {
+    let event = match event {
+        Value::Object(map) => map,
+        _ => return Err("Responses SSE event must be an object".to_string()),
+    };
+    let event_type_owned = event_type(&event)?.to_string();
+    if !supported_responses_sse_event_type(&event_type_owned) {
+        return Err(format!(
+            "Unsupported ResponsesSseEvent type: {}",
+            event_type_owned
+        ));
+    }
+    let data = data_object(&event, &event_type_owned)?;
+    let Some(Value::String(payload_type)) = data.get("type") else {
+        return Err(format!(
+            "Responses SSE payload missing canonical type for {}",
+            event_type_owned
+        ));
+    };
+    if payload_type != &event_type_owned {
+        return Err(format!(
+            "Responses SSE payload missing canonical type for {}",
+            event_type_owned
+        ));
+    }
+
+    let mut wire = format!(
+        "event: {}\ndata: {}\n",
+        event_type_owned,
+        serde_json::to_string(&Value::Object(data)).map_err(|error| {
+            format!("Failed to serialize Responses SSE event payload JSON: {}", error)
+        })?
+    );
+    if let Some(timestamp) = event.get("timestamp") {
+        if !timestamp.is_null() {
+            match timestamp {
+                Value::Number(number) => {
+                    wire.push_str("id: ");
+                    wire.push_str(&number.to_string());
+                    wire.push('\n');
+                }
+                Value::String(text) if !text.trim().is_empty() => {
+                    wire.push_str("id: ");
+                    wire.push_str(text);
+                    wire.push('\n');
+                }
+                _ => {}
+            }
+        }
+    }
+    wire.push('\n');
+    Ok(wire)
+}
+
+pub fn serialize_responses_sse_event_to_wire_json(event_json: String) -> Result<String, String> {
+    let event: Value = serde_json::from_str(&event_json)
+        .map_err(|error| format!("Failed to parse Responses SSE event JSON: {}", error))?;
+    serialize_responses_sse_event_to_wire(event)
+}
+
+fn parse_responses_sse_timestamp(source: Option<&str>) -> Result<i64, String> {
+    let Some(source) = source else {
+        return Err("Missing Responses SSE timestamp".to_string());
+    };
+    let source = source.trim();
+    if source.is_empty() {
+        return Err("Missing Responses SSE timestamp".to_string());
+    }
+    source
+        .parse::<i64>()
+        .map_err(|_| format!("Invalid Responses SSE timestamp: {}", source))
+}
+
+pub fn deserialize_responses_sse_event_from_wire(wire_data: &str) -> Result<Value, String> {
+    let mut event_type_value: Option<String> = None;
+    let mut event_data: Option<Value> = None;
+    let mut event_id: Option<String> = None;
+
+    for line in wire_data.trim().split('\n') {
+        if let Some(value) = line.strip_prefix("event:") {
+            event_type_value = Some(value.trim().to_string());
+        } else if let Some(value) = line.strip_prefix("data:") {
+            let data_str = value.trim();
+            let parsed: Value = serde_json::from_str(data_str).map_err(|error| {
+                format!("Invalid Responses SSE data payload: {}; {}", data_str, error)
+            })?;
+            event_data = Some(parsed);
+        } else if let Some(value) = line.strip_prefix("id:") {
+            event_id = Some(value.trim().to_string());
+        }
+    }
+
+    let Some(event_type_value) = event_type_value.filter(|value| !value.is_empty()) else {
+        return Err("Missing event type in SSE data".to_string());
+    };
+    let timestamp = parse_responses_sse_timestamp(event_id.as_deref())?;
+    Ok(serde_json::json!({
+        "type": event_type_value,
+        "timestamp": timestamp,
+        "data": event_data.unwrap_or(Value::Null),
+        "protocol": "responses",
+        "direction": "sse_to_json"
+    }))
+}
+
+pub fn deserialize_responses_sse_event_from_wire_json(
+    wire_data_json: String,
+) -> Result<String, String> {
+    let wire_data: Value = serde_json::from_str(&wire_data_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses SSE wire data JSON: {}",
+            error
+        )
+    })?;
+    let Some(wire_data) = wire_data.as_str() else {
+        return Err("Responses SSE wire data must be a string".to_string());
+    };
+    let output = deserialize_responses_sse_event_from_wire(wire_data)?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses SSE deserialized event JSON: {}",
+            error
+        )
+    })
+}
+
+pub fn validate_responses_sse_wire_format(wire_data: &str) -> Result<bool, String> {
+    let mut has_event = false;
+    let mut has_data = false;
+    for line in wire_data.trim().split('\n') {
+        if line.starts_with("event:") {
+            has_event = true;
+        } else if line.starts_with("data:") {
+            has_data = true;
+        }
+    }
+    Ok(has_event && has_data)
+}
+
+pub fn validate_responses_sse_wire_format_json(wire_data_json: String) -> Result<String, String> {
+    let wire_data: Value = serde_json::from_str(&wire_data_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses SSE wire data JSON: {}",
+            error
+        )
+    })?;
+    let Some(wire_data) = wire_data.as_str() else {
+        return Err("Responses SSE wire data must be a string".to_string());
+    };
+    serde_json::to_string(&validate_responses_sse_wire_format(wire_data)?).map_err(|error| {
+        format!(
+            "Failed to serialize Responses SSE wire validation JSON: {}",
+            error
+        )
+    })
 }
 
 pub fn normalize_responses_sse_response_payload(
@@ -1306,6 +1494,68 @@ mod tests {
         assert_eq!(output["data"]["type"], json!("response.completed"));
         assert_eq!(output["data"]["sequence_number"], json!(7));
         assert_eq!(output["data"]["response"]["id"], json!("resp_1"));
+    }
+
+    #[test]
+    fn serializes_responses_sse_event_to_wire() {
+        let output = serialize_responses_sse_event_to_wire(json!({
+            "type": "response.completed",
+            "timestamp": 123,
+            "data": {
+                "type": "response.completed",
+                "response": { "id": "resp_1" }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            output,
+            "event: response.completed\ndata: {\"response\":{\"id\":\"resp_1\"},\"type\":\"response.completed\"}\nid: 123\n\n"
+        );
+    }
+
+    #[test]
+    fn rejects_responses_sse_wire_payload_missing_type() {
+        let err = serialize_responses_sse_event_to_wire(json!({
+            "type": "response.completed",
+            "timestamp": 123,
+            "data": { "response": { "id": "resp_1" } }
+        }))
+        .unwrap_err();
+
+        assert!(err.contains("Responses SSE payload missing canonical type for response.completed"));
+    }
+
+    #[test]
+    fn deserializes_responses_sse_event_from_wire() {
+        let output = deserialize_responses_sse_event_from_wire(
+            "event: response.done\nid: 123\ndata: {\"type\":\"response.done\",\"response\":{}}\n",
+        )
+        .unwrap();
+
+        assert_eq!(output["type"], json!("response.done"));
+        assert_eq!(output["timestamp"], json!(123));
+        assert_eq!(output["protocol"], json!("responses"));
+        assert_eq!(output["direction"], json!("sse_to_json"));
+    }
+
+    #[test]
+    fn rejects_responses_sse_event_from_wire_invalid_timestamp() {
+        let err = deserialize_responses_sse_event_from_wire(
+            "event: response.done\nid: not-a-timestamp\ndata: {\"type\":\"response.done\",\"response\":{}}\n",
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Invalid Responses SSE timestamp: not-a-timestamp"));
+    }
+
+    #[test]
+    fn validates_responses_sse_wire_format() {
+        assert!(validate_responses_sse_wire_format(
+            "event: response.done\ndata: {\"type\":\"response.done\"}\n"
+        )
+        .unwrap());
+        assert!(!validate_responses_sse_wire_format("event: response.done\n").unwrap());
     }
 
     #[test]

@@ -1996,8 +1996,9 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts
-      - sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts
       - sharedmodule/llmswitch-core/src/sse/shared/writer.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
     contract:
       - tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
       - tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts

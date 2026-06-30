@@ -8,7 +8,7 @@ import type { BaseSseEvent } from '../types/core-interfaces.js';
 import type { ChatSseEvent, ResponsesSseEvent, AnthropicSseEvent, GeminiSseEvent } from '../types/index.js';
 import { serializeAnthropicEventToSSE } from './serializers/anthropic-event-serializer.js';
 import { serializeGeminiEventToSSE } from './serializers/gemini-event-serializer.js';
-import { defaultResponsesEventSerializer } from './serializers/responses-event-serializer.js';
+import { serializeResponsesSseEventToWireWithNative } from '../../native/router-hotpath/native-responses-sse-event-payload.js';
 import { TimeUtils } from './utils.js';
 import { serializeChatEventToSSE } from './chat-serializer.js';
 
@@ -194,10 +194,7 @@ export class StreamWriter {
   }
 
   private serializeResponsesEvent(event: ResponsesSseEvent): string {
-    if (typeof event.type !== 'string' || !event.type.startsWith('response.')) {
-      throw new Error(`Unsupported ResponsesSseEvent type: ${String((event as { type?: unknown }).type ?? 'missing')}`);
-    }
-    return defaultResponsesEventSerializer.serializeToWire(event);
+    return serializeResponsesSseEventToWireWithNative(event);
   }
 
   /**

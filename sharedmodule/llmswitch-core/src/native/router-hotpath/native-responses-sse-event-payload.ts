@@ -63,6 +63,87 @@ export function canonicalizeResponsesSseEventPayloadWithNative(event: unknown): 
   );
 }
 
+export function serializeResponsesSseEventToWireWithNative(event: unknown): string {
+  const capability = 'serializeResponsesSseEventToWireJson';
+  const fail = (reason?: string) => failNative<string>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let eventJson: string;
+  try {
+    eventJson = JSON.stringify(event);
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(eventJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE wire serialization result');
+    }
+    return raw;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
+export function deserializeResponsesSseEventFromWireWithNative(wireData: string): Record<string, unknown> {
+  return callNativeJson(
+    'deserializeResponsesSseEventFromWireJson',
+    'deserializeResponsesSseEventFromWireJson',
+    [JSON.stringify(wireData)],
+    parseNativeEvent,
+    {
+      emptyReason: 'empty Responses SSE wire deserialization result',
+      invalidReason: 'invalid Responses SSE wire deserialization result'
+    }
+  );
+}
+
+export function validateResponsesSseWireFormatWithNative(wireData: string): boolean {
+  const capability = 'validateResponsesSseWireFormatJson';
+  const fail = (reason?: string) => failNative<boolean>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let wireJson: string;
+  try {
+    wireJson = JSON.stringify(wireData);
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(wireJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE wire validation result');
+    }
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'boolean') {
+      return fail('invalid Responses SSE wire validation result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
 export function normalizeResponsesSseResponsePayloadWithNative(
   response: unknown,
   status: string

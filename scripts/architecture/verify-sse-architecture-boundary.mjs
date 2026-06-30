@@ -83,28 +83,10 @@ for (const forbidden of [
   }
 }
 
-const responsesSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts');
-for (const forbidden of [
-  'eventData = dataStr;',
-  'if (!source) return Date.now();',
-  'return Number.isNaN(parsed) ? Date.now() : parsed;',
-  'return hasEvent && hasData;\n    } catch',
-  'static createResponseCreatedEvent(',
-  'static createResponseInProgressEvent(',
-  'static createResponseCompletedEvent(',
-  'static createRequiredActionEvent(',
-  'static createResponseDoneEvent(',
-  'static createResponseErrorEvent(',
-  'timestamp: timestamp ?? Date.now()',
-  ".type.startsWith('response.')",
-  'private buildEventPayload(',
-  'payload.type = eventType;',
-  'payload = { type: eventType, value: data };',
-  'payload.sequence_number = sequenceNumber;',
-]) {
-  if (responsesSerializer.includes(forbidden)) {
-    failures.push(`Responses SSE serializer retains parse salvage marker: ${forbidden}`);
-  }
+const retiredResponsesSerializerPath =
+  'sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts';
+if (fs.existsSync(path.join(root, retiredResponsesSerializerPath))) {
+  failures.push(`${retiredResponsesSerializerPath} must stay physically deleted; Responses wire codec is Rust-owned`);
 }
 
 const responsesEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts');
@@ -197,7 +179,6 @@ const sharedOwnerFiles = [
   'sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts',
   'sharedmodule/llmswitch-core/src/sse/shared/writer.ts',
   'sharedmodule/llmswitch-core/src/sse/shared/utils.ts',
-  'sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts',
 ];
 
 for (const relPath of sharedOwnerFiles) {

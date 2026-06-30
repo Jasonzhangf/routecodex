@@ -1921,6 +1921,24 @@ pub fn canonicalize_responses_sse_event_payload_json(event_json: String) -> Napi
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "serializeResponsesSseEventToWireJson")]
+pub fn serialize_responses_sse_event_to_wire_json(event_json: String) -> NapiResult<String> {
+    responses_sse_event_payload::serialize_responses_sse_event_to_wire_json(event_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "deserializeResponsesSseEventFromWireJson")]
+pub fn deserialize_responses_sse_event_from_wire_json(wire_data_json: String) -> NapiResult<String> {
+    responses_sse_event_payload::deserialize_responses_sse_event_from_wire_json(wire_data_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "validateResponsesSseWireFormatJson")]
+pub fn validate_responses_sse_wire_format_json(wire_data_json: String) -> NapiResult<String> {
+    responses_sse_event_payload::validate_responses_sse_wire_format_json(wire_data_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "normalizeResponsesSseResponsePayloadJson")]
 pub fn normalize_responses_sse_response_payload_json(
     response_json: String,
