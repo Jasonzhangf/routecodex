@@ -1,3 +1,10 @@
+# 2026-06-30: Responses SSE error payload moved to Rust
+
+- SSE Rust 化继续收口 `sse.responses_encode_projection`：`responses.ts::buildErrorEvent` 不再本地合成 `{message,type:'internal_error',code:'generation_error'}`，改由 Rust `buildResponsesSseErrorPayloadJson` 生成 Responses `response.error` data payload。
+- TS 仍只创建 SSE event envelope（timestamp/protocol/direction/sequenceNumber）并调用 native；`verify-sse-architecture-boundary` 已禁止 Responses generator 里恢复 `"type: 'internal_error'"` / `"code: 'generation_error'"`。
+- 验证：Rust focused `responses_sse_event_payload` 8/8 PASS；native build PASS；focused Jest 15/15 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`。
+
 # 2026-06-30: Responses SSE response payload native owner slice
 
 - SSE Rust 化继续收口 `sse.responses_encode_projection`：`responses.ts` 删除本地 `createResponsePayload` / `normalizeUsage` helper，`response.created/in_progress/completed/done/required_action` 的 response payload materialize 改走 Rust `normalizeResponsesSseResponsePayloadJson`。

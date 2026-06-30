@@ -16,7 +16,10 @@ import type {
   ResponsesFunctionCallOutputItem
 } from '../../types/index.js';
 import { TimeUtils, StringUtils } from '../../shared/utils.js';
-import { normalizeResponsesSseResponsePayloadWithNative } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
+import {
+  buildResponsesSseErrorPayloadWithNative,
+  normalizeResponsesSseResponsePayloadWithNative
+} from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 const TEXT_CHUNK_BOUNDARY = /[\n\r\t，。、“”‘’！？,.\-:\u3000\s]/;
 
@@ -795,13 +798,7 @@ export function buildErrorEvent(
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      error: {
-        message: error.message,
-        type: 'internal_error',
-        code: 'generation_error'
-      }
-    },
+    data: buildResponsesSseErrorPayloadWithNative(error.message),
     sequenceNumber: baseEvent.sequenceNumber
   };
 }

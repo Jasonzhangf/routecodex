@@ -68,3 +68,34 @@ export function normalizeResponsesSseResponsePayloadWithNative(
     throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
   }
 }
+
+export function buildResponsesSseErrorPayloadWithNative(message: string): Record<string, unknown> {
+  const capability = 'buildResponsesSseErrorPayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const messageJson = JSON.stringify(message);
+  try {
+    const raw = fn(messageJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE error payload result');
+    }
+    const parsed = parseNativeEvent(raw);
+    if (!parsed) {
+      return fail('invalid Responses SSE error payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}

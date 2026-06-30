@@ -192,6 +192,31 @@ pub fn normalize_responses_sse_response_payload_json(
         .map_err(|error| format!("Failed to serialize Responses response JSON: {}", error))
 }
 
+pub fn build_responses_sse_error_payload(message: &str) -> Result<Value, String> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return Err("Responses SSE error message is required".to_string());
+    }
+    Ok(serde_json::json!({
+        "error": {
+            "message": trimmed,
+            "type": "internal_error",
+            "code": "generation_error"
+        }
+    }))
+}
+
+pub fn build_responses_sse_error_payload_json(message_json: String) -> Result<String, String> {
+    let message: Value = serde_json::from_str(&message_json)
+        .map_err(|error| format!("Failed to parse Responses SSE error message JSON: {}", error))?;
+    let Some(message_text) = message.as_str() else {
+        return Err("Responses SSE error message must be a string".to_string());
+    };
+    let output = build_responses_sse_error_payload(message_text)?;
+    serde_json::to_string(&output)
+        .map_err(|error| format!("Failed to serialize Responses SSE error payload JSON: {}", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,5 +329,21 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Invalid Responses response: missing created_at"));
+    }
+
+    #[test]
+    fn builds_responses_sse_error_payload() {
+        let output = build_responses_sse_error_payload("  upstream failed  ").unwrap();
+
+        assert_eq!(output["error"]["message"], json!("upstream failed"));
+        assert_eq!(output["error"]["type"], json!("internal_error"));
+        assert_eq!(output["error"]["code"], json!("generation_error"));
+    }
+
+    #[test]
+    fn rejects_empty_responses_sse_error_message() {
+        let err = build_responses_sse_error_payload("   ").unwrap_err();
+
+        assert!(err.contains("Responses SSE error message is required"));
     }
 }

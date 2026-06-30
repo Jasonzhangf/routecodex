@@ -111,6 +111,8 @@ const responsesEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-t
 for (const forbidden of [
   'function createResponsePayload(',
   'function normalizeUsage(',
+  "type: 'internal_error'",
+  "code: 'generation_error'",
   'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',
   'response.created_at ?? Math.floor(Date.now() / 1000)',
   'prompt_tokens',
