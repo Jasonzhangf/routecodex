@@ -1,8 +1,90 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { processProviderSendFailure } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-send-failure.js';
+import { resetErrorActionQueueStateForTests } from '../../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue.js';
 
 describe('request executor provider send failure abort handling', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    resetErrorActionQueueStateForTests();
+  });
+
+  it('waits through provider switch backoff before rerouting to the next provider', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-06-30T00:00:00.000Z'));
+    const error = Object.assign(new Error('HTTP 502: upstream temporary failure'), {
+      statusCode: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502'
+    });
+    const logStage = jest.fn();
+    const logProviderRetrySwitch = jest.fn();
+
+    const pending = processProviderSendFailure({
+      error,
+      requestId: 'req_provider_switch_wait',
+      providerKey: 'spark.key1.gpt-5.3-codex-spark',
+      providerId: 'spark',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-responses',
+      providerModel: 'gpt-5.3-codex-spark',
+      routeName: 'tools',
+      runtimeKey: 'spark.key1.gpt-5.3-codex-spark',
+      target: { providerKey: 'spark.key1.gpt-5.3-codex-spark', runtimeKey: 'spark.key1.gpt-5.3-codex-spark' },
+      dependencies: { errorHandlingCenter: {}, debugCenter: {}, logger: {} } as any,
+      runtimeManager: { resolveRuntimeKey: (providerKey?: string) => providerKey },
+      attempt: 1,
+      maxAttempts: 6,
+      logicalRequestChainKey: 'req_provider_switch_wait',
+      routePoolForAttempt: ['spark.key1.gpt-5.3-codex-spark', 'minimax.key1.MiniMax-M3'],
+      defaultTierAvailable: true,
+      excludedProviderKeys: new Set<string>(),
+      recordAttempt: jest.fn(),
+      logStage,
+      logProviderRetrySwitch,
+      bypassTrafficGovernor: false,
+      trafficActiveInFlightAtAcquire: 1,
+      trafficPolicyMaxInFlight: 4,
+      providerSendStartedAtMs: Date.now(),
+      providerSendElapsedMs: 0,
+      cumulativeExternalLatencyMs: 0,
+      contextOverflowRetries: 0,
+      maxContextOverflowRetries: 2,
+      metadata: { routecodexRoutingPolicyGroup: 'gateway_priority_5555' },
+      phase: 'provider_send',
+      logNonBlockingError: jest.fn(),
+      writeProviderSnapshot: jest.fn(async () => undefined),
+      extractRetryErrorSnapshot: () => ({
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: upstream temporary failure'
+      })
+    });
+
+    await jest.advanceTimersByTimeAsync(0);
+    expect(logStage).toHaveBeenCalledWith(
+      'provider.switch_backoff_wait',
+      'req_provider_switch_wait',
+      expect.objectContaining({
+        scopeKey: 'gateway_priority_5555|tools|provider-switch',
+        waitMs: 1000
+      })
+    );
+    await jest.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toMatchObject({ lastError: error });
+    expect(logStage).toHaveBeenCalledWith(
+      'provider.switch_backoff_wait.completed',
+      'req_provider_switch_wait',
+      expect.objectContaining({ waitMs: 1000 })
+    );
+    expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
+      switchAction: 'exclude_and_reroute',
+      stage: 'provider.send'
+    }));
+  });
+
   it('does not record backoff or retry switch after client disconnect abort', async () => {
     const error = Object.assign(new Error('CLIENT_REQUEST_ABORTED'), {
       name: 'AbortError',

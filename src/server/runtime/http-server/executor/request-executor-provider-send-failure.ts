@@ -11,7 +11,10 @@ import {
 } from './request-executor-provider-failure-plan.js';
 import {
   recordProviderTransportBackoff,
-  resolveProviderTransportBackoffScopeKey
+  recordProviderSwitchBackoff,
+  resolveProviderTransportBackoffScopeKey,
+  resolveProviderSwitchBackoffScopeKey,
+  waitProviderSwitchBackoffWithGate
 } from './request-executor-error-action-queue.js';
 import {
   extractStatusCodeFromError,
@@ -381,6 +384,44 @@ export async function processProviderSendFailure(
     delayMs: transportBackoffDelayMs,
     attempt: args.attempt
   });
+  const providerSwitchBackoffScopeKey = resolveProviderSwitchBackoffScopeKey({
+    portScope: args.portScope,
+    metadata: args.metadata,
+    routeName: args.routeName
+  });
+  const providerSwitchBackoffDelayMs = recordProviderSwitchBackoff({
+    providerSwitchBackoffKey: providerSwitchBackoffScopeKey
+  });
+  args.logStage('provider.switch_backoff.recorded', args.requestId, {
+    providerKey: args.providerKey,
+    routeName: args.routeName,
+    scopeKey: providerSwitchBackoffScopeKey,
+    delayMs: providerSwitchBackoffDelayMs,
+    attempt: args.attempt
+  });
+  const switchWaitMs = args.consumeProviderTransportBackoffMs?.() ?? providerSwitchBackoffDelayMs;
+  if (switchWaitMs > 0) {
+    args.logStage('provider.switch_backoff_wait', args.requestId, {
+      providerKey: args.providerKey,
+      routeName: args.routeName,
+      scopeKey: providerSwitchBackoffScopeKey,
+      waitMs: switchWaitMs,
+      attempt: args.attempt
+    });
+    await waitProviderSwitchBackoffWithGate({
+      providerSwitchBackoffKey: providerSwitchBackoffScopeKey,
+      ms: switchWaitMs,
+      signal: args.abortSignal,
+      logNonBlockingError: args.logNonBlockingError
+    });
+    args.logStage('provider.switch_backoff_wait.completed', args.requestId, {
+      providerKey: args.providerKey,
+      routeName: args.routeName,
+      scopeKey: providerSwitchBackoffScopeKey,
+      waitMs: switchWaitMs,
+      attempt: args.attempt
+    });
+  }
 
   return {
     lastError: args.error,

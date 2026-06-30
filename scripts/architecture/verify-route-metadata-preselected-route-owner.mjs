@@ -31,6 +31,13 @@ function forbidRustSource(relPath, pattern, message) {
   }
 }
 
+function requireContains(relPath, marker, message) {
+  const source = read(relPath);
+  if (!source.includes(marker)) {
+    failures.push(`${relPath}: ${message}`);
+  }
+}
+
 forbid(
   'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
   /routerEngine\.route\s*\(/,
@@ -75,6 +82,26 @@ forbidRustSource(
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs',
   /metadata_center_snapshot\.get\("providerProtocol"\)|metadata_center_snapshot\.get\("responsesResume"\)/,
   'VR metadata surface must not restore route scope from top-level providerProtocol or legacy responsesResume'
+);
+requireContains(
+  'src/server/runtime/http-server/executor/request-executor-error-shared.ts',
+  'export function isProviderProtocolBoundaryError(',
+  'providerProtocol boundary conflicts must remain explicitly classified outside provider availability'
+);
+requireContains(
+  'src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts',
+  'if (protocolBoundaryFailure) {',
+  'providerProtocol boundary conflicts must not produce retry/reroute/excludedProviderKeys plans'
+);
+requireContains(
+  'src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts',
+  'excludedCurrentProvider: false,',
+  'providerProtocol boundary conflicts must keep excludedCurrentProvider=false'
+);
+requireContains(
+  'tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts',
+  'protocol boundary conflicts never exclude providers from VR route hits',
+  'protocol boundary conflicts need a regression test proving no VR route-hit exclusion'
 );
 
 if (failures.length > 0) {

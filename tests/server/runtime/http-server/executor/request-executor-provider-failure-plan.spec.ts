@@ -1,6 +1,43 @@
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
+  test('protocol boundary conflicts never exclude providers from VR route hits', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const plan = await resolveRequestExecutorProviderFailurePlan({
+      error: Object.assign(
+        new Error('MetadataCenter runtime_control.providerProtocol conflict: existing=openai-responses selected=anthropic-messages'),
+        {
+          code: 'ERR_PROVIDER_PROTOCOL_MISMATCH'
+        }
+      ),
+      retryError: {
+        errorCode: 'ERR_PROVIDER_PROTOCOL_MISMATCH',
+        reason: 'MetadataCenter runtime_control.providerProtocol conflict: existing=openai-responses selected=anthropic-messages'
+      },
+      requestId: 'req-provider-protocol-boundary-no-exclusion',
+      providerKey: 'minimax.key1.MiniMax-M3',
+      providerProtocol: 'anthropic-messages',
+      runtimeKey: 'runtime:minimax',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.runtime_resolve',
+      logicalRequestChainKey: 'logical-provider-protocol-boundary-no-exclusion',
+      logicalChainRetryLimitStageRequestId: 'logical-provider-protocol-boundary-no-exclusion',
+      routePool: ['minimax.key1.MiniMax-M3', 'orangeai.key1.glm-5.2'],
+      forceExcludeCurrentProviderOnRetry: true,
+      excludedProviderKeys,
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(false);
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
+    expect(plan.retryExecutionPlan.retrySwitchPlan).toBeUndefined();
+    expect(excludedProviderKeys.size).toBe(0);
+  });
+
   test('local CLIENT_TOOL_ARGS_INVALID conversion failures remain recoverable only when they affect health', async () => {
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(

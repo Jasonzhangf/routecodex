@@ -549,7 +549,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Minimal change stack must prove fixed 1s/3s/5s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
+      - "Minimal change stack must prove fixed 1s/3s/5s cycling, blocking gate serialization, hook events, fixed waiter cap, provider-switch waits before exclude/reroute, provider traffic wait-then-saturate behavior, and server help visibility."
       - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
 
   - feature_id: vr.route_selection

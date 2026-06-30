@@ -2,6 +2,9 @@ import {
   isHostRequestExecutorErrorStage,
 } from './request-executor-provider-failure.js';
 import {
+  isProviderProtocolBoundaryError
+} from './request-executor-error-shared.js';
+import {
   resolveProviderRetryExecutionPolicyNative,
 } from '../../../../modules/llmswitch/bridge/native-exports.js';
 import {
@@ -109,10 +112,12 @@ export async function resolveProviderRetryExecutionPlan(args: {
   defaultTierAvailable?: boolean;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryExecutionPlan> {
+  const protocolBoundaryFailure = isProviderProtocolBoundaryError(args.error, args.retryError);
   const hostContractStage = isHostRequestExecutorErrorStage(args.stage ?? 'provider.send');
   const hostContractFailure = hostContractStage
     && args.retryError.errorCode !== 'EMPTY_ASSISTANT_RESPONSE'
-    && args.retryError.errorCode !== 'MISSING_REQUIRED_TOOL_CALL';
+    && args.retryError.errorCode !== 'MISSING_REQUIRED_TOOL_CALL'
+    || protocolBoundaryFailure;
   const classification = resolveProviderFailureClassification({
     error: args.error,
     stage: args.stage,
@@ -185,6 +190,16 @@ export async function resolveProviderRetryExecutionPlan(args: {
     excludedProviderKeys: args.excludedProviderKeys,
     defaultPoolAvailable: args.defaultTierAvailable === true,
   });
+  if (protocolBoundaryFailure) {
+    return {
+      shouldRetry: false,
+      excludedCurrentProvider: false,
+      routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+      defaultPoolAvailable: gate.defaultPoolAvailable,
+      policyExhausted: gate.policyExhausted,
+      mayProject: gate.mayProject,
+    };
+  }
   const maySwitchToAlternativeProvider = hasAlternativeCandidate && exclusionPlan.excludedCurrentProvider;
   if (!hasAlternativeCandidate) {
     if (

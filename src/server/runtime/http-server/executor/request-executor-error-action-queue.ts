@@ -117,6 +117,26 @@ export function resolveProviderTransportBackoffScopeKey(args: {
   return `${normalizeScopeKey(portScope)}|${normalizeScopeKey(providerKey)}|transport`;
 }
 
+export function resolveProviderSwitchBackoffScopeKey(args: {
+  providerSwitchBackoffKey?: string;
+  portScope?: string;
+  metadata?: Record<string, unknown>;
+  routeName?: string;
+}): string {
+  if (typeof args.providerSwitchBackoffKey === 'string' && args.providerSwitchBackoffKey.trim()) {
+    return args.providerSwitchBackoffKey.trim();
+  }
+  const portScope =
+    typeof args.portScope === 'string' && args.portScope.trim()
+      ? args.portScope.trim()
+      : readBackoffPortScope(args.metadata);
+  const routeName =
+    typeof args.routeName === 'string' && args.routeName.trim()
+      ? args.routeName.trim()
+      : 'unknown-route';
+  return `${normalizeScopeKey(portScope)}|${normalizeScopeKey(routeName)}|provider-switch`;
+}
+
 export function recordProviderTransportBackoff(args: {
   providerKey?: string;
   portScope?: string;
@@ -126,6 +146,18 @@ export function recordProviderTransportBackoff(args: {
   return recordErrorActionBackoff({
     category: 'global_error',
     scopeKey: resolveProviderTransportBackoffScopeKey(args)
+  });
+}
+
+export function recordProviderSwitchBackoff(args: {
+  routeName?: string;
+  portScope?: string;
+  metadata?: Record<string, unknown>;
+  providerSwitchBackoffKey?: string;
+}): number {
+  return recordErrorActionBackoff({
+    category: 'global_error',
+    scopeKey: resolveProviderSwitchBackoffScopeKey(args)
   });
 }
 
@@ -141,6 +173,24 @@ export async function waitProviderTransportBackoffWithGate(args: {
   return waitErrorActionBackoffWithGate({
     category: 'global_error',
     scopeKey: resolveProviderTransportBackoffScopeKey(args),
+    ms: args.ms,
+    signal: args.signal,
+    logNonBlockingError: args.logNonBlockingError
+  });
+}
+
+export async function waitProviderSwitchBackoffWithGate(args: {
+  routeName?: string;
+  portScope?: string;
+  metadata?: Record<string, unknown>;
+  providerSwitchBackoffKey?: string;
+  ms?: number;
+  signal?: AbortSignal;
+  logNonBlockingError?: LogNonBlockingError;
+}): Promise<number> {
+  return waitErrorActionBackoffWithGate({
+    category: 'global_error',
+    scopeKey: resolveProviderSwitchBackoffScopeKey(args),
     ms: args.ms,
     signal: args.signal,
     logNonBlockingError: args.logNonBlockingError

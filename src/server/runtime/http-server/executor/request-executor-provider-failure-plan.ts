@@ -20,6 +20,9 @@ import {
 import {
   resolveProviderRetryExecutionPlan
 } from './request-executor-retry-execution-plan.js';
+import {
+  isProviderProtocolBoundaryError
+} from './request-executor-error-shared.js';
 
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
@@ -89,11 +92,13 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     upstreamCode: reportPlan.upstreamCode,
     reason: args.retryError.reason
   });
+  const protocolBoundaryFailure = isProviderProtocolBoundaryError(args.error, args.retryError);
   const suppressForceExclude =
     topCode === 'CLIENT_TOOL_ARGS_INVALID'
     || topUpstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
     || errorCode === 'CLIENT_TOOL_ARGS_INVALID'
     || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
+    || protocolBoundaryFailure
     || reportPlan.stageHint === 'host.response_contract'
     || reportPlan.stageHint === 'provider.followup';
   const forceExcludeCurrentProviderOnRetry =
