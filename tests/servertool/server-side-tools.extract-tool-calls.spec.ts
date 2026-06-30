@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { extractToolCalls } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
+import { extractToolCallsFromResponseStage } from '../../sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.js';
 import { mapNativeProviderResponseToChat } from '../sharedmodule/native-response-mapper-test-helper.js';
 
 describe('server-side-tools: extractToolCalls', () => {
@@ -33,14 +33,14 @@ describe('server-side-tools: extractToolCalls', () => {
       ]
     } as any;
 
-    const calls = extractToolCalls(chat);
+    const calls = extractToolCallsFromResponseStage(chat);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.id).toBe('good_exec_call');
     expect(calls[0]?.name).toBe('exec_command');
   });
 
   test('fails fast when assistant tool_call id is missing', () => {
-    expect(() => extractToolCalls({
+    expect(() => extractToolCallsFromResponseStage({
       choices: [
         {
           message: {
@@ -61,7 +61,7 @@ describe('server-side-tools: extractToolCalls', () => {
   });
 
   test('assigns canonical ids for allowed internal servertools at extraction source', () => {
-    const calls = extractToolCalls({
+    const calls = extractToolCallsFromResponseStage({
       choices: [
         {
           message: {
@@ -104,7 +104,7 @@ describe('server-side-tools: extractToolCalls', () => {
         } as any
     ) as any;
 
-    const calls = extractToolCalls(chat, 'req-anthropic-tool-use-id');
+    const calls = extractToolCallsFromResponseStage(chat, 'req-anthropic-tool-use-id');
     expect(calls).toHaveLength(1);
     expect(calls[0]?.name).toBe('exec_command');
     expect(calls[0]?.id).toBe('call_97cb11e6620746fc9a33d1a1');

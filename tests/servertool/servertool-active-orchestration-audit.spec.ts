@@ -271,6 +271,7 @@ const TARGETS = [
     forbidden: [
       "import './handlers/stop-message-auto.js';",
       "import './handlers/vision.js';",
+      'export const extractToolCalls =',
       'if (!base) {',
       'if (isAdapterClientDisconnected(options.adapterContext)) {',
       "responseStagePlan?.nextAction === 'bypass'",

@@ -5015,13 +5015,19 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
-  for (const marker of ['export const runServerSideToolEngine =', 'export const extractToolCalls =']) {
+  for (const marker of ['export const runServerSideToolEngine =']) {
     if (!tsServerSideToolsImpl.includes(marker)) {
       fail(
         'servertool-cli-projection-thin-shell-guard',
         `server-side-tools-impl.ts must keep thin-shell owner marker ${marker}`
       );
     }
+  }
+  if (tsServerSideToolsImpl.includes('export const extractToolCalls =')) {
+    fail(
+      'servertool-cli-projection-thin-shell-guard',
+      'server-side-tools-impl.ts must not restore extractToolCalls facade; use extract-tool-calls-shell.ts directly'
+    );
   }
   const extractToolCallsShell = readRequired(TS_EXTRACT_TOOL_CALLS_SHELL);
   for (const marker of [
