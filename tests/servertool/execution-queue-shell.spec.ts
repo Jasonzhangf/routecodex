@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const getServerToolHandler = jest.fn();
 const executeBuiltinServerToolHandler = jest.fn();
 const materializeServertoolPlannedResult = jest.fn();
-const createServertoolExecutionLoopStateFromNative = jest.fn();
-const appendExecutedToolRecordFromNative = jest.fn();
+const createServertoolExecutionLoopStateWithNative = jest.fn();
+const appendServertoolExecutedRecordWithNative = jest.fn();
 const buildServertoolHandlerErrorToolOutputPayloadWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
@@ -21,9 +21,7 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     materializeServertoolPlannedResult,
-    executeBuiltinServerToolHandler,
-    createServertoolExecutionLoopStateFromNative,
-    appendExecutedToolRecordFromNative
+    executeBuiltinServerToolHandler
   })
 );
 
@@ -42,7 +40,9 @@ jest.unstable_mockModule(
   () => ({
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionLoopEffectWithNative,
-    planServertoolExecutionLoopRuntimeActionWithNative
+    planServertoolExecutionLoopRuntimeActionWithNative,
+    createServertoolExecutionLoopStateWithNative,
+    appendServertoolExecutedRecordWithNative
   })
 );
 
@@ -83,18 +83,26 @@ const { runServertoolIoExecutionQueue } = await import(
 describe('execution-queue-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    createServertoolExecutionLoopStateFromNative.mockReturnValue({
+    createServertoolExecutionLoopStateWithNative.mockReturnValue({
       executedToolCalls: [],
-      executedIds: new Set<string>(),
+      executedIds: [],
       executedFlowIds: []
     });
-    appendExecutedToolRecordFromNative.mockImplementation((state: any, toolCall: any, execution?: any) => {
-      state.executedToolCalls.push({ toolCall, ...(execution ? { execution } : {}) });
-      state.executedIds.add(toolCall.id);
+    appendServertoolExecutedRecordWithNative.mockImplementation((input: any) => {
+      const state = input?.state ?? { executedToolCalls: [], executedIds: [], executedFlowIds: [] };
+      const toolCall = input?.toolCall;
+      const execution = input?.execution;
+      const next = {
+        ...state,
+        executedToolCalls: [...state.executedToolCalls, { toolCall, ...(execution ? { execution } : {}) }],
+        executedIds: [...state.executedIds, toolCall.id],
+        executedFlowIds: [...state.executedFlowIds]
+      };
       if (execution?.flowId) {
-        state.executedFlowIds.push(execution.flowId);
-        state.lastExecution = execution;
+        next.executedFlowIds.push(execution.flowId);
+        next.lastExecution = execution;
       }
+      return next;
     });
     planServertoolExecutionLoopRuntimeActionWithNative.mockImplementation((input: any) => {
       if (input?.hasHandlerEntry !== true || input?.triggerMode !== 'tool_call') {
@@ -187,6 +195,6 @@ describe('execution-queue-shell', () => {
 
     expect(state.executedToolCalls).toHaveLength(1);
     expect(materializeServertoolPlannedResult).toHaveBeenCalled();
-    expect(appendExecutedToolRecordFromNative).toHaveBeenCalled();
+    expect(appendServertoolExecutedRecordWithNative).toHaveBeenCalled();
   });
 });

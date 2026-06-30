@@ -195,7 +195,7 @@ describe('execution-handler-materialization-shell', () => {
         toolCalls: [],
         executionState: {
           executedToolCalls: [],
-          executedIds: new Set<string>(),
+          executedIds: [],
           executedFlowIds: []
         }
       })
@@ -231,7 +231,7 @@ describe('execution-handler-materialization-shell', () => {
         toolCalls: [],
         executionState: {
           executedToolCalls: [],
-          executedIds: new Set<string>(),
+          executedIds: [],
           executedFlowIds: []
         }
       })
@@ -265,7 +265,7 @@ describe('execution-handler-materialization-shell', () => {
       toolCalls: [],
       executionState: {
         executedToolCalls: [{ toolCall: { id: 'call_1', name: 'tool_1', arguments: '{}' } }] as any,
-        executedIds: new Set<string>(),
+        executedIds: [],
         executedFlowIds: ['flow_1'],
         lastExecution: {
           flowId: 'flow_1',
@@ -280,7 +280,7 @@ describe('execution-handler-materialization-shell', () => {
         toolCalls: [],
         executionState: expect.objectContaining({
           executedToolCalls: [{ toolCall: { id: 'call_1', name: 'tool_1', arguments: '{}' } }],
-          executedIds: expect.any(Set),
+          executedIds: expect.any(Array),
           executedFlowIds: ['flow_1'],
           lastExecution: {
             flowId: 'flow_1',
@@ -323,7 +323,7 @@ describe('execution-handler-materialization-shell', () => {
         toolCalls: [],
         executionState: {
           executedToolCalls: [],
-          executedIds: new Set<string>(),
+          executedIds: [],
           executedFlowIds: []
         }
       })
@@ -340,7 +340,7 @@ describe('execution-handler-materialization-shell', () => {
   test('builds outcome-plan input through Rust owner directly', () => {
     const executionState = {
       executedToolCalls: [],
-      executedIds: new Set<string>(),
+      executedIds: [],
       executedFlowIds: []
     };
 

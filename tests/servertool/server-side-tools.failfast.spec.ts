@@ -794,7 +794,7 @@ jest.unstable_mockModule(
     runServertoolIoExecutionQueue: jest.fn(async (args: any) => {
       const state = {
         executedToolCalls: [],
-        executedIds: new Set<string>(),
+        executedIds: [],
         executedFlowIds: [],
         lastExecution: undefined as any
       };
@@ -818,7 +818,7 @@ jest.unstable_mockModule(
           ];
           const execution = { flowId: `${toolCall.name}_error` };
           state.executedToolCalls.push({ toolCall, execution });
-          state.executedIds.add(toolCall.id);
+          state.executedIds.push(toolCall.id);
           state.executedFlowIds.push(execution.flowId);
           state.lastExecution = execution;
         }
@@ -851,20 +851,7 @@ jest.unstable_mockModule(
         }
       }
     })),
-    executeBuiltinServerToolHandler: jest.fn(async () => null),
-    createServertoolExecutionLoopStateFromNative: jest.fn(() => ({
-      executedToolCalls: [],
-      executedIds: new Set<string>(),
-      executedFlowIds: []
-    })),
-    appendExecutedToolRecordFromNative: jest.fn((state: any, toolCall: any, execution?: any) => {
-      state.executedToolCalls.push({ toolCall, ...(execution ? { execution } : {}) });
-      state.executedIds.add(toolCall.id);
-      if (execution?.flowId) {
-        state.executedFlowIds.push(execution.flowId);
-        state.lastExecution = execution;
-      }
-    })
+    executeBuiltinServerToolHandler: jest.fn(async () => null)
   })
 );
 

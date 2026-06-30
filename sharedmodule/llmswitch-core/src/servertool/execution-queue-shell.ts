@@ -12,28 +12,31 @@ import {
 import {
   planServertoolExecutionDispatchErrorWithNative,
   planServertoolExecutionLoopEffectWithNative,
-  planServertoolExecutionLoopRuntimeActionWithNative
+  planServertoolExecutionLoopRuntimeActionWithNative,
+  appendServertoolExecutedRecordWithNative,
+  createServertoolExecutionLoopStateWithNative,
+  type NativeServertoolExecutedRecord,
+  type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  appendExecutedToolRecordFromNative,
-  createServertoolExecutionLoopStateFromNative,
   executeBuiltinServerToolHandler,
-  materializeServertoolPlannedResult,
-  type ServertoolExecutedRecord,
-  type ServertoolExecutionLoopState
+  materializeServertoolPlannedResult
 } from './execution-handler-materialization-shell.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
-export type { ServertoolExecutedRecord, ServertoolExecutionLoopState };
+export type {
+  NativeServertoolExecutedRecord as ServertoolExecutedRecord,
+  NativeServertoolExecutionLoopState as ServertoolExecutionLoopState
+};
 
 export async function runServertoolIoExecutionQueue(args: {
   dispatchPlan: ReturnType<typeof planServertoolToolCallDispatchWithNative>;
   options: ServerSideToolEngineOptions;
   contextBase: Omit<import('./types.js').ServerToolHandlerContext, 'toolCall'>;
   baseForExecution: JsonObject;
-}): Promise<ServertoolExecutionLoopState> {
-  const executionState = createServertoolExecutionLoopStateFromNative();
+}): Promise<NativeServertoolExecutionLoopState> {
+  let executionState = createServertoolExecutionLoopStateWithNative();
 
   for (const toolCall of args.dispatchPlan.executableToolCalls) {
     const entry = getServerToolHandler(toolCall.name);
@@ -79,7 +82,11 @@ export async function runServertoolIoExecutionQueue(args: {
     });
     if (resultLoopActionPlan.action === 'apply_materialized_result') {
       replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse as JsonObject);
-      appendExecutedToolRecordFromNative(executionState, toolCall, result.execution);
+      executionState = appendServertoolExecutedRecordWithNative({
+        state: executionState,
+        toolCall,
+        execution: result.execution
+      });
       continue;
     }
     if (resultLoopActionPlan.action === 'apply_handler_error_tool_output') {
@@ -101,11 +108,11 @@ export async function runServertoolIoExecutionQueue(args: {
           stripAfterExecute: toolCall.stripAfterExecute
         }
       });
-      appendExecutedToolRecordFromNative(
-        executionState,
-        errorEffectPlan.toolCall as ServertoolExecutedRecord['toolCall'],
-        errorEffectPlan.execution as ServerToolExecution
-      );
+      executionState = appendServertoolExecutedRecordWithNative({
+        state: executionState,
+        toolCall: errorEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall'],
+        execution: errorEffectPlan.execution as ServerToolExecution
+      });
     }
   }
 
@@ -133,11 +140,11 @@ export async function runServertoolIoExecutionQueue(args: {
       },
       noopFlowId
     });
-    appendExecutedToolRecordFromNative(
-      executionState,
-      noopEffectPlan.toolCall as ServertoolExecutedRecord['toolCall'],
-      noopEffectPlan.execution as ServerToolExecution
-    );
+    executionState = appendServertoolExecutedRecordWithNative({
+      state: executionState,
+      toolCall: noopEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall'],
+      execution: noopEffectPlan.execution as ServerToolExecution
+    });
   }
 
   return executionState;

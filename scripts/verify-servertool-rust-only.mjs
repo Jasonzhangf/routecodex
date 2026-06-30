@@ -2846,10 +2846,23 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-state-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'appendServertoolExecutedRecordJson'],
     ['servertool-execution-state-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'createServertoolExecutionLoopStateWithNative'],
     ['servertool-execution-state-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'appendServertoolExecutedRecordWithNative'],
-    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'createServertoolExecutionLoopStateFromNative'],
-    ['servertool-execution-state-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'appendExecutedToolRecordFromNative'],
+    ['servertool-execution-state-ts-native-direct', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'createServertoolExecutionLoopStateWithNative'],
+    ['servertool-execution-state-ts-native-direct', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'appendServertoolExecutedRecordWithNative'],
   ]) {
     assertContains(check, file, content, needle);
+  }
+  for (const marker of [
+    'createServertoolExecutionLoopStateFromNative',
+    'appendExecutedToolRecordFromNative',
+    'function hydrateExecutionLoopState(',
+    'new Set(state.executedIds)'
+  ]) {
+    assertMissing(
+      'servertool-execution-state-wrapper-deleted',
+      `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+      readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
+      marker
+    );
   }
   for (const [file, content, marker] of [
     [TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'noopExecutionContext'],

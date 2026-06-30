@@ -120,7 +120,7 @@ describe('server-side-tools native dispatch planner', () => {
           }
         }
       ],
-      executedIds: new Set(['call_dispatch_1']),
+      executedIds: ['call_dispatch_1'],
       executedFlowIds: [`${spec.name}_ok`],
       lastExecution: {
         flowId: `${spec.name}_ok`

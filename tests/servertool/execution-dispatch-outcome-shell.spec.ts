@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const getServerToolHandler = jest.fn();
 const executeBuiltinServerToolHandler = jest.fn();
 const materializeServertoolPlannedResult = jest.fn();
-const createServertoolExecutionLoopStateFromNative = jest.fn();
-const appendExecutedToolRecordFromNative = jest.fn();
+const createServertoolExecutionLoopStateWithNative = jest.fn();
+const appendServertoolExecutedRecordWithNative = jest.fn();
 const materializeNativeToolCallExecutionOutcomeNative = jest.fn((args: any) => ({
   mode: 'tool_flow',
   finalChatResponse: args.base,
@@ -56,8 +56,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     materializeServertoolPlannedResult,
-    createServertoolExecutionLoopStateFromNative,
-    appendExecutedToolRecordFromNative,
     executeBuiltinServerToolHandler,
     materializeNativeToolCallExecutionOutcome: materializeNativeToolCallExecutionOutcomeNative
   })
@@ -82,6 +80,8 @@ jest.unstable_mockModule(
     planServertoolExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
     planServertoolExecutionOutcomeRuntimeActionWithNative,
+    createServertoolExecutionLoopStateWithNative,
+    appendServertoolExecutedRecordWithNative,
     isAdapterClientDisconnectedWithNative: jest.fn(() => false),
     planClientDisconnectWatcherWithNative: jest.fn(() => ({ intervalMs: 50 })),
     planServertoolClientDisconnectedErrorWithNative: jest.fn((input: any) => ({
@@ -169,18 +169,26 @@ describe('execution queue dispatch runtime', () => {
       message: `[native-dispatch-contract] ${String(input?.kind ?? 'unknown')}`,
       details: input ?? {}
     }));
-    createServertoolExecutionLoopStateFromNative.mockReturnValue({
+    createServertoolExecutionLoopStateWithNative.mockReturnValue({
       executedToolCalls: [],
-      executedIds: new Set<string>(),
+      executedIds: [],
       executedFlowIds: []
     });
-    appendExecutedToolRecordFromNative.mockImplementation((state: any, toolCall: any, execution?: any) => {
-      state.executedToolCalls.push({ toolCall, ...(execution ? { execution } : {}) });
-      state.executedIds.add(toolCall.id);
+    appendServertoolExecutedRecordWithNative.mockImplementation((input: any) => {
+      const state = input?.state ?? { executedToolCalls: [], executedIds: [], executedFlowIds: [] };
+      const toolCall = input?.toolCall;
+      const execution = input?.execution;
+      const next = {
+        ...state,
+        executedToolCalls: [...state.executedToolCalls, { toolCall, ...(execution ? { execution } : {}) }],
+        executedIds: [...state.executedIds, toolCall.id],
+        executedFlowIds: [...state.executedFlowIds]
+      };
       if (execution?.flowId) {
-        state.executedFlowIds.push(execution.flowId);
-        state.lastExecution = execution;
+        next.executedFlowIds.push(execution.flowId);
+        next.lastExecution = execution;
       }
+      return next;
     });
     planServertoolExecutionLoopRuntimeActionWithNative.mockImplementation((input: any) => {
       if (input?.hasHandlerEntry !== true || input?.triggerMode !== 'tool_call') {
@@ -243,22 +251,6 @@ describe('execution queue dispatch runtime', () => {
         reuseLastExecutionEnvelope: false,
         executionFlowId: String(input?.flowId ?? 'servertool_multi')
       };
-    });
-    createServertoolExecutionLoopStateFromNative.mockReturnValue({
-      executedToolCalls: [],
-      executedIds: new Set<string>(),
-      executedFlowIds: []
-    });
-    appendExecutedToolRecordFromNative.mockImplementation((state: any, toolCall: any, execution?: any) => {
-      state.executedToolCalls.push({
-        toolCall,
-        ...(execution ? { execution } : {})
-      });
-      state.executedIds.add(toolCall.id);
-      if (execution?.flowId) {
-        state.executedFlowIds.push(execution.flowId);
-        state.lastExecution = execution;
-      }
     });
   });
 
@@ -398,7 +390,7 @@ describe('execution queue dispatch runtime', () => {
       })
     ).rejects.toThrow('[native-dispatch-contract] dispatch_spec_mismatch');
 
-    expect(createServertoolExecutionLoopStateFromNative).toHaveBeenCalledTimes(1);
+    expect(createServertoolExecutionLoopStateWithNative).toHaveBeenCalledTimes(1);
     expect(planServertoolExecutionLoopRuntimeActionWithNative).toHaveBeenCalledWith({
       hasHandlerEntry: true,
       triggerMode: 'tool_call',
