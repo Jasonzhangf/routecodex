@@ -5,6 +5,7 @@
 
 import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall, ChatUsage } from '../../types/index.js';
 import {
+  buildChatSseContentDeltaPayloadWithNative,
   buildChatSseErrorPayloadWithNative,
   buildChatSseEventEnvelopeWithNative,
   buildChatSseRoleDeltaPayloadWithNative
@@ -214,22 +215,20 @@ export function* buildContentDeltas(
 ): Generator<ChatSseEvent> {
   if (!content) return;
   const baseChunk = createBaseChunk(context, config);
-  const chunk = {
-    ...baseChunk,
-    choices: [{
-      index: context.choiceIndex,
-      delta: { content },
-      logprobs: null,
-      finish_reason: null
-    }]
-  };
+  const payload = buildChatSseContentDeltaPayloadWithNative({
+    responseId: baseChunk.id,
+    created: baseChunk.created,
+    model: baseChunk.model,
+    choiceIndex: context.choiceIndex,
+    content
+  });
   const envelope = nextChatEventEnvelope(context, config);
 
   yield {
     event: 'chat_chunk',
     type: 'chat_chunk',
     timestamp: envelope.timestamp,
-    data: JSON.stringify(chunk),
+    data: JSON.stringify(payload),
     sequenceNumber: envelope.sequenceNumber,
     protocol: envelope.protocol,
     direction: envelope.direction

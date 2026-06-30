@@ -1,3 +1,8 @@
+# 2026-07-01: Chat SSE content delta payload Rust owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 Chat `delta: { content }` marker 后先红，证明 Chat content delta chunk payload 仍由 TS 合成。
+- Fix：新增 Rust/NAPI `buildChatSseContentDeltaPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildContentDeltas()` 只取 base context、调用 native payload、封装 native envelope。
+- Verification：Rust `chat_sse_content_delta_payload` 2/2 PASS；native build PASS；focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic` 18/18 PASS；native export-list subtest PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；真实 chat replay `done=true error=false malformedWire=0 chatChunkCount=4 toolChunks=2 finishChunks=1 usageChunks=1`；该真实样本无非空 content delta，非空 content 行为由 Rust/Jest 覆盖。
+
 # 2026-07-01: Chat SSE role delta payload Rust owner
 - Red evidence：`verify:sse-architecture-boundary` 新增 Chat `delta: { role: role as ... }` marker 后先红，证明 Chat role delta chunk payload 仍由 TS 合成。
 - Fix：新增 Rust/NAPI `buildChatSseRoleDeltaPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildRoleDelta()` 只取 base context、调用 native payload、封装 native envelope。

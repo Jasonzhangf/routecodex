@@ -177,3 +177,51 @@ export function buildChatSseRoleDeltaPayloadWithNative(input: {
     throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
   }
 }
+
+export function buildChatSseContentDeltaPayloadWithNative(input: {
+  responseId: string;
+  created: number;
+  model: string;
+  choiceIndex: number;
+  content: string;
+}): Record<string, unknown> {
+  const capability = 'buildChatSseContentDeltaPayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      response_id: input.responseId,
+      created: input.created,
+      model: input.model,
+      choice_index: input.choiceIndex,
+      content: input.content
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Chat SSE content delta payload result');
+    }
+    const parsed = parseNativeEventPayload(raw);
+    if (!parsed) {
+      return fail('invalid Chat SSE content delta payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
