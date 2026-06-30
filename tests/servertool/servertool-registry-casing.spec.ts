@@ -10,10 +10,6 @@ jest.unstable_mockModule(
       executionMode: 'guarded',
       stripAfterExecute: true
     })),
-    planServertoolRegistryLookupFromSkeleton: jest.fn(() => ({
-      action: 'return_builtin',
-      canonicalName: 'reasoningStop'
-    })),
     resolveServertoolBuiltinHandlerEntry: jest.fn(() => ({
       name: 'reasoningStop',
       trigger: 'tool_call',
@@ -26,6 +22,16 @@ jest.unstable_mockModule(
     planServertoolBuiltinHandlerNames: jest.fn(() => ['reasoningStop']),
     planServertoolBuiltinAutoHandlerEntries: jest.fn(() => []),
     planServertoolBuiltinHandlerRecordEntries: jest.fn(() => [])
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  () => ({
+    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(() => ({
+      action: 'return_builtin',
+      canonicalName: 'reasoningStop'
+    })),
   })
 );
 

@@ -468,6 +468,7 @@ const TARGETS = [
     forbidden: [
       'planServertoolRegistryRegistrationActionWithNative',
       'planServertoolRegistryLookupActionWithNative',
+      'planServertoolRegistryLookupFromSkeleton({',
       'builtinNameMatched',
       'builtinEntryPresent',
       'registrationAllowedByConfig',
@@ -483,7 +484,7 @@ const TARGETS = [
       'buildServertoolDispatchPlanInputWithNative',
     ],
     required: [
-      'const actionPlan = planServertoolRegistryLookupFromSkeleton({',
+      'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
       'getServerToolHandlerViaNativePlan',
     ],
   },

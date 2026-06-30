@@ -3,13 +3,13 @@ import {
   getBuiltinHandlerEntry
 } from './builtin-handler-catalog.js';
 import {
-  planServertoolRegistryLookupFromSkeleton
-} from './skeleton-config.js';
+  planServertoolRegistryLookupFromSkeletonWithNative
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export const getServerToolHandlerViaNativePlan = (
   name: string
 ): ServerToolHandlerEntry | undefined => {
-  const actionPlan = planServertoolRegistryLookupFromSkeleton({
+  const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({
     name: typeof name === 'string' ? name : ''
   });
   if (actionPlan.action === 'return_builtin') {

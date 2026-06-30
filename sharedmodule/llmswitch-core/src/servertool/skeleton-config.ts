@@ -15,7 +15,6 @@ import {
   planServertoolBuiltinAutoHandlerEntriesWithNative,
   planServertoolBuiltinHandlerNamesWithNative,
   planServertoolBuiltinHandlerRecordEntriesWithNative,
-  planServertoolRegistryLookupFromSkeletonWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
   resolveServertoolRegisteredNameWithNative,
   resolveServertoolBuiltinHandlerEntryWithNative
@@ -98,12 +97,6 @@ export function planServertoolBuiltinAutoHandlerEntries(): Record<string, unknow
 
 export function planServertoolBuiltinHandlerRecordEntries(): Record<string, unknown>[] {
   return planServertoolBuiltinHandlerRecordEntriesWithNative().entries;
-}
-
-export function planServertoolRegistryLookupFromSkeleton(input: {
-  name: string;
-}): ReturnType<typeof planServertoolRegistryLookupFromSkeletonWithNative> {
-  return planServertoolRegistryLookupFromSkeletonWithNative(input);
 }
 
 export function isServertoolRegisteredNameByConfig(name: string): boolean {

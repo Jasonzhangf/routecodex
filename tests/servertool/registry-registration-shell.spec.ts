@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const getBuiltinHandlerEntryMock = jest.fn();
 const listBuiltinHandlerNamesMock = jest.fn();
-const planServertoolRegistryLookupFromSkeletonMock = jest.fn();
-const isServertoolRegisteredNameByConfigMock = jest.fn();
+const planServertoolRegistryLookupFromSkeletonWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.js',
@@ -14,10 +13,9 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
-    isServertoolRegisteredNameByConfig: isServertoolRegisteredNameByConfigMock,
-    planServertoolRegistryLookupFromSkeleton: planServertoolRegistryLookupFromSkeletonMock,
+    planServertoolRegistryLookupFromSkeletonWithNative: planServertoolRegistryLookupFromSkeletonWithNativeMock,
   })
 );
 
@@ -31,7 +29,6 @@ describe('registry-registration-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     listBuiltinHandlerNamesMock.mockReturnValue([]);
-    isServertoolRegisteredNameByConfigMock.mockReturnValue(true);
   });
 
   test('returns builtin entry and ignores retired ad-hoc lookup plans', () => {
@@ -39,13 +36,13 @@ describe('registry-registration-shell', () => {
     listBuiltinHandlerNamesMock.mockReturnValue(['builtin']);
     getBuiltinHandlerEntryMock.mockReturnValue(builtin);
 
-    planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
+    planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
       action: 'return_builtin',
       canonicalName: 'builtin',
     });
     expect(getServerToolHandlerViaNativePlan('Builtin')).toBe(builtin);
 
-    planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
+    planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
       action: 'return_none',
     });
     expect(getServerToolHandlerViaNativePlan('adhoc')).toBeUndefined();
@@ -58,12 +55,12 @@ describe('registry-registration-shell', () => {
 
     expect(source).not.toContain('function resolveBuiltinEntry(');
     expect(source).not.toContain('.trim().toLowerCase()');
-    expect(source).toContain("planServertoolRegistryLookupFromSkeleton({");
+    expect(source).toContain("planServertoolRegistryLookupFromSkeletonWithNative({");
     expect(source).not.toContain('const registryLookupInput = {');
   });
 
   test('fails fast when native builtin lookup omits canonicalName', () => {
-    planServertoolRegistryLookupFromSkeletonMock.mockReturnValueOnce({
+    planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
       action: 'return_builtin',
     });
 

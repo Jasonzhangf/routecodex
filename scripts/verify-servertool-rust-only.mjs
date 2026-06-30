@@ -3504,6 +3504,7 @@ function checkServertoolRegistryRustOwner() {
   for (const marker of [
     'planServertoolRegistryRegistrationActionWithNative',
     'planServertoolRegistryLookupActionWithNative',
+    'planServertoolRegistryLookupFromSkeleton({',
     'builtinNameMatched',
     'builtinEntryPresent',
     'registrationAllowedByConfig',
@@ -3542,7 +3543,7 @@ function checkServertoolRegistryRustOwner() {
     }
   }
   for (const needle of [
-    'planServertoolRegistryLookupFromSkeleton({',
+    'planServertoolRegistryLookupFromSkeletonWithNative({',
   ]) {
     assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
   }
