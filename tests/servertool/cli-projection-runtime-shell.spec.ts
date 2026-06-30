@@ -119,8 +119,8 @@ describe('cli-projection-runtime-shell', () => {
 
     expect(source).not.toContain('function parseToolArguments(');
     expect(source).not.toContain('JSON.parse(value)');
-    expect(source).toContain('const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({');
-    expect(source).toContain('input: projectionInput');
+    expect(source).not.toContain('const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({');
+    expect(source).toContain('input: parseServertoolCliProjectionToolArgumentsWithNative({');
     expect(source).toContain('const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({');
     expect(source).not.toContain('function buildClientVisibleProjectionShellForRuntime(');
     expect(source).toContain('const chatResponse = buildClientVisibleProjectionShellWithNative({');

@@ -35,13 +35,12 @@ export function buildServertoolCliProjectionBranchResult(args: {
     projectedToolCallId: cliProjectedToolCall.id
   });
   const toolName = cliProjectedToolCall.name;
-  const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({
-    arguments: cliProjectedToolCall.arguments
-  });
   const nativeProjection = buildClientExecCliProjectionOutputWithNative({
     toolName,
     flowId: 'servertool_cli_projection',
-    input: projectionInput,
+    input: parseServertoolCliProjectionToolArgumentsWithNative({
+      arguments: cliProjectedToolCall.arguments
+    }),
     repeatCount: 0,
     maxRepeats: 0
   });

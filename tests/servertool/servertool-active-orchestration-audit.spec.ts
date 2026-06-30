@@ -313,10 +313,11 @@ const TARGETS = [
       'const projectionShellInput = {',
       'buildClientVisibleProjectionShellWithNative(projectionShellInput)',
       'function buildClientVisibleProjectionShellForRuntime(',
-    ],
-    required: [
       'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
       'input: projectionInput',
+    ],
+    required: [
+      'input: parseServertoolCliProjectionToolArgumentsWithNative({',
       'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
       'const chatResponse = buildClientVisibleProjectionShellWithNative({',
     ],

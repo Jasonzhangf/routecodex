@@ -5000,9 +5000,8 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
     'parseServertoolCliProjectionToolArgumentsWithNative({',
-    'input: projectionInput',
+    'input: parseServertoolCliProjectionToolArgumentsWithNative({',
     'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
     'const chatResponse = buildClientVisibleProjectionShellWithNative({',
   ]) {
@@ -5017,6 +5016,8 @@ function checkServertoolRustOutcomeCloseout() {
     'const projectionShellInput = {',
     'buildClientVisibleProjectionShellWithNative(projectionShellInput)',
     'function buildClientVisibleProjectionShellForRuntime(',
+    'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
+    'input: projectionInput',
   ]) {
     if (cliProjectionRuntimeShell.includes(marker)) {
       fail(
