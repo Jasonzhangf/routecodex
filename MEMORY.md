@@ -116,6 +116,10 @@
 
 # RouteCodex Project Memory
 
+# 2026-07-01: Chat SSE tool-call start payload is Rust-owned
+- Chat JSON->SSE tool-call start chunk payload is native-owned by `buildChatSseToolCallStartPayloadJson`; `event-generators/chat.ts` must not restore local `{ choices: [{ delta: { tool_calls: [{ id, type, function: { name, arguments: "" } }] } }] }` payload synthesis.
+- Gate truth: `verify:sse-architecture-boundary` blocks the old `arguments: ''` marker. TS-side `toolCall.type || 'function'` fallback is removed; Rust requires `tool_call_type === "function"` and fails fast on missing or invalid type.
+
 # 2026-07-01: Chat SSE tool-call args delta payload is Rust-owned
 - Chat JSON->SSE tool-call arguments delta chunk payload is native-owned by `buildChatSseToolCallArgsDeltaPayloadJson`; `event-generators/chat.ts` must not restore local `{ choices: [{ delta: { tool_calls: [{ function: { arguments } }] } }] }` payload synthesis.
 - Gate truth: `verify:sse-architecture-boundary` blocks the old `function: { arguments: args }` marker; Rust tests cover missing arguments fail-fast, and real chat replay must preserve tool-call args chunks without malformed wire.

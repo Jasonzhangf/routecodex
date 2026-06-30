@@ -197,6 +197,7 @@ for (const forbidden of [
   'delta: { content }',
   'delta: { reasoning, reasoning_content: reasoning }',
   'function: { arguments: args }',
+  "arguments: ''",
   'id: context.responseId ?? context.requestId',
   'created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0)',
   'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return undefined;\n  }',

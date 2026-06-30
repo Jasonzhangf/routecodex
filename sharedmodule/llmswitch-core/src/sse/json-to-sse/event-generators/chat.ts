@@ -10,7 +10,8 @@ import {
   buildChatSseEventEnvelopeWithNative,
   buildChatSseReasoningDeltaPayloadWithNative,
   buildChatSseRoleDeltaPayloadWithNative,
-  buildChatSseToolCallArgsDeltaPayloadWithNative
+  buildChatSseToolCallArgsDeltaPayloadWithNative,
+  buildChatSseToolCallStartPayloadWithNative
 } from '../../../native/router-hotpath/native-chat-sse-event-payload.js';
 
 // 生成器配置
@@ -245,33 +246,23 @@ export function buildToolCallStart(
   config: ChatEventGeneratorConfig = DEFAULT_CHAT_EVENT_GENERATOR_CONFIG
 ): ChatSseEvent {
   const baseChunk = createBaseChunk(context, config);
-
-  const chunk = {
-    ...baseChunk,
-    choices: [{
-      index: context.choiceIndex,
-      delta: {
-        tool_calls: [{
-          index: toolCallIndex,
-          id: toolCall.id,
-          type: toolCall.type || 'function',
-          function: {
-            name: toolCall.function.name,
-            arguments: ''
-          }
-        }]
-      },
-      logprobs: null,
-      finish_reason: null
-    }]
-  };
+  const payload = buildChatSseToolCallStartPayloadWithNative({
+    responseId: baseChunk.id,
+    created: baseChunk.created,
+    model: baseChunk.model,
+    choiceIndex: context.choiceIndex,
+    toolCallIndex,
+    toolCallId: toolCall.id,
+    toolCallType: toolCall.type,
+    functionName: toolCall.function.name
+  });
   const envelope = nextChatEventEnvelope(context, config);
 
   return {
     event: 'chat_chunk',
     type: 'chat_chunk',
     timestamp: envelope.timestamp,
-    data: JSON.stringify(chunk),
+    data: JSON.stringify(payload),
     sequenceNumber: envelope.sequenceNumber,
     protocol: envelope.protocol,
     direction: envelope.direction

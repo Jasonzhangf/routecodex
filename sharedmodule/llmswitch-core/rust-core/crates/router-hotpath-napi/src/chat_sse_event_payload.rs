@@ -274,6 +274,72 @@ pub fn build_chat_sse_tool_call_args_delta_payload_json(
     })
 }
 
+pub fn build_chat_sse_tool_call_start_payload_json(input_json: String) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        format!(
+            "Failed to parse Chat SSE tool call start payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(input) = input.as_object() else {
+        return Err("Chat SSE tool call start payload expected object".to_string());
+    };
+    let response_id = read_required_string(input, "response_id", "tool call start payload")?;
+    let model = read_required_string(input, "model", "tool call start payload")?;
+    let tool_call_id = read_required_string(input, "tool_call_id", "tool call start payload")?;
+    let tool_call_type = read_required_string(input, "tool_call_type", "tool call start payload")?;
+    if tool_call_type != "function" {
+        return Err(format!(
+            "Chat SSE tool call start payload invalid tool_call_type: {}",
+            tool_call_type
+        ));
+    }
+    let function_name = read_required_string(input, "function_name", "tool call start payload")?;
+    let created = read_required_i64(input, "created", "tool call start payload")?;
+    if created <= 0 {
+        return Err("Chat SSE tool call start payload created must be positive".to_string());
+    }
+    let choice_index = read_required_i64(input, "choice_index", "tool call start payload")?;
+    if choice_index < 0 {
+        return Err("Chat SSE tool call start payload choice_index must be non-negative".to_string());
+    }
+    let tool_call_index = read_required_i64(input, "tool_call_index", "tool call start payload")?;
+    if tool_call_index < 0 {
+        return Err(
+            "Chat SSE tool call start payload tool_call_index must be non-negative".to_string(),
+        );
+    }
+
+    serde_json::to_string(&serde_json::json!({
+        "id": response_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": choice_index,
+            "delta": {
+                "tool_calls": [{
+                    "index": tool_call_index,
+                    "id": tool_call_id,
+                    "type": tool_call_type,
+                    "function": {
+                        "name": function_name,
+                        "arguments": ""
+                    }
+                }]
+            },
+            "logprobs": null,
+            "finish_reason": null
+        }]
+    }))
+    .map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE tool call start payload JSON: {}",
+            error
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,5 +599,81 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("missing arguments"));
+    }
+
+    #[test]
+    fn builds_chat_sse_tool_call_start_payload() {
+        let output = build_chat_sse_tool_call_start_payload_json(
+            json!({
+                "response_id": "chatcmpl_tool_start",
+                "created": 1782778490,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "tool_call_index": 3,
+                "tool_call_id": "call_test",
+                "tool_call_type": "function",
+                "function_name": "exec_command"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["id"], json!("chatcmpl_tool_start"));
+        assert_eq!(parsed["object"], json!("chat.completion.chunk"));
+        assert_eq!(parsed["created"], json!(1782778490));
+        assert_eq!(parsed["model"], json!("gpt-test"));
+        assert_eq!(parsed["choices"][0]["index"], json!(0));
+        assert_eq!(parsed["choices"][0]["delta"]["tool_calls"][0]["index"], json!(3));
+        assert_eq!(parsed["choices"][0]["delta"]["tool_calls"][0]["id"], json!("call_test"));
+        assert_eq!(parsed["choices"][0]["delta"]["tool_calls"][0]["type"], json!("function"));
+        assert_eq!(
+            parsed["choices"][0]["delta"]["tool_calls"][0]["function"]["name"],
+            json!("exec_command")
+        );
+        assert_eq!(
+            parsed["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+            json!("")
+        );
+        assert_eq!(parsed["choices"][0]["finish_reason"], Value::Null);
+    }
+
+    #[test]
+    fn rejects_chat_sse_tool_call_start_payload_missing_type() {
+        let err = build_chat_sse_tool_call_start_payload_json(
+            json!({
+                "response_id": "chatcmpl_tool_start",
+                "created": 1782778490,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "tool_call_index": 3,
+                "tool_call_id": "call_test",
+                "function_name": "exec_command"
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("missing tool_call_type"));
+    }
+
+    #[test]
+    fn rejects_chat_sse_tool_call_start_payload_invalid_type() {
+        let err = build_chat_sse_tool_call_start_payload_json(
+            json!({
+                "response_id": "chatcmpl_tool_start",
+                "created": 1782778490,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "tool_call_index": 3,
+                "tool_call_id": "call_test",
+                "tool_call_type": "other",
+                "function_name": "exec_command"
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("invalid tool_call_type"));
     }
 }

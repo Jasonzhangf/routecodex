@@ -1,3 +1,8 @@
+# 2026-07-01: Chat SSE tool-call start payload Rust owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 Chat `arguments: ''` marker 后先红，证明 Chat tool-call start chunk payload 仍由 TS 合成。
+- Fix：新增 Rust/NAPI `buildChatSseToolCallStartPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildToolCallStart()` 只取 base context、调用 native payload、封装 native envelope；同时删除 TS `toolCall.type || 'function'` 兜底，Rust 对缺失/非法 type fail-fast。
+- Verification：Rust `chat_sse_tool_call_start_payload` 3/3 PASS；native build PASS；focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic + chat-sse-function-call-args-no-fallback` 23/23 PASS；native export-list subtest PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；真实 chat replay `done=true error=false malformedWire=0 chatChunkCount=4 toolStartChunks=1 toolStartWithId=1 toolStartWithName=1 toolStartWithEmptyArgs=1 toolArgsChunks=1 finishChunks=1`。
+
 # 2026-07-01: Chat SSE tool-call args delta payload Rust owner
 - Red evidence：`verify:sse-architecture-boundary` 新增 Chat `function: { arguments: args }` marker 后先红，证明 Chat tool-call arguments delta chunk payload 仍由 TS 合成。
 - Fix：新增 Rust/NAPI `buildChatSseToolCallArgsDeltaPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildToolCallArgsDeltas()` 只取 base context、调用 native payload、封装 native envelope。

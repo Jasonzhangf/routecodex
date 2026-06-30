@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Chat SSE tool-call start payload Rust owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker for local Chat tool-call start payload synthesis (`arguments: ''`). The gate failed on the existing TS owner before the fix.
+- Fix: added Rust/NAPI owner `buildChatSseToolCallStartPayloadJson` and TS wrapper `buildChatSseToolCallStartPayloadWithNative`. `chat.ts::buildToolCallStart()` now only obtains base response context, calls native for the chat completion chunk payload, and wraps it in the native-owned SSE event envelope.
+- Boundary cleanup: removed the TS-side `toolCall.type || 'function'` fallback. Rust requires `tool_call_type === "function"` and fails fast on missing or invalid type.
+- Positive / reverse tests: Rust covers tool-call start payload construction, missing type fail-fast, and invalid type fail-fast; focused Jest keeps Chat SSE usage/no-synthetic/function-call-args behavior intact; native export-list covers the new NAPI symbol.
+- Verification: Rust focused `chat_sse_tool_call_start_payload` PASS 3/3; native hotpath build PASS; focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic + chat-sse-function-call-args-no-fallback` PASS 23/23; native export-list subtest PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real chat replay: `openai-chat/ports/10000/req_1782778465399_hrxbpl3tz/provider-response_1.json` SSE->JSON->SSE succeeded with `done=true`, `error=false`, `malformedWire=0`, `chatChunkCount=4`, `toolStartChunks=1`, `toolStartWithId=1`, `toolStartWithName=1`, `toolStartWithEmptyArgs=1`, `toolArgsChunks=1`, `finishChunks=1`.
+
 ### 2026-07-01 Chat SSE tool-call args delta payload Rust owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker for local Chat tool-call arguments delta payload synthesis (`function: { arguments: args }`). The gate failed on the existing TS owner before the fix.
