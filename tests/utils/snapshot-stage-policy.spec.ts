@@ -7,16 +7,16 @@ import {
 } from '../../src/utils/snapshot-stage-policy.js';
 
 describe('snapshot-stage-policy', () => {
-  it('uses provider and client request/response defaults when selector is empty', () => {
+  it('uses client request and response defaults when selector is empty', () => {
     const prev = process.env.ROUTECODEX_SNAPSHOT_STAGES;
     delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
     try {
       expect(getDefaultSnapshotStageSelector()).toContain('client-request');
-      expect(getDefaultSnapshotStageSelector()).toContain('provider-request');
+      expect(getDefaultSnapshotStageSelector().split(',')).not.toContain('provider-request');
       expect(getDefaultSnapshotStageSelector()).toContain('provider-response');
       expect(getDefaultSnapshotStageSelector()).toContain('client-response');
       expect(shouldCaptureSnapshotStage('client-request')).toBe(true);
-      expect(shouldCaptureSnapshotStage('provider-request')).toBe(true);
+      expect(shouldCaptureSnapshotStage('provider-request')).toBe(false);
       expect(shouldCaptureSnapshotStage('provider-response')).toBe(true);
       expect(shouldCaptureSnapshotStage('provider-error')).toBe(true);
       expect(shouldCaptureSnapshotStage('client-response')).toBe(true);
@@ -40,7 +40,7 @@ describe('snapshot-stage-policy', () => {
       expect(shouldCaptureSnapshotStage('provider-body-debug')).toBe(true);
       expect(shouldCaptureSnapshotStage('chat_process.req.stage2.semantic_map')).toBe(true);
       expect(stageSelectorNeedsHubSnapshots('provider-*,chat_process.req.*')).toBe(true);
-      expect(stageSelectorNeedsHubSnapshots('client-request,provider-request')).toBe(false);
+      expect(stageSelectorNeedsHubSnapshots('client-request,provider-request-contract')).toBe(false);
     } finally {
       if (prev === undefined) {
         delete process.env.ROUTECODEX_SNAPSHOT_STAGES;

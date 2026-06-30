@@ -4,16 +4,16 @@
 
 ## 1. 默认 `--snap` contract
 
-`--snap` 默认必须打开四类边界快照：
+`--snap` 默认只打开三类边界快照：
 
 - `client-request`
-- `provider-request`
 - `provider-response`
 - `client-response`
 
 说明：
 
-- 这是最小审计闭环，保证能从 client → provider → client 还原真实链路。
+- 这是最小审计闭环，保证能从 client → provider response → client 还原真实链路。
+- `provider-request body snapshots are disabled`：provider 出站 body 不得被 snapshot 复制；需要排查出站语义时只允许使用 contract/shape 级别的非 payload 观测，禁止记录完整 provider wire body。
 - `provider-error`、`*.retry`、`*.contract`、`chat_process.*`、`hub_followup.*`、`servertool.*` 不属于默认最小集。
 - `--mode analysis` 可强制 `*`，但普通 `--snap` 不能默认膨胀成全量模块快照。
 
@@ -54,7 +54,7 @@
 
 ## 3. 开关语义
 
-- `--snap`：启用默认边界四件套。
+- `--snap`：启用默认边界三件套。
 - `--snap-stages "<selector>"`：显式选择快照 stage；支持精确匹配和 `*` 前缀匹配。
 - `--snap-off`：显式关闭。
 - `ROUTECODEX_HUB_SNAPSHOTS=1`：允许 `chat_process.*` / `hub_followup.*` / `servertool.*` 等模块级快照。

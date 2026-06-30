@@ -323,6 +323,10 @@ fn requires_port_scoped_snapshot_dir(stage: &str) -> bool {
     stage.starts_with("client-") || stage.starts_with("provider-")
 }
 
+fn is_disabled_provider_request_body_snapshot(stage: &str) -> bool {
+    stage == "provider-request"
+}
+
 fn sanitize_token(value: &str, fallback: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -1015,6 +1019,12 @@ fn write_snapshot_file(
     options: &SnapshotHookOptions,
     root_override: Option<&Path>,
 ) -> Result<(), std::io::Error> {
+    if is_disabled_provider_request_body_snapshot(options.stage.as_str()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "[hub_snapshot_hooks] provider-request body snapshots are disabled",
+        ));
+    }
     let root = root_override
         .map(|p| p.to_path_buf())
         .unwrap_or_else(resolve_snapshot_root);
@@ -1463,7 +1473,7 @@ mod tests {
         ));
         let options = SnapshotHookOptions {
             endpoint: "/v1/responses".to_string(),
-            stage: "provider-request".to_string(),
+            stage: "provider-response".to_string(),
             request_id: "req_1".to_string(),
             data: serde_json::json!({
                 "providerKey": "mimo.key1.mimo-v2.5",
@@ -1490,7 +1500,7 @@ mod tests {
             "entry protocol/port directory must exist"
         );
         assert!(
-            entry_dir.join("provider-request.json").exists(),
+            entry_dir.join("provider-response.json").exists(),
             "stage snapshot must be written under the entry directory"
         );
         assert!(
@@ -1504,6 +1514,39 @@ mod tests {
     }
 
     #[test]
+    fn provider_request_body_snapshot_is_disabled() {
+        let root = env::temp_dir().join(format!(
+            "rcc-snapshot-provider-request-disabled-{}",
+            Uuid::new_v4().simple()
+        ));
+        let options = SnapshotHookOptions {
+            endpoint: "/v1/responses".to_string(),
+            stage: "provider-request".to_string(),
+            request_id: "req_disabled_provider_request".to_string(),
+            data: serde_json::json!({
+                "body": { "ok": true }
+            }),
+            verbosity: Some("minimal".to_string()),
+            channel: None,
+            provider_key: Some("mimo.key1.mimo-v2.5".to_string()),
+            group_request_id: Some("grp_disabled_provider_request".to_string()),
+            entry_protocol: Some("openai-responses".to_string()),
+            entry_port: Some(5555),
+            runtime_metadata: None,
+        };
+
+        let error = write_snapshot_file(&options, Some(root.as_path()))
+            .expect_err("provider-request body snapshot must be disabled");
+        assert!(error
+            .to_string()
+            .contains("provider-request body snapshots are disabled"));
+        assert!(
+            !root.join("openai-responses").exists(),
+            "disabled provider-request snapshot must not create artifact directories"
+        );
+    }
+
+    #[test]
     fn runtime_metadata_payload_captures_request_truth_summary() {
         let root = env::temp_dir().join(format!(
             "rcc-snapshot-runtime-truth-{}",
@@ -1511,7 +1554,7 @@ mod tests {
         ));
         let options = SnapshotHookOptions {
             endpoint: "/v1/responses".to_string(),
-            stage: "provider-request".to_string(),
+            stage: "provider-response".to_string(),
             request_id: "req_runtime_truth_1".to_string(),
             data: serde_json::json!({
                 "body": { "ok": true }
@@ -1613,7 +1656,7 @@ mod tests {
         ));
         let options = SnapshotHookOptions {
             endpoint: "/v1/responses".to_string(),
-            stage: "provider-request".to_string(),
+            stage: "provider-response".to_string(),
             request_id: "req_nested_port_1".to_string(),
             data: serde_json::json!({
                 "body": {
@@ -1640,7 +1683,7 @@ mod tests {
             .join("ports")
             .join("5555")
             .join("grp_nested_port");
-        assert!(entry_dir.join("provider-request.json").exists());
+        assert!(entry_dir.join("provider-response.json").exists());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1652,7 +1695,7 @@ mod tests {
         ));
         let options = SnapshotHookOptions {
             endpoint: "/v1/responses".to_string(),
-            stage: "provider-request".to_string(),
+            stage: "provider-response".to_string(),
             request_id: "req_missing_port_1".to_string(),
             data: serde_json::json!({
                 "body": { "ok": true }
@@ -1708,7 +1751,7 @@ mod tests {
 
         let provider_options = SnapshotHookOptions {
             endpoint: "/v1/responses".to_string(),
-            stage: "provider-request".to_string(),
+            stage: "provider-response".to_string(),
             request_id: "req_runtime_enrich_provider".to_string(),
             data: serde_json::json!({
                 "body": {

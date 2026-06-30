@@ -54,7 +54,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
     const providerKey = 'glm.1-186.minimax-m2.5';
     gate.allowSnapshotLocalDiskWrite(groupRequestId);
     await writeProviderSnapshot({
-      phase: 'provider-request',
+      phase: 'provider-response',
       requestId: groupRequestId,
       clientRequestId: groupRequestId,
       entryEndpoint: '/v1/messages',
@@ -79,7 +79,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
     const providerKey = 'glm.2-173.minimax-m2.5';
     gate.allowSnapshotLocalDiskWrite(groupRequestId);
     await writeProviderSnapshot({
-      phase: 'provider-request',
+      phase: 'provider-response',
       requestId: groupRequestId,
       clientRequestId: groupRequestId,
       entryEndpoint: '/v1/messages',

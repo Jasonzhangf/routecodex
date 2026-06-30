@@ -387,8 +387,6 @@ export class ResponsesProvider extends HttpTransportProvider {
       Accept: useSse ? 'text/event-stream' : 'application/json'
     };
 
-    await this.snapshotPhase('provider-request', context, finalBody, transportHeaders, targetUrl, entryEndpoint);
-
     try {
       if (useSse) {
         return await this.sendSseRequest({
@@ -502,8 +500,6 @@ export class ResponsesProvider extends HttpTransportProvider {
       }
     }
     const explicitStream = extractStreamFlagFromBody(overriddenBody);
-
-    await this.snapshotPhase('provider-request', context, overriddenBody, headers, targetUrl, entryEndpoint);
 
     try {
       if (explicitStream === true) {
@@ -631,7 +627,7 @@ export class ResponsesProvider extends HttpTransportProvider {
   }
 
   private async snapshotPhase(
-    phase: 'provider-request' | 'provider-response' | 'provider-error',
+    phase: 'provider-response' | 'provider-error',
     context: ProviderContext,
     data: unknown,
     headers: Record<string, string>,
@@ -799,7 +795,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     const body = options.skipSanitize === true
       ? options.body
       : await this.sanitizeResponsesProviderOutboundBody(options.body, context);
-    await this.snapshotPhase('provider-request', context, body, headers, targetUrl, entryEndpoint);
     try {
       return await this.executeSseStream({ ...options, body });
     } catch (error) {

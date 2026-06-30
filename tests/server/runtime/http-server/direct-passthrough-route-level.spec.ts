@@ -537,7 +537,7 @@ describe('direct passthrough route-level', () => {
     }));
   });
 
-  it('router same-protocol direct must not consume relay-owned responses scope materialize continuation', async () => {
+  it('router same-protocol direct selects VR route then relays relay-owned responses scope materialize continuation', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -550,10 +550,17 @@ describe('direct passthrough route-level', () => {
     } as any);
 
     const routerDirectSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
-      used: true,
-      response: { status: 200, body: { ok: true, mode: 'direct' } },
-      providerHandle: {} as any,
-      auditContext: {} as any,
+      used: false,
+      reason: 'relay_owned_responses_continuation',
+      preselectedRoute: {
+        target: {
+          providerKey: 'orangeai.key1.glm-5.2',
+          runtimeKey: 'orangeai.key1.glm-5.2',
+          outboundProfile: 'openai-responses',
+        },
+        decision: { route: 'longcontext' },
+        diagnostics: { reason: 'longcontext:token-threshold' },
+      },
     } as any);
     const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
       status: 200,
@@ -599,8 +606,14 @@ describe('direct passthrough route-level', () => {
       },
     });
 
-    expect(routerDirectSpy).not.toHaveBeenCalled();
+    expect(routerDirectSpy).toHaveBeenCalledTimes(1);
     expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    const relayMetadata = executePipelineSpy.mock.calls[0]?.[0]?.metadata as Record<string, unknown>;
+    const preselected = readRuntimeControlProjection(relayMetadata).preselectedRoute;
+    expect(preselected?.target).toMatchObject({
+      providerKey: 'orangeai.key1.glm-5.2',
+      outboundProfile: 'openai-responses',
+    });
     expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_scope_materialize' });
   });
 

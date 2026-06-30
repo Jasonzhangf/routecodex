@@ -39,12 +39,12 @@ describe('snapshot writer error spill in release mode', () => {
 
     process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
     process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsDir;
-    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'provider-request,provider-response,provider-error';
+    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'provider-response,provider-error';
     setRuntimeFlag('snapshotsEnabled', false);
     __resetProviderSnapshotErrorBufferForTests();
 
     try {
-      await writeProviderSnapshot({
+      await expect(writeProviderSnapshot({
         phase: 'provider-request',
         requestId: 'req_err_spill',
         clientRequestId: 'req_err_spill',
@@ -52,7 +52,7 @@ describe('snapshot writer error spill in release mode', () => {
         entryEndpoint: '/v1/responses',
         entryPort: 5555,
         data: { step: 'request' }
-      });
+      })).rejects.toThrow('provider-request body snapshots are disabled');
 
       expect(await listFilesRecursively(tempDir)).toHaveLength(0);
 

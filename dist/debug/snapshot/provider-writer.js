@@ -125,6 +125,9 @@ async function persistProviderSnapshot(input, forceLocalDiskWriteWhenDisabled = 
 }
 export async function writeProviderSnapshot(options) {
     const stage = String(options.phase || '').trim();
+    if (stage === 'provider-request') {
+        throw new Error('[snapshot-writer] provider-request body snapshots are disabled');
+    }
     const entryPortForSnapshot = requireProviderSnapshotEntryPort(stage, options.entryPort, options.metadata);
     if (shouldSuppressSnapshotFor429(stage, options.data)) {
         const purgeInput = {

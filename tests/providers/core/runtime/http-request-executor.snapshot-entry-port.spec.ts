@@ -76,11 +76,7 @@ describe('http-request-executor snapshot entryPort', () => {
     );
 
     const calls = writeProviderSnapshot.mock.calls.map((call) => call[0]);
-    expect(calls).toContainEqual(expect.objectContaining({
-      phase: 'provider-request',
-      requestId: 'req-http-executor-entry-port',
-      entryPort: 5520
-    }));
+    expect(calls).not.toContainEqual(expect.objectContaining({ phase: 'provider-request' }));
     expect(calls).toContainEqual(expect.objectContaining({
       phase: 'provider-response',
       requestId: 'req-http-executor-entry-port',

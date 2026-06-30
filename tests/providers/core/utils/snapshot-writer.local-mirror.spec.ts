@@ -119,7 +119,7 @@ describe('provider snapshot writer local mirror', () => {
     expect(runtimeParsed.matchedPort).toBe(5555);
   });
 
-  it('does not write request metadata or internal carriers into provider snapshots', async () => {
+  it('does not write provider-request snapshots carrying request metadata or internal carriers', async () => {
     const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
     const requestId = 'req_provider_snapshot_metadata_sanitize';
     const providerKey = 'minimax.key1.MiniMax-M3';
@@ -147,7 +147,7 @@ describe('provider snapshot writer local mirror', () => {
 
     allowSnapshotLocalDiskWrite(requestId);
 
-    await writeProviderSnapshot({
+    await expect(writeProviderSnapshot({
       phase: 'provider-request',
       requestId,
       clientRequestId: requestId,
@@ -155,7 +155,7 @@ describe('provider snapshot writer local mirror', () => {
       providerKey,
       metadata,
       data: { model: 'minimax-m3-free', messages: [{ role: 'user', content: 'ok' }] }
-    });
+    })).rejects.toThrow('provider-request body snapshots are disabled');
     await __flushProviderSnapshotQueueForTests();
 
     const filePath = path.join(
@@ -166,21 +166,7 @@ describe('provider snapshot writer local mirror', () => {
       requestId,
       'provider-request.json'
     );
-    const raw = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(raw) as { meta?: Record<string, any>; body?: Record<string, any> };
-
-    expect(parsed.meta?.matchedPort).toBe(5555);
-    expect(parsed.meta?.entryPort).toBe(5555);
-    expect(parsed.meta?.requestMetadata).toBeUndefined();
-    expect(raw).not.toContain('requestMetadata');
-    expect(raw).not.toContain('__raw_request_body');
-    expect(raw).not.toContain('responsesRequestContext');
-    expect(raw).not.toContain('toolsRaw');
-    expect(raw).not.toContain('"type":"namespace"');
-    expect(raw).not.toContain('__rt');
-    expect(raw).not.toContain('"metadata"');
-    expect(raw).not.toContain('sessionDir');
-    expect(raw).not.toContain('"snapshot"');
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('accepts explicit entryPort for provider-error snapshots even when metadata omits port fields', async () => {

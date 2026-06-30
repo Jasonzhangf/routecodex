@@ -294,7 +294,6 @@ export class HttpRequestExecutor {
 
   async execute(processedRequest: UnknownObject, context: ProviderContext): Promise<unknown> {
     const prepared = await this.prepareHttpRequest(processedRequest, context);
-    await this.snapshotProviderRequest(prepared, context);
     try {
       return await this.executeHttpRequestAcrossTargets(processedRequest, context, prepared);
     } catch (error) {
@@ -485,31 +484,6 @@ export class HttpRequestExecutor {
     } catch (logError) {
       logHttpRequestExecutorNonBlockingError('captureVisionDebugRequest.summarizeVisionMessages', logError, {
         requestId
-      });
-    }
-  }
-
-  private async snapshotProviderRequest(requestInfo: PreparedHttpRequest, context: ProviderContext): Promise<void> {
-    try {
-      const entryPort = readProviderSnapshotEntryPort(context);
-      await writeProviderSnapshot({
-        phase: 'provider-request',
-        requestId: context.requestId,
-        data: requestInfo.body,
-        headers: requestInfo.headers,
-        url: requestInfo.targetUrl,
-        entryEndpoint: requestInfo.entryEndpoint,
-        entryPort,
-        clientRequestId: requestInfo.clientRequestId,
-        providerKey: context.providerKey,
-        providerId: context.providerId,
-        metadata: readProviderSnapshotMetadata(context)
-      });
-    } catch (snapshotError) {
-      logHttpRequestExecutorNonBlockingError('snapshotProviderRequest.provider-request', snapshotError, {
-        requestId: context.requestId,
-        providerKey: context.providerKey,
-        providerId: context.providerId
       });
     }
   }

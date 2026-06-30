@@ -207,7 +207,7 @@ describe('RED: multi-port server isolation contract', () => {
     const groupRequestId = 'req_multi_port_iso_' + Date.now();
     gate.allowSnapshotLocalDiskWrite(groupRequestId);
     await writeProviderSnapshot({
-      phase: 'provider-request',
+      phase: 'provider-response',
       requestId: groupRequestId,
       clientRequestId: groupRequestId,
       entryEndpoint: '/v1/chat/completions',

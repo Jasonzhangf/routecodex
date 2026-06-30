@@ -60,7 +60,6 @@ import {
 } from './router-direct-pipeline.js';
 import {
   captureRouterDirectFailureSnapshots,
-  captureRouterDirectProviderRequestSnapshot,
   captureRouterDirectProviderResponseSnapshot,
 } from './router-direct-failure-snapshot.js';
 import {
@@ -340,7 +339,8 @@ function isRouterDirectRelayableSkip(reason: unknown): boolean {
     || message === 'client_tools_require_hub_relay'
     || message === 'stopless_servertool_requires_hub_relay'
     || message === 'target_outbound_profile_requires_hub_relay'
-    || message === 'servertool_followup_requires_hub_relay';
+    || message === 'servertool_followup_requires_hub_relay'
+    || message === 'relay_owned_responses_continuation';
 }
 
 export class RouteCodexHttpServer {
@@ -1317,14 +1317,12 @@ export class RouteCodexHttpServer {
       metadata,
     };
     if (!portConfig || portConfig.mode === 'router') {
-      const runtimeControl = readRuntimeControlProjection(metadata);
       const mustRelayLocalResponsesContinuation =
         portConfig?.mode === 'router'
         && resumeContinuationOwner === 'relay';
       if (
         portConfig?.mode === 'router'
         && (portConfig.sameProtocolBehavior ?? 'direct') === 'direct'
-        && !mustRelayLocalResponsesContinuation
       ) {
         this.logStage('router-direct.entry', input.requestId, {
           routingPolicyGroup: portConfig.routingPolicyGroup,
@@ -1385,14 +1383,6 @@ export class RouteCodexHttpServer {
           });
         }
         return await this.executePipeline(nextInput);
-      }
-      if (mustRelayLocalResponsesContinuation) {
-        this.logStage('router-direct.skipped', input.requestId, {
-          reason: 'relay_owned_responses_continuation',
-          routingPolicyGroup: portConfig?.routingPolicyGroup,
-          sameProtocolBehavior: portConfig?.sameProtocolBehavior,
-          continuationOwner: resumeContinuationOwner,
-        });
       }
       return await this.executePipeline(nextInput);
     }
@@ -1640,6 +1630,28 @@ export class RouteCodexHttpServer {
       typeof target.outboundProfile === 'string' && target.outboundProfile.trim()
         ? target.outboundProfile.trim()
         : undefined;
+    const forceRelayOwnedResponsesContinuation =
+      metadataForHub.responsesResume
+      && typeof metadataForHub.responsesResume === 'object'
+      && !Array.isArray(metadataForHub.responsesResume)
+      && (metadataForHub.responsesResume as Record<string, unknown>).continuationOwner === 'relay';
+    if (forceRelayOwnedResponsesContinuation) {
+      this.logStage('router-direct.skipped', input.requestId, {
+        reason: 'relay_owned_responses_continuation',
+        inboundProtocol,
+        outboundProfile: targetOutboundProfile,
+        providerKey,
+      });
+      return {
+        used: false,
+        reason: 'relay_owned_responses_continuation',
+        preselectedRoute: {
+          target,
+          decision: routingDecision,
+          diagnostics: routeResult.diagnostics,
+        },
+      };
+    }
     if (directRequiresHubRelay) {
       this.logStage('router-direct.skipped', input.requestId, {
         reason: directRelayReason,
@@ -1802,7 +1814,6 @@ export class RouteCodexHttpServer {
     let capturedUsage: Record<string, unknown> | undefined;
     let directOutcome: RouterDirectOutcome;
     let directRetryRequested = false;
-    let directProviderRequestCaptured = false;
     const routerDirectEntryPort = readEntryPortFromRequestTruth(metadataForHub);
     try {
       directOutcome = await executeRouterDirectPipeline({
@@ -1828,23 +1839,7 @@ export class RouteCodexHttpServer {
           ? this.providerHandles.get(runtimeKey)
           : undefined;
       },
-      onSnapshotBefore: (payload, ctx) => {
-        directProviderRequestCaptured = true;
-        void captureRouterDirectProviderRequestSnapshot({
-          requestId: input.requestId,
-          payload,
-          entryEndpoint: input.entryEndpoint,
-          entryPort: routerDirectEntryPort,
-          providerKey: ctx.providerKey,
-          providerId: directProviderHandle.providerId,
-          metadata: metadataForHub,
-        }).catch((error) => {
-          logRouterDirectNonBlockingError('snapshot.provider-request', error, {
-            requestId: input.requestId,
-            providerKey: ctx.providerKey,
-            directAttempt,
-          });
-        });
+      onSnapshotBefore: (_payload, ctx) => {
         this.logStage('router-direct.send.start', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -1904,16 +1899,13 @@ export class RouteCodexHttpServer {
         // stays in processProviderSendFailure / ErrorErr04-05 owners.
         await captureRouterDirectFailureSnapshots({
           requestId: input.requestId,
-          payload: ctx.payload,
           error,
           entryEndpoint: input.entryEndpoint,
           entryPort: routerDirectEntryPort,
           providerKey: ctx.providerKey,
           providerId: directProviderHandle.providerId,
           metadata: metadataForHub,
-          requestCaptured: directProviderRequestCaptured,
         });
-        directProviderRequestCaptured = true;
         const retryError = extractRetryErrorSnapshot(error);
         const statusCode = typeof retryError.statusCode === 'number'
           ? retryError.statusCode
