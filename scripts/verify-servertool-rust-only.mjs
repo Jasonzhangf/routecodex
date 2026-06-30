@@ -2548,6 +2548,14 @@ function checkOrchestrationPolicyRustOwner() {
     'disconnected',
     "flow=${options.flowId}",
     'timeout after ${options.timeoutMs}',
+    'export function isServerToolClientDisconnectedError(',
+    'export function createClientDisconnectWatcher(',
+    'export function isServerToolTimeoutError(',
+    'export function createStopMessageFetchFailedError(',
+    'export function createServertoolStateLoadFailedError(',
+    'planClientDisconnectWatcherWithNative',
+    'planStopMessageFetchFailedErrorWithNative',
+    'planServertoolStateLoadFailedErrorWithNative',
   ]) {
     if (timeoutShell.includes(keyword)) {
       fail(
@@ -2559,10 +2567,9 @@ function checkOrchestrationPolicyRustOwner() {
   for (const needle of [
     'planServertoolTimeoutWatcherWithNative',
     'isAdapterClientDisconnectedWithNative',
-    'planClientDisconnectWatcherWithNative',
     'planServertoolClientDisconnectedErrorWithNative',
     'planServertoolTimeoutErrorWithNative',
-    'planStopMessageFetchFailedErrorWithNative',
+    'planServertoolRequiredResponseHookEmptyErrorWithNative',
   ]) {
     assertContains(
       'servertool-timeout-error-ts-thin-shell',

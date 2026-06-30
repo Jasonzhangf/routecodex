@@ -6,13 +6,10 @@ import {
 } from '../conversion/provider-protocol-error.js';
 import {
   isAdapterClientDisconnectedWithNative,
-  planClientDisconnectWatcherWithNative,
   planServertoolClientDisconnectedErrorWithNative,
   planServertoolRequiredResponseHookEmptyErrorWithNative,
-  planServertoolStateLoadFailedErrorWithNative,
   planServertoolTimeoutErrorWithNative,
   planServertoolTimeoutWatcherWithNative,
-  planStopMessageFetchFailedErrorWithNative,
   type ServertoolErrorPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
@@ -56,62 +53,6 @@ export function createServerToolClientDisconnectedError(options: {
   return error;
 }
 
-export function isServerToolClientDisconnectedError(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      typeof (error as { code?: unknown }).code === 'string' &&
-      (error as { code: string }).code === 'SERVERTOOL_CLIENT_DISCONNECTED'
-  );
-}
-
-export function createClientDisconnectWatcher(options: {
-  adapterContext: AdapterContext;
-  requestId: string;
-  flowId?: string;
-  pollIntervalMs?: number;
-}): { promise: Promise<never>; cancel: () => void } {
-  const plan = planClientDisconnectWatcherWithNative(options.pollIntervalMs);
-  let timer: NodeJS.Timeout | undefined;
-  let active = true;
-  const cancel = () => {
-    active = false;
-    if (timer) {
-      clearTimeout(timer);
-      timer = undefined;
-    }
-  };
-  const promise = new Promise<never>((_resolve, reject) => {
-    const check = () => {
-      if (!active) {
-        return;
-      }
-      if (isAdapterClientDisconnected(options.adapterContext)) {
-        cancel();
-        reject(
-          createServerToolClientDisconnectedError({
-            requestId: options.requestId,
-            flowId: options.flowId
-          })
-        );
-        return;
-      }
-      timer = setTimeout(check, plan.intervalMs);
-    };
-    timer = setTimeout(check, plan.intervalMs);
-  });
-  return { promise, cancel };
-}
-
-export function isServerToolTimeoutError(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      typeof (error as { code?: unknown }).code === 'string' &&
-      (error as { code: string }).code === 'SERVERTOOL_TIMEOUT'
-  );
-}
-
 export function createServerToolTimeoutError(options: {
   requestId: string;
   phase: 'engine' | 'followup';
@@ -121,27 +62,6 @@ export function createServerToolTimeoutError(options: {
   maxAttempts?: number;
 }): ProviderProtocolError & { status?: number } {
   return buildProviderProtocolError(planServertoolTimeoutErrorWithNative(options));
-}
-
-export function createStopMessageFetchFailedError(options: {
-  requestId: string;
-  reason: 'loop_limit';
-  elapsedMs?: number;
-  repeatCount?: number;
-  attempt?: number;
-  maxAttempts?: number;
-}): ProviderProtocolError & { status?: number } {
-  return buildProviderProtocolError(planStopMessageFetchFailedErrorWithNative(options));
-}
-
-export function createServertoolStateLoadFailedError(options: {
-  requestId: string;
-  stickyKey: string;
-  entryEndpoint: string;
-  providerProtocol: string;
-  error: string;
-}): ProviderProtocolError & { status?: number } {
-  return buildProviderProtocolError(planServertoolStateLoadFailedErrorWithNative(options));
 }
 
 export function createServertoolRequiredResponseHookEmptyError(options: {
