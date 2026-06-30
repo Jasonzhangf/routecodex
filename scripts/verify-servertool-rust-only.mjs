@@ -5186,6 +5186,10 @@ function checkServertoolRustOutcomeCloseout() {
     'unsupported_backend_plan_kind',
     'plan_servertool_unsupported_backend_plan_kind_error',
     "if (planHandlerMaterializationAction(planned, options) === 'handler_plan')",
+    'buildHandlerRuntimeActionInput',
+    'buildProviderProtocolError',
+    "import { ProviderProtocolError }",
+    'planServertoolHandlerRuntimeActionWithNative(',
     "await import('./builtin-handler-catalog.js')",
     'getBuiltinHandlerEntry(args.builtinName)',
     'builtin handler missing execution descriptor',
@@ -5202,7 +5206,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-shell-ts-orchestration-guard',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    'planServertoolHandlerRuntimeActionWithNative'
+    'planServertoolHandlerRuntimeActionForPlannedWithNative'
   );
   assertContains(
     'servertool-execution-handler-builtin-runtime-thin-shell',
@@ -5336,7 +5340,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-handler-contract-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeCoreWrapper,
-    'planServertoolHandlerRuntimeActionWithNative'
+    'planServertoolHandlerRuntimeActionForPlannedWithNative'
   );
   assertContains(
     'servertool-execution-handler-contract-native-bridge',
@@ -5354,7 +5358,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-handler-contract-ts-thin-shell',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    'planServertoolHandlerRuntimeActionWithNative'
+    'planServertoolHandlerRuntimeActionForPlannedWithNative'
   );
 
   pass('servertool-outcome-rust-owner', 'servertool-core owns outcome planning and cli contract');

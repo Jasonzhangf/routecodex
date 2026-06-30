@@ -2630,6 +2630,26 @@ export function planServertoolHandlerRuntimeActionWithNative(input: {
   };
 }
 
+export function planServertoolHandlerRuntimeActionForPlannedWithNative(
+  planned: unknown
+): ServertoolHandlerRuntimeActionPlan {
+  const record =
+    planned && typeof planned === 'object' && !Array.isArray(planned)
+      ? (planned as Record<string, unknown>)
+      : {};
+  const execution =
+    record.execution && typeof record.execution === 'object' && !Array.isArray(record.execution)
+      ? (record.execution as Record<string, unknown>)
+      : undefined;
+  return planServertoolHandlerRuntimeActionWithNative({
+    hasFinalizeFunction: typeof record.finalize === 'function',
+    hasChatResponseObject: Boolean(record.chatResponse && typeof record.chatResponse === 'object' && !Array.isArray(record.chatResponse)),
+    hasExecutionObject: Boolean(record.execution && typeof record.execution === 'object' && !Array.isArray(record.execution)),
+    hasExecutionFlowId: typeof execution?.flowId === 'string',
+    hasPlanMarkers: typeof record.flowId === 'string' || record.finalize !== undefined
+  });
+}
+
 export function planEngineSelectionStartWithNative(input: {
   primaryAutoHookIds: string[];
 }): EngineSelectionStartPlan {

@@ -67,8 +67,8 @@ jest.unstable_mockModule(
       message: `[native-handler-contract] ${String(input?.kind ?? 'unknown')}`,
       details: input ?? {}
     })),
-    planServertoolHandlerRuntimeActionWithNative: jest.fn(() => ({
-      action: 'return_materialized_result'
+    planServertoolHandlerRuntimeActionForPlannedWithNative: jest.fn(() => ({
+      action: 'return_handler_result'
     })),
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
     parseServertoolCliProjectionToolArgumentsWithNative: jest.fn(() => ({})),

@@ -256,14 +256,23 @@ jest.unstable_mockModule(
       }
       return { action: 'invalid_plan_result' };
     }),
-    planServertoolHandlerRuntimeActionWithNative: jest.fn((input: any) => {
-      if (input?.hasFinalizeFunction) {
+    planServertoolHandlerRuntimeActionForPlannedWithNative: jest.fn((planned: any) => {
+      const execution = planned?.execution;
+      if (typeof planned?.finalize === 'function') {
         return { action: 'finalize_without_backend' };
       }
-      if (input?.hasChatResponseObject && input?.hasExecutionObject && input?.hasExecutionFlowId) {
+      if (
+        planned?.chatResponse &&
+        typeof planned.chatResponse === 'object' &&
+        !Array.isArray(planned.chatResponse) &&
+        execution &&
+        typeof execution === 'object' &&
+        !Array.isArray(execution) &&
+        typeof execution.flowId === 'string'
+      ) {
         return { action: 'return_handler_result' };
       }
-      if (input?.hasPlanMarkers) {
+      if (typeof planned?.flowId === 'string' || planned?.finalize !== undefined) {
         return { action: 'invalid_plan_missing_finalize' };
       }
       return { action: 'invalid_plan_result' };

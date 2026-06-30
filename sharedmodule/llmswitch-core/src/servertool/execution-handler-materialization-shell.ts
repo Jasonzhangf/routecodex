@@ -1,26 +1,22 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { ProviderProtocolError } from '../conversion/provider-protocol-error.js';
 import {
   appendServertoolExecutedRecordWithNative,
   planServertoolExecutionDispatchErrorWithNative,
   planServertoolExecutionOutcomeRuntimeActionWithNative,
   createServertoolExecutionLoopStateWithNative,
   planServertoolHandlerContractErrorWithNative,
-  planServertoolHandlerRuntimeActionWithNative,
-  type NativeServertoolExecutionLoopState,
-  type ServertoolErrorPlan
+  planServertoolHandlerRuntimeActionForPlannedWithNative,
+  type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   buildServertoolOutcomePlanInputWithNative,
   planServertoolOutcomeWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { __executeBuiltinHandlerForRuntime } from './builtin-handler-catalog.js';
-import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
-  ServerToolExecution,
   ServerToolHandlerContext,
   ServerToolHandlerPlan,
   ServerToolHandlerResult,
@@ -140,32 +136,17 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   };
 }
 
-function buildHandlerRuntimeActionInput(
-  planned: Partial<ServerToolHandlerPlan & ServerToolHandlerResult>
-): Parameters<typeof planServertoolHandlerRuntimeActionWithNative>[0] {
-  const execution = planned.execution as { flowId?: unknown } | undefined;
-  return {
-    hasFinalizeFunction: typeof planned.finalize === 'function',
-    hasChatResponseObject: Boolean(planned.chatResponse && typeof planned.chatResponse === 'object' && !Array.isArray(planned.chatResponse)),
-    hasExecutionObject: Boolean(planned.execution && typeof planned.execution === 'object' && !Array.isArray(planned.execution)),
-    hasExecutionFlowId: typeof execution?.flowId === 'string',
-    hasPlanMarkers: typeof planned.flowId === 'string' || planned.finalize !== undefined
-  };
-}
-
 export const materializeServertoolPlannedResult = async (
   planned: ServerToolHandlerPlan | ServerToolHandlerResult,
   options: ServerSideToolEngineOptions
 ): Promise<ServerToolHandlerResult | null> => {
-  const actionPlan = planServertoolHandlerRuntimeActionWithNative(
-    buildHandlerRuntimeActionInput(planned as Partial<ServerToolHandlerPlan & ServerToolHandlerResult>)
-  );
+  const actionPlan = planServertoolHandlerRuntimeActionForPlannedWithNative(planned);
   if (actionPlan.action === 'finalize_without_backend') {
     const plan = planned as ServerToolHandlerPlan;
     return await plan.finalize();
   }
   if (actionPlan.action === 'invalid_plan_missing_finalize') {
-    throw buildProviderProtocolError(
+    throw createServertoolProviderProtocolErrorFromPlan(
       planServertoolHandlerContractErrorWithNative({
         kind: 'invalid_handler_plan_missing_finalize',
         requestId: options.requestId
@@ -173,7 +154,7 @@ export const materializeServertoolPlannedResult = async (
     );
   }
   if (actionPlan.action === 'invalid_plan_result') {
-    throw buildProviderProtocolError(
+    throw createServertoolProviderProtocolErrorFromPlan(
       planServertoolHandlerContractErrorWithNative({
         kind: 'invalid_handler_plan_result',
         requestId: options.requestId
@@ -188,16 +169,6 @@ export async function executeBuiltinServerToolHandler(args: {
   ctx: ServerToolHandlerContext;
 }): Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null> {
   return __executeBuiltinHandlerForRuntime(args.builtinName, args.ctx);
-}
-
-function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {
-  const err = new ProviderProtocolError(plan.message, {
-    code: plan.code as any,
-    category: plan.category as any,
-    details: plan.details
-  }) as ProviderProtocolError & { status?: number };
-  err.status = plan.status;
-  return err;
 }
 
 function hydrateExecutionLoopState(state: NativeServertoolExecutionLoopState): ServertoolExecutionLoopState {
