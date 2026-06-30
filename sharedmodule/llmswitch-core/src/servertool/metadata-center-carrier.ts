@@ -50,16 +50,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function writeBoundRuntimeControl(args: {
-  center: MetadataCenterLike;
-  key: string;
-  value: unknown;
-  writer: RuntimeControlWriter;
-  reason?: string;
-}): void {
-  args.center.writeRuntimeControl?.(args.key, args.value, args.writer, args.reason);
-}
-
 export function writeRuntimeControlToBoundMetadataCenter(args: {
   metadata: Record<string, unknown>;
   key: string;
@@ -82,13 +72,7 @@ export function writeRuntimeControlToBoundMetadataCenter(args: {
     }
     return;
   }
-  writeBoundRuntimeControl({
-    center,
-    key: args.key,
-    value: args.value,
-    writer: args.writer,
-    reason: args.reason
-  });
+  center.writeRuntimeControl(args.key, args.value, args.writer, args.reason);
 }
 
 export function readRuntimeControlFromBoundMetadataCenter(
