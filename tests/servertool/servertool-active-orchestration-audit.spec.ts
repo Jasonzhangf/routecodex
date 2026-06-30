@@ -91,12 +91,12 @@ const TARGETS = [
       'isServertoolEnabledByConfig',
       'getServertoolToolSpec(name)?.enabled',
       'export function getDefaultServertoolSkeletonDocument(',
+      'export function getServertoolToolSpec(',
       'export function listServertoolToolSpecs(',
       'getDerivedConfig().toolSpecList',
     ],
     required: [
       'planServertoolSkeletonDerivedConfigWithNative',
-      'resolveServertoolToolSpecWithNative',
     ],
   },
   {

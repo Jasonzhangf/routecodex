@@ -3032,6 +3032,7 @@ function checkServertoolSkeletonConfigRustOwner() {
     'isServertoolEnabledByConfig',
     'getServertoolToolSpec(name)?.enabled',
     'export function getDefaultServertoolSkeletonDocument(',
+    'export function getServertoolToolSpec(',
     'export function listServertoolToolSpecs(',
     'getDerivedConfig().toolSpecList',
   ]) {
@@ -3045,7 +3046,6 @@ function checkServertoolSkeletonConfigRustOwner() {
   for (const needle of [
     'planServertoolSkeletonDerivedConfigWithNative',
     'normalizeServertoolRegistrationSpecWithNative',
-    'resolveServertoolToolSpecWithNative',
   ]) {
     assertContains(
       'servertool-skeleton-config-ts-thin-shell',

@@ -19,8 +19,7 @@ import {
   planServertoolRegistryLookupFromSkeletonWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
   resolveServertoolRegisteredNameWithNative,
-  resolveServertoolBuiltinHandlerEntryWithNative,
-  resolveServertoolToolSpecWithNative
+  resolveServertoolBuiltinHandlerEntryWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export type {
@@ -84,10 +83,6 @@ type ServertoolSkeletonDerivedConfig = {
 
 function getDerivedConfig(): ServertoolSkeletonDerivedConfig {
   return planServertoolSkeletonDerivedConfigWithNative() as ServertoolSkeletonDerivedConfig;
-}
-
-export function getServertoolToolSpec(name: string): ServertoolToolSpec | null {
-  return resolveServertoolToolSpecWithNative({ name }) as unknown as ServertoolToolSpec | null;
 }
 
 export function planServertoolBuiltinHandlerEntry(name: string): Record<string, unknown> {

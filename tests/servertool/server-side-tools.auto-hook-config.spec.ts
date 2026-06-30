@@ -42,6 +42,12 @@ const skeletonDocument = {
         enabled: true,
         trigger: { type: 'auto', canonicalName: 'stop_message_auto', phase: 'default', priority: 40 },
         execution: { mode: 'auto_hook', stripAfterExecute: true }
+      },
+      reasoningstop: {
+        name: 'reasoningStop',
+        enabled: true,
+        trigger: { type: 'tool_call', canonicalName: 'reasoningStop' },
+        execution: { mode: 'guarded', stripAfterExecute: true }
       }
     }
   }
@@ -733,7 +739,6 @@ jest.unstable_mockModule(
 let buildServertoolAutoHookQueueConfig: any;
 let buildServertoolFollowupConfig: any;
 let buildServertoolPendingInjectionConfig: any;
-let getServertoolToolSpec: any;
 let normalizeServerToolRegistrationSpec: any;
 let listAutoServerToolHooks: any;
 let listRegisteredServerToolHandlerNames: any;
@@ -745,7 +750,6 @@ beforeAll(async () => {
   buildServertoolAutoHookQueueConfig = skeletonConfig.buildServertoolAutoHookQueueConfig;
   buildServertoolFollowupConfig = skeletonConfig.buildServertoolFollowupConfig;
   buildServertoolPendingInjectionConfig = skeletonConfig.buildServertoolPendingInjectionConfig;
-  getServertoolToolSpec = skeletonConfig.getServertoolToolSpec;
   normalizeServerToolRegistrationSpec = skeletonConfig.normalizeServerToolRegistrationSpec;
   const orchestrationBlocks = await import('../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js');
   buildAutoHookQueuesFromConfig = orchestrationBlocks.buildAutoHookQueuesFromConfig;
@@ -795,7 +799,7 @@ describe('servertool skeleton config', () => {
   });
 
   test('per-tool spec is the authoritative source for trigger and mode', () => {
-    const stopMessage = getServertoolToolSpec('stop_message_auto');
+    const stopMessage = skeletonDocument.servertool.internalTools.stop_message_auto;
     expect(stopMessage).toMatchObject({
       name: 'stop_message_auto',
       trigger: {
@@ -809,7 +813,7 @@ describe('servertool skeleton config', () => {
         stripAfterExecute: true
       }
     });
-    expect(getServertoolToolSpec('reasoningStop')).toMatchObject({
+    expect(skeletonDocument.servertool.internalTools.reasoningstop).toMatchObject({
       name: 'reasoningStop',
       trigger: {
         type: 'tool_call',
