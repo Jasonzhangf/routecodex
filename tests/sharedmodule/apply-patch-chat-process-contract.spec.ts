@@ -3,6 +3,8 @@ import { describe, expect, it } from '@jest/globals';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
 function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string) {
   const result = runHubPipelineLibWithNative({
     config: { virtualRouter: {} },
@@ -188,11 +190,24 @@ describe('apply_patch freeform chat-process contract', () => {
   it('never executes apply_patch locally through server-side tool engine', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
-    const { runServerSideToolEngine } = await import('../../sharedmodule/llmswitch-core/dist/servertool/server-side-tools-impl.js');
+    const { orchestrateServertoolEngine: runServerSideToolEngine } = await import('../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js');
     const workspace = path.join(process.cwd(), 'tmp', 'jest-apply-patch-freeform-only');
     fs.mkdirSync(workspace, { recursive: true });
     const target = path.join(workspace, 'sample.txt');
     fs.writeFileSync(target, 'old\nkeep\n', 'utf8');
+
+    const adapterContext = {
+      requestId: 'req-apply-patch-freeform-only',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      cwd: workspace,
+      __rt: { applyPatch: { mode: 'servertool' } },
+      capturedChatRequest: { model: 'gpt-test', messages: [], tools: [] },
+    } as any;
+    Reflect.set(adapterContext, METADATA_CENTER_SYMBOL, {
+      readRuntimeControl: () => ({ providerProtocol: 'openai-chat' }),
+      readRequestTruth: () => ({ requestId: 'req-apply-patch-freeform-only' }),
+    });
 
     const result = await runServerSideToolEngine({
       chatResponse: {
@@ -220,14 +235,7 @@ describe('apply_patch freeform chat-process contract', () => {
           finish_reason: 'tool_calls',
         }],
       } as any,
-      adapterContext: {
-        requestId: 'req-apply-patch-freeform-only',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
-        cwd: workspace,
-        __rt: { applyPatch: { mode: 'servertool' } },
-        capturedChatRequest: { model: 'gpt-test', messages: [], tools: [] },
-      } as any,
+      adapterContext,
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-apply-patch-freeform-only',
       providerProtocol: 'openai-chat',

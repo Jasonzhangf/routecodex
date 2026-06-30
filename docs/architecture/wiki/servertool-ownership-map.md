@@ -1059,7 +1059,6 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts`
-- `sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts`
 - `sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts`
 - `tests/servertool/orchestration-policy-block.spec.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`

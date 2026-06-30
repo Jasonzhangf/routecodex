@@ -28,12 +28,12 @@ const TEST_SESSION_IDS = [
 type BootstrapModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js');
 type EngineModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js');
 type StickyModule = typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
-type ServerToolModule = typeof import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js');
+type ServerToolModule = typeof import('../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js');
 
 let bootstrapVirtualRouterConfig: BootstrapModule['bootstrapVirtualRouterConfig'];
 let VirtualRouterEngine: EngineModule['VirtualRouterEngine'];
 let saveRoutingInstructionStateSync: StickyModule['saveRoutingInstructionStateSync'];
-let runServerSideToolEngine: ServerToolModule['runServerSideToolEngine'];
+let runServerSideToolEngine: ServerToolModule['orchestrateServertoolEngine'];
 
 function bindTestMetadataCenter(
   target: Record<string, unknown>,
@@ -128,11 +128,11 @@ describe('stopMessage is session-scoped', () => {
     const bootstrapMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js');
     const engineMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js');
     const stickyMod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
-    const servertoolMod = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js');
+    const servertoolMod = await import('../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js');
     bootstrapVirtualRouterConfig = bootstrapMod.bootstrapVirtualRouterConfig;
     VirtualRouterEngine = engineMod.VirtualRouterEngine;
     saveRoutingInstructionStateSync = stickyMod.saveRoutingInstructionStateSync;
-    runServerSideToolEngine = servertoolMod.runServerSideToolEngine;
+    runServerSideToolEngine = servertoolMod.orchestrateServertoolEngine;
   });
 
   afterAll(() => {

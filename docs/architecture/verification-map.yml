@@ -459,7 +459,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
-      - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
       - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js';
+import { orchestrateServertoolEngine as runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {

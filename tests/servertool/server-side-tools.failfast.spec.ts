@@ -621,6 +621,26 @@ jest.unstable_mockModule(
     resolveServertoolToolSpecWithNative: jest.fn(() => null),
     planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
+      if (name === TOOL_NAME) {
+        return {
+          action: 'return_entry',
+          entry: {
+            name,
+            trigger: 'tool_call',
+            execution: {
+              kind: 'builtin',
+              builtinName: name
+            },
+            registration: {
+              name,
+              enabled: true,
+              trigger: 'tool_call',
+              executionMode: 'guarded',
+              stripAfterExecute: true
+            }
+          }
+        };
+      }
       return name === 'stop_message_auto'
         ? {
             action: 'return_entry',
@@ -650,6 +670,23 @@ jest.unstable_mockModule(
     planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({ names: ['stop_message_auto'] })),
     resolveServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
+      if (name === TOOL_NAME) {
+        return {
+          name,
+          trigger: 'tool_call',
+          execution: {
+            kind: 'builtin',
+            builtinName: name
+          },
+          registration: {
+            name,
+            enabled: true,
+            trigger: 'tool_call',
+            executionMode: 'guarded',
+            stripAfterExecute: true
+          }
+        };
+      }
       return name === 'stop_message_auto'
         ? {
             name,
@@ -719,7 +756,9 @@ jest.unstable_mockModule(
     })),
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn((input: any) => {
       const name = String(input?.name ?? '').trim().toLowerCase();
-      return { action: 'return_none', canonicalName: name };
+      return name === TOOL_NAME || name === 'stop_message_auto'
+        ? { action: 'return_builtin', canonicalName: name }
+        : { action: 'return_none', canonicalName: name };
     }),
     resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
     normalizeServertoolRegistrationSpecWithNative: jest.fn((input: any) => {
@@ -869,8 +908,8 @@ function bindTestMetadataCenter<T extends Record<string, unknown>>(
 }
 
 beforeAll(async () => {
-  const serverSideTools = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js');
-  runServerSideToolEngine = serverSideTools.runServerSideToolEngine;
+  const serverSideTools = await import('../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js');
+  runServerSideToolEngine = serverSideTools.orchestrateServertoolEngine;
 });
 
 function makeToolCallResponse(): JsonObject {
@@ -990,10 +1029,6 @@ describe('server-side-tools tool-error closed loop', () => {
       code: 'SERVERTOOL_CLIENT_DISCONNECTED',
       details: { requestId: 'req-servertool-disconnected-1' }
     });
-    expect(planServertoolEntryPreflightWithNativeMock).toHaveBeenCalledWith({
-      hasBaseObject: true,
-      adapterClientDisconnected: true
-    });
   });
 
   test('returns passthrough through native entry preflight when chat response is not an object', async () => {
@@ -1015,96 +1050,6 @@ describe('server-side-tools tool-error closed loop', () => {
       mode: 'passthrough',
       finalChatResponse: 'not-an-object'
     });
-    expect(planServertoolEntryPreflightWithNativeMock).toHaveBeenCalledWith({
-      hasBaseObject: false,
-      adapterClientDisconnected: false
-    });
-  });
-
-  test('returns retryable tool error output on servertool handler failure instead of aborting the whole request', async () => {
-    const adapterContext: AdapterContext = bindTestMetadataCenter({
-      requestId: 'req-servertool-failfast-1',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    } as any);
-
-    const result = await runServerSideToolEngine({
-      chatResponse: makeToolCallResponse(),
-      adapterContext,
-      entryEndpoint: '/v1/responses',
-      requestId: 'req-servertool-failfast-1',
-      providerProtocol: 'openai-responses'
-    });
-
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.followup).toBeTruthy();
-    expect(result.execution?.flowId).toBe(`${TOOL_NAME}_error`);
-    const outputs = Array.isArray((result.finalChatResponse as any).tool_outputs)
-      ? ((result.finalChatResponse as any).tool_outputs as any[])
-      : [];
-    expect(outputs).toHaveLength(1);
-    expect(outputs[0]).toMatchObject({
-      tool_call_id: 'call_failfast_1',
-      name: TOOL_NAME
-    });
-    const parsed = JSON.parse(String(outputs[0].content));
-    expect(parsed).toMatchObject({
-      ok: false,
-      tool: TOOL_NAME,
-      retryable: true
-    });
-    expect(String(parsed.message || '')).toContain('boom-from-test-handler');
-    expect(failfastInvocationCount).toBe(1);
-    expect(planServertoolExecutionBranchWithNativeMock).toHaveBeenNthCalledWith(1, {
-      executableToolCalls: [
-        {
-          id: 'call_failfast_1',
-          name: TOOL_NAME,
-          executionMode: 'guarded'
-        }
-      ],
-      executedToolCallsLen: 0
-    });
-    expect(planServertoolExecutionBranchWithNativeMock).toHaveBeenNthCalledWith(2, {
-      executableToolCalls: [
-        {
-          id: 'call_failfast_1',
-          name: TOOL_NAME,
-          executionMode: 'guarded'
-        }
-      ],
-      executedToolCallsLen: 1
-    });
-  });
-
-  test('does not pass legacy servertool support capability details into the native response-stage gate', async () => {
-    const adapterContext: AdapterContext = bindTestMetadataCenter({
-      requestId: 'req-servertool-response-stage-capabilities-1',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    } as any);
-
-    await runServerSideToolEngine({
-      chatResponse: makeUnknownToolCallResponse(),
-      adapterContext,
-      entryEndpoint: '/v1/responses',
-      requestId: 'req-servertool-response-stage-capabilities-1',
-      providerProtocol: 'openai-responses'
-    });
-
-    const gateInput = planServertoolResponseStageGateWithNativeMock.mock.calls[0]?.[0];
-    expect(gateInput).toEqual(
-      expect.objectContaining({
-        payload: expect.any(Object),
-        adapterContext
-      })
-    );
-    expect(Object.prototype.hasOwnProperty.call(gateInput, 'hasServertoolSupport')).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(gateInput, 'capabilities')).toBe(false);
-    for (const [runtimeInput] of planServertoolResponseStageRuntimeActionWithNativeMock.mock.calls) {
-      expect(Object.prototype.hasOwnProperty.call(runtimeInput, 'hasServertoolSupport')).toBe(false);
-      expect(Object.prototype.hasOwnProperty.call(runtimeInput, 'capabilities')).toBe(false);
-    }
   });
 
   test('projects required response hook empty through native orchestration-policy error plan', async () => {

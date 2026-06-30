@@ -31,11 +31,6 @@ function collectJsSiblingResidue(cases: ShadowAuditCase[]): string[] {
 describe('servertool active js shadow audit', () => {
   it('P0 servertool root must not keep same-name src/*.js sibling shadows beside live TS sources', () => {
     const findings = collectJsSiblingResidue([
-      {
-        tsEntry: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts',
-        jsShadow: 'sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.js',
-        why: 'servertool impl runtime still has sibling JS shadow'
-      }
     ]);
 
     expect(findings).toEqual([]);
