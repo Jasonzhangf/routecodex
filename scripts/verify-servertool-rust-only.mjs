@@ -111,7 +111,6 @@ const TS_ENGINE_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-orchestration
 const TS_ENGINE_OBSERVATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
-const TS_REGISTRY_REGISTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-registration-shell.ts`;
 const TS_REGISTRY_PROJECTION_SHELL = `${SERVERTOOL_TS_DIR}/registry-projection-shell.ts`;
 const TS_REGISTRY_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`;
 const TS_REGISTRY_TYPES = `${SERVERTOOL_TS_DIR}/registry-types.ts`;
@@ -172,6 +171,7 @@ const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-impl.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts`,
 ];
 const DELETED_BACKEND_ROUTE_POLICY_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/backend_route_contract.rs`,
@@ -3381,7 +3381,6 @@ function checkServertoolRegistryRustOwner() {
       `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import registry-orchestration-shell.ts directly`
     );
   }
-  const registryRegistrationShell = readRequired(TS_REGISTRY_REGISTRATION_SHELL);
   const registryProjectionShell = readRequired(TS_REGISTRY_PROJECTION_SHELL);
   const registryOrchestrationShell = readRequired(TS_REGISTRY_ORCHESTRATION_SHELL);
   const registryTypes = readRequired(TS_REGISTRY_TYPES);
@@ -3491,11 +3490,12 @@ function checkServertoolRegistryRustOwner() {
     '.trim().toLowerCase()',
     'isRegisteredServerToolNameViaNativeConfig',
     'isServertoolRegisteredNameByConfig',
+    'getServerToolHandlerViaNativePlan',
   ]) {
-    if (registryRegistrationShell.includes(marker)) {
+    if (registryOrchestrationShell.includes(marker)) {
       fail(
-        'servertool-registry-registration-shell',
-        `registry-registration-shell.ts must not retain TS registry action precondition marker ${marker}`
+        'servertool-registry-orchestration-shell',
+        `registry-orchestration-shell.ts must not retain TS registry action precondition marker ${marker}`
       );
     }
   }
@@ -3515,12 +3515,7 @@ function checkServertoolRegistryRustOwner() {
   for (const needle of [
     'planServertoolRegistryLookupFromSkeletonWithNative({',
   ]) {
-    assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
-  }
-  for (const needle of [
-    'getServerToolHandlerViaNativePlan',
-  ]) {
-    assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
+    assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
   }
   for (const needle of [
     'planServertoolRegistryAutoHookDescriptorsWithNative({',
