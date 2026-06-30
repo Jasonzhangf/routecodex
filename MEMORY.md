@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE data role must not default to model
+- `gemini-sse-to-json-converter.ts` must not synthesize `role='model'` when a `gemini.data` frame omits role metadata.
+- Missing or blank role now fails fast with `Invalid Gemini data event: missing role`; valid explicit role replay remains unchanged.
+- Verification: focused `sse-parser-no-recovery` Jest, SSE architecture gate, sharedmodule/root TypeScript checks, `verify:responses-sse-business-module`, `build:base`, `git diff --check`, and source replay passed. No real Gemini provider-response sample was found in current sample stores.
+
 # 2026-07-01: Gemini SSE data candidateIndex must not default to zero
 - `gemini-sse-to-json-converter.ts` must not synthesize `candidateIndex=0` when a `gemini.data` frame omits candidate metadata.
 - Missing `candidateIndex` now fails fast with `Invalid Gemini data event: missing candidateIndex`; valid explicit index replay remains unchanged.

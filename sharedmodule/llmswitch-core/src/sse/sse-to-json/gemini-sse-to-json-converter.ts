@@ -96,7 +96,10 @@ export class GeminiSseToJsonConverter {
     if (!part) {
       throw new Error('Invalid Gemini data event: missing part');
     }
-    const role = typeof payload?.role === 'string' ? payload.role : 'model';
+    if (typeof payload?.role !== 'string' || payload.role.trim().length === 0) {
+      throw new Error('Invalid Gemini data event: missing role');
+    }
+    const role = payload.role;
     if (!accumulator.has(candidateIndex)) {
       accumulator.set(candidateIndex, { role, parts: [] });
     }

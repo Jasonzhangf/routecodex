@@ -111,4 +111,18 @@ describe('SSE parser no-recovery boundary', () => {
       model: 'gemini-test'
     })).rejects.toThrow('Invalid Gemini data event: missing candidateIndex');
   });
+
+  it('fails Gemini data frames with missing role instead of defaulting to model', async () => {
+    const converter = new GeminiSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([
+      'event: gemini.data\n',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"output","candidateIndex":0,"partIndex":0,"part":{"text":"hello"}}\n\n',
+      'event: gemini.done\n',
+      'data: {"type":"gemini.done","protocol":"gemini-chat","direction":"output","candidates":[{"index":0,"finishReason":"STOP"}]}\n\n'
+    ]), {
+      requestId: 'req_gemini_missing_role_no_default',
+      model: 'gemini-test'
+    })).rejects.toThrow('Invalid Gemini data event: missing role');
+  });
 });

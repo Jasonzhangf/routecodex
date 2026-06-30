@@ -90,6 +90,13 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Gemini SSE role default removal slice
+
+- Red evidence: focused `tests/sharedmodule/sse-parser-no-recovery.spec.ts` first failed because a `gemini.data` frame missing `role` was defaulted to `model` and materialized as a successful response.
+- Fix: `sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts` now fail-fasts on missing or blank data-frame `role` with `Invalid Gemini data event: missing role`; `verify:sse-architecture-boundary` forbids the old default-to-model marker.
+- Positive / reverse tests: valid Gemini data/done replay with explicit `role:"model"` still materializes `role=model`, `text=hello`, and `finishReason=STOP`; missing `role` replay fails fast.
+- Verification: focused `sse-parser-no-recovery` Jest PASS 8/8; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `npx tsc -p tsconfig.json --noEmit --pretty false` PASS; `git diff --check` PASS; `npm run build:base` PASS; source replay valid/missing role PASS. No real Gemini provider-response sample was found in current sample stores.
+
 ### 2026-07-01 Gemini SSE candidateIndex default removal slice
 
 - Red evidence: focused `tests/sharedmodule/sse-parser-no-recovery.spec.ts` first failed because a `gemini.data` frame missing `candidateIndex` was defaulted to candidate `0` and materialized as a successful response.
