@@ -778,6 +778,95 @@ pub fn build_responses_sse_function_call_arguments_done_payload_json(
     })
 }
 
+fn build_responses_sse_reasoning_summary_payload(
+    lifecycle: &str,
+    output_index: i64,
+    item_id: &str,
+    summary_index: i64,
+    text: &str,
+) -> Result<Value, String> {
+    if item_id.trim().is_empty() {
+        return Err("Responses reasoning summary payload item_id is required".to_string());
+    }
+    let mut payload = Map::new();
+    payload.insert("output_index".to_string(), Value::from(output_index));
+    payload.insert("item_id".to_string(), Value::String(item_id.to_string()));
+    payload.insert("summary_index".to_string(), Value::from(summary_index));
+    match lifecycle {
+        "part_added" => {
+            payload.insert(
+                "part".to_string(),
+                serde_json::json!({ "type": "summary_text", "text": "" }),
+            );
+        }
+        "part_done" => {
+            payload.insert(
+                "part".to_string(),
+                serde_json::json!({ "type": "summary_text", "text": text }),
+            );
+        }
+        "text_delta" => {
+            payload.insert("delta".to_string(), Value::String(text.to_string()));
+        }
+        "text_done" => {
+            payload.insert("text".to_string(), Value::String(text.to_string()));
+        }
+        other => {
+            return Err(format!(
+                "Unsupported Responses reasoning summary payload lifecycle: {}",
+                other
+            ));
+        }
+    }
+    Ok(Value::Object(payload))
+}
+
+pub fn build_responses_sse_reasoning_summary_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> Result<String, String> {
+    let lifecycle = lifecycle_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Responses reasoning summary payload lifecycle is required".to_string())?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses reasoning summary payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(source) = payload.as_object() else {
+        return Err("Responses reasoning summary payload expected object".to_string());
+    };
+    let output_index = source
+        .get("output_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses reasoning summary payload missing output_index".to_string())?;
+    let item_id = source
+        .get("item_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Responses reasoning summary payload missing item_id".to_string())?;
+    let summary_index = source
+        .get("summary_index")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses reasoning summary payload missing summary_index".to_string())?;
+    let text = source.get("text").and_then(Value::as_str).unwrap_or("");
+    let output = build_responses_sse_reasoning_summary_payload(
+        lifecycle,
+        output_index,
+        item_id,
+        summary_index,
+        text,
+    )?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses reasoning summary payload JSON: {}",
+            error
+        )
+    })
+}
+
 pub fn build_responses_sse_error_payload(message: &str) -> Result<Value, String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
@@ -1186,5 +1275,97 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Responses function call arguments done payload call_id is required"));
+    }
+
+    #[test]
+    fn builds_responses_sse_reasoning_summary_part_payloads() {
+        let added = build_responses_sse_reasoning_summary_payload(
+            "part_added",
+            1,
+            "rs_1",
+            0,
+            "summary text",
+        )
+        .unwrap();
+        let done = build_responses_sse_reasoning_summary_payload(
+            "part_done",
+            1,
+            "rs_1",
+            0,
+            "summary text",
+        )
+        .unwrap();
+
+        assert_eq!(
+            added,
+            json!({
+                "output_index": 1,
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "part": { "type": "summary_text", "text": "" }
+            })
+        );
+        assert_eq!(
+            done,
+            json!({
+                "output_index": 1,
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "part": { "type": "summary_text", "text": "summary text" }
+            })
+        );
+    }
+
+    #[test]
+    fn builds_responses_sse_reasoning_summary_text_payloads() {
+        let delta = build_responses_sse_reasoning_summary_payload(
+            "text_delta",
+            1,
+            "rs_1",
+            0,
+            "summary",
+        )
+        .unwrap();
+        let done = build_responses_sse_reasoning_summary_payload(
+            "text_done",
+            1,
+            "rs_1",
+            0,
+            "summary text",
+        )
+        .unwrap();
+
+        assert_eq!(
+            delta,
+            json!({
+                "output_index": 1,
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "summary"
+            })
+        );
+        assert_eq!(
+            done,
+            json!({
+                "output_index": 1,
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "text": "summary text"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_responses_sse_reasoning_summary_payload_missing_item_id() {
+        let err = build_responses_sse_reasoning_summary_payload(
+            "part_done",
+            1,
+            " ",
+            0,
+            "summary text",
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Responses reasoning summary payload item_id is required"));
     }
 }

@@ -20,6 +20,7 @@ import {
   buildResponsesSseOutputTextDeltaPayloadWithNative,
   buildResponsesSseOutputTextDonePayloadWithNative,
   buildResponsesSseOutputItemDescriptorWithNative,
+  buildResponsesSseReasoningSummaryPayloadWithNative,
   normalizeResponsesSseReasoningSummaryWithNative,
   normalizeResponsesSseResponsePayloadWithNative
 } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
@@ -492,16 +493,20 @@ export function* buildReasoningSummaryEvents(
     if (!text) continue;
 
     const partAddedBase = createBaseEvent(context, config);
+    const partAdded = buildResponsesSseReasoningSummaryPayloadWithNative(
+      'part_added',
+      context.outputIndexCounter,
+      reasoning.id,
+      summaryIndex,
+      text
+    );
     yield {
       type: 'response.reasoning_summary_part.added',
       timestamp: partAddedBase.timestamp,
       protocol: partAddedBase.protocol,
       direction: partAddedBase.direction,
       data: {
-        output_index: context.outputIndexCounter,
-        item_id: reasoning.id,
-        summary_index: summaryIndex,
-        part: { type: 'summary_text', text: '' }
+        ...partAdded
       },
       sequenceNumber: partAddedBase.sequenceNumber
     };
@@ -510,47 +515,59 @@ export function* buildReasoningSummaryEvents(
     for (const chunk of chunks) {
       if (!chunk) continue;
       const deltaBase = createBaseEvent(context, config);
+      const delta = buildResponsesSseReasoningSummaryPayloadWithNative(
+        'text_delta',
+        context.outputIndexCounter,
+        reasoning.id,
+        summaryIndex,
+        chunk
+      );
       yield {
         type: 'response.reasoning_summary_text.delta',
         timestamp: deltaBase.timestamp,
         protocol: deltaBase.protocol,
         direction: deltaBase.direction,
         data: {
-          output_index: context.outputIndexCounter,
-          item_id: reasoning.id,
-          summary_index: summaryIndex,
-          delta: chunk
+          ...delta
         },
         sequenceNumber: deltaBase.sequenceNumber
       };
     }
 
     const textDoneBase = createBaseEvent(context, config);
+    const textDone = buildResponsesSseReasoningSummaryPayloadWithNative(
+      'text_done',
+      context.outputIndexCounter,
+      reasoning.id,
+      summaryIndex,
+      text
+    );
     yield {
       type: 'response.reasoning_summary_text.done',
       timestamp: textDoneBase.timestamp,
       protocol: textDoneBase.protocol,
       direction: textDoneBase.direction,
       data: {
-        output_index: context.outputIndexCounter,
-        item_id: reasoning.id,
-        summary_index: summaryIndex,
-        text
+        ...textDone
       },
       sequenceNumber: textDoneBase.sequenceNumber
     };
 
     const partDoneBase = createBaseEvent(context, config);
+    const partDone = buildResponsesSseReasoningSummaryPayloadWithNative(
+      'part_done',
+      context.outputIndexCounter,
+      reasoning.id,
+      summaryIndex,
+      text
+    );
     yield {
       type: 'response.reasoning_summary_part.done',
       timestamp: partDoneBase.timestamp,
       protocol: partDoneBase.protocol,
       direction: partDoneBase.direction,
       data: {
-        output_index: context.outputIndexCounter,
-        item_id: reasoning.id,
-        summary_index: summaryIndex,
-        part: { type: 'summary_text', text }
+        ...partDone
       },
       sequenceNumber: partDoneBase.sequenceNumber
     };

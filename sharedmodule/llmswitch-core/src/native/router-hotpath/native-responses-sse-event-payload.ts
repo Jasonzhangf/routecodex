@@ -358,6 +358,59 @@ function buildResponsesSseFunctionCallArgumentsPayloadWithNative(
   }
 }
 
+export type ResponsesSseReasoningSummaryPayloadLifecycle =
+  | 'part_added'
+  | 'part_done'
+  | 'text_delta'
+  | 'text_done';
+
+export function buildResponsesSseReasoningSummaryPayloadWithNative(
+  lifecycle: ResponsesSseReasoningSummaryPayloadLifecycle,
+  outputIndex: number,
+  itemId: string,
+  summaryIndex: number,
+  text: string
+): Record<string, unknown> {
+  const capability = 'buildResponsesSseReasoningSummaryPayloadJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let payloadJson: string;
+  try {
+    payloadJson = JSON.stringify({
+      output_index: outputIndex,
+      item_id: itemId,
+      summary_index: summaryIndex,
+      text
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, lifecycle);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses reasoning summary payload result');
+    }
+    const parsed = parseNativeEvent(raw);
+    if (!parsed) {
+      return fail('invalid Responses reasoning summary payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
 export function buildResponsesSseErrorPayloadWithNative(message: string): Record<string, unknown> {
   const capability = 'buildResponsesSseErrorPayloadJson';
   const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);

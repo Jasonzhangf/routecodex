@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses SSE reasoning summary payload native owner slice
+
+- Red evidence: `npm run verify:sse-architecture-boundary` 先红，命中 `part: { type: 'summary_text'`，证明 `responses.ts` 仍在本地合成 `response.reasoning_summary_part.added/done` 的 payload 语义。
+- Fix: 新增 Rust owner `buildResponsesSseReasoningSummaryPayloadJson`，TS `buildReasoningSummaryEvents()` 只调用 native wrapper 并封装 SSE event envelope，summary payload materialize 不再由 TS 负责。
+- Positive / reverse tests: Rust 覆盖 reasoning summary `part_added` / `part_done` / `text_delta` / `text_done` 和 missing `item_id` fail-fast；Jest 覆盖 native wrapper 直连与 `response.reasoning_summary_*` projection，不再依赖 TS 本地 summary payload 合成。
+- Verification: `cargo test -p router-hotpath-napi reasoning_summary --lib -- --nocapture` PASS 14/14；`node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS；focused Jest `responses-sse-output-item-descriptor-native + responses-sse-content-part-descriptor-native + responses-sse-reasoning-summary-no-normalize + responses-json-to-sse-usage + responses-sse-usage-no-fallback + responses-event-serializer-no-salvage` PASS 30/30；`npm run verify:sse-architecture-boundary` PASS；`npm run verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE 成功，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`，`reasoningItems=0`，`summaryPartAdded=0`，`summaryTextDelta=0`，`summaryTextDone=0`，`summaryPartDone=0`。
+
 ### 2026-06-30 Responses SSE function call arguments payload native owner slice
 
 - Red evidence: after adding `call_id: functionCall.call_id` and `arguments: functionCall.arguments` as forbidden markers, `npm run verify:sse-architecture-boundary` failed on the Responses event generator, proving `response.function_call_arguments.delta/done` payloads still synthesized function-call argument payload semantics in TS.

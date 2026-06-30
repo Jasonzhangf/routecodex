@@ -121,6 +121,7 @@ for (const forbidden of [
   'logprobs: []',
   'call_id: functionCall.call_id',
   'arguments: functionCall.arguments',
+  "part: { type: 'summary_text'",
   "type: 'internal_error'",
   "code: 'generation_error'",
   'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',

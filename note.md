@@ -1,3 +1,9 @@
+# 2026-06-30: Responses SSE reasoning summary payload native owner slice
+- `responses.ts::buildReasoningSummaryEvents()` 的 `response.reasoning_summary_part.added/done` payload 语义下沉到 Rust `buildResponsesSseReasoningSummaryPayloadJson`，TS 只保留 SSE envelope。
+- 红测：`verify:sse-architecture-boundary` 先红，命中 `part: { type: 'summary_text'`。
+- 验证：Rust `reasoning_summary` 14/14 PASS；native build PASS；focused Jest 30/30 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE 成功，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`。
+
 # 2026-06-30: Responses SSE function call arguments payload native owner slice
 
 - Red evidence：新增 `verify-sse-architecture-boundary` markers `call_id: functionCall.call_id` / `arguments: functionCall.arguments` 后，门禁先红，证明 `responses.ts` 仍在本地合成 `response.function_call_arguments.delta/done` payload。

@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
 import { normalizeResponsesSseReasoningSummaryWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseReasoningSummaryPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 
 async function collectEvents(response: any): Promise<any[]> {
   const events: any[] = [];
@@ -61,13 +62,47 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
     });
 
     const outputItemDone = events.find((event) => event.type === 'response.output_item.done');
+    const summaryPartAdded = events.find((event) => event.type === 'response.reasoning_summary_part.added');
+    const summaryTextDelta = events.find((event) => event.type === 'response.reasoning_summary_text.delta');
     const summaryTextDone = events.find((event) => event.type === 'response.reasoning_summary_text.done');
+    const summaryPartDone = events.find((event) => event.type === 'response.reasoning_summary_part.done');
     const payloadText = JSON.stringify(events);
 
     expect(outputItemDone?.data?.item?.summary).toEqual([{ type: 'summary_text', text: rawSummary }]);
+    expect(summaryPartAdded?.data?.part).toEqual({ type: 'summary_text', text: '' });
+    expect(summaryTextDelta?.data?.delta).toBe(rawSummary);
     expect(summaryTextDone?.data?.text).toBe(rawSummary);
+    expect(summaryPartDone?.data?.part).toEqual({ type: 'summary_text', text: rawSummary });
     expect(payloadText).not.toContain('**Thinking**');
     expect(payloadText).toContain('- inspect `file.ts`');
     expect(payloadText).toContain('> keep quoted detail');
+  });
+
+  it('builds reasoning summary payloads through the native owner', () => {
+    expect(buildResponsesSseReasoningSummaryPayloadWithNative(
+      'part_added',
+      1,
+      'rs_1',
+      0,
+      'summary text'
+    )).toEqual({
+      output_index: 1,
+      item_id: 'rs_1',
+      summary_index: 0,
+      part: { type: 'summary_text', text: '' }
+    });
+
+    expect(buildResponsesSseReasoningSummaryPayloadWithNative(
+      'part_done',
+      1,
+      'rs_1',
+      0,
+      'summary text'
+    )).toEqual({
+      output_index: 1,
+      item_id: 'rs_1',
+      summary_index: 0,
+      part: { type: 'summary_text', text: 'summary text' }
+    });
   });
 });
