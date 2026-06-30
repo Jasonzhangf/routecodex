@@ -80,6 +80,9 @@ const TARGETS = [
       'if (mandatoryResult) {',
     ],
     required: [
+      'const finalQueueName = queueOrder[queueOrder.length - 1]?.queueName;',
+      'const finalQueue = queue.queueName === finalQueueName;',
+      'finalQueue',
       'const toolFlowResult: ServerSideToolEngineResult = {',
       'return toolFlowResult;',
     ],

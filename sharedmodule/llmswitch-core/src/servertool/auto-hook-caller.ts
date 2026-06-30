@@ -111,6 +111,7 @@ export async function runServertoolAutoHookCaller(args: {
     { queueName: 'A_optional', hooks: optionalQueue },
     { queueName: 'B_mandatory', hooks: mandatoryQueue }
   ];
+  const finalQueueName = queueOrder[queueOrder.length - 1]?.queueName;
 
   for (const queue of queueOrder) {
     const queueResult = await runAutoHookExecutionQueue({
@@ -119,9 +120,10 @@ export async function runServertoolAutoHookCaller(args: {
       options: args.options,
       contextBase: args.contextBase
     });
+    const finalQueue = queue.queueName === finalQueueName;
     const finalizationPlan = planAutoHookCallerFinalizationWithNative({
       resultPresent: Boolean(queueResult),
-      finalQueue: queue.queueName === queueOrder[queueOrder.length - 1]?.queueName
+      finalQueue
     });
     if (finalizationPlan.returnResult) {
       if (!queueResult) {
