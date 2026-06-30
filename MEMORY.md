@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE terminal status must come from response.status
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts` must not synthesize terminal status with `response.status ?? 'completed'` or required-action status with `response.status ?? 'requires_action'`.
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts::validateResponse()` now fails missing/blank `response.status` with `Invalid Responses response: missing status`, preventing silent `in_progress/completed` terminal frames.
+- Verification included focused `responses-sse-usage-no-fallback`, `verify:sse-architecture-boundary`, sharedmodule/root `tsc --noEmit`, `verify:responses-sse-business-module`, `build:base`, and source replay proving valid completed/done still emit while missing status emits `response.error` and no completed/done.
+
 # 2026-07-01: Gemini SSE scalar candidate part must fail fast
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts` must not return scalar `part` values from `normalizeReasoningPart()`; non-object candidate parts are invalid provider shape and fail fast with `Invalid Gemini candidate part at index <n>`.
 - `verify:sse-architecture-boundary` and `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` now lock the scalar-part boundary.

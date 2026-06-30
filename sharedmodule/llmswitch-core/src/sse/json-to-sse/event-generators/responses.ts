@@ -593,7 +593,7 @@ export function buildRequiredActionEvent(
     data: buildResponsesSseResponseEventPayloadWithNative(
       'required_action',
       response,
-      response.status ?? 'requires_action',
+      response.status,
       requiredAction
     ),
     sequenceNumber: baseEvent.sequenceNumber
@@ -619,7 +619,7 @@ export function buildResponseCompletedEvent(
     data: buildResponsesSseResponseEventPayloadWithNative(
       'completed',
       response,
-      response.status ?? 'completed'
+      response.status
     ),
     sequenceNumber: baseEvent.sequenceNumber
   };
@@ -643,7 +643,7 @@ export function buildResponseDoneEvent(
     data: buildResponsesSseResponseEventPayloadWithNative(
       'done',
       response,
-      response.status ?? 'completed'
+      response.status
     ),
     sequenceNumber: baseEvent.sequenceNumber
   };

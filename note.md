@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE response status fallback removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 `response.status ?? 'requires_action'` / `response.status ?? 'completed'` 禁止 marker 后先红；focused `responses-sse-usage-no-fallback` 也先红，证明缺失 `status` 会被合成 `in_progress/completed` 并成功输出 terminal frames。
+- Fix：`responses-sequencer.ts::validateResponse()` 对缺失/空白 `response.status` 直接 fail-fast 抛 `Invalid Responses response: missing status`；`event-generators/responses.ts` 的 required_action/completed/done payload 全部只传 provider response 的显式 `status`，删除 TS 默认值。
+- Verification：focused Jest `responses-sse-usage-no-fallback` 7/7 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`build:base` PASS；source replay `validCompleted=true validDone=true missingStatusError=true missingStatusCompleted=false missingStatusDone=false`。
+
 # 2026-07-01: Gemini SSE scalar candidate part fail-fast removed silent emission
 - Red evidence：`verify:sse-architecture-boundary` 新增 `if (!part || typeof part !== 'object') { return [part]; }` 禁止 marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明 scalar candidate part 会被直接作为 `gemini.data` 发出。
 - Fix：`normalizeReasoningPart()` 现在对非对象 `part` 直接 fail-fast 抛 `Invalid Gemini candidate part at index <n>`，不再返回原值并继续发 SSE。

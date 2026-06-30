@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses SSE response status fallback removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `response.status ?? 'requires_action'` and `response.status ?? 'completed'` and failed before the fix. Focused Jest also failed because a response missing `status` was emitted as `response.created` / `response.in_progress` / `response.completed` / `response.done`.
+- Fix: `responses-sequencer.ts::validateResponse()` now rejects missing or blank `response.status` with `Invalid Responses response: missing status`. `event-generators/responses.ts` now passes only the explicit provider `response.status` into required_action/completed/done native payload builders.
+- Positive / reverse tests: `tests/sharedmodule/responses-sse-usage-no-fallback.spec.ts` now covers missing status fail-fast in addition to missing usage omission, invalid usage fail-fast, legacy usage alias rejection, missing created_at fail-fast, and invalid output item error projection.
+- Verification: focused Jest `responses-sse-usage-no-fallback` PASS 7/7; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
+- Replay evidence: source replay `validCompleted=true`, `validDone=true`, `missingStatusError=true`, `missingStatusMessage=true`, `missingStatusCompleted=false`, `missingStatusDone=false`.
+
 ### 2026-07-01 Gemini SSE candidate parts empty-success fallback removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `return [];` for `gemini-sequencer.ts` and failed before the fix. Focused Jest also failed because a candidate with a role but missing `content.parts` resolved successfully into only a `gemini.done` event.

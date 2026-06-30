@@ -67,6 +67,10 @@ function validateResponse(response: ResponsesResponse, config: ResponsesSequence
     throw new Error('Invalid response: missing required fields');
   }
 
+  if (typeof response.status !== 'string' || !response.status.trim()) {
+    throw new Error('Invalid Responses response: missing status');
+  }
+
   if (!response.output || !Array.isArray(response.output)) {
     throw new Error('Invalid response: missing or invalid output array');
   }

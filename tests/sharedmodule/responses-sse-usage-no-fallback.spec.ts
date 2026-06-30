@@ -121,6 +121,27 @@ describe('responses SSE usage no-fallback boundary', () => {
     expect(text).not.toContain('event: response.done');
   });
 
+  it('fails missing status instead of synthesizing completed terminal status', async () => {
+    const converter = new ResponsesJsonToSseConverterRefactored();
+    const response: ResponsesResponse = {
+      id: 'resp_missing_status',
+      object: 'response',
+      created_at: 1781149537,
+      model: 'gpt-5.5',
+      output: []
+    } as ResponsesResponse;
+
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_responses_missing_status'
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('event: response.error');
+    expect(text).toContain('Invalid Responses response: missing status');
+    expect(text).not.toContain('event: response.completed');
+    expect(text).not.toContain('event: response.done');
+  });
+
   it('does not recover an invalid output item and continue to completed', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
