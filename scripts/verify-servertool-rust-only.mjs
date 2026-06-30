@@ -5575,6 +5575,18 @@ function checkServertoolResponseStageGateThinShell() {
     responseStagePrePassShell,
     'runServertoolResponseStageAutoHookPass'
   );
+  const responseStageAutoHookShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`);
+  for (const marker of [
+    'const responseHookRequired = args.responseStageGatePlan.responseHookRequired === true;',
+    "const responseHookName = String(args.responseStageGatePlan.responseHookName ?? 'unknown');",
+  ]) {
+    assertContains(
+      'servertool-response-stage-auto-hook-shell-owner',
+      `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+      responseStageAutoHookShell,
+      marker
+    );
+  }
 }
 
 function checkServertoolEngineStoplessSessionThinShell() {

@@ -1,3 +1,15 @@
+# 2026-06-30: priority 场景临时网络错误逻辑审计
+- verified: `priority` 只是路由顺序，不是错误特例；`fetch failed` / `socket hang up` / `network timeout` / SSE decode 这类临时网络错会先进入 `error.provider_failure_policy`，分类为 `recoverable`，再由 `error.execution_decision_consumer` 生成 `ErrorErr05`。
+- current-request behavior: 只要 `routePoolRemainingAfterExclusion` 仍有候选，或 `defaultPoolAvailable=true`，`mayProject=false`，执行器会继续 `exclude_and_reroute`，不会立刻 client-visible。
+- recovery behavior: 失败 provider 在当前请求链里会被排除/冷却；下一次新请求是否再命中，取决于 VR 里 health/quota/default truth 是否已恢复，不存在 priority 专用的“自动复活”分支。
+
+# 2026-06-30: response-stage auto-hook repeated gate reads collapsed
+
+- `response-stage-auto-hook-shell.ts` 现在只在入口读取一次 `responseHookRequired` 和 `responseHookName`，再复用给 pre/post native runtime action 与 required-hook-empty error。
+- 这刀没有改变 owner：Rust 仍决定 response-stage runtime action；TS 只是去掉对 `responseStageGatePlan` 的重复局部解析，继续压薄这一层壳。
+- `verify:servertool-rust-only` 已新增 owner marker，要求 auto-hook shell 保持单点读取 `responseHookRequired/responseHookName`，防止同类重复判定回流。
+- 验证：focused Jest `response-stage-auto-hook-shell + response-stage-prepass-shell + response-stage-finalize-shell + servertool-active-orchestration-audit` 43 passed；sharedmodule TS PASS；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；`verify:architecture-mainline-call-map` PASS；`git diff --check` PASS。
+
 # 2026-06-30: servertool postflight dead non-blocking plumbing removed
 
 - `engine-observation-shell.ts -> engine-orchestration-shell.ts -> engine-postflight-shell.ts` 之间未消费的 `logNonBlocking` 残留参数链已删除；postflight 本身没有任何 non-blocking 日志面，这条 TS plumbing 仅增加壳层噪音。
@@ -18,11 +30,6 @@
 - 这次内联同时移除了 TS 对 `primaryAutoHookAttempt` 的额外注入，保持 runEngine 入参只含 Rust 计划已经定义的 overrides 字段。
 - `verify:servertool-rust-only` 已新增 `function toEngineOverrides(` / `primaryAutoHookAttempt:` 复活门禁。
 - 验证：focused Jest `engine-selection-block + servertool-active-orchestration-audit` 38 passed；sharedmodule TS PASS；`verify:servertool-rust-only` PASS；`git diff --check` PASS。
-
-# 2026-06-30: priority 场景临时网络错误逻辑审计
-- verified: `priority` 只是路由顺序，不是错误特例；`fetch failed` / `socket hang up` / `network timeout` / SSE decode 这类临时网络错会先进入 `error.provider_failure_policy`，分类为 `recoverable`，再由 `error.execution_decision_consumer` 生成 `ErrorErr05`。
-- current-request behavior: 只要 `routePoolRemainingAfterExclusion` 仍有候选，或 `defaultPoolAvailable=true`，`mayProject=false`，执行器会继续 `exclude_and_reroute`，不会立刻 client-visible。
-- recovery behavior: 失败 provider 在当前请求链里会被排除/冷却；下一次新请求是否再命中，取决于 VR 里 health/quota/default truth 是否已恢复，不存在 priority 专用的“自动复活”分支。
 
 # 2026-06-30: servertool match-log shell inlined and deleted
 
