@@ -3031,6 +3031,8 @@ function checkServertoolSkeletonConfigRustOwner() {
     'Object.fromEntries(',
     'isServertoolEnabledByConfig',
     'getServertoolToolSpec(name)?.enabled',
+    'export function listServertoolToolSpecs(',
+    'getDerivedConfig().toolSpecList',
   ]) {
     if (skeletonConfigShell.includes(keyword)) {
       fail(

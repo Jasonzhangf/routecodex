@@ -90,6 +90,8 @@ const TARGETS = [
     forbidden: [
       'isServertoolEnabledByConfig',
       'getServertoolToolSpec(name)?.enabled',
+      'export function listServertoolToolSpecs(',
+      'getDerivedConfig().toolSpecList',
     ],
     required: [
       'planServertoolSkeletonDerivedConfigWithNative',

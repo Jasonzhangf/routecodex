@@ -125,10 +125,6 @@ export function isServertoolRegisteredNameByConfig(name: string): boolean {
   return resolveServertoolRegisteredNameWithNative({ name });
 }
 
-export function listServertoolToolSpecs(): ServertoolToolSpec[] {
-  return getDerivedConfig().toolSpecList;
-}
-
 export function normalizeServerToolRegistrationSpec(
   name: string,
   options: {

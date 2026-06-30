@@ -5,23 +5,20 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { buildServertoolDispatchPlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { buildServertoolOutcomePlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { listServertoolToolSpecs } from '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js';
 
 const EXECUTABLE_TOOL_NAME = 'web_search';
+const EXECUTABLE_TOOL_EXECUTION_MODE = 'backend';
+const EXECUTABLE_TOOL_STRIP_AFTER_EXECUTE = true;
 
 function executableToolSpec(): {
   name: string;
   executionMode: string;
   stripAfterExecute: boolean;
 } {
-  const spec = listServertoolToolSpecs().find((entry) => entry.name === EXECUTABLE_TOOL_NAME);
-  if (!spec) {
-    throw new Error(`expected ${EXECUTABLE_TOOL_NAME} in servertool skeleton config`);
-  }
   return {
-    name: spec.name,
-    executionMode: spec.execution.mode,
-    stripAfterExecute: spec.execution.stripAfterExecute
+    name: EXECUTABLE_TOOL_NAME,
+    executionMode: EXECUTABLE_TOOL_EXECUTION_MODE,
+    stripAfterExecute: EXECUTABLE_TOOL_STRIP_AFTER_EXECUTE
   };
 }
 
