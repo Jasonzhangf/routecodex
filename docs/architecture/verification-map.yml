@@ -455,12 +455,13 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts
       - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/orchestration-policy-block.spec.ts
+      - tests/servertool/engine-preflight-shell.spec.ts
       - tests/servertool/server-side-tools.failfast.spec.ts
       - tests/servertool/timeout-error-block.spec.ts
     smoke:

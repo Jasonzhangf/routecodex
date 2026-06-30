@@ -14,9 +14,9 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
-    containsSyntheticRouteCodexControlText: containsSyntheticRouteCodexControlTextMock,
+    containsSyntheticRouteCodexControlTextWithNative: containsSyntheticRouteCodexControlTextMock,
   })
 );
 
@@ -58,8 +58,9 @@ describe('engine-preflight-shell', () => {
     expect(source).toContain('planServertoolEnginePreflightWithNative');
     expect(source).toContain('inspectStopGatewaySignal(');
     expect(source).toContain('attachStopGatewayContext(');
-    expect(source).toContain('containsSyntheticRouteCodexControlText(');
+    expect(source).toContain('containsSyntheticRouteCodexControlTextWithNative(');
     expect(source).not.toContain('./stop-gateway-context.js');
+    expect(source).not.toContain('./orchestration-policy-block.js');
   });
 
   test('returns original chat when native preflight says so', () => {

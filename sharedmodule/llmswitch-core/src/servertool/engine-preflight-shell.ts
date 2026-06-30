@@ -1,8 +1,8 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
-  containsSyntheticRouteCodexControlText
-} from './orchestration-policy-block.js';
+  containsSyntheticRouteCodexControlTextWithNative
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   attachStopGatewayContext,
   inspectStopGatewaySignal
@@ -41,7 +41,7 @@ export function runEnginePreflight(args: {
 }): EnginePreflightResult {
   const stopSignal = inspectStopGatewaySignal(args.chat);
   const preflightAction = planServertoolEnginePreflightWithNative({
-    hasSyntheticControlText: containsSyntheticRouteCodexControlText(args.chat),
+    hasSyntheticControlText: containsSyntheticRouteCodexControlTextWithNative(args.chat),
     stopSignalObserved: stopSignal.observed,
     adapterContext: args.adapterContext as Record<string, unknown>
   });

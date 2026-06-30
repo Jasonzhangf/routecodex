@@ -8,9 +8,6 @@ import {
   withTimeout
 } from './timeout-error-block.js';
 import {
-  resolveServerToolTimeoutMs
-} from './orchestration-policy-block.js';
-import {
   runPrimaryServerToolEngineSelection
 } from './engine-selection-block.js';
 import {
@@ -30,6 +27,7 @@ import {
 import {
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineSkipWithNative,
+  parseServertoolTimeoutMsWithNative,
   planServertoolTimeoutErrorWithNative,
   planStoplessExecutionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -50,6 +48,15 @@ export interface ServerToolOrchestrationResult {
 }
 
 type ServerToolEngineResult = Awaited<ReturnType<typeof orchestrateServertoolEngine>>;
+
+function resolveServerToolTimeoutMs(): number {
+  const raw = [
+    'ROUTECODEX_SERVERTOOL_TIMEOUT_MS',
+    'RCC_SERVERTOOL_TIMEOUT_MS',
+    'LLMSWITCH_SERVERTOOL_TIMEOUT_MS'
+  ].map((key) => process.env[key]).find((value) => Boolean(value));
+  return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });
+}
 
 export async function runServerToolOrchestrationShell(
   options: ServerToolOrchestrationOptions

@@ -2369,8 +2369,15 @@ function checkOrchestrationPolicyRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const tsShell = readRequired(TS_ORCHESTRATION_POLICY);
+  const engineShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
+  const enginePreflightShell = readRequired(TS_ENGINE_PREFLIGHT_SHELL);
   const timeoutShell = readRequired(TS_TIMEOUT_ERROR_BLOCK);
+
+  assertMissingFile(
+    'servertool-orchestration-policy-ts-deleted',
+    TS_ORCHESTRATION_POLICY,
+    `${TS_ORCHESTRATION_POLICY.replace(`${ROOT}/`, '')} must stay physically deleted; timeout IO lives in engine-orchestration-shell and synthetic control detection calls native directly`
+  );
 
   assertContains(
     'servertool-orchestration-policy-rust-owner',
@@ -2470,7 +2477,6 @@ function checkOrchestrationPolicyRustOwner() {
     'Math.max',
     'toLowerCase',
     'targetProviderKey',
-    'ProviderProtocolError',
     'inspectStopGatewaySignal',
     'const timeoutPolicyInput = {',
     'const followupTimeoutPolicyInput = {',
@@ -2486,10 +2492,10 @@ function checkOrchestrationPolicyRustOwner() {
     'compactFollowupErrorReasonWithNative',
     'resolveAdapterContextProviderKeyWithNative',
   ]) {
-    if (tsShell.includes(keyword)) {
+    if (engineShell.includes(keyword)) {
       fail(
         'servertool-orchestration-policy-ts-thin-shell',
-        `Forbidden TS orchestration policy semantic "${keyword}" found in orchestration-policy-block.ts`
+        `Forbidden TS orchestration policy semantic "${keyword}" found in engine-orchestration-shell.ts`
       );
     }
   }
@@ -2520,15 +2526,20 @@ function checkOrchestrationPolicyRustOwner() {
   for (const needle of [
     'parseServertoolTimeoutMsWithNative',
     'return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });',
-    'containsSyntheticRouteCodexControlTextWithNative',
   ]) {
     assertContains(
       'servertool-orchestration-policy-ts-thin-shell',
-      TS_ORCHESTRATION_POLICY,
-      tsShell,
+      TS_ENGINE_ORCHESTRATION_SHELL,
+      engineShell,
       needle
     );
   }
+  assertContains(
+    'servertool-orchestration-policy-ts-thin-shell',
+    TS_ENGINE_PREFLIGHT_SHELL,
+    enginePreflightShell,
+    'containsSyntheticRouteCodexControlTextWithNative'
+  );
   for (const keyword of [
     'function resolveServerToolTimeoutMsFromEnv(',
     'SERVERTOOL_TIMEOUT_ERROR_FEATURE_ID',
@@ -5047,7 +5058,7 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEnginePreflightWithNative',
     'inspectStopGatewaySignal(',
     'attachStopGatewayContext(',
-    'containsSyntheticRouteCodexControlText(',
+    'containsSyntheticRouteCodexControlTextWithNative(',
     'return_original_chat_direct_passthrough',
   ]) {
     if (!enginePreflightShell.includes(marker)) {

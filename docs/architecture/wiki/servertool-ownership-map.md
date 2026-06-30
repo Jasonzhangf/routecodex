@@ -1054,9 +1054,10 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts`
+- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts`
-- `tests/servertool/orchestration-policy-block.spec.ts`
+- `tests/servertool/engine-preflight-shell.spec.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
 - `tests/servertool/timeout-error-block.spec.ts`
 - `docs`
@@ -1067,7 +1068,7 @@ Forbidden paths:
 - `sharedmodule/llmswitch-core/src/servertool/handlers`
 
 Required tests:
-- `tests/servertool/orchestration-policy-block.spec.ts`
+- `tests/servertool/engine-preflight-shell.spec.ts`
 - `tests/servertool/timeout-error-block.spec.ts`
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
 
@@ -1077,7 +1078,7 @@ Required gates:
 
 Notes:
 - servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, and servertool error payload planning.
-- TS orchestration-policy-block may only read active engine env/arguments and call native wrappers still consumed by runtime.
+- Deleted TS orchestration-policy-block must stay absent; active engine timeout env IO lives in engine-orchestration-shell and synthetic control detection calls native directly from engine-preflight-shell.
 - TS server-side-tools may only consume `isAdapterClientDisconnected` from the native timeout-error shell; it must not restore local adapter disconnect scanning.
 - TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.
 - Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.

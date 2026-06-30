@@ -1220,9 +1220,10 @@
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts</code></li>
-          <li><code>tests/servertool/orchestration-policy-block.spec.ts</code></li>
+          <li><code>tests/servertool/engine-preflight-shell.spec.ts</code></li>
           <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
           <li><code>tests/servertool/timeout-error-block.spec.ts</code></li>
           <li><code>docs</code></li>
@@ -1235,7 +1236,7 @@
         </ul>
         <p>Required tests:</p>
         <ul>
-          <li><code>tests/servertool/orchestration-policy-block.spec.ts</code></li>
+          <li><code>tests/servertool/engine-preflight-shell.spec.ts</code></li>
           <li><code>tests/servertool/timeout-error-block.spec.ts</code></li>
           <li><code>tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts</code></li>
         </ul>
@@ -1247,7 +1248,7 @@
         <p>Notes:</p>
         <ul>
           <li>servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, and servertool error payload planning.</li>
-          <li>TS orchestration-policy-block may only read active engine env/arguments and call native wrappers still consumed by runtime.</li>
+          <li>Deleted TS orchestration-policy-block must stay absent; active engine timeout env IO lives in engine-orchestration-shell and synthetic control detection calls native directly from engine-preflight-shell.</li>
           <li>TS server-side-tools may only consume <code>isAdapterClientDisconnected</code> from the native timeout-error shell; it must not restore local adapter disconnect scanning.</li>
           <li>TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.</li>
           <li>Do not restore local <code>parseTimeoutMs</code>, <code>parseBooleanLike</code>, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.</li>

@@ -66,7 +66,7 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).toContain('planServertoolEnginePreflightWithNative');
     expect(source).toContain('inspectStopGatewaySignal(');
     expect(source).toContain('attachStopGatewayContext(');
-    expect(source).toContain('containsSyntheticRouteCodexControlText(');
+    expect(source).toContain('containsSyntheticRouteCodexControlTextWithNative(');
     expect(source).toContain('return_original_chat_direct_passthrough');
   });
 
