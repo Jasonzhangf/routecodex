@@ -315,11 +315,15 @@ const TARGETS = [
       'function buildClientVisibleProjectionShellForRuntime(',
       'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
       'input: projectionInput',
+      'const nativeProjection = buildClientExecCliProjectionOutputWithNative({',
+      'const chatResponse = buildClientVisibleProjectionShellWithNative({',
+      'const execution = buildServertoolCliProjectionExecutionContextWithNative({',
     ],
     required: [
       'input: parseServertoolCliProjectionToolArgumentsWithNative({',
       'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
-      'const chatResponse = buildClientVisibleProjectionShellWithNative({',
+      'finalChatResponse: buildClientVisibleProjectionShellWithNative({',
+      'execution: buildServertoolCliProjectionExecutionContextWithNative({',
     ],
   },
   {

@@ -5003,7 +5003,8 @@ function checkServertoolRustOutcomeCloseout() {
     'parseServertoolCliProjectionToolArgumentsWithNative({',
     'input: parseServertoolCliProjectionToolArgumentsWithNative({',
     'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
-    'const chatResponse = buildClientVisibleProjectionShellWithNative({',
+    'finalChatResponse: buildClientVisibleProjectionShellWithNative({',
+    'execution: buildServertoolCliProjectionExecutionContextWithNative({',
   ]) {
     if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(
@@ -5018,6 +5019,9 @@ function checkServertoolRustOutcomeCloseout() {
     'function buildClientVisibleProjectionShellForRuntime(',
     'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
     'input: projectionInput',
+    'const nativeProjection = buildClientExecCliProjectionOutputWithNative({',
+    'const chatResponse = buildClientVisibleProjectionShellWithNative({',
+    'const execution = buildServertoolCliProjectionExecutionContextWithNative({',
   ]) {
     if (cliProjectionRuntimeShell.includes(marker)) {
       fail(

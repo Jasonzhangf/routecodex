@@ -35,32 +35,29 @@ export function buildServertoolCliProjectionBranchResult(args: {
     projectedToolCallId: cliProjectedToolCall.id
   });
   const toolName = cliProjectedToolCall.name;
-  const nativeProjection = buildClientExecCliProjectionOutputWithNative({
-    toolName,
-    flowId: 'servertool_cli_projection',
-    input: parseServertoolCliProjectionToolArgumentsWithNative({
-      arguments: cliProjectedToolCall.arguments
-    }),
-    repeatCount: 0,
-    maxRepeats: 0
-  });
   const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
-  const chatResponse = buildClientVisibleProjectionShellWithNative({
-    requestId: args.options.requestId,
-    clientCallId,
-    nativeProjection,
-    reasoningText: `继续执行本地 hook ${toolName}。`,
-    ...(additionalToolCalls.length ? { additionalToolCalls } : {})
-  }) as JsonObject;
-  const execution = buildServertoolCliProjectionExecutionContextWithNative({
-    requestId: args.options.requestId,
-    clientCallId,
-    toolName
-  });
   return {
     mode: 'tool_flow',
-    finalChatResponse: chatResponse,
-    execution: execution as {
+    finalChatResponse: buildClientVisibleProjectionShellWithNative({
+      requestId: args.options.requestId,
+      clientCallId,
+      nativeProjection: buildClientExecCliProjectionOutputWithNative({
+        toolName,
+        flowId: 'servertool_cli_projection',
+        input: parseServertoolCliProjectionToolArgumentsWithNative({
+          arguments: cliProjectedToolCall.arguments
+        }),
+        repeatCount: 0,
+        maxRepeats: 0
+      }),
+      reasoningText: `继续执行本地 hook ${toolName}。`,
+      ...(additionalToolCalls.length ? { additionalToolCalls } : {})
+    }) as JsonObject,
+    execution: buildServertoolCliProjectionExecutionContextWithNative({
+      requestId: args.options.requestId,
+      clientCallId,
+      toolName
+    }) as {
       flowId: string;
       context?: JsonObject;
     }
