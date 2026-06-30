@@ -320,6 +320,8 @@ const TARGETS = [
       'writeRuntimeControlToBoundMetadataCenter(',
       'servertoolResponseOrchestration',
       'providerProtocol: ProviderProtocol;',
+      'const providerProtocol =',
+      'Servertool response stage orchestration requires metadata center runtime_control.providerProtocol',
       'function planServertoolResponseStageGate(',
       'const gatePlan = planServertoolResponseStageGate({',
     ],

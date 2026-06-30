@@ -5237,6 +5237,8 @@ function checkServertoolRustOutcomeCloseout() {
     'const responseStage =',
     'readFollowupClientInjectSourceWithNative',
     'providerProtocol: ProviderProtocol;',
+    'const providerProtocol =',
+    'Servertool response stage orchestration requires metadata center runtime_control.providerProtocol',
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(

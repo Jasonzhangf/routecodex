@@ -33,13 +33,6 @@ export async function runServertoolResponseStageOrchestrationShell(
 ): Promise<ServertoolResponseStageShellResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
-  const providerProtocol =
-    typeof runtimeControl?.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
-      ? runtimeControl.providerProtocol.trim()
-      : undefined;
-  if (!providerProtocol) {
-    throw new Error('Servertool response stage orchestration requires metadata center runtime_control.providerProtocol');
-  }
   const gatePlan = planServertoolResponseStageGateWithNative({
     payload: options.payload,
     adapterContext: options.adapterContext as Record<string, unknown>,
