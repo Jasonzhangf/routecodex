@@ -55,9 +55,27 @@ expectContains(handlerSource, "from '../../modules/llmswitch/bridge/responses-ss
 expectContains(sseBridgeSource, '// feature_id: server.responses_sse_bridge_surface', 'responses-sse-bridge.ts must stay feature-anchored');
 expectContains(sseTransportSource, 'export function buildClientSseKeepaliveFrameForHttp(', 'responses-sse-transport.ts must own keepalive framing');
 expectContains(sseTransportSource, 'export function shouldDropClientSseFrameForHttp(', 'responses-sse-transport.ts must own transport-only frame drop policy');
+expectNotContains(responseLifecycleBridgeSource, 'resolveResponsesRequestContextForHttp', 'responses-response-bridge.ts must not keep request-context facade salvage');
+expectNotContains(responseLifecycleBridgeSource, 'shouldDispatchResponsesSseToClientForHttp', 'responses-response-bridge.ts must not keep SSE dispatch facade salvage');
+expectNotContains(responseLifecycleBridgeSource, 'buildClientSseKeepaliveFrameForHttp', 'responses-response-bridge.ts must not own keepalive framing');
+expectNotContains(sseBridgeSource, 'resolveResponsesRequestContextForHttp', 'responses-sse-bridge.ts must not re-export request-context facade salvage');
+expectNotContains(sseBridgeSource, 'shouldDispatchResponsesSseToClientForHttp', 'responses-sse-bridge.ts must not re-export SSE dispatch facade salvage');
 
 for (const forbiddenLocalDefinition of [
+  'async function streamResponsesJsonAsSse(',
+  'async function streamChatCompletionsJsonAsSse(',
+  'async function dispatchResponsesJsonAsSse(',
   'function inspectResponsesTerminalStateFromSseChunk(',
+  'function hasResponsesTerminalSseMarker(',
+  'sawTerminalEvent',
+  'terminalScanBuffer',
+  'function buildStructuredSseErrorPayloadForHttp(',
+  'function extractStructuredSseErrorPayload(',
+  'function sendStructuredSseError(',
+  'structured_error_passthrough',
+  'function buildTransportLocalSseErrorPayload(',
+  'function resolveResponsesRequestContextForHttp(',
+  'function shouldDispatchResponsesSseToClientForHttp(',
   'function buildResponsesTerminalSseFramesFromProbe(',
   'function planResponsesStreamEndRepair(',
   'function shouldRequireResponsesTerminalEvent(',
@@ -74,12 +92,36 @@ for (const forbiddenLocalDefinition of [
   );
 }
 
+for (const forbiddenHandlerJsonSseBridge of [
+  'createResponsesJsonToSseConverterForHttp',
+  'createChatJsonToSseConverterForHttp',
+  'buildResponsesPayloadFromChatForHttp',
+]) {
+  if (handlerSource.includes(forbiddenHandlerJsonSseBridge)) {
+    failures.push(`handler-response-sse.ts must not keep force-SSE JSON->SSE fallback bridge: ${forbiddenHandlerJsonSseBridge}`);
+  }
+}
+
+for (const forbiddenSseBridgeJsonFallbackSurface of [
+  'createResponsesJsonToSseConverterForHttp',
+  'createChatJsonToSseConverterForHttp',
+  'buildResponsesPayloadFromChatForHttp',
+  'prepareResponsesJsonBodyForSseBridgeForHttp',
+]) {
+  if (sseBridgeSource.includes(forbiddenSseBridgeJsonFallbackSurface)) {
+    failures.push(`responses-sse-bridge.ts must not export JSON->SSE fallback surface: ${forbiddenSseBridgeJsonFallbackSurface}`);
+  }
+}
+
 for (const forbiddenLifecycleBridgeExport of [
   'export function planResponsesContinuationCloseActionForHttp(',
   'function isDirectResponsesToolCallContinuationForHttp(',
   'export async function prepareResponsesJsonBodyForSseBridgeForHttp(',
   'export function normalizeResponsesJsonBodyForHttp(',
   'function ensureResponsesJsonToSseRequiredFieldsForHttp(',
+  'export function buildResponsesSseErrorPayloadForHttp(',
+  'export function buildResponsesStructuredSseErrorPayloadForHttp(',
+  'export function buildResponsesMissingSseBridgeErrorPayloadForHttp(',
   'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
   'export function planResponsesStreamEndRepairForHttp(',
   'export async function createResponsesJsonToSseConverterForHttp(',
@@ -97,6 +139,31 @@ expectNotContains(
   sseBridgeSource,
   'normalizeClientVisibleResponsesSseFrameForHttp',
   'responses-sse-bridge.ts must not keep client projection semantics'
+);
+expectNotContains(
+  sseBridgeSource,
+  'reprojectDirectChatToolCallStreamForHttp',
+  'responses-sse-bridge.ts must not own direct chat tool-call stream reprojection; response projection belongs to Rust owner before transport'
+);
+expectNotContains(
+  responseLifecycleBridgeSource,
+  'normalizeChatUsagePayloadForHttp',
+  'responses-response-bridge.ts must not own chat usage normalization policy; usage semantics belong to response/runtime owner before transport'
+);
+expectNotContains(
+  responseLifecycleBridgeSource,
+  'shouldClearResponsesConversationOnClientCloseForHttp',
+  'responses-response-bridge.ts must not own client-close conversation cleanup policy; continuation lifecycle belongs to Chat Process/store owner'
+);
+expectNotContains(
+  responseLifecycleBridgeSource,
+  'shouldClearResponsesConversationOnFailureForHttp',
+  'responses-response-bridge.ts must not own failure conversation cleanup policy; continuation lifecycle belongs to Chat Process/store owner'
+);
+expectNotContains(
+  responseLifecycleBridgeSource,
+  'resolveRelayResponsesClientSseStreamForHttp',
+  'responses-response-bridge.ts must not own relay Responses SSE reprojection policy; client projection belongs to Rust owner before transport'
 );
 expectNotContains(
   sseTransportSource,

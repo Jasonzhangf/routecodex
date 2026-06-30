@@ -373,17 +373,6 @@ const mockBridgeModule = async () => ({
     && ((body as Record<string, unknown>).output as unknown[]).some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
   )),
   normalizeResponsesClientPayloadForHttp: jest.fn(async ({ payload }: { payload: unknown }) => payload),
-  prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async (args: {
-    responsesPayload: Record<string, unknown>;
-  }) => ({
-    normalizedPayload: args.responsesPayload,
-    sanitizedPayload: args.responsesPayload,
-    finishReason:
-      Array.isArray(args.responsesPayload.output)
-      && args.responsesPayload.output.some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
-        ? 'tool_calls'
-        : 'stop',
-  })),
   prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(async (args: {
     body: unknown;
   }) => ({
@@ -508,18 +497,6 @@ const mockBridgeModule = async () => ({
   projectResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => ({ emit: true, frame, state: undefined })),
   rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
-  resolveResponsesConversationClearReasonForHttp: jest.fn((phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json') => {
-    switch (phase) {
-      case 'sse_stream_error':
-        return 'sse-stream-error';
-      case 'sse_incomplete':
-        return 'sse-incomplete';
-      case 'json_empty':
-        return 'json-empty-error';
-      case 'json':
-        return 'json-error';
-    }
-  }),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn((payload: unknown) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return undefined;
@@ -904,7 +881,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     }
   });
 
-  it('encodes JSON responses payload into client-visible SSE instead of sse_bridge_error', async () => {
+  it('rejects forceSSE JSON responses payload without Rust-produced SSE stream', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/responses-sse-from-json', (_req, res) => {
@@ -944,31 +921,18 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       const text = await response.text();
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
-      expect(text).toContain('event: response.created');
-      expect(text).toContain('event: response.completed');
-      expect(text).toContain('"type":"response.completed"');
-      expect(text).not.toContain('sse_bridge_error');
+      expect(text).toContain('event: error');
+      expect(text).toContain('sse_bridge_error');
+      expect(text).toContain('SSE stream missing from pipeline result');
+      expect(text).not.toContain('event: response.created');
+      expect(text).not.toContain('event: response.completed');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
-  it('stops forceSSE JSON bridge writes after the client closes early', async () => {
+  it('does not start forceSSE JSON bridge writes when no Rust SSE stream exists', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
-    const bridgeModule = await import('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js');
-    const converterFactory = bridgeModule.createResponsesJsonToSseConverterForHttp as jest.Mock;
-    converterFactory.mockResolvedValueOnce({
-      convertResponseToJsonToSse: async () => {
-        const stream = Readable.from((async function* () {
-          yield 'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_json_bridge_close_1","status":"in_progress"}}\n\n';
-          await new Promise((resolve) => setTimeout(resolve, 80));
-          yield 'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_json_bridge_close_1","status":"completed"}}\n\n';
-          await new Promise((resolve) => setTimeout(resolve, 80));
-          yield 'event: response.done\ndata: {"type":"response.done","response":{"id":"resp_json_bridge_close_1","status":"completed"}}\n\n';
-        })());
-        return stream;
-      }
-    });
 
     const app = express();
     app.get('/responses-sse-from-slow-json', (_req, res) => {
@@ -1005,7 +969,9 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       const first = await reader!.read();
       const firstText = Buffer.from(first.value ?? []).toString('utf8');
       expect(first.done).toBe(false);
-      expect(firstText).toContain('response.created');
+      expect(firstText).toContain('event: error');
+      expect(firstText).toContain('sse_bridge_error');
+      expect(firstText).not.toContain('response.created');
       await reader!.cancel();
       await new Promise((resolve) => setTimeout(resolve, 180));
 
@@ -1016,7 +982,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     }
   });
 
-  it('encodes Responses function_call JSON into complete SSE terminal frames', async () => {
+  it('rejects Responses function_call JSON when forceSSE lacks Rust-produced SSE stream', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/responses-sse-from-tool-json', (_req, res) => {
@@ -1056,11 +1022,13 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       });
       const text = await response.text();
       expect(response.status).toBe(200);
-      expect(text).toContain('event: response.output_item.added');
-      expect(text).toContain('event: response.function_call_arguments.done');
-      expect(text).toContain('event: response.output_item.done');
-      expect(text).toContain('event: response.completed');
-      expect(text).toContain('event: response.done');
+      expect(text).toContain('event: error');
+      expect(text).toContain('sse_bridge_error');
+      expect(text).not.toContain('event: response.output_item.added');
+      expect(text).not.toContain('event: response.function_call_arguments.done');
+      expect(text).not.toContain('event: response.output_item.done');
+      expect(text).not.toContain('event: response.completed');
+      expect(text).not.toContain('event: response.done');
       expect(text).not.toContain('stream closed before response.completed');
       expect(text).not.toContain('sse_stream_error');
     } finally {
@@ -1106,7 +1074,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     }
   });
 
-  it('encodes chat.completion JSON into /v1/responses SSE instead of sse_bridge_error', async () => {
+  it('rejects chat.completion JSON for /v1/responses forceSSE without Rust-produced SSE stream', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/responses-sse-from-chat-json', (_req, res) => {
@@ -1146,15 +1114,16 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       const text = await response.text();
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
-      expect(text).toContain('event: response.created');
-      expect(text).toContain('event: response.completed');
-      expect(text).not.toContain('sse_bridge_error');
+      expect(text).toContain('event: error');
+      expect(text).toContain('sse_bridge_error');
+      expect(text).not.toContain('event: response.created');
+      expect(text).not.toContain('event: response.completed');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
-  it('encodes chat.completion JSON into /v1/chat/completions SSE instead of sse_bridge_error', async () => {
+  it('rejects chat.completion JSON for /v1/chat/completions forceSSE without Rust-produced SSE stream', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/chat-sse-from-chat-json', (_req, res) => {
@@ -1194,16 +1163,17 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       const text = await response.text();
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
-      expect(text).toContain('data: {"id":"chatcmpl_force_sse_1"');
-      expect(text).toContain('"object":"chat.completion.chunk"');
-      expect(text).toContain('[DONE]');
-      expect(text).not.toContain('sse_bridge_error');
+      expect(text).toContain('event: error');
+      expect(text).toContain('sse_bridge_error');
+      expect(text).not.toContain('data: {"id":"chatcmpl_force_sse_1"');
+      expect(text).not.toContain('"object":"chat.completion.chunk"');
+      expect(text).not.toContain('[DONE]');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
-  it('projects chat usage fallback into direct chat SSE body before stream conversion', async () => {
+  it('does not project chat usage fallback through TS JSON-to-SSE conversion', async () => {
     const sendPipelineResponse = await loadSendPipelineResponse();
     const app = express();
     app.get('/direct-chat-sse-usage-fallback', (_req, res) => {
@@ -1256,10 +1226,11 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       const text = await response.text();
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
-      expect(text).toContain('"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}');
-      expect(text).toContain('"object":"chat.completion.chunk"');
-      expect(text).toContain('[DONE]');
-      expect(text).not.toContain('sse_bridge_error');
+      expect(text).toContain('event: error');
+      expect(text).toContain('sse_bridge_error');
+      expect(text).not.toContain('"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}');
+      expect(text).not.toContain('"object":"chat.completion.chunk"');
+      expect(text).not.toContain('[DONE]');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

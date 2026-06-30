@@ -230,17 +230,6 @@ const mockBridgeModule = async () => ({
       return frame;
     }
   }),
-  prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async (args: {
-    responsesPayload: Record<string, unknown>;
-  }) => ({
-    normalizedPayload: args.responsesPayload,
-    sanitizedPayload: args.responsesPayload,
-    finishReason:
-      Array.isArray(args.responsesPayload.output)
-      && args.responsesPayload.output.some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
-        ? 'tool_calls'
-        : undefined,
-  })),
   prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(async (args: {
     body: unknown;
   }) => ({
@@ -255,19 +244,21 @@ const mockBridgeModule = async () => ({
         ? 'tool_calls'
         : undefined,
   })),
+  projectSseErrorEventPayloadNative: jest.fn((args: {
+    requestId: string;
+    status: number;
+    message: string;
+    code: string;
+  }) => ({
+    type: 'error',
+    status: args.status,
+    error: {
+      message: args.message,
+      code: args.code,
+      request_id: args.requestId,
+    },
+  })),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
-  resolveResponsesConversationClearReasonForHttp: jest.fn((phase: 'sse_stream_error' | 'sse_incomplete' | 'json_empty' | 'json') => {
-    switch (phase) {
-      case 'sse_stream_error':
-        return 'sse-stream-error';
-      case 'sse_incomplete':
-        return 'sse-incomplete';
-      case 'json_empty':
-        return 'json-empty-error';
-      case 'json':
-        return 'json-error';
-    }
-  }),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn((payload: unknown) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return undefined;

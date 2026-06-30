@@ -47,29 +47,13 @@ export {
 } from './bridge/responses-request-bridge.js';
 export {
   buildClientSseKeepaliveFrameForHttp,
-  buildResponsesMissingSseBridgeErrorPayloadForHttp,
-  buildResponsesPayloadFromChatForHttp,
   buildResponsesRequestLogContextForHttp,
-  buildResponsesSseErrorPayloadForHttp,
-  buildResponsesStructuredSseErrorPayloadForHttp,
-  createResponsesJsonToSseConverterForHttp,
-  reprojectDirectChatToolCallStreamForHttp,
   importResponsesHandlerCoreDist,
-  normalizeChatUsagePayloadForHttp,
-  prepareResponsesJsonBodyForSseBridgeForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
-  prepareResponsesJsonSseDispatchPlanForHttp,
   requireResponsesHandlerCoreDist,
-  resolveRelayResponsesClientSseStreamForHttp,
-  resolveResponsesRequestContextForHttp,
-  shouldDispatchResponsesSseToClientForHttp,
   shouldDropClientSseFrameForHttp,
-  shouldReprojectRelayResponsesSseForHttp,
 } from './bridge/responses-sse-bridge.js';
 export {
-  resolveResponsesConversationClearReasonForHttp,
-  shouldClearResponsesConversationOnClientCloseForHttp,
-  shouldClearResponsesConversationOnFailureForHttp,
   normalizeResponsesClientPayloadForHttp,
   rebindResponsesConversationRequestIdForHttp,
 } from './bridge/responses-response-bridge.js';
@@ -120,6 +104,7 @@ export {
   convertResponsesRequestToChatNative,
   evaluateResponsesDirectRouteDecisionNative,
   hasDeclaredApplyPatchToolNative,
+  projectSseErrorEventPayloadNative,
   deriveFinishReasonNative,
   isToolCallContinuationResponseNative,
   classifyProviderFailure,

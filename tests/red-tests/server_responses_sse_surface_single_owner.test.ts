@@ -17,6 +17,7 @@ describe('server responses SSE surface single owner', () => {
     expect(source).not.toContain('responses-stream-semantics');
     expect(joinedImports).not.toMatch(/buildResponsesSseErrorPayloadForHttp[\s\S]*responses-response-bridge\.js/);
     expect(joinedImports).not.toMatch(/shouldDispatchResponsesSseToClientForHttp[\s\S]*responses-response-bridge\.js/);
+    expect(joinedImports).not.toMatch(/resolveResponsesRequestContextForHttp[\s\S]*responses-response-bridge\.js/);
     expect(source).not.toContain('persistResponsesConversationLifecycleForHttp');
     expect(source).not.toContain('planResponsesContinuationCloseActionForHttp');
   });
@@ -34,7 +35,10 @@ describe('server responses SSE surface single owner', () => {
 
     expect(source).toContain("from './responses-sse-bridge.js'");
     expect(lifecycleSection).not.toContain('buildResponsesSseErrorPayloadForHttp');
+    expect(lifecycleSection).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
+    expect(lifecycleSection).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
     expect(lifecycleSection).not.toContain('shouldDispatchResponsesSseToClientForHttp');
+    expect(lifecycleSection).not.toContain('resolveResponsesRequestContextForHttp');
   });
 
   it('does not let responses-response-bridge own SSE semantic helpers', () => {
@@ -60,6 +64,9 @@ describe('server responses SSE surface single owner', () => {
 
     expect(bridgeSource).not.toContain('responses-sse-semantics');
     expect(bridgeSource).not.toContain('responses-client-projection');
+    expect(bridgeSource).not.toContain('buildResponsesSseErrorPayloadForHttp');
+    expect(bridgeSource).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
+    expect(bridgeSource).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
     expect(indexSource).not.toContain('normalizeResponsesSseFrameForClientForHttp');
     expect(indexSource).not.toContain('projectResponsesSseFrameForClientForHttp');
     expect(indexSource).not.toContain('assertDirectPassthroughResponsesSseMetadataIsolationForHttp');

@@ -33,28 +33,13 @@ export {
 } from './responses-request-bridge.js';
 export {
   buildClientSseKeepaliveFrameForHttp,
-  buildResponsesMissingSseBridgeErrorPayloadForHttp,
-  buildResponsesPayloadFromChatForHttp,
   buildResponsesRequestLogContextForHttp,
-  buildResponsesSseErrorPayloadForHttp,
-  buildResponsesStructuredSseErrorPayloadForHttp,
-  createResponsesJsonToSseConverterForHttp,
   importResponsesHandlerCoreDist,
-  normalizeChatUsagePayloadForHttp,
-  prepareResponsesJsonBodyForSseBridgeForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
-  prepareResponsesJsonSseDispatchPlanForHttp,
   requireResponsesHandlerCoreDist,
-  resolveResponsesRequestContextForHttp,
-  resolveRelayResponsesClientSseStreamForHttp,
-  shouldDispatchResponsesSseToClientForHttp,
-  shouldReprojectRelayResponsesSseForHttp,
   shouldDropClientSseFrameForHttp,
 } from './responses-sse-bridge.js';
 export {
-  resolveResponsesConversationClearReasonForHttp,
-  shouldClearResponsesConversationOnClientCloseForHttp,
-  shouldClearResponsesConversationOnFailureForHttp,
   normalizeResponsesClientPayloadForHttp,
   rebindResponsesConversationRequestIdForHttp,
 } from './responses-response-bridge.js';
@@ -99,6 +84,7 @@ export {
   describePipelineContractNative,
   describeVirtualRouterContractsNative,
   deriveFinishReasonNative,
+  projectSseErrorEventPayloadNative,
   isToolCallContinuationResponseNative,
   validatePipelineNodeContractBoundaryNative,
   getNetworkErrorCodes

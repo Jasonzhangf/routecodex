@@ -21,13 +21,7 @@ import { registerRequestLogContext } from '../utils/request-log-color.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildResponsesRequestLogContextForHttp,
-  clearResponsesConversationRequestIdsForHttp,
-  normalizeChatUsagePayloadForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
-  resolveResponsesConversationClearReasonForHttp,
-  resolveResponsesRequestContextForHttp,
-  shouldDispatchResponsesSseToClientForHttp,
-  shouldClearResponsesConversationOnFailureForHttp,
 } from '../../modules/llmswitch/bridge/responses-response-bridge.js';
 
 export {
@@ -52,11 +46,7 @@ export async function sendPipelineResponse(
     result.metadata && typeof result.metadata === 'object' && !Array.isArray(result.metadata)
       ? (result.metadata as Record<string, unknown>)
       : undefined;
-  const expectsStream = shouldDispatchResponsesSseToClientForHttp({
-    body,
-    forceSSE,
-    metadata: resultMetadata,
-  }) || result.sseStream !== undefined;
+  const expectsStream = forceSSE || result.sseStream !== undefined;
   const entryEndpoint = typeof options?.entryEndpoint === 'string' && options.entryEndpoint.trim()
     ? options.entryEndpoint.trim()
     : undefined;
@@ -72,9 +62,7 @@ export async function sendPipelineResponse(
     metadata: result.metadata,
     usageLogInfo: (result.usageLogInfo ?? null) as Record<string, unknown> | null
   });
-  const effectiveResponsesRequestContext = options?.responsesRequestContext ?? resolveResponsesRequestContextForHttp({
-    metadata: resultMetadata,
-  });
+  const effectiveResponsesRequestContext = options?.responsesRequestContext;
   registerRequestLogContext(requestLabel, requestLogContext);
   const responseStartedAtMs = Date.now();
   let responseCompletedLogged = false;
@@ -166,16 +154,7 @@ export async function sendPipelineResponse(
     continuationOwner: result.continuationOwner,
   });
 
-  const chatUsageNormalized = normalizeChatUsagePayloadForHttp(body, {
-    entryEndpoint,
-    usageFallback: result.usageLogInfo?.usage
-  });
-  if (chatUsageNormalized.normalized) {
-    logPipelineStage('response.chat_usage.normalized', requestLabel, {
-      source: chatUsageNormalized.source
-    });
-  }
-  const responseBody = chatUsageNormalized.payload;
+  const responseBody = body;
 
   const responseForDispatch =
     result.sseStream !== undefined
@@ -204,7 +183,6 @@ export async function sendPipelineResponse(
     result: responseForDispatch,
     requestLabel,
     status,
-    body: responseBody,
     forceSSE,
     expectsStream,
     entryEndpoint,
@@ -224,18 +202,6 @@ export async function sendPipelineResponse(
 
   applyHeaders(res, result.headers, false);
   if (body === undefined || body === null) {
-    if (shouldClearResponsesConversationOnFailureForHttp({
-      entryEndpoint,
-      status,
-      phase: 'json_empty',
-    })) {
-      await clearResponsesConversationRequestIdsForHttp({
-        requestLabel,
-        timingRequestIds: result.usageLogInfo?.timingRequestIds,
-        reason: resolveResponsesConversationClearReasonForHttp('json_empty'),
-        onNonBlockingError: logResponseNonBlockingError,
-      });
-    }
     logPipelineStage('response.json.empty', requestLabel, { status });
     if (shouldCaptureClientResponseSnapshotStage('client-response')) {
       void writeServerSnapshot({
@@ -267,19 +233,6 @@ export async function sendPipelineResponse(
   const clientBody = jsonDispatchPlan.clientBody;
   assertClientResponseHasNoInternalCarriers(clientBody, requestLabel);
   const sanitized = jsonDispatchPlan.sanitizedBody;
-  if (shouldClearResponsesConversationOnFailureForHttp({
-    entryEndpoint,
-    status,
-    phase: 'json',
-  })) {
-    await clearResponsesConversationRequestIdsForHttp({
-      requestLabel,
-      timingRequestIds: result.usageLogInfo?.timingRequestIds,
-      responseId: undefined,
-      reason: resolveResponsesConversationClearReasonForHttp('json'),
-      onNonBlockingError: logResponseNonBlockingError,
-    });
-  }
   const jsonFinishReason = result.usageLogInfo?.finishReason;
   getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (shouldCaptureClientResponseSnapshotStage('client-response')) {
