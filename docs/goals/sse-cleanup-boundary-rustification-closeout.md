@@ -90,6 +90,16 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Chat SSE finish/usage payload Rust owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for local Chat finish/usage payload synthesis (`function normalizeChatUsage(`, `const normalizedUsage = normalizeChatUsage(usage);`, and the finish chunk `delta: {}` / `finish_reason: finishReason` shape). The gate failed on the existing TS owner before the fix.
+- Fix: added Rust/NAPI owner `buildChatSseFinishPayloadJson` and TS wrapper `buildChatSseFinishPayloadWithNative`. `chat.ts::buildFinishEvent()` now only obtains base response context, calls native for the chat completion final chunk payload, and wraps it in the native-owned SSE event envelope.
+- Boundary cleanup: physically removed TS `normalizeChatUsage()` / `readNonNegativeInteger()` and local finish chunk object synthesis. Rust validates `finish_reason`, `created`, `choice_index`, and strict Chat usage token fields; missing usage is omitted, invalid usage fails fast.
+- Positive / reverse tests: Rust covers finish payload with usage, finish payload without usage, missing usage token fail-fast, and invalid finish_reason fail-fast; focused Jest keeps missing usage omission, invalid usage errors, Responses-style usage alias rejection, and function-call args no-fallback behavior intact; native export-list covers the new NAPI symbol.
+- Verification: Rust focused `chat_sse_finish_payload` PASS 4/4; native hotpath build PASS; focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-sse-function-call-args-no-fallback` PASS 21/21; native export-list subtest PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Known unrelated blocker: current worktree servertool registry rename residue blocks `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` / `npm run verify:function-map-compile-gate` / `npm run build:base`; failures are `registry-orchestration-shell.ts(37,12): Cannot find name 'getBuiltinHandlerEntry'` and missing `tests/servertool/registry-registration-shell.spec.ts`.
+- Real chat replay: `openai-chat/ports/10000/req_1782778465399_hrxbpl3tz/provider-response_1.json` SSE->JSON->SSE succeeded with `done=true`, `error=false`, `malformedWire=0`, `chatChunkCount=4`, `finishChunks=1`, `usageChunks=1`, `doneCount=1`, `finishReason=tool_calls`.
+
 ### 2026-07-01 Chat SSE tool-call start payload Rust owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker for local Chat tool-call start payload synthesis (`arguments: ''`). The gate failed on the existing TS owner before the fix.

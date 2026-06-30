@@ -3,11 +3,12 @@
  * 提供纯函数，将Chat响应数据转换为SSE事件对象，不处理流写入
  */
 
-import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall, ChatUsage } from '../../types/index.js';
+import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall } from '../../types/index.js';
 import {
   buildChatSseContentDeltaPayloadWithNative,
   buildChatSseErrorPayloadWithNative,
   buildChatSseEventEnvelopeWithNative,
+  buildChatSseFinishPayloadWithNative,
   buildChatSseReasoningDeltaPayloadWithNative,
   buildChatSseRoleDeltaPayloadWithNative,
   buildChatSseToolCallArgsDeltaPayloadWithNative,
@@ -42,43 +43,6 @@ export const DEFAULT_CHAT_EVENT_GENERATOR_CONFIG: ChatEventGeneratorConfig = {
   enableIdGeneration: true,
   enableTimestampGeneration: true
 };
-
-function readNonNegativeInteger(value: unknown, fieldName: string): number | undefined {
-  if (typeof value === 'undefined') {
-    return undefined;
-  }
-  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
-    return Math.round(value);
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      return Math.round(parsed);
-    }
-  }
-  throw new Error(`Invalid Chat usage.${fieldName}`);
-}
-
-function normalizeChatUsage(usage: unknown): ChatUsage | undefined {
-  if (typeof usage === 'undefined' || usage === null) {
-    return undefined;
-  }
-  if (typeof usage !== 'object' || Array.isArray(usage)) {
-    throw new Error('Invalid Chat usage: expected object');
-  }
-  const record = usage as Record<string, unknown>;
-  const promptTokens = readNonNegativeInteger(record.prompt_tokens, 'prompt_tokens');
-  const completionTokens = readNonNegativeInteger(record.completion_tokens, 'completion_tokens');
-  const totalTokens = readNonNegativeInteger(record.total_tokens, 'total_tokens');
-  if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {
-    throw new Error('Invalid Chat usage: missing token fields');
-  }
-  return {
-    prompt_tokens: promptTokens,
-    completion_tokens: completionTokens,
-    total_tokens: totalTokens
-  };
-}
 
 /**
  * 创建默认上下文
@@ -311,25 +275,21 @@ export function buildFinishEvent(
   usage?: ChatCompletionResponse['usage']
 ): ChatSseEvent {
   const baseChunk = createBaseChunk(context, config);
-  const normalizedUsage = normalizeChatUsage(usage);
-
-  const chunk = {
-    ...baseChunk,
-    choices: [{
-      index: context.choiceIndex,
-      delta: {},
-      logprobs: null,
-      finish_reason: finishReason
-    }],
-    ...(normalizedUsage ? { usage: normalizedUsage } : {})
-  };
+  const payload = buildChatSseFinishPayloadWithNative({
+    responseId: baseChunk.id,
+    created: baseChunk.created,
+    model: baseChunk.model,
+    choiceIndex: context.choiceIndex,
+    finishReason,
+    usage
+  });
   const envelope = nextChatEventEnvelope(context, config);
 
   return {
     event: 'chat_chunk',
     type: 'chat_chunk',
     timestamp: envelope.timestamp,
-    data: JSON.stringify(chunk),
+    data: JSON.stringify(payload),
     sequenceNumber: envelope.sequenceNumber,
     protocol: envelope.protocol,
     direction: envelope.direction

@@ -5,8 +5,7 @@ fn current_unix_timestamp_ms() -> Result<i64, String> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("Chat SSE event clock before UNIX_EPOCH: {}", error))?;
-    i64::try_from(duration.as_millis())
-        .map_err(|_| "Chat SSE event timestamp overflow".to_string())
+    i64::try_from(duration.as_millis()).map_err(|_| "Chat SSE event timestamp overflow".to_string())
 }
 
 pub fn build_chat_sse_event_envelope_json(input_json: String) -> Result<String, String> {
@@ -60,7 +59,12 @@ pub fn build_chat_sse_event_envelope_json(input_json: String) -> Result<String, 
         "protocol": "chat",
         "direction": "json_to_sse"
     }))
-    .map_err(|error| format!("Failed to serialize Chat SSE event envelope JSON: {}", error))
+    .map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE event envelope JSON: {}",
+            error
+        )
+    })
 }
 
 pub fn build_chat_sse_error_payload_json(input_json: String) -> Result<String, String> {
@@ -106,9 +110,57 @@ fn read_required_i64(
         .ok_or_else(|| format!("Chat SSE {} missing {}", label, field))
 }
 
+fn read_chat_usage_token(value: Option<&Value>, field: &str) -> Result<i64, String> {
+    let Some(value) = value else {
+        return Err("Invalid Chat usage: missing token fields".to_string());
+    };
+    let parsed = match value {
+        Value::Number(number) => number
+            .as_f64()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(f64::round),
+        Value::String(raw) if !raw.trim().is_empty() => raw
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(f64::round),
+        _ => None,
+    };
+    parsed
+        .filter(|value| *value <= i64::MAX as f64)
+        .map(|value| value as i64)
+        .ok_or_else(|| format!("Invalid Chat usage.{}", field))
+}
+
+fn read_chat_finish_usage(input: &serde_json::Map<String, Value>) -> Result<Option<Value>, String> {
+    let Some(usage) = input.get("usage") else {
+        return Ok(None);
+    };
+    if usage.is_null() {
+        return Ok(None);
+    }
+    let Some(usage) = usage.as_object() else {
+        return Err("Invalid Chat usage: expected object".to_string());
+    };
+    let prompt_tokens = read_chat_usage_token(usage.get("prompt_tokens"), "prompt_tokens")?;
+    let completion_tokens =
+        read_chat_usage_token(usage.get("completion_tokens"), "completion_tokens")?;
+    let total_tokens = read_chat_usage_token(usage.get("total_tokens"), "total_tokens")?;
+
+    Ok(Some(serde_json::json!({
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens
+    })))
+}
+
 pub fn build_chat_sse_role_delta_payload_json(input_json: String) -> Result<String, String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|error| format!("Failed to parse Chat SSE role delta payload JSON: {}", error))?;
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        format!(
+            "Failed to parse Chat SSE role delta payload JSON: {}",
+            error
+        )
+    })?;
     let Some(input) = input.as_object() else {
         return Err("Chat SSE role delta payload expected object".to_string());
     };
@@ -117,7 +169,12 @@ pub fn build_chat_sse_role_delta_payload_json(input_json: String) -> Result<Stri
     let role = read_required_string(input, "role", "role delta payload")?;
     match role {
         "user" | "system" | "assistant" | "tool" => {}
-        _ => return Err(format!("Chat SSE role delta payload invalid role: {}", role)),
+        _ => {
+            return Err(format!(
+                "Chat SSE role delta payload invalid role: {}",
+                role
+            ))
+        }
     }
     let created = read_required_i64(input, "created", "role delta payload")?;
     if created <= 0 {
@@ -140,12 +197,21 @@ pub fn build_chat_sse_role_delta_payload_json(input_json: String) -> Result<Stri
             "finish_reason": null
         }]
     }))
-    .map_err(|error| format!("Failed to serialize Chat SSE role delta payload JSON: {}", error))
+    .map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE role delta payload JSON: {}",
+            error
+        )
+    })
 }
 
 pub fn build_chat_sse_content_delta_payload_json(input_json: String) -> Result<String, String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|error| format!("Failed to parse Chat SSE content delta payload JSON: {}", error))?;
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        format!(
+            "Failed to parse Chat SSE content delta payload JSON: {}",
+            error
+        )
+    })?;
     let Some(input) = input.as_object() else {
         return Err("Chat SSE content delta payload expected object".to_string());
     };
@@ -173,7 +239,12 @@ pub fn build_chat_sse_content_delta_payload_json(input_json: String) -> Result<S
             "finish_reason": null
         }]
     }))
-    .map_err(|error| format!("Failed to serialize Chat SSE content delta payload JSON: {}", error))
+    .map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE content delta payload JSON: {}",
+            error
+        )
+    })
 }
 
 pub fn build_chat_sse_reasoning_delta_payload_json(input_json: String) -> Result<String, String> {
@@ -195,7 +266,9 @@ pub fn build_chat_sse_reasoning_delta_payload_json(input_json: String) -> Result
     }
     let choice_index = read_required_i64(input, "choice_index", "reasoning delta payload")?;
     if choice_index < 0 {
-        return Err("Chat SSE reasoning delta payload choice_index must be non-negative".to_string());
+        return Err(
+            "Chat SSE reasoning delta payload choice_index must be non-negative".to_string(),
+        );
     }
 
     serde_json::to_string(&serde_json::json!({
@@ -213,7 +286,12 @@ pub fn build_chat_sse_reasoning_delta_payload_json(input_json: String) -> Result
             "finish_reason": null
         }]
     }))
-    .map_err(|error| format!("Failed to serialize Chat SSE reasoning delta payload JSON: {}", error))
+    .map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE reasoning delta payload JSON: {}",
+            error
+        )
+    })
 }
 
 pub fn build_chat_sse_tool_call_args_delta_payload_json(
@@ -241,7 +319,8 @@ pub fn build_chat_sse_tool_call_args_delta_payload_json(
             "Chat SSE tool call args delta payload choice_index must be non-negative".to_string(),
         );
     }
-    let tool_call_index = read_required_i64(input, "tool_call_index", "tool call args delta payload")?;
+    let tool_call_index =
+        read_required_i64(input, "tool_call_index", "tool call args delta payload")?;
     if tool_call_index < 0 {
         return Err(
             "Chat SSE tool call args delta payload tool_call_index must be non-negative"
@@ -301,7 +380,9 @@ pub fn build_chat_sse_tool_call_start_payload_json(input_json: String) -> Result
     }
     let choice_index = read_required_i64(input, "choice_index", "tool call start payload")?;
     if choice_index < 0 {
-        return Err("Chat SSE tool call start payload choice_index must be non-negative".to_string());
+        return Err(
+            "Chat SSE tool call start payload choice_index must be non-negative".to_string(),
+        );
     }
     let tool_call_index = read_required_i64(input, "tool_call_index", "tool call start payload")?;
     if tool_call_index < 0 {
@@ -335,6 +416,61 @@ pub fn build_chat_sse_tool_call_start_payload_json(input_json: String) -> Result
     .map_err(|error| {
         format!(
             "Failed to serialize Chat SSE tool call start payload JSON: {}",
+            error
+        )
+    })
+}
+
+pub fn build_chat_sse_finish_payload_json(input_json: String) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| format!("Failed to parse Chat SSE finish payload JSON: {}", error))?;
+    let Some(input) = input.as_object() else {
+        return Err("Chat SSE finish payload expected object".to_string());
+    };
+    let response_id = read_required_string(input, "response_id", "finish payload")?;
+    let model = read_required_string(input, "model", "finish payload")?;
+    let finish_reason = read_required_string(input, "finish_reason", "finish payload")?;
+    match finish_reason {
+        "stop" | "length" | "tool_calls" | "content_filter" | "function_call" => {}
+        _ => {
+            return Err(format!(
+                "Chat SSE finish payload invalid finish_reason: {}",
+                finish_reason
+            ))
+        }
+    }
+    let created = read_required_i64(input, "created", "finish payload")?;
+    if created <= 0 {
+        return Err("Chat SSE finish payload created must be positive".to_string());
+    }
+    let choice_index = read_required_i64(input, "choice_index", "finish payload")?;
+    if choice_index < 0 {
+        return Err("Chat SSE finish payload choice_index must be non-negative".to_string());
+    }
+    let usage = read_chat_finish_usage(input)?;
+
+    let mut payload = serde_json::json!({
+        "id": response_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": choice_index,
+            "delta": {},
+            "logprobs": null,
+            "finish_reason": finish_reason
+        }]
+    });
+    if let Some(usage) = usage {
+        payload
+            .as_object_mut()
+            .expect("Chat SSE finish payload root must be object")
+            .insert("usage".to_string(), usage);
+    }
+
+    serde_json::to_string(&payload).map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE finish payload JSON: {}",
             error
         )
     })
@@ -491,7 +627,10 @@ mod tests {
         assert_eq!(parsed["created"], json!(1782778487));
         assert_eq!(parsed["model"], json!("gpt-test"));
         assert_eq!(parsed["choices"][0]["index"], json!(1));
-        assert_eq!(parsed["choices"][0]["delta"]["content"], json!("hello world"));
+        assert_eq!(
+            parsed["choices"][0]["delta"]["content"],
+            json!("hello world")
+        );
         assert_eq!(parsed["choices"][0]["finish_reason"], Value::Null);
     }
 
@@ -531,7 +670,10 @@ mod tests {
         assert_eq!(parsed["created"], json!(1782778488));
         assert_eq!(parsed["model"], json!("qwen-test"));
         assert_eq!(parsed["choices"][0]["index"], json!(0));
-        assert_eq!(parsed["choices"][0]["delta"]["reasoning"], json!("先检查上下文"));
+        assert_eq!(
+            parsed["choices"][0]["delta"]["reasoning"],
+            json!("先检查上下文")
+        );
         assert_eq!(
             parsed["choices"][0]["delta"]["reasoning_content"],
             json!("先检查上下文")
@@ -576,7 +718,10 @@ mod tests {
         assert_eq!(parsed["created"], json!(1782778489));
         assert_eq!(parsed["model"], json!("gpt-test"));
         assert_eq!(parsed["choices"][0]["index"], json!(0));
-        assert_eq!(parsed["choices"][0]["delta"]["tool_calls"][0]["index"], json!(2));
+        assert_eq!(
+            parsed["choices"][0]["delta"]["tool_calls"][0]["index"],
+            json!(2)
+        );
         assert_eq!(
             parsed["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
             json!("{\"cmd\":\"pwd\"}")
@@ -624,9 +769,18 @@ mod tests {
         assert_eq!(parsed["created"], json!(1782778490));
         assert_eq!(parsed["model"], json!("gpt-test"));
         assert_eq!(parsed["choices"][0]["index"], json!(0));
-        assert_eq!(parsed["choices"][0]["delta"]["tool_calls"][0]["index"], json!(3));
-        assert_eq!(parsed["choices"][0]["delta"]["tool_calls"][0]["id"], json!("call_test"));
-        assert_eq!(parsed["choices"][0]["delta"]["tool_calls"][0]["type"], json!("function"));
+        assert_eq!(
+            parsed["choices"][0]["delta"]["tool_calls"][0]["index"],
+            json!(3)
+        );
+        assert_eq!(
+            parsed["choices"][0]["delta"]["tool_calls"][0]["id"],
+            json!("call_test")
+        );
+        assert_eq!(
+            parsed["choices"][0]["delta"]["tool_calls"][0]["type"],
+            json!("function")
+        );
         assert_eq!(
             parsed["choices"][0]["delta"]["tool_calls"][0]["function"]["name"],
             json!("exec_command")
@@ -675,5 +829,97 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("invalid tool_call_type"));
+    }
+
+    #[test]
+    fn builds_chat_sse_finish_payload_with_usage() {
+        let output = build_chat_sse_finish_payload_json(
+            json!({
+                "response_id": "chatcmpl_finish",
+                "created": 1782778490,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "finish_reason": "tool_calls",
+                "usage": {
+                    "prompt_tokens": "12",
+                    "completion_tokens": 5.4,
+                    "total_tokens": 17
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["id"], json!("chatcmpl_finish"));
+        assert_eq!(parsed["object"], json!("chat.completion.chunk"));
+        assert_eq!(parsed["choices"][0]["index"], json!(0));
+        assert_eq!(parsed["choices"][0]["delta"], json!({}));
+        assert_eq!(parsed["choices"][0]["finish_reason"], json!("tool_calls"));
+        assert_eq!(
+            parsed["usage"],
+            json!({
+                "prompt_tokens": 12,
+                "completion_tokens": 5,
+                "total_tokens": 17
+            })
+        );
+    }
+
+    #[test]
+    fn builds_chat_sse_finish_payload_without_usage() {
+        let output = build_chat_sse_finish_payload_json(
+            json!({
+                "response_id": "chatcmpl_finish_no_usage",
+                "created": 1782778490,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "finish_reason": "stop"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert!(parsed.get("usage").is_none());
+        assert_eq!(parsed["choices"][0]["finish_reason"], json!("stop"));
+    }
+
+    #[test]
+    fn rejects_chat_sse_finish_payload_missing_usage_tokens() {
+        let err = build_chat_sse_finish_payload_json(
+            json!({
+                "response_id": "chatcmpl_finish_bad_usage",
+                "created": 1782778490,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "finish_reason": "stop",
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 5
+                }
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Invalid Chat usage: missing token fields"));
+    }
+
+    #[test]
+    fn rejects_chat_sse_finish_payload_invalid_finish_reason() {
+        let err = build_chat_sse_finish_payload_json(
+            json!({
+                "response_id": "chatcmpl_finish_bad_reason",
+                "created": 1782778490,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "finish_reason": "other"
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("invalid finish_reason"));
     }
 }

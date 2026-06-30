@@ -14,8 +14,8 @@ mod anthropic_response_helper;
 mod chat_governed_filter_payload;
 mod chat_node_result_semantics;
 mod chat_process_media_semantics;
-mod chat_sse_event_payload;
 mod chat_servertool_orchestration;
+mod chat_sse_event_payload;
 mod chat_web_search_tool_schema;
 mod compat_field_mapping;
 mod compat_harvest_tool_calls_from_text;
@@ -1923,10 +1923,7 @@ pub fn normalize_responses_message_item_json(
     item_json: String,
     options_json: Option<String>,
 ) -> NapiResult<String> {
-    shared_output_content_normalizer::normalize_responses_message_item_json(
-        item_json,
-        options_json,
-    )
+    shared_output_content_normalizer::normalize_responses_message_item_json(item_json, options_json)
 }
 
 #[napi(js_name = "expandResponsesMessageItemJson")]
@@ -1966,7 +1963,9 @@ pub fn serialize_responses_sse_event_to_wire_json(event_json: String) -> NapiRes
 }
 
 #[napi(js_name = "deserializeResponsesSseEventFromWireJson")]
-pub fn deserialize_responses_sse_event_from_wire_json(wire_data_json: String) -> NapiResult<String> {
+pub fn deserialize_responses_sse_event_from_wire_json(
+    wire_data_json: String,
+) -> NapiResult<String> {
     responses_sse_event_payload::deserialize_responses_sse_event_from_wire_json(wire_data_json)
         .map_err(napi::Error::from_reason)
 }
@@ -2184,6 +2183,12 @@ pub fn build_chat_sse_tool_call_args_delta_payload_json(input_json: String) -> N
 #[napi(js_name = "buildChatSseToolCallStartPayloadJson")]
 pub fn build_chat_sse_tool_call_start_payload_json(input_json: String) -> NapiResult<String> {
     chat_sse_event_payload::build_chat_sse_tool_call_start_payload_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildChatSseFinishPayloadJson")]
+pub fn build_chat_sse_finish_payload_json(input_json: String) -> NapiResult<String> {
+    chat_sse_event_payload::build_chat_sse_finish_payload_json(input_json)
         .map_err(napi::Error::from_reason)
 }
 
