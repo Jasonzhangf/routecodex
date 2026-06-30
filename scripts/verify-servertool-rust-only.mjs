@@ -5025,6 +5025,16 @@ function checkServertoolRustOutcomeCloseout() {
   const engineObservationShell = readRequired(TS_ENGINE_OBSERVATION_SHELL);
   for (const marker of [
     'export function logServertoolNonBlocking(',
+    '[servertool][non-blocking]',
+  ]) {
+    if (engineObservationShell.includes(marker)) {
+      fail(
+        'servertool-engine-observation-no-nonblocking-shell',
+        `engine-observation-shell.ts must not retain non-blocking log shell marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
     'export function createServertoolObservation(',
     'createServertoolProgressLogger({',
     "args.stageRecorder?.record('servertool.match'",

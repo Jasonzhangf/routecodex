@@ -7,22 +7,6 @@ import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-cente
 
 type ServertoolProgressLogger = ReturnType<typeof createServertoolProgressLogger>;
 
-export function logServertoolNonBlocking(
-  stage: string,
-  error: unknown,
-  details?: Record<string, unknown>
-): void {
-  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-  const detailEntries =
-    details && typeof details === 'object'
-      ? Object.entries(details)
-          .map(([key, value]) => `${key}=${String(value)}`)
-          .join(' ')
-      : '';
-  // eslint-disable-next-line no-console
-  console.warn(`[servertool][non-blocking] stage=${stage} error=${message}${detailEntries ? ` ${detailEntries}` : ''}`);
-}
-
 export function createServertoolObservation(args: {
   requestId: string;
   entryEndpoint: string;

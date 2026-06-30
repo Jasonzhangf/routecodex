@@ -51,20 +51,13 @@ describe('engine-observation-shell', () => {
       'utf8'
     );
 
-    expect(source).toContain('export function logServertoolNonBlocking(');
+    expect(source).not.toContain('export function logServertoolNonBlocking(');
+    expect(source).not.toContain('[servertool][non-blocking]');
     expect(source).toContain('export function createServertoolObservation(');
     expect(source).toContain('createServertoolProgressLogger({');
     expect(source).toContain("args.stageRecorder?.record('servertool.match'");
     expect(source).toContain('appendServerToolProgressFileEvent({');
     expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/match-log-block.ts')).toBe(false);
-
-    const progressSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
-    mod.logServertoolNonBlocking('unit_test', new Error('boom'), { flowId: 'flow_obs_1' });
-    expect(progressSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[servertool][non-blocking] stage=unit_test error=boom flowId=flow_obs_1')
-    );
-    progressSpy.mockRestore();
   });
 
   test('createServertoolObservation prefers bound metadata center providerProtocol over explicit argument', async () => {
