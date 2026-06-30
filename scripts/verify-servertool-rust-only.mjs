@@ -4029,35 +4029,11 @@ function checkServertoolTextExtractionRustOwner() {
     nativeServertoolWrapper,
     'extractTextFromChatLikeWithNative'
   );
-  if (!serverSideToolsImpl.includes('extractTextFromChatLikeWithNative(payload)')) {
+  if (serverSideToolsImpl.includes('extractTextFromChatLike')) {
     fail(
-      'servertool-text-extraction-thin-wrapper',
-      'server-side-tools-impl.ts must delegate extractTextFromChatLike to extractTextFromChatLikeWithNative(payload)'
+      'servertool-text-extraction-no-ts-owner',
+      'server-side-tools-impl.ts must not restore extractTextFromChatLike facade; use native-servertool-core-semantics.ts directly'
     );
-  }
-
-  const functionBlock = extractFunctionBlock(serverSideToolsImpl, 'extractTextFromChatLike');
-  if (!functionBlock) {
-    fail('servertool-text-extraction-no-ts-owner', 'extractTextFromChatLike function not found');
-    return;
-  }
-  for (const keyword of [
-    'choices',
-    'message.content',
-    'output_text',
-    'web_search',
-    'publish_date',
-    '【',
-    'join',
-    'slice',
-    'trim()',
-  ]) {
-    if (functionBlock.includes(keyword)) {
-      fail(
-        'servertool-text-extraction-no-ts-owner',
-        `Forbidden TS text extraction semantic "${keyword}" found in extractTextFromChatLike`
-      );
-    }
   }
   pass('servertool-text-extraction-rust-owner', 'servertool-core owns chat-like text extraction');
 }
