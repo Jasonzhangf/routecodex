@@ -90,6 +90,7 @@ const TARGETS = [
     forbidden: [
       'isServertoolEnabledByConfig',
       'getServertoolToolSpec(name)?.enabled',
+      'export function getDefaultServertoolSkeletonDocument(',
       'export function listServertoolToolSpecs(',
       'getDerivedConfig().toolSpecList',
     ],

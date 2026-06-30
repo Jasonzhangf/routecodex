@@ -11,7 +11,6 @@ import type {
   ServerToolRegisteredHandlerRecord,
 } from '../native/router-hotpath/native-followup-mainline-semantics.js';
 import {
-  getDefaultServertoolSkeletonDocumentWithNative,
   normalizeServertoolRegistrationSpecWithNative,
   planServertoolBuiltinAutoHandlerEntriesWithNative,
   planServertoolBuiltinHandlerEntryWithNative,
@@ -85,10 +84,6 @@ type ServertoolSkeletonDerivedConfig = {
 
 function getDerivedConfig(): ServertoolSkeletonDerivedConfig {
   return planServertoolSkeletonDerivedConfigWithNative() as ServertoolSkeletonDerivedConfig;
-}
-
-export function getDefaultServertoolSkeletonDocument(): ServertoolSkeletonDocument {
-  return getDefaultServertoolSkeletonDocumentWithNative() as unknown as ServertoolSkeletonDocument;
 }
 
 export function getServertoolToolSpec(name: string): ServertoolToolSpec | null {

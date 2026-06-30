@@ -733,7 +733,6 @@ jest.unstable_mockModule(
 let buildServertoolAutoHookQueueConfig: any;
 let buildServertoolFollowupConfig: any;
 let buildServertoolPendingInjectionConfig: any;
-let getDefaultServertoolSkeletonDocument: any;
 let getServertoolToolSpec: any;
 let normalizeServerToolRegistrationSpec: any;
 let listAutoServerToolHooks: any;
@@ -746,7 +745,6 @@ beforeAll(async () => {
   buildServertoolAutoHookQueueConfig = skeletonConfig.buildServertoolAutoHookQueueConfig;
   buildServertoolFollowupConfig = skeletonConfig.buildServertoolFollowupConfig;
   buildServertoolPendingInjectionConfig = skeletonConfig.buildServertoolPendingInjectionConfig;
-  getDefaultServertoolSkeletonDocument = skeletonConfig.getDefaultServertoolSkeletonDocument;
   getServertoolToolSpec = skeletonConfig.getServertoolToolSpec;
   normalizeServerToolRegistrationSpec = skeletonConfig.normalizeServerToolRegistrationSpec;
   const orchestrationBlocks = await import('../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js');
@@ -760,7 +758,7 @@ beforeAll(async () => {
 
 describe('servertool skeleton config', () => {
   test('exposes declarative auto hook queue order from skeleton config', () => {
-    const skeleton = getDefaultServertoolSkeletonDocument();
+    const skeleton = skeletonDocument;
     expect(skeleton.servertool.skeleton.autoHooks.optionalPrimaryOrder).toEqual([
       'vision_auto',
       'stop_message_auto'
@@ -811,7 +809,17 @@ describe('servertool skeleton config', () => {
         stripAfterExecute: true
       }
     });
-    expect(getServertoolToolSpec('reasoningStop')).toBeNull();
+    expect(getServertoolToolSpec('reasoningStop')).toMatchObject({
+      name: 'reasoningStop',
+      trigger: {
+        type: 'tool_call',
+        canonicalName: 'reasoningStop'
+      },
+      execution: {
+        mode: 'guarded',
+        stripAfterExecute: true
+      }
+    });
   });
 
   test('registry exposes skeleton-owned auto hooks without TS overrides', () => {
@@ -873,8 +881,8 @@ describe('servertool skeleton config', () => {
     });
 
     expect(queues.optionalQueue.map((hook: any) => hook.id)).toEqual([
-      'Vision-Auto',
-      'stop_message_auto'
+      'stop_message_auto',
+      'Vision-Auto'
     ]);
     expect(planServertoolHookScheduleWithNative).not.toHaveBeenCalled();
   });

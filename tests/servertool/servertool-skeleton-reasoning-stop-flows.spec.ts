@@ -68,16 +68,9 @@ jest.unstable_mockModule(
   })
 );
 
-let getDefaultServertoolSkeletonDocument: any;
-
-beforeAll(async () => {
-  const skeletonConfig = await import('../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js');
-  getDefaultServertoolSkeletonDocument = skeletonConfig.getDefaultServertoolSkeletonDocument;
-});
-
 describe('servertool skeleton reasoning-stop flow profiles', () => {
   test('exposes reasoning stop flows as native followup policy truth', () => {
-    const doc = getDefaultServertoolSkeletonDocument();
+    const doc = skeletonDocument;
     const profiles = doc.servertool.skeleton.followup.flowPolicy.profilesByFlowId ?? {};
 
     expect(profiles.reasoning_stop_guard_flow).toBeDefined();
