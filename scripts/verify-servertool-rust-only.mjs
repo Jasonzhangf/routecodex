@@ -5003,13 +5003,24 @@ function checkServertoolRustOutcomeCloseout() {
     'parseServertoolCliProjectionToolArgumentsWithNative({',
     'input: projectionInput',
     'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
-    'const projectionShellInput = {',
-    'const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;',
+    'function buildClientVisibleProjectionShellForRuntime(',
+    'const chatResponse = buildClientVisibleProjectionShellForRuntime({',
   ]) {
     if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(
         'servertool-cli-projection-thin-shell-guard',
         `cli-projection-runtime-shell.ts must keep CLI projection impl guard marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'const projectionShellInput = {',
+    'buildClientVisibleProjectionShellWithNative(projectionShellInput)',
+  ]) {
+    if (cliProjectionRuntimeShell.includes(marker)) {
+      fail(
+        'servertool-cli-projection-runtime-thin-shell',
+        `cli-projection-runtime-shell.ts must not retain retired projection shell marker ${marker}`
       );
     }
   }

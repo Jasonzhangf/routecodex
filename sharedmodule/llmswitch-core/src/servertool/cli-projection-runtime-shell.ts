@@ -15,6 +15,22 @@ import {
   collectServertoolAdditionalClientToolCallsWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
+function buildClientVisibleProjectionShellForRuntime(args: {
+  requestId: string;
+  clientCallId: string;
+  nativeProjection: ReturnType<typeof buildClientExecCliProjectionOutputWithNative>;
+  toolName: string;
+  additionalToolCalls: unknown[];
+}): JsonObject {
+  return buildClientVisibleProjectionShellWithNative({
+    requestId: args.requestId,
+    clientCallId: args.clientCallId,
+    nativeProjection: args.nativeProjection,
+    reasoningText: `继续执行本地 hook ${args.toolName}。`,
+    ...(args.additionalToolCalls.length ? { additionalToolCalls: args.additionalToolCalls } : {})
+  }) as JsonObject;
+}
+
 export function buildServertoolCliProjectionBranchResult(args: {
   options: ServerSideToolEngineOptions;
   base: JsonObject;
@@ -46,14 +62,13 @@ export function buildServertoolCliProjectionBranchResult(args: {
     maxRepeats: 0
   });
   const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
-  const projectionShellInput = {
+  const chatResponse = buildClientVisibleProjectionShellForRuntime({
     requestId: args.options.requestId,
     clientCallId,
     nativeProjection,
-    reasoningText: `继续执行本地 hook ${toolName}。`,
-    ...(additionalToolCalls.length ? { additionalToolCalls } : {})
-  };
-  const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;
+    toolName,
+    additionalToolCalls
+  });
   const execution = buildServertoolCliProjectionExecutionContextWithNative({
     requestId: args.options.requestId,
     clientCallId,

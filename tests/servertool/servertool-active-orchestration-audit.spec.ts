@@ -309,13 +309,15 @@ const TARGETS = [
       'export const collectAdditionalClientToolCalls',
       'function parseToolArguments(',
       'JSON.parse(value)',
+      'const projectionShellInput = {',
+      'buildClientVisibleProjectionShellWithNative(projectionShellInput)',
     ],
     required: [
       'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
       'input: projectionInput',
       'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
-      'const projectionShellInput = {',
-      'const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;',
+      'function buildClientVisibleProjectionShellForRuntime(',
+      'const chatResponse = buildClientVisibleProjectionShellForRuntime({',
     ],
   },
   {
