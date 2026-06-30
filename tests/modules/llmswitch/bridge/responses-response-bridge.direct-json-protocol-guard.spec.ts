@@ -1,8 +1,38 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { normalizeResponsesClientPayloadForHttp } from '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts';
+import {
+  normalizeResponsesClientPayloadForHttp,
+  prepareResponsesJsonClientDispatchPlanForHttp,
+} from '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts';
 
 describe('responses-response-bridge direct JSON protocol guard', () => {
+  it('router-direct JSON dispatch bypasses Responses client projection without requestContext', async () => {
+    const body = {
+      id: 'resp_direct_passthrough_no_context',
+      object: 'response',
+      status: 'completed',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'ok' }],
+        },
+      ],
+    };
+
+    const output = await prepareResponsesJsonClientDispatchPlanForHttp({
+      entryEndpoint: '/v1/responses',
+      continuationOwner: 'direct',
+      body,
+      metadata: {},
+    });
+
+    expect(output).toEqual({
+      clientBody: body,
+      sanitizedBody: body,
+    });
+  });
+
   it('RED: direct owner side-channel must not skip Responses replay-safe client projection', async () => {
     const output = await normalizeResponsesClientPayloadForHttp({
       entryEndpoint: '/v1/responses',

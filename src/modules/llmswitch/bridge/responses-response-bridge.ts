@@ -150,6 +150,7 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
   body: unknown;
   entryEndpoint?: string;
   requestLabel?: string;
+  continuationOwner?: string;
   requestContext?: {
     payload: AnyRecord;
     context: AnyRecord;
@@ -164,6 +165,12 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
   clientBody: unknown;
   sanitizedBody: unknown;
 }> {
+  if (args.continuationOwner === 'direct') {
+    return {
+      clientBody: args.body,
+      sanitizedBody: args.body,
+    };
+  }
   const clientBody = await normalizeResponsesClientPayloadForHttp({
     payload: args.body,
     entryEndpoint: args.entryEndpoint,

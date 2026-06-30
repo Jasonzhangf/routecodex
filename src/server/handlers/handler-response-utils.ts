@@ -227,6 +227,7 @@ export async function sendPipelineResponse(
     body: responseBody,
     entryEndpoint,
     requestLabel,
+    continuationOwner: result.continuationOwner,
     requestContext: effectiveResponsesRequestContext,
     metadata: resultMetadata,
   });
