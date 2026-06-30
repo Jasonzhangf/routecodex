@@ -6,7 +6,7 @@ async function collectEvents(response: any): Promise<any[]> {
   const events: any[] = [];
   const context = {
     requestId: 'req_metadata_response_boundary',
-    sequenceNumber: 0,
+    sequenceCounter: 0,
     outputIndexCounter: 0,
     contentIndexCounter: new Map<string, number>()
   };

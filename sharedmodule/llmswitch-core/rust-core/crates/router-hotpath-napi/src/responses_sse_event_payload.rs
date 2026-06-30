@@ -1,4 +1,75 @@
 use serde_json::{Map, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn current_unix_timestamp_ms() -> Result<i64, String> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("Responses SSE event clock before UNIX_EPOCH: {}", error))?;
+    i64::try_from(duration.as_millis())
+        .map_err(|_| "Responses SSE event timestamp overflow".to_string())
+}
+
+pub fn build_responses_sse_event_envelope_json(input_json: String) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses SSE event envelope JSON: {}",
+            error
+        )
+    })?;
+    let Some(input) = input.as_object() else {
+        return Err("Responses SSE event envelope expected object".to_string());
+    };
+    let request_id = input
+        .get("request_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Responses SSE event envelope missing request_id".to_string())?;
+    let current_sequence = input
+        .get("current_sequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses SSE event envelope missing current_sequence".to_string())?;
+    if current_sequence < 0 {
+        return Err("Responses SSE event envelope current_sequence must be non-negative".to_string());
+    }
+    let enable_timestamp_generation = input
+        .get("enable_timestamp_generation")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let enable_sequence_numbers = input
+        .get("enable_sequence_numbers")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let sequence_number = if enable_sequence_numbers {
+        current_sequence
+    } else {
+        0
+    };
+    let next_sequence_counter = if enable_sequence_numbers {
+        current_sequence + 1
+    } else {
+        current_sequence
+    };
+    let timestamp = if enable_timestamp_generation {
+        current_unix_timestamp_ms()?
+    } else {
+        0
+    };
+
+    serde_json::to_string(&serde_json::json!({
+        "requestId": request_id,
+        "timestamp": timestamp,
+        "sequenceNumber": sequence_number,
+        "nextSequenceCounter": next_sequence_counter,
+        "protocol": "responses",
+        "direction": "json_to_sse"
+    }))
+    .map_err(|error| {
+        format!(
+            "Failed to serialize Responses SSE event envelope JSON: {}",
+            error
+        )
+    })
+}
 
 fn is_responses_sse_text_chunk_boundary(ch: char) -> bool {
     ch.is_whitespace()
@@ -816,6 +887,7 @@ pub fn normalize_responses_sse_response_payload(
     };
 
     let mut payload_row = source.clone();
+    payload_row.remove("metadata");
 
     if !payload_row.contains_key("object") || payload_row.get("object").is_none_or(Value::is_null) {
         payload_row.insert("object".to_string(), Value::String("response".to_string()));
@@ -1558,6 +1630,46 @@ mod tests {
     }
 
     #[test]
+    fn builds_responses_sse_event_envelope_and_advances_sequence() {
+        let output = build_responses_sse_event_envelope_json(
+            json!({
+                "request_id": "req_envelope",
+                "current_sequence": 7,
+                "enable_timestamp_generation": false,
+                "enable_sequence_numbers": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["requestId"], json!("req_envelope"));
+        assert_eq!(parsed["timestamp"], json!(0));
+        assert_eq!(parsed["sequenceNumber"], json!(7));
+        assert_eq!(parsed["nextSequenceCounter"], json!(8));
+        assert_eq!(parsed["protocol"], json!("responses"));
+        assert_eq!(parsed["direction"], json!("json_to_sse"));
+    }
+
+    #[test]
+    fn builds_responses_sse_event_envelope_without_sequence_generation() {
+        let output = build_responses_sse_event_envelope_json(
+            json!({
+                "request_id": "req_envelope_no_sequence",
+                "current_sequence": 7,
+                "enable_timestamp_generation": false,
+                "enable_sequence_numbers": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["sequenceNumber"], json!(0));
+        assert_eq!(parsed["nextSequenceCounter"], json!(7));
+    }
+
+    #[test]
     fn builds_responses_sse_text_chunks_at_size_and_boundary() {
         let chunks = build_responses_sse_text_chunks("hello world again", Some(8)).unwrap();
         assert_eq!(
@@ -1706,6 +1818,30 @@ mod tests {
             output["usage"]["input_tokens_details"]["cached_tokens"],
             json!(7)
         );
+    }
+
+    #[test]
+    fn normalizes_responses_sse_response_payload_without_metadata() {
+        let output = normalize_responses_sse_response_payload(
+            json!({
+                "id": "resp_sse_payload_metadata",
+                "object": "response",
+                "created_at": 1781149537,
+                "status": "completed",
+                "model": "gpt-test",
+                "metadata": {
+                    "session_id": "must-not-leak",
+                    "__shadowCompareForcedProviderKey": "provider.key"
+                },
+                "output": []
+            }),
+            Some("completed"),
+        )
+        .unwrap();
+
+        assert!(output.get("metadata").is_none());
+        assert!(!output.to_string().contains("must-not-leak"));
+        assert!(!output.to_string().contains("__shadowCompareForcedProviderKey"));
     }
 
     #[test]

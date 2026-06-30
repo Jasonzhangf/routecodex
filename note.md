@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE event envelope Rust owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 `TimeUtils` import、`getNextSequenceNumber()`、`createBaseEvent()` marker 后先红，证明 Responses SSE event envelope 的 timestamp / sequence 仍由 TS 生成。
+- Fix：新增 Rust/NAPI `buildResponsesSseEventEnvelopeJson`；`responses.ts` 只调用 native envelope wrapper 并回写 `nextSequenceCounter`，不再本地生成 timestamp 或 sequence。并把 response payload 的 `metadata` 剥离下沉到 Rust `normalize_responses_sse_response_payload`，避免 provider/debug metadata 泄漏到 client SSE。
+- Verification：Rust envelope tests PASS；Rust metadata strip test PASS；native build PASS；focused Jest 6 suites / 34 tests PASS；native export-list subtest PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；4444 replay `completed=true done=true error=false missingType=0 missingSequence=0 malformedWire=0 metadataLeak=0 eventCount=25`。
+
 # 2026-07-01: Responses SSE error recovery policy Rust owner
 - Red evidence：`verify:sse-architecture-boundary` 新增 `enableRecovery` / `if (config.enableRecovery)` / item-level `yield buildErrorEvent(error as Error, context, config)` marker 后先红，证明 `responses-sequencer.ts` 仍在 TS 本地决定 recovery 策略。
 - Fix：新增 Rust/NAPI `planResponsesSseErrorRecoveryJson`；`responses-sequencer.ts` 删除 `enableRecovery` 配置和 per-output-item catch，不再局部吞 item 错误后继续 completed，response-level catch 只消费 native policy 后投影 `response.error`。

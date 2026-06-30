@@ -63,6 +63,38 @@ function parseNativeRecoveryPlan(raw: string): { action: 'emit_response_error' |
   }
 }
 
+export interface ResponsesSseEventEnvelopeNative {
+  requestId: string;
+  timestamp: number;
+  sequenceNumber: number;
+  nextSequenceCounter: number;
+  protocol: 'responses';
+  direction: 'json_to_sse';
+}
+
+function parseNativeEventEnvelope(raw: string): ResponsesSseEventEnvelopeNative | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    const row = parsed as Record<string, unknown>;
+    if (
+      typeof row.requestId !== 'string'
+      || typeof row.timestamp !== 'number'
+      || typeof row.sequenceNumber !== 'number'
+      || typeof row.nextSequenceCounter !== 'number'
+      || row.protocol !== 'responses'
+      || row.direction !== 'json_to_sse'
+    ) {
+      return null;
+    }
+    return row as unknown as ResponsesSseEventEnvelopeNative;
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalizeResponsesSseEventPayloadWithNative(event: unknown): Record<string, unknown> {
   return callNativeJson(
     'canonicalizeResponsesSseEventPayloadJson',
@@ -826,6 +858,52 @@ export function buildResponsesSseErrorPayloadWithNative(message: string): Record
     const parsed = parseNativeEvent(raw);
     if (!parsed) {
       return fail('invalid Responses SSE error payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
+export function buildResponsesSseEventEnvelopeWithNative(input: {
+  requestId: string;
+  currentSequence: number;
+  enableTimestampGeneration: boolean;
+  enableSequenceNumbers: boolean;
+}): ResponsesSseEventEnvelopeNative {
+  const capability = 'buildResponsesSseEventEnvelopeJson';
+  const fail = (reason?: string) => failNative<ResponsesSseEventEnvelopeNative>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      request_id: input.requestId,
+      current_sequence: input.currentSequence,
+      enable_timestamp_generation: input.enableTimestampGeneration,
+      enable_sequence_numbers: input.enableSequenceNumbers
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE event envelope result');
+    }
+    const parsed = parseNativeEventEnvelope(raw);
+    if (!parsed) {
+      return fail('invalid Responses SSE event envelope result');
     }
     return parsed;
   } catch (error) {

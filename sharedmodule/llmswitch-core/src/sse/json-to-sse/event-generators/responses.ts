@@ -11,8 +11,8 @@ import type {
   ResponsesReasoningItem,
   ResponsesContent
 } from '../../types/index.js';
-import { TimeUtils } from '../../shared/utils.js';
 import {
+  buildResponsesSseEventEnvelopeWithNative,
   buildResponsesSseTextChunksWithNative,
   buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative,
   buildResponsesSseFunctionCallArgumentsDonePayloadWithNative,
@@ -72,16 +72,9 @@ export function createDefaultResponsesContext(requestId: string, model: string):
 }
 
 /**
- * 生成下一个序列号
- */
-function getNextSequenceNumber(context: ResponsesEventGeneratorContext, config: ResponsesEventGeneratorConfig): number {
-  return config.enableSequenceNumbers ? context.sequenceCounter++ : 0;
-}
-
-/**
  * 创建基础事件数据
  */
-function createBaseEvent(
+function nextResponsesEventEnvelope(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig
 ): {
@@ -91,13 +84,14 @@ function createBaseEvent(
   protocol: 'responses';
   direction: 'json_to_sse';
 } {
-  return {
+  const envelope = buildResponsesSseEventEnvelopeWithNative({
     requestId: context.requestId,
-    timestamp: config.enableTimestampGeneration ? TimeUtils.now() : 0,
-    sequenceNumber: getNextSequenceNumber(context, config),
-    protocol: 'responses' as const,
-    direction: 'json_to_sse' as const
-  };
+    currentSequence: context.sequenceCounter,
+    enableTimestampGeneration: config.enableTimestampGeneration,
+    enableSequenceNumbers: config.enableSequenceNumbers
+  });
+  context.sequenceCounter = envelope.nextSequenceCounter;
+  return envelope;
 }
 
 /**
@@ -111,7 +105,7 @@ export function* buildResponseStartEvents(
 ): Generator<ResponsesSseEvent> {
   const startPayload = buildResponsesSseResponseEventPayloadWithNative('start', response, 'in_progress');
   // 第一个事件：response.created
-  const createdEvent = createBaseEvent(context, config);
+  const createdEvent = nextResponsesEventEnvelope(context, config);
   yield {
     type: 'response.created',
     timestamp: createdEvent.timestamp,
@@ -122,7 +116,7 @@ export function* buildResponseStartEvents(
   };
 
   // 第二个事件：response.in_progress
-  const inProgressEvent = createBaseEvent(context, config);
+  const inProgressEvent = nextResponsesEventEnvelope(context, config);
   yield {
     type: 'response.in_progress',
     timestamp: inProgressEvent.timestamp,
@@ -142,7 +136,7 @@ export function buildOutputItemStartEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
   const item = buildResponsesSseOutputItemEventPayloadWithNative(
     'added',
     context.outputIndexCounter,
@@ -170,7 +164,7 @@ export function buildContentPartStartEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
   const part = buildResponsesSseContentPartEventPayloadWithNative(
     'added',
     context.outputIndexCounter,
@@ -205,7 +199,7 @@ export function* buildContentPartDeltas(
   const chunks = buildResponsesSseTextChunksWithNative(text, config.chunkSize);
 
   for (const chunk of chunks) {
-    const baseEvent = createBaseEvent(context, config);
+    const baseEvent = nextResponsesEventEnvelope(context, config);
     const delta = buildResponsesSseOutputTextDeltaPayloadWithNative(
       context.outputIndexCounter,
       outputItemId,
@@ -233,7 +227,7 @@ export function buildContentPartDoneEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
   const part = content
     ? buildResponsesSseContentPartEventPayloadWithNative(
         'done',
@@ -266,7 +260,7 @@ export function buildOutputTextDoneEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
   const textDone = buildResponsesSseOutputTextDonePayloadWithNative(
     context.outputIndexCounter,
     outputItemId,
@@ -301,7 +295,7 @@ export function* buildFunctionCallArgsDeltas(
   const chunks = buildResponsesSseTextChunksWithNative(functionCall.arguments, config.chunkSize);
 
   for (const chunk of chunks) {
-    const baseEvent = createBaseEvent(context, config);
+    const baseEvent = nextResponsesEventEnvelope(context, config);
     const delta = buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative(
       context.outputIndexCounter,
       functionCall.id,
@@ -328,7 +322,7 @@ export function buildFunctionCallDoneEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
   const done = buildResponsesSseFunctionCallArgumentsDonePayloadWithNative(
     context.outputIndexCounter,
     functionCall.id,
@@ -355,7 +349,7 @@ export function buildReasoningStartEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
   const payload = buildResponsesSseReasoningLifecyclePayloadWithNative(
     'start',
     reasoning.id,
@@ -386,7 +380,7 @@ export function* buildReasoningDeltas(
   for (const content of contents) {
     if (content.type === 'reasoning_text') {
       if (!content.text) continue;
-      const baseEvent = createBaseEvent(context, config);
+      const baseEvent = nextResponsesEventEnvelope(context, config);
       const payload = buildResponsesSseReasoningDeltaPayloadWithNative(
         'text',
         context.outputIndexCounter,
@@ -404,7 +398,7 @@ export function* buildReasoningDeltas(
         sequenceNumber: baseEvent.sequenceNumber
       };
     } else if (content.type === 'reasoning_signature') {
-      const baseEvent = createBaseEvent(context, config);
+      const baseEvent = nextResponsesEventEnvelope(context, config);
       const payload = buildResponsesSseReasoningDeltaPayloadWithNative(
         'signature',
         context.outputIndexCounter,
@@ -422,7 +416,7 @@ export function* buildReasoningDeltas(
         sequenceNumber: baseEvent.sequenceNumber
       };
     } else if (content.type === 'reasoning_image') {
-      const baseEvent = createBaseEvent(context, config);
+      const baseEvent = nextResponsesEventEnvelope(context, config);
       const payload = buildResponsesSseReasoningDeltaPayloadWithNative(
         'image',
         context.outputIndexCounter,
@@ -457,7 +451,7 @@ export function* buildReasoningSummaryEvents(
     const text = summaries[summaryIndex]?.text;
     if (!text) continue;
 
-    const partAddedBase = createBaseEvent(context, config);
+    const partAddedBase = nextResponsesEventEnvelope(context, config);
     const partAdded = buildResponsesSseReasoningSummaryPayloadWithNative(
       'part_added',
       context.outputIndexCounter,
@@ -477,7 +471,7 @@ export function* buildReasoningSummaryEvents(
     const chunks = buildResponsesSseTextChunksWithNative(text, config.chunkSize);
     for (const chunk of chunks) {
       if (!chunk) continue;
-      const deltaBase = createBaseEvent(context, config);
+      const deltaBase = nextResponsesEventEnvelope(context, config);
       const delta = buildResponsesSseReasoningSummaryPayloadWithNative(
         'text_delta',
         context.outputIndexCounter,
@@ -495,7 +489,7 @@ export function* buildReasoningSummaryEvents(
       };
     }
 
-    const textDoneBase = createBaseEvent(context, config);
+    const textDoneBase = nextResponsesEventEnvelope(context, config);
     const textDone = buildResponsesSseReasoningSummaryPayloadWithNative(
       'text_done',
       context.outputIndexCounter,
@@ -512,7 +506,7 @@ export function* buildReasoningSummaryEvents(
       sequenceNumber: textDoneBase.sequenceNumber
     };
 
-    const partDoneBase = createBaseEvent(context, config);
+    const partDoneBase = nextResponsesEventEnvelope(context, config);
     const partDone = buildResponsesSseReasoningSummaryPayloadWithNative(
       'part_done',
       context.outputIndexCounter,
@@ -539,7 +533,7 @@ export function buildReasoningDoneEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
   const payload = buildResponsesSseReasoningLifecyclePayloadWithNative(
     'done',
     reasoning.id
@@ -563,7 +557,7 @@ export function buildOutputItemDoneEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
   const item = buildResponsesSseOutputItemEventPayloadWithNative(
     'done',
     context.outputIndexCounter,
@@ -589,7 +583,7 @@ export function buildRequiredActionEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
 
   return {
     type: 'response.required_action',
@@ -615,7 +609,7 @@ export function buildResponseCompletedEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
 
   return {
     type: 'response.completed',
@@ -639,7 +633,7 @@ export function buildResponseDoneEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
 
   return {
     type: 'response.done',
@@ -663,7 +657,7 @@ export function buildErrorEvent(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
-  const baseEvent = createBaseEvent(context, config);
+  const baseEvent = nextResponsesEventEnvelope(context, config);
 
   return {
     type: 'response.error',

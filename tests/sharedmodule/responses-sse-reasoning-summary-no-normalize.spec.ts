@@ -7,12 +7,13 @@ import { buildResponsesSseReasoningDeltaPayloadWithNative } from '../../sharedmo
 import { buildResponsesSseReasoningLifecyclePayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseResponseEventPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseTextChunksWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseEventEnvelopeWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 
 async function collectEvents(response: any, overrides: Record<string, unknown> = {}): Promise<any[]> {
   const events: any[] = [];
   const context = {
     requestId: 'req_reasoning_summary_no_normalize',
-    sequenceNumber: 0,
+    sequenceCounter: 0,
     outputIndexCounter: 0,
     contentIndexCounter: new Map<string, number>()
   };
@@ -33,6 +34,29 @@ async function collectEvents(response: any, overrides: Record<string, unknown> =
 }
 
 describe('responses SSE reasoning summary no-normalize boundary', () => {
+  it('builds event envelope timestamp and sequence through the native owner', () => {
+    expect(buildResponsesSseEventEnvelopeWithNative({
+      requestId: 'req_native_envelope',
+      currentSequence: 7,
+      enableTimestampGeneration: false,
+      enableSequenceNumbers: true
+    })).toEqual({
+      requestId: 'req_native_envelope',
+      timestamp: 0,
+      sequenceNumber: 7,
+      nextSequenceCounter: 8,
+      protocol: 'responses',
+      direction: 'json_to_sse'
+    });
+
+    expect(buildResponsesSseEventEnvelopeWithNative({
+      requestId: 'req_native_envelope_no_seq',
+      currentSequence: 7,
+      enableTimestampGeneration: false,
+      enableSequenceNumbers: false
+    }).nextSequenceCounter).toBe(7);
+  });
+
   it('builds text chunks through the native owner', () => {
     expect(buildResponsesSseTextChunksWithNative('hello world again', 8)).toEqual([
       'hello ',

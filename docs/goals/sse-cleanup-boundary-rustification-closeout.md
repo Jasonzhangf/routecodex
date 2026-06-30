@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses SSE event envelope Rust owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for local Responses SSE envelope synthesis (`TimeUtils` import, `getNextSequenceNumber()`, and `createBaseEvent()`). The gate failed on the existing TS owner before the fix.
+- Fix: added Rust/NAPI owner `buildResponsesSseEventEnvelopeJson`; `responses.ts` now only calls `buildResponsesSseEventEnvelopeWithNative()` and writes back `nextSequenceCounter`. TS no longer owns timestamp generation or sequence advancement. The same slice moved response metadata stripping into Rust `normalize_responses_sse_response_payload`, preventing internal metadata from leaking into client-visible SSE response payloads.
+- Positive / reverse tests: Rust covers envelope sequence advancement, sequence-disabled behavior, and metadata removal from response payload; Jest covers the native wrapper and existing sequenced Responses SSE projections; metadata boundary tests lock the no-leak behavior.
+- Verification: Rust focused envelope tests PASS; Rust metadata stripping test PASS; native hotpath build PASS; focused Jest `responses-sse-reasoning-summary-no-normalize + responses-sse-content-part-descriptor-native + responses-sse-output-item-descriptor-native + responses-sse-metadata-boundary + responses-sse-usage-no-fallback + responses-json-to-sse-usage` PASS 34/34; native export-list subtest PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `malformedWire=0`, `metadataLeak=0`, `eventCount=25`.
+
 ### 2026-07-01 Responses SSE error recovery policy Rust owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `responses-sequencer.ts` local recovery policy (`enableRecovery`, `if (config.enableRecovery)`, and item-level `yield buildErrorEvent(error as Error, context, config)`). The gate failed on the existing TS owner.
