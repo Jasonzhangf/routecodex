@@ -38,12 +38,7 @@ export async function runServertoolExecutionStage(args: {
     executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: 0
   });
-  const projectedPreExecutionToolCall =
-    typeof preExecutionBranchPlan.projectedToolCallIndex === 'number'
-      ? dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]
-      : undefined;
-  const isStopMessageAutoPreProjection = projectedPreExecutionToolCall?.name === 'stop_message_auto';
-  if (preExecutionBranchPlan.action === 'client_exec_cli_projection' && !isStopMessageAutoPreProjection) {
+  if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
     return buildServertoolCliProjectionBranchResult({
       options: args.options,
       base: args.baseObject,

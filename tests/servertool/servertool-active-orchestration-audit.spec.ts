@@ -171,6 +171,7 @@ const TARGETS = [
     forbidden: [
       'structuredClone(args.baseObject)',
       'const baseForExecution = structuredClone',
+      'isStopMessageAutoPreProjection',
     ],
     required: [
       'prepareServertoolDispatchStage',

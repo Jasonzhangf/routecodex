@@ -1,3 +1,9 @@
+# 2026-06-30: servertool execution-stage stop_message_auto TS special-case removed
+
+- 本 slice 将 `execution-stage-shell.ts` 中 `stop_message_auto` CLI pre-projection 豁免从 TS 分支移到 Rust `servertool-core/src/execution_branch_contract.rs`。
+- TS execution stage 不再本地读取 `projectedToolCallIndex` 后按工具名二次判断；只执行 Rust branch plan。`verify-servertool-rust-only` 与 `servertool-active-orchestration-audit` 禁止 `isStopMessageAutoPreProjection` 复活。
+- 验证：focused Jest `execution-stage-shell + servertool-active-orchestration-audit` 37 passed；`cargo test -p servertool-core execution_branch_contract --lib -- --nocapture` 4 passed；sharedmodule TS PASS；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；`verify:architecture-mainline-call-map` PASS；`git diff --check` PASS。
+
 # 2026-06-30: web_search / vision_auto backend plan contract physically removed
 - Jason 明确纠偏：`web_search` 和 `vision_auto` 都走 client/CLI，不走 followup/backend。Rust outcome/CLI contract 已保持 `ClientExecCliProjection` 与 routeHint：`web_search -> web_search`、`vision_auto -> multimodal`。
 - 本 slice 删除 handler plan backend carrier：`ServerToolBackendPlan` / `ServerToolBackendResult`、`backendResult` finalize 参数、`hasBackendPlan` / `backendKind` / `unsupported_backend_plan_kind` action 与 error plan、router-hotpath skeleton 旧 `plan_servertool_backend_execution_json` stub。

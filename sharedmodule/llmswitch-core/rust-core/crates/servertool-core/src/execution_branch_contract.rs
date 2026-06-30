@@ -48,6 +48,13 @@ pub fn plan_servertool_execution_branch(
         .find(|(_, tool_call)| tool_call.execution_mode.trim() == "client_exec_cli_projection")
     {
         let (projected_tool_call_index, projected_tool_call) = projected;
+        if projected_tool_call.name.trim() == "stop_message_auto" {
+            return ServertoolExecutionBranchPlan {
+                action: ServertoolExecutionBranchAction::ContinueResponseStage,
+                projected_tool_call_id: None,
+                projected_tool_call_index: None,
+            };
+        }
         let projected_tool_call_id = projected_tool_call.id.trim();
         return ServertoolExecutionBranchPlan {
             action: ServertoolExecutionBranchAction::ClientExecCliProjection,
@@ -81,11 +88,11 @@ mod tests {
     };
 
     #[test]
-    fn plans_cli_projection_before_other_actions() {
+    fn plans_cli_projection_before_other_actions_for_non_stop_message_auto() {
         let plan = plan_servertool_execution_branch(ServertoolExecutionBranchPlanInput {
             executable_tool_calls: vec![ServertoolExecutableToolCall {
                 id: " call_1 ".to_string(),
-                name: "stop_message_auto".to_string(),
+                name: "web_search".to_string(),
                 execution_mode: "client_exec_cli_projection".to_string(),
             }],
             executed_tool_calls_len: 1,
@@ -96,6 +103,24 @@ mod tests {
         );
         assert_eq!(plan.projected_tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(plan.projected_tool_call_index, Some(0));
+    }
+
+    #[test]
+    fn continues_response_stage_for_stop_message_auto_projection_candidate() {
+        let plan = plan_servertool_execution_branch(ServertoolExecutionBranchPlanInput {
+            executable_tool_calls: vec![ServertoolExecutableToolCall {
+                id: " call_stopless ".to_string(),
+                name: " stop_message_auto ".to_string(),
+                execution_mode: "client_exec_cli_projection".to_string(),
+            }],
+            executed_tool_calls_len: 0,
+        });
+        assert_eq!(
+            plan.action,
+            ServertoolExecutionBranchAction::ContinueResponseStage
+        );
+        assert_eq!(plan.projected_tool_call_id, None);
+        assert_eq!(plan.projected_tool_call_index, None);
     }
 
     #[test]

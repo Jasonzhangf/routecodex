@@ -105,6 +105,7 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
     expect(source).toContain('finalizeServertoolResponseStage');
     expect(source).not.toContain('structuredClone(args.baseObject)');
+    expect(source).not.toContain('isStopMessageAutoPreProjection');
   });
 
   test('returns cli projection when pre-execution branch selects it', async () => {
