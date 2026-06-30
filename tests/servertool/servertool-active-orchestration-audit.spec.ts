@@ -136,7 +136,9 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.ts',
-    forbidden: [],
+    forbidden: [
+      'function asObject(',
+    ],
     required: [
       'runServertoolResponseStageWithNative',
       'replaceJsonObjectInPlace',

@@ -5060,6 +5060,12 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
+  if (extractToolCallsShell.includes('function asObject(')) {
+    fail(
+      'servertool-extract-tool-calls-shell-owner',
+      'extract-tool-calls-shell.ts must not restore local asObject carrier helper'
+    );
+  }
   const dispatchPreparationShell = readRequired(TS_DISPATCH_PREPARATION_SHELL);
   for (const marker of [
     "from '../conversion/runtime-metadata.js'",
