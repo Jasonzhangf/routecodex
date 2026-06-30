@@ -89,6 +89,13 @@ for (const forbidden of [
   'if (!source) return Date.now();',
   'return Number.isNaN(parsed) ? Date.now() : parsed;',
   'return hasEvent && hasData;\n    } catch',
+  'static createResponseCreatedEvent(',
+  'static createResponseInProgressEvent(',
+  'static createResponseCompletedEvent(',
+  'static createRequiredActionEvent(',
+  'static createResponseDoneEvent(',
+  'static createResponseErrorEvent(',
+  'timestamp: timestamp ?? Date.now()',
 ]) {
   if (responsesSerializer.includes(forbidden)) {
     failures.push(`Responses SSE serializer retains parse salvage marker: ${forbidden}`);

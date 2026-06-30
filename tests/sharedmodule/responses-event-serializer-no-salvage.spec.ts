@@ -37,4 +37,13 @@ describe('responses event serializer no-salvage boundary', () => {
 
     expect(() => serializer.validateWireFormat(null as unknown as string)).toThrow();
   });
+
+  it('does not expose static event factory helpers that synthesize timestamps', () => {
+    expect((ResponsesEventSerializer as unknown as Record<string, unknown>).createResponseCreatedEvent).toBeUndefined();
+    expect((ResponsesEventSerializer as unknown as Record<string, unknown>).createResponseInProgressEvent).toBeUndefined();
+    expect((ResponsesEventSerializer as unknown as Record<string, unknown>).createResponseCompletedEvent).toBeUndefined();
+    expect((ResponsesEventSerializer as unknown as Record<string, unknown>).createRequiredActionEvent).toBeUndefined();
+    expect((ResponsesEventSerializer as unknown as Record<string, unknown>).createResponseDoneEvent).toBeUndefined();
+    expect((ResponsesEventSerializer as unknown as Record<string, unknown>).createResponseErrorEvent).toBeUndefined();
+  });
 });
