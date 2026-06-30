@@ -22,16 +22,11 @@ import {
   buildResponsesSseOutputTextDonePayloadWithNative,
   buildResponsesSseOutputItemEventPayloadWithNative,
   buildResponsesSseReasoningDeltaPayloadWithNative,
+  buildResponsesSseReasoningLifecyclePayloadWithNative,
   buildResponsesSseReasoningSummaryPayloadWithNative,
   buildResponsesSseResponseEventPayloadWithNative,
   normalizeResponsesSseReasoningSummaryWithNative,
 } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
-
-function normalizeReasoningSummaryFieldWithNative(
-  summary: ResponsesReasoningItem['summary'] | undefined
-): Array<{ type: 'summary_text'; text: string }> | undefined {
-  return normalizeResponsesSseReasoningSummaryWithNative(summary);
-}
 
 // 生成器配置
 export interface ResponsesEventGeneratorConfig {
@@ -369,16 +364,18 @@ export function buildReasoningStartEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
+  const payload = buildResponsesSseReasoningLifecyclePayloadWithNative(
+    'start',
+    reasoning.id,
+    reasoning.summary
+  );
 
   return {
     type: 'reasoning.start',
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      item_id: reasoning.id,
-      summary: normalizeReasoningSummaryFieldWithNative(reasoning.summary)
-    },
+    data: payload,
     sequenceNumber: baseEvent.sequenceNumber
   };
 }
@@ -469,7 +466,7 @@ export function* buildReasoningSummaryEvents(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
-  const summaries = normalizeReasoningSummaryFieldWithNative(reasoning.summary) ?? [];
+  const summaries = normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? [];
   for (let summaryIndex = 0; summaryIndex < summaries.length; summaryIndex++) {
     const text = summaries[summaryIndex]?.text;
     if (!text) continue;
@@ -565,15 +562,17 @@ export function buildReasoningDoneEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
+  const payload = buildResponsesSseReasoningLifecyclePayloadWithNative(
+    'done',
+    reasoning.id
+  );
 
   return {
     type: 'reasoning.done',
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      item_id: reasoning.id
-    },
+    data: payload,
     sequenceNumber: baseEvent.sequenceNumber
   };
 }

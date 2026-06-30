@@ -4,6 +4,7 @@ import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json
 import { normalizeResponsesSseReasoningSummaryWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseReasoningSummaryPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseReasoningDeltaPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseReasoningLifecyclePayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseResponseEventPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import { buildResponsesSseTextChunksWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 
@@ -105,6 +106,27 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       type: 'submit_tool_outputs',
       submit_tool_outputs: { tool_calls: [] }
     });
+  });
+
+  it('builds reasoning lifecycle payloads through native owner', () => {
+    const start = buildResponsesSseReasoningLifecyclePayloadWithNative(
+      'start',
+      'rs_native_lifecycle',
+      ['- keep `verbatim`']
+    );
+    const done = buildResponsesSseReasoningLifecyclePayloadWithNative(
+      'done',
+      'rs_native_lifecycle'
+    );
+
+    expect(start).toEqual({
+      item_id: 'rs_native_lifecycle',
+      summary: [{ type: 'summary_text', text: '- keep `verbatim`' }]
+    });
+    expect(done).toEqual({ item_id: 'rs_native_lifecycle' });
+    expect(() => buildResponsesSseReasoningLifecyclePayloadWithNative('start', ' ', [])).toThrow(
+      'Responses reasoning lifecycle payload item_id is required'
+    );
   });
 
   it('builds output item and content part payload wrappers through native owner', async () => {

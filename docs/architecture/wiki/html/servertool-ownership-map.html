@@ -1229,7 +1229,7 @@
           <li><code>sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts</code></li>
-          <li><code>tests/servertool/followup-runtime-provider-pin.spec.ts</code></li>
+          <li><code>tests/servertool/orchestration-policy-block.spec.ts</code></li>
           <li><code>tests/servertool/server-side-tools.failfast.spec.ts</code></li>
           <li><code>tests/servertool/timeout-error-block.spec.ts</code></li>
           <li><code>docs</code></li>
@@ -1242,7 +1242,7 @@
         </ul>
         <p>Required tests:</p>
         <ul>
-          <li><code>tests/servertool/followup-runtime-provider-pin.spec.ts</code></li>
+          <li><code>tests/servertool/orchestration-policy-block.spec.ts</code></li>
           <li><code>tests/servertool/timeout-error-block.spec.ts</code></li>
           <li><code>tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts</code></li>
         </ul>
@@ -1253,8 +1253,8 @@
         </ul>
         <p>Notes:</p>
         <ul>
-          <li>servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, servertool error payload planning, clientInjectOnly parsing, client inject text normalization, followup error compaction, and adapter provider key resolution.</li>
-          <li>TS orchestration-policy-block may only read env/arguments and call native wrappers.</li>
+          <li>servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, and servertool error payload planning.</li>
+          <li>TS orchestration-policy-block may only read active engine env/arguments and call native wrappers still consumed by runtime.</li>
           <li>TS server-side-tools may only consume <code>isAdapterClientDisconnected</code> from the native timeout-error shell; it must not restore local adapter disconnect scanning.</li>
           <li>TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.</li>
           <li>Do not restore local <code>parseTimeoutMs</code>, <code>parseBooleanLike</code>, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.</li>

@@ -873,7 +873,7 @@ owners:
       - sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts
       - sharedmodule/llmswitch-core/src/servertool/server-side-tools-impl.ts
       - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
-      - tests/servertool/followup-runtime-provider-pin.spec.ts
+      - tests/servertool/orchestration-policy-block.spec.ts
       - tests/servertool/server-side-tools.failfast.spec.ts
       - tests/servertool/timeout-error-block.spec.ts
       - docs
@@ -882,7 +882,7 @@ owners:
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/servertool/handlers
     required_tests:
-      - tests/servertool/followup-runtime-provider-pin.spec.ts
+      - tests/servertool/orchestration-policy-block.spec.ts
       - tests/servertool/timeout-error-block.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
@@ -890,8 +890,8 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, servertool error payload planning, clientInjectOnly parsing, client inject text normalization, followup error compaction, and adapter provider key resolution."
-      - "TS orchestration-policy-block may only read env/arguments and call native wrappers."
+      - "servertool-core owns timeout parsing, timeout watcher planning, client disconnect detection/watcher planning, and servertool error payload planning."
+      - "TS orchestration-policy-block may only read active engine env/arguments and call native wrappers still consumed by runtime."
       - "TS server-side-tools may only consume `isAdapterClientDisconnected` from the native timeout-error shell; it must not restore local adapter disconnect scanning."
       - "TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans."
       - "Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders."

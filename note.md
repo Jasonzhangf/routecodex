@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE reasoning lifecycle payload native owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 `item_id: reasoning.id` / `summary: normalizeReasoningSummaryFieldWithNative` 后锁住 `reasoning.start` / `reasoning.done` payload 不得再由 TS 合成。
+- Fix：新增 Rust/NAPI `buildResponsesSseReasoningLifecyclePayloadJson`；TS `responses.ts` 只调用 native wrapper 并封装 SSE envelope，物理删除本地 `normalizeReasoningSummaryFieldWithNative()` 中间壳。
+- Verification：Rust `reasoning_lifecycle` 2/2 PASS；native build PASS；focused Jest `responses-sse-reasoning-summary-no-normalize` 11/11 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；4444 real replay `completed=true done=true error=false missingType=0 missingSequence=0 malformedWire=0 eventCount=25`。
+
 # 2026-07-01: Responses SSE terminal transport state Rust owner
 - Red evidence：focused `hub-pipeline-stage-residue-audit` 命中 `responses-sse-bridge.ts` / `responses-sse-transport.ts` 仍暴露 `updateResponsesContractProbeFromSseChunkForHttp`，且 `handler-response-sse.ts` 仍维护 `responsesSseBlockCarry` / `responsesContractProbe` / terminal bool。
 - Fix：新增 Rust/NAPI `updateResponsesSseTransportTerminalStateJson`，Rust 统一处理 partial block carry、probe 更新、terminal observation；TS handler 只保留 opaque state + `observedTerminal` action result，SSE transport 不再 import/export probe helper。

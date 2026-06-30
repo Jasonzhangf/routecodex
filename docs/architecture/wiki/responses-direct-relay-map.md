@@ -146,7 +146,7 @@ flowchart TD
 - `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts`
 - `tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts`
 - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
-- `tests/servertool/followup-runtime-provider-pin.spec.ts`
+- `tests/servertool/orchestration-policy-block.spec.ts`
 - `scripts/architecture/verify-architecture-metadata-leak-boundary.mjs`
 - `npm run verify:function-map-compile-gate`
 

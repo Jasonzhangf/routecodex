@@ -115,6 +115,8 @@ for (const forbidden of [
   'delta: content.text',
   'signature: content.signature',
   'image_url: content.image_url',
+  'item_id: reasoning.id',
+  'summary: normalizeReasoningSummaryFieldWithNative',
   "type: 'internal_error'",
   "code: 'generation_error'",
   'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',

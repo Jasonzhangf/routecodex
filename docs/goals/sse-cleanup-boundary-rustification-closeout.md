@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses SSE reasoning lifecycle payload native owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers `item_id: reasoning.id` and `summary: normalizeReasoningSummaryFieldWithNative`; this caught the remaining TS synthesis path for `reasoning.start` / `reasoning.done` payloads.
+- Fix: added Rust/NAPI owner `buildResponsesSseReasoningLifecyclePayloadJson`; TS `buildReasoningStartEvent()` and `buildReasoningDoneEvent()` now call `buildResponsesSseReasoningLifecyclePayloadWithNative()` and only wrap the SSE event envelope. The local TS `normalizeReasoningSummaryFieldWithNative()` helper was physically removed, so summary normalization is consumed directly from native owner.
+- Positive / reverse tests: Rust covers start/done lifecycle payload construction and blank `item_id` fail-fast; Jest covers native wrapper output and missing `item_id` error propagation.
+- Verification: `cargo test -p router-hotpath-napi reasoning_lifecycle --lib -- --nocapture` PASS 2/2; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; focused Jest `responses-sse-reasoning-summary-no-normalize` PASS 11/11; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `malformedWire=0`, `eventCount=25`.
+
 ### 2026-06-30 Responses direct JSON client model restore Rust owner slice
 
 - Red evidence: deleting the TS/JS direct-body model helper path (`readResponsesRequestModelForHttp` / `ensureResponsesJsonToSseRequiredFieldsForHttp`) made `tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts` fail because direct JSON client projection no longer emitted `model: gpt-5.4`.

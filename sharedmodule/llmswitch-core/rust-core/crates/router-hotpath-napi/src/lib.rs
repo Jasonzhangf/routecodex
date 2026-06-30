@@ -2084,6 +2084,18 @@ pub fn build_responses_sse_reasoning_summary_payload_json(
     .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildResponsesSseReasoningLifecyclePayloadJson")]
+pub fn build_responses_sse_reasoning_lifecycle_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_reasoning_lifecycle_payload_json(
+        payload_json,
+        lifecycle_json,
+    )
+    .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "buildResponsesSseReasoningDeltaPayloadJson")]
 pub fn build_responses_sse_reasoning_delta_payload_json(
     payload_json: String,

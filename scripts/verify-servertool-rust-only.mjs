@@ -2481,6 +2481,15 @@ function checkOrchestrationPolicyRustOwner() {
     'const followupTimeoutPolicyInput = {',
     'parseServertoolTimeoutMsWithNative(timeoutPolicyInput)',
     'parseServertoolTimeoutMsWithNative(followupTimeoutPolicyInput)',
+    'export function resolveServerToolFollowupTimeoutMs(',
+    'export function readClientInjectOnly(',
+    'export function normalizeClientInjectText(',
+    'export function compactFollowupErrorReason(',
+    'export function resolveAdapterContextProviderKey(',
+    'readClientInjectOnlyWithNative',
+    'normalizeClientInjectTextWithNative',
+    'compactFollowupErrorReasonWithNative',
+    'resolveAdapterContextProviderKeyWithNative',
   ]) {
     if (tsShell.includes(keyword)) {
       fail(
@@ -2517,10 +2526,6 @@ function checkOrchestrationPolicyRustOwner() {
     'parseServertoolTimeoutMsWithNative',
     'function resolveServerToolTimeoutMsFromEnv(',
     'return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });',
-    'readClientInjectOnlyWithNative',
-    'normalizeClientInjectTextWithNative',
-    'compactFollowupErrorReasonWithNative',
-    'resolveAdapterContextProviderKeyWithNative',
     'containsSyntheticRouteCodexControlTextWithNative',
   ]) {
     assertContains(

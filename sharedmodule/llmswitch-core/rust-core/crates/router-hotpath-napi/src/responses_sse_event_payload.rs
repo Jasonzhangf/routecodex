@@ -1333,6 +1333,71 @@ pub fn build_responses_sse_reasoning_summary_payload_json(
     })
 }
 
+fn build_responses_sse_reasoning_lifecycle_payload(
+    lifecycle: &str,
+    item_id: &str,
+    summary: Option<&Value>,
+) -> Result<Value, String> {
+    if item_id.trim().is_empty() {
+        return Err("Responses reasoning lifecycle payload item_id is required".to_string());
+    }
+    let mut payload = Map::new();
+    payload.insert("item_id".to_string(), Value::String(item_id.to_string()));
+    match lifecycle {
+        "start" => {
+            if let Some(summary) = summary {
+                let normalized = normalize_responses_sse_reasoning_summary(summary)?;
+                if !normalized.is_null() {
+                    payload.insert("summary".to_string(), normalized);
+                }
+            }
+        }
+        "done" => {}
+        other => {
+            return Err(format!(
+                "Unsupported Responses reasoning lifecycle payload: {}",
+                other
+            ));
+        }
+    }
+    Ok(Value::Object(payload))
+}
+
+pub fn build_responses_sse_reasoning_lifecycle_payload_json(
+    payload_json: String,
+    lifecycle_json: Option<String>,
+) -> Result<String, String> {
+    let lifecycle = lifecycle_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Responses reasoning lifecycle payload lifecycle is required".to_string())?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses reasoning lifecycle payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(source) = payload.as_object() else {
+        return Err("Responses reasoning lifecycle payload expected object".to_string());
+    };
+    let item_id = source
+        .get("item_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Responses reasoning lifecycle payload missing item_id".to_string())?;
+    let output = build_responses_sse_reasoning_lifecycle_payload(
+        lifecycle,
+        item_id,
+        source.get("summary"),
+    )?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses reasoning lifecycle payload JSON: {}",
+            error
+        )
+    })
+}
+
 fn build_responses_sse_reasoning_delta_payload(
     lifecycle: &str,
     output_index: i64,
@@ -2115,6 +2180,33 @@ mod tests {
                 .unwrap_err();
 
         assert!(err.contains("Responses reasoning summary payload item_id is required"));
+    }
+
+    #[test]
+    fn builds_responses_sse_reasoning_lifecycle_payloads() {
+        let start = build_responses_sse_reasoning_lifecycle_payload(
+            "start",
+            "rs_1",
+            Some(&json!(["- keep `verbatim`"])),
+        )
+        .unwrap();
+        let done = build_responses_sse_reasoning_lifecycle_payload("done", "rs_1", None).unwrap();
+
+        assert_eq!(
+            start,
+            json!({
+                "item_id": "rs_1",
+                "summary": [{ "type": "summary_text", "text": "- keep `verbatim`" }]
+            })
+        );
+        assert_eq!(done, json!({ "item_id": "rs_1" }));
+    }
+
+    #[test]
+    fn rejects_responses_sse_reasoning_lifecycle_payload_missing_item_id() {
+        let err = build_responses_sse_reasoning_lifecycle_payload("start", " ", None).unwrap_err();
+
+        assert!(err.contains("Responses reasoning lifecycle payload item_id is required"));
     }
 
     #[test]

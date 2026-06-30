@@ -65,6 +65,27 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts',
+    forbidden: [
+      'export function resolveServerToolFollowupTimeoutMs(',
+      'export function readClientInjectOnly(',
+      'export function normalizeClientInjectText(',
+      'export function compactFollowupErrorReason(',
+      'export function resolveAdapterContextProviderKey(',
+      'readClientInjectOnlyWithNative',
+      'normalizeClientInjectTextWithNative',
+      'compactFollowupErrorReasonWithNative',
+      'resolveAdapterContextProviderKeyWithNative',
+    ],
+    required: [
+      'function resolveServerToolTimeoutMsFromEnv(',
+      'parseServertoolTimeoutMsWithNative({ raw: raw || undefined })',
+      'export function resolveServerToolTimeoutMs()',
+      'export function containsSyntheticRouteCodexControlText(',
+      'containsSyntheticRouteCodexControlTextWithNative(value)',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts',
     forbidden: [
       'isServertoolEnabledByConfig',

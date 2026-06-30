@@ -466,7 +466,7 @@ verification:
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/followup-runtime-provider-pin.spec.ts
+      - tests/servertool/orchestration-policy-block.spec.ts
       - tests/servertool/server-side-tools.failfast.spec.ts
       - tests/servertool/timeout-error-block.spec.ts
     smoke:
@@ -475,7 +475,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "servertool-core owns timeout watcher, client disconnect detection/watcher, servertool error payload, client-inject, followup error compaction, and adapter provider key policy; TS may only pass env/metadata/value into native wrappers or execute timer/Error-object glue from native plans."
+      - "servertool-core owns timeout watcher, client disconnect detection/watcher, and servertool error payload policy; TS may only pass active engine env/metadata/value into native wrappers or execute timer/Error-object glue from native plans."
 
 
   - feature_id: hub.servertool_rust_only_closeout
