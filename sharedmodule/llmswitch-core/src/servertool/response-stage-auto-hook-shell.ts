@@ -18,13 +18,11 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   | { action: 'continue_without_result' }
   | { action: 'return_auto_hook_result'; result: ServerSideToolEngineResult }
 > {
-  const responseHookRequired = args.responseStageGatePlan.responseHookRequired === true;
-  const responseHookName = String(args.responseStageGatePlan.responseHookName ?? 'unknown');
   const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: false,
     hasAutoHookResult: false,
-    responseHookRequired
+    responseHookRequired: args.responseStageGatePlan.responseHookRequired === true
   });
   if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass') {
     return { action: 'return_passthrough_bypass' };
@@ -40,12 +38,12 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: true,
     hasAutoHookResult: Boolean(autoHookResult),
-    responseHookRequired
+    responseHookRequired: args.responseStageGatePlan.responseHookRequired === true
   });
   if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
     throw createServertoolRequiredResponseHookEmptyError({
       requestId: args.options.requestId,
-      responseHookName
+      responseHookName: String(args.responseStageGatePlan.responseHookName ?? 'unknown')
     });
   }
   if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
