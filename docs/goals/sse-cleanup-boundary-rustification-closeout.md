@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Anthropic SSE tool_result id fail-fast slice
+
+- Red evidence: `verify:sse-architecture-boundary` added a required marker for `Invalid Anthropic tool_result block: missing tool_use_id` and failed before the fix. Focused Jest also failed because missing `tool_result.tool_use_id` resolved successfully and emitted a content block with `tool_use_id: undefined`.
+- Fix: `anthropic-sequencer.ts` now requires `tool_result.tool_use_id` to be present and non-blank; invalid tool result ids fail fast before any content block is emitted.
+- Positive / reverse tests: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` now covers missing `tool_result.tool_use_id` fail-fast; existing positive and reverse cases still cover valid event flow, missing id/role/tool id/tool input, invalid content, missing content, text, redacted data, and stop_reason.
+- Verification: focused Jest `anthropic-sse-required-fields-no-fallback` PASS 11/11; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
+- Replay evidence: source replay `eventCount=5`, `hasToolResult=true`, `hasToolUseId=true`, `missingToolResultIdFailed=true`, `missingToolResultIdMessage="Invalid Anthropic tool_result block: missing tool_use_id"`.
+- Real sample gap: current Anthropic sample directories still contain 429 provider-error snapshots only, not a successful provider-response SSE/JSON replay sample.
+
 ### 2026-07-01 Anthropic SSE tool_use input fallback removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `block.input ?? {}` and `JSON.stringify(input ?? {})` in `anthropic-sequencer.ts` and failed before the fix. Focused Jest also failed because a missing `tool_use.input` resolved successfully and emitted an `input_json_delta` with `{}`.

@@ -295,6 +295,9 @@ for (const forbidden of [
     failures.push(`Anthropic SSE sequencer must not synthesize fallback/event envelope truth: ${forbidden}`);
   }
 }
+if (!anthropicSequencer.includes('Invalid Anthropic tool_result block: missing tool_use_id')) {
+  failures.push('Anthropic SSE sequencer must fail fast when tool_result.tool_use_id is missing');
+}
 
 const geminiEventSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts');
 for (const forbidden of [

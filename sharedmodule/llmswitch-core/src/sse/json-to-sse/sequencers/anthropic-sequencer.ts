@@ -164,6 +164,9 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
           yield createEvent('content_block_stop', { index });
           index += 1;
         } else if (block.type === 'tool_result') {
+          if (!block.tool_use_id || !block.tool_use_id.trim()) {
+            throw new Error('Invalid Anthropic tool_result block: missing tool_use_id');
+          }
           yield createEvent('content_block_start', {
             index,
             content_block: {

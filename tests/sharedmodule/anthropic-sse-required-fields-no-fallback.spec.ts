@@ -91,6 +91,21 @@ describe('anthropic SSE required fields no-fallback boundary', () => {
     ))).rejects.toThrow('Invalid Anthropic tool_use block: missing input');
   });
 
+  it('throws when tool_result tool_use_id is missing instead of emitting an undefined id', async () => {
+    const sequencer = createAnthropicSequencer();
+
+    await expect(collectEvents(sequencer.sequenceResponse(
+      baseResponse({
+        content: [{
+          type: 'tool_result',
+          tool_use_id: undefined as unknown as string,
+          content: 'done'
+        }]
+      }),
+      'req_anthropic_missing_tool_result_id'
+    ))).rejects.toThrow('Invalid Anthropic tool_result block: missing tool_use_id');
+  });
+
   it('throws when a content block is null instead of silently skipping it', async () => {
     const sequencer = createAnthropicSequencer();
 
