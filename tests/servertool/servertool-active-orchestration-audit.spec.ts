@@ -357,6 +357,12 @@ const TARGETS = [
       'reenterPipeline: options.reenterPipeline',
       'clientInjectDispatch: options.clientInjectDispatch'
     ],
+    required: [
+      'const bypassResult = {',
+      'return bypassResult;',
+      'const passthroughResult = {',
+      'return passthroughResult;',
+    ],
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts',

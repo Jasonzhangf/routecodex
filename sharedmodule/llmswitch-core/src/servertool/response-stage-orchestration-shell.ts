@@ -71,13 +71,14 @@ export async function runServertoolResponseStageOrchestrationShell(
       skipReason: gatePlan.skipReason || 'followup_bypass',
       inputShape: detectProviderResponseShapeWithNative(options.payload)
     });
-    return {
+    const bypassResult: ServertoolResponseStageShellResult = {
       payload: options.payload,
       executed: false,
       ...(gatePlan.skipReason === 'no_servertool_support' || gatePlan.skipReason === 'followup_bypass'
         ? { skipReason: gatePlan.skipReason }
         : {})
     };
+    return bypassResult;
   }
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
 
@@ -118,8 +119,9 @@ export async function runServertoolResponseStageOrchestrationShell(
     executed: false,
     inputShape
   });
-  return {
+  const passthroughResult: ServertoolResponseStageShellResult = {
     payload: options.payload,
     executed: false
   };
+  return passthroughResult;
 }

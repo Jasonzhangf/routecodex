@@ -5184,6 +5184,10 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolResponseStageGateWithNative',
     'detectProviderResponseShapeWithNative',
     'runServerToolOrchestration',
+    'const bypassResult = {',
+    'return bypassResult;',
+    'const passthroughResult = {',
+    'return passthroughResult;',
   ]) {
     if (!responseStageOrchestrationShell.includes(marker)) {
       fail(
