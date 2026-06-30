@@ -6,8 +6,8 @@ import {
 import {
   buildServertoolDispatchPlanInput
 } from '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js';
-import { buildServertoolOutcomePlanInput } from '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js';
 import { buildServertoolDispatchPlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import { buildServertoolOutcomePlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { listServertoolToolSpecs } from '../../sharedmodule/llmswitch-core/src/servertool/skeleton-config.js';
 
 const EXECUTABLE_TOOL_NAME = 'web_search';
@@ -134,7 +134,7 @@ describe('server-side-tools native dispatch planner', () => {
     };
 
     const outcome = planServertoolOutcomeWithNative(
-      buildServertoolOutcomePlanInput({
+      buildServertoolOutcomePlanInputWithNative({
         toolCalls: [
           { id: 'call_dispatch_1', name: spec.name, arguments: '{}' },
           { id: 'call_dispatch_2', name: 'client_side_tool', arguments: '{}' }

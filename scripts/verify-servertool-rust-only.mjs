@@ -2722,7 +2722,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'servertool-execution-handler-outcome-rust-owner',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
-    'const outcomePlanInput = buildServertoolOutcomePlanInput({'
+    'const outcomePlanInput = buildServertoolOutcomePlanInputWithNative({'
   );
   assertContains(
     'servertool-execution-handler-outcome-rust-owner',

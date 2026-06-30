@@ -792,7 +792,6 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
-    buildServertoolOutcomePlanInput: jest.fn((input: any) => input),
     materializeServertoolPlannedResult: jest.fn(async (planned: any) => planned),
     materializeNativeToolCallExecutionOutcome: jest.fn((args: any) => ({
       mode: 'tool_flow',

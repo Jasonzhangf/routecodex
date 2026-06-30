@@ -67,20 +67,6 @@ export function appendExecutedToolRecordFromNative(
   state.lastExecution = next.lastExecution;
 }
 
-export const buildServertoolOutcomePlanInput = (args: {
-  toolCalls: ToolCall[];
-  executionState: ServertoolExecutionLoopState;
-  adapterContext?: unknown;
-  baseForExecution?: unknown;
-}) => {
-  return buildServertoolOutcomePlanInputWithNative({
-    toolCalls: args.toolCalls,
-    executionState: args.executionState,
-    ...(args.adapterContext !== undefined ? { adapterContext: args.adapterContext } : {}),
-    ...(args.baseForExecution !== undefined ? { baseForExecution: args.baseForExecution } : {}),
-  });
-};
-
 type ServertoolExecutionDispatchErrorInput = Parameters<
   typeof planServertoolExecutionDispatchErrorWithNative
 >[0];
@@ -97,7 +83,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   toolCalls: ToolCall[];
   executionState: ServertoolExecutionLoopState;
 }): ServerSideToolEngineResult {
-  const outcomePlanInput = buildServertoolOutcomePlanInput({
+  const outcomePlanInput = buildServertoolOutcomePlanInputWithNative({
     toolCalls: args.toolCalls,
     executionState: args.executionState,
     adapterContext: args.options.adapterContext,

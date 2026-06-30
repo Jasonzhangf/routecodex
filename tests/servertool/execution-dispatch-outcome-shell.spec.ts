@@ -58,7 +58,6 @@ jest.unstable_mockModule(
     materializeServertoolPlannedResult,
     createServertoolExecutionLoopStateFromNative,
     appendExecutedToolRecordFromNative,
-    buildServertoolOutcomePlanInput: jest.fn((input: any) => input),
     executeBuiltinServerToolHandler,
     materializeNativeToolCallExecutionOutcome: materializeNativeToolCallExecutionOutcomeNative
   })

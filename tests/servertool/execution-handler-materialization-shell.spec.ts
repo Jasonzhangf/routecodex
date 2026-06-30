@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
-const buildServertoolOutcomePlanInputWithNative = jest.fn((input: any) => input);
+const buildServertoolOutcomePlanInputWithNativeMock = jest.fn((input: any) => input);
 const planServertoolOutcomeWithNative = jest.fn();
 const planServertoolExecutionOutcomeRuntimeActionWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
@@ -35,7 +35,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
-    buildServertoolOutcomePlanInputWithNative,
+    buildServertoolOutcomePlanInputWithNative: buildServertoolOutcomePlanInputWithNativeMock,
     getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => ({})),
     normalizeServertoolRegistrationSpecWithNative: jest.fn(() => null),
     planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({ entries: [] })),
@@ -109,7 +109,6 @@ jest.unstable_mockModule(
 );
 
 const {
-  buildServertoolOutcomePlanInput,
   materializeNativeToolCallExecutionOutcome
 } = await import(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js'
@@ -164,11 +163,12 @@ describe('execution-handler-materialization-shell', () => {
 
     expect(source).toContain('adapterContext: args.options.adapterContext');
     expect(source).toContain('baseForExecution: args.baseForExecution');
-    expect(source).toContain('const outcomePlanInput = buildServertoolOutcomePlanInput({');
+    expect(source).toContain('const outcomePlanInput = buildServertoolOutcomePlanInputWithNative({');
     expect(source).toContain('const outcomePlan = planServertoolOutcomeWithNative(outcomePlanInput);');
     expect(source).toContain('function throwServertoolExecutionDispatchError(args: ServertoolExecutionDispatchErrorInput): never');
     expect(source).toContain('planServertoolExecutionDispatchErrorWithNative(args)');
     expect(source).toContain('finalChatResponse: args.baseForExecution');
+    expect(source).not.toContain('export const buildServertoolOutcomePlanInput =');
     expect(source).not.toContain('structuredClone(args.base)');
     expect(source).not.toContain('base: JsonObject;');
     expect(source).not.toContain('filterOutExecutedToolCalls:');
@@ -273,7 +273,7 @@ describe('execution-handler-materialization-shell', () => {
       }
     });
 
-    expect(buildServertoolOutcomePlanInputWithNative).toHaveBeenCalledWith(
+    expect(buildServertoolOutcomePlanInputWithNativeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         toolCalls: [],
         executionState: expect.objectContaining({
@@ -335,14 +335,14 @@ describe('execution-handler-materialization-shell', () => {
     });
   });
 
-  test('builds outcome-plan input through Rust owner instead of local TS branch assembly', () => {
+  test('builds outcome-plan input through Rust owner directly', () => {
     const executionState = {
       executedToolCalls: [],
       executedIds: new Set<string>(),
       executedFlowIds: []
     };
 
-    const input = buildServertoolOutcomePlanInput({
+    const input = buildServertoolOutcomePlanInputWithNativeMock({
       toolCalls: [{ id: 'call_dispatch_1', name: 'web_search', arguments: '{}' }],
       executionState,
       adapterContext: { sessionId: 'sess_dispatch_1' },
