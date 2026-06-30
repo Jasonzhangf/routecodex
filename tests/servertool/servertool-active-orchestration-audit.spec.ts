@@ -123,6 +123,7 @@ const TARGETS = [
       'if (mandatoryResult) {',
       'const toolFlowResult: ServerSideToolEngineResult = {',
       'return toolFlowResult;',
+      'export async function runAutoHookExecutionQueue(',
       'ServerToolHandlerPlan',
       'function planAutoHookRuntimeAttempt(',
       'const attemptPlan = planAutoHookRuntimeAttempt({',

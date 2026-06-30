@@ -3321,6 +3321,7 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'finalChatResponse: queueResult.chatResponse');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'execution: queueResult.execution');
   for (const keyword of [
+    'export async function runAutoHookExecutionQueue(',
     'errorAttemptInput',
     'runtimeAttemptInput',
     'callerFinalizationInput',

@@ -24,7 +24,7 @@ type AutoHookExecutionItem = {
   execution: ServerToolExecutionDescriptor;
 };
 
-export async function runAutoHookExecutionQueue(args: {
+async function runAutoHookExecutionQueue(args: {
   queueName: ServerToolAutoHookTraceEvent['queue'];
   hooks: AutoHookExecutionItem[];
   options: ServerSideToolEngineOptions;
