@@ -41,8 +41,8 @@ const TARGETS = [
     required: [
       'function throwServertoolExecutionDispatchError(args: ServertoolExecutionDispatchErrorInput): never',
       'planServertoolExecutionDispatchErrorWithNative(args)',
-  'const outcomePlanInput = buildServertoolOutcomePlanInputWithNative({',
-      'const outcomePlan = planServertoolOutcomeWithNative(outcomePlanInput);',
+      'const outcomePlan = planServertoolOutcomeWithNative(',
+      'buildServertoolOutcomePlanInputWithNative({',
     ],
   },
   {

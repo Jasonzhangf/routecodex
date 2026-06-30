@@ -2724,13 +2724,13 @@ function checkServertoolExecutionDispatchRustOwner() {
     'servertool-execution-handler-outcome-rust-owner',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
-    'const outcomePlanInput = buildServertoolOutcomePlanInputWithNative({'
+    'buildServertoolOutcomePlanInputWithNative({'
   );
   assertContains(
     'servertool-execution-handler-outcome-rust-owner',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
-    'const outcomePlan = planServertoolOutcomeWithNative(outcomePlanInput);'
+    'const outcomePlan = planServertoolOutcomeWithNative('
   );
   for (const keyword of [
     'listRegisteredServerToolHandlerRecords()',

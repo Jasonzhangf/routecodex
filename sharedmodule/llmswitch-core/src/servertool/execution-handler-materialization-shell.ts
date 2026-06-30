@@ -83,13 +83,14 @@ export function materializeNativeToolCallExecutionOutcome(args: {
   toolCalls: ToolCall[];
   executionState: ServertoolExecutionLoopState;
 }): ServerSideToolEngineResult {
-  const outcomePlanInput = buildServertoolOutcomePlanInputWithNative({
-    toolCalls: args.toolCalls,
-    executionState: args.executionState,
-    adapterContext: args.options.adapterContext,
-    baseForExecution: args.baseForExecution,
-  });
-  const outcomePlan = planServertoolOutcomeWithNative(outcomePlanInput);
+  const outcomePlan = planServertoolOutcomeWithNative(
+    buildServertoolOutcomePlanInputWithNative({
+      toolCalls: args.toolCalls,
+      executionState: args.executionState,
+      adapterContext: args.options.adapterContext,
+      baseForExecution: args.baseForExecution,
+    })
+  );
 
   const outcomeRuntimeActionPlan = planServertoolExecutionOutcomeRuntimeActionWithNative({
     outcomeMode: outcomePlan.outcomeMode,
