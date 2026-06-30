@@ -301,6 +301,7 @@ const geminiSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/se
 for (const forbidden of [
   'parts.filter((part): part is GeminiContentPart => Boolean(part))',
   'sequenceNumber: 0',
+  'timestamp: Date.now()',
 ]) {
   if (geminiSequencer.includes(forbidden)) {
     failures.push(`Gemini SSE sequencer must not synthesize fallback event truth: ${forbidden}`);

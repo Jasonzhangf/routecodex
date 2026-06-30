@@ -1,4 +1,4 @@
-import type { BaseSseEvent, StreamDirection } from './core-interfaces.js';
+import type { StreamDirection } from './core-interfaces.js';
 import type { ChatReasoningMode } from './chat-types.js';
 
 export interface GeminiContentTextPart {
@@ -130,7 +130,7 @@ export interface SseToGeminiJsonContext {
 
 export type GeminiSseEventType = 'gemini.data' | 'gemini.done' | 'gemini.error';
 
-export interface GeminiSseEvent extends BaseSseEvent {
+export interface GeminiSseEvent {
   type: GeminiSseEventType;
   event?: GeminiSseEventType;
   protocol: 'gemini-chat';

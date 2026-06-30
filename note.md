@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE timestamp synthesis removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 `timestamp: Date.now()` marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明 `gemini-sequencer.ts` 对每个 Gemini SSE event 合成本地 timestamp。
+- Fix：`GeminiSseEvent` 不再继承要求 `timestamp` 的 `BaseSseEvent`，`createEvent()` 不再写 `timestamp: Date.now()`；Gemini writer/serializer 仍只依赖 `protocol` / `event` / `type` / `data`，合法 `gemini.data` / `gemini.done` wire 输出保持不变。
+- Verification：focused Jest `gemini-sse-no-role-fallback` 3/3 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；`build:base` PASS；`git diff --check` PASS；source replay `eventCount=2 dataEvents=1 doneEvents=1 hasSequenceNumber=false hasTimestamp=false hasPartText=true hasDone=true`。真实 Gemini 样本缺口同前：当前 `~/.rcc/codex-samples` 与 `/Volumes/extension/.rcc/codex-samples` 未找到 Gemini provider-response 样本。
+
 # 2026-07-01: Gemini SSE fixed sequence number removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 `sequenceNumber: 0` marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明 `gemini-sequencer.ts` 对每个 Gemini SSE event 合成固定 sequence truth。
 - Fix：`createEvent()` 不再写 `sequenceNumber: 0`；Gemini serializer 只写 `event:` / `data:` wire frame，不依赖该内部字段。合法事件仍输出 `gemini.data` / `gemini.done`，但不再携带伪造序号。
