@@ -140,7 +140,6 @@ describe('engine-observation-shell', () => {
 
   test('postflight stage recorder failures are fail-fast', async () => {
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
-    const logNonBlocking = jest.fn();
     const stageRecorder = {
       record: jest.fn(() => {
         throw new Error('postflight recorder down');
@@ -175,11 +174,9 @@ describe('engine-observation-shell', () => {
         flowId: 'flow-postflight-failfast',
         totalSteps: 5,
         stageRecorder: stageRecorder as any,
-        logProgress: jest.fn(),
-        logNonBlocking
+        logProgress: jest.fn()
       })
     ).rejects.toThrow('postflight recorder down');
-    expect(logNonBlocking).not.toHaveBeenCalled();
   });
 
   test('postflight observation summary is native-owned', async () => {
@@ -227,8 +224,7 @@ describe('engine-observation-shell', () => {
       flowId: 'flow-postflight-summary',
       totalSteps: 5,
       stageRecorder: stageRecorder as any,
-      logProgress: jest.fn(),
-      logNonBlocking: jest.fn()
+      logProgress: jest.fn()
     });
 
     expect(stageRecorder.record).toHaveBeenCalledWith(

@@ -34,7 +34,6 @@ export function createServertoolObservation(args: {
   logProgress: ServertoolProgressLogger['logProgress'];
   logAutoHookTrace: ServertoolProgressLogger['logAutoHookTrace'];
   logStopCompare: ServertoolProgressLogger['logStopCompare'];
-  logNonBlocking: typeof logServertoolNonBlocking;
 } {
   const BLUE = '\x1b[38;5;39m';
   const YELLOW = '\x1b[38;5;214m';
@@ -57,8 +56,7 @@ export function createServertoolObservation(args: {
     reset: RESET
   });
   return {
-    ...logger,
-    logNonBlocking: logServertoolNonBlocking
+    ...logger
   };
 }
 

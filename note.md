@@ -1,3 +1,10 @@
+# 2026-06-30: servertool postflight dead non-blocking plumbing removed
+
+- `engine-observation-shell.ts -> engine-orchestration-shell.ts -> engine-postflight-shell.ts` 之间未消费的 `logNonBlocking` 残留参数链已删除；postflight 本身没有任何 non-blocking 日志面，这条 TS plumbing 仅增加壳层噪音。
+- `verify:servertool-rust-only` 已新增 `logNonBlocking:` 防复活门禁，避免 stopless postflight / postflight observation 重新长出无消费者的参数壳。
+- `engine-observation-shell.spec.ts` 已同步删除对应假依赖；postflight fail-fast 仍锁 `stageRecorder` 失败直接抛错，不做 non-blocking 吞并。
+- 验证：focused Jest `engine-observation-shell + engine.stopless-session-thin-shell + servertool-active-orchestration-audit` 50 passed；sharedmodule TS PASS；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；`verify:architecture-mainline-call-map` PASS；`git diff --check` PASS。
+
 # 2026-06-30: servertool dead feature-id exports removed from runtime shells
 
 - `engine-selection-block.ts`、`orchestration-policy-block.ts`、`timeout-error-block.ts` 中无 consumer 的 `SERVERTOOL_*_FEATURE_ID` 导出已删除，避免 function-map/source-anchor 文本继续以 runtime export 形式驻留在 TS 壳。

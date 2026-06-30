@@ -72,7 +72,6 @@ export async function runServertoolEnginePostflight(args: {
   totalSteps: number;
   stageRecorder?: StageRecorder;
   logProgress: (step: number, total: number, status: string, details?: Record<string, unknown>) => void;
-  logNonBlocking: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 }): Promise<
   | {
       chat: JsonObject;

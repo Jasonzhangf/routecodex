@@ -5629,6 +5629,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     }
   }
   for (const marker of [
+    'logNonBlocking:',
     'resolveStoplessCliProjectionContext(',
     'planStoplessCliProjectionContextWithNative(',
     'buildServertoolCliProjectionForAutoFlowShell({',
@@ -6035,6 +6036,7 @@ function checkServertoolPostflightLoggingFailFast() {
   const postflightSource = readRequired(postflightFile);
   const observationSpec = readRequired(`${ROOT}/tests/servertool/engine-observation-shell.spec.ts`);
   for (const marker of [
+    'logNonBlocking:',
     'const followupSummary: Record<string, unknown> = {',
     "if ('payload' in followup)",
     'payloadRecord.messages',

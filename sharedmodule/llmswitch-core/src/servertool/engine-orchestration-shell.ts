@@ -87,8 +87,7 @@ export async function runServerToolOrchestrationShell(
     logStopEntry,
     logProgress,
     logAutoHookTrace,
-    logStopCompare,
-    logNonBlocking
+    logStopCompare
   } = createServertoolObservation({
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
@@ -217,8 +216,7 @@ export async function runServerToolOrchestrationShell(
     flowId,
     totalSteps,
     stageRecorder: options.stageRecorder,
-    logProgress,
-    logNonBlocking
+    logProgress
   });
 }
 
