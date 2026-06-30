@@ -257,7 +257,8 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('planServertoolEngineSkipWithNative({');
     expect(source).toContain('recordServertoolEngineMatchSkipped({');
     expect(source).toContain('recordServertoolEngineMatchHit({');
-    expect(source).toContain('planStoplessExecutionWithNative({');
+    expect(source).toContain('const stoplessExecutionInput = {');
+    expect(source).toContain('const stoplessExecutionPlan = planStoplessExecutionWithNative(stoplessExecutionInput);');
     expect(source).toContain('runServertoolEnginePostflight({');
   });
 });

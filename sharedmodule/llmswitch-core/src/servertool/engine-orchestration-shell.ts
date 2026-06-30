@@ -173,7 +173,7 @@ export async function runServerToolOrchestrationShell(
   const requestTruthSessionId = readRequestTruthSessionIdFromAnyBoundMetadataCenter(
     options.adapterContext as Record<string, unknown>
   );
-  const stoplessExecutionPlan = planStoplessExecutionWithNative({
+  const stoplessExecutionInput = {
     flowId,
     execution:
       engineResult.execution && typeof engineResult.execution === 'object'
@@ -184,7 +184,8 @@ export async function runServerToolOrchestrationShell(
       runtimeControl && typeof runtimeControl === 'object'
         ? (runtimeControl as Record<string, unknown>)
         : null
-  });
+  };
+  const stoplessExecutionPlan = planStoplessExecutionWithNative(stoplessExecutionInput);
   const stoplessExecution = stoplessExecutionPlan.execution;
   const stoplessPlan = stoplessExecutionPlan.orchestrationPlan;
   const hasServertoolCliProjectionContext = stoplessExecution.flowId === 'servertool_cli_projection';

@@ -4247,7 +4247,7 @@ function checkStoplessOrchestrationActionRustOwner() {
     ['stopless-orchestration-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_stopless_execution_json'],
     ['stopless-orchestration-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_stopless_execution_json'],
     ['stopless-orchestration-action-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planStoplessExecutionJson'],
-    ['stopless-orchestration-action-thin-shell', TS_ENGINE_ORCHESTRATION_SHELL, servertoolEngine, 'planStoplessExecutionWithNative({'],
+    ['stopless-orchestration-action-thin-shell', TS_ENGINE_ORCHESTRATION_SHELL, servertoolEngine, 'const stoplessExecutionPlan = planStoplessExecutionWithNative(stoplessExecutionInput);'],
     ['stopless-orchestration-action-thin-shell', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'export function planStoplessExecutionWithNative'],
   ]) {
     assertContains(check, file, content, needle);
@@ -5043,6 +5043,8 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEngineSkipWithNative({',
     'recordServertoolEngineMatchSkipped({',
     'recordServertoolEngineMatchHit({',
+    'const stoplessExecutionInput = {',
+    'const stoplessExecutionPlan = planStoplessExecutionWithNative(stoplessExecutionInput);',
     'const postflightEngineResult = {',
     'engineResult: postflightEngineResult,',
     'runServertoolEnginePostflight({',

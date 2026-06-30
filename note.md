@@ -4,6 +4,11 @@
 - 关键验证：`provider-failure-policy.spec.ts`、`provider-failure-policy-upstream-stream-incomplete.spec.ts`、`request-executor-error-action-queue.spec.ts`、`request-executor-global-error-backoff.spec.ts`、`virtual-router-health-last-provider.spec.ts`、`virtual-router-provider-unavailable-cooldown-native.spec.ts`、`virtual-router-error-classification-top-level-native.spec.ts` 全绿。
 - 发现：`scripts/tests/provider-failure-ban-blackbox.mjs` 与 `scripts/tests/provider-direct-failure-failover-blackbox.mjs` 仍引用已移除的 `dist/server/runtime/http-server/provider-traffic-governor.js`，已改到 `dist/modules/traffic-governor/index.js`；但 provider-failure-ban-blackbox 继续卡在 bootstrapped VR 缺 `metadata.runtime_control.preselectedRoute` 的旧合同，说明黑盒请求 truth 还没跟主链合同对齐，需另行处理。
 
+# 2026-06-30: servertool engine orchestration stopless input local
+- `engine-orchestration-shell.ts` 把 `planStoplessExecutionWithNative` 的内联对象收成 `stoplessExecutionInput`，TS 只保留单点输入载体，不再直接把大对象字面量喂给 native plan。
+- `engine-observation-shell.spec.ts`、`engine.stopless-session-thin-shell.spec.ts`、`verify-servertool-rust-only.mjs` 已同步锁这个形态。
+- 验证：focused Jest `engine-observation-shell + engine.stopless-session-thin-shell`、sharedmodule `tsc`、`verify:servertool-rust-only`、`verify:function-map-compile-gate`、`verify:architecture-mainline-call-map`、`git diff --check` 均已通过。
+
 # 2026-06-30: servertool cli projection input local
 
 - `cli-projection-runtime-shell.ts` 把 tool arguments native parse 结果收成 `projectionInput`，CLI projection native 输出只消费单点输入载体。
