@@ -217,9 +217,7 @@ export function* buildContentPartDeltas(
       timestamp: baseEvent.timestamp,
       protocol: baseEvent.protocol,
       direction: baseEvent.direction,
-      data: {
-        ...delta
-      },
+      data: delta,
       sequenceNumber: baseEvent.sequenceNumber
     };
   }
@@ -281,9 +279,7 @@ export function buildOutputTextDoneEvent(
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      ...textDone
-    },
+    data: textDone,
     sequenceNumber: baseEvent.sequenceNumber
   };
 }
@@ -317,9 +313,7 @@ export function* buildFunctionCallArgsDeltas(
       timestamp: baseEvent.timestamp,
       protocol: baseEvent.protocol,
       direction: baseEvent.direction,
-      data: {
-        ...delta
-      },
+      data: delta,
       sequenceNumber: baseEvent.sequenceNumber
     };
   }
@@ -348,9 +342,7 @@ export function buildFunctionCallDoneEvent(
     timestamp: baseEvent.timestamp,
     protocol: baseEvent.protocol,
     direction: baseEvent.direction,
-    data: {
-      ...done
-    },
+    data: done,
     sequenceNumber: baseEvent.sequenceNumber
   };
 }
@@ -408,9 +400,7 @@ export function* buildReasoningDeltas(
         timestamp: baseEvent.timestamp,
         protocol: baseEvent.protocol,
         direction: baseEvent.direction,
-        data: {
-          ...payload
-        },
+        data: payload,
         sequenceNumber: baseEvent.sequenceNumber
       };
     } else if (content.type === 'reasoning_signature') {
@@ -428,9 +418,7 @@ export function* buildReasoningDeltas(
         timestamp: baseEvent.timestamp,
         protocol: baseEvent.protocol,
         direction: baseEvent.direction,
-        data: {
-          ...payload
-        },
+        data: payload,
         sequenceNumber: baseEvent.sequenceNumber
       };
     } else if (content.type === 'reasoning_image') {
@@ -448,9 +436,7 @@ export function* buildReasoningDeltas(
         timestamp: baseEvent.timestamp,
         protocol: baseEvent.protocol,
         direction: baseEvent.direction,
-        data: {
-          ...payload
-        },
+        data: payload,
         sequenceNumber: baseEvent.sequenceNumber
       };
     }
@@ -484,9 +470,7 @@ export function* buildReasoningSummaryEvents(
       timestamp: partAddedBase.timestamp,
       protocol: partAddedBase.protocol,
       direction: partAddedBase.direction,
-      data: {
-        ...partAdded
-      },
+      data: partAdded,
       sequenceNumber: partAddedBase.sequenceNumber
     };
 
@@ -506,9 +490,7 @@ export function* buildReasoningSummaryEvents(
         timestamp: deltaBase.timestamp,
         protocol: deltaBase.protocol,
         direction: deltaBase.direction,
-        data: {
-          ...delta
-        },
+        data: delta,
         sequenceNumber: deltaBase.sequenceNumber
       };
     }
@@ -526,9 +508,7 @@ export function* buildReasoningSummaryEvents(
       timestamp: textDoneBase.timestamp,
       protocol: textDoneBase.protocol,
       direction: textDoneBase.direction,
-      data: {
-        ...textDone
-      },
+      data: textDone,
       sequenceNumber: textDoneBase.sequenceNumber
     };
 
@@ -545,9 +525,7 @@ export function* buildReasoningSummaryEvents(
       timestamp: partDoneBase.timestamp,
       protocol: partDoneBase.protocol,
       direction: partDoneBase.direction,
-      data: {
-        ...partDone
-      },
+      data: partDone,
       sequenceNumber: partDoneBase.sequenceNumber
     };
   }

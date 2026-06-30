@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses SSE native payload wrapper collapse slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `data: { ...delta }`, `data: { ...payload }`, `data: { ...partAdded }`, `data: { ...textDone }`, and `data: { ...partDone }`; the gate failed on the remaining TS re-wrap paths.
+- Fix: `responses.ts` now assigns native payloads directly to `data` for output text, function call arguments, reasoning deltas, and reasoning summary events. TS no longer clones/re-wraps native-owned SSE payload objects before the canonical Rust serializer boundary.
+- Positive / reverse tests: focused Jest proves the same native payload projections still sequence correctly; the architecture gate prevents the local spread-wrapper shape from returning.
+- Verification: focused Jest `responses-sse-reasoning-summary-no-normalize` PASS 11/11; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `malformedWire=0`, `eventCount=25`.
+
 ### 2026-07-01 Responses SSE reasoning lifecycle payload native owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers `item_id: reasoning.id` and `summary: normalizeReasoningSummaryFieldWithNative`; this caught the remaining TS synthesis path for `reasoning.start` / `reasoning.done` payloads.
