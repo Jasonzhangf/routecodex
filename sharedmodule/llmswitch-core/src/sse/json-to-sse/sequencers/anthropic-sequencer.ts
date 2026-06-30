@@ -79,8 +79,11 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
         }
       });
 
+      if (!Array.isArray(response.content)) {
+        throw new Error('Invalid Anthropic response: missing content');
+      }
       let index = 0;
-      for (const [blockIndex, block] of (response.content || []).entries()) {
+      for (const [blockIndex, block] of response.content.entries()) {
         if (!block || typeof block !== 'object') {
           throw new Error(`Invalid Anthropic content block at index ${blockIndex}`);
         }

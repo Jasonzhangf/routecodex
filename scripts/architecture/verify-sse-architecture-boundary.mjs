@@ -287,6 +287,7 @@ for (const forbidden of [
   "block.text ?? ''",
   "const data = typeof block.data === 'string' ? block.data : '';",
   'if (!data.trim().length) {\n            continue;\n          }',
+  'response.content || []',
 ]) {
   if (anthropicSequencer.includes(forbidden)) {
     failures.push(`Anthropic SSE sequencer must not synthesize fallback/event envelope truth: ${forbidden}`);

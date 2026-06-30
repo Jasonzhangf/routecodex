@@ -86,6 +86,17 @@ describe('anthropic SSE required fields no-fallback boundary', () => {
     ))).rejects.toThrow('Invalid Anthropic content block at index 0');
   });
 
+  it('throws when response content is missing instead of treating it as empty', async () => {
+    const sequencer = createAnthropicSequencer();
+
+    await expect(collectEvents(sequencer.sequenceResponse(
+      baseResponse({
+        content: undefined as unknown as AnthropicMessageResponse['content']
+      }),
+      'req_anthropic_missing_content'
+    ))).rejects.toThrow('Invalid Anthropic response: missing content');
+  });
+
   it('throws when a text block is missing text instead of treating it as empty', async () => {
     const sequencer = createAnthropicSequencer();
 
