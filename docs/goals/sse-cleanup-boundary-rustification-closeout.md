@@ -90,6 +90,13 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Gemini SSE candidateIndex default removal slice
+
+- Red evidence: focused `tests/sharedmodule/sse-parser-no-recovery.spec.ts` first failed because a `gemini.data` frame missing `candidateIndex` was defaulted to candidate `0` and materialized as a successful response.
+- Fix: `sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts` now fail-fasts on missing data-frame `candidateIndex` with `Invalid Gemini data event: missing candidateIndex`; `verify:sse-architecture-boundary` forbids the old default-to-zero marker.
+- Positive / reverse tests: valid Gemini data/done replay with explicit `candidateIndex:0` still materializes `text=hello` and `finishReason=STOP`; missing `candidateIndex` replay fails fast.
+- Verification: focused `sse-parser-no-recovery` Jest PASS 7/7; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `npx tsc -p tsconfig.json --noEmit --pretty false` PASS; `git diff --check` PASS; `npm run build:base` PASS; source replay valid/missing candidateIndex PASS. No real Gemini provider-response sample was found in current sample stores.
+
 ### 2026-07-01 Gemini SSE done candidate metadata fail-fast slice
 
 - Red evidence: focused `tests/sharedmodule/sse-parser-no-recovery.spec.ts` covered `gemini.done` with invalid `candidates` metadata, and the old implementation would have silently skipped malformed entries.

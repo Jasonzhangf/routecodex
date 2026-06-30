@@ -61,7 +61,7 @@ describe('SSE parser no-recovery boundary', () => {
 
     await expect(converter.convertSseToJson(Readable.from([
       'event: gemini.data\n',
-      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"output","data":{"kind":"part","candidateIndex":0,"partIndex":0,"role":"model"}}\n\n',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"output","candidateIndex":0,"partIndex":0,"role":"model"}\n\n',
       'event: gemini.done\n',
       'data: {"type":"gemini.done","protocol":"gemini-chat","direction":"output","data":{"kind":"done","candidates":[{"index":0,"finishReason":"STOP"}]}}\n\n'
     ]), {
@@ -96,5 +96,19 @@ describe('SSE parser no-recovery boundary', () => {
       requestId: 'req_gemini_invalid_done_candidate_no_swallow',
       model: 'gemini-test'
     })).rejects.toThrow('Invalid Gemini done event: invalid candidate at index 0');
+  });
+
+  it('fails Gemini data frames with missing candidateIndex instead of defaulting to candidate zero', async () => {
+    const converter = new GeminiSseToJsonConverter();
+
+    await expect(converter.convertSseToJson(Readable.from([
+      'event: gemini.data\n',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"output","partIndex":0,"role":"model","part":{"text":"hello"}}\n\n',
+      'event: gemini.done\n',
+      'data: {"type":"gemini.done","protocol":"gemini-chat","direction":"output","candidates":[{"index":0,"finishReason":"STOP"}]}\n\n'
+    ]), {
+      requestId: 'req_gemini_missing_candidate_index_no_default',
+      model: 'gemini-test'
+    })).rejects.toThrow('Invalid Gemini data event: missing candidateIndex');
   });
 });

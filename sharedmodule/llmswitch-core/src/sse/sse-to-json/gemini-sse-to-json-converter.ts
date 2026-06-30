@@ -88,7 +88,10 @@ export class GeminiSseToJsonConverter {
     context: SseToGeminiJsonContext
   ): void {
     const payload = event.data as { candidateIndex?: number; role?: string; part?: GeminiContentPart };
-    const candidateIndex = typeof payload?.candidateIndex === 'number' ? payload.candidateIndex : 0;
+    if (typeof payload?.candidateIndex !== 'number') {
+      throw new Error('Invalid Gemini data event: missing candidateIndex');
+    }
+    const candidateIndex = payload.candidateIndex;
     const part = payload?.part;
     if (!part) {
       throw new Error('Invalid Gemini data event: missing part');
