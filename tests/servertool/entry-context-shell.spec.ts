@@ -33,6 +33,8 @@ describe('entry-context-shell', () => {
 
     expect(source).toContain('export function resolveServertoolEntryContext(');
     expect(source).toContain('planServertoolEntryContextWithNative');
+    expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
+    expect(source).not.toContain('Servertool entry context requires metadata center runtime_control.providerProtocol');
     expect(source).not.toContain('export function asServertoolJsonObject(');
     expect(source).not.toContain('function tokenSetFromNativePlan(');
     expect(source).not.toContain('.trim().toLowerCase()');
@@ -70,7 +72,7 @@ describe('entry-context-shell', () => {
     expect(result.action === 'continue' ? result.excludeAutoHookIds : null).toBeNull();
   });
 
-  test('fails fast when metadata center runtimeControl.providerProtocol is absent', () => {
+  test('fails fast when metadata center snapshot is absent', () => {
     expect(() => resolveServertoolEntryContext({
       options: {
         adapterContext: {},
@@ -79,7 +81,7 @@ describe('entry-context-shell', () => {
       } as any,
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
       base: { ok: true } as any
-    })).toThrow('Servertool entry context requires metadata center runtime_control.providerProtocol');
+    })).toThrow('Servertool entry context requires MetadataCenter request truth or runtime_control snapshot');
   });
 
   test('uses only bound metadata center runtimeControl.providerProtocol', () => {

@@ -235,6 +235,8 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts',
     forbidden: [
       'export function asServertoolJsonObject(',
+      'readProviderProtocolFromAnyBoundMetadataCenter',
+      'Servertool entry context requires metadata center runtime_control.providerProtocol',
     ],
     required: [
       'resolveServertoolEntryContext',

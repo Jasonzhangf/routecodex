@@ -5141,6 +5141,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export function asServertoolJsonObject(',
     'asServertoolJsonObject(',
+    'readProviderProtocolFromAnyBoundMetadataCenter',
+    'Servertool entry context requires metadata center runtime_control.providerProtocol',
   ]) {
     if (entryContextShell.includes(marker)) {
       fail(

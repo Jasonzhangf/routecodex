@@ -5,7 +5,6 @@ import type {
   ToolCall
 } from './types.js';
 import {
-  readProviderProtocolFromAnyBoundMetadataCenter,
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
 import { planServertoolEntryContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -27,11 +26,6 @@ export function resolveServertoolEntryContext(args: {
     } {
   if (!args.base) {
     return { action: 'return_non_object_base' };
-  }
-  const providerProtocol =
-    readProviderProtocolFromAnyBoundMetadataCenter(args.options.adapterContext as Record<string, unknown>);
-  if (!providerProtocol) {
-    throw new Error('Servertool entry context requires metadata center runtime_control.providerProtocol');
   }
   const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
     args.options.adapterContext as Record<string, unknown>
