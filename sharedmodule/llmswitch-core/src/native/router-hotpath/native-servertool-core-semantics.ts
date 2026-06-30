@@ -321,9 +321,7 @@ export interface ServertoolHandlerRuntimeActionPlan {
     | 'finalize_without_backend'
     | 'return_handler_result'
     | 'invalid_plan_missing_finalize'
-    | 'invalid_plan_result'
-    | 'unsupported_backend_plan_kind';
-  backendKind?: string;
+    | 'invalid_plan_result';
 }
 
 export interface StoplessLearnedNoteWritePlanInput {
@@ -494,8 +492,7 @@ export interface ServertoolMaterializationProgressPlan {
     | 'finalize_without_backend'
     | 'return_handler_result'
     | 'invalid_plan_missing_finalize'
-    | 'invalid_plan_result'
-    | 'unsupported_backend_plan_kind';
+    | 'invalid_plan_result';
 }
 
 export interface StopMessageBlockedReport {
@@ -2605,8 +2602,6 @@ export function planServertoolHandlerRuntimeActionWithNative(input: {
   hasExecutionObject: boolean;
   hasExecutionFlowId: boolean;
   hasPlanMarkers: boolean;
-  hasBackendPlan: boolean;
-  backendKind?: string;
 }): ServertoolHandlerRuntimeActionPlan {
   const capability = 'planServertoolHandlerRuntimeActionJson';
   const fn = readNativeFunction(capability);
@@ -2626,19 +2621,12 @@ export function planServertoolHandlerRuntimeActionWithNative(input: {
     record.action !== 'finalize_without_backend' &&
     record.action !== 'return_handler_result' &&
     record.action !== 'invalid_plan_missing_finalize' &&
-    record.action !== 'invalid_plan_result' &&
-    record.action !== 'unsupported_backend_plan_kind'
+    record.action !== 'invalid_plan_result'
   ) {
     throw new Error('planServertoolHandlerRuntimeActionJson native returned invalid action');
   }
-  if (record.backendKind !== undefined && typeof record.backendKind !== 'string') {
-    throw new Error('planServertoolHandlerRuntimeActionJson native returned invalid backendKind');
-  }
   return {
-    action: record.action,
-    ...(typeof record.backendKind === 'string' && record.backendKind.trim()
-      ? { backendKind: record.backendKind }
-      : {})
+    action: record.action
   };
 }
 
@@ -2992,11 +2980,6 @@ export function planServertoolHandlerContractErrorWithNative(input:
       error: string;
     }
   | {
-      kind: 'unsupported_backend_plan_kind';
-      requestId: string;
-      backendKind: string;
-    }
-  | {
       kind: 'invalid_handler_plan_missing_finalize';
       requestId: string;
     }
@@ -3092,7 +3075,6 @@ export function planServertoolMaterializationProgressWithNative(input: {
   hasExecutionObject: boolean;
   hasExecutionFlowId: boolean;
   hasPlanMarkers: boolean;
-  hasBackendPlan: boolean;
 }): ServertoolMaterializationProgressPlan {
   const capability = 'planServertoolMaterializationProgressJson';
   const fn = readNativeFunction(capability);
@@ -3112,8 +3094,7 @@ export function planServertoolMaterializationProgressWithNative(input: {
     record.action !== 'finalize_without_backend' &&
     record.action !== 'return_handler_result' &&
     record.action !== 'invalid_plan_missing_finalize' &&
-    record.action !== 'invalid_plan_result' &&
-    record.action !== 'unsupported_backend_plan_kind'
+    record.action !== 'invalid_plan_result'
   ) {
     throw new Error('planServertoolMaterializationProgressJson native returned invalid action');
   }

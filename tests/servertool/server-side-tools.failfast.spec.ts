@@ -245,9 +245,6 @@ jest.unstable_mockModule(
       details: {}
     })),
     planServertoolMaterializationProgressWithNative: jest.fn((input: any) => {
-      if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
-        return { action: 'unsupported_backend_plan_kind' };
-      }
       if (input?.hasFinalizeFunction) {
         return { action: 'finalize_without_backend' };
       }
@@ -260,10 +257,6 @@ jest.unstable_mockModule(
       return { action: 'invalid_plan_result' };
     }),
     planServertoolHandlerRuntimeActionWithNative: jest.fn((input: any) => {
-      if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
-        const backendKind = String(input?.backendKind ?? '');
-        return { action: 'unsupported_backend_plan_kind', backendKind };
-      }
       if (input?.hasFinalizeFunction) {
         return { action: 'finalize_without_backend' };
       }
@@ -281,7 +274,6 @@ jest.unstable_mockModule(
       const requestId = String(input?.requestId ?? '');
       const entryEndpoint = String(input?.entryEndpoint ?? '');
       const providerProtocol = String(input?.providerProtocol ?? '');
-      const backendKind = String(input?.backendKind ?? '');
       const error = String(input?.error ?? '');
       if (kind === 'handler_failed') {
         return {
@@ -298,18 +290,6 @@ jest.unstable_mockModule(
           }
         };
       }
-      if (kind === 'unsupported_backend_plan_kind') {
-        return {
-          code: 'SERVERTOOL_HANDLER_CONTRACT_ERROR',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: `[servertool] unsupported backend plan kind: ${backendKind}`,
-          details: {
-            requestId,
-            backendKind
-          }
-        };
-      }
       return {
         code: 'SERVERTOOL_HANDLER_CONTRACT_ERROR',
         category: 'INTERNAL_ERROR',
@@ -320,7 +300,6 @@ jest.unstable_mockModule(
           entryEndpoint,
           providerProtocol,
           toolName,
-          backendKind,
           error
         }
       };
@@ -471,18 +450,6 @@ jest.unstable_mockModule(
             entryEndpoint: String(input?.entryEndpoint ?? ''),
             providerProtocol: String(input?.providerProtocol ?? ''),
             error: String(input?.error ?? '')
-          }
-        };
-      }
-      if (kind === 'unsupported_backend_plan_kind') {
-        return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: `[servertool] unsupported backend plan kind: ${String(input?.backendKind ?? '')}`,
-          details: {
-            requestId: String(input?.requestId ?? ''),
-            backendKind: String(input?.backendKind ?? '')
           }
         };
       }

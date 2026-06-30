@@ -46,8 +46,6 @@ pub struct ServertoolMaterializationProgressInput {
     pub has_execution_flow_id: bool,
     #[serde(default)]
     pub has_plan_markers: bool,
-    #[serde(default)]
-    pub has_backend_plan: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -57,7 +55,6 @@ pub enum ServertoolMaterializationAction {
     ReturnHandlerResult,
     InvalidPlanMissingFinalize,
     InvalidPlanResult,
-    UnsupportedBackendPlanKind,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -79,10 +76,6 @@ pub struct ServertoolHandlerRuntimeActionInput {
     pub has_execution_flow_id: bool,
     #[serde(default)]
     pub has_plan_markers: bool,
-    #[serde(default)]
-    pub has_backend_plan: bool,
-    #[serde(default)]
-    pub backend_kind: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -92,15 +85,12 @@ pub enum ServertoolHandlerRuntimeAction {
     ReturnHandlerResult,
     InvalidPlanMissingFinalize,
     InvalidPlanResult,
-    UnsupportedBackendPlanKind,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolHandlerRuntimeActionPlan {
     pub action: ServertoolHandlerRuntimeAction,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub backend_kind: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,13 +101,6 @@ pub struct ServertoolHandlerFailedErrorInput {
     pub entry_endpoint: String,
     pub provider_protocol: String,
     pub error: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServertoolUnsupportedBackendPlanKindErrorInput {
-    pub request_id: String,
-    pub backend_kind: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,11 +144,7 @@ pub fn plan_servertool_materialization_progress(
     });
     let action = match contract.action {
         ServertoolHandlerContractAction::HandlerPlan => {
-            if input.has_backend_plan {
-                ServertoolMaterializationAction::UnsupportedBackendPlanKind
-            } else {
-                ServertoolMaterializationAction::FinalizeWithoutBackend
-            }
+            ServertoolMaterializationAction::FinalizeWithoutBackend
         }
         ServertoolHandlerContractAction::HandlerResult => {
             ServertoolMaterializationAction::ReturnHandlerResult
@@ -190,16 +169,8 @@ pub fn plan_servertool_handler_runtime_action(
             has_execution_object: input.has_execution_object,
             has_execution_flow_id: input.has_execution_flow_id,
             has_plan_markers: input.has_plan_markers,
-            has_backend_plan: input.has_backend_plan,
         });
-    let backend_kind = input
-        .backend_kind
-        .as_ref()
-        .map(|value| value.trim().to_string());
     let action = match progression.action {
-        ServertoolMaterializationAction::UnsupportedBackendPlanKind => {
-            ServertoolHandlerRuntimeAction::UnsupportedBackendPlanKind
-        }
         ServertoolMaterializationAction::FinalizeWithoutBackend => {
             ServertoolHandlerRuntimeAction::FinalizeWithoutBackend
         }
@@ -215,7 +186,6 @@ pub fn plan_servertool_handler_runtime_action(
     };
     ServertoolHandlerRuntimeActionPlan {
         action,
-        backend_kind: backend_kind.filter(|value| !value.is_empty()),
     }
 }
 
@@ -231,21 +201,6 @@ pub fn plan_servertool_handler_failed_error(input: &ServertoolHandlerFailedError
             "entryEndpoint": input.entry_endpoint.trim(),
             "providerProtocol": input.provider_protocol.trim(),
             "error": input.error.trim(),
-        }
-    })
-}
-
-pub fn plan_servertool_unsupported_backend_plan_kind_error(
-    input: &ServertoolUnsupportedBackendPlanKindErrorInput,
-) -> Value {
-    serde_json::json!({
-        "message": format!("[servertool] unsupported backend plan kind: {}", input.backend_kind.trim()),
-        "code": "SERVERTOOL_HANDLER_FAILED",
-        "category": "INTERNAL_ERROR",
-        "status": 500,
-        "details": {
-            "requestId": input.request_id.trim(),
-            "backendKind": input.backend_kind.trim(),
         }
     })
 }
@@ -285,12 +240,11 @@ mod tests {
         plan_servertool_handler_runtime_action,
         plan_servertool_invalid_handler_plan_missing_finalize_error,
         plan_servertool_invalid_handler_plan_result_error,
-        plan_servertool_materialization_progress,
-        plan_servertool_unsupported_backend_plan_kind_error, ServertoolHandlerContractAction,
+        plan_servertool_materialization_progress, ServertoolHandlerContractAction,
         ServertoolHandlerContractInput, ServertoolHandlerFailedErrorInput,
         ServertoolHandlerRuntimeAction, ServertoolHandlerRuntimeActionInput,
         ServertoolInvalidHandlerPlanErrorInput, ServertoolMaterializationAction,
-        ServertoolMaterializationProgressInput, ServertoolUnsupportedBackendPlanKindErrorInput,
+        ServertoolMaterializationProgressInput,
     };
 
     #[test]
@@ -336,19 +290,6 @@ mod tests {
                 has_execution_object: false,
                 has_execution_flow_id: false,
                 has_plan_markers: true,
-                has_backend_plan: true,
-            })
-            .action,
-            ServertoolMaterializationAction::UnsupportedBackendPlanKind
-        );
-        assert_eq!(
-            plan_servertool_materialization_progress(&ServertoolMaterializationProgressInput {
-                has_finalize_function: true,
-                has_chat_response_object: false,
-                has_execution_object: false,
-                has_execution_flow_id: false,
-                has_plan_markers: true,
-                has_backend_plan: false,
             })
             .action,
             ServertoolMaterializationAction::FinalizeWithoutBackend
@@ -360,7 +301,6 @@ mod tests {
                 has_execution_object: true,
                 has_execution_flow_id: true,
                 has_plan_markers: false,
-                has_backend_plan: false,
             })
             .action,
             ServertoolMaterializationAction::ReturnHandlerResult
@@ -373,37 +313,9 @@ mod tests {
                 has_execution_object: false,
                 has_execution_flow_id: false,
                 has_plan_markers: true,
-                has_backend_plan: true,
-                backend_kind: Some("vision_analysis".to_string()),
             })
             .action,
-            ServertoolHandlerRuntimeAction::UnsupportedBackendPlanKind
-        );
-        assert_eq!(
-            plan_servertool_handler_runtime_action(&ServertoolHandlerRuntimeActionInput {
-                has_finalize_function: true,
-                has_chat_response_object: false,
-                has_execution_object: false,
-                has_execution_flow_id: false,
-                has_plan_markers: true,
-                has_backend_plan: true,
-                backend_kind: Some("web_search".to_string()),
-            })
-            .action,
-            ServertoolHandlerRuntimeAction::UnsupportedBackendPlanKind
-        );
-        assert_eq!(
-            plan_servertool_handler_runtime_action(&ServertoolHandlerRuntimeActionInput {
-                has_finalize_function: true,
-                has_chat_response_object: false,
-                has_execution_object: false,
-                has_execution_flow_id: false,
-                has_plan_markers: true,
-                has_backend_plan: true,
-                backend_kind: Some("unknown_backend_kind".to_string()),
-            })
-            .action,
-            ServertoolHandlerRuntimeAction::UnsupportedBackendPlanKind
+            ServertoolHandlerRuntimeAction::FinalizeWithoutBackend
         );
     }
 
@@ -419,17 +331,6 @@ mod tests {
             });
         assert_eq!(handler_failed["code"], "SERVERTOOL_HANDLER_FAILED");
         assert_eq!(handler_failed["details"]["toolName"], "tool");
-
-        let unsupported = plan_servertool_unsupported_backend_plan_kind_error(
-            &ServertoolUnsupportedBackendPlanKindErrorInput {
-                request_id: "req-3".to_string(),
-                backend_kind: "unknown_backend_kind".to_string(),
-            },
-        );
-        assert_eq!(
-            unsupported["details"]["backendKind"],
-            "unknown_backend_kind"
-        );
 
         let invalid_missing = plan_servertool_invalid_handler_plan_missing_finalize_error(
             &ServertoolInvalidHandlerPlanErrorInput {

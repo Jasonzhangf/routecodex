@@ -19,6 +19,7 @@ jest.unstable_mockModule(
       reuseLastExecutionEnvelope: false
     })),
     createServertoolExecutionLoopStateWithNative: jest.fn(() => ({ executedRecords: [] })),
+    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
     planServertoolHookScheduleWithNative: jest.fn(() => ({ action: 'skip' })),
     isAdapterClientDisconnectedWithNative: jest.fn(() => false),
     planClientDisconnectWatcherWithNative: jest.fn(() => ({ intervalMs: 1000 })),
@@ -59,10 +60,6 @@ jest.unstable_mockModule(
       details: {}
     })),
     planServertoolHandlerRuntimeActionWithNative: jest.fn((input: any) => {
-      if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
-        const backendKind = String(input?.backendKind ?? '');
-        return { action: 'unsupported_backend_plan_kind', backendKind };
-      }
       if (input?.hasFinalizeFunction) {
         return { action: 'finalize_without_backend' };
       }
@@ -75,9 +72,6 @@ jest.unstable_mockModule(
       return { action: 'invalid_plan_result' };
     }),
     planServertoolMaterializationProgressWithNative: jest.fn((input: any) => {
-      if (input?.hasFinalizeFunction && input?.hasBackendPlan) {
-        return { action: 'unsupported_backend_plan_kind' };
-      }
       if (input?.hasFinalizeFunction) {
         return { action: 'finalize_without_backend' };
       }
@@ -103,18 +97,6 @@ jest.unstable_mockModule(
             entryEndpoint: String(input?.entryEndpoint ?? ''),
             providerProtocol: String(input?.providerProtocol ?? ''),
             error: String(input?.error ?? '')
-          }
-        };
-      }
-      if (kind === 'unsupported_backend_plan_kind') {
-        return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: `[servertool] unsupported backend plan kind: ${String(input?.backendKind ?? '')}`,
-          details: {
-            requestId: String(input?.requestId ?? ''),
-            backendKind: String(input?.backendKind ?? '')
           }
         };
       }
@@ -162,18 +144,18 @@ let materializeServertoolPlannedResult: typeof import('../../sharedmodule/llmswi
 function buildOptions(overrides: Partial<ServerSideToolEngineOptions> = {}): ServerSideToolEngineOptions {
   return {
     chatResponse: {
-      id: 'chatcmpl-backend-failfast',
+      id: 'chatcmpl-handler-materialization',
       object: 'chat.completion',
       model: 'gpt-test',
       choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'tool_calls' }]
     } as JsonObject,
     adapterContext: {
-      requestId: 'req-backend-failfast',
+      requestId: 'req-handler-materialization',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-responses'
     } as any,
     entryEndpoint: '/v1/responses',
-    requestId: 'req-backend-failfast',
+    requestId: 'req-handler-materialization',
     providerProtocol: 'openai-responses',
     ...overrides
   };
@@ -185,7 +167,7 @@ beforeAll(async () => {
   } = await import('../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js'));
 });
 
-describe('execution-shell backend failfast', () => {
+describe('execution-shell handler materialization', () => {
   test('handler plan without finalize fails fast instead of being treated as a materialized result', async () => {
     await expect(
       materializeServertoolPlannedResult(
@@ -197,53 +179,25 @@ describe('execution-shell backend failfast', () => {
     ).rejects.toThrow('[servertool] invalid handler plan contract: missing finalize');
   });
 
-  test('vision_analysis backend plan fails fast instead of reentering through retired backend mainline', async () => {
+  test('handler plan with finalize materializes without any backend plan carrier', async () => {
     await expect(
       materializeServertoolPlannedResult(
         {
-          flowId: 'vision_backend_plan',
-          backend: {
-            kind: 'vision_analysis',
-            requestIdSuffix: ':vision',
-            entryEndpoint: '/v1/chat/completions',
-            payload: { model: 'gpt-test', messages: [] }
-          },
+          flowId: 'finalize_only_plan',
           finalize: async () => ({
             chatResponse: {
-              id: 'chatcmpl-backend-finalize-vision',
+              id: 'chatcmpl-backend-finalize',
               object: 'chat.completion',
               model: 'gpt-test',
               choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
             } as JsonObject,
-            execution: { flowId: 'vision_backend_plan' }
-          })
-        },
-        buildOptions()
-      )
-    ).rejects.toThrow('[servertool] unsupported backend plan kind: vision_analysis');
-  });
-
-  test('unknown backend kind fails fast instead of reaching any local backend executor', async () => {
-    await expect(
-      materializeServertoolPlannedResult(
-        {
-          flowId: 'unknown_backend_plan',
-          backend: {
-            kind: 'unknown_backend_kind',
-            requestIdSuffix: ':unknown'
-          },
-          finalize: async () => ({
-            chatResponse: {
-              id: 'chatcmpl-backend-finalize-unknown',
-              object: 'chat.completion',
-              model: 'gpt-test',
-              choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
-            } as JsonObject,
-            execution: { flowId: 'unknown_backend_plan' }
+            execution: { flowId: 'finalize_only_plan' }
           })
         } as any,
         buildOptions()
       )
-    ).rejects.toThrow('[servertool] unsupported backend plan kind: unknown_backend_kind');
+    ).resolves.toMatchObject({
+      execution: { flowId: 'finalize_only_plan' }
+    });
   });
 });

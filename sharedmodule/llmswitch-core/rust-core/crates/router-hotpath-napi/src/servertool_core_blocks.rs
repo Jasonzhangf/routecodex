@@ -557,17 +557,6 @@ pub fn plan_servertool_handler_contract_error_json(input_json: &str) -> Result<S
             )
             .map_err(|e| format!("serialize handler failed error plan: {e}"))
         }
-        "unsupported_backend_plan_kind" => {
-            let parsed: execution_handler_contract::ServertoolUnsupportedBackendPlanKindErrorInput =
-                serde_json::from_value(input)
-                    .map_err(|e| format!("deserialize unsupported backend kind input: {e}"))?;
-            serde_json::to_string(
-                &execution_handler_contract::plan_servertool_unsupported_backend_plan_kind_error(
-                    &parsed,
-                ),
-            )
-            .map_err(|e| format!("serialize unsupported backend kind error plan: {e}"))
-        }
         "invalid_handler_plan_missing_finalize" => {
             let parsed: execution_handler_contract::ServertoolInvalidHandlerPlanErrorInput =
                 serde_json::from_value(input).map_err(|e| {
@@ -2427,19 +2416,13 @@ fn plans_servertool_handler_runtime_action_via_servertool_core_bridge() {
             "hasChatResponseObject": false,
             "hasExecutionObject": false,
             "hasExecutionFlowId": false,
-            "hasPlanMarkers": true,
-            "hasBackendPlan": true,
-            "backendKind": "vision_analysis"
+            "hasPlanMarkers": true
         })
         .to_string(),
     )
     .expect("handler runtime action plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(
-        parsed["action"],
-        serde_json::json!("unsupported_backend_plan_kind")
-    );
-    assert_eq!(parsed["backendKind"], serde_json::json!("vision_analysis"));
+    assert_eq!(parsed["action"], serde_json::json!("finalize_without_backend"));
 }
 
 #[test]
@@ -3035,12 +3018,11 @@ fn plans_servertool_materialization_progress_via_servertool_core_bridge() {
             "hasChatResponseObject": false,
             "hasExecutionObject": false,
             "hasExecutionFlowId": false,
-            "hasPlanMarkers": true,
-            "hasBackendPlan": true
+            "hasPlanMarkers": true
         })
         .to_string(),
     )
     .expect("materialization progress plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(parsed["action"], "unsupported_backend_plan_kind");
+    assert_eq!(parsed["action"], "finalize_without_backend");
 }

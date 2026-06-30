@@ -746,20 +746,6 @@ pub fn plan_servertool_handler_contract_json(input_json: String) -> NapiResult<S
 }
 
 #[napi]
-pub fn plan_servertool_backend_execution_json(input_json: String) -> NapiResult<String> {
-    let input: Value =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let kind = read_trimmed_string(input.get("kind")).unwrap_or_else(|| "unknown".to_string());
-    let action = match kind.as_str() {
-        "vision_analysis" => "vision_analysis",
-        "web_search" => "web_search",
-        _ => "unsupported",
-    };
-    serde_json::to_string(&json!({ "action": action, "backendKind": kind }))
-        .map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn normalize_servertool_registration_spec_json(input_json: String) -> NapiResult<String> {
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -1089,8 +1075,7 @@ mod tests {
         build_servertool_dispatch_plan_input_json, build_servertool_outcome_plan_input_json,
         get_default_servertool_skeleton_document_json, normalize_servertool_progress_flow_id_json,
         normalize_servertool_progress_result_json, normalize_servertool_progress_token_json,
-        normalize_servertool_registration_spec_json, plan_servertool_backend_execution_json,
-        plan_servertool_builtin_auto_handler_entries_json,
+        normalize_servertool_registration_spec_json, plan_servertool_builtin_auto_handler_entries_json,
         plan_servertool_builtin_handler_entry_json, plan_servertool_builtin_handler_names_json,
         plan_servertool_builtin_handler_record_entries_json, plan_servertool_followup_runtime_json,
         plan_servertool_handler_contract_json, plan_servertool_registry_lookup_from_skeleton_json,
@@ -1203,7 +1188,7 @@ mod tests {
     }
 
     #[test]
-    fn plans_handler_and_backend_contracts() {
+    fn plans_handler_contracts() {
         let handler = plan_servertool_handler_contract_json(
             json!({
                 "hasFinalizeFunction": false,
@@ -1217,16 +1202,6 @@ mod tests {
         .expect("handler contract");
         let parsed: Value = serde_json::from_str(&handler).expect("parse handler contract");
         assert_eq!(parsed["action"], json!("invalid_plan_missing_finalize"));
-
-        let backend = plan_servertool_backend_execution_json(
-            json!({
-                "kind": "web_search"
-            })
-            .to_string(),
-        )
-        .expect("backend execution contract");
-        let parsed: Value = serde_json::from_str(&backend).expect("parse backend contract");
-        assert_eq!(parsed["action"], json!("web_search"));
     }
 
     #[test]

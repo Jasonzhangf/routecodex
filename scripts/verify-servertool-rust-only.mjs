@@ -5179,8 +5179,12 @@ function checkServertoolRustOutcomeCloseout() {
     '[servertool] invalid handler plan contract: missing finalize',
     '[servertool] invalid handler plan/result contract',
     '[servertool] handler failed:',
-    '[servertool] vision_analysis backend requires reenterPipeline',
-    '[servertool] unsupported backend plan kind:',
+    'ServerToolBackendPlan',
+    'ServerToolBackendResult',
+    'hasBackendPlan',
+    'backendKind',
+    'unsupported_backend_plan_kind',
+    'plan_servertool_unsupported_backend_plan_kind_error',
     "if (planHandlerMaterializationAction(planned, options) === 'handler_plan')",
     "await import('./builtin-handler-catalog.js')",
     'getBuiltinHandlerEntry(args.builtinName)',
@@ -5220,7 +5224,6 @@ function checkServertoolRustOutcomeCloseout() {
     'pub struct ServertoolHandlerRuntimeActionPlan',
     'pub fn plan_servertool_handler_runtime_action',
     'pub fn plan_servertool_handler_failed_error',
-    'pub fn plan_servertool_unsupported_backend_plan_kind_error',
   ]) {
     assertContains(
       'servertool-execution-handler-contract-rust-owner',
@@ -5232,6 +5235,11 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'plan_servertool_backend_requires_reenter_pipeline_error',
     'backend_requires_reenter_pipeline',
+    'has_backend_plan',
+    'backend_kind',
+    'UnsupportedBackendPlanKind',
+    'unsupported_backend_plan_kind',
+    'plan_servertool_unsupported_backend_plan_kind_error',
   ]) {
     if (rustExecutionHandlerContract.includes(marker)) {
       fail(
@@ -5240,6 +5248,24 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
+  const servertoolTypes = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/servertool/types.ts`);
+  for (const marker of [
+    'ServerToolBackendPlan',
+    'ServerToolBackendResult',
+  ]) {
+    assertMissing(
+      'servertool-execution-handler-contract-rust-owner',
+      `${ROOT}/sharedmodule/llmswitch-core/src/servertool/types.ts`,
+      servertoolTypes,
+      marker
+    );
+  }
+  assertMissing(
+    'servertool-execution-handler-contract-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`,
+    readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`),
+    'plan_servertool_backend_execution_json'
+  );
   assertContains(
     'servertool-execution-handler-contract-rust-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,

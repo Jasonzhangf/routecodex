@@ -40,56 +40,9 @@ export interface ServerSideToolEngineOptions {
   onAutoHookTrace?: (event: ServerToolAutoHookTraceEvent) => void;
 }
 
-export type ServerToolBackendPlan =
-  | {
-    kind: 'vision_analysis';
-    requestIdSuffix: string;
-    entryEndpoint: string;
-    payload: JsonObject;
-  }
-  | {
-    kind: 'web_search';
-    requestIdSuffix: string;
-    query: string;
-    recency?: string;
-    resultCount: number;
-    engines: {
-      id: string;
-      providerKey: string;
-      description?: string;
-      default?: boolean;
-      executionMode?: 'servertool' | 'direct';
-      directActivation?: 'route' | 'builtin';
-      modelId?: string;
-      maxUses?: number;
-      serverToolsDisabled?: boolean;
-      searchEngineList?: string[];
-    }[];
-  };
-
-export type ServerToolBackendResult =
-  | { kind: 'vision_analysis'; response: { body?: JsonObject; sseStream?: unknown; format?: string } }
-  | {
-    kind: 'web_search';
-    chosenEngine?: { id: string; providerKey: string };
-    result: {
-      ok: boolean;
-      summary: string;
-      hits: {
-        title?: string;
-        link: string;
-        media?: string;
-        publish_date?: string;
-        content?: string;
-        refer?: string;
-      }[];
-    };
-  };
-
 export interface ServerToolHandlerPlan {
   flowId: string;
-  backend?: ServerToolBackendPlan;
-  finalize: (args: { backendResult?: ServerToolBackendResult }) => Promise<ServerToolHandlerResult | null>;
+  finalize: () => Promise<ServerToolHandlerResult | null>;
 }
 
 export interface ServerToolExecution {

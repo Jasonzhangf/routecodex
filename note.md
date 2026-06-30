@@ -1,3 +1,10 @@
+# 2026-06-30: web_search / vision_auto backend plan contract physically removed
+- Jason 明确纠偏：`web_search` 和 `vision_auto` 都走 client/CLI，不走 followup/backend。Rust outcome/CLI contract 已保持 `ClientExecCliProjection` 与 routeHint：`web_search -> web_search`、`vision_auto -> multimodal`。
+- 本 slice 删除 handler plan backend carrier：`ServerToolBackendPlan` / `ServerToolBackendResult`、`backendResult` finalize 参数、`hasBackendPlan` / `backendKind` / `unsupported_backend_plan_kind` action 与 error plan、router-hotpath skeleton 旧 `plan_servertool_backend_execution_json` stub。
+- TS materialization shell 现在只把 handler plan 交给 Rust runtime action 并执行无参 `finalize()`；不再接受或投影 backend plan。
+- 防复活：`verify-servertool-rust-only` 新增 absent contract，禁止 backend carrier/action/error/stub marker 复活。
+- 验证：sharedmodule TS PASS；servertool-core `execution_handler_contract` 2 passed；router-hotpath-napi `servertool_core_blocks` 54 passed；native build PASS；focused Jest `execution-shell.backend-failfast + server-side-tools.failfast + servertool-active-orchestration-audit` 41 passed；`verify:servertool-rust-only` PASS；`verify:function-map-compile-gate` PASS；scoped `git diff --check` PASS。root TS 当前被无关 `src/modules/llmswitch/bridge*` re-export `responses-sse-bridge` 缺失阻塞。
+
 # 2026-06-30: stopless postflight projection direct native parse removed
 - 本 slice 将 `engine-postflight-shell.ts` 里的 direct `readNativeFunction('buildStoplessAutoCliProjectionFromEngineJson')` / `JSON.parse(raw)` 迁到 `native-servertool-core-semantics.ts::buildStoplessAutoCliProjectionFromEngineWithNative` typed wrapper；postflight 只构造必要 input 并消费 `chatResponse`。
 - 防复活：`verify-servertool-rust-only` 改为要求 postflight 使用 `buildStoplessAutoCliProjectionFromEngineWithNative({`，并禁止旧 direct NAPI 调用和 `JSON.parse(raw)` 复活。

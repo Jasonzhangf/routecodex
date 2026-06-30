@@ -141,19 +141,15 @@ export function materializeNativeToolCallExecutionOutcome(args: {
 }
 
 function buildHandlerRuntimeActionInput(
-  planned: Partial<ServerToolHandlerPlan & ServerToolHandlerResult>,
-  options: ServerSideToolEngineOptions
+  planned: Partial<ServerToolHandlerPlan & ServerToolHandlerResult>
 ): Parameters<typeof planServertoolHandlerRuntimeActionWithNative>[0] {
   const execution = planned.execution as { flowId?: unknown } | undefined;
-  const backend = planned.backend as { kind?: unknown } | undefined;
   return {
     hasFinalizeFunction: typeof planned.finalize === 'function',
     hasChatResponseObject: Boolean(planned.chatResponse && typeof planned.chatResponse === 'object' && !Array.isArray(planned.chatResponse)),
     hasExecutionObject: Boolean(planned.execution && typeof planned.execution === 'object' && !Array.isArray(planned.execution)),
     hasExecutionFlowId: typeof execution?.flowId === 'string',
-    hasPlanMarkers: typeof planned.flowId === 'string' || planned.backend !== undefined || planned.finalize !== undefined,
-    hasBackendPlan: planned.backend !== undefined,
-    ...(typeof backend?.kind === 'string' ? { backendKind: backend.kind } : {})
+    hasPlanMarkers: typeof planned.flowId === 'string' || planned.finalize !== undefined
   };
 }
 
@@ -162,23 +158,11 @@ export const materializeServertoolPlannedResult = async (
   options: ServerSideToolEngineOptions
 ): Promise<ServerToolHandlerResult | null> => {
   const actionPlan = planServertoolHandlerRuntimeActionWithNative(
-    buildHandlerRuntimeActionInput(planned as Partial<ServerToolHandlerPlan & ServerToolHandlerResult>, options)
+    buildHandlerRuntimeActionInput(planned as Partial<ServerToolHandlerPlan & ServerToolHandlerResult>)
   );
-  if (
-    actionPlan.action === 'unsupported_backend_plan_kind' ||
-    actionPlan.action === 'finalize_without_backend'
-  ) {
+  if (actionPlan.action === 'finalize_without_backend') {
     const plan = planned as ServerToolHandlerPlan;
-    if (actionPlan.action === 'unsupported_backend_plan_kind') {
-      throw buildProviderProtocolError(
-        planServertoolHandlerContractErrorWithNative({
-          kind: 'unsupported_backend_plan_kind',
-          requestId: options.requestId,
-          backendKind: actionPlan.backendKind ?? String((plan.backend as { kind?: unknown } | undefined)?.kind ?? '')
-        })
-      );
-    }
-    return await plan.finalize({});
+    return await plan.finalize();
   }
   if (actionPlan.action === 'invalid_plan_missing_finalize') {
     throw buildProviderProtocolError(
