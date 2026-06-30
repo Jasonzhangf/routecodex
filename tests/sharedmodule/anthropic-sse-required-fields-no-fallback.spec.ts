@@ -142,6 +142,20 @@ describe('anthropic SSE required fields no-fallback boundary', () => {
     ))).rejects.toThrow('Invalid Anthropic text block: missing text');
   });
 
+  it('throws when a text block is empty instead of silently skipping it', async () => {
+    const sequencer = createAnthropicSequencer();
+
+    await expect(collectEvents(sequencer.sequenceResponse(
+      baseResponse({
+        content: [{
+          type: 'text',
+          text: ''
+        }]
+      }),
+      'req_anthropic_empty_text'
+    ))).rejects.toThrow('Invalid Anthropic text block: missing text');
+  });
+
   it('throws when redacted_thinking data is missing instead of silently skipping it', async () => {
     const sequencer = createAnthropicSequencer();
 

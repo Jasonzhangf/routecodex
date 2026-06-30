@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Anthropic SSE empty text silent-skip removal slice
+
+- Residue evidence: source scan found `anthropic-sequencer.ts` still had three `if (!chunk) continue;` silent-skip branches after `chunkText()`, so empty text could emit `content_block_start/stop` without a delta instead of failing fast.
+- Fix: `chunkText()` now rejects empty text with `Invalid Anthropic text block: missing text`, and the sequencer no longer has chunk-level `continue` skips for text/thinking output. `verify:sse-architecture-boundary` now forbids `if (!chunk) continue` in the Anthropic sequencer.
+- Positive / reverse tests: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` keeps the valid Anthropic event flow positive path and adds empty text fail-fast coverage.
+- Verification: focused Anthropic Jest PASS 12/12; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `git diff --check` PASS; `npm run build:base` PASS.
+- Replay evidence: `tsx` source replay produced valid `eventCount=6`, `hasMessageStart=true`, `hasTextDelta=true`, `hasMessageStop=true`; empty text replay failed with `Invalid Anthropic text block: missing text`. Real Anthropic success samples are still unavailable; current sample stores only contain a 429 provider-error snapshot.
+
 ### 2026-07-01 SSE decode malformed chunk silent-swallow removal slice
 
 - Red evidence: focused Jest `sse-parser-no-recovery` first failed because a `gemini.data` frame missing `data.part` was silently dropped and materialized as `candidates: []`. Focused Jest `chat-sse-no-salvage` first failed because a non-object `chat_chunk` after a valid response was skipped and the response still completed successfully.

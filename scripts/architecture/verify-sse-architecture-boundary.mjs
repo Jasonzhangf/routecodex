@@ -294,6 +294,7 @@ for (const forbidden of [
   'response.content || []',
   'block.input ?? {}',
   'JSON.stringify(input ?? {})',
+  'if (!chunk) continue',
 ]) {
   if (anthropicSequencer.includes(forbidden)) {
     failures.push(`Anthropic SSE sequencer must not synthesize fallback/event envelope truth: ${forbidden}`);

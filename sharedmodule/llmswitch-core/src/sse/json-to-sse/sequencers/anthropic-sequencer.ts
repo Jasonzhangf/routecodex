@@ -35,12 +35,15 @@ async function maybeDelay(config: AnthropicSequencerConfig): Promise<void> {
 }
 
 function chunkText(input: string, size: number): string[] {
-  if (!input || size <= 0) return [input];
+  if (!input || !input.length) {
+    throw new Error('Invalid Anthropic text block: missing text');
+  }
+  if (size <= 0) return [input];
   const chunks: string[] = [];
   for (let i = 0; i < input.length; i += size) {
     chunks.push(input.slice(i, i + size));
   }
-  return chunks.length ? chunks : [''];
+  return chunks;
 }
 
 function normalizeToolInput(input: unknown): string {
@@ -93,7 +96,6 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
           }
           yield createEvent('content_block_start', { index, content_block: { type: 'text' } });
           for (const chunk of chunkText(block.text, finalConfig.chunkSize)) {
-            if (!chunk) continue;
             yield createEvent('content_block_delta', {
               index,
               delta: { type: 'text_delta', text: chunk }
@@ -110,7 +112,6 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
           if (decision.appendToContent) {
             yield createEvent('content_block_start', { index, content_block: { type: 'text' } });
             for (const chunk of chunkText(decision.appendToContent, finalConfig.chunkSize)) {
-              if (!chunk) continue;
               yield createEvent('content_block_delta', {
                 index,
                 delta: { type: 'text_delta', text: chunk }
@@ -123,7 +124,6 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
           if (decision.channel) {
             yield createEvent('content_block_start', { index, content_block: { type: 'thinking' } });
             for (const chunk of chunkText(decision.channel, finalConfig.chunkSize)) {
-              if (!chunk) continue;
               yield createEvent('content_block_delta', {
                 index,
                 delta: { type: 'thinking_delta', text: chunk }

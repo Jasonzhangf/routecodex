@@ -196,6 +196,10 @@
 
 # RouteCodex Project Memory
 
+# 2026-07-01: Anthropic SSE empty text must fail fast
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts` must not use `if (!chunk) continue` to silently skip empty text/thinking chunks. Empty Anthropic text is invalid provider shape and must fail fast with `Invalid Anthropic text block: missing text`.
+- Gate truth: `verify:sse-architecture-boundary` now blocks the old chunk-skip marker, and `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` locks valid event flow plus empty-text reverse coverage. Real Anthropic success replay remains unavailable; current sample stores only contain 429 provider-error snapshots.
+
 # 2026-07-01: Anthropic/Gemini SSE serializers must not synthesize event types
 - `serializeAnthropicEventToSSE` and `serializeGeminiEventToSSE` are wire framing shells only; they must require explicit `event` or `type` and fail fast when missing. Do not restore Anthropic payload-derived / default `message` fallback or Gemini default `gemini.data` fallback in serializer code.
 - Gate truth: `verify:sse-architecture-boundary` blocks the old Anthropic/Gemini serializer fallback markers, and `tests/sharedmodule/anthropic-gemini-sse-serializer-no-fallback.spec.ts` locks positive explicit-event serialization plus reverse missing-event fail-fast.

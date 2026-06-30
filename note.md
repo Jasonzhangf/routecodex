@@ -1,3 +1,9 @@
+# 2026-07-01 Anthropic SSE empty text chunk skip removal
+- Scope: SSE Rustification closeout, `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts`.
+- Finding: `chunkText()` returned `[input]` for empty input and each text/thinking loop had `if (!chunk) continue;`, so empty text could silently emit start/stop without a delta.
+- Fix: empty text now fail-fasts with `Invalid Anthropic text block: missing text`; chunk skip branches were removed; `verify:sse-architecture-boundary` forbids `if (!chunk) continue`.
+- Verification: focused Anthropic Jest 12/12 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `git diff --check` PASS; `build:base` PASS; `tsx` source replay valid path `eventCount=6` and empty path fail-fast. Real Anthropic success sample unavailable; only 429 provider-error sample found.
+
 # 2026-07-01: SSE decode malformed chunk silent swallow removed
 - Red evidence: focused `sse-parser-no-recovery` first failed because a `gemini.data` frame missing `data.part` resolved successfully as `candidates: []`; focused `chat-sse-no-salvage` first failed because a non-object `chat_chunk` after a valid response was skipped and the response still completed.
 - Fix: `gemini-sse-to-json-converter.ts` now fail-fasts on missing Gemini data `part`; `chat-sse-to-json-converter.ts` now fail-fasts on non-object `chat_chunk` payloads instead of `continue`-skipping them. `verify:sse-architecture-boundary` locks both old swallow markers.
