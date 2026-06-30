@@ -1,3 +1,8 @@
+# 2026-07-01: Chat SSE reasoning delta payload Rust owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 Chat `delta: { reasoning, reasoning_content: reasoning }` marker 后先红，证明 Chat reasoning delta chunk payload 仍由 TS 合成。
+- Fix：新增 Rust/NAPI `buildChatSseReasoningDeltaPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildReasoningDeltas()` 只取 base context、调用 native payload、封装 native envelope。
+- Verification：Rust `chat_sse_reasoning_delta_payload` 2/2 PASS；native build PASS；focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic` 18/18 PASS；native export-list subtest PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；`verify:function-map-compile-gate` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；真实 chat replay `done=true error=false malformedWire=0 chatChunkCount=4 reasoningChunks=0 toolChunks=2 finishChunks=1`；该真实样本无 reasoning delta，非空 reasoning 行为由 Rust/Jest 覆盖。
+
 # 2026-07-01: Chat SSE content delta payload Rust owner
 - Red evidence：`verify:sse-architecture-boundary` 新增 Chat `delta: { content }` marker 后先红，证明 Chat content delta chunk payload 仍由 TS 合成。
 - Fix：新增 Rust/NAPI `buildChatSseContentDeltaPayloadJson` 与 TS wrapper；`event-generators/chat.ts::buildContentDeltas()` 只取 base context、调用 native payload、封装 native envelope。

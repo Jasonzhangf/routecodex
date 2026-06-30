@@ -195,6 +195,7 @@ for (const forbidden of [
   "code: 'generation_error'",
   "delta: { role: role as 'user' | 'system' | 'assistant' | 'tool' }",
   'delta: { content }',
+  'delta: { reasoning, reasoning_content: reasoning }',
   'id: context.responseId ?? context.requestId',
   'created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0)',
   'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return undefined;\n  }',

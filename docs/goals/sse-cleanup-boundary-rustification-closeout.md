@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Chat SSE reasoning delta payload Rust owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker for local Chat reasoning delta payload synthesis (`delta: { reasoning, reasoning_content: reasoning }`). The gate failed on the existing TS owner before the fix.
+- Fix: added Rust/NAPI owner `buildChatSseReasoningDeltaPayloadJson` and TS wrapper `buildChatSseReasoningDeltaPayloadWithNative`. `chat.ts::buildReasoningDeltas()` now only obtains base response context, calls native for the chat completion chunk payload, and wraps it in the native-owned SSE event envelope.
+- Positive / reverse tests: Rust covers reasoning delta payload construction and missing reasoning fail-fast; focused Jest keeps Chat SSE reasoning/content roundtrip behavior intact; native export-list covers the new NAPI symbol.
+- Verification: Rust focused `chat_sse_reasoning_delta_payload` PASS 2/2; native hotpath build PASS; focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic` PASS 18/18; native export-list subtest PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real chat replay: `openai-chat/ports/10000/req_1782778465399_hrxbpl3tz/provider-response_1.json` SSE->JSON->SSE succeeded with `done=true`, `error=false`, `malformedWire=0`, `chatChunkCount=4`, `reasoningChunks=0`, `toolChunks=2`, `finishChunks=1`. This real sample has no reasoning delta, so non-empty reasoning delta behavior is covered by Rust and focused Jest.
+
 ### 2026-07-01 Chat SSE content delta payload Rust owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker for local Chat content delta payload synthesis (`delta: { content }`). The gate failed on the existing TS owner before the fix.

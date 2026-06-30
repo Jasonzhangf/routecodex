@@ -176,6 +176,46 @@ pub fn build_chat_sse_content_delta_payload_json(input_json: String) -> Result<S
     .map_err(|error| format!("Failed to serialize Chat SSE content delta payload JSON: {}", error))
 }
 
+pub fn build_chat_sse_reasoning_delta_payload_json(input_json: String) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        format!(
+            "Failed to parse Chat SSE reasoning delta payload JSON: {}",
+            error
+        )
+    })?;
+    let Some(input) = input.as_object() else {
+        return Err("Chat SSE reasoning delta payload expected object".to_string());
+    };
+    let response_id = read_required_string(input, "response_id", "reasoning delta payload")?;
+    let model = read_required_string(input, "model", "reasoning delta payload")?;
+    let reasoning = read_required_string(input, "reasoning", "reasoning delta payload")?;
+    let created = read_required_i64(input, "created", "reasoning delta payload")?;
+    if created <= 0 {
+        return Err("Chat SSE reasoning delta payload created must be positive".to_string());
+    }
+    let choice_index = read_required_i64(input, "choice_index", "reasoning delta payload")?;
+    if choice_index < 0 {
+        return Err("Chat SSE reasoning delta payload choice_index must be non-negative".to_string());
+    }
+
+    serde_json::to_string(&serde_json::json!({
+        "id": response_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": choice_index,
+            "delta": {
+                "reasoning": reasoning,
+                "reasoning_content": reasoning
+            },
+            "logprobs": null,
+            "finish_reason": null
+        }]
+    }))
+    .map_err(|error| format!("Failed to serialize Chat SSE reasoning delta payload JSON: {}", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +385,49 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("missing content"));
+    }
+
+    #[test]
+    fn builds_chat_sse_reasoning_delta_payload() {
+        let output = build_chat_sse_reasoning_delta_payload_json(
+            json!({
+                "response_id": "chatcmpl_reasoning_delta",
+                "created": 1782778488,
+                "model": "qwen-test",
+                "choice_index": 0,
+                "reasoning": "先检查上下文"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["id"], json!("chatcmpl_reasoning_delta"));
+        assert_eq!(parsed["object"], json!("chat.completion.chunk"));
+        assert_eq!(parsed["created"], json!(1782778488));
+        assert_eq!(parsed["model"], json!("qwen-test"));
+        assert_eq!(parsed["choices"][0]["index"], json!(0));
+        assert_eq!(parsed["choices"][0]["delta"]["reasoning"], json!("先检查上下文"));
+        assert_eq!(
+            parsed["choices"][0]["delta"]["reasoning_content"],
+            json!("先检查上下文")
+        );
+        assert_eq!(parsed["choices"][0]["finish_reason"], Value::Null);
+    }
+
+    #[test]
+    fn rejects_chat_sse_reasoning_delta_payload_missing_reasoning() {
+        let err = build_chat_sse_reasoning_delta_payload_json(
+            json!({
+                "response_id": "chatcmpl_reasoning_delta",
+                "created": 1782778488,
+                "model": "qwen-test",
+                "choice_index": 0
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("missing reasoning"));
     }
 }

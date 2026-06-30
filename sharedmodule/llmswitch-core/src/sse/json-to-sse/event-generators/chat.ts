@@ -8,6 +8,7 @@ import {
   buildChatSseContentDeltaPayloadWithNative,
   buildChatSseErrorPayloadWithNative,
   buildChatSseEventEnvelopeWithNative,
+  buildChatSseReasoningDeltaPayloadWithNative,
   buildChatSseRoleDeltaPayloadWithNative
 } from '../../../native/router-hotpath/native-chat-sse-event-payload.js';
 
@@ -183,22 +184,20 @@ export function* buildReasoningDeltas(
 ): Generator<ChatSseEvent> {
   if (!reasoning) return;
   const baseChunk = createBaseChunk(context, config);
-  const chunk = {
-    ...baseChunk,
-    choices: [{
-      index: context.choiceIndex,
-      delta: { reasoning, reasoning_content: reasoning },
-      logprobs: null,
-      finish_reason: null
-    }]
-  };
+  const payload = buildChatSseReasoningDeltaPayloadWithNative({
+    responseId: baseChunk.id,
+    created: baseChunk.created,
+    model: baseChunk.model,
+    choiceIndex: context.choiceIndex,
+    reasoning
+  });
   const envelope = nextChatEventEnvelope(context, config);
 
   yield {
     event: 'chat_chunk',
     type: 'chat_chunk',
     timestamp: envelope.timestamp,
-    data: JSON.stringify(chunk),
+    data: JSON.stringify(payload),
     sequenceNumber: envelope.sequenceNumber,
     protocol: envelope.protocol,
     direction: envelope.direction
