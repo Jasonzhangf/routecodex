@@ -60,6 +60,8 @@ describe('dispatch-preparation-shell', () => {
     expect(source).not.toContain('resolveServertoolRuntimePreCommandState');
     expect(source).not.toContain('applyPreCommandHooksToToolCalls');
     expect(source).toContain('planServertoolToolCallDispatchWithNative');
+    expect(source).toContain('buildServertoolDispatchPlanInputWithNative({');
+    expect(source).not.toContain('const dispatchPlanInput =');
   });
 
   test('builds dispatch plan without pre-command mutation', () => {

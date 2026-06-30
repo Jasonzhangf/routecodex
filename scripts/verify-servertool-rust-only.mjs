@@ -5061,8 +5061,7 @@ function checkServertoolRustOutcomeCloseout() {
     'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
     'planServertoolToolCallDispatchWithNative',
     'buildServertoolDispatchPlanInputWithNative',
-    'const dispatchPlanInput = buildServertoolDispatchPlanInputWithNative({',
-    'dispatchPlan: planServertoolToolCallDispatchWithNative(dispatchPlanInput)'
+    'dispatchPlan: planServertoolToolCallDispatchWithNative('
   ]) {
     if (!dispatchPreparationShell.includes(marker)) {
       fail(

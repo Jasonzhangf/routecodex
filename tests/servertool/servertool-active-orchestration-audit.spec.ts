@@ -148,8 +148,7 @@ const TARGETS = [
       'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
       'planServertoolToolCallDispatchWithNative',
       'buildServertoolDispatchPlanInputWithNative',
-      'const dispatchPlanInput = buildServertoolDispatchPlanInputWithNative({',
-      'dispatchPlan: planServertoolToolCallDispatchWithNative(dispatchPlanInput)',
+      'dispatchPlan: planServertoolToolCallDispatchWithNative(',
     ],
   },
   {
