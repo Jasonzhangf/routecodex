@@ -30,7 +30,6 @@ export interface ServerSideToolEngineOptions {
   adapterContext: AdapterContext;
   entryEndpoint: string;
   requestId: string;
-  providerProtocol: string;
   disableToolCallHandlers?: boolean;
   primaryAutoHookAttempt?: boolean;
   includeAutoHookIds?: string[];

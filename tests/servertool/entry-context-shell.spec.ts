@@ -21,11 +21,14 @@ function bindProviderProtocol(adapterContext: Record<string, unknown>, providerP
 
 describe('entry-context-shell', () => {
   test('keeps entry shell thin and delegates filter normalization to native Rust', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile(
-        'sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts',
-        'utf8'
-      )
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(
+      'sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts',
+      'utf8'
+    );
+    const typesSource = await fs.readFile(
+      'sharedmodule/llmswitch-core/src/servertool/types.ts',
+      'utf8'
     );
 
     expect(source).toContain('export function resolveServertoolEntryContext(');
@@ -33,6 +36,7 @@ describe('entry-context-shell', () => {
     expect(source).not.toContain('export function asServertoolJsonObject(');
     expect(source).not.toContain('function tokenSetFromNativePlan(');
     expect(source).not.toContain('.trim().toLowerCase()');
+    expect(typesSource).not.toMatch(/export interface ServerSideToolEngineOptions\s*\{[\s\S]{0,260}providerProtocol:\s*string;/);
   });
 
   test('builds context base and normalized include/exclude sets', () => {
@@ -43,7 +47,6 @@ describe('entry-context-shell', () => {
         adapterContext,
         requestId: 'req-1',
         entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
         includeToolCallHandlerNames: [' Web_Search ', '', 'web_search'],
         excludeToolCallHandlerNames: [' Vision_Auto '],
         includeAutoHookIds: [' Stop_Message_Auto '],
@@ -73,15 +76,14 @@ describe('entry-context-shell', () => {
       options: {
         adapterContext: {},
         requestId: 'req-1',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses'
+        entryEndpoint: '/v1/responses'
       } as any,
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
       base: { ok: true } as any
     })).toThrow('Servertool entry context requires metadata center runtime_control.providerProtocol');
   });
 
-  test('prefers bound metadata center runtimeControl.providerProtocol over explicit options.providerProtocol', () => {
+  test('uses only bound metadata center runtimeControl.providerProtocol', () => {
     const adapterContext: Record<string, unknown> = {};
     const center = MetadataCenter.attach(adapterContext);
     center.writeRuntimeControl(
@@ -89,7 +91,7 @@ describe('entry-context-shell', () => {
       'anthropic-messages',
       {
         module: 'tests/servertool/entry-context-shell.spec.ts',
-        symbol: 'prefers bound metadata center runtimeControl.providerProtocol over explicit options.providerProtocol',
+        symbol: 'uses only bound metadata center runtimeControl.providerProtocol',
         stage: 'test'
       }
     );
@@ -98,8 +100,7 @@ describe('entry-context-shell', () => {
       options: {
         adapterContext,
         requestId: 'req-1',
-        entryEndpoint: '/v1/messages',
-        providerProtocol: 'openai-chat'
+        entryEndpoint: '/v1/messages'
       } as any,
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
       base: { ok: true } as any

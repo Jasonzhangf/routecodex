@@ -111,6 +111,7 @@ const TS_ENGINE_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-orchestration
 const TS_ENGINE_OBSERVATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
+const TS_SERVERTOOL_TYPES = `${SERVERTOOL_TS_DIR}/types.ts`;
 const TS_REGISTRY_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`;
 const TS_REGISTRY_TYPES = `${SERVERTOOL_TS_DIR}/registry-types.ts`;
 const TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL = `${SERVERTOOL_TS_DIR}/run-server-side-tool-engine-shell.ts`;
@@ -5035,6 +5036,13 @@ function checkServertoolRustOutcomeCloseout() {
     fail(
       'servertool-engine-orchestration-metadata-center-only',
       'ServerToolOrchestrationOptions must not accept providerProtocol as a second protocol truth'
+    );
+  }
+  const servertoolOptionsTypes = readRequired(TS_SERVERTOOL_TYPES);
+  if (/export interface ServerSideToolEngineOptions\s*\{[\s\S]{0,260}providerProtocol:\s*string;/.test(servertoolOptionsTypes)) {
+    fail(
+      'servertool-engine-options-metadata-center-only',
+      'ServerSideToolEngineOptions must not accept providerProtocol as a second protocol truth'
     );
   }
   const engineObservationShell = readRequired(TS_ENGINE_OBSERVATION_SHELL);

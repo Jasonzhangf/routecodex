@@ -6,6 +6,7 @@ import type {
 } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import type { ServerToolExecutionDescriptor } from '../../sharedmodule/llmswitch-core/src/servertool/registry-types.js';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const registryHooks: Array<{
   id: string;
@@ -201,6 +202,19 @@ beforeEach(() => {
 });
 
 function createOptions(traces: ServerToolAutoHookTraceEvent[]): ServerSideToolEngineOptions {
+  const adapterContext = {
+    requestId: 'req-hook-trace',
+    entryEndpoint: '/v1/responses'
+  } as Record<string, unknown>;
+  MetadataCenter.attach(adapterContext).writeRuntimeControl(
+    'providerProtocol',
+    'openai-responses',
+    {
+      module: 'tests/servertool/servertool-auto-hook-trace.spec.ts',
+      symbol: 'createOptions',
+      stage: 'test'
+    }
+  );
   return {
     chatResponse: {
       id: 'chatcmpl-hook-trace',
@@ -214,26 +228,27 @@ function createOptions(traces: ServerToolAutoHookTraceEvent[]): ServerSideToolEn
         }
       ]
     } as JsonObject,
-    adapterContext: {
-      requestId: 'req-hook-trace',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses'
-    } as any,
+    adapterContext: adapterContext as any,
     entryEndpoint: '/v1/responses',
     requestId: 'req-hook-trace',
-    providerProtocol: 'openai-responses',
     onAutoHookTrace: (event) => traces.push(event)
   };
 }
 
 function createContextBase(options: ServerSideToolEngineOptions): ServerToolHandlerContext {
+  const providerProtocol = MetadataCenter.attach(
+    options.adapterContext as Record<string, unknown>
+  ).readRuntimeControl().providerProtocol;
+  if (typeof providerProtocol !== 'string' || !providerProtocol.trim()) {
+    throw new Error('test context requires metadata center runtime_control.providerProtocol');
+  }
   return {
     base: options.chatResponse,
     toolCalls: [],
     adapterContext: options.adapterContext,
     requestId: options.requestId,
     entryEndpoint: options.entryEndpoint,
-    providerProtocol: options.providerProtocol
+    providerProtocol
   };
 }
 

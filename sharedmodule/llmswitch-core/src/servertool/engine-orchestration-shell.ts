@@ -124,7 +124,6 @@ export async function runServerToolOrchestrationShell(
     adapterContext: options.adapterContext,
     entryEndpoint: options.entryEndpoint,
     requestId: options.requestId,
-    providerProtocol,
     onAutoHookTrace: logAutoHookTrace
   };
 

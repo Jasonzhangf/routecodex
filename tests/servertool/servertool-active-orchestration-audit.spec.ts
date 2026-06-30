@@ -22,6 +22,16 @@ const DELETED_FILES = [
 
 const TARGETS = [
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/types.ts',
+    forbidden: [
+      'providerProtocol: string;\n  disableToolCallHandlers?: boolean;',
+    ],
+    required: [
+      'export interface ServerSideToolEngineOptions',
+      'export interface ServerToolHandlerContext',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts',
     forbidden: [
       'const SERVERTOOL_BACKEND_EXECUTORS',
