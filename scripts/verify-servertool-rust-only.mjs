@@ -6196,6 +6196,7 @@ function checkServertoolPostflightLoggingFailFast() {
     'logNonBlocking:',
     'function applyServertoolPostflightMetadataWritePlan(',
     'function buildStoplessProjectionMetadataCenterSnapshot(',
+    'function printServertoolLine(',
     "symbol: 'applyServertoolPostflightMetadataWritePlan'",
     'const followupSummary: Record<string, unknown> = {',
     "if ('payload' in followup)",

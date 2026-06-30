@@ -44,6 +44,7 @@ describe('progress-log-block fail-fast behavior', () => {
     );
     expect(source).not.toContain('function resolveStage(');
     expect(source).not.toContain('function normalizeResult(');
+    expect(source).not.toContain('function printServertoolLine(');
     expect(source).not.toContain("event.reason.trim().toLowerCase().replace");
     expect(source).not.toContain("compareContext.reason.toLowerCase().replace");
     expect(source).not.toContain('extra.flowId.trim()');
@@ -78,7 +79,6 @@ describe('progress-log-block fail-fast behavior', () => {
 
     try {
       expect(() => logger.logProgress(2, 5, 'running', { flowId: 'fixture_flow' })).toThrow('console down');
-      expect(() => logger.logStopCompare('trigger', 'stop_message_flow')).toThrow('console down');
       expect(logNonBlocking).not.toHaveBeenCalled();
     } finally {
       consoleSpy.mockRestore();

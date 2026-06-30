@@ -46,10 +46,6 @@ function compactStopCompareSummary(summary: string): string {
     .join(' ');
 }
 
-function printServertoolLine(color: string, reset: string, parts: string[]): void {
-  console.log(`${color}[servertool] ${parts.join(' ')}${reset}`);
-}
-
 type CommonArgs = {
   requestId: string;
   entryEndpoint: string;
@@ -103,12 +99,12 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     const color = shouldUseServertoolGoldProgressHighlightWithNative({ flowId }) ? args.gold : args.yellow;
     const shouldPrintConsole = tool !== 'stop_message_auto';
     if (shouldPrintConsole) {
-      printServertoolLine(color, args.reset, [
+      console.log(`${color}[servertool] ${[
         field('requestId', args.requestId, color, args.reset),
         `tool=${tool}`,
         `stage=${stage}`,
         field('result', result, color, args.reset)
-      ]);
+      ].join(' ')}${args.reset}`);
     }
     appendServerToolProgressFileEvent({
       requestId: args.requestId,
@@ -189,7 +185,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
         ['match', stopMatchBrief.result],
         ['flow', flowToken || stopMatchBrief.flow]
       ] : [['flow', flowToken]];
-      printServertoolLine(args.blue, args.reset, [
+      console.log(`${args.blue}[servertool] ${[
         field('requestId', args.requestId, args.blue, args.reset),
         'tool=stop_message_auto',
         'stage=summary',
@@ -201,7 +197,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
           if (index <= 0) return part;
           return field(part.slice(0, index), part.slice(index + 1), args.blue, args.reset);
         })
-      ]);
+      ].join(' ')}${args.reset}`);
     }
     args.stageRecorder?.record('servertool.stop_compare', {
       stage: viewStage,
