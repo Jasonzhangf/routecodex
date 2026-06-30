@@ -3771,6 +3771,8 @@ function checkEngineSelectionRustOwner() {
     'engineResult.mode',
     '!engineResult.execution',
     "mode === 'passthrough'",
+    'function toEngineOverrides(',
+    'primaryAutoHookAttempt:',
     'disableToolCallHandlers: true',
     'includeAutoHookIds: primaryAutoHookIds',
     'excludeAutoHookIds: primaryAutoHookIds',

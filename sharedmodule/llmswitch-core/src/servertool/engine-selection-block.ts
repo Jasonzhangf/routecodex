@@ -3,7 +3,6 @@ import { buildServertoolAutoHookQueueConfig } from './skeleton-config.js';
 import {
   planEngineSelectionAfterRunWithNative,
   planEngineSelectionStartWithNative,
-  type EngineSelectionOverridesPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export const SERVERTOOL_ENGINE_SELECTION_FEATURE_ID = 'feature_id: hub.servertool_engine_selection';
@@ -18,26 +17,34 @@ export async function runPrimaryServerToolEngineSelection(args: {
   const startPlan = planEngineSelectionStartWithNative({
     primaryAutoHookIds: buildServertoolAutoHookQueueConfig().optionalPrimaryOrder
   });
-  const engineResult = await args.runEngine(toEngineOverrides(startPlan.overrides));
+  const engineResult = await args.runEngine({
+    ...(typeof startPlan.overrides.disableToolCallHandlers === 'boolean'
+      ? { disableToolCallHandlers: startPlan.overrides.disableToolCallHandlers }
+      : {}),
+    ...(Array.isArray(startPlan.overrides.includeAutoHookIds)
+      ? { includeAutoHookIds: startPlan.overrides.includeAutoHookIds }
+      : {}),
+    ...(Array.isArray(startPlan.overrides.excludeAutoHookIds)
+      ? { excludeAutoHookIds: startPlan.overrides.excludeAutoHookIds }
+      : {})
+  });
   const afterRunPlan = planEngineSelectionAfterRunWithNative({
     primaryAutoHookIds: startPlan.primaryAutoHookIds,
     engineResult
   });
   if (afterRunPlan.action === 'rerun_excluding_primary_hooks') {
-    return await args.runEngine(toEngineOverrides(afterRunPlan.overrides ?? {}));
+    const overrides = afterRunPlan.overrides ?? {};
+    return await args.runEngine({
+      ...(typeof overrides.disableToolCallHandlers === 'boolean'
+        ? { disableToolCallHandlers: overrides.disableToolCallHandlers }
+        : {}),
+      ...(Array.isArray(overrides.includeAutoHookIds)
+        ? { includeAutoHookIds: overrides.includeAutoHookIds }
+        : {}),
+      ...(Array.isArray(overrides.excludeAutoHookIds)
+        ? { excludeAutoHookIds: overrides.excludeAutoHookIds }
+        : {})
+    });
   }
   return engineResult;
-}
-
-function toEngineOverrides(plan: EngineSelectionOverridesPlan): Partial<ServerSideToolEngineOptions> {
-  return {
-    ...(Array.isArray(plan.includeAutoHookIds) && plan.includeAutoHookIds.length > 0
-      ? { primaryAutoHookAttempt: true }
-      : {}),
-    ...(typeof plan.disableToolCallHandlers === 'boolean'
-      ? { disableToolCallHandlers: plan.disableToolCallHandlers }
-      : {}),
-    ...(Array.isArray(plan.includeAutoHookIds) ? { includeAutoHookIds: plan.includeAutoHookIds } : {}),
-    ...(Array.isArray(plan.excludeAutoHookIds) ? { excludeAutoHookIds: plan.excludeAutoHookIds } : {})
-  };
 }

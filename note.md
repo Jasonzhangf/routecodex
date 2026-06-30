@@ -1,3 +1,10 @@
+# 2026-06-30: servertool engine-selection helper inlined
+
+- `sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts` 已删除本地 `toEngineOverrides()` helper，直接内联 Rust 计划返回的 overrides 映射；TS 只保留必要的 queue 调度和 native plan 消费。
+- 这次内联同时移除了 TS 对 `primaryAutoHookAttempt` 的额外注入，保持 runEngine 入参只含 Rust 计划已经定义的 overrides 字段。
+- `verify:servertool-rust-only` 已新增 `function toEngineOverrides(` / `primaryAutoHookAttempt:` 复活门禁。
+- 验证：focused Jest `engine-selection-block + servertool-active-orchestration-audit` 38 passed；sharedmodule TS PASS；`verify:servertool-rust-only` PASS；`git diff --check` PASS。
+
 # 2026-06-30: servertool match-log shell inlined and deleted
 
 - 本 slice 将 `sharedmodule/llmswitch-core/src/servertool/match-log-block.ts` 物理删除，`recordServertoolEngineMatchSkipped` / `recordServertoolEngineMatchHit` 直接内联到 `engine-observation-shell.ts`，避免 match logging 继续以独立 helper 形态保留第二层 owner。
