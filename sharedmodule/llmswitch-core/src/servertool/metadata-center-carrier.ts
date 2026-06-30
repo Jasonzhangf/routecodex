@@ -3,7 +3,6 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import {
   formatStopMessageCompareContextWithNative,
   inspectStopGatewaySignalWithNative,
-  normalizeStopGatewayContextWithNative,
   normalizeStopMessageCompareContextWithNative,
   type StopGatewayContext,
   type StopMessageCompareContext
@@ -210,15 +209,6 @@ export function attachStopGatewayContext(adapterContext: AdapterContext, context
     reason: 'response stop gateway control signal',
     required: true
   });
-}
-
-export function readStopGatewayContext(adapterContext: unknown): StopGatewayContext | undefined {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return undefined;
-  }
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as Record<string, unknown>);
-  const raw = runtimeControl?.stopGatewayContext;
-  return normalizeStopGatewayContextWithNative(raw);
 }
 
 export function attachStopMessageCompareContext(

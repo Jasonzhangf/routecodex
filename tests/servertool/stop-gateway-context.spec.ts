@@ -3,8 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
   attachStopGatewayContext,
-  inspectStopGatewaySignal,
-  readStopGatewayContext
+  inspectStopGatewaySignal
 } from '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js';
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
@@ -44,6 +43,8 @@ describe('servertool stop-gateway context', () => {
 
     expect(source).not.toContain('export function resolveStopGatewayContext(');
     expect(source).not.toContain('export function isStopEligibleForServerTool(');
+    expect(source).not.toContain('export function readStopGatewayContext(');
+    expect(source).not.toContain('normalizeStopGatewayContextWithNative');
   });
 
   test('uses native inspect and preserves the last finish_reason choice index', () => {
@@ -82,45 +83,6 @@ describe('servertool stop-gateway context', () => {
     expect(context.reason).toBe('finish_reason_stop_with_embedded_tool_markers');
   });
 
-  test('reads metadata-center runtime control context through native normalization', () => {
-    const { target } = bindRuntimeControlTarget({
-      stopGatewayContext: {
-        observed: true,
-        eligible: false,
-        source: ' RESPONSES ',
-        reason: ' responses_required_action ',
-        choiceIndex: 2.8,
-        hasToolCalls: true
-      }
-    });
-
-    const context = readStopGatewayContext(target);
-
-    expect(context).toEqual({
-      observed: true,
-      eligible: false,
-      source: 'responses',
-      reason: 'responses_required_action',
-      choiceIndex: 2,
-      hasToolCalls: true
-    });
-  });
-
-  test('does not read legacy __rt stop gateway context', () => {
-    const context = readStopGatewayContext({
-      __rt: {
-        stopGatewayContext: {
-          observed: true,
-          eligible: false,
-          source: 'chat',
-          reason: 'legacy_rt'
-        }
-      }
-    });
-
-    expect(context).toBeUndefined();
-  });
-
   test('attach writes explicit metadata-center runtime control context', () => {
     const { target, runtimeControl } = bindRuntimeControlTarget();
     attachStopGatewayContext(target as any, {
@@ -134,14 +96,6 @@ describe('servertool stop-gateway context', () => {
 
     expect(target.__rt).toBeUndefined();
     expect(runtimeControl.stopGatewayContext).toEqual({
-      observed: true,
-      eligible: true,
-      source: 'chat',
-      reason: 'finish_reason_stop',
-      choiceIndex: 0,
-      hasToolCalls: false
-    });
-    expect(readStopGatewayContext(target)).toEqual({
       observed: true,
       eligible: true,
       source: 'chat',

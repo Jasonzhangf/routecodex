@@ -2216,6 +2216,8 @@ function checkStopGatewayContextRustOwner() {
     'function writeBoundRuntimeControl(',
     'export function resolveStopGatewayContext(',
     'export function isStopEligibleForServerTool(',
+    'export function readStopGatewayContext(',
+    'normalizeStopGatewayContextWithNative',
   ]) {
     if (metadataCenterCarrier.includes(keyword)) {
       fail(
@@ -2229,12 +2231,6 @@ function checkStopGatewayContextRustOwner() {
     TS_METADATA_CENTER_CARRIER,
     metadataCenterCarrier,
     'inspectStopGatewaySignalWithNative'
-  );
-  assertContains(
-    'stop-gateway-context-metadata-carrier',
-    TS_METADATA_CENTER_CARRIER,
-    metadataCenterCarrier,
-    'normalizeStopGatewayContextWithNative'
   );
   assertContains(
     'stop-gateway-context-metadata-carrier',
