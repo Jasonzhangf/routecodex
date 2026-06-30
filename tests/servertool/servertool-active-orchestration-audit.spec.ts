@@ -80,6 +80,7 @@ const TARGETS = [
       'export function stripToolOutputs(',
       'export function patchToolCallArgumentsById(',
       'export function filterOutExecutedToolCalls(',
+      'function replaceJsonObjectInPlaceInternal(',
       'function nativeArray(',
       'function nativeRecord(',
     ],

@@ -2922,10 +2922,11 @@ function checkServertoolExecutionDispatchRustOwner() {
   for (const marker of [
     'export function buildAssistantToolCallMessage(',
     'export function buildToolMessagesFromOutputs(',
-    'export function stripToolOutputs(',
-    'export function patchToolCallArgumentsById(',
-    'export function filterOutExecutedToolCalls(',
-    'function nativeArray(',
+      'export function stripToolOutputs(',
+      'export function patchToolCallArgumentsById(',
+      'export function filterOutExecutedToolCalls(',
+      'function replaceJsonObjectInPlaceInternal(',
+      'function nativeArray(',
     'function nativeRecord(',
     'runServertoolOrchestrationMutationWithNative'
   ]) {

@@ -4,18 +4,6 @@ import {
   planServertoolAutoHookQueuesWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
-function replaceJsonObjectInPlaceInternal(target: JsonObject, next: JsonObject): void {
-  const newKeys = new Set(Object.keys(next));
-  for (const [key, value] of Object.entries(next)) {
-    (target as Record<string, unknown>)[key] = value;
-  }
-  for (const key of Object.keys(target)) {
-    if (!newKeys.has(key)) {
-      delete (target as Record<string, unknown>)[key];
-    }
-  }
-}
-
 export function buildAutoHookQueuesFromConfig<THook extends {
   id: string;
   phase: string;
@@ -57,5 +45,13 @@ export function buildAutoHookQueuesFromConfig<THook extends {
 }
 
 export function replaceJsonObjectInPlace(target: JsonObject, next: JsonObject): void {
-  replaceJsonObjectInPlaceInternal(target, next);
+  const newKeys = new Set(Object.keys(next));
+  for (const [key, value] of Object.entries(next)) {
+    (target as Record<string, unknown>)[key] = value;
+  }
+  for (const key of Object.keys(target)) {
+    if (!newKeys.has(key)) {
+      delete (target as Record<string, unknown>)[key];
+    }
+  }
 }
