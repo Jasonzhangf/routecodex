@@ -166,8 +166,9 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).toContain('const outcomePlan = planServertoolOutcomeWithNative(');
     expect(source).toContain('buildServertoolOutcomePlanInputWithNative({');
     expect(source).not.toContain('const outcomePlanInput =');
-    expect(source).toContain('function throwServertoolExecutionDispatchError(args: ServertoolExecutionDispatchErrorInput): never');
-    expect(source).toContain('planServertoolExecutionDispatchErrorWithNative(args)');
+    expect(source).toContain('throw createServertoolProviderProtocolErrorFromPlan(');
+    expect(source).toContain('planServertoolExecutionDispatchErrorWithNative({');
+    expect(source).not.toContain('function throwServertoolExecutionDispatchError(');
     expect(source).toContain('finalChatResponse: args.baseForExecution');
     expect(source).not.toContain('export const buildServertoolOutcomePlanInput =');
     expect(source).not.toContain('structuredClone(args.base)');

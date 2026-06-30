@@ -5339,6 +5339,8 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     'const servertoolBackendExecutors',
+    'function throwServertoolExecutionDispatchError(',
+    'planServertoolExecutionDispatchErrorWithNative(args)',
     'function isServerToolHandlerPlan(',
     'function isServerToolHandlerResult(',
     'function assertValidServertoolHandlerContract(',
