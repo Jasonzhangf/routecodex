@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses SSE content part descriptor native owner slice
+
+- Red evidence: after adding forbidden markers, `npm run verify:sse-architecture-boundary` failed on `const partDescriptor: Record<string, unknown>`, `(content as any).annotations`, and `(content as any).logprobs`, proving `responses.ts` still owned content part descriptor materialization in TS.
+- Fix: added Rust `buildResponsesSseContentPartDescriptorJson`; `response.content_part.added/done` now materialize part descriptors in Rust, and TS only calls `buildResponsesSseContentPartDescriptorWithNative()` before wrapping the SSE envelope.
+- Positive / reverse tests: Rust covers `output_text` added, `function_result` done, and missing type fail-fast; Jest covers the native wrapper, JSON->SSE projection, and missing type does not synthesize an unknown descriptor.
+- Verification: Rust focused `responses_sse_content_part` 3/3 PASS; native build PASS; focused Jest 24/24 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` replayed cleanly with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`; that sample has no `content_part` events, so content part behavior is covered by focused Jest.
+
 ### 2026-06-30 bridge helper deletion slice
 
 - Red evidence: after adding forbidden markers, `npm run verify:responses-sse-business-module` failed on direct chat tool-call stream reprojection, chat usage normalization, client-close/failure conversation cleanup policy, and relay Responses SSE reprojection policy.

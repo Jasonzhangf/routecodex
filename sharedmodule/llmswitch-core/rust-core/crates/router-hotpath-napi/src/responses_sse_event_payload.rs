@@ -205,6 +205,164 @@ pub fn build_responses_sse_output_item_descriptor(
     }
 }
 
+fn build_responses_sse_content_part_added_descriptor(
+    source: &Map<String, Value>,
+) -> Result<Value, String> {
+    let part_type = source
+        .get("type")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Responses content part descriptor missing type".to_string())?;
+
+    let mut part = Map::new();
+    part.insert("type".to_string(), Value::String(part_type.to_string()));
+    match part_type {
+        "input_text" => {
+            let text = source.get("text").and_then(Value::as_str).unwrap_or("");
+            part.insert("text".to_string(), Value::String(text.to_string()));
+        }
+        "output_text" => {
+            part.insert("text".to_string(), Value::String(String::new()));
+            part.insert(
+                "annotations".to_string(),
+                source
+                    .get("annotations")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Array(Vec::new())),
+            );
+            part.insert(
+                "logprobs".to_string(),
+                source
+                    .get("logprobs")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Array(Vec::new())),
+            );
+        }
+        "input_image" => {
+            if let Some(image_url) = source.get("image_url") {
+                part.insert("image_url".to_string(), image_url.clone());
+            }
+            insert_string_if_present(&mut part, source, "detail");
+        }
+        "file_search" => {
+            if let Some(value) = source.get("file_search") {
+                part.insert("file_search".to_string(), value.clone());
+            }
+        }
+        "computer_use" => {
+            if let Some(value) = source.get("computer_use") {
+                part.insert("computer_use".to_string(), value.clone());
+            }
+        }
+        "function_call" => {
+            if let Some(value) = source.get("name") {
+                part.insert("name".to_string(), value.clone());
+            }
+            if let Some(value) = source.get("arguments") {
+                part.insert("arguments".to_string(), value.clone());
+            }
+        }
+        "function_result" => {
+            if let Some(value) = source.get("result") {
+                part.insert("result".to_string(), value.clone());
+            }
+            if let Some(value) = source.get("tool_call_id") {
+                part.insert("tool_call_id".to_string(), value.clone());
+            }
+        }
+        "conversation" => {
+            if let Some(value) = source.get("conversation") {
+                part.insert("conversation".to_string(), value.clone());
+            }
+        }
+        _ => {}
+    }
+
+    Ok(Value::Object(part))
+}
+
+fn build_responses_sse_content_part_done_descriptor(
+    source: &Map<String, Value>,
+) -> Result<Value, String> {
+    let part_type = source
+        .get("type")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Responses content part descriptor missing type".to_string())?;
+
+    let mut part = Map::new();
+    part.insert("type".to_string(), Value::String(part_type.to_string()));
+    match part_type {
+        "input_text" | "output_text" => {
+            let text = source.get("text").and_then(Value::as_str).unwrap_or("");
+            part.insert("text".to_string(), Value::String(text.to_string()));
+            if part_type == "output_text" {
+                part.insert(
+                    "annotations".to_string(),
+                    source
+                        .get("annotations")
+                        .cloned()
+                        .unwrap_or_else(|| Value::Array(Vec::new())),
+                );
+                part.insert(
+                    "logprobs".to_string(),
+                    source
+                        .get("logprobs")
+                        .cloned()
+                        .unwrap_or_else(|| Value::Array(Vec::new())),
+                );
+            }
+        }
+        "input_image" => {
+            if let Some(image_url) = source.get("image_url") {
+                part.insert("image_url".to_string(), image_url.clone());
+            }
+            insert_string_if_present(&mut part, source, "detail");
+        }
+        "function_call" => {
+            if let Some(value) = source.get("name") {
+                part.insert("name".to_string(), value.clone());
+            }
+            if let Some(value) = source.get("arguments") {
+                part.insert("arguments".to_string(), value.clone());
+            }
+        }
+        "function_result" => {
+            if let Some(value) = source.get("result") {
+                part.insert("result".to_string(), value.clone());
+            }
+            if let Some(value) = source.get("tool_call_id") {
+                part.insert("tool_call_id".to_string(), value.clone());
+            }
+        }
+        "conversation" => {
+            if let Some(value) = source.get("conversation") {
+                part.insert("conversation".to_string(), value.clone());
+            }
+        }
+        _ => {}
+    }
+
+    Ok(Value::Object(part))
+}
+
+pub fn build_responses_sse_content_part_descriptor(
+    content_part: Value,
+    lifecycle: Option<&str>,
+) -> Result<Value, String> {
+    let source = content_part
+        .as_object()
+        .ok_or_else(|| "Responses content part descriptor expected object".to_string())?;
+    match lifecycle.unwrap_or("done") {
+        "added" => build_responses_sse_content_part_added_descriptor(source),
+        "done" => build_responses_sse_content_part_done_descriptor(source),
+        other => Err(format!(
+            "Unsupported Responses content part descriptor lifecycle: {}",
+            other
+        )),
+    }
+}
+
 fn event_type(input: &Map<String, Value>) -> Result<&str, String> {
     input
         .get("type")
@@ -355,6 +513,29 @@ pub fn build_responses_sse_output_item_descriptor_json(
     serde_json::to_string(&output).map_err(|error| {
         format!(
             "Failed to serialize Responses output item descriptor JSON: {}",
+            error
+        )
+    })
+}
+
+pub fn build_responses_sse_content_part_descriptor_json(
+    content_part_json: String,
+    lifecycle_json: Option<String>,
+) -> Result<String, String> {
+    let content_part: Value = serde_json::from_str(&content_part_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses content part descriptor JSON: {}",
+            error
+        )
+    })?;
+    let lifecycle = lifecycle_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let output = build_responses_sse_content_part_descriptor(content_part, lifecycle)?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses content part descriptor JSON: {}",
             error
         )
     })
@@ -599,5 +780,64 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Responses output item descriptor missing type"));
+    }
+
+    #[test]
+    fn builds_responses_sse_content_part_added_descriptor() {
+        let output = build_responses_sse_content_part_descriptor(
+            json!({
+                "type": "output_text",
+                "text": "final text",
+                "annotations": [{ "type": "file_citation" }],
+                "logprobs": [{ "token": "x" }]
+            }),
+            Some("added"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "type": "output_text",
+                "text": "",
+                "annotations": [{ "type": "file_citation" }],
+                "logprobs": [{ "token": "x" }]
+            })
+        );
+    }
+
+    #[test]
+    fn builds_responses_sse_content_part_done_descriptor() {
+        let output = build_responses_sse_content_part_descriptor(
+            json!({
+                "type": "function_result",
+                "result": { "ok": true },
+                "tool_call_id": "call_1"
+            }),
+            Some("done"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "type": "function_result",
+                "result": { "ok": true },
+                "tool_call_id": "call_1"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_responses_sse_content_part_descriptor_missing_type() {
+        let err = build_responses_sse_content_part_descriptor(
+            json!({
+                "text": "missing type"
+            }),
+            Some("added"),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Responses content part descriptor missing type"));
     }
 }

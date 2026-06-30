@@ -14,6 +14,7 @@ import type {
 import { TimeUtils, StringUtils } from '../../shared/utils.js';
 import {
   buildResponsesSseErrorPayloadWithNative,
+  buildResponsesSseContentPartDescriptorWithNative,
   buildResponsesSseOutputItemDescriptorWithNative,
   normalizeResponsesSseReasoningSummaryWithNative,
   normalizeResponsesSseResponsePayloadWithNative
@@ -207,31 +208,7 @@ export function buildContentPartStartEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
-  const partDescriptor: Record<string, unknown> = { type: content.type };
-  if (content.type === 'input_text') {
-    partDescriptor.text = content.text ?? '';
-  } else if (content.type === 'output_text') {
-    partDescriptor.text = '';
-    partDescriptor.annotations = (content as any).annotations ?? [];
-    partDescriptor.logprobs = (content as any).logprobs ?? [];
-  } else if (content.type === 'input_image') {
-    partDescriptor.image_url = content.image_url;
-    if (content.detail) {
-      partDescriptor.detail = content.detail;
-    }
-  } else if (content.type === 'file_search') {
-    partDescriptor.file_search = content.file_search;
-  } else if (content.type === 'computer_use') {
-    partDescriptor.computer_use = content.computer_use;
-  } else if (content.type === 'function_call') {
-    partDescriptor.name = content.name;
-    partDescriptor.arguments = content.arguments;
-  } else if (content.type === 'function_result') {
-    partDescriptor.result = content.result;
-    partDescriptor.tool_call_id = content.tool_call_id;
-  } else if (content.type === 'conversation') {
-    partDescriptor.conversation = content.conversation;
-  }
+  const part = buildResponsesSseContentPartDescriptorWithNative(content, 'added');
 
   return {
     type: 'response.content_part.added',
@@ -242,7 +219,7 @@ export function buildContentPartStartEvent(
       output_index: context.outputIndexCounter,
       item_id: outputItemId,
       content_index: contentIndex,
-      part: partDescriptor
+      part
     },
     sequenceNumber: baseEvent.sequenceNumber
   };
@@ -293,31 +270,9 @@ export function buildContentPartDoneEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
-  const partDescriptor: Record<string, unknown> = {};
-
-  if (content) {
-    partDescriptor.type = content.type;
-    if (content.type === 'input_text' || content.type === 'output_text') {
-      partDescriptor.text = content.text ?? '';
-      if (content.type === 'output_text') {
-        partDescriptor.annotations = (content as any).annotations ?? [];
-        partDescriptor.logprobs = (content as any).logprobs ?? [];
-      }
-    } else if (content.type === 'input_image') {
-      partDescriptor.image_url = content.image_url;
-      if (content.detail) {
-        partDescriptor.detail = content.detail;
-      }
-    } else if (content.type === 'function_call') {
-      partDescriptor.name = content.name;
-      partDescriptor.arguments = content.arguments;
-    } else if (content.type === 'function_result') {
-      partDescriptor.result = content.result;
-      partDescriptor.tool_call_id = content.tool_call_id;
-    } else if (content.type === 'conversation') {
-      partDescriptor.conversation = content.conversation;
-    }
-  }
+  const part = content
+    ? buildResponsesSseContentPartDescriptorWithNative(content, 'done')
+    : undefined;
 
   return {
     type: 'response.content_part.done',
@@ -328,7 +283,7 @@ export function buildContentPartDoneEvent(
       output_index: context.outputIndexCounter,
       item_id: outputItemId,
       content_index: contentIndex,
-      ...(Object.keys(partDescriptor).length ? { part: partDescriptor } : {})
+      ...(part ? { part } : {})
     },
     sequenceNumber: baseEvent.sequenceNumber
   };
