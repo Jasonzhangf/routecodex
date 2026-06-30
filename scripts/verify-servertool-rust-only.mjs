@@ -6030,6 +6030,19 @@ function checkServertoolMatchLoggingFailFast() {
       'engine-observation-shell.ts must not fallback missing execution.flowId to unknown'
     );
   }
+  if (observationShellSource.includes("args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution'")) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'engine-observation-shell.ts must consume native skipReason instead of deriving it from engineMode'
+    );
+  }
+  const engineOrchestrationSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`);
+  if (engineOrchestrationSource.includes("engineSkipPlan.skipReason ?? 'no_execution'")) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'engine-orchestration-shell.ts must not fallback missing native skipReason to no_execution'
+    );
+  }
   assertContains(
     'servertool-match-log-fail-fast',
     `${ROOT}/tests/servertool/engine-observation-shell.spec.ts`,
@@ -6041,6 +6054,12 @@ function checkServertoolMatchLoggingFailFast() {
     `${ROOT}/tests/servertool/engine-observation-shell.spec.ts`,
     observationSpec,
     'match hit requires execution flowId instead of falling back to unknown'
+  );
+  assertContains(
+    'servertool-match-log-fail-fast',
+    `${ROOT}/tests/servertool/engine-observation-shell.spec.ts`,
+    observationSpec,
+    'match skipped consumes native skipReason instead of deriving it from engine mode'
   );
   pass(
     'servertool-match-log-fail-fast',

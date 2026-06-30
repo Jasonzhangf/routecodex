@@ -9,6 +9,7 @@ export function recordServertoolEngineMatchSkipped(args: {
   entryEndpoint: string;
   providerProtocol: string;
   engineMode: 'passthrough' | 'tool_flow';
+  skipReason: string;
   stageRecorder?: StageRecorder;
   adapterContext?: AdapterContext;
 }): void {
@@ -17,7 +18,10 @@ export function recordServertoolEngineMatchSkipped(args: {
   if (!providerProtocol) {
     throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol');
   }
-  const skipReason = args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution';
+  const skipReason = args.skipReason.trim();
+  if (!skipReason) {
+    throw new Error('Servertool match skipped requires native skipReason');
+  }
   args.stageRecorder?.record('servertool.match', {
     matched: false,
     mode: args.engineMode,

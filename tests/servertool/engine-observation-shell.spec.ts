@@ -74,6 +74,7 @@ describe('engine-observation-shell', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         engineMode: 'passthrough',
+        skipReason: 'passthrough',
         adapterContext: adapterContext as any,
         stageRecorder: stageRecorder as any
       })
@@ -98,6 +99,34 @@ describe('engine-observation-shell', () => {
         stageRecorder: stageRecorder as any
       })
     ).toThrow('stage recorder down');
+  });
+
+  test('match skipped consumes native skipReason instead of deriving it from engine mode', async () => {
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
+      'utf8'
+    );
+    const orchestrationSource = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
+      'utf8'
+    );
+    const adapterContext: Record<string, unknown> = {};
+    bindProviderProtocol(adapterContext, 'openai-chat');
+
+    expect(source).not.toContain("args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution'");
+    expect(orchestrationSource).not.toContain("engineSkipPlan.skipReason ?? 'no_execution'");
+    expect(orchestrationSource).toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
+    expect(() =>
+      mod.recordServertoolEngineMatchSkipped({
+        requestId: 'req-match-skip-missing-reason',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        engineMode: 'passthrough',
+        skipReason: ' ',
+        adapterContext: adapterContext as any
+      })
+    ).toThrow('Servertool match skipped requires native skipReason');
   });
 
   test('match hit requires execution flowId instead of falling back to unknown', async () => {
@@ -239,6 +268,7 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('createProgressObservation({');
     expect(source).toContain('runEnginePreflight({');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
+    expect(source).toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
     expect(source).toContain('planServertoolTimeoutErrorWithNative({');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan(');
     expect(source).toContain('recordServertoolEngineMatchSkipped({');
