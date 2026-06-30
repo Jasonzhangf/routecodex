@@ -74,6 +74,41 @@ fn normalize_strict_responses_usage(usage_raw: &Value) -> Result<Value, String> 
     Ok(Value::Object(out))
 }
 
+fn normalize_responses_sse_reasoning_summary(summary_raw: &Value) -> Result<Value, String> {
+    let Some(summary) = summary_raw.as_array() else {
+        return Ok(Value::Array(Vec::new()));
+    };
+
+    let mut normalized: Vec<Value> = Vec::new();
+    for entry in summary {
+        if let Some(text) = entry.as_str() {
+            if !text.is_empty() {
+                normalized.push(serde_json::json!({
+                    "type": "summary_text",
+                    "text": text
+                }));
+            }
+            continue;
+        }
+
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let Some(text) = row.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        if text.is_empty() {
+            continue;
+        }
+        normalized.push(serde_json::json!({
+            "type": "summary_text",
+            "text": text
+        }));
+    }
+
+    Ok(Value::Array(normalized))
+}
+
 fn event_type(input: &Map<String, Value>) -> Result<&str, String> {
     input
         .get("type")
@@ -190,6 +225,20 @@ pub fn normalize_responses_sse_response_payload_json(
     let output = normalize_responses_sse_response_payload(response, status)?;
     serde_json::to_string(&output)
         .map_err(|error| format!("Failed to serialize Responses response JSON: {}", error))
+}
+
+pub fn normalize_responses_sse_reasoning_summary_json(
+    summary_json: String,
+) -> Result<String, String> {
+    let summary: Value = serde_json::from_str(&summary_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses reasoning summary JSON: {}",
+            error
+        )
+    })?;
+    let output = normalize_responses_sse_reasoning_summary(&summary)?;
+    serde_json::to_string(&output)
+        .map_err(|error| format!("Failed to serialize Responses reasoning summary JSON: {}", error))
 }
 
 pub fn build_responses_sse_error_payload(message: &str) -> Result<Value, String> {
@@ -345,5 +394,28 @@ mod tests {
         let err = build_responses_sse_error_payload("   ").unwrap_err();
 
         assert!(err.contains("Responses SSE error message is required"));
+    }
+
+    #[test]
+    fn normalize_responses_sse_reasoning_summary_preserves_verbatim_text() {
+        let output = normalize_responses_sse_reasoning_summary(&json!([
+            "- inspect `file.ts`",
+            { "text": "> keep quoted detail" },
+            { "type": "summary_text", "text": "  spaced summary  " },
+            { "type": "other", "text": "still kept" },
+            "",
+            null
+        ]))
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!([
+                { "type": "summary_text", "text": "- inspect `file.ts`" },
+                { "type": "summary_text", "text": "> keep quoted detail" },
+                { "type": "summary_text", "text": "  spaced summary  " },
+                { "type": "summary_text", "text": "still kept" }
+            ])
+        );
     }
 }

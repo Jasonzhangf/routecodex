@@ -1,3 +1,11 @@
+# 2026-06-30: Responses SSE reasoning summary native owner slice
+
+- SSE Rust 化继续收口 `sse.responses_encode_projection`：`responses.ts` 删除本地 `normalizeReasoningSummaryEntries` / `normalizeReasoningSummaryField` 语义归一化，reasoning summary `summary_text` materialize 改由 Rust `normalizeResponsesSseReasoningSummaryJson` 负责。
+- TS 现在只调用 `normalizeResponsesSseReasoningSummaryWithNative()` 并封装 SSE event envelope；summary 文本保持 verbatim，不注入 `**Thinking**`、不 compact markdown、不剥离前缀。
+- 门禁：`verify-sse-architecture-boundary.mjs` 新增禁止旧 helper 名复活；`responses-sse-reasoning-summary-no-normalize.spec.ts` 增加 native wrapper 直接断言。
+- 验证：Rust focused `normalize_responses_sse_reasoning_summary` PASS；native build PASS；focused Jest `responses-sse-reasoning-summary-no-normalize + responses-json-to-sse-usage + responses-sse-usage-no-fallback + responses-event-serializer-no-salvage` 16/16 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`、`reasoningItems=1`。
+
 # 2026-06-30: Responses SSE error payload moved to Rust
 
 - SSE Rust 化继续收口 `sse.responses_encode_projection`：`responses.ts::buildErrorEvent` 不再本地合成 `{message,type:'internal_error',code:'generation_error'}`，改由 Rust `buildResponsesSseErrorPayloadJson` 生成 Responses `response.error` data payload。

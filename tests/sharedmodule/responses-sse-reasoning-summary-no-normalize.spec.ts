@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
+import { normalizeResponsesSseReasoningSummaryWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 
 async function collectEvents(response: any): Promise<any[]> {
   const events: any[] = [];
@@ -26,6 +27,22 @@ async function collectEvents(response: any): Promise<any[]> {
 }
 
 describe('responses SSE reasoning summary no-normalize boundary', () => {
+  it('normalizes reasoning summary entries through the native owner verbatim', () => {
+    const summary = normalizeResponsesSseReasoningSummaryWithNative([
+      '- inspect `file.ts`',
+      { text: '> keep quoted detail' },
+      { type: 'summary_text', text: '  spaced summary  ' },
+      { type: 'other', text: 'still kept' }
+    ] as any);
+
+    expect(summary).toEqual([
+      { type: 'summary_text', text: '- inspect `file.ts`' },
+      { type: 'summary_text', text: '> keep quoted detail' },
+      { type: 'summary_text', text: '  spaced summary  ' },
+      { type: 'summary_text', text: 'still kept' }
+    ]);
+  });
+
   it('projects reasoning summary text without adding Thinking headers or compacting markdown', async () => {
     const rawSummary = '- inspect `file.ts`\n\n> keep quoted detail';
     const events = await collectEvents({

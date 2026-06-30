@@ -18,6 +18,7 @@ import type {
 import { TimeUtils, StringUtils } from '../../shared/utils.js';
 import {
   buildResponsesSseErrorPayloadWithNative,
+  normalizeResponsesSseReasoningSummaryWithNative,
   normalizeResponsesSseResponsePayloadWithNative
 } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
@@ -47,38 +48,17 @@ function chunkText(text: string, config: ResponsesEventGeneratorConfig): string[
   return StringUtils.chunkString(text, size, cloneRegex(TEXT_CHUNK_BOUNDARY));
 }
 
-function normalizeReasoningSummaryEntries(summary: ResponsesReasoningItem['summary'] | undefined): string[] {
-  if (!Array.isArray(summary)) return [];
-  const entries: string[] = [];
-  for (const entry of summary) {
-    if (typeof entry === 'string') {
-      if (entry.length) entries.push(entry);
-      continue;
-    }
-    if (entry && typeof entry === 'object') {
-      const text = typeof (entry as any).text === 'string' ? (entry as any).text : '';
-      if (text.length) entries.push(text);
-    }
-  }
-  return entries;
-}
-
-function normalizeReasoningSummaryField(summary: ResponsesReasoningItem['summary'] | undefined): Array<{ type: 'summary_text'; text: string }> | undefined {
-  const entries = normalizeReasoningSummaryEntries(summary);
-  if (!entries.length) {
-    return undefined;
-  }
-  return entries.map((text) => ({
-    type: 'summary_text' as const,
-    text
-  }));
-}
-
 function buildResponsePayload(
   response: ResponsesResponse,
   status: string
 ): Record<string, unknown> {
   return normalizeResponsesSseResponsePayloadWithNative(response, status);
+}
+
+function normalizeReasoningSummaryFieldWithNative(
+  summary: ResponsesReasoningItem['summary'] | undefined
+): Array<{ type: 'summary_text'; text: string }> | undefined {
+  return normalizeResponsesSseReasoningSummaryWithNative(summary);
 }
 
 // 生成器配置
@@ -241,7 +221,7 @@ export function buildOutputItemStartEvent(
 
   if (outputItem.type === 'reasoning') {
     const reasoning = outputItem as ResponsesReasoningItem;
-    const normalizedSummary = normalizeReasoningSummaryField(reasoning.summary);
+    const normalizedSummary = normalizeReasoningSummaryFieldWithNative(reasoning.summary);
     if (normalizedSummary) {
       itemDescriptor.summary = normalizedSummary;
     }
@@ -505,7 +485,7 @@ export function buildReasoningStartEvent(
     direction: baseEvent.direction,
     data: {
       item_id: reasoning.id,
-      summary: normalizeReasoningSummaryField(reasoning.summary)
+    summary: normalizeReasoningSummaryFieldWithNative(reasoning.summary)
     },
     sequenceNumber: baseEvent.sequenceNumber
   };
@@ -585,9 +565,9 @@ export function* buildReasoningSummaryEvents(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
-  const summaries = normalizeReasoningSummaryEntries(reasoning.summary);
+  const summaries = normalizeReasoningSummaryFieldWithNative(reasoning.summary) ?? [];
   for (let summaryIndex = 0; summaryIndex < summaries.length; summaryIndex++) {
-    const text = summaries[summaryIndex];
+    const text = summaries[summaryIndex]?.text;
     if (!text) continue;
 
     const partAddedBase = createBaseEvent(context, config);
@@ -695,7 +675,7 @@ export function buildOutputItemDoneEvent(
   };
   if (outputItem.type === 'reasoning') {
     const reasoning = outputItem as ResponsesReasoningItem;
-    const normalizedSummary = normalizeReasoningSummaryField(reasoning.summary);
+    const normalizedSummary = normalizeReasoningSummaryFieldWithNative(reasoning.summary);
     if (normalizedSummary) {
       itemDescriptor.summary = normalizedSummary;
     }
