@@ -5869,6 +5869,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
     '.map((name) => getBuiltinHandlerEntry(name))',
     '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry?.autoHook))',
     '.filter((entry): entry is ServerToolHandlerEntry => Boolean(entry))',
+    'function runBuiltinHandlerForRuntimeNapi(',
+    'function runBuiltinHandler(',
   ]) {
     if (builtinHandlerCatalogSource.includes(marker)) {
       fail(

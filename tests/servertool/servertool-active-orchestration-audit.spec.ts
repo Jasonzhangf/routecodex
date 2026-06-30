@@ -541,8 +541,8 @@ describe('stop-message-auto native-catalog audit', () => {
     const source = fs.readFileSync(repoPath('sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts'), 'utf8');
 
     expect(source).toContain('runStoplessBuiltinHandlerForRuntimeWithNative');
-    expect(source).toContain('runBuiltinHandlerForRuntimeNapi');
-    expect(source).toContain('function runBuiltinHandler(');
+    expect(source).not.toContain('function runBuiltinHandlerForRuntimeNapi(');
+    expect(source).not.toContain('function runBuiltinHandler(');
     expect(source).toContain('resolveServertoolBuiltinHandlerEntryWithNative');
 
     const forbidden = [

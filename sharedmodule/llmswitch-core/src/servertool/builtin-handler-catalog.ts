@@ -8,7 +8,7 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { runStoplessBuiltinHandlerForRuntimeWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
-async function runBuiltinHandlerForRuntimeNapi(
+export async function __executeBuiltinHandlerForRuntime(
   name: string,
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerResult | null> {
@@ -18,20 +18,6 @@ async function runBuiltinHandlerForRuntimeNapi(
     requestId: ctx.requestId,
     runtimeMetadata: ctx.runtimeMetadata ?? null
   }) as ServerToolHandlerResult | null;
-}
-
-async function runBuiltinHandler(
-  name: string,
-  ctx: ServerToolHandlerContext
-): Promise<ServerToolHandlerResult | null> {
-  return runBuiltinHandlerForRuntimeNapi(name, ctx);
-}
-
-export async function __executeBuiltinHandlerForRuntime(
-  name: string,
-  ctx: ServerToolHandlerContext
-): Promise<ServerToolHandlerResult | null> {
-  return runBuiltinHandler(name, ctx);
 }
 
 export function getBuiltinHandlerEntry(name: string): ServerToolHandlerEntry | undefined {
