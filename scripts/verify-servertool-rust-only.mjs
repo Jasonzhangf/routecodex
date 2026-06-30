@@ -2775,11 +2775,10 @@ function checkServertoolExecutionDispatchRustOwner() {
     'execution-shell.ts must stay physically deleted after moving pre-command wrappers to pre-command-hooks.ts and direct imports to execution-handler-materialization-shell.ts'
   );
 
-  assertContains(
-    'servertool-execution-branch-runtime-shell-owner',
+  assertMissingFile(
+    'servertool-execution-branch-runtime-shell-deleted',
     TS_EXECUTION_BRANCH_RUNTIME_SHELL,
-    readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL),
-    'planServertoolExecutionBranchWithNative'
+    'execution-branch-runtime-shell.ts must stay physically deleted after inlining native execution-branch planning into execution-stage-shell.ts'
   );
 
   for (const [check, file, content, needle] of [
@@ -2790,10 +2789,11 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_branch_json'],
     ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchJson'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'planServertoolExecutionBranchRuntimeAction('],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_BRANCH_RUNTIME_SHELL, readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL), 'planServertoolExecutionBranchWithNative('],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_BRANCH_RUNTIME_SHELL, readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL), 'const executableToolCallInputs = args.executableToolCalls.map'],
-    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_BRANCH_RUNTIME_SHELL, readRequired(TS_EXECUTION_BRANCH_RUNTIME_SHELL), 'executableToolCalls: executableToolCallInputs'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'planServertoolExecutionBranchWithNative('],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchInput = {'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchInput = {'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'projected_tool_call_index'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCallIndex'],
     ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'feature_id: hub.servertool_engine_preflight_contract'],
@@ -5166,11 +5166,11 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export async function runServertoolExecutionStage(',
     'prepareServertoolDispatchStage',
-    'planServertoolExecutionBranchRuntimeAction',
+    'planServertoolExecutionBranchWithNative',
     'const preExecutionBranchInput = {',
-    'const preExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(preExecutionBranchInput);',
+    'const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({',
     'const postExecutionBranchInput = {',
-    'const postExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(postExecutionBranchInput);',
+    'const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({',
     'runServertoolIoExecutionQueue',
     'materializeNativeToolCallExecutionOutcome',
     'finalizeServertoolResponseStage'

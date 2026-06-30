@@ -105,16 +105,6 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/execution-branch-runtime-shell.ts',
-    forbidden: [],
-    required: [
-      'planServertoolExecutionBranchWithNative',
-      'const executableToolCallInputs = args.executableToolCalls.map(',
-      'executableToolCalls.map(',
-      'executableToolCalls: executableToolCallInputs',
-    ],
-  },
-  {
     file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts',
     forbidden: [],
     required: [
@@ -214,11 +204,11 @@ const TARGETS = [
     ],
     required: [
       'prepareServertoolDispatchStage',
-      'planServertoolExecutionBranchRuntimeAction',
+      'planServertoolExecutionBranchWithNative',
       'const preExecutionBranchInput = {',
-      'const preExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(preExecutionBranchInput);',
+      'const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({',
       'const postExecutionBranchInput = {',
-      'const postExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(postExecutionBranchInput);',
+      'const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({',
       'runServertoolIoExecutionQueue',
       'materializeNativeToolCallExecutionOutcome',
       'finalizeServertoolResponseStage',
@@ -282,7 +272,7 @@ const TARGETS = [
       'readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);',
       'planServertoolToolCallDispatchWithNative(',
       'prepareServertoolDispatchStage(',
-      'planServertoolExecutionBranchRuntimeAction(',
+      'planServertoolExecutionBranchWithNative(',
       'buildServertoolCliProjectionBranchResult(',
       'runServertoolIoExecutionQueue(',
       'materializeNativeToolCallExecutionOutcome(',

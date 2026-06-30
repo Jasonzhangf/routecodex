@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const prepareServertoolDispatchStage = jest.fn();
-const planServertoolExecutionBranchRuntimeAction = jest.fn();
+const planServertoolExecutionBranchWithNative = jest.fn();
 const buildServertoolCliProjectionBranchResult = jest.fn();
 const runServertoolIoExecutionQueue = jest.fn();
 const materializeNativeToolCallExecutionOutcome = jest.fn();
@@ -15,9 +15,9 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-branch-runtime-shell.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolExecutionBranchRuntimeAction
+    planServertoolExecutionBranchWithNative
   })
 );
 
@@ -69,7 +69,7 @@ describe('execution-stage-shell', () => {
         executableToolCalls: [{ id: 'call_1', name: 'web_search', executionMode: 'guarded' }]
       }
     });
-    planServertoolExecutionBranchRuntimeAction
+    planServertoolExecutionBranchWithNative
       .mockReturnValueOnce({ action: 'continue_response_stage' })
       .mockReturnValueOnce({ action: 'resolve_execution_outcome' });
     runServertoolIoExecutionQueue.mockResolvedValue({
@@ -100,11 +100,11 @@ describe('execution-stage-shell', () => {
     );
 
     expect(source).toContain('prepareServertoolDispatchStage');
-    expect(source).toContain('planServertoolExecutionBranchRuntimeAction');
+    expect(source).toContain('planServertoolExecutionBranchWithNative');
     expect(source).toContain('const preExecutionBranchInput = {');
-    expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(preExecutionBranchInput);');
+    expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('const postExecutionBranchInput = {');
-    expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchRuntimeAction(postExecutionBranchInput);');
+    expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
     expect(source).toContain('finalizeServertoolResponseStage');
@@ -113,8 +113,8 @@ describe('execution-stage-shell', () => {
   });
 
   test('returns cli projection when pre-execution branch selects it', async () => {
-    planServertoolExecutionBranchRuntimeAction.mockReset();
-    planServertoolExecutionBranchRuntimeAction.mockReturnValue({
+    planServertoolExecutionBranchWithNative.mockReset();
+    planServertoolExecutionBranchWithNative.mockReturnValue({
       action: 'client_exec_cli_projection',
       projectedToolCallIndex: 0
     });
@@ -137,6 +137,38 @@ describe('execution-stage-shell', () => {
       execution: { flowId: 'servertool_cli_projection' }
     });
     expect(runServertoolIoExecutionQueue).not.toHaveBeenCalled();
+  });
+
+  test('projects executable tool calls directly into the native execution-branch planner', async () => {
+    planServertoolExecutionBranchWithNative.mockReset();
+    planServertoolExecutionBranchWithNative
+      .mockReturnValueOnce({
+        action: 'continue_response_stage'
+      })
+      .mockReturnValueOnce({
+        action: 'resolve_execution_outcome'
+      });
+
+    await runServertoolExecutionStage({
+      options: { requestId: 'req-branch-inline' } as any,
+      baseObject: { ok: true } as any,
+      toolCalls: [
+        { id: 'call_1', name: 'web_search', arguments: '{}', executionMode: 'guarded' }
+      ],
+      contextBase: {} as any,
+      includeToolCallNames: null,
+      excludeToolCallNames: null,
+      includeAutoHookIds: null,
+      excludeAutoHookIds: null,
+      responseStageGatePlan: { responseHookMatched: false }
+    });
+
+    expect(planServertoolExecutionBranchWithNative).toHaveBeenCalledWith({
+      executableToolCalls: [
+        { id: 'call_1', name: 'web_search', executionMode: 'guarded' }
+      ],
+      executedToolCallsLen: 0
+    });
   });
 
   test('materializes execution outcome when post-execution branch selects it', async () => {
