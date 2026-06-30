@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE function_call arguments must not be skipped by TS
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts` must not gate function-call argument emission with `if (item.arguments)`.
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts` must not use `if (!functionCall.arguments) return;`; malformed function_call arguments must enter the native text chunk/payload path and fail fast there.
+- Verification included focused Jest `responses-sse-output-item-descriptor-native`, `verify:sse-architecture-boundary`, sharedmodule/root TypeScript checks, `verify:responses-sse-business-module`, `build:base`, and source replay proving missing arguments emits `response.error` with no `function_call_arguments.done` or terminal completed/done.
+
 # 2026-07-01: Responses SSE reasoning summary entries must not be silently skipped
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs::normalize_responses_sse_reasoning_summary()` is the owner for reasoning summary entry validation. Null/missing summary may produce no summary events, but non-array summary, invalid entries, missing text, or empty text must fail fast.
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts` must not use `normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []` or `if (!text) continue;` to hide invalid summary entries.

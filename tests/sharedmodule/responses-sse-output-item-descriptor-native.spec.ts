@@ -254,4 +254,27 @@ describe('responses SSE output item descriptor native owner', () => {
       arguments: '{"q":"rust"}'
     });
   });
+
+  it('fails missing function_call arguments instead of silently skipping argument deltas', async () => {
+    const events = await collectEvents({
+      id: 'resp_function_call_missing_arguments',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'fc_missing_args',
+        type: 'function_call',
+        status: 'completed',
+        name: 'search',
+        call_id: 'call_missing_args'
+      }]
+    } as any);
+
+    expect(events.some((event) => event.type === 'response.error')).toBe(true);
+    expect(JSON.stringify(events)).toContain('Responses SSE text chunk payload missing text');
+    expect(events.some((event) => event.type === 'response.function_call_arguments.done')).toBe(false);
+    expect(events.some((event) => event.type === 'response.completed')).toBe(false);
+    expect(events.some((event) => event.type === 'response.done')).toBe(false);
+  });
 });

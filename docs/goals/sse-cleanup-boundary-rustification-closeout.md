@@ -98,6 +98,14 @@ Focused tests to use as slice gates:
 - Verification: focused Jest `responses-sse-usage-no-fallback` PASS 7/7; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
 - Replay evidence: source replay `validCompleted=true`, `validDone=true`, `missingStatusError=true`, `missingStatusMessage=true`, `missingStatusCompleted=false`, `missingStatusDone=false`.
 
+### 2026-07-01 Responses SSE function_call arguments skip removal slice
+
+- Red evidence: `sequenceFunctionCallItem()` used `if (item.arguments)` and `buildFunctionCallArgsDeltas()` used `if (!functionCall.arguments) return;`, allowing malformed function_call items to bypass argument delta native validation in TS.
+- Fix: removed both truthiness gates. Function-call arguments now always pass through native text chunk and function_call_arguments payload builders; missing arguments fail fast with `Responses SSE text chunk payload missing text`.
+- Positive / reverse tests: focused Jest covers valid function_call argument delta/done projection and missing-arguments fail-fast with no `response.function_call_arguments.done`, `response.completed`, or `response.done`.
+- Verification: focused Jest `responses-sse-output-item-descriptor-native` PASS 10/10; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: source replay showed valid function_call arguments emit delta/done/completed, while missing arguments emits `response.error` and no argument done or terminal completed/done.
+
 ### 2026-07-01 Responses SSE reasoning summary missing text fail-fast slice
 
 - Red evidence: `buildReasoningSummaryEvents()` still had `normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []` and `if (!text) continue;`; Rust `normalize_responses_sse_reasoning_summary()` skipped malformed entries, so missing summary text could silently disappear and still emit terminal events.

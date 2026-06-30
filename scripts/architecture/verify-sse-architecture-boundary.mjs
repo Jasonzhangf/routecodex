@@ -111,6 +111,8 @@ for (const forbidden of [
   'logprobs: []',
   'call_id: functionCall.call_id',
   'arguments: functionCall.arguments',
+  'if (item.arguments) {',
+  'if (!functionCall.arguments) return;',
   "part: { type: 'summary_text'",
   'delta: content.text',
   'signature: content.signature',

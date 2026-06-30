@@ -291,7 +291,6 @@ export function* buildFunctionCallArgsDeltas(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
-  if (!functionCall.arguments) return;
   const chunks = buildResponsesSseTextChunksWithNative(functionCall.arguments, config.chunkSize);
 
   for (const chunk of chunks) {

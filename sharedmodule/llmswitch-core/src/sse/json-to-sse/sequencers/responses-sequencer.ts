@@ -155,12 +155,10 @@ async function* sequenceFunctionCallItem(
   yield buildOutputItemStartEvent(item, context, config);
 
   // 2. 发送function_call.delta事件流（arguments）
-  if (item.arguments) {
-    yield* withDelay(
-      buildFunctionCallArgsDeltas(item, context, config),
-      config
-    );
-  }
+  yield* withDelay(
+    buildFunctionCallArgsDeltas(item, context, config),
+    config
+  );
 
   // 3. 发送function_call.done事件
   yield buildFunctionCallDoneEvent(item, context, config);

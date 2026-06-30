@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE function_call missing arguments must fail in native path
+- Red evidence: `sequenceFunctionCallItem()` still used `if (item.arguments)` and `buildFunctionCallArgsDeltas()` used `if (!functionCall.arguments) return;`, so malformed function_call output could skip argument delta handling in TS before native validation.
+- Fix: removed both truthiness gates. Function call arguments always enter `buildResponsesSseTextChunksWithNative()` and native payload builders; missing arguments now fail with `Responses SSE text chunk payload missing text` and stop before function_call_arguments.done/completed/done.
+- Verification: focused Jest `responses-sse-output-item-descriptor-native` PASS 10/10; `verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `verify:responses-sse-business-module` PASS; `build:base` PASS; source replay confirmed valid args still emit delta/done/completed while missing args emits `response.error` only.
+
 # 2026-07-01: Responses SSE reasoning summary entry missing text fails in Rust
 - Red evidence: `buildReasoningSummaryEvents()` still used `normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []` and `if (!text) continue;`, while Rust `normalize_responses_sse_reasoning_summary()` skipped invalid summary entries. Focused Jest red showed missing summary text previously completed without `response.error`.
 - Fix: Rust summary normalizer now treats null summary as empty but rejects non-array summary, invalid entries, missing text, and empty text. TS native wrapper returns an array, and `responses.ts` no longer has summary `?? []` or text-skip fallback.
