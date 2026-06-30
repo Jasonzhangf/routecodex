@@ -6194,6 +6194,9 @@ function checkServertoolPostflightLoggingFailFast() {
   const observationSpec = readRequired(`${ROOT}/tests/servertool/engine-observation-shell.spec.ts`);
   for (const marker of [
     'logNonBlocking:',
+    'function applyServertoolPostflightMetadataWritePlan(',
+    'function buildStoplessProjectionMetadataCenterSnapshot(',
+    "symbol: 'applyServertoolPostflightMetadataWritePlan'",
     'const followupSummary: Record<string, unknown> = {',
     "if ('payload' in followup)",
     'payloadRecord.messages',

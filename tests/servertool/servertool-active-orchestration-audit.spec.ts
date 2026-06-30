@@ -329,6 +329,9 @@ const TARGETS = [
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
     forbidden: [
+      'function applyServertoolPostflightMetadataWritePlan(',
+      'function buildStoplessProjectionMetadataCenterSnapshot(',
+      "symbol: 'applyServertoolPostflightMetadataWritePlan'",
       'const followupSummary: Record<string, unknown> = {',
       "if ('payload' in followup)",
       'payloadRecord.messages',
