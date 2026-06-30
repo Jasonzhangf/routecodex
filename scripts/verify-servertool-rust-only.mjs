@@ -5075,9 +5075,8 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEngineSkipWithNative({',
     'recordServertoolEngineMatchSkipped({',
     'recordServertoolEngineMatchHit({',
-    'function planStoplessEngineRuntime(',
     'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
-    'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
+    'const runtimeAction = planServertoolEngineRuntimeActionWithNative({',
     'engineResult: {',
     'runServertoolEnginePostflight({',
   ]) {
@@ -5091,6 +5090,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'effectiveServerToolTimeoutMs',
     'args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs',
+    'function planStoplessEngineRuntime(',
+    'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(

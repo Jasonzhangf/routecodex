@@ -48,9 +48,9 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain("if (stoplessPlan.action === 'terminal_final')");
     expect(source).not.toContain("if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow)");
     expect(source).not.toContain('!stoplessPlan.isStopMessageFlow &&');
-    expect(source).toContain('function planStoplessEngineRuntime(');
     expect(source).toContain('const stoplessExecutionPlan = planStoplessExecutionWithNative({');
-    expect(source).toContain('const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({');
+    expect(source).toContain('const runtimeAction = planServertoolEngineRuntimeActionWithNative({');
+    expect(source).not.toContain('function planStoplessEngineRuntime(');
     expect(source).not.toContain('const stoplessExecutionInput = {');
     expect(source).not.toContain('const hasServertoolCliProjectionContext =');
     expect(source).not.toContain('const postflightEngineResult = {');

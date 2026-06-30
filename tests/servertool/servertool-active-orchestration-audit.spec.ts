@@ -422,14 +422,15 @@ const TARGETS = [
     forbidden: [
       'const stoplessExecutionInput = {',
       'const hasServertoolCliProjectionContext =',
+      'function planStoplessEngineRuntime(',
+      'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
       'planStoplessExecutionWithNative(stoplessExecutionInput)',
       'const postflightEngineResult = {',
       'engineResult: postflightEngineResult,',
     ],
     required: [
-      'function planStoplessEngineRuntime(',
       'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
-      'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
+      'const runtimeAction = planServertoolEngineRuntimeActionWithNative({',
       'engineResult: {',
     ],
   },
