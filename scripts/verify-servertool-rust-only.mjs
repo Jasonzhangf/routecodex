@@ -4999,7 +4999,9 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export function prepareServertoolDispatchStage(',
     'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
-    'planServertoolToolCallDispatchWithNative'
+    'planServertoolToolCallDispatchWithNative',
+    'const dispatchPlanInput = buildServertoolDispatchPlanInput({',
+    'dispatchPlan: planServertoolToolCallDispatchWithNative(dispatchPlanInput)'
   ]) {
     if (!dispatchPreparationShell.includes(marker)) {
       fail(

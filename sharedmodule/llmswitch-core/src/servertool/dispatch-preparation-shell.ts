@@ -29,16 +29,15 @@ export function prepareServertoolDispatchStage(args: {
   const runtimeMetadata = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
     args.options.adapterContext as Record<string, unknown>
   );
+  const dispatchPlanInput = buildServertoolDispatchPlanInput({
+    toolCalls: args.toolCalls,
+    disableToolCallHandlers: args.options.disableToolCallHandlers === true,
+    ...(args.includeToolCallNames ? { includeToolCallHandlerNames: [...args.includeToolCallNames] } : {}),
+    ...(args.excludeToolCallNames ? { excludeToolCallHandlerNames: [...args.excludeToolCallNames] } : {}),
+    runtimeMetadata
+  });
 
   return {
-    dispatchPlan: planServertoolToolCallDispatchWithNative(
-      buildServertoolDispatchPlanInput({
-        toolCalls: args.toolCalls,
-        disableToolCallHandlers: args.options.disableToolCallHandlers === true,
-        ...(args.includeToolCallNames ? { includeToolCallHandlerNames: [...args.includeToolCallNames] } : {}),
-        ...(args.excludeToolCallNames ? { excludeToolCallHandlerNames: [...args.excludeToolCallNames] } : {}),
-        runtimeMetadata
-      })
-    )
+    dispatchPlan: planServertoolToolCallDispatchWithNative(dispatchPlanInput)
   };
 }
