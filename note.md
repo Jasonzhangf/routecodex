@@ -1,3 +1,9 @@
+# 2026-07-01 Gemini SSE decode scalar part fail-fast
+- Scope: SSE Rustification closeout, `sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts`.
+- Finding: decode-side `normalizeReasoningPart()` still returned `[part]` for non-object `gemini.data.part`, so scalar semantic data could materialize into candidate parts.
+- Fix: non-object Gemini data parts now fail-fast with `Invalid Gemini data event: invalid part at index <n>`; `verify:sse-architecture-boundary` forbids the old decode marker.
+- Verification: focused `sse-parser-no-recovery` Jest 5/5 PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `git diff --check` PASS; `build:base` PASS; source replay valid `text=hello/finishReason=STOP` and scalar fail-fast. No Gemini real samples found.
+
 # 2026-07-01 Anthropic SSE empty text chunk skip removal
 - Scope: SSE Rustification closeout, `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts`.
 - Finding: `chunkText()` returned `[input]` for empty input and each text/thinking loop had `if (!chunk) continue;`, so empty text could silently emit start/stop without a delta.

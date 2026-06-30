@@ -99,7 +99,7 @@ export class GeminiSseToJsonConverter {
     }
 
     const candidate = accumulator.get(candidateIndex)!;
-    const normalizedParts = this.normalizeReasoningPart(part, context);
+    const normalizedParts = this.normalizeReasoningPart(part, context, candidateIndex);
 
     for (const normalizedPart of normalizedParts) {
       // For text parts, accumulate into the last text part instead of creating new ones
@@ -195,10 +195,11 @@ export class GeminiSseToJsonConverter {
 
   private normalizeReasoningPart(
     part: GeminiContentPart,
-    context: SseToGeminiJsonContext
+    context: SseToGeminiJsonContext,
+    candidateIndex: number
   ): GeminiContentPart[] {
     if (!part || typeof part !== 'object') {
-      return [part];
+      throw new Error(`Invalid Gemini data event: invalid part at index ${candidateIndex}`);
     }
     const reasoning = typeof (part as any).reasoning === 'string' ? (part as any).reasoning : undefined;
     if (!reasoning) {

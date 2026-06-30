@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Gemini SSE decode scalar part fail-fast slice
+
+- Residue evidence: `gemini-sse-to-json-converter.ts::normalizeReasoningPart()` still returned `[part]` for non-object `gemini.data` parts, allowing malformed scalar provider content to materialize into `candidate.content.parts`.
+- Fix: decode now fails non-object Gemini data parts with `Invalid Gemini data event: invalid part at index <n>`; `verify:sse-architecture-boundary` forbids the old decode-side `return [part]` marker.
+- Positive / reverse tests: `tests/sharedmodule/sse-parser-no-recovery.spec.ts` keeps malformed-frame and missing-part failures, and adds scalar part fail-fast coverage.
+- Verification: focused `sse-parser-no-recovery` Jest PASS 5/5; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `git diff --check` PASS; `npm run build:base` PASS.
+- Replay evidence: `tsx` source replay materialized valid Gemini data/done as one candidate with `text=hello` and `finishReason=STOP`; scalar part replay failed with `Invalid Gemini data event: invalid part at index 0`. No real Gemini provider-response samples were found in current sample stores.
+
 ### 2026-07-01 Anthropic SSE empty text silent-skip removal slice
 
 - Residue evidence: source scan found `anthropic-sequencer.ts` still had three `if (!chunk) continue;` silent-skip branches after `chunkText()`, so empty text could emit `content_block_start/stop` without a delta instead of failing fast.

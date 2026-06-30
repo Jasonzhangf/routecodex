@@ -196,6 +196,10 @@
 
 # RouteCodex Project Memory
 
+# 2026-07-01: Gemini SSE decode scalar parts must fail fast
+- `sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts` must not pass non-object `gemini.data.part` through as a candidate content part. Scalar/null malformed semantic parts fail fast with `Invalid Gemini data event: invalid part at index <n>`.
+- Gate truth: `verify:sse-architecture-boundary` blocks the old decode-side `return [part]` marker, and `tests/sharedmodule/sse-parser-no-recovery.spec.ts` locks malformed frame, missing part, and scalar part reverse paths. Real Gemini provider-response replay remains unavailable in current sample stores.
+
 # 2026-07-01: Anthropic SSE empty text must fail fast
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts` must not use `if (!chunk) continue` to silently skip empty text/thinking chunks. Empty Anthropic text is invalid provider shape and must fail fast with `Invalid Anthropic text block: missing text`.
 - Gate truth: `verify:sse-architecture-boundary` now blocks the old chunk-skip marker, and `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` locks valid event flow plus empty-text reverse coverage. Real Anthropic success replay remains unavailable; current sample stores only contain 429 provider-error snapshots.

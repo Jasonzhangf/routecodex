@@ -329,6 +329,15 @@ for (const forbidden of [
   }
 }
 
+const geminiSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts');
+for (const forbidden of [
+  'if (!part || typeof part !== \'object\') {\n      return [part];\n    }',
+]) {
+  if (geminiSseToJsonConverter.includes(forbidden)) {
+    failures.push(`Gemini SSE decode must not pass malformed data parts through: ${forbidden}`);
+  }
+}
+
 const providerNeutralProjectionFiles = [
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
   'sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts',
