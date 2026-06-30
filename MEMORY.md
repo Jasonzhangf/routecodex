@@ -1,3 +1,8 @@
+# 2026-07-01: Provider response streamPipe must carry explicit native payload
+- `provider-response.ts` must not cast malformed `runtimeEffects.streamPipe.codec/requestId` or fall back from missing `streamPipe.payload` to `hubRespOutbound04ClientSemantic`.
+- Stream pipe effects now require explicit `codec`, `requestId`, and `payload`; malformed stream pipe shape fails fast with `Rust HubPipeline response path returned malformed stream pipe effect`.
+- Verification: focused mocked provider-response Jest, real native `provider-response-rust-plan` streaming path, `verify:sse-architecture-boundary`, `verify:hub-response-provider-sse-materialization`, sharedmodule/root TypeScript checks, `verify:responses-sse-business-module`, and `build:base` passed.
+
 # 2026-07-01: Provider response servertool runtime actions must not default to empty
 - `provider-response.ts::executeProviderResponseNativeServertoolEffects()` must not convert malformed `runtimeEffects.servertoolRuntimeActions` into an empty action list.
 - The TS shell now requires Rust-normalized `servertoolRuntimeActions` to be an array and fails fast with `Rust HubPipeline response path returned malformed servertool runtime actions` before planning servertool effects.

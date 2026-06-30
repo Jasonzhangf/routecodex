@@ -273,4 +273,43 @@ describe('provider response metadata center providerProtocol contract', () => {
       wantsStream: false
     })).rejects.toThrow('Rust HubPipeline response path returned malformed servertool runtime actions');
   });
+
+  it('fails fast when Rust returns malformed provider response stream pipe effect', async () => {
+    normalizeProviderResponseEffectPlanWithNativeMock.mockReturnValueOnce({
+      runtimeStateWrite: {
+        keepForSubmitToolOutputs: false
+      },
+      servertoolRuntimeActions: [],
+      streamPipe: {
+        codec: 'openai-chat',
+        requestId: 'req_provider_response_malformed_stream_pipe'
+      }
+    });
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_malformed_stream_pipe',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+    const center = MetadataCenter.attach(context);
+    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRuntimeControl('providerProtocol', 'openai-chat', TEST_METADATA_WRITER, 'test-provider-protocol');
+
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_provider_response_malformed_stream_pipe',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: true
+    })).rejects.toThrow('Rust HubPipeline response path returned malformed stream pipe effect');
+  });
 });

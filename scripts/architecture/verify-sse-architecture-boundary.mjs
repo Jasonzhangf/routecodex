@@ -308,7 +308,9 @@ const providerResponseShell = read('sharedmodule/llmswitch-core/src/conversion/h
 for (const forbidden of [
   'effectPlan: { effects: Array.isArray(effects) ? effects : [] }',
   'servertoolRuntimeActions: [], streamPipe: null, runtimeStateWrite: null, stoplessMetadataCenterWrite: null',
-  'Array.isArray(args.runtimeEffects.servertoolRuntimeActions)\n    ? args.runtimeEffects.servertoolRuntimeActions\n    : []'
+  'Array.isArray(args.runtimeEffects.servertoolRuntimeActions)\n    ? args.runtimeEffects.servertoolRuntimeActions\n    : []',
+  'outboundEffect.runtimeEffects.streamPipe.codec as SseProtocol',
+  ': hubRespOutbound04ClientSemantic;'
 ]) {
   if (providerResponseShell.includes(forbidden)) {
     failures.push(`Provider response shell must not synthesize empty native effect plan truth: ${forbidden}`);

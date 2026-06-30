@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Provider response streamPipe payload fallback removal slice
+
+- Red evidence: mocked provider-response test covered Rust-normalized runtime effects returning `streamPipe` without `payload`; the old TS shell cast `codec/requestId` and fell back to `hubRespOutbound04ClientSemantic`, allowing stream payload truth to be synthesized in TS.
+- Fix: `provider-response.ts` now reads stream pipe through a strict helper requiring explicit `codec`, `requestId`, and `payload`; malformed stream pipe shape fails fast with `Rust HubPipeline response path returned malformed stream pipe effect`.
+- Positive / reverse tests: mocked malformed streamPipe fails; real native `provider-response-rust-plan` still passes 20/20, including `uses Rust streamPipe effect plan for streaming response path`.
+- Verification: focused Jest `provider-response.metadata-center-provider-protocol` PASS 4/4; focused Jest `provider-response-rust-plan` PASS 20/20; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:hub-response-provider-sse-materialization` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `npm run build:base` PASS.
+- Replay evidence: this slice uses real native provider-response positive streaming coverage plus mocked malformed native-plan reverse coverage; full goal completion still requires live/real SSE replay across handler/bridge/provider-response closeout.
+
 ### 2026-07-01 Provider response servertool runtime actions fallback removal slice
 
 - Red evidence: mocked provider-response test covered Rust-normalized runtime effects returning malformed `servertoolRuntimeActions`; the old TS shell converted it to an empty action list and continued as successful no-op.

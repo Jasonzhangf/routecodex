@@ -300,6 +300,24 @@ function executeProviderResponseNativeRuntimeStateEffect(args: {
   }
 }
 
+function readProviderResponseNativeStreamPipe(args: {
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
+}): { codec: SseProtocol; requestId: string; payload: JsonObject } | null {
+  const streamPipe = isRecord(args.runtimeEffects.streamPipe)
+    ? args.runtimeEffects.streamPipe
+    : null;
+  if (!streamPipe) {
+    return null;
+  }
+  const codec = readString(streamPipe.codec);
+  const requestId = readString(streamPipe.requestId);
+  const payload = isRecord(streamPipe.payload) ? streamPipe.payload as JsonObject : null;
+  if (!codec || !requestId || !payload) {
+    throw new Error('Rust HubPipeline response path returned malformed stream pipe effect');
+  }
+  return { codec: codec as SseProtocol, requestId, payload };
+}
+
 async function materializeProviderResponseSsePayload(
   payload: unknown
 ): Promise<Record<string, unknown>> {
@@ -431,9 +449,9 @@ export async function convertProviderResponse(
   });
 
   // Step 7: Stream or body-only response
-  const streamPipe = isRecord(outboundEffect.runtimeEffects.streamPipe)
-    ? { codec: outboundEffect.runtimeEffects.streamPipe.codec as SseProtocol, requestId: outboundEffect.runtimeEffects.streamPipe.requestId as string }
-    : null;
+  const streamPipe = readProviderResponseNativeStreamPipe({
+    runtimeEffects: outboundEffect.runtimeEffects
+  });
   if (!streamPipe) {
     recordStage(options.stageRecorder, 'chat_process.resp.stage9.client_remap', hubRespOutbound04ClientSemantic);
     recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
@@ -446,9 +464,7 @@ export async function convertProviderResponse(
   const streamClientSemantic =
     respProcessEffect.stage === 'HubRespChatProcess03Governed'
       ? hubRespOutbound04ClientSemantic
-      : isRecord(outboundEffect.runtimeEffects.streamPipe?.payload)
-        ? outboundEffect.runtimeEffects.streamPipe.payload as JsonObject
-        : hubRespOutbound04ClientSemantic;
+      : streamPipe.payload;
   hubRespOutbound04ClientSemantic = streamClientSemantic;
   const codec = defaultSseCodecRegistry.get(streamPipe.codec);
   logHubStageTiming(requestId, 'resp_outbound.stage2_codec_stream', 'start', { clientProtocol: streamPipe.codec });
