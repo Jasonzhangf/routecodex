@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses SSE error recovery policy Rust owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `responses-sequencer.ts` local recovery policy (`enableRecovery`, `if (config.enableRecovery)`, and item-level `yield buildErrorEvent(error as Error, context, config)`). The gate failed on the existing TS owner.
+- Fix: added Rust/NAPI owner `planResponsesSseErrorRecoveryJson`. `responses-sequencer.ts` no longer exposes `enableRecovery`, no longer catches per-output-item errors, and only consumes the native response-level policy before emitting `response.error`; invalid output items now fail up to response-level error projection instead of being locally recovered and followed by `response.completed`.
+- Positive / reverse tests: Rust covers response scope -> `emit_response_error` and output_item scope -> `throw`; Jest covers direct native policy output and verifies invalid output items produce `response.error` without `response.completed` / `response.done`.
+- Verification: `cargo test -p router-hotpath-napi plans_responses_sse_error_recovery_by_scope --lib -- --nocapture` PASS; native build PASS; focused Jest `responses-sse-usage-no-fallback + responses-json-to-sse-usage + responses-sse-reasoning-summary-no-normalize` PASS 19/19; native export-list subtest PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `malformedWire=0`, `eventCount=25`.
+
 ### 2026-07-01 Responses output message normalizer Rust owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added markers for `responses-sequencer.ts::normalizeResponseOutput()` and TS-side `responses-output-normalizer.ts` message/reasoning split logic (`baseId`, `extraReasoning`, `suppressReasoningFromContent`, synthetic `_reasoning` id). The gate failed on the existing TS owner.

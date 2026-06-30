@@ -33,12 +33,14 @@ import {
 } from '../event-generators/responses.js';
 import type { ResponsesEventGeneratorContext, ResponsesEventGeneratorConfig } from '../event-generators/responses.js';
 import { normalizeResponsesOutputItems } from '../../shared/responses-output-normalizer.js';
-import { canonicalizeResponsesSseEventPayloadWithNative } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
+import {
+  canonicalizeResponsesSseEventPayloadWithNative,
+  planResponsesSseErrorRecoveryWithNative
+} from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 // 排列器配置
 export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig {
   enableValidation: boolean;
-  enableRecovery: boolean;
   enableDelay: boolean;
   maxOutputItems: number;
   maxContentParts: number;
@@ -49,7 +51,6 @@ export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig 
 export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesSequencerConfig = {
   ...DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG,
   enableValidation: true,
-  enableRecovery: true,
   enableDelay: false,
   maxOutputItems: 50,
   maxContentParts: 100,
@@ -211,36 +212,37 @@ async function* sequenceOutputItem(
   context: ResponsesEventGeneratorContext,
   config: ResponsesSequencerConfig
 ): AsyncGenerator<ResponsesSseEvent> {
-  try {
-    switch (item.type) {
-      case 'message':
-        yield* sequenceMessageItem(item as ResponsesMessageItem, context, config);
-        break;
+  switch (item.type) {
+    case 'message':
+      yield* sequenceMessageItem(item as ResponsesMessageItem, context, config);
+      break;
 
-      case 'function_call':
-        yield* sequenceFunctionCallItem(item as ResponsesFunctionCallItem, context, config);
-        break;
+    case 'function_call':
+      yield* sequenceFunctionCallItem(item as ResponsesFunctionCallItem, context, config);
+      break;
 
-      case 'function_call_output':
-        yield* sequenceFunctionCallOutputItem(item as ResponsesFunctionCallOutputItem, context, config);
-        break;
+    case 'function_call_output':
+      yield* sequenceFunctionCallOutputItem(item as ResponsesFunctionCallOutputItem, context, config);
+      break;
 
-      case 'reasoning':
-        yield* sequenceReasoningItem(item as ResponsesReasoningItem, context, config);
-        break;
+    case 'reasoning':
+      yield* sequenceReasoningItem(item as ResponsesReasoningItem, context, config);
+      break;
 
-      default:
-        if (config.enableValidation) {
-          throw new Error(`Unknown output item type: ${(item as any).type}`);
-        }
-    }
-  } catch (error) {
-    if (config.enableRecovery) {
-      yield buildErrorEvent(error as Error, context, config);
-    } else {
-      throw error;
-    }
+    default:
+      if (config.enableValidation) {
+        throw new Error(`Unknown output item type: ${(item as any).type}`);
+      }
   }
+}
+
+function shouldEmitResponseError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+  const plan = planResponsesSseErrorRecoveryWithNative({
+    scope: 'response',
+    message
+  });
+  return plan.action === 'emit_response_error';
 }
 
 /**
@@ -288,8 +290,11 @@ async function* sequenceResponseCore(
     yield buildResponseDoneEvent(response, context, config);
 
   } catch (error) {
-    // 发送错误事件
-    yield buildErrorEvent(error as Error, context, config);
+    if (!shouldEmitResponseError(error)) {
+      throw error;
+    }
+    const responseError = error instanceof Error ? error : new Error(String(error ?? 'unknown'));
+    yield buildErrorEvent(responseError, context, config);
   }
 }
 

@@ -122,8 +122,7 @@ export class ResponsesJsonToSseConverterRefactored {
         chunkSize: context.options.chunkSize || this.config.defaultChunkSize,
         chunkDelayMs: context.options.delayMs || this.config.defaultDelayMs,
         enableDelay: !!context.options.delayMs,
-        enableValidation: this.config.enableEventValidation,
-        enableRecovery: this.config.strictMode
+        enableValidation: this.config.enableEventValidation
       });
 
       // 4. 生成事件序列并写入流

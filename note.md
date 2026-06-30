@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE error recovery policy Rust owner
+- Red evidence：`verify:sse-architecture-boundary` 新增 `enableRecovery` / `if (config.enableRecovery)` / item-level `yield buildErrorEvent(error as Error, context, config)` marker 后先红，证明 `responses-sequencer.ts` 仍在 TS 本地决定 recovery 策略。
+- Fix：新增 Rust/NAPI `planResponsesSseErrorRecoveryJson`；`responses-sequencer.ts` 删除 `enableRecovery` 配置和 per-output-item catch，不再局部吞 item 错误后继续 completed，response-level catch 只消费 native policy 后投影 `response.error`。
+- Verification：Rust `plans_responses_sse_error_recovery_by_scope` PASS；native build PASS；focused Jest `responses-sse-usage-no-fallback + responses-json-to-sse-usage + responses-sse-reasoning-summary-no-normalize` 19/19 PASS；native export-list subtest PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS；4444 real replay `completed=true done=true error=false missingType=0 missingSequence=0 malformedWire=0 eventCount=25`。
+
 # 2026-07-01: Responses output message normalizer Rust owner
 - Red evidence：`verify:sse-architecture-boundary` 新增 `normalizeResponseOutput()`、`baseId`、`extraReasoning`、`suppressReasoningFromContent`、synthetic `_reasoning` id 等 marker 后先红，证明 Responses message/reasoning split 仍由 TS owner 执行。
 - Fix：新增 Rust/NAPI `normalizeResponsesMessageItemJson`、`expandResponsesMessageItemJson`、`normalizeResponsesOutputItemsJson`；`responses-output-normalizer.ts` 只保留 native wrapper，`responses-sequencer.ts` 不再本地判断 explicit reasoning / suppress reasoning。

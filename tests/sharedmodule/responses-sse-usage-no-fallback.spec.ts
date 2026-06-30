@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { ResponsesJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.js';
+import { planResponsesSseErrorRecoveryWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import type { ResponsesResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
@@ -12,6 +13,18 @@ async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
 }
 
 describe('responses SSE usage no-fallback boundary', () => {
+  it('plans response-level error projection through the native owner', () => {
+    expect(planResponsesSseErrorRecoveryWithNative({
+      scope: 'response',
+      message: 'Invalid Responses usage.input_tokens'
+    })).toEqual({ action: 'emit_response_error' });
+
+    expect(planResponsesSseErrorRecoveryWithNative({
+      scope: 'output_item',
+      message: 'Unknown output item type'
+    })).toEqual({ action: 'throw' });
+  });
+
   it('omits missing usage instead of synthesizing zero-token usage', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {
@@ -104,6 +117,28 @@ describe('responses SSE usage no-fallback boundary', () => {
 
     expect(text).toContain('event: response.error');
     expect(text).toContain('Invalid Responses response: missing created_at');
+    expect(text).not.toContain('event: response.completed');
+    expect(text).not.toContain('event: response.done');
+  });
+
+  it('does not recover an invalid output item and continue to completed', async () => {
+    const converter = new ResponsesJsonToSseConverterRefactored();
+    const response: ResponsesResponse = {
+      id: 'resp_invalid_output_item',
+      object: 'response',
+      created_at: 1781149537,
+      status: 'completed',
+      model: 'gpt-5.5',
+      output: [{ id: 'weird_1', type: 'unknown_item' }]
+    } as unknown as ResponsesResponse;
+
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_responses_invalid_output_item'
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('event: response.error');
+    expect(text).toContain('Unknown output item type: unknown_item');
     expect(text).not.toContain('event: response.completed');
     expect(text).not.toContain('event: response.done');
   });

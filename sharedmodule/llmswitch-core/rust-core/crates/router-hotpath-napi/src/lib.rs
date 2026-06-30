@@ -2138,6 +2138,12 @@ pub fn build_responses_sse_error_payload_json(message_json: String) -> NapiResul
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "planResponsesSseErrorRecoveryJson")]
+pub fn plan_responses_sse_error_recovery_json(input_json: String) -> NapiResult<String> {
+    responses_sse_event_payload::plan_responses_sse_error_recovery_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "hasRequestedToolsInSemanticsJson")]
 pub fn has_requested_tools_in_semantics_json_bridge(
     request_semantics_json: String,

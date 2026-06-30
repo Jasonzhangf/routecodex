@@ -50,6 +50,19 @@ function parseNativeStringArray(raw: string): string[] | null {
   }
 }
 
+function parseNativeRecoveryPlan(raw: string): { action: 'emit_response_error' | 'throw' } | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    const action = (parsed as Record<string, unknown>).action;
+    return action === 'emit_response_error' || action === 'throw' ? { action } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalizeResponsesSseEventPayloadWithNative(event: unknown): Record<string, unknown> {
   return callNativeJson(
     'canonicalizeResponsesSseEventPayloadJson',
@@ -813,6 +826,45 @@ export function buildResponsesSseErrorPayloadWithNative(message: string): Record
     const parsed = parseNativeEvent(raw);
     if (!parsed) {
       return fail('invalid Responses SSE error payload result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
+export function planResponsesSseErrorRecoveryWithNative(input: {
+  scope: 'response' | 'output_item';
+  message: string;
+}): { action: 'emit_response_error' | 'throw' } {
+  const capability = 'planResponsesSseErrorRecoveryJson';
+  const fail = (reason?: string) => failNative<{ action: 'emit_response_error' | 'throw' }>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify(input);
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE error recovery plan result');
+    }
+    const parsed = parseNativeRecoveryPlan(raw);
+    if (!parsed) {
+      return fail('invalid Responses SSE error recovery plan result');
     }
     return parsed;
   } catch (error) {

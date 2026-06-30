@@ -159,6 +159,10 @@ for (const forbidden of [
   'data: {\n      type: event.type,',
   'sequence_number: event.sequenceNumber',
   'Responses event payload type mismatch: event=',
+  'enableRecovery: boolean',
+  'enableRecovery: true',
+  'if (config.enableRecovery) {',
+  'yield buildErrorEvent(error as Error, context, config);',
 ]) {
   if (responsesSequencer.includes(forbidden)) {
     failures.push(`Responses sequencer must not locally canonicalize SSE payload semantics: ${forbidden}`);
