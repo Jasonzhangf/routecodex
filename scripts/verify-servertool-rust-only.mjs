@@ -5258,15 +5258,26 @@ function checkServertoolRustOutcomeCloseout() {
     'const orchestration = await runServerToolOrchestration(',
     'buildServertoolResponseStageOrchestrationInput({',
     'runServerToolOrchestration',
-    'const bypassResult: ServertoolResponseStageShellResult = {',
-    'return bypassResult;',
-    'const passthroughResult: ServertoolResponseStageShellResult = {',
-    'return passthroughResult;',
+    'payload: options.payload',
+    'executed: false',
   ]) {
     if (!responseStageOrchestrationShell.includes(marker)) {
       fail(
         'servertool-response-stage-orchestration-thin-shell',
         `response-stage-orchestration-shell.ts must keep thin orchestration marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'const bypassResult: ServertoolResponseStageShellResult = {',
+    'return bypassResult;',
+    'const passthroughResult: ServertoolResponseStageShellResult = {',
+    'return passthroughResult;',
+  ]) {
+    if (responseStageOrchestrationShell.includes(marker)) {
+      fail(
+        'servertool-response-stage-orchestration-no-local-carrier',
+        `response-stage-orchestration-shell.ts must not restore local carrier marker ${marker}`
       );
     }
   }

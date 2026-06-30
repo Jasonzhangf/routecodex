@@ -403,13 +403,16 @@ const TARGETS = [
       'capabilities: {',
       'providerInvoker: options.providerInvoker',
       'reenterPipeline: options.reenterPipeline',
-      'clientInjectDispatch: options.clientInjectDispatch'
-    ],
-    required: [
+      'clientInjectDispatch: options.clientInjectDispatch',
       'const bypassResult: ServertoolResponseStageShellResult = {',
       'return bypassResult;',
       'const passthroughResult: ServertoolResponseStageShellResult = {',
       'return passthroughResult;',
+    ],
+    required: [
+      "return {",
+      'payload: options.payload',
+      'executed: false',
     ],
   },
   {
