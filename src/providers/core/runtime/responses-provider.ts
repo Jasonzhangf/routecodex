@@ -41,9 +41,11 @@ import {
   type SubmitToolOutputsPayload
 } from './responses-provider-helpers.js';
 import {
+  buildResponsesSseIncompleteError,
   buildResponsesSseProviderError,
   inspectResponsesSseBlockForProviderRateLimit,
-  isResponsesSseAdvisoryRateLimitsBlock
+  isResponsesSseAdvisoryRateLimitsBlock,
+  isResponsesSseTerminalBlock
 } from './responses-sse-error-guard.js';
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
@@ -220,16 +222,17 @@ async function prepareDirectResponsesSsePassthroughStream(
 ): Promise<NodeJS.ReadableStream> {
   const iterator = stream[Symbol.asyncIterator]();
   const bufferedFrames: Buffer[] = [];
-  let bufferedText = '';
+  let pending = '';
   let sawSemanticFrame = false;
+  let sawTerminalFrame = false;
   let lastSemanticActivityAt = Date.now();
 
-  while (!sawSemanticFrame) {
+  while (true) {
     const next = await readDirectResponsesChunkWithSemanticTimeout(
       iterator,
-      options?.noContentTimeoutMs,
+      sawSemanticFrame ? options?.contentIdleTimeoutMs : options?.noContentTimeoutMs,
       lastSemanticActivityAt,
-      'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
+      sawSemanticFrame ? 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT' : 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
     );
     if (next.done) {
       break;
@@ -237,9 +240,9 @@ async function prepareDirectResponsesSsePassthroughStream(
     const chunk = Buffer.isBuffer(next.value)
       ? next.value
       : Buffer.from(String(next.value));
-    bufferedText += chunk.toString('utf8');
-    const parts = bufferedText.split(/\r?\n\r?\n/);
-    bufferedText = parts.pop() ?? '';
+    pending += chunk.toString('utf8');
+    const parts = pending.split(/\r?\n\r?\n/);
+    pending = parts.pop() ?? '';
     for (const part of parts) {
       const trimmed = part.trim();
       if (!trimmed || trimmed.startsWith(':')) {
@@ -256,62 +259,25 @@ async function prepareDirectResponsesSsePassthroughStream(
       if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
         continue;
       }
+      if (isResponsesSseTerminalBlock(part)) {
+        sawTerminalFrame = true;
+      }
       bufferedFrames.push(Buffer.from(`${part}\n\n`));
       sawSemanticFrame = true;
       lastSemanticActivityAt = Date.now();
     }
-    const bufferedSize = bufferedFrames.reduce((total, item) => total + item.byteLength, 0) + Buffer.byteLength(bufferedText);
-    if (bufferedSize > 64 * 1024) {
-      break;
-    }
   }
-  if (bufferedText) {
-    bufferedFrames.push(Buffer.from(bufferedText));
-    bufferedText = '';
+  if (pending) {
+    bufferedFrames.push(Buffer.from(pending));
   }
-
-  async function* filterAndRead(): AsyncGenerator<Buffer> {
-    let pending = '';
-    while (true) {
-      const next = await readDirectResponsesChunkWithSemanticTimeout(
-        iterator,
-        options?.contentIdleTimeoutMs,
-        lastSemanticActivityAt,
-        'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
-      );
-      if (next.done) {
-        break;
-      }
-      pending += (Buffer.isBuffer(next.value)
-        ? next.value
-        : Buffer.from(String(next.value))).toString('utf8');
-      const parts = pending.split(/\r?\n\r?\n/);
-      pending = parts.pop() ?? '';
-      for (const part of parts) {
-        const trimmed = part.trim();
-        if (trimmed && !trimmed.startsWith(':')) {
-          const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
-          if (rateLimitPayload) {
-            throw buildResponsesSseProviderError(rateLimitPayload);
-          }
-          if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
-            continue;
-          }
-          lastSemanticActivityAt = Date.now();
-        }
-        yield Buffer.from(`${part}\n\n`);
-      }
-    }
-    if (pending) {
-      yield Buffer.from(pending);
-    }
+  if (!sawTerminalFrame) {
+    throw buildResponsesSseIncompleteError();
   }
 
   async function* replayAndRead(): AsyncGenerator<Buffer> {
     for (const chunk of bufferedFrames) {
       yield chunk;
     }
-    yield* filterAndRead();
   }
 
   return Readable.from(replayAndRead());

@@ -20,7 +20,7 @@ describe('provider-failure-policy upstream_stream_incomplete', () => {
     expect(classification).toBe('recoverable');
   });
 
-  it('[forward] upstream_stream_incomplete still affectsHealth=true (not health-neutral)', () => {
+  it('[forward] upstream_stream_incomplete stays health-neutral while remaining recoverable', () => {
     const outcome = resolveProviderFailureOutcome({
       error: {
         message: 'stream closed before response.completed',
@@ -34,6 +34,6 @@ describe('provider-failure-policy upstream_stream_incomplete', () => {
       reason: 'stream closed before response.completed',
     });
     expect(outcome.recoverable).toBe(true);
-    expect(outcome.affectsHealth).toBe(true);
+    expect(outcome.affectsHealth).toBe(false);
   });
 });
