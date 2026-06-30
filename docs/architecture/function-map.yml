@@ -1953,7 +1953,6 @@ owners:
       - tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
       - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
-      - tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
       - npm run verify:hub-response-responses-chat-projection

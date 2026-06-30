@@ -1113,7 +1113,6 @@ verification:
       - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts
       - tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts
     smoke:
       - cargo test -p router-hotpath-napi project_responses --lib -- --nocapture

@@ -1,3 +1,8 @@
+# 2026-07-01: Handler apply_patch SSE projection spec is obsolete
+- `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` must stay deleted; it asserted handler-side apply_patch/freeform SSE projection (`function_call -> custom_tool_call`, argument unwrap, delta aggregation, done de-duplication, direct-passthrough repair), which belongs to Rust/native `hub.response_responses_client_projection`.
+- Function-map / verification-map / SSE bridge wiki anchors now point to native/Rust projection coverage instead, and `verify:responses-handler-single-bridge-surface` fails if the stale handler spec path is restored.
+- Verification: focused native projection Jest 7/7, handler single-bridge gate, SSE architecture/business gates, Rust projection cargo gate, sharedmodule/root TypeScript checks, wiki sync/html sync, focused function-map gates, and `git diff --check` passed. No server restart or live replay was performed for this slice.
+
 # 2026-07-01: Provider response streamPipe must carry explicit native payload
 - `provider-response.ts` must not cast malformed `runtimeEffects.streamPipe.codec/requestId` or fall back from missing `streamPipe.payload` to `hubRespOutbound04ClientSemantic`.
 - Stream pipe effects now require explicit `codec`, `requestId`, and `payload`; malformed stream pipe shape fails fast with `Rust HubPipeline response path returned malformed stream pipe effect`.

@@ -96,8 +96,16 @@ Focused tests to use as slice gates:
 - Fix: `responses-response-bridge.ts` and checked-in `.js` mirror now require explicit `requestContext.context.toolsRaw` for `/v1/responses` client projection; missing or malformed tools truth fails fast with `Responses client projection requires requestContext.context.toolsRaw`.
 - Positive / reverse tests: direct JSON projection tests pass with explicit `context.toolsRaw: []`; request-context resolution reverse test proves `clientToolsRaw` / `payload.tools` no longer salvage missing projection input.
 - Verification: focused Jest `responses-response-bridge.request-context-resolution + responses-response-bridge.direct-json-protocol-guard` PASS 4/4; `npm run verify:responses-handler-single-bridge-surface` PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run verify:hub-response-responses-chat-projection` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `npm run build:base` PASS.
-- Gap: `handler-response-utils.apply-patch-freeform-sse.spec.ts` is now an obsolete handler-side SSE projection expectation and failed when run directly; it needs a separate transport-only rewrite slice rather than being used as green evidence for this bridge input contract.
+- Follow-up: `handler-response-utils.apply-patch-freeform-sse.spec.ts` was confirmed as an obsolete handler-side SSE projection expectation and is handled by the 2026-07-01 stale handler projection spec deletion slice below.
 - Replay evidence: no new live replay was run for this narrow bridge input contract; full goal completion still requires live/real SSE replay after the handler/bridge closeout.
+
+### 2026-07-01 Stale handler apply_patch SSE projection spec deletion slice
+
+- Red evidence: direct Jest of `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts` failed, and the test mocked/expected handler-side `function_call -> custom_tool_call`, freeform argument unwrap, delta aggregation, done de-duplication, and direct-passthrough frame repair.
+- Fix: physically deleted the stale handler projection spec; removed it from `hub.response_responses_client_projection` function-map/verification-map/wiki anchors; `verify:responses-handler-single-bridge-surface` now fails if the deleted spec path is restored.
+- Replacement owner: client-visible apply_patch/freeform JSON/SSE projection remains covered by Rust/native owner tests such as `tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts` and `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts`.
+- Verification: focused native Jest `apply-patch-freeform-client-projection.blackbox + native-exports.responses-sse-contract` PASS 7/7; `verify:responses-handler-single-bridge-surface` PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; `verify:hub-response-responses-chat-projection` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; wiki sync/html sync and focused function-map required-tests/boundary/build-wiring gates PASS; `git diff --check` PASS.
+- Replay evidence: still pending for full SSE closeout; no server restart was performed in this slice.
 
 ### 2026-07-01 Provider response streamPipe payload fallback removal slice
 

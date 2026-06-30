@@ -84,7 +84,6 @@ flowchart LR
 ## Verification Anchors
 
 - `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts`
-- `tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts`
 - `tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts`
 - `tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts`
 - `tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts`
