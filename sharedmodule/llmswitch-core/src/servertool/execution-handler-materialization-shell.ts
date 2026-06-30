@@ -56,7 +56,12 @@ export function appendExecutedToolRecordFromNative(
 ): void {
   const next = hydrateExecutionLoopState(
     appendServertoolExecutedRecordWithNative({
-      state: dehydrateExecutionLoopState(state),
+      state: {
+        executedToolCalls: state.executedToolCalls as any,
+        executedIds: [...state.executedIds],
+        executedFlowIds: state.executedFlowIds,
+        ...(state.lastExecution ? { lastExecution: state.lastExecution as any } : {})
+      },
       toolCall,
       ...(execution ? { execution } : {})
     })
@@ -166,14 +171,5 @@ function hydrateExecutionLoopState(state: NativeServertoolExecutionLoopState): S
     executedIds: new Set(state.executedIds),
     executedFlowIds: state.executedFlowIds,
     ...(state.lastExecution ? { lastExecution: state.lastExecution as ServertoolExecutedRecord['execution'] } : {})
-  };
-}
-
-function dehydrateExecutionLoopState(state: ServertoolExecutionLoopState): NativeServertoolExecutionLoopState {
-  return {
-    executedToolCalls: state.executedToolCalls as any,
-    executedIds: [...state.executedIds],
-    executedFlowIds: state.executedFlowIds,
-    ...(state.lastExecution ? { lastExecution: state.lastExecution as any } : {})
   };
 }

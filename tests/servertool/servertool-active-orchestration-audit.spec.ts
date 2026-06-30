@@ -22,6 +22,7 @@ const TARGETS = [
       'const SERVERTOOL_BACKEND_EXECUTORS',
       'const servertoolBackendExecutors',
       'const materializePlannedServertoolResult',
+      'function dehydrateExecutionLoopState(',
       'const executeBackendPlanViaThinShell',
       'const runServertoolHandlerThinShell',
       'function materializeServertoolPlannedResult(',

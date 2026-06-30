@@ -2732,6 +2732,12 @@ function checkServertoolExecutionDispatchRustOwner() {
     readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
     'const outcomePlan = planServertoolOutcomeWithNative('
   );
+  assertMissing(
+    'servertool-execution-handler-outcome-rust-owner',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
+    'function dehydrateExecutionLoopState('
+  );
   for (const keyword of [
     'listRegisteredServerToolHandlerRecords()',
     'registeredToolCallHandlers: listRegisteredServerToolHandlerRecords()',
