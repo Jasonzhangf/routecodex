@@ -85,7 +85,7 @@ The stdout object is intentionally ordinary `exec_command` output. It is not rem
 
 ## Verification
 
-- Projection contract: `tests/servertool/cli-projection-runtime-shell.spec.ts`
+- Projection contract: `tests/servertool/execution-stage-shell.spec.ts`
 - CLI command contract: `tests/cli/servertool-command.spec.ts`
 - Rust-only executor gate: `npm run verify:servertool-rust-only`
 - Lifecycle blackbox: `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`

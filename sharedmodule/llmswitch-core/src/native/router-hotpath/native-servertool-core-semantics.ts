@@ -198,7 +198,8 @@ export interface ServertoolCliProjectionRuntimeBranchInput {
   requestId: string;
   toolName: string;
   toolArguments: string;
-  additionalToolCalls?: unknown[];
+  projectedToolCallId: string;
+  base: Record<string, unknown>;
 }
 
 export interface ServertoolCliProjectionRuntimeBranchOutput {

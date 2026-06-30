@@ -115,7 +115,7 @@ flowchart LR
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/cli/servertool-command.spec.ts --runInBand`
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts --runInBand`
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-vr-route-hint.spec.ts --runInBand`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/cli-projection-runtime-shell.spec.ts --runInBand`
+- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/execution-stage-shell.spec.ts --runInBand`
 - `npm run verify:architecture-mainline-call-map`
 - `npm run verify:function-map-compile-gate`
 

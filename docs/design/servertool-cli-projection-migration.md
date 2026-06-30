@@ -35,6 +35,6 @@ ProviderRespInbound01Raw
 
 ## Validation
 
-- Generic CLI projection runtime-shell tests stay in `tests/servertool/cli-projection-runtime-shell.spec.ts`.
+- Generic CLI projection runtime branch tests stay in `tests/servertool/execution-stage-shell.spec.ts`.
 - Stopless CLI continuation tests stay in `tests/servertool/stopless-cli-continuation.spec.ts`.
 - `npm run verify:servertool-rust-only` must keep the two paths separated.

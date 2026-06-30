@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const prepareServertoolDispatchStage = jest.fn();
 const planServertoolExecutionBranchWithNative = jest.fn();
-const buildServertoolCliProjectionBranchResult = jest.fn();
+const buildServertoolCliProjectionRuntimeBranchWithNative = jest.fn();
 const runServertoolIoExecutionQueue = jest.fn();
 const materializeNativeToolCallExecutionOutcome = jest.fn();
 const finalizeServertoolResponseStage = jest.fn();
@@ -17,14 +17,8 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    buildServertoolCliProjectionRuntimeBranchWithNative,
     planServertoolExecutionBranchWithNative
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.js',
-  () => ({
-    buildServertoolCliProjectionBranchResult
   })
 );
 
@@ -58,7 +52,7 @@ describe('execution-stage-shell', () => {
     jest.clearAllMocks();
     prepareServertoolDispatchStage.mockReturnValue({
       dispatchPlan: {
-        executableToolCalls: [{ id: 'call_1', name: 'web_search', executionMode: 'guarded' }]
+        executableToolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}', executionMode: 'guarded' }]
       }
     });
     planServertoolExecutionBranchWithNative
@@ -76,9 +70,8 @@ describe('execution-stage-shell', () => {
       mode: 'passthrough',
       finalChatResponse: { ok: true }
     });
-    buildServertoolCliProjectionBranchResult.mockReturnValue({
-      mode: 'tool_flow',
-      finalChatResponse: { cli: true },
+    buildServertoolCliProjectionRuntimeBranchWithNative.mockReturnValue({
+      chatResponse: { cli: true },
       execution: { flowId: 'servertool_cli_projection' }
     });
   });
@@ -93,11 +86,14 @@ describe('execution-stage-shell', () => {
 
     expect(source).toContain('prepareServertoolDispatchStage');
     expect(source).toContain('planServertoolExecutionBranchWithNative');
+    expect(source).toContain('buildServertoolCliProjectionRuntimeBranchWithNative');
     expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
     expect(source).toContain('finalizeServertoolResponseStage');
+    expect(source).not.toContain("from './cli-projection-runtime-shell.js'");
+    expect(source).not.toContain('buildServertoolCliProjectionBranchResult');
     expect(source).not.toContain('function planExecutionBranchRuntimeAction(');
     expect(source).not.toContain('const preExecutionBranchInput = {');
     expect(source).not.toContain('const postExecutionBranchInput = {');
@@ -133,6 +129,13 @@ describe('execution-stage-shell', () => {
       execution: { flowId: 'servertool_cli_projection' }
     });
     expect(runServertoolIoExecutionQueue).not.toHaveBeenCalled();
+    expect(buildServertoolCliProjectionRuntimeBranchWithNative).toHaveBeenCalledWith({
+      requestId: 'req-1',
+      toolName: 'web_search',
+      toolArguments: '{}',
+      projectedToolCallId: 'call_1',
+      base: { ok: true }
+    });
   });
 
   test('projects executable tool calls directly into the native execution-branch planner', async () => {
@@ -161,7 +164,7 @@ describe('execution-stage-shell', () => {
 
     expect(planServertoolExecutionBranchWithNative).toHaveBeenCalledWith({
       executableToolCalls: [
-        { id: 'call_1', name: 'web_search', executionMode: 'guarded' }
+        { id: 'call_1', name: 'web_search', arguments: '{}', executionMode: 'guarded' }
       ],
       executedToolCallsLen: 0
     });

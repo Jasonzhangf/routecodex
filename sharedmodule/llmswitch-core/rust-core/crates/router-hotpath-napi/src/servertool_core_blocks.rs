@@ -57,8 +57,8 @@ struct ServertoolCliProjectionRuntimeBranchInput {
     request_id: String,
     tool_name: String,
     tool_arguments: String,
-    #[serde(default)]
-    additional_tool_calls: Vec<serde_json::Value>,
+    projected_tool_call_id: String,
+    base: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -910,13 +910,23 @@ pub fn build_servertool_cli_projection_runtime_branch_json(
         "call_servertool_cli_{}",
         Uuid::new_v4().simple().to_string()
     );
+    let additional_tool_calls_json = collect_servertool_additional_client_tool_calls_json(
+        &serde_json::json!({
+            "projectedToolCallId": input.projected_tool_call_id,
+            "base": input.base
+        })
+        .to_string(),
+    )?;
+    let additional_tool_calls: Vec<serde_json::Value> =
+        serde_json::from_str(&additional_tool_calls_json)
+            .map_err(|e| format!("deserialize cli projection additional tool calls: {e}"))?;
     let chat_response = cli_contract::build_client_visible_projection_shell(
         ServertoolClientVisibleProjectionShellInput {
             request_id: input.request_id.clone(),
             client_call_id: client_call_id.clone(),
             native_projection,
             reasoning_text: format!("继续执行本地 hook {}。", input.tool_name),
-            additional_tool_calls: input.additional_tool_calls,
+            additional_tool_calls,
         },
     )
     .map_err(|e| e.to_string())?;
@@ -3105,7 +3115,31 @@ fn builds_cli_projection_runtime_branch_via_servertool_core_bridge() {
             "requestId": "req-runtime-branch",
             "toolName": "web_search",
             "toolArguments": "{\"query\":\"rust\"}",
-            "additionalToolCalls": []
+            "projectedToolCallId": "call_web_search_1",
+            "base": {
+                "choices": [{
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_web_search_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_search",
+                                    "arguments": "{\"query\":\"rust\"}"
+                                }
+                            },
+                            {
+                                "id": "call_exec_command_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "exec_command",
+                                    "arguments": "{\"cmd\":\"echo hi\"}"
+                                }
+                            }
+                        ]
+                    }
+                }]
+            }
         })
         .to_string(),
     )
@@ -3119,5 +3153,9 @@ fn builds_cli_projection_runtime_branch_via_servertool_core_bridge() {
     assert_eq!(
         parsed["chatResponse"]["choices"][0]["message"]["reasoning_text"],
         "继续执行本地 hook web_search。"
+    );
+    assert_eq!(
+        parsed["chatResponse"]["choices"][0]["message"]["tool_calls"][1]["id"],
+        "call_exec_command_1"
     );
 }

@@ -6,11 +6,13 @@ import type {
 } from './types.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { prepareServertoolDispatchStage } from './dispatch-preparation-shell.js';
-import { buildServertoolCliProjectionBranchResult } from './cli-projection-runtime-shell.js';
 import { runServertoolIoExecutionQueue } from './execution-queue-shell.js';
 import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
-import { planServertoolExecutionBranchWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  buildServertoolCliProjectionRuntimeBranchWithNative,
+  planServertoolExecutionBranchWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export async function runServertoolExecutionStage(args: {
   options: ServerSideToolEngineOptions;
@@ -31,20 +33,34 @@ export async function runServertoolExecutionStage(args: {
   });
 
   const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({
-    executableToolCalls: dispatchPlan.executableToolCalls.map((toolCall) => ({
-      id: toolCall.id,
-      name: toolCall.name,
-      executionMode: toolCall.executionMode
-    })),
+    executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: 0
   });
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
-    return buildServertoolCliProjectionBranchResult({
-      options: args.options,
-      base: args.baseObject,
-      executableToolCalls: dispatchPlan.executableToolCalls,
-      projectedToolCallIndex: preExecutionBranchPlan.projectedToolCallIndex
+    const projectedToolCall =
+      typeof preExecutionBranchPlan.projectedToolCallIndex === 'number'
+        ? dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]
+        : undefined;
+    if (!projectedToolCall) {
+      throw new Error(
+        `[servertool] native execution-branch projected missing tool call index: ${String(preExecutionBranchPlan.projectedToolCallIndex ?? '')}`
+      );
+    }
+    const branch = buildServertoolCliProjectionRuntimeBranchWithNative({
+      requestId: args.options.requestId,
+      toolName: projectedToolCall.name,
+      toolArguments: projectedToolCall.arguments,
+      projectedToolCallId: projectedToolCall.id,
+      base: args.baseObject
     });
+    return {
+      mode: 'tool_flow',
+      finalChatResponse: branch.chatResponse as JsonObject,
+      execution: branch.execution as {
+        flowId: string;
+        context?: JsonObject;
+      }
+    };
   }
 
   const executionState = await runServertoolIoExecutionQueue({
@@ -55,11 +71,7 @@ export async function runServertoolExecutionStage(args: {
   });
 
   const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({
-    executableToolCalls: dispatchPlan.executableToolCalls.map((toolCall) => ({
-      id: toolCall.id,
-      name: toolCall.name,
-      executionMode: toolCall.executionMode
-    })),
+    executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: executionState.executedToolCalls.length
   });
   if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {

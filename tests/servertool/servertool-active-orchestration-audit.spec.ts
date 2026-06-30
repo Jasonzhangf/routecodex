@@ -16,6 +16,8 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/pending-injection-block.ts',
   'sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts',
   'sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts',
+  'sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts',
+  'tests/servertool/cli-projection-runtime-shell.spec.ts',
   'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pre_command_hook_contract.rs',
   'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/pending_session_contract.rs',
 ] as const;
@@ -333,8 +335,10 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts',
+    file: 'sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts',
     forbidden: [
+      "from './cli-projection-runtime-shell.js'",
+      'buildServertoolCliProjectionBranchResult',
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
       '.find(isClientExecCliProjectionToolCall)',
       'export function isClientExecCliProjectionToolCall(',
@@ -359,7 +363,6 @@ const TARGETS = [
       '继续执行本地 hook',
     ],
     required: [
-      'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
       'buildServertoolCliProjectionRuntimeBranchWithNative({',
       'finalChatResponse: branch.chatResponse as JsonObject',
       'execution: branch.execution as {',

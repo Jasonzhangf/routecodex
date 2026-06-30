@@ -138,7 +138,7 @@ flowchart TD
 ## Verification Anchors
 
 - `tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts`
-- `tests/servertool/cli-projection-runtime-shell.spec.ts`
+- `tests/servertool/execution-stage-shell.spec.ts`
 - `tests/servertool/stopless-cli-continuation.spec.ts`
 - `tests/servertool/engine-preflight-shell.spec.ts`
 - `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
