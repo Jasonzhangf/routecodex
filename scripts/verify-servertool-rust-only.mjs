@@ -3300,6 +3300,8 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookCallerFinalizationWithNative');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'planAutoHookRuntimeAttemptWithNative({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'planAutoHookCallerFinalizationWithNative({');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const toolFlowResult: ServerSideToolEngineResult = {');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'return toolFlowResult;');
   for (const keyword of [
     'auto_hook_queue_contract',
     'plan_auto_hook_queue_progress',

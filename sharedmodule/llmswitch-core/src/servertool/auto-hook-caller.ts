@@ -127,12 +127,13 @@ export async function runServertoolAutoHookCaller(args: {
       if (!queueResult) {
         throw new Error('[servertool] native auto-hook queue progress requested result but queue result was empty');
       }
-      return {
+      const toolFlowResult: ServerSideToolEngineResult = {
         mode: 'tool_flow',
         finalChatResponse: queueResult.chatResponse,
         execution: queueResult.execution,
         ...(queueResult.metadataWritePlan ? { metadataWritePlan: queueResult.metadataWritePlan } : {})
       };
+      return toolFlowResult;
     }
     if (finalizationPlan.continueNextQueue) {
       continue;

@@ -73,6 +73,10 @@ const TARGETS = [
       'result.execution.flowId.trim()',
       'if (mandatoryResult) {',
     ],
+    required: [
+      'const toolFlowResult: ServerSideToolEngineResult = {',
+      'return toolFlowResult;',
+    ],
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/execution-branch-runtime-shell.ts',
