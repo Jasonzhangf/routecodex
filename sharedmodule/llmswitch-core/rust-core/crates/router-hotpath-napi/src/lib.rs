@@ -575,6 +575,19 @@ pub fn update_responses_contract_probe_from_sse_chunk_json_bridge(
     )
 }
 
+#[napi(js_name = "updateResponsesSseTransportTerminalStateJson")]
+pub fn update_responses_sse_transport_terminal_state_json_bridge(
+    chunk_json: String,
+    state_json: String,
+    flush_remainder: bool,
+) -> NapiResult<String> {
+    shared_responses_response_utils::update_responses_sse_transport_terminal_state_json(
+        chunk_json,
+        state_json,
+        flush_remainder,
+    )
+}
+
 #[napi(js_name = "buildResponsesTerminalSseFramesFromProbeJson")]
 pub fn build_responses_terminal_sse_frames_from_probe_json_bridge(
     probe_json: String,

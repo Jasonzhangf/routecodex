@@ -25,7 +25,7 @@ import { projectSseErrorEventPayload } from '../utils/http-error-mapper.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildClientSseKeepaliveFrameForHttp,
-  updateResponsesContractProbeFromSseChunkForHttp,
+  updateResponsesSseTransportTerminalStateForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
 
 type FlushableResponse = Response & {
@@ -415,9 +415,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   let ended = false;
   let cleanupLogged = false;
   let streamEnded = false;
-  let sawResponsesTerminalEvent = false;
-  let responsesContractProbe: Record<string, unknown> = {};
-  let responsesSseBlockCarry = '';
+  let responsesSseObservedTerminal = false;
+  let responsesSseTransportState: Record<string, unknown> = {};
   let totalTimer: NodeJS.Timeout | null = null;
   let keepaliveTimer: NodeJS.Timeout | null = null;
 
@@ -551,35 +550,17 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   };
 
   const updateResponsesTerminalProbeFromTransportText = (text: string, flushRemainder = false) => {
-    if (!isResponsesSseEndpoint(entryEndpoint) || sawResponsesTerminalEvent) {
+    if (!isResponsesSseEndpoint(entryEndpoint) || responsesSseObservedTerminal) {
       return;
     }
-    const joined = `${responsesSseBlockCarry}${text}`;
-    const lastBlockEnd = joined.lastIndexOf('\n\n');
-    if (lastBlockEnd < 0) {
-      responsesSseBlockCarry = joined.slice(-4096);
-      if (!flushRemainder) {
-        return;
-      }
-    }
-    const completeText = lastBlockEnd >= 0
-      ? joined.slice(0, lastBlockEnd + 2)
-      : joined;
-    responsesSseBlockCarry = lastBlockEnd >= 0
-      ? joined.slice(lastBlockEnd + 2).slice(-4096)
-      : '';
-    if (!completeText.trim()) {
-      return;
-    }
-    responsesContractProbe = updateResponsesContractProbeFromSseChunkForHttp(
-      completeText,
-      responsesContractProbe
-    );
-    if (
-      responsesContractProbe.__seen_response_completed === true
-      || responsesContractProbe.__seen_response_done === true
-    ) {
-      sawResponsesTerminalEvent = true;
+    const terminalState = updateResponsesSseTransportTerminalStateForHttp({
+      chunk: text,
+      state: responsesSseTransportState,
+      flushRemainder,
+    });
+    responsesSseTransportState = terminalState.state;
+    if (terminalState.observedTerminal) {
+      responsesSseObservedTerminal = true;
     }
   };
 
@@ -733,7 +714,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       finishReason: undefined,
     });
     updateResponsesTerminalProbeFromTransportText('', true);
-    if (isResponsesSseEndpoint(entryEndpoint) && !sawResponsesTerminalEvent) {
+    if (isResponsesSseEndpoint(entryEndpoint) && !responsesSseObservedTerminal) {
       endWithSseError(
         'upstream_stream_incomplete',
         'SSE stream ended before response.completed',

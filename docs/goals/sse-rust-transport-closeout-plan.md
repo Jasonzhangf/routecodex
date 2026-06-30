@@ -137,7 +137,7 @@
 
 #### A2. 必须迁出 TS 的语义能力
 
-- `updateResponsesContractProbeFromSseChunkForHttp`
+- 旧 `updateResponsesContractProbeFromSseChunkForHttp`（已从 SSE bridge/transport 退役）
 - `inspectResponsesTerminalStateFromSseChunkForHttp`
 - `planResponsesStreamEndRepairForHttp`
 - `required_action` / tool visibility projection

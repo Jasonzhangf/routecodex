@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE terminal transport state Rust owner
+- Red evidence：focused `hub-pipeline-stage-residue-audit` 命中 `responses-sse-bridge.ts` / `responses-sse-transport.ts` 仍暴露 `updateResponsesContractProbeFromSseChunkForHttp`，且 `handler-response-sse.ts` 仍维护 `responsesSseBlockCarry` / `responsesContractProbe` / terminal bool。
+- Fix：新增 Rust/NAPI `updateResponsesSseTransportTerminalStateJson`，Rust 统一处理 partial block carry、probe 更新、terminal observation；TS handler 只保留 opaque state + `observedTerminal` action result，SSE transport 不再 import/export probe helper。
+- Verification：native build PASS；focused Jest `native-exports.responses-sse-contract + handler-response-sse-upstream-incomplete + handler-response-utils.force-sse-json-responses + handler-response-utils.required-action-split-frame` 21/21 PASS；`verify:responses-handler-single-bridge-surface` PASS；`verify:responses-sse-business-module` PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；4444 real replay `completed=true done=true error=false missingType=0 missingSequence=0 malformedWire=0 eventCount=25`。
+
 # 2026-07-01: retired responses stream semantics spec cleanup
 - Red evidence：`tests/modules/llmswitch/bridge/responses-stream-semantics.spec.ts` 仍 import 已物理删除的 `src/modules/llmswitch/bridge/responses-stream-semantics.js`，focused Jest 先红为 module-not-found；这不是缺实现，而是旧 TS stream semantics owner 的陈旧正向测试残留。
 - Fix：物理删除 stale spec；`docs/goals/sse-rust-transport-closeout-plan.md` 把 `responses-stream-semantics.ts` 标记为已退役/已删除；active closeout doc 记录这刀，避免后续按旧计划复活 wrapper。

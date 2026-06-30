@@ -63,6 +63,11 @@ type NativeChatProcessNodeResultSemantics = {
   classifyEmptyResponseSignalJson?: (stage: string, bodyJson: string) => string;
   detectToolExecutionFailuresJson?: (bodyJson: string) => string;
   updateResponsesContractProbeFromSseChunkJson?: (chunkJson: string, probeJson: string) => string;
+  updateResponsesSseTransportTerminalStateJson?: (
+    chunkJson: string,
+    stateJson: string,
+    flushRemainder: boolean
+  ) => string;
   buildResponsesTerminalSseFramesFromProbeJson?: (probeJson: string, requestLabel: string) => string;
   resolveProviderResponseRequestSemanticsJson?: (
     processedJson: string,
@@ -1050,6 +1055,35 @@ export function updateResponsesContractProbeFromSseChunkNative(
     throw new Error('[llmswitch-bridge] updateResponsesContractProbeFromSseChunkJson returned invalid payload');
   }
   return parsed as Record<string, unknown>;
+}
+
+export function updateResponsesSseTransportTerminalStateNative(input: {
+  chunk: unknown;
+  state: Record<string, unknown> | undefined;
+  flushRemainder?: boolean;
+}): { state: Record<string, unknown>; observedTerminal: boolean } {
+  const fn = getChatProcessNodeResultSemantics().updateResponsesSseTransportTerminalStateJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] updateResponsesSseTransportTerminalStateJson not available');
+  }
+  const raw = fn(
+    JSON.stringify(typeof input.chunk === 'string' ? input.chunk : String(input.chunk ?? '')),
+    JSON.stringify(input.state ?? {}),
+    input.flushRemainder === true
+  );
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] updateResponsesSseTransportTerminalStateJson returned invalid payload');
+  }
+  const state = (parsed as { state?: unknown }).state;
+  const sawTerminalEvent = (parsed as { sawTerminalEvent?: unknown }).sawTerminalEvent;
+  if (!state || typeof state !== 'object' || Array.isArray(state) || typeof sawTerminalEvent !== 'boolean') {
+    throw new Error('[llmswitch-bridge] updateResponsesSseTransportTerminalStateJson returned invalid shape');
+  }
+  return {
+    state: state as Record<string, unknown>,
+    observedTerminal: sawTerminalEvent,
+  };
 }
 
 export function buildResponsesTerminalSseFramesFromProbeNative(

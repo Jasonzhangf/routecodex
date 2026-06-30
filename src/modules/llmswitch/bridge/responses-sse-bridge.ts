@@ -18,8 +18,10 @@ import {
 import {
   buildClientSseKeepaliveFrameForHttp as buildClientSseKeepaliveFrameForHttpImpl,
   shouldDropClientSseFrameForHttp as shouldDropClientSseFrameForHttpImpl,
-  updateResponsesContractProbeFromSseChunkForHttp as updateResponsesContractProbeFromSseChunkForHttpImpl,
 } from './responses-sse-transport.js';
+import {
+  updateResponsesSseTransportTerminalStateNative,
+} from './native-exports.js';
 
 export type { ResponsesRequestContextForHttp };
 
@@ -29,4 +31,4 @@ export const importResponsesHandlerCoreDist = importResponsesHandlerCoreDistImpl
 export const prepareResponsesJsonClientDispatchPlanForHttp = prepareResponsesJsonClientDispatchPlanForHttpImpl;
 export const requireResponsesHandlerCoreDist = requireResponsesHandlerCoreDistImpl;
 export const shouldDropClientSseFrameForHttp = shouldDropClientSseFrameForHttpImpl;
-export const updateResponsesContractProbeFromSseChunkForHttp = updateResponsesContractProbeFromSseChunkForHttpImpl;
+export const updateResponsesSseTransportTerminalStateForHttp = updateResponsesSseTransportTerminalStateNative;

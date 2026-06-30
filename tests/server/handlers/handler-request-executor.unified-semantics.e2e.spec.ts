@@ -474,7 +474,10 @@ const buildResponsesSseBridgeDirectMockModule = () => {
     resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
     resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn(() => undefined),
     summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
-    updateResponsesContractProbeFromSseChunkForHttp: jest.fn(() => ({})),
+    updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: any) => ({
+      state: input?.state ?? {},
+      observedTerminal: String(input?.chunk ?? '').includes('response.completed') || String(input?.chunk ?? '').includes('response.done'),
+    })),
     importResponsesHandlerCoreDist: jest.fn(async () => ({})),
     planResponsesHandlerStreamForHttp: jest.fn((args: any) => ({
       outboundStream: args?.forceStream === true ? true : Boolean(args?.acceptsSse),

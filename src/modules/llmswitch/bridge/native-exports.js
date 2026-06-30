@@ -635,6 +635,26 @@ export function updateResponsesContractProbeFromSseChunkNative(chunk, probe) {
     }
     return parsed;
 }
+export function updateResponsesSseTransportTerminalStateNative(input) {
+    const fn = getChatProcessNodeResultSemantics().updateResponsesSseTransportTerminalStateJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] updateResponsesSseTransportTerminalStateJson not available');
+    }
+    const raw = fn(JSON.stringify(typeof input.chunk === 'string' ? input.chunk : String(input.chunk ?? '')), JSON.stringify(input.state ?? {}), input.flushRemainder === true);
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('[llmswitch-bridge] updateResponsesSseTransportTerminalStateJson returned invalid payload');
+    }
+    const state = parsed.state;
+    const sawTerminalEvent = parsed.sawTerminalEvent;
+    if (!state || typeof state !== 'object' || Array.isArray(state) || typeof sawTerminalEvent !== 'boolean') {
+        throw new Error('[llmswitch-bridge] updateResponsesSseTransportTerminalStateJson returned invalid shape');
+    }
+    return {
+        state,
+        observedTerminal: sawTerminalEvent,
+    };
+}
 export function buildResponsesTerminalSseFramesFromProbeNative(probe, requestLabel) {
     const fn = getChatProcessNodeResultSemantics().buildResponsesTerminalSseFramesFromProbeJson;
     if (typeof fn !== 'function') {

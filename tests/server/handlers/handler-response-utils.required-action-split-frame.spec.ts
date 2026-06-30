@@ -381,21 +381,10 @@ const mockBridgeModule = async () => ({
   finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
   recordResponsesResponseForRequest: jest.fn(async () => undefined),
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),
-  updateResponsesContractProbeFromSseChunkForHttp: jest.fn((chunk: unknown, probe: Record<string, unknown> | undefined) => {
-    const text = typeof chunk === 'string' ? chunk : String(chunk ?? '');
-    const next = { ...(probe ?? {}) } as Record<string, unknown>;
-    const dataLine = text.split('\n').find((line) => line.startsWith('data:'));
-    if (!dataLine) return next;
-    try {
-      const parsed = JSON.parse(dataLine.slice('data:'.length).trim()) as Record<string, unknown>;
-      const response = parsed.response && typeof parsed.response === 'object' && !Array.isArray(parsed.response)
-        ? parsed.response as Record<string, unknown>
-        : undefined;
-      if (response) Object.assign(next, response);
-      if (parsed.required_action) next.required_action = parsed.required_action;
-    } catch {}
-    return next;
-  }),
+  updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: { chunk?: unknown; state?: Record<string, unknown> }) => ({
+    state: input.state ?? {},
+    observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
+  })),
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);

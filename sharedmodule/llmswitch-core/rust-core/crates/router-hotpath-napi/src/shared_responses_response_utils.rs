@@ -1159,6 +1159,93 @@ pub fn update_responses_contract_probe_from_sse_chunk_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+pub fn update_responses_sse_transport_terminal_state_json(
+    chunk_json: String,
+    state_json: String,
+    flush_remainder: bool,
+) -> NapiResult<String> {
+    let chunk: Value =
+        serde_json::from_str(&chunk_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let text = match chunk {
+        Value::String(text) => text,
+        other => other.as_str().unwrap_or_default().to_string(),
+    };
+    let state_value = serde_json::from_str::<Value>(&state_json).unwrap_or(Value::Null);
+    let state = state_value.as_object();
+    let previous_carry = state
+        .and_then(|value| value.get("carry"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let probe_value = state
+        .and_then(|value| value.get("probe"))
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    let joined = format!("{previous_carry}{text}");
+    let last_block_end = joined.rfind("\n\n");
+    let (complete_text, carry) = if let Some(index) = last_block_end {
+        (
+            joined[..index + 2].to_string(),
+            joined[index + 2..]
+                .chars()
+                .rev()
+                .take(4096)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect::<String>(),
+        )
+    } else if flush_remainder {
+        (joined, String::new())
+    } else {
+        (
+            String::new(),
+            joined
+                .chars()
+                .rev()
+                .take(4096)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect::<String>(),
+        )
+    };
+    let probe_json =
+        serde_json::to_string(&probe_value).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let updated_probe_json = if complete_text.trim().is_empty() {
+        probe_json
+    } else {
+        update_responses_contract_probe_from_sse_chunk_json(
+            serde_json::to_string(&complete_text)
+                .map_err(|e| napi::Error::from_reason(e.to_string()))?,
+            probe_json,
+        )?
+    };
+    let updated_probe =
+        serde_json::from_str::<Value>(&updated_probe_json).unwrap_or_else(|_| Value::Object(Map::new()));
+    let saw_terminal_event = updated_probe
+        .as_object()
+        .map(|probe| {
+            probe
+                .get("__seen_response_completed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || probe
+                    .get("__seen_response_done")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+        })
+        .unwrap_or(false);
+
+    serde_json::to_string(&serde_json::json!({
+        "state": {
+            "carry": carry,
+            "probe": updated_probe,
+        },
+        "sawTerminalEvent": saw_terminal_event,
+    }))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn safe_response_id_from_request_label(request_label: &str) -> String {
     let safe: String = request_label
         .chars()

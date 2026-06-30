@@ -127,6 +127,14 @@ export declare function classifyEmptyResponseSignalNative(stage: string, body: u
 export declare function detectToolExecutionFailuresNative(body: unknown): ToolExecutionFailureSignal[];
 export declare function resolveProviderResponseRequestSemanticsNative(processed: Record<string, unknown> | undefined, standardized: Record<string, unknown> | undefined, requestMetadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined;
 export declare function updateResponsesContractProbeFromSseChunkNative(chunk: unknown, probe: Record<string, unknown> | undefined): Record<string, unknown>;
+export declare function updateResponsesSseTransportTerminalStateNative(input: {
+    chunk: unknown;
+    state: Record<string, unknown> | undefined;
+    flushRemainder?: boolean;
+}): {
+    state: Record<string, unknown>;
+    observedTerminal: boolean;
+};
 export declare function buildResponsesTerminalSseFramesFromProbeNative(probe: Record<string, unknown> | undefined, requestLabel: string): string[];
 export declare function extractServertoolCliResultRouteHintFromRequestNative(input: {
     adapterContext?: Record<string, unknown>;

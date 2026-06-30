@@ -3,7 +3,8 @@ import { describe, expect, it } from '@jest/globals';
 import {
   buildResponsesTerminalSseFramesFromProbeNative,
   projectResponsesSseFrameForClientNative,
-  updateResponsesContractProbeFromSseChunkNative
+  updateResponsesContractProbeFromSseChunkNative,
+  updateResponsesSseTransportTerminalStateNative
 } from '../../../../src/modules/llmswitch/bridge/native-exports.js';
 
 describe('native-exports responses SSE contract', () => {
@@ -125,5 +126,20 @@ describe('native-exports responses SSE contract', () => {
     expect(wire).toContain('event: response.completed');
     expect(wire).toContain('event: response.done');
     expect(wire).not.toContain('event: response.required_action');
+  });
+
+  it('keeps partial Responses terminal blocks in native-owned transport state', () => {
+    const first = updateResponsesSseTransportTerminalStateNative({
+      chunk: 'event: response.com',
+      state: undefined,
+    });
+    expect(first.observedTerminal).toBe(false);
+
+    const second = updateResponsesSseTransportTerminalStateNative({
+      chunk: 'pleted\ndata: {"type":"response.completed","response":{"id":"resp_split_terminal","object":"response","status":"completed"}}\n\n',
+      state: first.state,
+    });
+
+    expect(second.observedTerminal).toBe(true);
   });
 });
