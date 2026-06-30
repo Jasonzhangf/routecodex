@@ -100,6 +100,28 @@ describe('engine-observation-shell', () => {
     ).toThrow('stage recorder down');
   });
 
+  test('match hit requires execution flowId instead of falling back to unknown', async () => {
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
+
+    expect(() =>
+      mod.recordServertoolEngineMatchHit({
+        requestId: 'req-match-hit-missing-flow',
+        execution: {
+          toolName: 'reasoningStop',
+          toolCall: {
+            id: 'call_missing_flow',
+            type: 'function',
+            function: {
+              name: 'reasoningStop',
+              arguments: '{}'
+            }
+          },
+          followup: null
+        } as any
+      })
+    ).toThrow('Servertool match hit requires execution.flowId');
+  });
+
   test('postflight stage recorder failures are fail-fast', async () => {
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
     const stageRecorder = {

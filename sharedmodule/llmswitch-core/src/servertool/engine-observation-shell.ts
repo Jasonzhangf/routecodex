@@ -41,7 +41,10 @@ export function recordServertoolEngineMatchHit(args: {
   execution: ServerToolExecution;
   stageRecorder?: StageRecorder;
 }): string {
-  const flowId = args.execution.flowId ?? 'unknown';
+  const flowId = args.execution.flowId;
+  if (typeof flowId !== 'string' || !flowId.trim()) {
+    throw new Error('Servertool match hit requires execution.flowId');
+  }
   args.stageRecorder?.record('servertool.match', {
     matched: true,
     flowId,

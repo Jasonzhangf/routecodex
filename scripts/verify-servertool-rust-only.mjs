@@ -6023,11 +6023,23 @@ function checkServertoolMatchLoggingFailFast() {
       'engine-observation-shell.ts must not catch stageRecorder failures'
     );
   }
+  if (observationShellSource.includes("flowId ?? 'unknown'")) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'engine-observation-shell.ts must not fallback missing execution.flowId to unknown'
+    );
+  }
   assertContains(
     'servertool-match-log-fail-fast',
     `${ROOT}/tests/servertool/engine-observation-shell.spec.ts`,
     observationSpec,
     'match stage recorder failures are fail-fast'
+  );
+  assertContains(
+    'servertool-match-log-fail-fast',
+    `${ROOT}/tests/servertool/engine-observation-shell.spec.ts`,
+    observationSpec,
+    'match hit requires execution flowId instead of falling back to unknown'
   );
   pass(
     'servertool-match-log-fail-fast',
