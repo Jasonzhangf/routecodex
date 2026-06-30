@@ -45,10 +45,22 @@ export function resolveServertoolEntryContext(args: {
     includeAutoHookIds: args.options.includeAutoHookIds,
     excludeAutoHookIds: args.options.excludeAutoHookIds
   });
-  const includeToolCallNames = tokenSetFromNativePlan(entryContextPlan.includeToolCallNames);
-  const excludeToolCallNames = tokenSetFromNativePlan(entryContextPlan.excludeToolCallNames);
-  const includeAutoHookIds = tokenSetFromNativePlan(entryContextPlan.includeAutoHookIds);
-  const excludeAutoHookIds = tokenSetFromNativePlan(entryContextPlan.excludeAutoHookIds);
+  const includeToolCallNames =
+    entryContextPlan.includeToolCallNames && entryContextPlan.includeToolCallNames.length > 0
+      ? new Set(entryContextPlan.includeToolCallNames)
+      : null;
+  const excludeToolCallNames =
+    entryContextPlan.excludeToolCallNames && entryContextPlan.excludeToolCallNames.length > 0
+      ? new Set(entryContextPlan.excludeToolCallNames)
+      : null;
+  const includeAutoHookIds =
+    entryContextPlan.includeAutoHookIds && entryContextPlan.includeAutoHookIds.length > 0
+      ? new Set(entryContextPlan.includeAutoHookIds)
+      : null;
+  const excludeAutoHookIds =
+    entryContextPlan.excludeAutoHookIds && entryContextPlan.excludeAutoHookIds.length > 0
+      ? new Set(entryContextPlan.excludeAutoHookIds)
+      : null;
 
   return {
     action: 'continue',
@@ -71,8 +83,4 @@ export function resolveServertoolEntryContext(args: {
 
 export function asServertoolJsonObject(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : null;
-}
-
-function tokenSetFromNativePlan(values: string[] | undefined): Set<string> | null {
-  return values && values.length > 0 ? new Set(values) : null;
 }

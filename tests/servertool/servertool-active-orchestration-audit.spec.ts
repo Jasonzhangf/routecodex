@@ -181,7 +181,7 @@ const TARGETS = [
       'resolveServertoolEntryContext',
       'asServertoolJsonObject',
       'planServertoolEntryContextWithNative',
-      'const includeToolCallNames = tokenSetFromNativePlan(entryContextPlan.includeToolCallNames);',
+      'const includeToolCallNames =',
     ],
   },
   {
@@ -432,9 +432,7 @@ const TARGETS = [
       'buildServertoolDispatchPlanInputWithNative',
     ],
     required: [
-      'const registryLookupInput = {',
-      'const actionPlan = planServertoolRegistryLookupFromSkeleton(registryLookupInput);',
-      'planServertoolRegistryLookupFromSkeleton(',
+      'const actionPlan = planServertoolRegistryLookupFromSkeleton({',
       'getServerToolHandlerViaNativePlan',
     ],
   },

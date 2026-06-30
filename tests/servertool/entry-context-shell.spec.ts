@@ -32,7 +32,7 @@ describe('entry-context-shell', () => {
     expect(source).toContain('export function resolveServertoolEntryContext(');
     expect(source).toContain('export function asServertoolJsonObject(');
     expect(source).toContain('planServertoolEntryContextWithNative');
-    expect(source).not.toContain('function normalizeFilterTokenSet(');
+    expect(source).not.toContain('function tokenSetFromNativePlan(');
     expect(source).not.toContain('.trim().toLowerCase()');
   });
 
