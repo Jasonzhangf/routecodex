@@ -5031,6 +5031,12 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
+  if (/export interface ServerToolOrchestrationOptions\s*\{[\s\S]{0,220}providerProtocol:\s*string;/.test(engineOrchestrationShell)) {
+    fail(
+      'servertool-engine-orchestration-metadata-center-only',
+      'ServerToolOrchestrationOptions must not accept providerProtocol as a second protocol truth'
+    );
+  }
   const engineObservationShell = readRequired(TS_ENGINE_OBSERVATION_SHELL);
   for (const marker of [
     'export function logServertoolNonBlocking(',
@@ -5065,6 +5071,12 @@ function checkServertoolRustOutcomeCloseout() {
         `engine-observation-shell.ts must not restore public progress observation facade marker ${marker}`
       );
     }
+  }
+  if (/recordServertoolEngineMatchSkipped\(args:\s*\{[\s\S]{0,220}providerProtocol:\s*string;/.test(engineObservationShell)) {
+    fail(
+      'servertool-engine-observation-metadata-center-only',
+      'recordServertoolEngineMatchSkipped must not accept providerProtocol as a second protocol truth'
+    );
   }
   for (const marker of [
     'export function runEnginePreflight(',

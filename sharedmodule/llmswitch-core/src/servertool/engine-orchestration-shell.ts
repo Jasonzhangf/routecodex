@@ -37,7 +37,6 @@ export interface ServerToolOrchestrationOptions {
   adapterContext: AdapterContext;
   requestId: string;
   entryEndpoint: string;
-  providerProtocol: string;
   stageRecorder?: StageRecorder;
 }
 
@@ -172,7 +171,6 @@ export async function runServerToolOrchestrationShell(
     recordServertoolEngineMatchSkipped({
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint,
-      providerProtocol,
       engineMode: engineResult.mode,
       skipReason,
       stageRecorder: options.stageRecorder,

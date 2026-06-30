@@ -72,7 +72,6 @@ describe('engine-observation-shell', () => {
       mod.recordServertoolEngineMatchSkipped({
         requestId: 'req-match-skip-failfast',
         entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
         engineMode: 'passthrough',
         skipReason: 'passthrough',
         adapterContext: adapterContext as any,
@@ -121,7 +120,6 @@ describe('engine-observation-shell', () => {
       mod.recordServertoolEngineMatchSkipped({
         requestId: 'req-match-skip-missing-reason',
         entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
         engineMode: 'passthrough',
         skipReason: ' ',
         adapterContext: adapterContext as any
@@ -265,6 +263,7 @@ describe('engine-observation-shell', () => {
     );
 
     expect(source).toContain('export async function runServerToolOrchestrationShell(');
+    expect(source).not.toMatch(/export interface ServerToolOrchestrationOptions\s*\{[\s\S]{0,220}providerProtocol:\s*string;/);
     expect(source).toContain('createProgressObservation({');
     expect(source).toContain('runEnginePreflight({');
     expect(source).toContain('planServertoolEngineSkipWithNative({');

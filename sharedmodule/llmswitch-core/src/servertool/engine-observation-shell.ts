@@ -7,7 +7,6 @@ import { readProviderProtocolFromAnyBoundMetadataCenter } from './metadata-cente
 export function recordServertoolEngineMatchSkipped(args: {
   requestId: string;
   entryEndpoint: string;
-  providerProtocol: string;
   engineMode: 'passthrough' | 'tool_flow';
   skipReason: string;
   stageRecorder?: StageRecorder;

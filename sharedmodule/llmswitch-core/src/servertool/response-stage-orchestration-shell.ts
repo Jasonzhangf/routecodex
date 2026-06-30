@@ -71,7 +71,6 @@ export async function runServertoolResponseStageOrchestrationShell(
       adapterContext: options.adapterContext,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint,
-      providerProtocol,
       stageRecorder: options.stageRecorder
     }
   );
