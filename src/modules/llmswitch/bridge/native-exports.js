@@ -473,6 +473,7 @@ export function projectResponsesClientPayloadForClientNative(args) {
         args.payload ?? null,
         Array.isArray(args.toolsRaw) ? args.toolsRaw : [],
         args.metadata ?? null,
+        args.context ?? null,
     ]);
     return assertNativeObject('projectResponsesClientPayloadForClientJson', parsed);
 }

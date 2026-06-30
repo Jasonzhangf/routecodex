@@ -281,11 +281,12 @@ export function projectResponsesClientPayloadForClientWithNative(
   const payloadJson = safeStringify(responsesPayload);
   const toolsRawJson = safeStringify(toolsRaw ?? []);
   const metadataJson = safeStringify(metadata ?? {});
-  if (!payloadJson || !toolsRawJson || !metadataJson) {
+  const contextJson = safeStringify(null);
+  if (!payloadJson || !toolsRawJson || !metadataJson || !contextJson) {
     return fail('json stringify failed');
   }
   try {
-    const raw = fn(payloadJson, toolsRawJson, metadataJson);
+    const raw = fn(payloadJson, toolsRawJson, metadataJson, contextJson);
     const nativeErrorMessage = extractNativeErrorMessage(raw);
     if (nativeErrorMessage) {
       return fail(nativeErrorMessage);

@@ -77,6 +77,7 @@ export declare function projectResponsesClientPayloadForClientNative(args: {
     payload: unknown;
     toolsRaw: unknown[];
     metadata?: Record<string, unknown>;
+    context?: Record<string, unknown>;
 }): Record<string, unknown>;
 export declare function projectResponsesSseFrameForClientNative(args: {
     frame: string;

@@ -75,37 +75,6 @@ export function requireResponsesHandlerCoreDist(specifier) {
 export async function importResponsesHandlerCoreDist(specifier) {
     return await importCoreDist(specifier);
 }
-function readResponsesRequestModelForHttp(requestContext) {
-    const payloadModel = requestContext?.payload?.model;
-    if (typeof payloadModel === 'string' && payloadModel.trim()) {
-        return payloadModel.trim();
-    }
-    const contextModel = requestContext?.context?.model;
-    if (typeof contextModel === 'string' && contextModel.trim()) {
-        return contextModel.trim();
-    }
-    return undefined;
-}
-function ensureResponsesJsonToSseRequiredFieldsForHttp(args) {
-    if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
-        return args.payload;
-    }
-    const payload = args.payload;
-    if (payload.object !== 'response') {
-        return args.payload;
-    }
-    if (typeof payload.model === 'string' && payload.model.trim()) {
-        return args.payload;
-    }
-    const model = readResponsesRequestModelForHttp(args.requestContext);
-    if (!model) {
-        return args.payload;
-    }
-    return {
-        ...payload,
-        model,
-    };
-}
 function readResponsesClientToolsRawForHttp(requestContext) {
     const contextToolsRaw = requestContext?.context?.toolsRaw;
     if (Array.isArray(contextToolsRaw)) {
@@ -133,11 +102,14 @@ export async function normalizeResponsesClientPayloadForHttp(args) {
         payload: args.payload,
         toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
         metadata: args.metadata,
+        context: args.requestContext
+            ? {
+                originalRequest: args.requestContext.payload,
+                requestContext: args.requestContext.context,
+            }
+            : undefined,
     });
-    return ensureResponsesJsonToSseRequiredFieldsForHttp({
-        payload: stripClientVisibleMetadataDeep(projectedPayload),
-        requestContext: args.requestContext,
-    });
+    return stripClientVisibleMetadataDeep(projectedPayload);
 }
 export async function prepareResponsesJsonClientDispatchPlanForHttp(args) {
     const normalizedJsonBody = await normalizeResponsesJsonBodyForHttp({

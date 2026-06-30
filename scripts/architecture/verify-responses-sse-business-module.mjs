@@ -118,6 +118,7 @@ for (const forbiddenLifecycleBridgeExport of [
   'function isDirectResponsesToolCallContinuationForHttp(',
   'export async function prepareResponsesJsonBodyForSseBridgeForHttp(',
   'export function normalizeResponsesJsonBodyForHttp(',
+  'function readResponsesRequestModelForHttp(',
   'function ensureResponsesJsonToSseRequiredFieldsForHttp(',
   'export function buildResponsesSseErrorPayloadForHttp(',
   'export function buildResponsesStructuredSseErrorPayloadForHttp(',

@@ -107,25 +107,6 @@ export async function importResponsesHandlerCoreDist<TModule extends object>(
   return await importCoreDist<TModule>(specifier);
 }
 
-function readResponsesRequestModelForHttp(requestContext?: {
-  payload: AnyRecord;
-  context: AnyRecord;
-  sessionId?: string;
-  conversationId?: string;
-  matchedPort?: number;
-  routingPolicyGroup?: string;
-}): string | undefined {
-  const payloadModel = requestContext?.payload?.model;
-  if (typeof payloadModel === 'string' && payloadModel.trim()) {
-    return payloadModel.trim();
-  }
-  const contextModel = requestContext?.context?.model;
-  if (typeof contextModel === 'string' && contextModel.trim()) {
-    return contextModel.trim();
-  }
-  return undefined;
-}
-
 function readResponsesClientToolsRawForHttp(requestContext?: {
   payload: AnyRecord;
   context: AnyRecord;
@@ -175,6 +156,12 @@ export async function normalizeResponsesClientPayloadForHttp(args: {
     payload: args.payload,
     toolsRaw: readResponsesClientToolsRawForHttp(args.requestContext),
     metadata: args.metadata,
+    context: args.requestContext
+      ? {
+          originalRequest: args.requestContext.payload,
+          requestContext: args.requestContext.context,
+        }
+      : undefined,
   });
   return stripClientVisibleMetadataDeep(projectedPayload);
 }

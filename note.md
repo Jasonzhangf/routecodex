@@ -1,3 +1,11 @@
+# 2026-06-30: Responses direct JSON client model restore Rust owner slice
+- Red evidence：删除 `responses-response-bridge.js` 里的 `readResponsesRequestModelForHttp` / `ensureResponsesJsonToSseRequiredFieldsForHttp` 后，`responses-response-bridge.direct-json-protocol-guard.spec.ts` 先红，direct JSON client projection 少了 `model: gpt-5.4`。
+- Root cause：Rust `project_responses_client_payload_for_client` 只恢复 `{"response": ...}` event wrapper 的 client-visible model/reasoning，没有覆盖 direct response body `{ object: "response" }`，导致旧 JS 镜像保留了 TS 补字段 owner。
+- Fix：Rust owner 新增 direct response body client-visible field restore；NAPI `projectResponsesClientPayloadForClientJson` 增加 context JSON；TS bridge 只把 requestContext payload/context 透传给 native，并物理删除 TS/JS 本地补字段 helper。
+- Gate：`verify:responses-sse-business-module` 新增 `readResponsesRequestModelForHttp` / `ensureResponsesJsonToSseRequiredFieldsForHttp` 禁复活 marker。
+- Verification：Rust focused direct-body model test PASS；native build PASS；focused Jest direct-json-protocol-guard PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE 成功，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`、`malformedWire=0`。
+
 # 2026-06-30: Responses SSE text chunk native owner slice
 - `responses.ts` 的 `chunkText/getChunkSize/TEXT_CHUNK_BOUNDARY` 分块语义下沉到 Rust `buildResponsesSseTextChunksJson`，TS 只保留调用 native chunks 后封装 SSE envelope。
 - 红证据：当前门禁 marker 对上一提交 `responses.ts` 命中 `const TEXT_CHUNK_BOUNDARY` / `function getChunkSize(` / `function chunkText(` / `StringUtils.chunkString(`。

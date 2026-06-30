@@ -908,6 +908,37 @@ fn resolve_client_visible_reasoning_effort(metadata: &Value) -> Option<String> {
         })
 }
 
+fn apply_client_visible_response_fields(
+    response: &Map<String, Value>,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Option<Map<String, Value>> {
+    let mut next_response = response.clone();
+    let mut changed = false;
+    if let Some(model) = model {
+        if next_response.get("model").and_then(Value::as_str) != Some(model) {
+            next_response.insert("model".to_string(), Value::String(model.to_string()));
+            changed = true;
+        }
+    }
+    if let Some(reasoning_effort) = reasoning_effort {
+        let mut reasoning = next_response
+            .get("reasoning")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if reasoning.get("effort").and_then(Value::as_str) != Some(reasoning_effort) {
+            reasoning.insert(
+                "effort".to_string(),
+                Value::String(reasoning_effort.to_string()),
+            );
+            next_response.insert("reasoning".to_string(), Value::Object(reasoning));
+            changed = true;
+        }
+    }
+    changed.then_some(next_response)
+}
+
 fn restore_client_visible_response_payload(payload: &Value, metadata: &Value) -> Value {
     let model = resolve_client_visible_model_id(metadata);
     let reasoning_effort = resolve_client_visible_reasoning_effort(metadata);
@@ -918,33 +949,28 @@ fn restore_client_visible_response_payload(payload: &Value, metadata: &Value) ->
     let Some(record) = payload.as_object() else {
         return payload.clone();
     };
+
+    if record.get("object").and_then(Value::as_str) == Some("response") {
+        if let Some(next_response) = apply_client_visible_response_fields(
+            record,
+            model.as_deref(),
+            reasoning_effort.as_deref(),
+        ) {
+            return Value::Object(next_response);
+        }
+        return payload.clone();
+    }
+
     let Some(response) = record.get("response").and_then(Value::as_object) else {
         return payload.clone();
     };
-
-    let mut next_response = response.clone();
-    let mut changed = false;
-    if let Some(model) = model {
-        if next_response.get("model").and_then(Value::as_str) != Some(model.as_str()) {
-            next_response.insert("model".to_string(), Value::String(model));
-            changed = true;
-        }
-    }
-    if let Some(reasoning_effort) = reasoning_effort {
-        let mut reasoning = next_response
-            .get("reasoning")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        if reasoning.get("effort").and_then(Value::as_str) != Some(reasoning_effort.as_str()) {
-            reasoning.insert("effort".to_string(), Value::String(reasoning_effort));
-            next_response.insert("reasoning".to_string(), Value::Object(reasoning));
-            changed = true;
-        }
-    }
-    if !changed {
+    let Some(next_response) = apply_client_visible_response_fields(
+        response,
+        model.as_deref(),
+        reasoning_effort.as_deref(),
+    ) else {
         return payload.clone();
-    }
+    };
 
     let mut out = record.clone();
     out.insert("response".to_string(), Value::Object(next_response));

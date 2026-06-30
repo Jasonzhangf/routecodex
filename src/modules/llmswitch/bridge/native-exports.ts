@@ -199,7 +199,8 @@ type NativeRouterHotpathJsonBinding = {
   projectResponsesClientPayloadForClientJson?: (
     payloadJson: string,
     toolsRawJson?: string,
-    metadataJson?: string
+    metadataJson?: string,
+    contextJson?: string
   ) => string;
   projectResponsesSseFrameForClientJson?: (
     frameJson: string,
@@ -801,11 +802,13 @@ export function projectResponsesClientPayloadForClientNative(args: {
   payload: unknown;
   toolsRaw: unknown[];
   metadata?: Record<string, unknown>;
+  context?: Record<string, unknown>;
 }): Record<string, unknown> {
   const parsed = invokeRouterHotpathJsonCapability('projectResponsesClientPayloadForClientJson', [
     args.payload ?? null,
     Array.isArray(args.toolsRaw) ? args.toolsRaw : [],
     args.metadata ?? null,
+    args.context ?? null,
   ]);
   return assertNativeObject('projectResponsesClientPayloadForClientJson', parsed);
 }

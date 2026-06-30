@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-06-30 Responses direct JSON client model restore Rust owner slice
+
+- Red evidence: deleting the TS/JS direct-body model helper path (`readResponsesRequestModelForHttp` / `ensureResponsesJsonToSseRequiredFieldsForHttp`) made `tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts` fail because direct JSON client projection no longer emitted `model: gpt-5.4`.
+- Root cause: Rust `project_responses_client_payload_for_client` restored client-visible model/reasoning only for event-wrapper payloads shaped as `{ response: ... }`; direct response bodies shaped as `{ object: "response" }` still depended on the stale JS bridge helper.
+- Fix: Rust owner now restores client-visible fields on direct response bodies as well as event wrappers; `projectResponsesClientPayloadForClientJson` accepts a context JSON argument, and the TS bridge only passes requestContext payload/context to native before stripping client-visible metadata. The stale TS/JS helper path was physically deleted.
+- Positive / reverse tests: Rust covers direct response body model restore from `originalRequest.model`; focused Jest proves direct JSON projection still removes replay-unsafe reasoning/status/internal metadata while preserving client-visible model. `verify:responses-sse-business-module` now forbids the deleted helper names from returning.
+- Verification: Rust focused direct-body model test PASS; native build PASS; focused Jest `responses-response-bridge.direct-json-protocol-guard` PASS 2/2; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real 4444 replay: `req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE succeeded with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, and `malformedWire=0`.
+
 ### 2026-06-30 Responses SSE text chunk native owner slice
 
 - Red evidence: current gate markers checked previous HEAD and caught `const TEXT_CHUNK_BOUNDARY`, `function getChunkSize(`, `function chunkText(`, and `StringUtils.chunkString(`, proving Responses SSE text chunking still lived in TS.

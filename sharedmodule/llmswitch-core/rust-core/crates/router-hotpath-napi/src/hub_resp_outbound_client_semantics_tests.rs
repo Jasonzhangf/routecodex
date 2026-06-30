@@ -1099,6 +1099,27 @@ fn project_responses_client_payload_for_client_restores_client_visible_response_
 }
 
 #[test]
+fn project_responses_client_payload_for_client_restores_direct_response_body_model() {
+    let payload = json!({
+        "id": "resp_restore_direct",
+        "object": "response",
+        "status": "completed",
+        "output": []
+    });
+    let output = project_responses_client_payload_for_client(
+        &payload,
+        &json!([]),
+        &json!({
+            "originalRequest": {
+                "model": "client-visible-direct-model"
+            }
+        }),
+    );
+
+    assert_eq!(output["model"], "client-visible-direct-model");
+}
+
+#[test]
 fn project_responses_client_payload_for_client_synthesizes_required_action_for_pending_function_calls(
 ) {
     let payload = json!({

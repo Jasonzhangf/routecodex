@@ -275,13 +275,25 @@ pub fn project_responses_client_payload_for_client_json(
     responses_payload_json: String,
     tools_raw_json: String,
     metadata_json: String,
+    context_json: String,
 ) -> NapiResult<String> {
     let responses_payload: Value = serde_json::from_str(&responses_payload_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let tools_raw: Value = serde_json::from_str(&tools_raw_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let metadata: Value = serde_json::from_str(&metadata_json)
+    let mut metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let context: Value =
+        serde_json::from_str(&context_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    if let (Some(metadata_record), Some(context_record)) =
+        (metadata.as_object_mut(), context.as_object())
+    {
+        for (key, value) in context_record {
+            metadata_record
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
+        }
+    }
     let output =
         project_responses_client_payload_for_client(&responses_payload, &tools_raw, &metadata);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
