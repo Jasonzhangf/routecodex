@@ -131,13 +131,12 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
             index += 1;
           }
         } else if (block.type === 'redacted_thinking') {
-          const data = typeof block.data === 'string' ? block.data : '';
-          if (!data.trim().length) {
-            continue;
+          if (typeof block.data !== 'string' || !block.data.trim().length) {
+            throw new Error('Invalid Anthropic redacted_thinking block: missing data');
           }
           yield createEvent('content_block_start', {
             index,
-            content_block: { type: 'redacted_thinking', data }
+            content_block: { type: 'redacted_thinking', data: block.data }
           });
           yield createEvent('content_block_stop', { index });
           index += 1;

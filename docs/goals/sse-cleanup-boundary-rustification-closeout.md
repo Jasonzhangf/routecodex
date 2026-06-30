@@ -117,6 +117,15 @@ Focused tests to use as slice gates:
 - Replay evidence: source replay `eventCount=6`, `hasTimestamp=false`, `hasTextDelta=true`, `hasMessageStop=true`, `missingTextFailed=true`.
 - Real sample gap: current Anthropic sample directories still contain 429 provider-error snapshots only, not a successful provider-response SSE/JSON replay sample.
 
+### 2026-07-01 Anthropic SSE redacted_thinking silent skip removal slice
+
+- Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `redacted_thinking` empty-string fallback and `continue` skip. Focused Jest also failed because missing redacted data was silently skipped.
+- Fix: `anthropic-sequencer.ts` now requires `redacted_thinking.data` to be a non-empty string and fails fast with `Invalid Anthropic redacted_thinking block: missing data`.
+- Positive / reverse tests: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts` now asserts valid redacted block projection plus missing redacted data fail-fast; existing reverse tests still cover invalid content block, missing text, id, role, tool id, and stop_reason.
+- Verification: focused Jest `anthropic-sse-required-fields-no-fallback` PASS 8/8; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS.
+- Replay evidence: source replay `eventCount=5`, `hasTimestamp=false`, `hasRedactedBlock=true`, `hasMessageStop=true`, `missingRedactedFailed=true`.
+- Real sample gap: current Anthropic sample directories still contain 429 provider-error snapshots only, not a successful provider-response SSE/JSON replay sample.
+
 ### 2026-07-01 Gemini SSE timestamp synthesis removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `timestamp: Date.now()` for `gemini-sequencer.ts` and failed before the fix. Focused Jest also failed because valid Gemini events carried an own `timestamp` property.

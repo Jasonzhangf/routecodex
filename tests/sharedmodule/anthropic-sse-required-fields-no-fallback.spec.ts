@@ -100,6 +100,20 @@ describe('anthropic SSE required fields no-fallback boundary', () => {
     ))).rejects.toThrow('Invalid Anthropic text block: missing text');
   });
 
+  it('throws when redacted_thinking data is missing instead of silently skipping it', async () => {
+    const sequencer = createAnthropicSequencer();
+
+    await expect(collectEvents(sequencer.sequenceResponse(
+      baseResponse({
+        content: [{
+          type: 'redacted_thinking',
+          data: undefined as unknown as string
+        }]
+      }),
+      'req_anthropic_missing_redacted_data'
+    ))).rejects.toThrow('Invalid Anthropic redacted_thinking block: missing data');
+  });
+
   it('throws when stop_reason is missing instead of defaulting to end_turn', async () => {
     const sequencer = createAnthropicSequencer();
 

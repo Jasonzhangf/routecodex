@@ -1,3 +1,8 @@
+# 2026-07-01: Anthropic SSE redacted_thinking silent skip removed
+- Red evidence：`verify:sse-architecture-boundary` 新增 Anthropic redacted data 空串兜底和 `continue` marker 后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明缺失 redacted data 会被静默跳过。
+- Fix：`anthropic-sequencer.ts` 对 `redacted_thinking` 缺少非空 string `data` 直接 fail-fast 抛 `Invalid Anthropic redacted_thinking block: missing data`；合法 redacted block 原样输出。
+- Verification：focused Jest `anthropic-sse-required-fields-no-fallback` 8/8 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；source replay `eventCount=5 hasTimestamp=false hasRedactedBlock=true hasMessageStop=true missingRedactedFailed=true`。真实 Anthropic 成功样本缺口仍在：只找到 429 provider-error 快照。
+
 # 2026-07-01: Anthropic SSE text block empty fallback removed
 - Red evidence：`verify:sse-architecture-boundary` 新增 Anthropic `block.text ?? ''` marker 后先红；focused `anthropic-sse-required-fields-no-fallback` 也先红，证明缺失 text 会被当成空字符串继续输出空 content block。
 - Fix：`anthropic-sequencer.ts` 对 text block 缺少 string `text` 直接 fail-fast 抛 `Invalid Anthropic text block: missing text`；合法 text 仍按 chunk 输出，不再用空串兜底。
