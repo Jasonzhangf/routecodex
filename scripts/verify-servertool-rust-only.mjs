@@ -5153,6 +5153,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
     "import type { JsonObject } from '../conversion/hub/types/json.js';",
+    'const base =',
+    "typeof options.chatResponse === 'object'",
   ]) {
     if (runServerSideToolEngineShell.includes(marker)) {
       fail(

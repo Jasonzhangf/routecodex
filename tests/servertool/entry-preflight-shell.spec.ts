@@ -58,8 +58,7 @@ describe('entry-preflight-shell', () => {
       options: {
         requestId: 'req-1',
         chatResponse: 'raw-chat'
-      } as any,
-      base: null
+      } as any
     });
 
     expect(result).toEqual({
@@ -77,9 +76,9 @@ describe('entry-preflight-shell', () => {
       runServertoolEntryPreflight({
         options: {
           requestId: 'req-2',
-          adapterContext: {}
-        } as any,
-        base: {}
+          adapterContext: {},
+          chatResponse: {}
+        } as any
       })
     ).toThrow('[servertool] client disconnected: req-2');
   });

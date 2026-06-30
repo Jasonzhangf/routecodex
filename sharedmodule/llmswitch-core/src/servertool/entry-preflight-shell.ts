@@ -8,12 +8,15 @@ import {
 
 export function runServertoolEntryPreflight(args: {
   options: ServerSideToolEngineOptions;
-  base: JsonObject | null;
 }):
   | { action: 'continue'; baseObject: JsonObject }
   | { action: 'return_result'; result: ServerSideToolEngineResult } {
+  const base =
+    args.options.chatResponse && typeof args.options.chatResponse === 'object' && !Array.isArray(args.options.chatResponse)
+      ? args.options.chatResponse as JsonObject
+      : null;
   const entryPreflightPlan = planServertoolEntryPreflightWithNative({
-    hasBaseObject: Boolean(args.base),
+    hasBaseObject: Boolean(base),
     adapterClientDisconnected: isAdapterClientDisconnected(args.options.adapterContext)
   });
   if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {
@@ -29,6 +32,6 @@ export function runServertoolEntryPreflight(args: {
   }
   return {
     action: 'continue',
-    baseObject: args.base as JsonObject
+    baseObject: base as JsonObject
   };
 }

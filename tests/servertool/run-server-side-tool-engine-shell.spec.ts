@@ -63,6 +63,8 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).toContain('resolveServertoolEntryContext');
     expect(source).toContain('runServertoolResponseStagePrePass');
     expect(source).toContain('runServertoolExecutionStage');
+    expect(source).not.toContain('const base =');
+    expect(source).not.toContain("typeof options.chatResponse === 'object'");
   });
 
   test('returns preflight early result when preflight short-circuits', async () => {
