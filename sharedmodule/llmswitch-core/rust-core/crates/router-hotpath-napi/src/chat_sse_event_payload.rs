@@ -85,6 +85,64 @@ pub fn build_chat_sse_error_payload_json(input_json: String) -> Result<String, S
     .map_err(|error| format!("Failed to serialize Chat SSE error payload JSON: {}", error))
 }
 
+fn read_required_string<'a>(
+    row: &'a serde_json::Map<String, Value>,
+    field: &str,
+    label: &str,
+) -> Result<&'a str, String> {
+    row.get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("Chat SSE {} missing {}", label, field))
+}
+
+fn read_required_i64(
+    row: &serde_json::Map<String, Value>,
+    field: &str,
+    label: &str,
+) -> Result<i64, String> {
+    row.get(field)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("Chat SSE {} missing {}", label, field))
+}
+
+pub fn build_chat_sse_role_delta_payload_json(input_json: String) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| format!("Failed to parse Chat SSE role delta payload JSON: {}", error))?;
+    let Some(input) = input.as_object() else {
+        return Err("Chat SSE role delta payload expected object".to_string());
+    };
+    let response_id = read_required_string(input, "response_id", "role delta payload")?;
+    let model = read_required_string(input, "model", "role delta payload")?;
+    let role = read_required_string(input, "role", "role delta payload")?;
+    match role {
+        "user" | "system" | "assistant" | "tool" => {}
+        _ => return Err(format!("Chat SSE role delta payload invalid role: {}", role)),
+    }
+    let created = read_required_i64(input, "created", "role delta payload")?;
+    if created <= 0 {
+        return Err("Chat SSE role delta payload created must be positive".to_string());
+    }
+    let choice_index = read_required_i64(input, "choice_index", "role delta payload")?;
+    if choice_index < 0 {
+        return Err("Chat SSE role delta payload choice_index must be non-negative".to_string());
+    }
+
+    serde_json::to_string(&serde_json::json!({
+        "id": response_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": choice_index,
+            "delta": { "role": role },
+            "logprobs": null,
+            "finish_reason": null
+        }]
+    }))
+    .map_err(|error| format!("Failed to serialize Chat SSE role delta payload JSON: {}", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +231,46 @@ mod tests {
         let err = build_chat_sse_error_payload_json(json!({}).to_string()).unwrap_err();
 
         assert!(err.contains("missing message"));
+    }
+
+    #[test]
+    fn builds_chat_sse_role_delta_payload() {
+        let output = build_chat_sse_role_delta_payload_json(
+            json!({
+                "response_id": "chatcmpl_role_delta",
+                "created": 1782778486,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "role": "assistant"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["id"], json!("chatcmpl_role_delta"));
+        assert_eq!(parsed["object"], json!("chat.completion.chunk"));
+        assert_eq!(parsed["created"], json!(1782778486));
+        assert_eq!(parsed["model"], json!("gpt-test"));
+        assert_eq!(parsed["choices"][0]["index"], json!(0));
+        assert_eq!(parsed["choices"][0]["delta"]["role"], json!("assistant"));
+        assert_eq!(parsed["choices"][0]["finish_reason"], Value::Null);
+    }
+
+    #[test]
+    fn rejects_chat_sse_role_delta_payload_invalid_role() {
+        let err = build_chat_sse_role_delta_payload_json(
+            json!({
+                "response_id": "chatcmpl_role_delta",
+                "created": 1782778486,
+                "model": "gpt-test",
+                "choice_index": 0,
+                "role": "invalid"
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("invalid role"));
     }
 }

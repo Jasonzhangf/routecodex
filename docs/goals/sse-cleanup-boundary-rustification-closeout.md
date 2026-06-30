@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Chat SSE role delta payload Rust owner slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker for local Chat role delta payload synthesis (`delta: { role: role as ... }`). The gate failed on the existing TS owner before the fix.
+- Fix: added Rust/NAPI owner `buildChatSseRoleDeltaPayloadJson` and TS wrapper `buildChatSseRoleDeltaPayloadWithNative`. `chat.ts::buildRoleDelta()` now only obtains the base response context, calls native for the chat completion chunk payload, and wraps it in the native-owned SSE event envelope.
+- Positive / reverse tests: Rust covers role delta payload construction and invalid role fail-fast; focused Jest keeps Chat SSE usage/no-synthetic behavior intact; native export-list covers the new NAPI symbol.
+- Verification: Rust focused `chat_sse_role_delta_payload` PASS 2/2; native hotpath build PASS; focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip + chat-request-sse-no-synthetic` PASS 18/18; native export-list subtest PASS; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
+- Real chat replay: `openai-chat/ports/10000/req_1782778465399_hrxbpl3tz/provider-response_1.json` SSE->JSON->SSE succeeded with `done=true`, `error=false`, `malformedWire=0`, `eventCount=5`, `chatChunkCount=4`, `doneCount=1`, `roleChunks=1`, `finishReason=tool_calls`.
+
 ### 2026-07-01 Chat SSE error payload Rust owner slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers for Chat SSE local error payload synthesis (`type: 'internal_error'` and `code: 'generation_error'`). The gate failed on the existing TS owner before the fix.
