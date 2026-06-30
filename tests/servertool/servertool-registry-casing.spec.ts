@@ -14,18 +14,6 @@ jest.unstable_mockModule(
       action: 'return_builtin',
       canonicalName: 'reasoningStop'
     })),
-    planServertoolBuiltinHandlerEntry: jest.fn(() => ({
-      action: 'return_entry',
-      entry: {
-        name: 'reasoningStop',
-        trigger: 'tool_call',
-        registration: {
-          name: 'reasoningStop',
-          trigger: 'tool_call',
-          executionMode: 'guarded'
-        }
-      }
-    })),
     resolveServertoolBuiltinHandlerEntry: jest.fn(() => ({
       name: 'reasoningStop',
       trigger: 'tool_call',

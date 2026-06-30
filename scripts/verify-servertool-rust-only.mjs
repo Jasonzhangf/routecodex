@@ -3034,6 +3034,7 @@ function checkServertoolSkeletonConfigRustOwner() {
     'export function getDefaultServertoolSkeletonDocument(',
     'export function getServertoolToolSpec(',
     'export function listServertoolToolSpecs(',
+    'export function planServertoolBuiltinHandlerEntry(',
     'getDerivedConfig().toolSpecList',
   ]) {
     if (skeletonConfigShell.includes(keyword)) {

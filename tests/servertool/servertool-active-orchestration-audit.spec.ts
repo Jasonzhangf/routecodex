@@ -93,6 +93,7 @@ const TARGETS = [
       'export function getDefaultServertoolSkeletonDocument(',
       'export function getServertoolToolSpec(',
       'export function listServertoolToolSpecs(',
+      'export function planServertoolBuiltinHandlerEntry(',
       'getDerivedConfig().toolSpecList',
     ],
     required: [

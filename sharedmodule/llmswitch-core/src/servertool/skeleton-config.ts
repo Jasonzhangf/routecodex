@@ -13,7 +13,6 @@ import type {
 import {
   normalizeServertoolRegistrationSpecWithNative,
   planServertoolBuiltinAutoHandlerEntriesWithNative,
-  planServertoolBuiltinHandlerEntryWithNative,
   planServertoolBuiltinHandlerNamesWithNative,
   planServertoolBuiltinHandlerRecordEntriesWithNative,
   planServertoolRegistryLookupFromSkeletonWithNative,
@@ -83,10 +82,6 @@ type ServertoolSkeletonDerivedConfig = {
 
 function getDerivedConfig(): ServertoolSkeletonDerivedConfig {
   return planServertoolSkeletonDerivedConfigWithNative() as ServertoolSkeletonDerivedConfig;
-}
-
-export function planServertoolBuiltinHandlerEntry(name: string): Record<string, unknown> {
-  return planServertoolBuiltinHandlerEntryWithNative({ name }) as unknown as Record<string, unknown>;
 }
 
 export function resolveServertoolBuiltinHandlerEntry(name: string): Record<string, unknown> | null {
