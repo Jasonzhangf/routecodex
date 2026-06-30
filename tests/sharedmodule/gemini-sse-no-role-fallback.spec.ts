@@ -125,4 +125,22 @@ describe('gemini SSE no-fallback boundary', () => {
 
     await expect(collectEvents(stream)).rejects.toThrow('Invalid Gemini candidate part at index 0');
   });
+
+  it('throws when a candidate content part is scalar instead of emitting it as a part', async () => {
+    const response: GeminiResponse = {
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: ['hello' as never]
+          }
+        }
+      ]
+    };
+
+    const sequencer = createGeminiSequencer();
+    const stream = sequencer.sequenceResponse(response);
+
+    await expect(collectEvents(stream)).rejects.toThrow('Invalid Gemini candidate part at index 0');
+  });
 });

@@ -108,6 +108,15 @@ Focused tests to use as slice gates:
 - Replay evidence: source replay `eventCount=2`, `dataEvents=1`, `doneEvents=1`, `nullCandidateFailed=true`, `nullCandidateMessage="Invalid Gemini candidate at index 0"`.
 - Real sample gap: no Gemini provider-response samples were found under the current sample stores, so this slice uses source replay as the available substitute.
 
+### 2026-07-01 Gemini SSE scalar candidate part fail-fast slice
+
+- Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `if (!part || typeof part !== 'object') { return [part]; }` and failed before the fix. Focused Jest also failed because a scalar candidate part was emitted as `gemini.data` instead of failing fast.
+- Fix: `normalizeReasoningPart()` now rejects non-object candidate parts with `Invalid Gemini candidate part at index <n>`; it no longer returns the raw scalar part.
+- Positive / reverse tests: `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` now covers scalar candidate part fail-fast in addition to valid data/done output, missing candidates, null candidate, missing role, missing parts, and null part fail-fast.
+- Verification: focused Jest `gemini-sse-no-role-fallback` PASS 7/7; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS.
+- Replay evidence: source replay `eventCount=2`, `dataEvents=1`, `doneEvents=1`, `scalarPartFailed=true`, `scalarPartMessage="Invalid Gemini candidate part at index 0"`.
+- Real sample gap: no Gemini provider-response samples were found under the current sample stores, so this slice uses source replay as the available substitute.
+
 ### 2026-07-01 Gemini SSE candidates empty-success fallback removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added the forbidden marker `Array.isArray(response.candidates) ? response.candidates : []` and failed before the fix. Focused Jest also failed because missing `response.candidates` resolved successfully into a `gemini.done` event with `candidates: []`.

@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE scalar candidate part must fail fast
+- `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts` must not return scalar `part` values from `normalizeReasoningPart()`; non-object candidate parts are invalid provider shape and fail fast with `Invalid Gemini candidate part at index <n>`.
+- `verify:sse-architecture-boundary` and `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` now lock the scalar-part boundary.
+- Verification for this slice included focused Gemini Jest, SSE architecture gate, sharedmodule/root TypeScript checks, `verify:responses-sse-business-module`, `build:base`, and source replay with `eventCount=2`, `dataEvents=1`, `doneEvents=1`, and `scalarPartFailed=true`. Real Gemini provider-response replay remains unavailable.
+
 # 2026-07-01: Gemini SSE null candidate must fail fast
 - `sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts` must not coerce `candidates[candidateIndex]` through `|| {}`; null/undefined candidate is invalid provider shape and fails fast with `Invalid Gemini candidate at index <n>`.
 - `verify:sse-architecture-boundary` and `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` now lock the null-candidate boundary.

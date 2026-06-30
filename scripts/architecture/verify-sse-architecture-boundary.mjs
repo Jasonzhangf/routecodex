@@ -315,6 +315,7 @@ for (const forbidden of [
   'timestamp: Date.now()',
   'Array.isArray(response.candidates) ? response.candidates : []',
   'candidates[candidateIndex] || {}',
+  "if (!part || typeof part !== 'object') {\n    return [part];\n  }",
   'return [];',
 ]) {
   if (geminiSequencer.includes(forbidden)) {

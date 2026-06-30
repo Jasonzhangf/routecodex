@@ -1,3 +1,8 @@
+# 2026-07-01: Gemini SSE scalar candidate part fail-fast removed silent emission
+- Red evidence：`verify:sse-architecture-boundary` 新增 `if (!part || typeof part !== 'object') { return [part]; }` 禁止 marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明 scalar candidate part 会被直接作为 `gemini.data` 发出。
+- Fix：`normalizeReasoningPart()` 现在对非对象 `part` 直接 fail-fast 抛 `Invalid Gemini candidate part at index <n>`，不再返回原值并继续发 SSE。
+- Verification：focused Jest `gemini-sse-no-role-fallback` 7/7 PASS；`verify:sse-architecture-boundary` PASS；sharedmodule/root `tsc --noEmit` PASS；`verify:responses-sse-business-module` PASS；`build:base` PASS；source replay `eventCount=2 dataEvents=1 doneEvents=1 scalarPartFailed=true`。真实 Gemini provider-response 样本缺口仍在。
+
 # 2026-07-01: Gemini SSE null candidate fail-fast removed empty-object coercion
 - Red evidence：`verify:sse-architecture-boundary` 新增 `candidates[candidateIndex] || {}` 禁止 marker 后先红；focused `gemini-sse-no-role-fallback` 也先红，证明 `null` candidate 会被静默改写成空对象再走 role 检查。
 - Fix：`gemini-sequencer.ts` 新增 `getCandidateAtIndex()`；`null` / `undefined` candidate 直接 fail-fast 抛 `Invalid Gemini candidate at index <n>`，不再先转成 `{}`。

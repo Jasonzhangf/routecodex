@@ -79,7 +79,7 @@ export function createGeminiSequencer(config?: Partial<GeminiSequencerConfig>) {
         const role = getCandidateRole(candidate);
         const parts = getCandidateParts(candidate);
         for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-          const normalizedParts = normalizeReasoningPart(parts[partIndex], finalConfig);
+          const normalizedParts = normalizeReasoningPart(parts[partIndex], partIndex, finalConfig);
           for (const normalizedPart of normalizedParts) {
             yield createEvent('gemini.data', {
               kind: 'part',
@@ -111,10 +111,11 @@ export function createGeminiSequencer(config?: Partial<GeminiSequencerConfig>) {
 
 function normalizeReasoningPart(
   part: GeminiContentPart,
+  partIndex: number,
   config: GeminiSequencerConfig
 ): GeminiContentPart[] {
   if (!part || typeof part !== 'object') {
-    return [part];
+    throw new Error(`Invalid Gemini candidate part at index ${partIndex}`);
   }
   const reasoning = typeof (part as any).reasoning === 'string' ? (part as any).reasoning : undefined;
   if (!reasoning) {
