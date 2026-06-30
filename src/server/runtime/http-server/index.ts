@@ -173,6 +173,15 @@ function readConversationIdForUsageLog(metadata: Record<string, unknown>): strin
   return readRuntimeRequestTruthIdentifiers(metadata).conversationId;
 }
 
+function readEntryPortFromRequestTruth(metadata: Record<string, unknown>): number | undefined {
+  const portScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
+  if (typeof portScope !== 'string') {
+    return undefined;
+  }
+  const parsed = Number.parseInt(portScope, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 import {
   initializeHttpServer,
   restartRuntimeFromDisk,
@@ -232,10 +241,10 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
   };
 }
 
-function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'routeHint' | 'providerProtocol' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
+function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'routeHint' | 'routecodexRoutingPolicyGroup' | 'providerProtocol' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
   metadata: Record<string, unknown>,
   key: K,
-  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' | 'routeHint' | 'providerProtocol' ? string : boolean,
+  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' | 'routeHint' | 'routecodexRoutingPolicyGroup' | 'providerProtocol' ? string : boolean,
   reason: string
 ): void {
   MetadataCenter.attach(metadata).writeRuntimeControl(
@@ -1253,6 +1262,14 @@ export class RouteCodexHttpServer {
         'request header route hint'
       );
     }
+    if (typeof portConfig?.routingPolicyGroup === 'string' && portConfig.routingPolicyGroup.trim()) {
+      writeMetadataCenterRuntimeControl(
+        metadata,
+        'routecodexRoutingPolicyGroup',
+        portConfig.routingPolicyGroup.trim(),
+        'port routing policy group'
+      );
+    }
     writeMetadataCenterRuntimeControl(
       metadata,
       'stopMessageEnabled',
@@ -1446,6 +1463,14 @@ export class RouteCodexHttpServer {
           stage: 'ServerReqInbound01ClientRaw'
         },
         'router-direct request entry port scope'
+      );
+    }
+    if (typeof portConfig.routingPolicyGroup === 'string' && portConfig.routingPolicyGroup.trim()) {
+      writeMetadataCenterRuntimeControl(
+        metadataForHub,
+        'routecodexRoutingPolicyGroup',
+        portConfig.routingPolicyGroup.trim(),
+        'router-direct routing policy group'
       );
     }
     writeMetadataCenterRuntimeControl(
@@ -1778,6 +1803,7 @@ export class RouteCodexHttpServer {
     let directOutcome: RouterDirectOutcome;
     let directRetryRequested = false;
     let directProviderRequestCaptured = false;
+    const routerDirectEntryPort = readEntryPortFromRequestTruth(metadataForHub);
     try {
       directOutcome = await executeRouterDirectPipeline({
       portConfig,
@@ -1808,6 +1834,7 @@ export class RouteCodexHttpServer {
           requestId: input.requestId,
           payload,
           entryEndpoint: input.entryEndpoint,
+          entryPort: routerDirectEntryPort,
           providerKey: ctx.providerKey,
           providerId: directProviderHandle.providerId,
           metadata: metadataForHub,
@@ -1833,6 +1860,7 @@ export class RouteCodexHttpServer {
           requestId: input.requestId,
           response,
           entryEndpoint: input.entryEndpoint,
+          entryPort: routerDirectEntryPort,
           providerKey: ctx.providerKey,
           providerId: directProviderHandle.providerId,
           metadata: metadataForHub,
@@ -1879,6 +1907,7 @@ export class RouteCodexHttpServer {
           payload: ctx.payload,
           error,
           entryEndpoint: input.entryEndpoint,
+          entryPort: routerDirectEntryPort,
           providerKey: ctx.providerKey,
           providerId: directProviderHandle.providerId,
           metadata: metadataForHub,
@@ -1975,6 +2004,7 @@ export class RouteCodexHttpServer {
               requestId: snapshotArgs.requestId,
               response: snapshotArgs.data,
               entryEndpoint: input.entryEndpoint,
+              entryPort: routerDirectEntryPort,
               providerKey: ctx.providerKey,
               providerId: directProviderHandle.providerId,
               metadata: metadataForHub,

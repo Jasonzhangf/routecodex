@@ -1263,7 +1263,7 @@ describe('direct passthrough route-level', () => {
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
 
-  it('router-direct hands recoverable 429 to Hub relay when VR selects a cross-protocol next target', async () => {
+  it('router-direct excludes failed provider first; cross-protocol VR target then uses relay boundary', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -1392,6 +1392,8 @@ describe('direct passthrough route-level', () => {
       providerKey: secondProviderKey,
       outboundProfile: 'anthropic-messages',
     });
+    // 429 only mutates the VR exclusion set. Relay is selected later because
+    // the new VR target protocol differs from the entry protocol.
     expect(firstDirectSend).toHaveBeenCalledTimes(1);
     expect(secondDirectSend).not.toHaveBeenCalled();
     expect(route).toHaveBeenCalledTimes(2);
