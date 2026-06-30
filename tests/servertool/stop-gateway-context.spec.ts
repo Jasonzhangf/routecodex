@@ -4,8 +4,7 @@ import { describe, expect, test } from '@jest/globals';
 import {
   attachStopGatewayContext,
   inspectStopGatewaySignal,
-  readStopGatewayContext,
-  resolveStopGatewayContext
+  readStopGatewayContext
 } from '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js';
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
@@ -35,6 +34,16 @@ describe('servertool stop-gateway context', () => {
     expect(source).not.toContain('export function readRequestTruthSessionIdFromBoundMetadataCenter(');
     expect(source).toContain('function readRequestTruthSessionIdFromBoundMetadataCenter(');
     expect(source).toContain('export function readRequestTruthSessionIdFromAnyBoundMetadataCenter(');
+  });
+
+  test('metadata carrier does not export stop eligibility facade helpers', () => {
+    const source = fs.readFileSync(
+      'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts',
+      'utf8'
+    );
+
+    expect(source).not.toContain('export function resolveStopGatewayContext(');
+    expect(source).not.toContain('export function isStopEligibleForServerTool(');
   });
 
   test('uses native inspect and preserves the last finish_reason choice index', () => {
@@ -110,29 +119,6 @@ describe('servertool stop-gateway context', () => {
     });
 
     expect(context).toBeUndefined();
-  });
-
-  test('metadata-center context wins over payload inspect', () => {
-    const { target } = bindRuntimeControlTarget({
-      stopGatewayContext: {
-        observed: true,
-        eligible: false,
-        source: 'chat',
-        reason: 'metadata_override'
-      }
-    });
-    const context = resolveStopGatewayContext(
-      {
-        choices: [{
-          finish_reason: 'stop',
-          message: { role: 'assistant', content: 'eligible' }
-        }]
-      },
-      target
-    );
-
-    expect(context.eligible).toBe(false);
-    expect(context.reason).toBe('metadata_override');
   });
 
   test('attach writes explicit metadata-center runtime control context', () => {

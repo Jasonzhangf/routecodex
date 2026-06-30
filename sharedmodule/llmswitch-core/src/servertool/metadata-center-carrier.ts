@@ -221,18 +221,6 @@ export function readStopGatewayContext(adapterContext: unknown): StopGatewayCont
   return normalizeStopGatewayContextWithNative(raw);
 }
 
-export function resolveStopGatewayContext(base: unknown, adapterContext?: unknown): StopGatewayContext {
-  const fromMetadata = readStopGatewayContext(adapterContext);
-  if (fromMetadata) {
-    return fromMetadata;
-  }
-  return inspectStopGatewaySignal(base);
-}
-
-export function isStopEligibleForServerTool(base: unknown, adapterContext?: unknown): boolean {
-  return resolveStopGatewayContext(base, adapterContext).eligible;
-}
-
 export function attachStopMessageCompareContext(
   adapterContext: unknown,
   context: StopMessageCompareContext

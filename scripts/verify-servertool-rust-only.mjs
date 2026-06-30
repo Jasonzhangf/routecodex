@@ -2214,6 +2214,8 @@ function checkStopGatewayContextRustOwner() {
     'catch { return undefined; }',
     'ignore metadata write failures',
     'function writeBoundRuntimeControl(',
+    'export function resolveStopGatewayContext(',
+    'export function isStopEligibleForServerTool(',
   ]) {
     if (metadataCenterCarrier.includes(keyword)) {
       fail(
