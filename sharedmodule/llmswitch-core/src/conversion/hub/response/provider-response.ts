@@ -192,9 +192,10 @@ async function executeProviderResponseNativeServertoolEffects(args: {
   providerProtocol: ProviderProtocol;
   stageRecorder?: StageRecorder;
 }): Promise<{ payload: JsonObject; stage: 'HubRespChatProcess03Governed' | 'unchanged' }> {
-  const servertoolRuntimeActions = Array.isArray(args.runtimeEffects.servertoolRuntimeActions)
-    ? args.runtimeEffects.servertoolRuntimeActions
-    : [];
+  if (!Array.isArray(args.runtimeEffects.servertoolRuntimeActions)) {
+    throw new Error('Rust HubPipeline response path returned malformed servertool runtime actions');
+  }
+  const servertoolRuntimeActions = args.runtimeEffects.servertoolRuntimeActions;
   const actionPlan = planProviderResponseServertoolRuntimeActionsWithNative({
     servertoolRuntimeActions
   });

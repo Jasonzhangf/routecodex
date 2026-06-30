@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Provider response servertool runtime actions fallback removal slice
+
+- Red evidence: mocked provider-response test covered Rust-normalized runtime effects returning malformed `servertoolRuntimeActions`; the old TS shell converted it to an empty action list and continued as successful no-op.
+- Fix: `provider-response.ts::executeProviderResponseNativeServertoolEffects()` now requires `runtimeEffects.servertoolRuntimeActions` to be an array and fails fast with `Rust HubPipeline response path returned malformed servertool runtime actions`; `verify:sse-architecture-boundary` forbids the old array-or-empty fallback.
+- Positive / reverse tests: valid mocked provider-response path still uses MetadataCenter `runtimeControl.providerProtocol` and records response scope; malformed servertool actions fail before `planProviderResponseServertoolRuntimeActionsWithNative()`.
+- Verification: focused Jest `provider-response.metadata-center-provider-protocol` PASS 3/3; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:hub-response-provider-sse-materialization` PASS; `npm run verify:responses-sse-business-module` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `npm run build:base` PASS.
+- Replay evidence: this is a native-plan contract invariant; focused mocked native-plan coverage and architecture gate lock the reverse path. Full goal completion still requires live/real SSE replay for the broader handler/bridge/provider-response closeout.
+
 ### 2026-07-01 Provider response native effect plan fallback removal slice
 
 - Red evidence: mocked provider-response test covered Rust returning malformed `nativeResponsePlan.effectPlan.effects`; the old TS shell synthesized an empty runtime effect plan instead of exposing the contract error.

@@ -238,4 +238,39 @@ describe('provider response metadata center providerProtocol contract', () => {
     })).rejects.toThrow('Rust HubPipeline response path returned malformed effect plan');
     expect(normalizeProviderResponseEffectPlanWithNativeMock).not.toHaveBeenCalled();
   });
+
+  it('fails fast when Rust returns malformed provider response servertool runtime actions', async () => {
+    normalizeProviderResponseEffectPlanWithNativeMock.mockReturnValueOnce({
+      runtimeStateWrite: {
+        keepForSubmitToolOutputs: false
+      },
+      servertoolRuntimeActions: null
+    });
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_malformed_servertool_actions',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+    const center = MetadataCenter.attach(context);
+    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRuntimeControl('providerProtocol', 'openai-chat', TEST_METADATA_WRITER, 'test-provider-protocol');
+
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_provider_response_malformed_servertool_actions',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false
+    })).rejects.toThrow('Rust HubPipeline response path returned malformed servertool runtime actions');
+  });
 });
