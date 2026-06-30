@@ -2035,6 +2035,10 @@ export class RouteCodexHttpServer {
     if (!args.requestId) return;
     void args.entryEndpoint;
     const keepForSubmitToolOutputs = isToolCallContinuationResponseNative(args.responseBody);
+    if (!keepForSubmitToolOutputs) {
+      await clearResponsesConversationByRequestId(args.requestId);
+      return;
+    }
     await recordResponsesResponseForRequest({
       requestId: args.requestId,
       response: args.responseBody as Record<string, unknown>,

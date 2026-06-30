@@ -72,6 +72,8 @@ const RESPONSES_REQUEST_IDS = [
   'req-provider-direct-retention-required-action-only',
   'req-provider-direct-retention-http-502',
   'req-provider-direct-retention-sse-wrapper',
+  'req-router-direct-completed-without-capture',
+  'req-provider-direct-completed-without-capture',
 ];
 
 beforeEach(() => {
@@ -371,6 +373,45 @@ describe('http-server direct result metadata propagation', () => {
     expect(restored).toBeNull();
   });
 
+  it('router-direct completed response without captured request context does not write continuation state', async () => {
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.3-codex';
+
+    const result = await server.buildRouterDirectResult({
+      response: {
+        status: 200,
+        data: {
+          id: 'resp-router-direct-completed-without-capture',
+          object: 'response',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'ok' }],
+            },
+          ],
+        },
+      },
+      providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
+      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'thinking' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
+    }, {
+      requestId: 'req-router-direct-completed-without-capture',
+      body: { model: 'gpt-5.3-codex', stream: false },
+      metadata: {
+        sessionId: 'sess-router-direct-completed-without-capture',
+        clientModelId: 'gpt-5.3-codex',
+      },
+    });
+
+    expect(result.status).toBe(200);
+    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
+    expect(responsesConversationStore.getDebugStats().responseIndexSize).toBe(0);
+    expect(responsesConversationStore.getDebugStats().scopeIndexSize).toBe(0);
+  });
+
   it('router-direct result clears captured responses request on recoverable upstream 502', async () => {
     captureResponsesRequestContext({
       requestId: 'req-router-direct-retention-http-502',
@@ -565,6 +606,49 @@ describe('http-server direct result metadata propagation', () => {
     });
 
     expect(restored?.payload.previous_response_id).toBe('resp-provider-direct-success');
+  });
+
+  it('provider-direct completed response without captured request context does not write continuation state', async () => {
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.3-codex';
+
+    const result = await server.buildProviderDirectResult({
+      response: {
+        status: 200,
+        data: {
+          id: 'resp-provider-direct-completed-without-capture',
+          object: 'response',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'ok' }],
+            },
+          ],
+        },
+      },
+      providerProtocol: 'openai-responses',
+      providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 0,
+    }, {
+      requestId: 'req-provider-direct-completed-without-capture',
+      body: { model: 'gpt-5.3-codex', stream: false },
+      metadata: {
+        sessionId: 'sess-provider-direct-completed-without-capture',
+        clientModelId: 'gpt-5.3-codex',
+      },
+    }, {
+      id: 'resp-provider-direct-completed-without-capture',
+      object: 'response',
+      status: 'completed',
+    }, 'test.key1');
+
+    expect(result.status).toBe(200);
+    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
+    expect(responsesConversationStore.getDebugStats().responseIndexSize).toBe(0);
+    expect(responsesConversationStore.getDebugStats().scopeIndexSize).toBe(0);
   });
 
   it('RED: provider-direct responses retain submit_tool_outputs continuation when response only exposes required_action', async () => {
