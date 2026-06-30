@@ -194,6 +194,18 @@ export interface ServertoolCliProjectionExecutionContextOutput {
   flowId: string;
 }
 
+export interface ServertoolCliProjectionRuntimeBranchInput {
+  requestId: string;
+  toolName: string;
+  toolArguments: string;
+  additionalToolCalls?: unknown[];
+}
+
+export interface ServertoolCliProjectionRuntimeBranchOutput {
+  chatResponse: Record<string, unknown>;
+  execution: ServertoolCliProjectionExecutionContextOutput;
+}
+
 export interface NativeServertoolExecutionSummary {
   flowId: string;
   context?: unknown;
@@ -1649,6 +1661,45 @@ export function buildServertoolCliProjectionExecutionContextWithNative(
   }
   return {
     flowId: 'servertool_cli_projection'
+  };
+}
+
+export function buildServertoolCliProjectionRuntimeBranchWithNative(
+  input: ServertoolCliProjectionRuntimeBranchInput,
+): ServertoolCliProjectionRuntimeBranchOutput {
+  const capability = 'buildServertoolCliProjectionRuntimeBranchJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
+    const nativeError = resultJson as Record<string, unknown>;
+    const message = typeof nativeError.message === 'string' && nativeError.message.trim()
+      ? nativeError.message.trim()
+      : JSON.stringify(nativeError);
+    throw new Error(`buildServertoolCliProjectionRuntimeBranchJson native error: ${message}`);
+  }
+  if (typeof resultJson !== 'string') {
+    throw new Error(`buildServertoolCliProjectionRuntimeBranchJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid branch');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (!record.chatResponse || typeof record.chatResponse !== 'object' || Array.isArray(record.chatResponse)) {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid chatResponse');
+  }
+  const execution = record.execution as Record<string, unknown> | undefined;
+  if (!execution || execution.flowId !== 'servertool_cli_projection') {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid execution');
+  }
+  return {
+    chatResponse: record.chatResponse as Record<string, unknown>,
+    execution: {
+      flowId: 'servertool_cli_projection'
+    }
   };
 }
 

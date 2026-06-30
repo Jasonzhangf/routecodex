@@ -38,6 +38,8 @@ use servertool_core::stopless_decision_context_signals;
 use servertool_core::stopless_learned_note_contract;
 use servertool_core::stopless_orchestration_contract;
 use servertool_core::text_extraction;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 const SERVERTOOL_INTERNAL_TOOL_NAMES: &[&str] = &[
     "continue_execution",
@@ -48,6 +50,23 @@ const SERVERTOOL_INTERNAL_TOOL_NAMES: &[&str] = &[
     "vision_auto",
     "servertool_fixture",
 ];
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServertoolCliProjectionRuntimeBranchInput {
+    request_id: String,
+    tool_name: String,
+    tool_arguments: String,
+    #[serde(default)]
+    additional_tool_calls: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServertoolCliProjectionRuntimeBranchOutput {
+    chat_response: serde_json::Value,
+    execution: serde_json::Value,
+}
 
 /// Inspect a response payload and return the stop gateway context as JSON.
 pub fn inspect_stop_gateway_signal(payload_json: &str) -> Result<String, String> {
@@ -861,6 +880,60 @@ pub fn parse_servertool_cli_projection_tool_arguments_json(
         .map_err(|e| e.to_string())?;
     serde_json::to_string(&output)
         .map_err(|e| format!("serialize cli projection tool arguments: {e}"))
+}
+
+pub fn build_servertool_cli_projection_runtime_branch_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: ServertoolCliProjectionRuntimeBranchInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize cli projection runtime branch input: {e}"))?;
+    let parsed_arguments = cli_contract::parse_servertool_cli_projection_tool_arguments(
+        cli_contract::ServertoolCliProjectionToolArgumentsInput {
+            arguments: input.tool_arguments,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let native_projection = cli_contract::plan_client_exec_cli_projection_output(
+        cli_contract::ClientExecCliProjectionInput {
+            tool_name: Some(input.tool_name.clone()),
+            flow_id: Some("servertool_cli_projection".to_string()),
+            input: Some(parsed_arguments),
+            repeat_count: Some(0),
+            max_repeats: Some(0),
+            stdout_preview: None,
+            session_id: None,
+            request_id: Some(input.request_id.clone()),
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let client_call_id = format!(
+        "call_servertool_cli_{}",
+        Uuid::new_v4().simple().to_string()
+    );
+    let chat_response = cli_contract::build_client_visible_projection_shell(
+        ServertoolClientVisibleProjectionShellInput {
+            request_id: input.request_id.clone(),
+            client_call_id: client_call_id.clone(),
+            native_projection,
+            reasoning_text: format!("继续执行本地 hook {}。", input.tool_name),
+            additional_tool_calls: input.additional_tool_calls,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let execution = cli_contract::build_servertool_cli_projection_execution_context(
+        cli_contract::ServertoolCliProjectionExecutionContextInput {
+            request_id: input.request_id,
+            client_call_id,
+            tool_name: input.tool_name,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    let output = ServertoolCliProjectionRuntimeBranchOutput {
+        chat_response,
+        execution,
+    };
+    serde_json::to_string(&output)
+        .map_err(|e| format!("serialize cli projection runtime branch: {e}"))
 }
 
 pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<String, String> {
@@ -3023,4 +3096,28 @@ fn plans_servertool_materialization_progress_via_servertool_core_bridge() {
     .expect("materialization progress plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
     assert_eq!(parsed["action"], "finalize_without_backend");
+}
+
+#[test]
+fn builds_cli_projection_runtime_branch_via_servertool_core_bridge() {
+    let output = build_servertool_cli_projection_runtime_branch_json(
+        &serde_json::json!({
+            "requestId": "req-runtime-branch",
+            "toolName": "web_search",
+            "toolArguments": "{\"query\":\"rust\"}",
+            "additionalToolCalls": []
+        })
+        .to_string(),
+    )
+    .expect("cli projection runtime branch");
+    let parsed: serde_json::Value = serde_json::from_str(&output).expect("runtime branch json");
+    assert_eq!(parsed["execution"]["flowId"], "servertool_cli_projection");
+    assert_eq!(
+        parsed["chatResponse"]["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    assert_eq!(
+        parsed["chatResponse"]["choices"][0]["message"]["reasoning_text"],
+        "继续执行本地 hook web_search。"
+    );
 }

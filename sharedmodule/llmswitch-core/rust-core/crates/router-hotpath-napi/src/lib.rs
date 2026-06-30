@@ -1657,6 +1657,14 @@ pub fn parse_servertool_cli_projection_tool_arguments_json(
 }
 
 #[napi]
+pub fn build_servertool_cli_projection_runtime_branch_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::build_servertool_cli_projection_runtime_branch_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_stopless_orchestration_action_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_stopless_orchestration_action_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

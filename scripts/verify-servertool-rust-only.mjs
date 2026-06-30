@@ -902,6 +902,10 @@ function checkServertoolCliProjectionMap() {
     ['cli-projection-output-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_client_exec_cli_projection_output_json'],
     ['cli-projection-output-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildClientExecCliProjectionOutputJson'],
     ['cli-projection-output-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildClientExecCliProjectionOutputWithNative'],
+    ['cli-projection-runtime-branch-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'build_servertool_cli_projection_runtime_branch_json'],
+    ['cli-projection-runtime-branch-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_servertool_cli_projection_runtime_branch_json'],
+    ['cli-projection-runtime-branch-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildServertoolCliProjectionRuntimeBranchJson'],
+    ['cli-projection-runtime-branch-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildServertoolCliProjectionRuntimeBranchWithNative'],
     ['cli-projection-execution-context-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, 'pub fn build_servertool_cli_projection_execution_context'],
     ['cli-projection-execution-context-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'build_servertool_cli_projection_execution_context_json'],
     ['cli-projection-execution-context-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_servertool_cli_projection_execution_context_json'],
@@ -991,19 +995,7 @@ function checkServertoolCliProjectionMap() {
     'cli-projection-runtime-native-owner',
     `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`,
     cliProjectionRuntimeShell,
-    'buildClientExecCliProjectionOutputWithNative'
-  );
-  assertContains(
-    'cli-projection-runtime-native-owner',
-    `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`,
-    cliProjectionRuntimeShell,
-    'parseServertoolCliProjectionToolArgumentsWithNative'
-  );
-  assertContains(
-    'cli-projection-runtime-native-owner',
-    `${SERVERTOOL_TS_DIR}/cli-projection-runtime-shell.ts`,
-    cliProjectionRuntimeShell,
-    'buildClientVisibleProjectionShellWithNative'
+    'buildServertoolCliProjectionRuntimeBranchWithNative'
   );
   if (cliProjectionRuntimeShell.includes("name: 'exec_command'") || cliProjectionRuntimeShell.includes('"name": "exec_command"')) {
     fail('cli-projection-command-contract', 'cli-projection runtime shell must not build exec_command tool call shape in TS');
@@ -1020,6 +1012,14 @@ function checkServertoolCliProjectionMap() {
     'const maxRepeats =',
     'function parseToolArguments(',
     'JSON.parse(value)',
+    'randomUUID',
+    'buildClientExecCliProjectionOutputWithNative',
+    'parseServertoolCliProjectionToolArgumentsWithNative',
+    'buildClientVisibleProjectionShellWithNative',
+    'buildServertoolCliProjectionExecutionContextWithNative',
+    'servertool_cli_projection',
+    'reasoningText',
+    '继续执行本地 hook',
   ]) {
     if (cliProjectionRuntimeShell.includes(keyword)) {
       fail(
@@ -4914,11 +4914,10 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
-    'parseServertoolCliProjectionToolArgumentsWithNative({',
-    'input: parseServertoolCliProjectionToolArgumentsWithNative({',
     'const additionalToolCalls = collectServertoolAdditionalClientToolCallsWithNative({',
-    'finalChatResponse: buildClientVisibleProjectionShellWithNative({',
-    'execution: buildServertoolCliProjectionExecutionContextWithNative({',
+    'buildServertoolCliProjectionRuntimeBranchWithNative({',
+    'finalChatResponse: branch.chatResponse as JsonObject',
+    'execution: branch.execution as {',
   ]) {
     if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(
@@ -4932,10 +4931,18 @@ function checkServertoolRustOutcomeCloseout() {
     'buildClientVisibleProjectionShellWithNative(projectionShellInput)',
     'function buildClientVisibleProjectionShellForRuntime(',
     'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
+    'input: parseServertoolCliProjectionToolArgumentsWithNative({',
     'input: projectionInput',
     'const nativeProjection = buildClientExecCliProjectionOutputWithNative({',
+    'buildClientExecCliProjectionOutputWithNative',
     'const chatResponse = buildClientVisibleProjectionShellWithNative({',
+    'buildClientVisibleProjectionShellWithNative',
     'const execution = buildServertoolCliProjectionExecutionContextWithNative({',
+    'buildServertoolCliProjectionExecutionContextWithNative',
+    'randomUUID',
+    'servertool_cli_projection',
+    'reasoningText',
+    '继续执行本地 hook',
   ]) {
     if (cliProjectionRuntimeShell.includes(marker)) {
       fail(

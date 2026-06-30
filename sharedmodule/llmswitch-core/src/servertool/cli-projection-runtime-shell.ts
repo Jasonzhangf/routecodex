@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
   ServerSideToolEngineOptions,
@@ -6,10 +5,7 @@ import type {
   ToolCall
 } from './types.js';
 import {
-  buildClientExecCliProjectionOutputWithNative,
-  buildClientVisibleProjectionShellWithNative,
-  buildServertoolCliProjectionExecutionContextWithNative,
-  parseServertoolCliProjectionToolArgumentsWithNative
+  buildServertoolCliProjectionRuntimeBranchWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   collectServertoolAdditionalClientToolCallsWithNative
@@ -35,29 +31,16 @@ export function buildServertoolCliProjectionBranchResult(args: {
     projectedToolCallId: cliProjectedToolCall.id
   });
   const toolName = cliProjectedToolCall.name;
-  const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
+  const branch = buildServertoolCliProjectionRuntimeBranchWithNative({
+    requestId: args.options.requestId,
+    toolName,
+    toolArguments: cliProjectedToolCall.arguments,
+    ...(additionalToolCalls.length ? { additionalToolCalls } : {})
+  });
   return {
     mode: 'tool_flow',
-    finalChatResponse: buildClientVisibleProjectionShellWithNative({
-      requestId: args.options.requestId,
-      clientCallId,
-      nativeProjection: buildClientExecCliProjectionOutputWithNative({
-        toolName,
-        flowId: 'servertool_cli_projection',
-        input: parseServertoolCliProjectionToolArgumentsWithNative({
-          arguments: cliProjectedToolCall.arguments
-        }),
-        repeatCount: 0,
-        maxRepeats: 0
-      }),
-      reasoningText: `继续执行本地 hook ${toolName}。`,
-      ...(additionalToolCalls.length ? { additionalToolCalls } : {})
-    }) as JsonObject,
-    execution: buildServertoolCliProjectionExecutionContextWithNative({
-      requestId: args.options.requestId,
-      clientCallId,
-      toolName
-    }) as {
+    finalChatResponse: branch.chatResponse as JsonObject,
+    execution: branch.execution as {
       flowId: string;
       context?: JsonObject;
     }
