@@ -5102,6 +5102,7 @@ function checkServertoolRustOutcomeCloseout() {
   const runServerSideToolEngineShell = readRequired(TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL);
   for (const marker of [
     'export async function orchestrateServertoolEngine(',
+    "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
     'runServertoolEntryPreflight',
     'extractToolCallsFromResponseStage',
     'resolveServertoolEntryContext',

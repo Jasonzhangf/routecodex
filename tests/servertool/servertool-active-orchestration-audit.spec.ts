@@ -161,6 +161,8 @@ const TARGETS = [
     forbidden: [],
     required: [
       'orchestrateServertoolEngine',
+      "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
+      'return passthroughResult;',
       'runServertoolEntryPreflight',
       'extractToolCallsFromResponseStage',
       'resolveServertoolEntryContext',

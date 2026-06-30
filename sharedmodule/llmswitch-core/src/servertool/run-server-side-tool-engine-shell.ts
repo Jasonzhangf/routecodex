@@ -13,6 +13,7 @@ import { asServertoolJsonObject, resolveServertoolEntryContext } from './entry-c
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
+  const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;
   const base = asServertoolJsonObject(options.chatResponse);
   const entryPreflight = runServertoolEntryPreflight({ options, base });
   if (entryPreflight.action === 'return_result') {
@@ -28,7 +29,7 @@ export async function orchestrateServertoolEngine(
     base: entryPreflight.baseObject
   });
   if (entryContext.action !== 'continue') {
-    return { mode: 'passthrough', finalChatResponse: options.chatResponse };
+    return passthroughResult;
   }
   const responseStagePrePass = await runServertoolResponseStagePrePass({
     options,
