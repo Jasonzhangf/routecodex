@@ -281,6 +281,10 @@ const TARGETS = [
       'function parseToolArguments(',
       'JSON.parse(value)',
     ],
+    required: [
+      'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
+      'input: projectionInput',
+    ],
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',

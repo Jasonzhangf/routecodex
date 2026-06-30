@@ -4959,7 +4959,9 @@ function checkServertoolRustOutcomeCloseout() {
     'export function isClientExecCliProjectionToolCall(',
     'return isServertoolClientExecCliProjectionToolCallWithNative({',
     'executionMode: toolCall.executionMode',
+    'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
     'parseServertoolCliProjectionToolArgumentsWithNative({',
+    'input: projectionInput',
   ]) {
     if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(
