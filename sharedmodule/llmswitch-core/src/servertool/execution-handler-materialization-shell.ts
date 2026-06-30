@@ -4,7 +4,6 @@ import {
   planServertoolExecutionOutcomeRuntimeActionWithNative,
   planServertoolHandlerContractErrorWithNative,
   planServertoolHandlerRuntimeActionForPlannedWithNative,
-  runStoplessBuiltinHandlerForRuntimeWithNative,
   type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
@@ -15,7 +14,6 @@ import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-b
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
-  ServerToolHandlerContext,
   ServerToolHandlerPlan,
   ServerToolHandlerResult,
   ToolCall
@@ -100,15 +98,3 @@ export const materializeServertoolPlannedResult = async (
   }
   return planned as ServerToolHandlerResult;
 };
-
-export async function executeBuiltinServerToolHandler(args: {
-  builtinName: string;
-  ctx: ServerToolHandlerContext;
-}): Promise<ServerToolHandlerPlan | ServerToolHandlerResult | null> {
-  return runStoplessBuiltinHandlerForRuntimeWithNative({
-    name: args.builtinName,
-    base: args.ctx.base,
-    requestId: args.ctx.requestId,
-    runtimeMetadata: args.ctx.runtimeMetadata ?? null
-  }) as ServerToolHandlerResult | null;
-}

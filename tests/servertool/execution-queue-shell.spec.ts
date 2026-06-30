@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const getServerToolHandler = jest.fn();
-const executeBuiltinServerToolHandler = jest.fn();
 const materializeServertoolPlannedResult = jest.fn();
 const createServertoolExecutionLoopStateWithNative = jest.fn();
 const appendServertoolExecutedRecordWithNative = jest.fn();
@@ -9,6 +8,7 @@ const buildServertoolHandlerErrorToolOutputPayloadWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
+const runStoplessBuiltinHandlerForRuntimeWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js',
@@ -20,8 +20,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
-    materializeServertoolPlannedResult,
-    executeBuiltinServerToolHandler
+    materializeServertoolPlannedResult
   })
 );
 
@@ -42,7 +41,8 @@ jest.unstable_mockModule(
     planServertoolExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
     createServertoolExecutionLoopStateWithNative,
-    appendServertoolExecutedRecordWithNative
+    appendServertoolExecutedRecordWithNative,
+    runStoplessBuiltinHandlerForRuntimeWithNative
   })
 );
 
@@ -146,7 +146,7 @@ describe('execution-queue-shell', () => {
       chatResponse: { ok: true },
       execution: { flowId: 'flow-1' }
     });
-    executeBuiltinServerToolHandler.mockResolvedValue({
+    runStoplessBuiltinHandlerForRuntimeWithNative.mockResolvedValue({
       finalize: jest.fn(),
       flowId: 'flow-1'
     });
@@ -194,6 +194,12 @@ describe('execution-queue-shell', () => {
     });
 
     expect(state.executedToolCalls).toHaveLength(1);
+    expect(runStoplessBuiltinHandlerForRuntimeWithNative).toHaveBeenCalledWith({
+      name: 'web_search',
+      base: expect.objectContaining({ ok: true }),
+      requestId: 'req-1',
+      runtimeMetadata: null
+    });
     expect(materializeServertoolPlannedResult).toHaveBeenCalled();
     expect(appendServertoolExecutedRecordWithNative).toHaveBeenCalled();
   });

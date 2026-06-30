@@ -15,13 +15,11 @@ import {
   planServertoolExecutionLoopRuntimeActionWithNative,
   appendServertoolExecutedRecordWithNative,
   createServertoolExecutionLoopStateWithNative,
+  runStoplessBuiltinHandlerForRuntimeWithNative,
   type NativeServertoolExecutedRecord,
   type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import {
-  executeBuiltinServerToolHandler,
-  materializeServertoolPlannedResult
-} from './execution-handler-materialization-shell.js';
+import { materializeServertoolPlannedResult } from './execution-handler-materialization-shell.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
@@ -66,9 +64,11 @@ export async function runServertoolIoExecutionQueue(args: {
     let planned = null;
     let lastErr: unknown;
     try {
-      planned = await executeBuiltinServerToolHandler({
-        builtinName: entry.execution.builtinName,
-        ctx
+      planned = await runStoplessBuiltinHandlerForRuntimeWithNative({
+        name: entry.execution.builtinName,
+        base: ctx.base,
+        requestId: ctx.requestId,
+        runtimeMetadata: ctx.runtimeMetadata ?? null
       });
     } catch (err) {
       lastErr = err;

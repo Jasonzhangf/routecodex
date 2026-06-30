@@ -5225,6 +5225,8 @@ function checkServertoolRustOutcomeCloseout() {
   }
   const executionShell = existsSync(TS_EXECUTION_SHELL) ? readRequired(TS_EXECUTION_SHELL) : '';
   const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
+  const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
+  const executionQueueShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`);
   const rustExecutionHandlerContract = readRequired(RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
@@ -5292,8 +5294,14 @@ function checkServertoolRustOutcomeCloseout() {
   );
   assertContains(
     'servertool-execution-handler-builtin-runtime-thin-shell',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`,
+    autoHookCaller,
+    'runStoplessBuiltinHandlerForRuntimeWithNative({'
+  );
+  assertContains(
+    'servertool-execution-handler-builtin-runtime-thin-shell',
+    `${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`,
+    executionQueueShell,
     'runStoplessBuiltinHandlerForRuntimeWithNative({'
   );
   assertContains(
@@ -5600,6 +5608,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
   const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
   const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
   const registryOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`);
+  const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
+  const executionQueueShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`);
   const rustProjectionContextSource = readRequired(
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
   );
@@ -5748,7 +5758,12 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'resolveServertoolBuiltinHandlerEntryWithNative(',
     'planServertoolBuiltinAutoHandlerEntriesWithNative(',
   ]) {
-    if (!executionMaterializationShell.includes(marker) && !registryOrchestrationShell.includes(marker)) {
+    if (
+      !executionMaterializationShell.includes(marker) &&
+      !registryOrchestrationShell.includes(marker) &&
+      !autoHookCaller.includes(marker) &&
+      !executionQueueShell.includes(marker)
+    ) {
       fail(
         'servertool-builtin-handler-stopless-thin-shell',
         `servertool TS runtime shells must keep direct native builtin thin-shell marker ${marker}`
@@ -5771,6 +5786,7 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
         'const materializePlannedServertoolResult',
         'const executeBackendPlanViaThinShell',
         'const runServertoolHandlerThinShell',
+        'export async function executeBuiltinServerToolHandler(',
         'function materializeServertoolPlannedResult(',
         'function executeServertoolBackendPlan(',
         'export async function runServertoolHandler(',

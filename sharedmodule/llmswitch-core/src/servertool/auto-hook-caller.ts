@@ -9,12 +9,10 @@ import { listAutoServerToolHooks } from './registry-orchestration-shell.js';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
 import {
   planAutoHookCallerFinalizationWithNative,
-  planAutoHookRuntimeAttemptWithNative
+  planAutoHookRuntimeAttemptWithNative,
+  runStoplessBuiltinHandlerForRuntimeWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import {
-  materializeServertoolPlannedResult,
-  executeBuiltinServerToolHandler
-} from './execution-handler-materialization-shell.js';
+import { materializeServertoolPlannedResult } from './execution-handler-materialization-shell.js';
 import type { ServerToolExecutionDescriptor } from './registry-types.js';
 
 type AutoHookExecutionItem = {
@@ -44,9 +42,11 @@ async function runAutoHookExecutionQueue(args: {
 
     let planned: unknown = null;
     try {
-      planned = await executeBuiltinServerToolHandler({
-        builtinName: hook.execution.builtinName,
-        ctx: args.contextBase
+      planned = await runStoplessBuiltinHandlerForRuntimeWithNative({
+        name: hook.execution.builtinName,
+        base: args.contextBase.base,
+        requestId: args.contextBase.requestId,
+        runtimeMetadata: args.contextBase.runtimeMetadata ?? null
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? 'unknown');

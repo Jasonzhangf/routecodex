@@ -33,6 +33,7 @@ const TARGETS = [
       'new Set(state.executedIds)',
       'const executeBackendPlanViaThinShell',
       'const runServertoolHandlerThinShell',
+      'export async function executeBuiltinServerToolHandler(',
       'function materializeServertoolPlannedResult(',
       'export async function runServertoolHandler(',
       '[servertool] invalid handler plan contract: missing finalize',

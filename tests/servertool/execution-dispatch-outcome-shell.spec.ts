@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const getServerToolHandler = jest.fn();
-const executeBuiltinServerToolHandler = jest.fn();
 const materializeServertoolPlannedResult = jest.fn();
 const createServertoolExecutionLoopStateWithNative = jest.fn();
 const appendServertoolExecutedRecordWithNative = jest.fn();
@@ -17,6 +16,7 @@ const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
 const planServertoolExecutionOutcomeRuntimeActionWithNative = jest.fn();
 const planServertoolOutcomeWithNative = jest.fn();
 const buildServertoolOutcomePlanInputWithNative = jest.fn((input: any) => input);
+const runStoplessBuiltinHandlerForRuntimeWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/provider-protocol-error.js',
@@ -56,7 +56,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
   () => ({
     materializeServertoolPlannedResult,
-    executeBuiltinServerToolHandler,
     materializeNativeToolCallExecutionOutcome: materializeNativeToolCallExecutionOutcomeNative
   })
 );
@@ -82,6 +81,7 @@ jest.unstable_mockModule(
     planServertoolExecutionOutcomeRuntimeActionWithNative,
     createServertoolExecutionLoopStateWithNative,
     appendServertoolExecutedRecordWithNative,
+    runStoplessBuiltinHandlerForRuntimeWithNative,
     isAdapterClientDisconnectedWithNative: jest.fn(() => false),
     planClientDisconnectWatcherWithNative: jest.fn(() => ({ intervalMs: 50 })),
     planServertoolClientDisconnectedErrorWithNative: jest.fn((input: any) => ({
@@ -260,7 +260,7 @@ describe('execution queue dispatch runtime', () => {
       registration: { executionMode: 'guarded' },
       execution: { kind: 'builtin', builtinName: 'failfast_test_tool' }
     });
-    executeBuiltinServerToolHandler.mockRejectedValue(new Error('boom-from-execution-shell'));
+    runStoplessBuiltinHandlerForRuntimeWithNative.mockRejectedValue(new Error('boom-from-execution-shell'));
     materializeServertoolPlannedResult.mockResolvedValue(null);
     buildServertoolHandlerErrorToolOutputPayloadWithNative.mockImplementation((input: any) => ({
       ...(input.base ?? {}),
@@ -450,7 +450,7 @@ describe('execution queue dispatch runtime', () => {
       hasMaterializedResult: false,
       hasHandlerError: false
     });
-    expect(executeBuiltinServerToolHandler).not.toHaveBeenCalled();
+    expect(runStoplessBuiltinHandlerForRuntimeWithNative).not.toHaveBeenCalled();
     expect(result.executedToolCalls).toEqual([]);
   });
 

@@ -850,8 +850,7 @@ jest.unstable_mockModule(
           }
         }
       }
-    })),
-    executeBuiltinServerToolHandler: jest.fn(async () => null)
+    }))
   })
 );
 
