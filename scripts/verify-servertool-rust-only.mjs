@@ -4970,6 +4970,8 @@ function checkServertoolRustOutcomeCloseout() {
     'buildServertoolDispatchPlanInput(',
     'baseObject: JsonObject;',
     'baseForExecution: JsonObject;',
+    'readProviderProtocolFromAnyBoundMetadataCenter',
+    'Servertool dispatch preparation requires metadata center runtime_control.providerProtocol',
   ]) {
     if (dispatchPreparationShell.includes(marker)) {
       fail(

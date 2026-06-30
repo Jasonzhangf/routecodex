@@ -199,6 +199,8 @@ const TARGETS = [
       'buildServertoolDispatchPlanInput(',
       'baseObject: JsonObject;',
       'baseForExecution: JsonObject;',
+      'readProviderProtocolFromAnyBoundMetadataCenter',
+      'Servertool dispatch preparation requires metadata center runtime_control.providerProtocol',
     ],
     required: [
       'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',

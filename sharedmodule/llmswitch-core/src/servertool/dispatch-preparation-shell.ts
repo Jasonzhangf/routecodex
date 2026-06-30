@@ -5,7 +5,6 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { buildServertoolDispatchPlanInputWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  readProviderProtocolFromAnyBoundMetadataCenter,
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
 
@@ -17,11 +16,6 @@ export function prepareServertoolDispatchStage(args: {
 }): {
   dispatchPlan: ReturnType<typeof planServertoolToolCallDispatchWithNative>;
 } {
-  const providerProtocol =
-    readProviderProtocolFromAnyBoundMetadataCenter(args.options.adapterContext as Record<string, unknown>);
-  if (!providerProtocol) {
-    throw new Error('Servertool dispatch preparation requires metadata center runtime_control.providerProtocol');
-  }
   const runtimeMetadata = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
     args.options.adapterContext as Record<string, unknown>
   );

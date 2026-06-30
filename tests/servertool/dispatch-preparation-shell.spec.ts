@@ -66,7 +66,6 @@ describe('dispatch-preparation-shell', () => {
       options: {
         requestId: 'req-1',
         entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
         adapterContext
       } as any,
       toolCalls,
@@ -90,17 +89,31 @@ describe('dispatch-preparation-shell', () => {
     expect(result.dispatchPlan.executableToolCalls).toEqual(toolCalls);
   });
 
-  test('fails fast when metadata center runtimeControl.providerProtocol is absent', () => {
-    expect(() => prepareServertoolDispatchStage({
+  test('does not locally require providerProtocol when MetadataCenter is bound', () => {
+    const adapterContext: Record<string, unknown> = {};
+    MetadataCenter.attach(adapterContext);
+    const result = prepareServertoolDispatchStage({
       options: {
         requestId: 'req-1',
         entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        adapterContext: {}
+        adapterContext
       } as any,
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
       includeToolCallNames: null,
       excludeToolCallNames: null
-    })).toThrow('Servertool dispatch preparation requires metadata center runtime_control.providerProtocol');
+    });
+
+    expect(buildServertoolDispatchPlanInputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeMetadata: {
+          metadataCenterSnapshot: {
+            requestTruth: {},
+            runtimeControl: {},
+            providerObservation: {}
+          }
+        }
+      })
+    );
+    expect(result.dispatchPlan.executableToolCalls).toEqual([{ id: 'call_1', name: 'web_search', arguments: '{}' }]);
   });
 });
