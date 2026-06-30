@@ -3561,6 +3561,7 @@ function checkServertoolRegistryRustOwner() {
     'registerServerToolHandler',
     'ServerToolHandler,',
     'type ServerToolHandlerRegistrationSpec',
+    'export const listAutoServerToolHandlers',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(

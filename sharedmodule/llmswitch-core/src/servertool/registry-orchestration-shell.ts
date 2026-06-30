@@ -44,13 +44,9 @@ export function listRegisteredServerToolHandlerNames(): string[] {
   return projectCurrentRegistrySources().registeredNames;
 }
 
-export const listAutoServerToolHandlers = (): ServerToolHandlerEntry[] => {
-  return projectCurrentRegistrySources().autoHandlers;
-};
-
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
   return projectAutoServerToolHookDescriptors({
-    entries: listAutoServerToolHandlers()
+    entries: projectCurrentRegistrySources().autoHandlers
   });
 };
 

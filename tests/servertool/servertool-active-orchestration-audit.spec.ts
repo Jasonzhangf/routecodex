@@ -502,6 +502,7 @@ const TARGETS = [
       'isRegisteredServerToolNameViaNativeConfig',
       'isServertoolRegisteredNameByConfig',
       'type ServerToolHandlerRegistrationSpec',
+      'export const listAutoServerToolHandlers',
     ],
     required: [
       'resolveServertoolRegisteredNameWithNative',
