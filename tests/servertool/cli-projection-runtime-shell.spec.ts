@@ -148,6 +148,8 @@ describe('cli-projection-runtime-shell', () => {
     expect(source).not.toContain('JSON.parse(value)');
     expect(source).toContain('const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({');
     expect(source).toContain('input: projectionInput');
+    expect(source).toContain('const projectionShellInput = {');
+    expect(source).toContain('const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;');
     expect(source).toContain('parseServertoolCliProjectionToolArgumentsWithNative(');
   });
 });

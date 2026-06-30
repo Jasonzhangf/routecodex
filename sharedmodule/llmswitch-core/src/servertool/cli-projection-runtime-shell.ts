@@ -44,13 +44,14 @@ export function buildServertoolCliProjectionBranchResult(args: {
     maxRepeats: 0
   });
   const clientCallId = `call_servertool_cli_${randomUUID().replace(/-/g, '')}`;
-  const chatResponse = buildClientVisibleProjectionShellWithNative({
+  const projectionShellInput = {
     requestId: args.options.requestId,
     clientCallId,
     nativeProjection,
     reasoningText: `继续执行本地 hook ${toolName}。`,
     ...(additionalToolCalls.length ? { additionalToolCalls } : {})
-  }) as JsonObject;
+  };
+  const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;
   const execution = buildServertoolCliProjectionExecutionContextWithNative({
     requestId: args.options.requestId,
     clientCallId,

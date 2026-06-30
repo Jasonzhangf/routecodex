@@ -4964,6 +4964,8 @@ function checkServertoolRustOutcomeCloseout() {
     'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
     'parseServertoolCliProjectionToolArgumentsWithNative({',
     'input: projectionInput',
+    'const projectionShellInput = {',
+    'const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;',
   ]) {
     if (!cliProjectionRuntimeShell.includes(marker)) {
       fail(

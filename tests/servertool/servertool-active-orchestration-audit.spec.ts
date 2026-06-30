@@ -293,6 +293,8 @@ const TARGETS = [
     required: [
       'const projectionInput = parseServertoolCliProjectionToolArgumentsWithNative({',
       'input: projectionInput',
+      'const projectionShellInput = {',
+      'const chatResponse = buildClientVisibleProjectionShellWithNative(projectionShellInput) as JsonObject;',
     ],
   },
   {
