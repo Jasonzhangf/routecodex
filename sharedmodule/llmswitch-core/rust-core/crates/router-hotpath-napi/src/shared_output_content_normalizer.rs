@@ -318,7 +318,7 @@ fn normalize_content_part(
         .unwrap_or(false)
         && !clone.get("text").map(Value::is_string).unwrap_or(false)
     {
-        clone.insert("text".to_string(), Value::String(String::new()));
+        return None;
     }
     Some(clone)
 }
@@ -439,15 +439,15 @@ fn normalize_responses_message_item_value(
         options_obj.and_then(|option| option.get("extraReasoning")),
     ));
 
+    if normalized_parts.is_empty() && reasoning_chunks.is_empty() {
+        return Err("Invalid Responses message: missing content text".to_string());
+    }
+
     let mut message = source.clone();
     message.insert("id".to_string(), Value::String(base_id.to_string()));
     message.insert(
         "content".to_string(),
-        if normalized_parts.is_empty() {
-            Value::Array(vec![json!({ "type": "output_text", "text": "" })])
-        } else {
-            Value::Array(normalized_parts)
-        },
+        Value::Array(normalized_parts),
     );
 
     let mut output = Map::new();
@@ -644,5 +644,19 @@ mod tests {
 
         let err = normalize_responses_message_item_value(&item, None).unwrap_err();
         assert!(err.contains("Invalid Responses message: missing id"));
+    }
+
+    #[test]
+    fn rejects_responses_message_item_missing_output_text_text() {
+        let item = json!({
+            "id": "msg_missing_text",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{ "type": "output_text" }]
+        });
+
+        let err = normalize_responses_message_item_value(&item, None).unwrap_err();
+        assert!(err.contains("Invalid Responses message: missing content text"));
     }
 }

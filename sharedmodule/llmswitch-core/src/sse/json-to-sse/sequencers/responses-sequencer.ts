@@ -123,8 +123,8 @@ async function* sequenceMessageItem(
     yield buildContentPartStartEvent(item.id, contentIndex, content, context, config);
 
     // 2b. 发送content_part.delta事件流（仅对文本内容）
-    const isTextContent = (content.type === 'input_text' || content.type === 'output_text') && !!content.text;
-    if (isTextContent && content.text) {
+    const isTextContent = content.type === 'input_text' || content.type === 'output_text';
+    if (isTextContent) {
       yield* withDelay(
         buildContentPartDeltas(item.id, contentIndex, content.text, context, config),
         config

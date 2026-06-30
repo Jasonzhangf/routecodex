@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses SSE output_text missing text fail-fast slice
+
+- Red evidence: focused Jest `responses-sse-output-item-descriptor-native` first failed because a message content part `{ "type": "output_text" }` still completed without `response.error`; source replay showed the Rust content/message owners synthesized `text: ""`.
+- Fix: removed TS truthiness gates in `responses.ts` / `responses-sequencer.ts` (`if (!text) return`, `&& !!content.text`, `if (isTextContent && content.text)`, Responses summary chunk skip). Rust `responses_sse_event_payload` now requires content-part text for `input_text` / `output_text`, and `shared_output_content_normalizer` no longer synthesizes empty output text for malformed message content.
+- Positive / reverse tests: focused Jest covers valid `output_text` delta/done projection and missing `output_text.text` error projection with no `response.output_text.done`, `response.completed`, or `response.done`. Rust tests cover content-part descriptor missing text and message normalizer missing content text.
+- Verification: Rust focused `responses_sse_event_payload` PASS 50/50; Rust focused `shared_output_content_normalizer` PASS 4/4; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; focused Jest `responses-sse-output-item-descriptor-native` PASS 11/11; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: source replay showed valid output text emits delta/done/completed, while missing text emits `response.error` and no output_text.done/completed/done. Real 4444 native frame replay of `~/.rcc/codex-samples/openai-responses/ports/4444/req_1782794773576_s7okhowx0/provider-response_1.json` parsed 8 frames with `entryPort=4444`, `response.completed=true`, `response.error=false`, and no missing-text error.
+
 ### 2026-07-01 Responses SSE response status fallback removal slice
 
 - Red evidence: `verify:sse-architecture-boundary` added forbidden markers for `response.status ?? 'requires_action'` and `response.status ?? 'completed'` and failed before the fix. Focused Jest also failed because a response missing `status` was emitted as `response.created` / `response.in_progress` / `response.completed` / `response.done`.

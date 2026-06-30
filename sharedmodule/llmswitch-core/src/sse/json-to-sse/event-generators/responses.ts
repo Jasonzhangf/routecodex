@@ -195,7 +195,6 @@ export function* buildContentPartDeltas(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
-  if (!text) return;
   const chunks = buildResponsesSseTextChunksWithNative(text, config.chunkSize);
 
   for (const chunk of chunks) {
@@ -467,7 +466,6 @@ export function* buildReasoningSummaryEvents(
 
     const chunks = buildResponsesSseTextChunksWithNative(text, config.chunkSize);
     for (const chunk of chunks) {
-      if (!chunk) continue;
       const deltaBase = nextResponsesEventEnvelope(context, config);
       const delta = buildResponsesSseReasoningSummaryPayloadWithNative(
         'text_delta',

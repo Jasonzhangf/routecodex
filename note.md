@@ -1,3 +1,8 @@
+# 2026-07-01: Responses SSE output_text missing text fails in Rust
+- Red evidence: focused `responses-sse-output-item-descriptor-native` failed because `{ type: "output_text" }` still completed without `response.error`; source replay showed Rust content-part descriptor and message normalizer synthesized `text: ""`.
+- Fix: removed TS text truthiness gates (`if (!text) return`, `&& !!content.text`, `if (!chunk) continue`) and removed Rust empty-text synthesis in Responses message/content-part payload owners. Missing `output_text.text` now emits `response.error` and stops before `output_text.done/completed/done`.
+- Verification: Rust focused `responses_sse_event_payload` PASS 50/50 and `shared_output_content_normalizer` PASS 4/4; native build PASS; focused Jest PASS 11/11; `verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `verify:responses-sse-business-module` PASS; `build:base` PASS; source replay and real 4444 native frame replay PASS (`entryPort=4444`, parsed=8, completed=true, no response.error/missing text).
+
 # 2026-07-01: Responses SSE function_call missing arguments must fail in native path
 - Red evidence: `sequenceFunctionCallItem()` still used `if (item.arguments)` and `buildFunctionCallArgsDeltas()` used `if (!functionCall.arguments) return;`, so malformed function_call output could skip argument delta handling in TS before native validation.
 - Fix: removed both truthiness gates. Function call arguments always enter `buildResponsesSseTextChunksWithNative()` and native payload builders; missing arguments now fail with `Responses SSE text chunk payload missing text` and stop before function_call_arguments.done/completed/done.

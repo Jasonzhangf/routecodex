@@ -215,6 +215,31 @@ describe('responses SSE output item descriptor native owner', () => {
     });
   });
 
+  it('fails missing output_text text instead of silently skipping text deltas', async () => {
+    const events = await collectEvents({
+      id: 'resp_output_text_missing_text',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'msg_missing_text',
+        type: 'message',
+        status: 'completed',
+        role: 'assistant',
+        content: [{
+          type: 'output_text'
+        }]
+      }]
+    } as any);
+
+    expect(events.some((event) => event.type === 'response.error')).toBe(true);
+    expect(JSON.stringify(events)).toContain('Invalid Responses message: missing content text');
+    expect(events.some((event) => event.type === 'response.output_text.done')).toBe(false);
+    expect(events.some((event) => event.type === 'response.completed')).toBe(false);
+    expect(events.some((event) => event.type === 'response.done')).toBe(false);
+  });
+
   it('projects function_call_arguments events through the native payload owner', async () => {
     const events = await collectEvents({
       id: 'resp_function_call_arguments_native',

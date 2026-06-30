@@ -139,6 +139,8 @@ for (const forbidden of [
   'function stripReasoningLinePrefix(',
   'function compactReasoningSummaryBody(',
   'function normalizeReasoningSummaryText(',
+  'if (!text) return;',
+  'if (!chunk) continue;',
   '**Thinking**',
 ]) {
   if (responsesEventGenerator.includes(forbidden)) {
@@ -361,8 +363,11 @@ for (const relPath of providerNeutralProjectionFiles) {
     "response.status ?? 'requires_action'",
     "response.status ?? 'completed'",
     'if (!content.text) continue;',
+    'if (!text) return;',
     'normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []',
     'if (!text) continue;',
+    '&& !!content.text',
+    'if (isTextContent && content.text)',
     "args = '{}'",
     'return String(raw)',
     "outputItemState.arguments = '{}'",

@@ -396,11 +396,18 @@ fn build_responses_sse_content_part_added_descriptor(
     part.insert("type".to_string(), Value::String(part_type.to_string()));
     match part_type {
         "input_text" => {
-            let text = source.get("text").and_then(Value::as_str).unwrap_or("");
+            let text = source
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Responses content part descriptor missing text".to_string())?;
             part.insert("text".to_string(), Value::String(text.to_string()));
         }
         "output_text" => {
-            part.insert("text".to_string(), Value::String(String::new()));
+            let text = source
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Responses content part descriptor missing text".to_string())?;
+            part.insert("text".to_string(), Value::String(text.to_string()));
             part.insert(
                 "annotations".to_string(),
                 source
@@ -472,7 +479,10 @@ fn build_responses_sse_content_part_done_descriptor(
     part.insert("type".to_string(), Value::String(part_type.to_string()));
     match part_type {
         "input_text" | "output_text" => {
-            let text = source.get("text").and_then(Value::as_str).unwrap_or("");
+            let text = source
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Responses content part descriptor missing text".to_string())?;
             part.insert("text".to_string(), Value::String(text.to_string()));
             if part_type == "output_text" {
                 part.insert(
@@ -2122,11 +2132,24 @@ mod tests {
             output,
             json!({
                 "type": "output_text",
-                "text": "",
+                "text": "final text",
                 "annotations": [{ "type": "file_citation" }],
                 "logprobs": [{ "token": "x" }]
             })
         );
+    }
+
+    #[test]
+    fn rejects_responses_sse_content_part_descriptor_missing_text() {
+        let err = build_responses_sse_content_part_descriptor(
+            json!({
+                "type": "output_text"
+            }),
+            Some("added"),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Responses content part descriptor missing text"));
     }
 
     #[test]

@@ -346,6 +346,10 @@
 - Gate truth: `verify:sse-architecture-boundary` blocks `response.stop_reason ?? 'end_turn'`. Focused spec: `tests/sharedmodule/anthropic-sse-required-fields-no-fallback.spec.ts`.
 - Replay gap: current Anthropic samples under `~/.rcc/codex-samples/anthropic-messages` and `/Volumes/extension/.rcc/codex-samples/anthropic-messages` are 429 error snapshots, not successful provider-response SSE/JSON samples; source replay is the substitute evidence for this slice.
 
+# 2026-07-01: Responses SSE output_text text is Rust-required
+- Responses JSON->SSE 不允许 TS 或 Rust payload owner 把缺失 `output_text.text` 合成为 `""`；`responses_sse_event_payload` / `shared_output_content_normalizer` 必须 fail-fast，由 sequencer 投影为 `response.error`，并禁止继续输出 `response.output_text.done` / `response.completed` / `response.done`。
+- Gate 口径：`verify:sse-architecture-boundary` 必须禁止 `if (!text) return;`、`&& !!content.text`、`if (isTextContent && content.text)`、Responses generator 内 `if (!chunk) continue;` 这类 TS silent skip 门。
+
 # 2026-06-30: route entry hard query gate added
 - 项目入口与调试技能已补硬查询门槛：每个改实现任务必须先读 `docs/agent-routing/05-foundation-contract.md`，再查 `docs/architecture/function-map.yml`、`docs/architecture/mainline-call-map.yml`、`docs/architecture/verification-map.yml` 和对应 wiki/mainline source。
 - 入口、运行时路由、`rcc-dev-skills` 现在都明确要求：1-2 次内定位不到唯一 owner / 唯一主线边，就先补 map/contract，再动实现；验证后必须做 architecture review，排查 fallback、临时绕路、补丁式修复和错层修复。
