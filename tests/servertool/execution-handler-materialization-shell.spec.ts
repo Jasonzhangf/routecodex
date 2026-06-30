@@ -170,6 +170,9 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).toContain('planServertoolExecutionDispatchErrorWithNative(args)');
     expect(source).toContain('finalChatResponse: args.baseForExecution');
     expect(source).not.toContain('structuredClone(args.base)');
+    expect(source).not.toContain('base: JsonObject;');
+    expect(source).not.toContain('filterOutExecutedToolCalls:');
+    expect(source).not.toContain('stripToolOutputs:');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).sessionId ===');
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===');
     expect(source).not.toContain('Array.isArray((args.baseForExecution as any).tool_outputs)');
@@ -185,7 +188,6 @@ describe('execution-handler-materialization-shell', () => {
 
     expect(() =>
       materializeNativeToolCallExecutionOutcome({
-        base: { id: 'base-1' } as any,
         baseForExecution: { id: 'base-1' } as any,
         options: { requestId: 'req-invalid-mixed-1', adapterContext: {} } as any,
         toolCalls: [],
@@ -193,9 +195,7 @@ describe('execution-handler-materialization-shell', () => {
           executedToolCalls: [],
           executedIds: new Set<string>(),
           executedFlowIds: []
-        },
-        filterOutExecutedToolCalls: jest.fn(),
-        stripToolOutputs: jest.fn()
+        }
       })
     ).toThrow('[native-dispatch-contract] invalid_mixed_client_tools_outcome');
 
@@ -224,7 +224,6 @@ describe('execution-handler-materialization-shell', () => {
 
     expect(() =>
       materializeNativeToolCallExecutionOutcome({
-        base: { id: 'base-2' } as any,
         baseForExecution: { id: 'base-2' } as any,
         options: { requestId: 'req-missing-followup-1', adapterContext: {} } as any,
         toolCalls: [],
@@ -232,9 +231,7 @@ describe('execution-handler-materialization-shell', () => {
           executedToolCalls: [],
           executedIds: new Set<string>(),
           executedFlowIds: []
-        },
-        filterOutExecutedToolCalls: jest.fn(),
-        stripToolOutputs: jest.fn()
+        }
       })
     ).toThrow('[native-dispatch-contract] missing_servertool_execution_contract');
 
@@ -261,7 +258,6 @@ describe('execution-handler-materialization-shell', () => {
     });
 
     const result = materializeNativeToolCallExecutionOutcome({
-      base: { id: 'base-3' } as any,
       baseForExecution: { id: 'base-3' } as any,
       options: { requestId: 'req-outcome-runtime-action-1', adapterContext: {} } as any,
       toolCalls: [],
@@ -274,9 +270,7 @@ describe('execution-handler-materialization-shell', () => {
           followup: { requestIdSuffix: ':reuse_last_execution' },
           context: { kept: true }
         } as any
-      },
-      filterOutExecutedToolCalls: jest.fn(),
-      stripToolOutputs: jest.fn()
+      }
     });
 
     expect(buildServertoolOutcomePlanInputWithNative).toHaveBeenCalledWith(
@@ -320,11 +314,8 @@ describe('execution-handler-materialization-shell', () => {
       flowId: 'servertool_mixed'
     });
 
-    const filterOutExecutedToolCalls = jest.fn();
-    const stripToolOutputs = jest.fn();
     expect(() =>
       materializeNativeToolCallExecutionOutcome({
-        base: { id: 'base-pending-1' } as any,
         baseForExecution: { id: 'base-pending-1' } as any,
         options: { requestId: 'req-pending-injection-1', adapterContext: {} } as any,
         toolCalls: [],
@@ -332,9 +323,7 @@ describe('execution-handler-materialization-shell', () => {
           executedToolCalls: [],
           executedIds: new Set<string>(),
           executedFlowIds: []
-        },
-        filterOutExecutedToolCalls,
-        stripToolOutputs
+        }
       })
     ).toThrow('[native-dispatch-contract] invalid_mixed_client_tools_outcome');
     expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
@@ -344,8 +333,6 @@ describe('execution-handler-materialization-shell', () => {
       lastExecution: undefined,
       flowId: 'servertool_mixed'
     });
-    expect(filterOutExecutedToolCalls).not.toHaveBeenCalled();
-    expect(stripToolOutputs).not.toHaveBeenCalled();
   });
 
   test('builds outcome-plan input through Rust owner instead of local TS branch assembly', () => {

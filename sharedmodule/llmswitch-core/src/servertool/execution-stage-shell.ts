@@ -9,7 +9,6 @@ import { prepareServertoolDispatchStage } from './dispatch-preparation-shell.js'
 import { buildServertoolCliProjectionBranchResult } from './cli-projection-runtime-shell.js';
 import { runServertoolIoExecutionQueue } from './execution-queue-shell.js';
 import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
-import { filterOutExecutedToolCalls, stripToolOutputs } from './orchestration-blocks.js';
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
 import { planServertoolExecutionBranchWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
@@ -76,13 +75,10 @@ export async function runServertoolExecutionStage(args: {
   });
   if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {
     return materializeNativeToolCallExecutionOutcome({
-      base: args.baseObject,
       baseForExecution,
       options: args.options,
       toolCalls: args.toolCalls,
-      executionState,
-      filterOutExecutedToolCalls,
-      stripToolOutputs
+      executionState
     });
   }
 

@@ -5186,6 +5186,8 @@ function checkServertoolRustOutcomeCloseout() {
     'structuredClone(args.baseObject)',
     'const baseForExecution = structuredClone',
     'isStopMessageAutoPreProjection',
+    'filterOutExecutedToolCalls',
+    'stripToolOutputs',
   ]) {
     if (executionStageShell.includes(marker)) {
       fail(

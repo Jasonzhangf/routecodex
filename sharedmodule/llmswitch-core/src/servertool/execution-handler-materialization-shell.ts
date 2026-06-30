@@ -92,13 +92,10 @@ function throwServertoolExecutionDispatchError(args: ServertoolExecutionDispatch
 }
 
 export function materializeNativeToolCallExecutionOutcome(args: {
-  base: JsonObject;
   baseForExecution: JsonObject;
   options: ServerSideToolEngineOptions;
   toolCalls: ToolCall[];
   executionState: ServertoolExecutionLoopState;
-  filterOutExecutedToolCalls: (chatResponse: JsonObject, executedIds: Set<string>) => void;
-  stripToolOutputs: (base: JsonObject) => void;
 }): ServerSideToolEngineResult {
   const outcomePlanInput = buildServertoolOutcomePlanInput({
     toolCalls: args.toolCalls,

@@ -108,6 +108,8 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
     expect(source).toContain('finalizeServertoolResponseStage');
+    expect(source).not.toContain('filterOutExecutedToolCalls');
+    expect(source).not.toContain('stripToolOutputs');
     expect(source).not.toContain('structuredClone(args.baseObject)');
     expect(source).not.toContain('isStopMessageAutoPreProjection');
   });
@@ -190,6 +192,14 @@ describe('execution-stage-shell', () => {
       execution: { flowId: 'flow_1' }
     });
     expect(materializeNativeToolCallExecutionOutcome).toHaveBeenCalled();
+    expect(materializeNativeToolCallExecutionOutcome).toHaveBeenCalledWith({
+      baseForExecution: { ok: true },
+      options: { requestId: 'req-2' },
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+      executionState: {
+        executedToolCalls: [{ toolCall: { id: 'call_1' } }]
+      }
+    });
     expect(finalizeServertoolResponseStage).not.toHaveBeenCalled();
   });
 });

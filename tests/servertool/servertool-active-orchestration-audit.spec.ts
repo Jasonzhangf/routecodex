@@ -201,6 +201,8 @@ const TARGETS = [
       'structuredClone(args.baseObject)',
       'const baseForExecution = structuredClone',
       'isStopMessageAutoPreProjection',
+      'filterOutExecutedToolCalls',
+      'stripToolOutputs',
     ],
     required: [
       'prepareServertoolDispatchStage',
