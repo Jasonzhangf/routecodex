@@ -3,7 +3,6 @@ import {
   getBuiltinHandlerEntry
 } from './builtin-handler-catalog.js';
 import {
-  isServertoolRegisteredNameByConfig,
   planServertoolRegistryLookupFromSkeleton
 } from './skeleton-config.js';
 
@@ -22,7 +21,3 @@ export const getServerToolHandlerViaNativePlan = (
   }
   return undefined;
 };
-
-export function isRegisteredServerToolNameViaNativeConfig(name: string): boolean {
-  return isServertoolRegisteredNameByConfig(name);
-}

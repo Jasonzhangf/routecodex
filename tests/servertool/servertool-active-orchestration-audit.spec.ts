@@ -409,12 +409,13 @@ const TARGETS = [
       'hasHandler:',
       'function resolveBuiltinEntry(',
       '.trim().toLowerCase()',
+      'isRegisteredServerToolNameViaNativeConfig',
+      'isServertoolRegisteredNameByConfig',
     ],
     required: [
       'const registryLookupInput = {',
       'const actionPlan = planServertoolRegistryLookupFromSkeleton(registryLookupInput);',
       'planServertoolRegistryLookupFromSkeleton(',
-      'isServertoolRegisteredNameByConfig(',
       'getServerToolHandlerViaNativePlan',
     ],
   },
@@ -430,6 +431,16 @@ const TARGETS = [
       'projectAutoServerToolHookDescriptors',
       'planServertoolRegistrySourceProjectionWithNative',
       'projectRegistrySources',
+    ],
+  },
+  {
+    file: 'sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts',
+    forbidden: [
+      'isRegisteredServerToolNameViaNativeConfig',
+    ],
+    required: [
+      'isServertoolRegisteredNameByConfig',
+      'return isServertoolRegisteredNameByConfig(name);',
     ],
   },
 ] as const;

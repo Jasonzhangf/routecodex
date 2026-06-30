@@ -3495,6 +3495,8 @@ function checkServertoolRegistryRustOwner() {
     'handler: ServerToolHandler',
     'function resolveBuiltinEntry(',
     '.trim().toLowerCase()',
+    'isRegisteredServerToolNameViaNativeConfig',
+    'isServertoolRegisteredNameByConfig',
   ]) {
     if (registryRegistrationShell.includes(marker)) {
       fail(
@@ -3520,7 +3522,6 @@ function checkServertoolRegistryRustOwner() {
     'const registryLookupInput = {',
     'const actionPlan = planServertoolRegistryLookupFromSkeleton(registryLookupInput);',
     'planServertoolRegistryLookupFromSkeleton(',
-    'isServertoolRegisteredNameByConfig(',
   ]) {
     assertContains('servertool-registry-registration-shell', TS_REGISTRY_REGISTRATION_SHELL, registryRegistrationShell, needle);
   }
@@ -3547,6 +3548,12 @@ function checkServertoolRegistryRustOwner() {
     registryOrchestrationShell,
     'projectRegistrySources('
   );
+  for (const needle of [
+    'isServertoolRegisteredNameByConfig',
+    'return isServertoolRegisteredNameByConfig(name);',
+  ]) {
+    assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
+  }
   for (const marker of [
     '[...listBuiltinHandlerNames(), ...listAdHocHandlerNames()]',
     '[...listBuiltinAutoHandlerEntries(), ...listAdHocAutoHandlerEntries()]',

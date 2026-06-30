@@ -8,9 +8,9 @@ import {
   listBuiltinHandlerNames
 } from './builtin-handler-catalog.js';
 import {
-  getServerToolHandlerViaNativePlan,
-  isRegisteredServerToolNameViaNativeConfig
+  getServerToolHandlerViaNativePlan
 } from './registry-registration-shell.js';
+import { isServertoolRegisteredNameByConfig } from './skeleton-config.js';
 import {
   projectAutoServerToolHookDescriptors,
   projectRegistrySources
@@ -56,7 +56,7 @@ export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
 };
 
 export function isRegisteredServerToolName(name: string): boolean {
-  return isRegisteredServerToolNameViaNativeConfig(name);
+  return isServertoolRegisteredNameByConfig(name);
 }
 
 export function listRegisteredServerToolHandlerRecords(): ServerToolRegisteredHandlerRecord[] {

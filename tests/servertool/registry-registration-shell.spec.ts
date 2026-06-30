@@ -23,7 +23,6 @@ jest.unstable_mockModule(
 
 const {
   getServerToolHandlerViaNativePlan,
-  isRegisteredServerToolNameViaNativeConfig,
 } = await import(
   '../../sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.js'
 );
@@ -73,14 +72,12 @@ describe('registry-registration-shell', () => {
     );
   });
 
-  test('checks registered tool names through native skeleton config', () => {
-    isServertoolRegisteredNameByConfigMock.mockReturnValueOnce(true);
-    expect(isRegisteredServerToolNameViaNativeConfig('alpha')).toBe(true);
+  test('does not keep a registered-name wrapper around skeleton config', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts', 'utf8')
+    );
 
-    isServertoolRegisteredNameByConfigMock.mockReturnValueOnce(false);
-    expect(isRegisteredServerToolNameViaNativeConfig('beta')).toBe(false);
-
-    isServertoolRegisteredNameByConfigMock.mockReturnValueOnce(false);
-    expect(isRegisteredServerToolNameViaNativeConfig('missing')).toBe(false);
+    expect(source).not.toContain('isRegisteredServerToolNameViaNativeConfig');
+    expect(source).not.toContain('isServertoolRegisteredNameByConfig');
   });
 });
