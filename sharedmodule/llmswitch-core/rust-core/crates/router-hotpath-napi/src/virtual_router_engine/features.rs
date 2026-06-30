@@ -711,6 +711,44 @@ mod tests {
     use serde_json::{json, Value};
 
     #[test]
+    fn responses_exec_command_tool_output_segment_preserves_last_tool_category() {
+        let request = json!({
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "修复脚本"}]
+                },
+                {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "call_id": "call_read",
+                    "arguments": "{\"cmd\":\"sed -n '1,220p' scripts/unsloth-studioctl.sh\",\"workdir\":\"/repo\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_read",
+                    "output": "script contents"
+                }
+            ],
+            "tools": [{
+                "type": "function",
+                "name": "exec_command",
+                "parameters": {"type": "object"}
+            }]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+
+        assert!(!features.latest_message_from_user);
+        assert!(features.has_tool_call_responses);
+        assert_eq!(
+            features.last_assistant_tool_category.as_deref(),
+            Some("thinking")
+        );
+    }
+
+    #[test]
     fn estimate_tokens_accounts_for_large_payloads() {
         let big = "x".repeat(800_000);
         let request = json!({

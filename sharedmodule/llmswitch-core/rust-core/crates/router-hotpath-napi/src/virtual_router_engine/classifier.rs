@@ -75,23 +75,26 @@ impl RoutingClassifier {
         // Web-search routing must be decided from current-turn signals only.
         // Do not inherit web_search intent from historical tool continuation.
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
-        let has_tool_activity = !latest_message_from_user && features.has_tool_call_responses;
         let has_visual = features.has_image_attachment
             || (features.has_video_attachment && features.has_remote_video_attachment);
-        // Jason 规则：thinking 只看当前轮是否为 fresh user input。
-        // stopless followup 是内部续轮，必须走 thinking。
+        // Fresh user input starts on thinking. Tool-output continuations keep the
+        // current turn on the previous tool category instead of falling into tools.
         let thinking_from_user = latest_message_from_user || stopless_followup;
-        // Coding route must be based on current-turn continuation signal only.
+        // Continuation routes must be based on current-turn tool-output signal only.
         // If this turn does not contain tool-call response activity, do not inherit
-        // historical "last tool was coding" into the new request.
+        // historical labels into a new request.
         let has_current_turn_continuation_signal =
             !latest_message_from_user && features.has_tool_call_responses;
+        let thinking_continuation =
+            has_current_turn_continuation_signal && last_tool_category == "thinking";
         let coding_continuation =
             has_current_turn_continuation_signal && last_tool_category == "coding";
         let search_continuation =
             has_current_turn_continuation_signal && last_tool_category == "search";
-        let tools_continuation =
+        let other_tool_continuation =
             has_current_turn_continuation_signal && last_tool_category == "other";
+        let unknown_tool_continuation =
+            has_current_turn_continuation_signal && last_tool_category.is_empty();
         let web_search_tool_intent =
             has_current_turn_continuation_signal && last_tool_category == "websearch";
         let user_text_lower = features.user_text_sample.to_lowercase();
@@ -137,8 +140,12 @@ impl RoutingClassifier {
         ));
         evaluation.push((
             "thinking".to_string(),
-            thinking_from_user && !reached_long_context,
-            "thinking:user-input".to_string(),
+            (thinking_from_user || thinking_continuation) && !reached_long_context,
+            if thinking_continuation {
+                "thinking:last-tool-thinking".to_string()
+            } else {
+                "thinking:user-input".to_string()
+            },
         ));
         evaluation.push((
             "coding".to_string(),
@@ -161,8 +168,8 @@ impl RoutingClassifier {
         ));
         evaluation.push((
             "tools".to_string(),
-            tools_continuation || (!search_continuation && has_tool_activity),
-            if tools_continuation {
+            other_tool_continuation || unknown_tool_continuation,
+            if other_tool_continuation {
                 "tools:last-tool-other".to_string()
             } else {
                 "tools:tool-request-detected".to_string()
@@ -320,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn previous_turn_read_continuation_no_longer_routes_to_thinking() {
+    fn previous_turn_read_continuation_stays_on_thinking_route() {
         let features = RoutingFeatures {
             latest_message_from_user: false,
             has_tools: true,
@@ -331,8 +338,9 @@ mod tests {
 
         let result = test_classifier().classify(&features);
 
-        assert_eq!(result.route_name, "tools");
-        assert!(result.reasoning.contains("tools:tool-request-detected"));
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:last-tool-thinking"));
+        assert!(!result.reasoning.contains("tools:tool-request-detected"));
         assert!(!result.reasoning.contains("thinking:user-input"));
     }
 
