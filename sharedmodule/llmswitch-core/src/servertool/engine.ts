@@ -3,5 +3,5 @@ export type {
   ServerToolOrchestrationResult
 } from './engine-orchestration-shell.js';
 export {
-  runServerToolOrchestration
+  runServerToolOrchestrationShell as runServerToolOrchestration
 } from './engine-orchestration-shell.js';

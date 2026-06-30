@@ -3,7 +3,7 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { recordStage } from '../conversion/hub/pipeline/stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../conversion/hub/pipeline/hub-stage-timing.js';
-import { runServerToolOrchestration } from './engine.js';
+import { runServerToolOrchestrationShell } from './engine-orchestration-shell.js';
 import {
   planServertoolResponseStageGateWithNative,
   detectProviderResponseShapeWithNative
@@ -65,7 +65,7 @@ export async function runServertoolResponseStageOrchestrationShell(
 
   logHubStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
   const orchestrationStart = Date.now();
-  const orchestration = await runServerToolOrchestration(
+  const orchestration = await runServerToolOrchestrationShell(
     {
       chat: options.payload as JsonObject,
       adapterContext: options.adapterContext,

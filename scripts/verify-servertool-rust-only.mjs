@@ -5102,6 +5102,7 @@ function checkServertoolRustOutcomeCloseout() {
     'const { stoplessExecution, runtimeAction } = planStoplessEngineRuntime({',
     'function createServerToolEngineRunner(',
     'type ServerToolEngineRunner =',
+    'export const runServerToolOrchestration = runServerToolOrchestrationShell;',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(
@@ -5273,8 +5274,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'const gatePlan = planServertoolResponseStageGateWithNative({',
     'detectProviderResponseShapeWithNative',
-    'const orchestration = await runServerToolOrchestration(',
-    'runServerToolOrchestration',
+    'const orchestration = await runServerToolOrchestrationShell(',
+    'runServerToolOrchestrationShell',
     'payload: options.payload',
     'executed: false',
   ]) {

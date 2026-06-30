@@ -261,8 +261,8 @@ const TARGETS = [
     required: [
       'const gatePlan = planServertoolResponseStageGateWithNative({',
       'detectProviderResponseShapeWithNative',
-      'const orchestration = await runServerToolOrchestration(',
-      'runServerToolOrchestration',
+      'const orchestration = await runServerToolOrchestrationShell(',
+      'runServerToolOrchestrationShell',
     ],
   },
   {

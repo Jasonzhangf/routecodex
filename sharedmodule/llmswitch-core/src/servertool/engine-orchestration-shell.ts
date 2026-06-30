@@ -199,5 +199,3 @@ export async function runServerToolOrchestrationShell(
     logProgress
   });
 }
-
-export const runServerToolOrchestration = runServerToolOrchestrationShell;
