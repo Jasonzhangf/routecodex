@@ -71,7 +71,6 @@ export function resolveServertoolEntryContext(args: {
       adapterContext: args.options.adapterContext,
       requestId: args.options.requestId,
       entryEndpoint: args.options.entryEndpoint,
-      providerProtocol,
       runtimeMetadata: runtimeMetadataSnapshot
     },
     includeToolCallNames,

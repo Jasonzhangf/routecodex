@@ -61,8 +61,7 @@ describe('entry-context-shell', () => {
       baseObject: { ok: true },
       contextBase: {
         requestId: 'req-1',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses'
+        entryEndpoint: '/v1/responses'
       }
     });
     expect(result.action === 'continue' ? [...(result.includeToolCallNames ?? [])] : []).toEqual(['web_search']);
@@ -109,7 +108,7 @@ describe('entry-context-shell', () => {
     expect(result).toMatchObject({
       action: 'continue',
       contextBase: {
-        providerProtocol: 'anthropic-messages'
+        entryEndpoint: '/v1/messages'
       }
     });
   });

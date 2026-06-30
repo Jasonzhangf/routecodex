@@ -72,7 +72,6 @@ export interface ServerToolHandlerContext {
   adapterContext: AdapterContext;
   requestId: string;
   entryEndpoint: string;
-  providerProtocol: string;
   runtimeMetadata?: JsonObject;
 }
 

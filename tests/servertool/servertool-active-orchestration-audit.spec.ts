@@ -25,6 +25,7 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/types.ts',
     forbidden: [
       'providerProtocol: string;\n  disableToolCallHandlers?: boolean;',
+      'providerProtocol: string;\n  runtimeMetadata?: JsonObject;',
     ],
     required: [
       'export interface ServerSideToolEngineOptions',

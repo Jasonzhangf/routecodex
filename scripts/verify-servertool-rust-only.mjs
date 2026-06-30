@@ -5045,6 +5045,12 @@ function checkServertoolRustOutcomeCloseout() {
       'ServerSideToolEngineOptions must not accept providerProtocol as a second protocol truth'
     );
   }
+  if (/export interface ServerToolHandlerContext\s*\{[\s\S]{0,260}providerProtocol:\s*string;/.test(servertoolOptionsTypes)) {
+    fail(
+      'servertool-handler-context-metadata-center-only',
+      'ServerToolHandlerContext must not carry providerProtocol as a duplicated protocol truth'
+    );
+  }
   const engineObservationShell = readRequired(TS_ENGINE_OBSERVATION_SHELL);
   for (const marker of [
     'export function logServertoolNonBlocking(',

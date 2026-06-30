@@ -236,19 +236,12 @@ function createOptions(traces: ServerToolAutoHookTraceEvent[]): ServerSideToolEn
 }
 
 function createContextBase(options: ServerSideToolEngineOptions): ServerToolHandlerContext {
-  const providerProtocol = MetadataCenter.attach(
-    options.adapterContext as Record<string, unknown>
-  ).readRuntimeControl().providerProtocol;
-  if (typeof providerProtocol !== 'string' || !providerProtocol.trim()) {
-    throw new Error('test context requires metadata center runtime_control.providerProtocol');
-  }
   return {
     base: options.chatResponse,
     toolCalls: [],
     adapterContext: options.adapterContext,
     requestId: options.requestId,
-    entryEndpoint: options.entryEndpoint,
-    providerProtocol
+    entryEndpoint: options.entryEndpoint
   };
 }
 
