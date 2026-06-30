@@ -172,7 +172,3 @@ export function buildServertoolFollowupConfig(): ServertoolFollowupConfig {
 export function buildServertoolStateConfig(): ServertoolStateConfig {
   return getDerivedConfig().stateConfig;
 }
-
-export function isServertoolEnabledByConfig(name: string): boolean {
-  return getServertoolToolSpec(name)?.enabled !== false;
-}

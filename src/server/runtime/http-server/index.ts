@@ -266,13 +266,19 @@ function buildMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<
   const requestTruth = center.readRequestTruth();
   const continuationContext = center.readContinuationContext();
   const runtimeControl = center.readRuntimeControl();
+  const excludedProviderKeys = Array.isArray(metadata.excludedProviderKeys)
+    ? metadata.excludedProviderKeys
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map((value) => value.trim())
+    : [];
   const hasRequestTruth = Object.keys(requestTruth).length > 0;
   const hasContinuationContext = Object.keys(continuationContext).length > 0;
   const hasRuntimeControl = Object.keys(runtimeControl).length > 0;
   return {
     ...(hasRequestTruth ? { requestTruth } : {}),
     ...(hasContinuationContext ? { continuationContext } : {}),
-    ...(hasRuntimeControl ? { runtimeControl } : {})
+    ...(hasRuntimeControl ? { runtimeControl } : {}),
+    ...(excludedProviderKeys.length > 0 ? { excludedProviderKeys } : {})
   };
 }
 

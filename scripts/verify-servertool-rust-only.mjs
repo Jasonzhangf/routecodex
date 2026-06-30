@@ -3012,6 +3012,8 @@ function checkServertoolSkeletonConfigRustOwner() {
     'profile.autoLimit === true',
     'profile.contextDecorationMode ===',
     'Object.fromEntries(',
+    'isServertoolEnabledByConfig',
+    'getServertoolToolSpec(name)?.enabled',
   ]) {
     if (skeletonConfigShell.includes(keyword)) {
       fail(

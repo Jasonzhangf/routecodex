@@ -63,6 +63,17 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts',
+    forbidden: [
+      'isServertoolEnabledByConfig',
+      'getServertoolToolSpec(name)?.enabled',
+    ],
+    required: [
+      'planServertoolSkeletonDerivedConfigWithNative',
+      'resolveServertoolToolSpecWithNative',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts',
     forbidden: [
       "outcome: 'error'",

@@ -57,7 +57,14 @@ jest.unstable_mockModule(
       stateConfig: skeletonDocument.servertool.state
     })),
     normalizeServertoolRegistrationSpecWithNative: jest.fn(() => null),
-    resolveServertoolToolSpecWithNative: jest.fn(() => null)
+    resolveServertoolToolSpecWithNative: jest.fn(() => null),
+    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({ entries: [] })),
+    planServertoolBuiltinHandlerEntryWithNative: jest.fn(() => ({})),
+    planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({ names: [] })),
+    planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({ entries: [] })),
+    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(() => ({ action: 'return_null' })),
+    resolveServertoolRegisteredNameWithNative: jest.fn(() => false),
+    resolveServertoolBuiltinHandlerEntryWithNative: jest.fn(() => null)
   })
 );
 

@@ -1154,7 +1154,10 @@ describe('direct passthrough route-level', () => {
       };
     });
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
-      const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
+      const snapshot = metadata.metadataCenterSnapshot && typeof metadata.metadataCenterSnapshot === 'object'
+        ? metadata.metadataCenterSnapshot as Record<string, unknown>
+        : {};
+      const excluded = Array.isArray(snapshot.excludedProviderKeys) ? snapshot.excludedProviderKeys : [];
       const providerKey = excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey;
       return {
         target: {
@@ -1248,12 +1251,156 @@ describe('direct passthrough route-level', () => {
     expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_429_switched' });
     expect(firstDirectSend).toHaveBeenCalledTimes(1);
     expect(secondDirectSend).toHaveBeenCalledTimes(1);
-    expect(sentPayloads).toEqual([requestBody, requestBody]);
+    expect(sentPayloads).toHaveLength(2);
+    expect(sentPayloads.map((payload) => payload.model)).toEqual(['gpt-5.5', 'gpt-5.5']);
+    expect(sentPayloads.map((payload) => payload.input)).toEqual([requestBody.input, requestBody.input]);
     expect(route).toHaveBeenCalledTimes(2);
     expect(route.mock.calls[0]?.[1]).toEqual(expect.not.objectContaining({ excludedProviderKeys: expect.anything() }));
     expect(route.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
       excludedProviderKeys: [firstProviderKey],
       routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+    }));
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+  });
+
+  it('router-direct hands recoverable 429 to Hub relay when VR selects a cross-protocol next target', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const firstProviderKey = 'ykk.ykk.gpt-5.3-codex-spark';
+    const secondProviderKey = 'minimax.key1.MiniMax-M3';
+    const direct429 = () => Object.assign(new Error('HTTP 429: Concurrency limit exceeded for user'), {
+      statusCode: 429,
+      status: 429,
+      code: 'HTTP_429',
+      upstreamCode: 'HTTP_429',
+    });
+    const firstDirectSend = jest.fn(async () => {
+      throw direct429();
+    });
+    const secondDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'should_not_direct_send_cross_protocol_target',
+      },
+    }));
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      const snapshot = metadata.metadataCenterSnapshot && typeof metadata.metadataCenterSnapshot === 'object'
+        ? metadata.metadataCenterSnapshot as Record<string, unknown>
+        : {};
+      const excluded = Array.isArray(snapshot.excludedProviderKeys) ? snapshot.excludedProviderKeys : [];
+      const useRelayTarget = excluded.includes(firstProviderKey);
+      const providerKey = useRelayTarget ? secondProviderKey : firstProviderKey;
+      return {
+        target: {
+          providerKey,
+          providerType: useRelayTarget ? 'anthropic' : 'openai',
+          outboundProfile: useRelayTarget ? 'anthropic-messages' : 'openai-responses',
+          runtimeKey: providerKey,
+          modelId: useRelayTarget ? 'MiniMax-M3' : 'gpt-5.3-codex-spark',
+        },
+        decision: { routeName: 'tools', pool: [firstProviderKey, secondProviderKey], reason: 'tools:test' },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_glm_4444',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('outer pipeline owns relay handoff after router-direct skip'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_glm_4444', (server as any).hubPipeline]
+    ]);
+    (server as any).providerHandles = new Map([
+      [firstProviderKey, {
+        runtimeKey: firstProviderKey,
+        providerId: 'ykk',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.3-codex-spark' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: firstDirectSend,
+        },
+      }],
+      [secondProviderKey, {
+        runtimeKey: secondProviderKey,
+        providerId: 'minimax',
+        providerType: 'anthropic',
+        providerFamily: 'anthropic',
+        providerProtocol: 'anthropic-messages',
+        runtime: { modelId: 'MiniMax-M3' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: secondDirectSend,
+        },
+      }],
+    ]);
+
+    const requestBody = {
+      model: 'router-gpt-5.5',
+      stream: true,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+    };
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5555,
+        host: '127.0.0.1',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_glm_4444',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_429_cross_protocol_relay',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: requestBody,
+        metadata: {},
+      },
+    );
+
+    expect(outcome.used).toBe(false);
+    expect(outcome.reason).toBe('target_outbound_profile_requires_hub_relay');
+    expect(outcome.preselectedRoute?.target).toMatchObject({
+      providerKey: secondProviderKey,
+      outboundProfile: 'anthropic-messages',
+    });
+    expect(firstDirectSend).toHaveBeenCalledTimes(1);
+    expect(secondDirectSend).not.toHaveBeenCalled();
+    expect(route).toHaveBeenCalledTimes(2);
+    expect(route.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      excludedProviderKeys: [firstProviderKey],
+      metadataCenterSnapshot: expect.objectContaining({
+        excludedProviderKeys: [firstProviderKey],
+      }),
+      routecodexRoutingPolicyGroup: 'gateway_glm_4444',
     }));
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
   });
