@@ -392,6 +392,8 @@ const TARGETS = [
       '.trim().toLowerCase()',
     ],
     required: [
+      'const registryLookupInput = {',
+      'const actionPlan = planServertoolRegistryLookupFromSkeleton(registryLookupInput);',
       'planServertoolRegistryLookupFromSkeleton(',
       'isServertoolRegisteredNameByConfig(',
       'getServerToolHandlerViaNativePlan',

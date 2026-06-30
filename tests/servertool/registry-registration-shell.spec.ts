@@ -59,6 +59,8 @@ describe('registry-registration-shell', () => {
 
     expect(source).not.toContain('function resolveBuiltinEntry(');
     expect(source).not.toContain('.trim().toLowerCase()');
+    expect(source).toContain('const registryLookupInput = {');
+    expect(source).toContain('const actionPlan = planServertoolRegistryLookupFromSkeleton(registryLookupInput);');
   });
 
   test('fails fast when native builtin lookup omits canonicalName', () => {

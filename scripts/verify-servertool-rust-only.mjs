@@ -3507,6 +3507,8 @@ function checkServertoolRegistryRustOwner() {
     }
   }
   for (const needle of [
+    'const registryLookupInput = {',
+    'const actionPlan = planServertoolRegistryLookupFromSkeleton(registryLookupInput);',
     'planServertoolRegistryLookupFromSkeleton(',
     'isServertoolRegisteredNameByConfig(',
   ]) {
