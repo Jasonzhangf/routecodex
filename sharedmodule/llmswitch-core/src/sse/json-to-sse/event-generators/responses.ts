@@ -7,17 +7,14 @@ import type {
   ResponsesSseEvent,
   ResponsesResponse,
   ResponsesOutputItem,
-  ResponsesMessageItem,
   ResponsesFunctionCallItem,
   ResponsesReasoningItem,
-  ResponsesContent,
-  ResponsesTool,
-  ResponsesToolCall,
-  ResponsesFunctionCallOutputItem
+  ResponsesContent
 } from '../../types/index.js';
 import { TimeUtils, StringUtils } from '../../shared/utils.js';
 import {
   buildResponsesSseErrorPayloadWithNative,
+  buildResponsesSseOutputItemDescriptorWithNative,
   normalizeResponsesSseReasoningSummaryWithNative,
   normalizeResponsesSseResponsePayloadWithNative
 } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
@@ -183,52 +180,7 @@ export function buildOutputItemStartEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
-  const itemDescriptor: Record<string, unknown> = {
-    id: outputItem.id,
-    type: outputItem.type,
-    status: 'in_progress'
-  };
-
-  if (outputItem.type === 'message') {
-    const message = outputItem as ResponsesMessageItem;
-    if (message.role) {
-      itemDescriptor.role = message.role;
-    }
-    itemDescriptor.content = [];
-  }
-
-  if (outputItem.type === 'function_call') {
-    const functionCall = outputItem as ResponsesFunctionCallItem;
-    if (functionCall.name) {
-      itemDescriptor.name = functionCall.name;
-    }
-    if (functionCall.call_id) {
-      itemDescriptor.call_id = functionCall.call_id;
-    }
-    itemDescriptor.arguments = '';
-  }
-
-  if (outputItem.type === 'function_call_output') {
-    const functionCallOutput = outputItem as ResponsesFunctionCallOutputItem;
-    if (functionCallOutput.call_id) {
-      itemDescriptor.call_id = functionCallOutput.call_id;
-    }
-    if (functionCallOutput.tool_call_id) {
-      itemDescriptor.tool_call_id = functionCallOutput.tool_call_id;
-    }
-    itemDescriptor.output = functionCallOutput.output;
-  }
-
-  if (outputItem.type === 'reasoning') {
-    const reasoning = outputItem as ResponsesReasoningItem;
-    const normalizedSummary = normalizeReasoningSummaryFieldWithNative(reasoning.summary);
-    if (normalizedSummary) {
-      itemDescriptor.summary = normalizedSummary;
-    }
-    if (typeof reasoning.encrypted_content === 'string' && reasoning.encrypted_content.length) {
-      itemDescriptor.encrypted_content = reasoning.encrypted_content;
-    }
-  }
+  const item = buildResponsesSseOutputItemDescriptorWithNative(outputItem, 'added');
 
   return {
     type: 'response.output_item.added',
@@ -237,7 +189,7 @@ export function buildOutputItemStartEvent(
     direction: baseEvent.direction,
     data: {
       output_index: context.outputIndexCounter,
-      item: itemDescriptor
+      item
     },
     sequenceNumber: baseEvent.sequenceNumber
   };
@@ -485,7 +437,7 @@ export function buildReasoningStartEvent(
     direction: baseEvent.direction,
     data: {
       item_id: reasoning.id,
-    summary: normalizeReasoningSummaryFieldWithNative(reasoning.summary)
+      summary: normalizeReasoningSummaryFieldWithNative(reasoning.summary)
     },
     sequenceNumber: baseEvent.sequenceNumber
   };
@@ -667,19 +619,7 @@ export function buildOutputItemDoneEvent(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
   const baseEvent = createBaseEvent(context, config);
-  // NOTE: Codex CLI expects `output_item.done` to contain a fully-formed output item
-  // (e.g. message includes role/content). A minimal `{id,type,status}` breaks parsing.
-  const itemDescriptor: Record<string, unknown> = {
-    ...(outputItem as any),
-    status: 'completed'
-  };
-  if (outputItem.type === 'reasoning') {
-    const reasoning = outputItem as ResponsesReasoningItem;
-    const normalizedSummary = normalizeReasoningSummaryFieldWithNative(reasoning.summary);
-    if (normalizedSummary) {
-      itemDescriptor.summary = normalizedSummary;
-    }
-  }
+  const item = buildResponsesSseOutputItemDescriptorWithNative(outputItem, 'done');
 
   return {
     type: 'response.output_item.done',
@@ -688,7 +628,7 @@ export function buildOutputItemDoneEvent(
     direction: baseEvent.direction,
     data: {
       output_index: context.outputIndexCounter,
-      item: itemDescriptor
+      item
     },
     sequenceNumber: baseEvent.sequenceNumber
   };

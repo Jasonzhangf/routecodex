@@ -113,6 +113,8 @@ for (const forbidden of [
   'function normalizeUsage(',
   'function normalizeReasoningSummaryEntries(',
   'function normalizeReasoningSummaryField(',
+  'const itemDescriptor: Record<string, unknown>',
+  '...(outputItem as any)',
   "type: 'internal_error'",
   "code: 'generation_error'",
   'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',

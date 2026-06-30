@@ -1,3 +1,11 @@
+# 2026-06-30: Responses SSE output item descriptor native owner slice
+
+- Red evidence：新增 `verify-sse-architecture-boundary` marker 后，门禁先红，命中 `const itemDescriptor: Record<string, unknown>` 与 `...(outputItem as any)`，证明 `responses.ts` 仍在本地合成 output item descriptor。
+- Fix：新增 Rust `buildResponsesSseOutputItemDescriptorJson`，`response.output_item.added/done` 的 item descriptor materialize 下沉到 Rust；TS 只调用 `buildResponsesSseOutputItemDescriptorWithNative()` 并封装 event envelope。
+- 正向/反向测试：Rust 覆盖 function_call added、reasoning done summary、missing type fail-fast；Jest 覆盖 native wrapper、JSON->SSE projection、missing type 不合成 unknown descriptor。
+- 验证：Rust focused `responses_sse_output_item` 3/3 PASS；native build PASS；focused Jest 20/20 PASS；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；`git diff --check` PASS。
+- 真实 4444 replay：`req_1782794868950_3m64se1xv/provider-response_1.json` materialize -> JSON->SSE，`completed=true`、`done=true`、`error=false`、`missingType=0`、`missingSequence=0`、`outputAdded=2`、`outputDone=2`。
+
 # 2026-06-30: Responses SSE reasoning summary native owner slice
 
 - SSE Rust 化继续收口 `sse.responses_encode_projection`：`responses.ts` 删除本地 `normalizeReasoningSummaryEntries` / `normalizeReasoningSummaryField` 语义归一化，reasoning summary `summary_text` materialize 改由 Rust `normalizeResponsesSseReasoningSummaryJson` 负责。

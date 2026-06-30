@@ -109,6 +109,102 @@ fn normalize_responses_sse_reasoning_summary(summary_raw: &Value) -> Result<Valu
     Ok(Value::Array(normalized))
 }
 
+fn insert_string_if_present(
+    target: &mut Map<String, Value>,
+    source: &Map<String, Value>,
+    field: &str,
+) {
+    if let Some(text) = source.get(field).and_then(Value::as_str) {
+        if !text.is_empty() {
+            target.insert(field.to_string(), Value::String(text.to_string()));
+        }
+    }
+}
+
+fn build_responses_sse_output_item_added_descriptor(
+    source: &Map<String, Value>,
+) -> Result<Value, String> {
+    let item_type = source
+        .get("type")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Responses output item descriptor missing type".to_string())?;
+
+    let mut item = Map::new();
+    insert_string_if_present(&mut item, source, "id");
+    item.insert("type".to_string(), Value::String(item_type.to_string()));
+    item.insert(
+        "status".to_string(),
+        Value::String("in_progress".to_string()),
+    );
+
+    match item_type {
+        "message" => {
+            insert_string_if_present(&mut item, source, "role");
+            item.insert("content".to_string(), Value::Array(Vec::new()));
+        }
+        "function_call" => {
+            insert_string_if_present(&mut item, source, "name");
+            insert_string_if_present(&mut item, source, "call_id");
+            item.insert("arguments".to_string(), Value::String(String::new()));
+        }
+        "function_call_output" => {
+            insert_string_if_present(&mut item, source, "call_id");
+            insert_string_if_present(&mut item, source, "tool_call_id");
+            if let Some(output) = source.get("output") {
+                item.insert("output".to_string(), output.clone());
+            }
+        }
+        "reasoning" => {
+            if let Some(summary) = source.get("summary") {
+                let normalized = normalize_responses_sse_reasoning_summary(summary)?;
+                if normalized.as_array().is_some_and(|entries| !entries.is_empty()) {
+                    item.insert("summary".to_string(), normalized);
+                }
+            }
+            insert_string_if_present(&mut item, source, "encrypted_content");
+        }
+        _ => {}
+    }
+
+    Ok(Value::Object(item))
+}
+
+fn build_responses_sse_output_item_done_descriptor(
+    source: &Map<String, Value>,
+) -> Result<Value, String> {
+    let mut item = source.clone();
+    item.insert("status".to_string(), Value::String("completed".to_string()));
+    if source.get("type").and_then(Value::as_str) == Some("reasoning") {
+        if let Some(summary) = source.get("summary") {
+            let normalized = normalize_responses_sse_reasoning_summary(summary)?;
+            if normalized.as_array().is_some_and(|entries| !entries.is_empty()) {
+                item.insert("summary".to_string(), normalized);
+            } else {
+                item.remove("summary");
+            }
+        }
+    }
+    Ok(Value::Object(item))
+}
+
+pub fn build_responses_sse_output_item_descriptor(
+    output_item: Value,
+    lifecycle: Option<&str>,
+) -> Result<Value, String> {
+    let source = output_item
+        .as_object()
+        .ok_or_else(|| "Responses output item descriptor expected object".to_string())?;
+    match lifecycle.unwrap_or("done") {
+        "added" => build_responses_sse_output_item_added_descriptor(source),
+        "done" => build_responses_sse_output_item_done_descriptor(source),
+        other => Err(format!(
+            "Unsupported Responses output item descriptor lifecycle: {}",
+            other
+        )),
+    }
+}
+
 fn event_type(input: &Map<String, Value>) -> Result<&str, String> {
     input
         .get("type")
@@ -239,6 +335,29 @@ pub fn normalize_responses_sse_reasoning_summary_json(
     let output = normalize_responses_sse_reasoning_summary(&summary)?;
     serde_json::to_string(&output)
         .map_err(|error| format!("Failed to serialize Responses reasoning summary JSON: {}", error))
+}
+
+pub fn build_responses_sse_output_item_descriptor_json(
+    output_item_json: String,
+    lifecycle_json: Option<String>,
+) -> Result<String, String> {
+    let output_item: Value = serde_json::from_str(&output_item_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses output item descriptor JSON: {}",
+            error
+        )
+    })?;
+    let lifecycle = lifecycle_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let output = build_responses_sse_output_item_descriptor(output_item, lifecycle)?;
+    serde_json::to_string(&output).map_err(|error| {
+        format!(
+            "Failed to serialize Responses output item descriptor JSON: {}",
+            error
+        )
+    })
 }
 
 pub fn build_responses_sse_error_payload(message: &str) -> Result<Value, String> {
@@ -417,5 +536,68 @@ mod tests {
                 { "type": "summary_text", "text": "still kept" }
             ])
         );
+    }
+
+    #[test]
+    fn builds_responses_sse_output_item_added_descriptor() {
+        let output = build_responses_sse_output_item_descriptor(
+            json!({
+                "id": "fc_1",
+                "type": "function_call",
+                "status": "completed",
+                "name": "search",
+                "call_id": "call_1",
+                "arguments": "{\"q\":\"rust\"}"
+            }),
+            Some("added"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "id": "fc_1",
+                "type": "function_call",
+                "status": "in_progress",
+                "name": "search",
+                "call_id": "call_1",
+                "arguments": ""
+            })
+        );
+    }
+
+    #[test]
+    fn builds_responses_sse_output_item_done_descriptor_with_normalized_reasoning_summary() {
+        let output = build_responses_sse_output_item_descriptor(
+            json!({
+                "id": "rs_1",
+                "type": "reasoning",
+                "summary": ["- inspect `file.ts`"],
+                "content": [],
+                "encrypted_content": "enc_1"
+            }),
+            Some("done"),
+        )
+        .unwrap();
+
+        assert_eq!(output["status"], json!("completed"));
+        assert_eq!(
+            output["summary"],
+            json!([{ "type": "summary_text", "text": "- inspect `file.ts`" }])
+        );
+        assert_eq!(output["encrypted_content"], json!("enc_1"));
+    }
+
+    #[test]
+    fn rejects_responses_sse_output_item_added_descriptor_missing_type() {
+        let err = build_responses_sse_output_item_descriptor(
+            json!({
+                "id": "item_missing_type"
+            }),
+            Some("added"),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Responses output item descriptor missing type"));
     }
 }
