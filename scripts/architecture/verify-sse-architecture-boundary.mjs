@@ -121,9 +121,17 @@ for (const forbidden of [
   'created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0)',
   'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return undefined;\n  }',
   'if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {\n    return undefined;\n  }',
+  'record.input_tokens',
+  'record.output_tokens',
+  'record.promptTokens',
+  'record.completionTokens',
+  'record.inputTokens',
+  'record.outputTokens',
+  'record.totalTokens',
+  '(promptTokens ?? 0) + (completionTokens ?? 0)',
 ]) {
   if (chatEventGenerator.includes(forbidden)) {
-    failures.push(`Chat SSE generator must not synthesize response id/created truth: ${forbidden}`);
+    failures.push(`Chat SSE generator must not synthesize response id/created/usage truth: ${forbidden}`);
   }
 }
 

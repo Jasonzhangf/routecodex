@@ -57,22 +57,9 @@ function normalizeChatUsage(usage: unknown): ChatUsage | undefined {
     throw new Error('Invalid Chat usage: expected object');
   }
   const record = usage as Record<string, unknown>;
-  const promptTokens = readNonNegativeInteger(
-    record.prompt_tokens ?? record.input_tokens ?? record.promptTokens ?? record.inputTokens,
-    'prompt_tokens'
-  );
-  const completionTokens = readNonNegativeInteger(
-    record.completion_tokens ?? record.output_tokens ?? record.completionTokens ?? record.outputTokens,
-    'completion_tokens'
-  );
-  const totalTokens = readNonNegativeInteger(
-    record.total_tokens ??
-      record.totalTokens ??
-      ((promptTokens ?? 0) + (completionTokens ?? 0) > 0
-        ? (promptTokens ?? 0) + (completionTokens ?? 0)
-        : undefined),
-    'total_tokens'
-  );
+  const promptTokens = readNonNegativeInteger(record.prompt_tokens, 'prompt_tokens');
+  const completionTokens = readNonNegativeInteger(record.completion_tokens, 'completion_tokens');
+  const totalTokens = readNonNegativeInteger(record.total_tokens, 'total_tokens');
   if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {
     throw new Error('Invalid Chat usage: missing token fields');
   }

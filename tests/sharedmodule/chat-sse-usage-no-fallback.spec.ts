@@ -71,4 +71,69 @@ describe('chat SSE usage no-fallback boundary', () => {
     expect(text).toContain('Invalid Chat usage.prompt_tokens');
     expect(text).not.toContain('data: [DONE]');
   });
+
+  it('rejects Responses-style usage aliases instead of normalizing them', async () => {
+    const converter = new ChatJsonToSseConverterRefactored();
+    const response: ChatCompletionResponse = {
+      id: 'chatcmpl_response_usage_alias',
+      object: 'chat.completion',
+      created: 1,
+      model: 'gpt-4o-mini',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'hello'
+        },
+        finish_reason: 'stop'
+      }],
+      usage: {
+        input_tokens: 12,
+        output_tokens: 5,
+        total_tokens: 17
+      }
+    } as unknown as ChatCompletionResponse;
+
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_chat_response_usage_alias',
+      model: response.model
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('"code":"generation_error"');
+    expect(text).toContain('Invalid Chat usage: missing token fields');
+    expect(text).not.toContain('data: [DONE]');
+  });
+
+  it('requires explicit total_tokens instead of deriving it from prompt and completion', async () => {
+    const converter = new ChatJsonToSseConverterRefactored();
+    const response: ChatCompletionResponse = {
+      id: 'chatcmpl_missing_total_usage',
+      object: 'chat.completion',
+      created: 1,
+      model: 'gpt-4o-mini',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'hello'
+        },
+        finish_reason: 'stop'
+      }],
+      usage: {
+        prompt_tokens: 12,
+        completion_tokens: 5
+      }
+    } as unknown as ChatCompletionResponse;
+
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_chat_missing_total_usage',
+      model: response.model
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('"code":"generation_error"');
+    expect(text).toContain('Invalid Chat usage: missing token fields');
+    expect(text).not.toContain('data: [DONE]');
+  });
 });

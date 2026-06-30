@@ -1,8 +1,21 @@
+# 2026-06-30: priority provider health-neutral + 1-3-5 backoff verified
+- `provider-failure-policy-impl.ts` 已把 recoverable provider failure 改成 health-neutral，避免把 priority provider 长期写进 VR cooldown/trip。
+- `request-executor-error-action-queue.ts` 的 blocking backoff 序列已收口为 `1s -> 3s -> 5s -> repeat`，对应单测已绿。
+- 关键验证：`provider-failure-policy.spec.ts`、`provider-failure-policy-upstream-stream-incomplete.spec.ts`、`request-executor-error-action-queue.spec.ts`、`request-executor-global-error-backoff.spec.ts`、`virtual-router-health-last-provider.spec.ts`、`virtual-router-provider-unavailable-cooldown-native.spec.ts`、`virtual-router-error-classification-top-level-native.spec.ts` 全绿。
+- 发现：`scripts/tests/provider-failure-ban-blackbox.mjs` 与 `scripts/tests/provider-direct-failure-failover-blackbox.mjs` 仍引用已移除的 `dist/server/runtime/http-server/provider-traffic-governor.js`，已改到 `dist/modules/traffic-governor/index.js`；但 provider-failure-ban-blackbox 继续卡在 bootstrapped VR 缺 `metadata.runtime_control.preselectedRoute` 的旧合同，说明黑盒请求 truth 还没跟主链合同对齐，需另行处理。
+
 # 2026-06-30: servertool cli projection input local
 
 - `cli-projection-runtime-shell.ts` 把 tool arguments native parse 结果收成 `projectionInput`，CLI projection native 输出只消费单点输入载体。
 - `cli-projection-runtime-shell.spec.ts`、`servertool-active-orchestration-audit.spec.ts`、`verify-servertool-rust-only.mjs` 已同步锁 `projectionInput` marker。
 - 验证：cli-projection focused Jest、sharedmodule `tsc`、`verify:servertool-rust-only`、`verify:function-map-compile-gate`、`verify:architecture-mainline-call-map`、`git diff --check` 均已通过。
+
+# 2026-06-30: Chat JSON->SSE usage alias fallback removed
+
+- 本 slice 继续收口 `sse.chat_stream_projection`：`chat.ts::normalizeChatUsage` 不再接受 `input_tokens/output_tokens`、camelCase `promptTokens/completionTokens/inputTokens/outputTokens/totalTokens`，也不再用 `prompt + completion` 推导缺失 `total_tokens`。
+- Chat JSON->SSE encode 现在只接受 canonical chat usage：`prompt_tokens` / `completion_tokens` / `total_tokens`；缺字段或 Responses-style alias 直接生成 `generation_error`，不再 fallback 到 `[DONE]` 成功流。
+- 门禁：`verify-sse-architecture-boundary.mjs` 禁止 chat generator 重新出现 usage alias marker 和 total 推导表达式；`chat-sse-usage-no-fallback.spec.ts` 增加 Responses-style alias 与 missing total 的反向测试。
+- 验证：focused Jest `chat-sse-usage-no-fallback + chat-sse-usage-roundtrip` 16 passed；`verify:sse-architecture-boundary` PASS；`verify:responses-sse-business-module` PASS；sharedmodule/root `tsc --noEmit` PASS；真实 chat SSE 样本 `req_1782778465399_hrxbpl3tz/provider-response_1.json` 先 materialize 再 JSON->SSE replay 成功，`has_done=true`、`has_error=false`、usage 保持 canonical chat `{completion_tokens:38,prompt_tokens:262815,total_tokens:262846}`。
 
 # 2026-06-30: Responses JSON->SSE usage alias fallback removed
 
