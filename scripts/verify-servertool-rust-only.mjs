@@ -6183,6 +6183,8 @@ function checkServertoolPostflightLoggingFailFast() {
     'payloadRecord.input',
     "if ('injection' in followup)",
     'followup.injection?.ops',
+    'const engineFinalResult = {',
+    'return engineFinalResult;',
   ]) {
     if (postflightSource.includes(marker)) {
       fail(
@@ -6194,8 +6196,8 @@ function checkServertoolPostflightLoggingFailFast() {
   for (const marker of [
     'buildServertoolPostflightObservationSummaryWithNative({',
     "args.stageRecorder.record('servertool.execution', summary);",
-    'const engineFinalResult = {',
-    'return engineFinalResult;',
+    'chat: engineResult.finalChatResponse',
+    'executed: true',
   ]) {
     if (!postflightSource.includes(marker)) {
       fail(

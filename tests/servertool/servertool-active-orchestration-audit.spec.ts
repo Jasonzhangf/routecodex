@@ -329,12 +329,14 @@ const TARGETS = [
       'payloadRecord.input',
       "if ('injection' in followup)",
       'followup.injection?.ops',
+      'const engineFinalResult = {',
+      'return engineFinalResult;',
     ],
     required: [
       'buildServertoolPostflightObservationSummaryWithNative({',
       "args.stageRecorder.record('servertool.execution', summary);",
-      'const engineFinalResult = {',
-      'return engineFinalResult;',
+      'chat: engineResult.finalChatResponse',
+      'executed: true',
     ],
   },
   {
