@@ -88,19 +88,11 @@ export async function runServertoolEnginePostflight(args: {
     const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterRecord);
     const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(adapterRecord);
     const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
-    const requestTruth = metadataCenterSnapshot?.requestTruth as Record<string, unknown> | undefined;
-    const rawSessionId = requestTruth?.sessionId;
-    const sessionId =
-      typeof rawSessionId === 'string' && rawSessionId.trim()
-        ? rawSessionId.trim()
-        : undefined;
+    const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (
+      runtimeControl ? { runtimeControl } : null
+    );
     const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
-      metadataCenterSnapshot: sessionId || runtimeControl
-        ? {
-            requestTruth: sessionId ? { sessionId } : {},
-            runtimeControl: runtimeControl ?? {}
-          }
-        : null,
+      metadataCenterSnapshot: nativeMetadataCenterSnapshot,
       execution: engineResult.execution ?? null,
       metadataWritePlan: engineResult.metadataWritePlan ?? null,
       requestId: options.requestId ?? null

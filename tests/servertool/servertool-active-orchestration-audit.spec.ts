@@ -392,6 +392,9 @@ const TARGETS = [
       'followup.injection?.ops',
       'const engineFinalResult = {',
       'return engineFinalResult;',
+      'const requestTruth = metadataCenterSnapshot?.requestTruth',
+      'const rawSessionId = requestTruth?.sessionId',
+      'rawSessionId.trim()',
     ],
     required: [
       'buildServertoolPostflightObservationSummaryWithNative({',
