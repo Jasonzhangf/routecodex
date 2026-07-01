@@ -324,6 +324,7 @@ jest.unstable_mockModule(
       };
     }),
     planAutoHookRuntimeAttemptWithNative: jest.fn((input: any) => ({
+      action: input?.message ? 'rethrow_error' : input?.hasMaterializedResult === true ? 'return_result' : 'continue_queue',
       returnResult: !input?.message && input?.hasMaterializedResult === true,
       continueQueue: !input?.message && input?.hasMaterializedResult !== true,
       rethrowError: Boolean(input?.message),
@@ -341,12 +342,12 @@ jest.unstable_mockModule(
     })),
     planAutoHookCallerFinalizationWithNative: jest.fn((input: any) => {
       if (input?.resultPresent) {
-        return { returnResult: true, continueNextQueue: false, returnNull: false };
+        return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false };
       }
       if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
-        return { returnResult: false, continueNextQueue: false, returnNull: true };
+        return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };
       }
-      return { returnResult: false, continueNextQueue: true, returnNull: false };
+      return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
     }),
     extractTextFromChatLikeWithNative: jest.fn(() => ''),
     buildClientExecCliProjectionOutputWithNative: jest.fn(() => ({})),
@@ -355,6 +356,9 @@ jest.unstable_mockModule(
       flowId: 'servertool_cli_projection'
     })),
     planServertoolExecutionBranchWithNative: planServertoolExecutionBranchWithNativeMock,
+    planServertoolEnginePrepassActionWithNative: jest.fn((input: any) => ({
+      action: input?.hasPrepassResult === true ? 'return_prepass_result' : 'continue_to_execution'
+    })),
     planServertoolResponseStageRuntimeActionWithNative: planServertoolResponseStageRuntimeActionWithNativeMock,
     planServertoolResponseStageOrchestrationOutputWithNative: jest.fn((input: any) =>
       input?.orchestrationExecuted === true

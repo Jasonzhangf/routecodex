@@ -110,14 +110,18 @@ async function runAutoHookExecutionQueue(args: {
     });
     args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
 
-    switch (attemptPlan.returnResult) {
-      case true:
+    switch (attemptPlan.action) {
+      case 'return_result':
         return result as ServerToolHandlerResult;
-      case false:
+      case 'continue_queue':
         continue;
+      case 'rethrow_error':
+        throw new Error(
+          `[servertool] native auto-hook attempt requested rethrow after successful handler execution: ${hook.id}`
+        );
       default:
         throw new Error(
-          `[servertool] invalid auto-hook attempt return disposition: ${String(attemptPlan.returnResult)}`
+          `[servertool] invalid auto-hook attempt action: ${String((attemptPlan as { action: unknown }).action)}`
         );
     }
   }

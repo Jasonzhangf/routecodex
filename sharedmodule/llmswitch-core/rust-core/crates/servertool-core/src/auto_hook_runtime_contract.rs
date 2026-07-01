@@ -31,12 +31,21 @@ pub struct AutoHookRuntimeAttemptInput {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoHookRuntimeAttemptPlan {
+    pub action: AutoHookRuntimeAttemptAction,
     pub trace_event: AutoHookTraceEventPlan,
     pub return_result: bool,
     pub continue_queue: bool,
     pub rethrow_error: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoHookRuntimeAttemptAction {
+    ReturnResult,
+    ContinueQueue,
+    RethrowError,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,11 +102,17 @@ pub fn plan_auto_hook_runtime_attempt(
         flow_id: None,
         materialized_flow_id: input.materialized_flow_id,
     });
+    let action = match decision.action {
+        AutoHookExecutionAction::ReturnResult => AutoHookRuntimeAttemptAction::ReturnResult,
+        AutoHookExecutionAction::ContinueQueue => AutoHookRuntimeAttemptAction::ContinueQueue,
+        AutoHookExecutionAction::RethrowError => AutoHookRuntimeAttemptAction::RethrowError,
+    };
     AutoHookRuntimeAttemptPlan {
+        action,
         trace_event: decision.trace_event,
-        return_result: decision.action == AutoHookExecutionAction::ReturnResult,
-        continue_queue: decision.action == AutoHookExecutionAction::ContinueQueue,
-        rethrow_error: decision.action == AutoHookExecutionAction::RethrowError,
+        return_result: matches!(decision.action, AutoHookExecutionAction::ReturnResult),
+        continue_queue: matches!(decision.action, AutoHookExecutionAction::ContinueQueue),
+        rethrow_error: matches!(decision.action, AutoHookExecutionAction::RethrowError),
         error_message: if has_error { error_message } else { None },
     }
 }
@@ -180,6 +195,10 @@ mod tests {
             message: None,
             materialized_flow_id: None,
         });
+        assert_eq!(
+            miss.action,
+            super::AutoHookRuntimeAttemptAction::ContinueQueue
+        );
         assert!(miss.continue_queue);
         assert!(!miss.return_result);
         assert_eq!(miss.trace_event.reason, "predicate_false");
@@ -197,6 +216,10 @@ mod tests {
             message: None,
             materialized_flow_id: Some("stop_message_flow".to_string()),
         });
+        assert_eq!(
+            matched.action,
+            super::AutoHookRuntimeAttemptAction::ReturnResult
+        );
         assert!(matched.return_result);
         assert!(!matched.continue_queue);
         assert_eq!(matched.trace_event.result, "match");
@@ -217,6 +240,10 @@ mod tests {
             message: Some(" boom ".to_string()),
             materialized_flow_id: None,
         });
+        assert_eq!(
+            error.action,
+            super::AutoHookRuntimeAttemptAction::RethrowError
+        );
         assert!(error.rethrow_error);
         assert_eq!(error.error_message.as_deref(), Some("boom"));
 
@@ -262,7 +289,10 @@ mod tests {
             queue_index: 1,
             queue_total: 2,
         });
-        assert_eq!(next.action, super::AutoHookCallerFinalizationAction::ContinueNextQueue);
+        assert_eq!(
+            next.action,
+            super::AutoHookCallerFinalizationAction::ContinueNextQueue
+        );
         assert!(next.continue_next_queue);
 
         let done = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
@@ -270,7 +300,10 @@ mod tests {
             queue_index: 2,
             queue_total: 2,
         });
-        assert_eq!(done.action, super::AutoHookCallerFinalizationAction::ReturnNull);
+        assert_eq!(
+            done.action,
+            super::AutoHookCallerFinalizationAction::ReturnNull
+        );
         assert!(done.return_null);
 
         let malformed = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
@@ -278,7 +311,10 @@ mod tests {
             queue_index: 0,
             queue_total: 0,
         });
-        assert_eq!(malformed.action, super::AutoHookCallerFinalizationAction::ReturnNull);
+        assert_eq!(
+            malformed.action,
+            super::AutoHookCallerFinalizationAction::ReturnNull
+        );
         assert!(malformed.return_null);
     }
 }

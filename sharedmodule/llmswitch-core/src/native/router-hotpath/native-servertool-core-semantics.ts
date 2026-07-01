@@ -120,6 +120,7 @@ export interface AutoHookTraceEventPlan {
 }
 
 export interface AutoHookRuntimeAttemptPlan {
+  action: 'return_result' | 'continue_queue' | 'rethrow_error';
   traceEvent: AutoHookTraceEventPlan;
   returnResult: boolean;
   continueQueue: boolean;
@@ -1919,6 +1920,13 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
   }
   const traceRecord = trace as Record<string, unknown>;
   if (
+    record.action !== 'return_result' &&
+    record.action !== 'continue_queue' &&
+    record.action !== 'rethrow_error'
+  ) {
+    throw new Error('planAutoHookRuntimeAttemptJson native returned invalid action');
+  }
+  if (
     typeof traceRecord.hookId !== 'string' ||
     typeof traceRecord.phase !== 'string' ||
     typeof traceRecord.priority !== 'number' ||
@@ -1943,7 +1951,15 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
   if (record.rethrowError === true && input.error === undefined) {
     throw new Error('planAutoHookRuntimeAttemptJson native returned rethrow disposition without error input');
   }
+  if (
+    (record.action === 'return_result' && record.returnResult !== true) ||
+    (record.action === 'continue_queue' && record.continueQueue !== true) ||
+    (record.action === 'rethrow_error' && record.rethrowError !== true)
+  ) {
+    throw new Error('planAutoHookRuntimeAttemptJson native returned action/disposition mismatch');
+  }
   return {
+    action: record.action,
     traceEvent: {
       hookId: traceRecord.hookId,
       phase: traceRecord.phase,

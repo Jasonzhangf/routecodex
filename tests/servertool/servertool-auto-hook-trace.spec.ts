@@ -41,6 +41,7 @@ const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
         : 'materialized_empty';
   if (outcome === 'materialized_match') {
     return {
+      action: 'return_result',
       returnResult: true,
       continueQueue: false,
       rethrowError: false,
@@ -58,6 +59,7 @@ const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
     };
   }
   return {
+    action: outcome === 'error' ? 'rethrow_error' : 'continue_queue',
     returnResult: false,
     continueQueue: outcome !== 'error',
     rethrowError: outcome === 'error',
@@ -202,6 +204,7 @@ beforeEach(() => {
           : 'materialized_empty';
     if (outcome === 'materialized_match') {
       return {
+        action: 'return_result',
         returnResult: true,
         continueQueue: false,
         rethrowError: false,
@@ -219,6 +222,7 @@ beforeEach(() => {
       };
     }
     return {
+      action: outcome === 'error' ? 'rethrow_error' : 'continue_queue',
       returnResult: false,
       continueQueue: outcome !== 'error',
       rethrowError: outcome === 'error',
@@ -451,7 +455,8 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('hasPlannedResult: planned != null');
     expect(callerSource).toContain('const result = planned != null');
     expect(callerSource).toContain('result?.execution != null && typeof result.execution.flowId');
-    expect(callerSource).toContain('switch (attemptPlan.returnResult)');
+    expect(callerSource).toContain('switch (attemptPlan.action)');
+    expect(callerSource).not.toContain('switch (attemptPlan.returnResult)');
     expect(callerSource).not.toContain('if (planned) {');
     expect(callerSource).not.toContain('if (attemptPlan.returnResult)');
     expect(callerSource).toContain('hasMaterializedResult: result != null');
@@ -473,6 +478,9 @@ describe('servertool auto hook trace', () => {
     );
     expect(nativeWrapperSource).toContain(
       'planAutoHookRuntimeAttemptJson native returned rethrow disposition without error input'
+    );
+    expect(nativeWrapperSource).toContain(
+      'planAutoHookRuntimeAttemptJson native returned action/disposition mismatch'
     );
     expect(nativeWrapperSource).toContain(
       'planAutoHookCallerFinalizationJson native returned result disposition without queue result'
@@ -560,7 +568,7 @@ describe('servertool auto hook trace', () => {
       }
     });
     planAutoHookRuntimeAttemptWithNativeMock.mockReturnValue({
-      returnResult: 'unknown_return_disposition',
+      action: 'unknown_attempt_action',
       traceEvent: {
         hookId: 'vision_auto',
         phase: 'default',
@@ -581,7 +589,7 @@ describe('servertool auto hook trace', () => {
         includeAutoHookIds: null,
         excludeAutoHookIds: null
       })
-    ).rejects.toThrow('[servertool] invalid auto-hook attempt return disposition: unknown_return_disposition');
+    ).rejects.toThrow('[servertool] invalid auto-hook attempt action: unknown_attempt_action');
   });
 
   test('fails fast for invalid native caller finalization action', async () => {

@@ -516,12 +516,11 @@ pub fn plan_servertool_entry_context_json(input_json: &str) -> Result<String, St
 
 pub fn plan_servertool_engine_prepass_action_json(input_json: &str) -> Result<String, String> {
     let input: engine_prepass_action_contract::ServertoolEnginePrepassActionInput =
-        serde_json::from_str(input_json).map_err(|e| {
-            format!("deserialize servertool engine prepass action input: {e}")
-        })?;
-    serde_json::to_string(&engine_prepass_action_contract::plan_servertool_engine_prepass_action(
-        input,
-    ))
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool engine prepass action input: {e}"))?;
+    serde_json::to_string(
+        &engine_prepass_action_contract::plan_servertool_engine_prepass_action(input),
+    )
     .map_err(|e| format!("serialize servertool engine prepass action plan: {e}"))
 }
 
@@ -2376,6 +2375,7 @@ fn plans_auto_hook_runtime_attempt_via_servertool_core_bridge() {
     )
     .expect("auto-hook runtime attempt plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
+    assert_eq!(parsed["action"], "return_result");
     assert_eq!(parsed["returnResult"], true);
     assert_eq!(parsed["continueQueue"], false);
     assert_eq!(parsed["rethrowError"], false);
@@ -2401,6 +2401,7 @@ fn plans_auto_hook_runtime_attempt_via_servertool_core_bridge() {
     .expect("auto-hook planned-null runtime attempt plan");
     let planned_null_parsed: serde_json::Value =
         serde_json::from_str(&planned_null).expect("parse planned-null plan");
+    assert_eq!(planned_null_parsed["action"], "continue_queue");
     assert_eq!(planned_null_parsed["returnResult"], false);
     assert_eq!(planned_null_parsed["continueQueue"], true);
     assert_eq!(planned_null_parsed["rethrowError"], false);
@@ -2424,6 +2425,7 @@ fn plans_auto_hook_runtime_attempt_via_servertool_core_bridge() {
     .expect("auto-hook blank error runtime attempt plan");
     let blank_error_parsed: serde_json::Value =
         serde_json::from_str(&blank_error).expect("parse blank error plan");
+    assert_eq!(blank_error_parsed["action"], "rethrow_error");
     assert_eq!(blank_error_parsed["returnResult"], false);
     assert_eq!(blank_error_parsed["continueQueue"], false);
     assert_eq!(blank_error_parsed["rethrowError"], true);

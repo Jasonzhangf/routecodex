@@ -8,6 +8,7 @@ import {
   planServertoolEnginePrepassActionWithNative,
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineTriggerObservationWithNative,
+  planAutoHookRuntimeAttemptWithNative,
   planStoplessCliProjectionContextWithNative,
   planServertoolExecutionBranchWithNative,
   planServertoolExecutionLoopEffectWithNative,
@@ -667,6 +668,75 @@ describe('servertool CLI native bridge', () => {
         sourceIndex: 1
       }
     ]);
+  });
+
+  it('uses Rust-owned auto-hook runtime attempt action planning', () => {
+    expect(
+      planAutoHookRuntimeAttemptWithNative({
+        hookId: 'stop_message_auto',
+        phase: 'default',
+        priority: 40,
+        queue: 'A_optional',
+        queueIndex: 1,
+        queueTotal: 2,
+        hasPlannedResult: true,
+        hasMaterializedResult: true,
+        materializedFlowId: 'stop_message_flow'
+      })
+    ).toMatchObject({
+      action: 'return_result',
+      returnResult: true,
+      continueQueue: false,
+      rethrowError: false,
+      traceEvent: {
+        result: 'match',
+        reason: 'matched',
+        flowId: 'stop_message_flow'
+      }
+    });
+
+    expect(
+      planAutoHookRuntimeAttemptWithNative({
+        hookId: 'vision_auto',
+        phase: 'default',
+        priority: 20,
+        queue: 'A_optional',
+        queueIndex: 1,
+        queueTotal: 2,
+        hasPlannedResult: false,
+        hasMaterializedResult: false
+      })
+    ).toMatchObject({
+      action: 'continue_queue',
+      returnResult: false,
+      continueQueue: true,
+      rethrowError: false,
+      traceEvent: {
+        result: 'miss',
+        reason: 'predicate_false'
+      }
+    });
+
+    expect(
+      planAutoHookRuntimeAttemptWithNative({
+        hookId: 'stop_message_auto',
+        phase: 'default',
+        priority: 40,
+        queue: 'A_optional',
+        queueIndex: 1,
+        queueTotal: 1,
+        error: new Error('boom')
+      })
+    ).toMatchObject({
+      action: 'rethrow_error',
+      returnResult: false,
+      continueQueue: false,
+      rethrowError: true,
+      traceEvent: {
+        result: 'error',
+        reason: 'boom'
+      }
+    });
   });
 
   it('uses Rust-owned registry projection planning for names, records, and auto handler order', () => {

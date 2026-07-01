@@ -1,3 +1,8 @@
+# 2026-07-02: servertool auto-hook attempt action moved to Rust plan
+- Slice: `AutoHookRuntimeAttemptPlan` now exposes Rust-owned `action` (`return_result` / `continue_queue` / `rethrow_error`), and `auto-hook-caller.ts` switches on `attemptPlan.action` instead of interpreting `returnResult` as the branch owner.
+- Gate: `execution-shell.auto-hook-failfast.spec.ts`, `servertool-auto-hook-trace.spec.ts`, `servertool-cli-native-bridge.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` require the native action path and forbid `switch (attemptPlan.returnResult)`.
+- Evidence: Rust `servertool-core auto_hook` PASS 10/10; NAPI bridge focused PASS 1/1; native hotpath rebuild PASS; focused Jest PASS 5 suites / 81 tests; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool engine prepass action moved to Rust plan
 - Slice: `run-server-side-tool-engine-shell.ts` no longer switches on `responseStagePrePass.action`; it asks Rust `plan_servertool_engine_prepass_action` whether to return the prepass result or continue to execution, and TS only dispatches `enginePrepassAction.action`.
 - Gate: `servertool-cli-native-bridge.spec.ts`, `run-server-side-tool-engine-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` require the native bridge/action switch and forbid `switch (responseStagePrePass.action)`.

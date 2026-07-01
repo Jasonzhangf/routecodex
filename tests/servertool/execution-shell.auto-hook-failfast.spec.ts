@@ -13,7 +13,8 @@ describe('execution-shell auto hook failfast', () => {
     expect(source).not.toContain('export async function runAutoHookExecutionQueue(');
     expect(source).toContain('const attemptPlan = planAutoHookRuntimeAttemptWithNative({');
     expect(source).toContain('const result = planned != null');
-    expect(source).toContain('switch (attemptPlan.returnResult)');
+    expect(source).toContain('switch (attemptPlan.action)');
+    expect(source).not.toContain('switch (attemptPlan.returnResult)');
     expect(source).not.toContain('if (planned) {');
     expect(source).not.toContain('if (attemptPlan.returnResult)');
     expect(source).toContain('args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);');
