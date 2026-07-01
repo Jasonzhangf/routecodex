@@ -171,12 +171,9 @@ function readRuntimeControlForProviderResponseConverter(
   };
 }
 
-function readProviderProtocolForProviderResponseConverter(args: {
-  metadata?: Record<string, unknown>;
-  adapterContext?: Record<string, unknown>;
-}): string {
+function readProviderProtocolForProviderResponseConverter(metadata?: Record<string, unknown>): string {
   const providerProtocol = readRuntimeControlForProviderResponseConverter(
-    args.metadata ?? args.adapterContext
+    metadata
   ).providerProtocol;
   if (providerProtocol) {
     return providerProtocol;
@@ -240,9 +237,7 @@ function buildProviderContextForResponseConversion(
     ...(asRecord(options.pipelineMetadata) ?? {}),
     ...(extensions ? { extensions } : {})
   };
-  const providerProtocol = readProviderProtocolForProviderResponseConverter({
-    metadata: runtimeMetadata
-  });
+  const providerProtocol = readProviderProtocolForProviderResponseConverter(runtimeMetadata);
   return {
     requestId: options.requestId,
     providerType: (options.providerType || 'unknown') as ProviderContext['providerType'],
@@ -347,9 +342,7 @@ export async function convertProviderResponseIfNeeded(
     metadata: asRecord(options.pipelineMetadata),
     providerFamily: options.providerFamily
   });
-  const effectiveProviderProtocol = readProviderProtocolForProviderResponseConverter({
-    metadata: responseMetadataBag
-  });
+  const effectiveProviderProtocol = readProviderProtocolForProviderResponseConverter(responseMetadataBag);
   const bridgeProviderResponseSeed = buildBridgeProviderResponseSeed(options.response, body);
   if (!bridgeProviderResponseSeed) {
     return options.response;
@@ -378,10 +371,7 @@ export async function convertProviderResponseIfNeeded(
       providerProtocol: effectiveProviderProtocol,
       serverToolsEnabled: options.serverToolsEnabled !== false
     });
-    const bridgeProviderProtocol = readProviderProtocolForProviderResponseConverter({
-      metadata: responseMetadataBag,
-      adapterContext
-    });
+    const bridgeProviderProtocol = effectiveProviderProtocol;
     const serverToolsEnabled = options.serverToolsEnabled !== false;
     let stageRecorder: unknown;
     if (shouldEnableHubStageRecorder()) {

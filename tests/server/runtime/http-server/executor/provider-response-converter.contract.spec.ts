@@ -30,6 +30,9 @@ describe('provider-response-converter contract', () => {
     expect(source).not.toContain('syncAdapterContextRuntimeBackToPipelineMetadata');
     expect(source).not.toContain('provider response stopless runtime pipeline sync');
     expect(source).not.toContain('provider response hub-stage-top debug snapshot sync');
+    expect(source).not.toContain('adapterContext?: Record<string, unknown>');
+    expect(source).not.toContain('args.metadata ?? args.adapterContext');
+    expect(source).not.toContain('adapterContext\n    });');
     expect(source).not.toContain('restoreDirectChatVisibleContentFromSse');
     expect(source).not.toContain('recoverVisibleAssistantContentFromChatSseText');
     expect(source).not.toContain('isImagePathLike');

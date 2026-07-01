@@ -1,3 +1,10 @@
+# 2026-07-01: provider response adapterContext protocol fallback removed
+- Slice: `provider-response-converter.ts` no longer reads `runtime_control.providerProtocol` from `adapterContext`; provider protocol is resolved once from response metadata/MetadataCenter and reused for bridge conversion.
+- Gate: `provider-response-converter.contract.spec.ts` now forbids `adapterContext?: Record<string, unknown>`, `args.metadata ?? args.adapterContext`, and provider-protocol reads that pass `adapterContext`.
+- Red/green: focused contract first failed on the existing `adapterContext?: Record<string, unknown>` fallback, then passed after deleting the fallback read.
+- Evidence: focused provider-response converter Jest PASS 3 suites / 4 tests; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
+- Commit scope note: unrelated dirty SSE/package/build-info and prior uncommitted note entries remain excluded.
+
 # 2026-07-01: provider response adapter context backwrite removed
 - Slice: `provider-response-converter.ts` no longer copies runtime-control/debug snapshot values from bridge `adapterContext` back into pipeline metadata after conversion. The bridge context must use the same bound `MetadataCenter`, so there is no second-center post-bridge sync path.
 - Gate: `provider-response-converter.contract.spec.ts` forbids `syncAdapterContextRuntimeBackToPipelineMetadata` and the old stopless/debug snapshot sync reason strings; stopless runtime tests now assert same-center binding instead of host backwrite.
