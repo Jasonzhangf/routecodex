@@ -275,7 +275,6 @@ export interface ResponsesJsonToSseOptions {
   enableHeartbeat?: boolean;
   heartbeatIntervalMs?: number;
   chunkSize?: number;
-  delayMs?: number;
   includeSequenceNumbers?: boolean;
   includeMetadata?: boolean;
   validationMode?: 'none' | 'basic' | 'strict';

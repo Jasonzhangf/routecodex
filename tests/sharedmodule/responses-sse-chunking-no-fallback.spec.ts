@@ -29,7 +29,7 @@ describe('responses SSE chunking no-fallback boundary', () => {
       0,
       'hello world',
       context,
-      { chunkSize: 8, chunkDelayMs: 0, enableIdGeneration: true, enableTimestampGeneration: false, enableSequenceNumbers: false, enableDelay: false }
+      { chunkSize: 8, enableIdGeneration: true, enableTimestampGeneration: false, enableSequenceNumbers: false }
     );
 
     const deltas = [];

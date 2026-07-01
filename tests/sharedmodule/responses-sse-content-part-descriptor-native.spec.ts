@@ -15,9 +15,7 @@ async function collectEvents(response: any): Promise<any[]> {
   for await (const event of sequenceResponse(response, context as any, {
     enableTimestampGeneration: false,
     chunkSize: 0,
-    chunkDelayMs: 0,
     enableRecovery: false,
-    enableDelay: false,
     maxOutputItems: 10,
     maxContentParts: 10
   } as any)) {
@@ -113,10 +111,8 @@ describe('responses SSE content part descriptor native owner', () => {
       {
         enableTimestampGeneration: false,
         chunkSize: 0,
-        chunkDelayMs: 0,
         enableIdGeneration: false,
         enableSequenceNumbers: true,
-        enableDelay: false
       }
     )).toThrow('Invalid Responses content_part.done: missing content part');
   });

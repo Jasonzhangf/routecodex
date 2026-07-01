@@ -4,6 +4,8 @@ import {
   resolveProviderWantsUpstreamSse
 } from '../../../../src/providers/core/runtime/provider-request-shaping-utils.js';
 import { ProviderRequestPreprocessor } from '../../../../src/providers/core/runtime/provider-request-preprocessor.js';
+import { OpenAIChatProtocolClient } from '../../../../src/client/openai/chat-protocol-client.js';
+import { ResponsesProtocolClient } from '../../../../src/client/responses/responses-protocol-client.js';
 
 const protocolClient = {
   buildRequestBody: () => ({ model: 'gpt-5.4', messages: [{ role: 'user', content: 'hi' }] }),
@@ -80,5 +82,49 @@ describe('provider outbound metadata boundary', () => {
       messages: [],
       stream: true
     });
+  });
+
+  it('preprocesses relay requests before OpenAI chat protocol body build so metadata never reaches provider wire', () => {
+    const processedRequest = ProviderRequestPreprocessor.preprocess({
+      model: 'gpt-5.4',
+      data: {
+        model: 'gpt-5.4',
+        metadata: { sessionId: 'sess' },
+        messages: [{ role: 'user', content: 'hi' }]
+      },
+      metadata: { entryEndpoint: '/v1/responses' },
+      client_metadata: { session_id: 'sess' }
+    });
+
+    const body = buildProviderHttpRequestBody({
+      request: processedRequest,
+      protocolClient: new OpenAIChatProtocolClient()
+    });
+
+    expect(body.metadata).toBeUndefined();
+    expect(body.client_metadata).toBeUndefined();
+    expect(body.messages).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+
+  it('preprocesses direct responses requests before Responses protocol body build so metadata never reaches provider wire', () => {
+    const processedRequest = ProviderRequestPreprocessor.preprocess({
+      model: 'gpt-5.5',
+      data: {
+        model: 'gpt-5.5',
+        metadata: { sessionId: 'sess' },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
+      },
+      metadata: { entryEndpoint: '/v1/responses' },
+      client_metadata: { session_id: 'sess' }
+    });
+
+    const body = buildProviderHttpRequestBody({
+      request: processedRequest,
+      protocolClient: new ResponsesProtocolClient()
+    });
+
+    expect(body.metadata).toBeUndefined();
+    expect(body.client_metadata).toBeUndefined();
+    expect(body.input).toEqual([{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]);
   });
 });

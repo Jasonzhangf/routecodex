@@ -30,11 +30,9 @@ import {
 // 生成器配置
 export interface ResponsesEventGeneratorConfig {
   chunkSize: number;
-  chunkDelayMs: number;
   enableIdGeneration: boolean;
   enableTimestampGeneration: boolean;
   enableSequenceNumbers: boolean;
-  enableDelay: boolean;
 }
 
 // 事件生成上下文
@@ -50,11 +48,9 @@ export interface ResponsesEventGeneratorContext {
 export const DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG: ResponsesEventGeneratorConfig = {
   // 默认关闭文本切片，让上游模型的分块行为原样透传
   chunkSize: 0,
-  chunkDelayMs: 8,
   enableIdGeneration: true,
   enableTimestampGeneration: true,
-  enableSequenceNumbers: true,
-  enableDelay: false
+  enableSequenceNumbers: true
 };
 
 /**

@@ -48,7 +48,7 @@ describe('provider-request-preprocessor', () => {
     expect(String(text || '')).toContain('Tool update_plan does not exists');
   });
 
-  it('RED: should move provider runtime hints into runtime symbol instead of keeping control metadata in outbound body', async () => {
+  it('removes provider-bound metadata fields and only mirrors transport hints into runtime symbol', async () => {
     const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
     const runtimeMetadata = { metadata: { clientHeaders: { authorization: 'Bearer x' } } } as any;
     const req = {
@@ -59,6 +59,7 @@ describe('provider-request-preprocessor', () => {
         qwenWebSearch: true,
         clientHeaders: { authorization: 'Bearer x' },
       },
+      client_metadata: { session_id: 'client-session' },
       data: { uq: 'routecodex', page: 1, rows: 5 }
     } as any;
 
@@ -67,10 +68,10 @@ describe('provider-request-preprocessor', () => {
 
     expect(attached?.metadata?.entryEndpoint).toBe('/api/v1/indices/plugin/web_search');
     expect(attached?.metadata?.stream).toBe(true);
-    expect(attached?.qwenWebSearch).toBe(true);
-    expect((out as any).metadata?.entryEndpoint).toBeUndefined();
-    expect((out as any).metadata?.stream).toBeUndefined();
-    expect((out as any).metadata?.clientHeaders).toBeUndefined();
+    expect(attached?.qwenWebSearch).toBeUndefined();
+    expect(attached?.metadata?.qwenWebSearch).toBeUndefined();
+    expect((out as any).metadata).toBeUndefined();
+    expect((out as any).client_metadata).toBeUndefined();
   });
 
   it('prefers client SSE accept header over stale body metadata stream=false', async () => {
@@ -93,10 +94,10 @@ describe('provider-request-preprocessor', () => {
     const attached = extractProviderRuntimeMetadata(out as Record<string, unknown>);
 
     expect(attached?.metadata?.stream).toBe(true);
-    expect((out as any).metadata?.stream).toBeUndefined();
+    expect((out as any).metadata).toBeUndefined();
   });
 
-  it('physically removes session and conversation control metadata from outbound body', async () => {
+  it('does not move request metadata session fields into runtime metadata or provider-bound body', async () => {
     const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
     const runtimeMetadata = { metadata: {} } as any;
     const req = {
@@ -111,13 +112,15 @@ describe('provider-request-preprocessor', () => {
     const out = ProviderRequestPreprocessor.preprocess(req, runtimeMetadata);
     const attached = extractProviderRuntimeMetadata(out as Record<string, unknown>);
 
-    expect(attached?.metadata?.sessionId).toBe('sess-live');
-    expect(attached?.metadata?.conversationId).toBe('conv-live');
-    expect(attached?.metadata?.client_tmux_session_id).toBe('tmux-live');
+    expect(attached?.metadata?.sessionId).toBeUndefined();
+    expect(attached?.metadata?.conversationId).toBeUndefined();
+    expect(attached?.metadata?.client_tmux_session_id).toBeUndefined();
+    expect((attached as any)?.sessionId).toBeUndefined();
+    expect((attached as any)?.conversationId).toBeUndefined();
     expect((out as any).metadata).toBeUndefined();
   });
 
-  it('preserves metadata center binding so request truth port scope survives preprocessing', async () => {
+  it('does not bind payload metadata center into runtime metadata during preprocessing', async () => {
     const { MetadataCenter } = await import('../../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
     const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
     const req = {
@@ -142,6 +145,41 @@ describe('provider-request-preprocessor', () => {
     const attached = extractProviderRuntimeMetadata(out as Record<string, unknown>);
 
     expect(attached?.metadata?.entryEndpoint).toBe('/v1/responses');
-    expect(MetadataCenter.read(attached?.metadata as Record<string, unknown>)?.readRequestTruth().portScope).toBe('5520');
+    expect(MetadataCenter.read(attached?.metadata as Record<string, unknown>)?.readRequestTruth().portScope).toBeUndefined();
+    expect((out as any).metadata).toBeUndefined();
+  });
+
+  it('recursively removes metadata fields before protocol clients build provider wire bodies', () => {
+    const req = {
+      model: 'gpt-5.5',
+      data: {
+        model: 'gpt-5.5',
+        metadata: { nestedTop: true },
+        input: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: 'hi',
+                metadata: { nested: true },
+                client_metadata: { nestedClient: true }
+              }
+            ]
+          }
+        ]
+      },
+      metadata: { top: true },
+      client_metadata: { clientTop: true }
+    } as any;
+
+    const out = ProviderRequestPreprocessor.preprocess(req);
+
+    expect((out as any).metadata).toBeUndefined();
+    expect((out as any).client_metadata).toBeUndefined();
+    expect((out as any).data.metadata).toBeUndefined();
+    expect((out as any).data.input[0].content[0].metadata).toBeUndefined();
+    expect((out as any).data.input[0].content[0].client_metadata).toBeUndefined();
+    expect((out as any).data.input[0].content[0].text).toBe('hi');
   });
 });

@@ -20,9 +20,7 @@ async function collectEvents(response: any, overrides: Record<string, unknown> =
   for await (const event of sequenceResponse(response, context as any, {
     enableTimestampGeneration: false,
     chunkSize: 0,
-    chunkDelayMs: 0,
     enableRecovery: false,
-    enableDelay: false,
     maxOutputItems: 10,
     maxContentParts: 10,
     ...overrides

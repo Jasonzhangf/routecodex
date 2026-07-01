@@ -2,10 +2,10 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { attachProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
-import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 type MetadataContainer = {
   metadata?: Record<string, unknown>;
+  client_metadata?: Record<string, unknown>;
   model?: unknown;
   entryEndpoint?: string;
   stream?: boolean;
@@ -40,32 +40,30 @@ function readHeaderCaseInsensitive(
   return undefined;
 }
 
+function stripProviderOutboundMetadataFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripProviderOutboundMetadataFields(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  const stripped: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(source)) {
+    if (key === 'metadata' || key === 'client_metadata') {
+      continue;
+    }
+    stripped[key] = stripProviderOutboundMetadataFields(item);
+  }
+  return stripped;
+}
+
 export class ProviderRequestPreprocessor {
   static preprocess(request: UnknownObject, runtimeMetadata?: ProviderRuntimeMetadata): UnknownObject {
     const requestMetadata =
       request && typeof request === 'object' && (request as MetadataContainer).metadata && typeof (request as MetadataContainer).metadata === 'object'
         ? ((request as MetadataContainer).metadata as Record<string, unknown>)
         : undefined;
-    if (runtimeMetadata && requestMetadata) {
-      const requestMetadataCenter = MetadataCenter.read(requestMetadata);
-      if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
-        runtimeMetadata.metadata = {};
-      }
-      const runtimeCarrier = runtimeMetadata.metadata as Record<string, unknown>;
-      Object.assign(runtimeCarrier, requestMetadata);
-      if (requestMetadataCenter) {
-        MetadataCenter.bind(runtimeCarrier, requestMetadataCenter);
-      }
-      for (const [key, value] of Object.entries(requestMetadata)) {
-        if (key === 'clientHeaders' || key === 'entryEndpoint' || key === 'stream') {
-          continue;
-        }
-        if ((runtimeMetadata as Record<string, unknown>)[key] === undefined) {
-          (runtimeMetadata as Record<string, unknown>)[key] = value;
-        }
-      }
-    }
-
     const headersFromRequest = ProviderPayloadUtils.normalizeClientHeaders(requestMetadata?.clientHeaders);
     const headersFromRuntime = ProviderPayloadUtils.normalizeClientHeaders(
       runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
@@ -80,7 +78,7 @@ export class ProviderRequestPreprocessor {
       (runtimeMetadata.metadata as Record<string, unknown>).clientHeaders = effectiveClientHeaders;
     }
 
-    const processedRequest: UnknownObject = { ...request };
+    const processedRequest = stripProviderOutboundMetadataFields(request) as UnknownObject;
     const requestCarrier = request as MetadataContainer;
     const inboundModel = typeof requestCarrier?.model === 'string' ? requestCarrier.model : undefined;
     const entryEndpoint =
@@ -101,7 +99,6 @@ export class ProviderRequestPreprocessor {
       if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
         runtimeMetadata.metadata = {};
       }
-      const runtimeMetadataCenter = MetadataCenter.read(runtimeMetadata.metadata);
       if (entryEndpoint) {
         (runtimeMetadata.metadata as Record<string, unknown>).entryEndpoint = entryEndpoint;
       }
@@ -111,15 +108,10 @@ export class ProviderRequestPreprocessor {
       if (typeof inboundModel === 'string' && inboundModel.trim()) {
         (runtimeMetadata.metadata as Record<string, unknown>).__origModel = inboundModel;
       }
-      if (runtimeMetadataCenter) {
-        MetadataCenter.bind(runtimeMetadata.metadata as Record<string, unknown>, runtimeMetadataCenter);
-      }
     }
     if (runtimeMetadata && processedRequest && typeof processedRequest === 'object') {
       attachProviderRuntimeMetadata(processedRequest as Record<string, unknown>, runtimeMetadata);
     }
-
-    delete (processedRequest as MetadataContainer).metadata;
 
     return processedRequest;
   }

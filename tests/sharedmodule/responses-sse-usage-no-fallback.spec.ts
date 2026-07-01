@@ -153,8 +153,6 @@ describe('responses SSE usage no-fallback boundary', () => {
       {
         enableTimestampGeneration: false,
         chunkSize: 256,
-        chunkDelayMs: 0,
-        enableDelay: false,
         enableValidation: false,
         maxOutputItems: 10,
         maxContentParts: 10

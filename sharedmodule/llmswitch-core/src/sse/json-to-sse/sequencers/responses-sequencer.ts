@@ -36,7 +36,6 @@ import { canonicalizeResponsesSseEventPayloadWithNative } from '../../../native/
 
 // 排列器配置
 export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig {
-  enableDelay: boolean;
   maxOutputItems: number;
   maxContentParts: number;
   submittedToolOutputs?: ResponsesFunctionCallOutputItem[];
@@ -45,7 +44,6 @@ export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig 
 // 默认配置
 export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesSequencerConfig = {
   ...DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG,
-  enableDelay: false,
   maxOutputItems: 50,
   maxContentParts: 100,
   submittedToolOutputs: undefined
@@ -69,22 +67,6 @@ function validateResponse(response: ResponsesResponse, config: ResponsesSequence
 
   if (response.output.length > config.maxOutputItems) {
     throw new Error(`Too many output items: ${response.output.length} > ${config.maxOutputItems}`);
-  }
-}
-
-/**
- * 异步生成器：为事件添加延迟
- */
-async function* withDelay(
-  events: Generator<ResponsesSseEvent> | AsyncGenerator<ResponsesSseEvent> | ResponsesSseEvent[],
-  config: ResponsesSequencerConfig
-): AsyncGenerator<ResponsesSseEvent> {
-  for await (const event of events) {
-    yield event;
-
-    if (config.enableDelay && config.chunkDelayMs > 0) {
-      await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs));
-    }
   }
 }
 
@@ -114,10 +96,7 @@ async function* sequenceMessageItem(
     // 2b. 发送content_part.delta事件流（仅对文本内容）
     const isTextContent = content.type === 'input_text' || content.type === 'output_text';
     if (isTextContent) {
-      yield* withDelay(
-        buildContentPartDeltas(item.id, contentIndex, content.text, context, config),
-        config
-      );
+      yield* buildContentPartDeltas(item.id, contentIndex, content.text, context, config);
 
       if (content.type === 'output_text') {
         yield buildOutputTextDoneEvent(item.id, contentIndex, content.text, context, config);
@@ -144,10 +123,7 @@ async function* sequenceFunctionCallItem(
   yield buildOutputItemStartEvent(item, context, config);
 
   // 2. 发送function_call.delta事件流（arguments）
-  yield* withDelay(
-    buildFunctionCallArgsDeltas(item, context, config),
-    config
-  );
+  yield* buildFunctionCallArgsDeltas(item, context, config);
 
   // 3. 发送function_call.done事件
   yield buildFunctionCallDoneEvent(item, context, config);
@@ -180,16 +156,10 @@ async function* sequenceReasoningItem(
   yield buildOutputItemStartEvent(item, context, config);
 
   // 2. 发送reasoning_summary事件流
-  yield* withDelay(
-    buildReasoningSummaryEvents(item, context, config),
-    config
-  );
+  yield* buildReasoningSummaryEvents(item, context, config);
 
   // 3. 发送reasoning.delta事件流
-  yield* withDelay(
-    buildReasoningDeltas(item, context, config),
-    config
-  );
+  yield* buildReasoningDeltas(item, context, config);
 
   // 4. 发送output_item.done事件
   yield buildOutputItemDoneEvent(item, context, config);
@@ -257,11 +227,6 @@ async function* sequenceResponseCore(
     context.outputIndexCounter = outputOffset + outputIndex;
 
     yield* sequenceOutputItem(item, context, config);
-
-    // 输出项间添加小延迟（如果启用）
-    if (config.enableDelay && config.chunkDelayMs > 0 && outputIndex < normalizedOutput.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs * 2));
-    }
   }
 
   // 4. 发送终止事件；工具调用已通过标准 output_item/function_call_arguments 事件表达。

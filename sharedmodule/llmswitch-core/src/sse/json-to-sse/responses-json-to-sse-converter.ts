@@ -84,14 +84,10 @@ export class ResponsesJsonToSseConverterRefactored {
 
       // 3. 直接调用 sequencer 函数，避免长期保留第二套配置 facade。
       const sequencerConfig: ResponsesSequencerConfig = {
-        ...DEFAULT_RESPONSES_SEQUENCER_CONFIG,
-        enableDelay: typeof context.options.delayMs === 'number' && context.options.delayMs > 0
+        ...DEFAULT_RESPONSES_SEQUENCER_CONFIG
       };
       if (typeof context.options.chunkSize === 'number') {
         sequencerConfig.chunkSize = context.options.chunkSize;
-      }
-      if (typeof context.options.delayMs === 'number') {
-        sequencerConfig.chunkDelayMs = context.options.delayMs;
       }
 
       // 4. 生成事件序列并写入流
