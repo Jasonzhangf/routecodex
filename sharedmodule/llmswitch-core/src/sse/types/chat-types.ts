@@ -366,66 +366,10 @@ export interface ChatEventValidationRule {
   };
 }
 
-// Chat转换配置
-export interface ChatConversionConfig {
-  // 超时配置
-  defaultTimeoutMs: number;
-  heartbeatIntervalMs: number;
-  chunkTimeoutMs: number;
-
-  // 分块配置
-  defaultChunkDelayMs: number;
-  maxTokensPerChunk: number;
-  maxChunkSize: number;
-
-  // 验证配置
-  enableChunkValidation: boolean;
-  strictMode: boolean;
-  validateToolCalls: boolean;
-
-  // 性能配置
-  maxConcurrentChoices: number;
-  maxConcurrentToolCalls: number;
-  eventBufferSize: number;
-
-  // 调试配置
-  debugMode: boolean;
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
-  enableMetrics: boolean;
-  reasoningMode: ChatReasoningMode;
-  reasoningTextPrefix?: string;
-}
-
-// 默认Chat转换配置
-export const DEFAULT_CHAT_CONVERSION_CONFIG: ChatConversionConfig = {
-  defaultTimeoutMs: 900000,
-  heartbeatIntervalMs: 15000,
-  chunkTimeoutMs: 5000,
-
-  defaultChunkDelayMs: 10,
-  maxTokensPerChunk: 100,
-  maxChunkSize: 1024,
-
-  enableChunkValidation: true,
-  strictMode: false,
-  validateToolCalls: true,
-
-  maxConcurrentChoices: 10,
-  maxConcurrentToolCalls: 50,
-  eventBufferSize: 1000,
-
-  debugMode: false,
-  logLevel: 'info',
-  enableMetrics: true,
-  reasoningMode: 'channel'
-};
-
 // Chat SSE事件流 - 简化类型定义，支持AsyncIterable
 export interface ChatSseEventStream extends AsyncIterable<ChatSseEvent> {
   // 获取流统计
   getStats(): ChatEventStats;
-  // 获取当前配置
-  getConfig(): ChatConversionConfig;
   // 手动完成流
   complete(): void;
   // 手动中止流

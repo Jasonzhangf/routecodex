@@ -740,3 +740,11 @@ Focused tests to use as slice gates:
 - Fix: `AnthropicJsonToSseConverter` and `GeminiJsonToSseConverter` now keep only per-call local conversion context; the dead converter-level context maps were physically removed.
 - Positive tests: the focused spec proves Anthropic `message_start/message_stop` and Gemini `gemini.data/gemini.done` framing still works without converter-level state.
 - Reverse tests/gates: the same spec and `verify:sse-architecture-boundary` forbid the old converter-level cache markers from returning.
+
+### 2026-07-01 Chat SSE converter config surface removed
+
+- Boundary: Chat SSE converter surfaces must stay per-call IO/codec shells; they must not expose converter-level default config or config introspection APIs as a second semantic truth.
+- Red evidence: `chat-json-to-sse-context-no-dead-state` and `verify:sse-architecture-boundary` first failed on `DEFAULT_CHAT_CONVERSION_CONFIG`, converter `private config`, constructor config injection, `this.config`, `getConfig`, and public `ChatConversionConfig`.
+- Fix: `ChatJsonToSseConverterRefactored` and `ChatSseToJsonConverter` now pass only explicit per-call options to their sequencer/dispatcher; `ChatConversionConfig`, `DEFAULT_CHAT_CONVERSION_CONFIG`, and `ChatSseEventStream.getConfig()` were physically removed from the public type surface.
+- Positive tests: focused Chat JSON/SSE tests still project completed responses, usage, function-call arguments, and no-salvage boundaries.
+- Reverse tests/gates: the focused context spec and `verify:sse-architecture-boundary` forbid the retired Chat converter config markers from returning.

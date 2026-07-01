@@ -5,7 +5,6 @@
 
 // feature_id: sse.chat_stream_projection
 import { PassThrough } from 'stream';
-import { DEFAULT_CHAT_CONVERSION_CONFIG } from '../types/index.js';
 import type {
   ChatCompletionResponse,
   ChatSseEvent,
@@ -23,14 +22,6 @@ import { createChatStreamWriter } from '../shared/writer.js';
  * 采用函数化架构，专注于编排而非具体业务逻辑
  */
 export class ChatJsonToSseConverterRefactored {
-  private config = DEFAULT_CHAT_CONVERSION_CONFIG;
-
-  constructor(config?: Partial<typeof DEFAULT_CHAT_CONVERSION_CONFIG>) {
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
-  }
-
   /**
    * 将Chat Completion响应转换为SSE流
    */
@@ -55,7 +46,6 @@ export class ChatJsonToSseConverterRefactored {
       direction: 'json_to_sse' as const,
       requestId: options.requestId,
       getStats: () => context.eventStats,
-      getConfig: () => this.config,
       complete: () => this.completeStream(context, stream),
       abort: (error?: Error) => this.abortStream(context, stream, error)
     }) as ChatSseEventStream;
@@ -88,11 +78,11 @@ export class ChatJsonToSseConverterRefactored {
 
       // 3. 创建事件序列化器
       const sequencer = createChatSequencer({
-        chunkSize: context.options.maxTokensPerChunk || this.config.maxTokensPerChunk,
-        chunkDelayMs: context.options.chunkDelayMs || this.config.defaultChunkDelayMs,
+        chunkSize: context.options.maxTokensPerChunk,
+        chunkDelayMs: context.options.chunkDelayMs,
         enableDelay: !!context.options.chunkDelayMs,
-        reasoningMode: context.options.reasoningMode || this.config.reasoningMode,
-        reasoningTextPrefix: context.options.reasoningTextPrefix ?? this.config.reasoningTextPrefix
+        reasoningMode: context.options.reasoningMode,
+        reasoningTextPrefix: context.options.reasoningTextPrefix
       });
 
       // 4. 生成事件序列并写入流

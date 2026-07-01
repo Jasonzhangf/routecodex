@@ -346,9 +346,25 @@ for (const forbidden of [
   'getContext(requestId: string)',
   'clearContext(requestId: string)',
   'getActiveContexts(): Map<string, ChatJsonToSseContext>',
+  'DEFAULT_CHAT_CONVERSION_CONFIG',
+  'private config',
+  'constructor(config?',
+  'this.config',
+  'getConfig:',
 ]) {
   if (chatJsonToSseConverter.includes(forbidden)) {
     failures.push(`Chat JSON->SSE converter must not keep dead context state: ${forbidden}`);
+  }
+}
+
+const chatTypes = read('sharedmodule/llmswitch-core/src/sse/types/chat-types.ts');
+for (const forbidden of [
+  'interface ChatConversionConfig',
+  'DEFAULT_CHAT_CONVERSION_CONFIG',
+  'getConfig(): ChatConversionConfig',
+]) {
+  if (chatTypes.includes(forbidden)) {
+    failures.push(`Chat SSE types must not expose converter-level config surface: ${forbidden}`);
   }
 }
 

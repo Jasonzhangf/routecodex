@@ -102,5 +102,5 @@ export type { ChatSseToJsonConverter } from '../sse-to-json/chat-sse-to-json-con
 export type { ResponsesSseToJsonConverterRefactored as ResponsesSseToJsonConverter } from '../sse-to-json/responses-sse-to-json-converter.js';
 
 // 常量
-export { DEFAULT_CHAT_CONVERSION_CONFIG, CHAT_CONVERSION_ERROR_CODES } from './chat-types.js';
+export { CHAT_CONVERSION_ERROR_CODES } from './chat-types.js';
 export { RESPONSES_CONVERSION_ERROR_CODES } from './responses-types.js';

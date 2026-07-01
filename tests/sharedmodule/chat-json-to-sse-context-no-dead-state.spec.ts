@@ -60,4 +60,32 @@ describe('chat JSON-to-SSE context dead-state boundary', () => {
     expect(source).not.toContain('getContext(');
     expect(source).not.toContain('clearContext(');
   });
+
+  it('does not keep converter-level config defaults or config introspection APIs', () => {
+    const converterPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts'
+    );
+    const typesPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/types/chat-types.ts'
+    );
+    const barrelPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/types/index.ts'
+    );
+    const converterSource = fs.readFileSync(converterPath, 'utf8');
+    const typesSource = fs.readFileSync(typesPath, 'utf8');
+    const barrelSource = fs.readFileSync(barrelPath, 'utf8');
+
+    expect(converterSource).not.toContain('DEFAULT_CHAT_CONVERSION_CONFIG');
+    expect(converterSource).not.toContain('private config');
+    expect(converterSource).not.toContain('constructor(config?');
+    expect(converterSource).not.toContain('this.config');
+    expect(converterSource).not.toContain('getConfig:');
+    expect(typesSource).not.toContain('interface ChatConversionConfig');
+    expect(typesSource).not.toContain('DEFAULT_CHAT_CONVERSION_CONFIG');
+    expect(typesSource).not.toContain('getConfig(): ChatConversionConfig');
+    expect(barrelSource).not.toContain('DEFAULT_CHAT_CONVERSION_CONFIG');
+  });
 });

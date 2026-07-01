@@ -4,7 +4,7 @@
  */
 
 // feature_id: sse.chat_stream_projection
-import { DEFAULT_CHAT_CONVERSION_CONFIG, CHAT_CONVERSION_ERROR_CODES } from '../types/index.js';
+import { CHAT_CONVERSION_ERROR_CODES } from '../types/index.js';
 import type {
   ChatCompletionResponse,
   ChatCompletionChunk,
@@ -63,14 +63,7 @@ function coerceNormalizedChatUsage(usage: unknown): ChatUsage | undefined {
  * Chat SSE到JSON转换器
  */
 export class ChatSseToJsonConverter {
-  private config = DEFAULT_CHAT_CONVERSION_CONFIG;
   private contexts = new Map<string, SseToChatJsonContext>();
-
-  constructor(config?: Partial<typeof DEFAULT_CHAT_CONVERSION_CONFIG>) {
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
-  }
 
   /**
    * 将SSE流转换为Chat Completion响应
@@ -403,7 +396,7 @@ export class ChatSseToJsonConverter {
     return {
       requestId: options.requestId,
       model: options.model,
-      options: { ...DEFAULT_CHAT_CONVERSION_CONFIG, ...options },
+      options,
       startTime: TimeUtils.now(),
       currentResponse: {
         id: '',
@@ -852,8 +845,8 @@ export class ChatSseToJsonConverter {
     }
 
     const dispatchResult = dispatchReasoning(reasoningText, {
-      mode: context.options.reasoningMode ?? this.config.reasoningMode,
-      prefix: context.options.reasoningTextPrefix ?? this.config.reasoningTextPrefix
+      mode: context.options.reasoningMode,
+      prefix: context.options.reasoningTextPrefix
     });
 
     if (dispatchResult.appendToContent) {
