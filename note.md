@@ -1,3 +1,9 @@
+# 2026-07-01: server colored logger dummy fallback removed
+- Slice: `colored-logger.ts` now statically imports `ColoredLogger` and constructs the real logger in all runtimes; removed `createRequire`, Jest-only dummy logger, warning-only no-op logger, and require-failure fallback.
+- Gate: new `colored-logger.spec.ts` source test forbids `createRequire`, `localRequire`, fallback wording, dummy/no-op markers, and verifies the test runtime receives real logger methods including `logVirtualRouterHit`.
+- Verification: focused Jest `colored-logger` PASS 2/2; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` completed with exit code 0, and its generated version/test side effects were explicitly excluded from this slice.
+- Commit scope note: unrelated dirty SSE handler/client contract tests remain excluded.
+
 # 2026-07-01: provider-response shared pure blocks TS fallback removed
 - Slice: `provider-response-shared-pure-blocks.ts` no longer catches native binding load failures or falls back to local TS implementations for migrated shared pure blocks; native-backed exports now require router-hotpath NAPI functions and fail fast on missing/malformed native output.
 - Gate: `provider-response-shared-pure-blocks.spec.ts` now scans the source and forbids `withNativeBinding`, `return fallback()`, `TS fallback`, and `fall through` markers from returning.
