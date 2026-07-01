@@ -4,10 +4,17 @@ import path from 'node:path';
 const root = process.cwd();
 
 const staleHandlerProjectionSpec = 'tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts';
+const staleHandlerTerminalRepairSpec = 'tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts';
 
 if (fs.existsSync(path.join(root, staleHandlerProjectionSpec))) {
   console.error('[verify:responses-handler-single-bridge-surface] failed');
   console.error(`- stale handler-side apply_patch SSE projection spec must stay deleted: ${staleHandlerProjectionSpec}`);
+  process.exit(1);
+}
+
+if (fs.existsSync(path.join(root, staleHandlerTerminalRepairSpec))) {
+  console.error('[verify:responses-handler-single-bridge-surface] failed');
+  console.error(`- stale handler-side Responses terminal repair spec must stay deleted: ${staleHandlerTerminalRepairSpec}`);
   process.exit(1);
 }
 

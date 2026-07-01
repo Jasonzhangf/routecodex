@@ -597,7 +597,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     }
     clearTimers();
     detachOutboundStream();
-    const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
+    const closeBeforeStreamEnd =
+      trigger === 'close'
+      && !streamEnded
+      && !(isResponsesSseEndpoint(entryEndpoint) && responsesSseObservedTerminal);
     const details = {
       status,
       trigger,

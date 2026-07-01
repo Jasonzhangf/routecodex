@@ -3546,7 +3546,6 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/hub/response
     required_tests:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
-      - tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate

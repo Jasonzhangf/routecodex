@@ -83,7 +83,13 @@ describe('response SSE wrapper contract', () => {
         },
       } as any,
       'req-illegal-body-sse-stream',
-      { entryEndpoint: '/v1/responses' },
+      {
+        entryEndpoint: '/v1/responses',
+        responsesRequestContext: {
+          payload: {},
+          context: { toolsRaw: [] },
+        },
+      },
     )).rejects.toThrow('sseStream');
   });
 

@@ -1958,7 +1958,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     contract:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
-      - tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts
     integration: []
     smoke:
       - npm run verify:sse-architecture-boundary
@@ -2118,7 +2117,6 @@ verification:
       - tests/server/utils/http-error-mapper-provider-not-available-details.spec.ts
       - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
       - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
-      - tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts
     smoke:
       - npm run verify:error-pipeline-contract
       - npm run verify:function-map-compile-gate

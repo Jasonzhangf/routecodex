@@ -30,6 +30,23 @@ function createMockCoreDistProjectionModule() {
   };
 }
 
+function projectSseErrorEventPayloadNativeMock(args: {
+  requestId?: string;
+  status?: number;
+  message?: string;
+  code?: string;
+}) {
+  return {
+    type: 'error',
+    status: args.status ?? 500,
+    error: {
+      message: args.message ?? 'SSE error',
+      code: args.code ?? 'sse_error',
+      request_id: args.requestId,
+    },
+  };
+}
+
 let mockJsonToSseConverterImpl: (() => Promise<PassThrough>) | undefined;
 
 describe('handler-response SSE write-after-end regression', () => {
@@ -62,7 +79,7 @@ describe('handler-response SSE write-after-end regression', () => {
     }
   });
 
-  it('does not classify client close after response.completed as before-terminal when upstream writes late', async () => {
+  it('does not raise uncaughtException when upstream writes late after response.completed', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -83,6 +100,7 @@ describe('handler-response SSE write-after-end regression', () => {
           : {}
       ),
       buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
       importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
@@ -184,9 +202,6 @@ describe('handler-response SSE write-after-end regression', () => {
 
       expect(output).toContain('event: response.completed');
       expect(uncaught?.message ?? '').not.toContain('write after end');
-      expect(
-        warnSpy.mock.calls.map((call) => call.join(' ')).join('\n')
-      ).not.toContain('response.sse.client_close');
     } finally {
       process.removeListener('uncaughtException', onUncaught);
       warnSpy.mockRestore();
@@ -216,6 +231,7 @@ describe('handler-response SSE write-after-end regression', () => {
           : {}
       ),
       buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
       importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
@@ -366,7 +382,7 @@ describe('handler-response SSE write-after-end regression', () => {
     }
   });
 
-  it('emits repaired responses terminal frames only after outbound SSE end flush', async () => {
+  it('emits explicit incomplete-stream error instead of repairing missing responses terminal frames in handler', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -437,6 +453,7 @@ describe('handler-response SSE write-after-end regression', () => {
           }
         })}\n\n`,
       ],
+      projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
       importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
@@ -490,15 +507,16 @@ describe('handler-response SSE write-after-end regression', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 120));
 
     const outputItemDoneIndex = output.indexOf('event: response.output_item.done');
-    const responseCompletedIndex = output.indexOf('event: response.completed');
-    const responseDoneIndex = output.indexOf('event: response.done');
+    const responseErrorIndex = output.indexOf('event: error');
 
     expect(outputItemDoneIndex).toBeGreaterThanOrEqual(0);
-    expect(responseCompletedIndex).toBeGreaterThan(outputItemDoneIndex);
-    expect(responseDoneIndex).toBeGreaterThan(responseCompletedIndex);
+    expect(responseErrorIndex).toBeGreaterThan(outputItemDoneIndex);
+    expect(output).toContain('SSE stream ended before response.completed');
+    expect(output).not.toContain('event: response.completed');
+    expect(output).not.toContain('event: response.done');
   });
 
-  it('does not raise uncaughtException when chat json->sse bridge client closes and converter writes late', async () => {
+  it('emits bridge error when chat forceSSE lacks Rust-produced SSE stream', async () => {
     const converterStream = new PassThrough();
     mockJsonToSseConverterImpl = async () => converterStream;
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
@@ -529,6 +547,7 @@ describe('handler-response SSE write-after-end regression', () => {
           : {}
       ),
       buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
       importCoreDist: async () => createMockCoreDistProjectionModule(),
       requireCoreDist: () => ({})
     }));
@@ -586,41 +605,9 @@ describe('handler-response SSE write-after-end regression', () => {
         { forceSSE: true, entryEndpoint: '/v1/chat/completions' }
       );
 
-      converterStream.write(
-        `data: ${JSON.stringify({
-          id: 'chat_json_bridge_resp',
-          object: 'chat.completion.chunk',
-          created: 1,
-          model: 'test-model',
-          choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
-        })}\n\n`
-      );
-      converterStream.write(
-        `data: ${JSON.stringify({
-          id: 'chat_json_bridge_resp',
-          object: 'chat.completion.chunk',
-          created: 1,
-          model: 'test-model',
-          choices: [{ index: 0, delta: { content: 'hello bridge' }, finish_reason: 'stop' }]
-        })}\n\n`
-      );
-
-      await new Promise<void>((resolve) => setTimeout(resolve, 30));
-
-      converterStream.write(
-        `data: ${JSON.stringify({
-          id: 'chat_json_bridge_resp',
-          object: 'chat.completion.chunk',
-          created: 1,
-          model: 'test-model',
-          choices: [{ index: 0, delta: { content: 'late after end' }, finish_reason: null }]
-        })}\n\n`
-      );
-      converterStream.end();
-
       await new Promise<void>((resolve) => setTimeout(resolve, 80));
 
-      expect(output).toContain('hello bridge');
+      expect(output).toContain('SSE stream missing from pipeline result');
       expect(uncaught?.message ?? '').not.toContain('write after end');
     } finally {
       process.removeListener('uncaughtException', onUncaught);
