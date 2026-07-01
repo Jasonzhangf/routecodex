@@ -66,7 +66,7 @@ pub fn plan_auto_hook_runtime_attempt(
         queue: input.queue,
         queue_index: input.queue_index,
         queue_total: input.queue_total,
-        outcome: None,
+        outcome: input.message.as_ref().map(|_| "error".to_string()),
         has_planned_result: input.has_planned_result,
         has_materialized_result: input.has_materialized_result,
         message: input.message.clone(),
@@ -167,6 +167,22 @@ mod tests {
         });
         assert!(error.rethrow_error);
         assert_eq!(error.error_message.as_deref(), Some("boom"));
+
+        let blank_error = plan_auto_hook_runtime_attempt(AutoHookRuntimeAttemptInput {
+            hook_id: "stop_message_auto".to_string(),
+            phase: "default".to_string(),
+            priority: 40,
+            queue: "A_optional".to_string(),
+            queue_index: 1,
+            queue_total: 1,
+            has_planned_result: false,
+            has_materialized_result: false,
+            message: Some("   ".to_string()),
+            materialized_flow_id: None,
+        });
+        assert!(blank_error.rethrow_error);
+        assert_eq!(blank_error.trace_event.reason, "unknown");
+        assert_eq!(blank_error.error_message, None);
 
         let next = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
             result_present: false,

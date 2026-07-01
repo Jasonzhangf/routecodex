@@ -98,7 +98,7 @@ async function runAutoHookExecutionQueue(args: {
         runtimeMetadata: args.contextBase.runtimeMetadata ?? null
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
       const attemptPlan = planAutoHookRuntimeAttemptWithNative({
         ...traceBase,
         message

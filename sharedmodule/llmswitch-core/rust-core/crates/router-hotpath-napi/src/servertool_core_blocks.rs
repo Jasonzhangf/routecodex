@@ -2368,6 +2368,29 @@ fn plans_auto_hook_runtime_attempt_via_servertool_core_bridge() {
         planned_null_parsed["traceEvent"]["reason"],
         serde_json::Value::String("predicate_false".to_string())
     );
+
+    let blank_error = plan_auto_hook_runtime_attempt_json(
+        &serde_json::json!({
+            "hookId": "stop_message_auto",
+            "phase": "default",
+            "priority": 40,
+            "queue": "A_optional",
+            "queueIndex": 1,
+            "queueTotal": 1,
+            "message": "   "
+        })
+        .to_string(),
+    )
+    .expect("auto-hook blank error runtime attempt plan");
+    let blank_error_parsed: serde_json::Value =
+        serde_json::from_str(&blank_error).expect("parse blank error plan");
+    assert_eq!(blank_error_parsed["returnResult"], false);
+    assert_eq!(blank_error_parsed["continueQueue"], false);
+    assert_eq!(blank_error_parsed["rethrowError"], true);
+    assert_eq!(
+        blank_error_parsed["traceEvent"]["reason"],
+        serde_json::Value::String("unknown".to_string())
+    );
 }
 
 #[test]

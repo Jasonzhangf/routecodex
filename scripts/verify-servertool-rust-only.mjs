@@ -3395,6 +3395,8 @@ function checkAutoHookExecutionRustOwner() {
     'if (optionalResult) {',
     'if (mandatoryResult) {',
     'result.execution.flowId.trim()',
+    "String(error ?? 'unknown')",
+    'error instanceof Error ? error.message : String',
     '// best-effort',
   ]) {
     if (autoHookCaller.includes(keyword)) {

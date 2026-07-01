@@ -151,6 +151,8 @@ const TARGETS = [
       'const finalQueueName = queueOrder[queueOrder.length - 1]?.queueName;',
       'const finalQueue = queue.queueName === finalQueueName;',
       'finalQueue',
+      "String(error ?? 'unknown')",
+      'error instanceof Error ? error.message : String',
     ],
     required: [
       'const attemptPlan = planAutoHookRuntimeAttemptWithNative({',
