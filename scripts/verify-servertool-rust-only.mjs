@@ -5829,8 +5829,31 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-prepass-shell-owner',
     TS_RESPONSE_STAGE_PREPASS_SHELL,
     responseStagePrePassShell,
+    'planServertoolResponseStageRuntimeActionWithNative'
+  );
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
+    "prepassRuntimeAction.action !== 'run_auto_hooks'"
+  );
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
     'runServertoolResponseStageAutoHookPass'
   );
+  for (const marker of [
+    'responseHookMatched !== true',
+    'responseStageGatePlan.responseHookMatched !== true',
+  ]) {
+    if (responseStagePrePassShell.includes(marker)) {
+      fail(
+        'servertool-response-stage-prepass-shell-owner',
+        `response-stage-prepass-shell.ts must not branch on Rust-owned hook match marker ${marker}`
+      );
+    }
+  }
   const responseStageAutoHookShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`);
   for (const marker of [
     'responseHookRequired: args.responseStageGatePlan.responseHookRequired === true',
