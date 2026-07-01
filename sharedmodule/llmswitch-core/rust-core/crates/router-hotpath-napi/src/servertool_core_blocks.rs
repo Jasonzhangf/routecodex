@@ -3061,6 +3061,10 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         bypass_value["action"],
         serde_json::json!("return_passthrough_bypass")
     );
+    assert_eq!(
+        bypass_value["resultMode"],
+        serde_json::json!("passthrough")
+    );
 
     let run_auto_hooks = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
@@ -3078,6 +3082,7 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         run_auto_hooks_value["action"],
         serde_json::json!("run_auto_hooks")
     );
+    assert_eq!(run_auto_hooks_value.get("resultMode"), None);
 
     let passthrough = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
@@ -3094,6 +3099,10 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
     assert_eq!(
         passthrough_value["action"],
         serde_json::json!("return_passthrough_no_auto_hook_result")
+    );
+    assert_eq!(
+        passthrough_value["resultMode"],
+        serde_json::json!("passthrough")
     );
 
     let required_empty = plan_servertool_response_stage_runtime_action_json(

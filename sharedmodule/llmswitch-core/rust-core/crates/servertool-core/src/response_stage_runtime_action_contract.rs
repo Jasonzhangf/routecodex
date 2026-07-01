@@ -29,6 +29,8 @@ pub struct ServertoolResponseStageRuntimeActionPlan {
     pub action: ServertoolResponseStageRuntimeAction,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_hook_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_mode: Option<String>,
 }
 
 fn resolve_response_stage_next_action(input: &ServertoolResponseStageRuntimeActionInput) -> &str {
@@ -75,6 +77,7 @@ pub fn plan_servertool_response_stage_runtime_action(
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass,
             response_hook_name: None,
+            result_mode: Some("passthrough".to_string()),
         };
     }
 
@@ -82,6 +85,7 @@ pub fn plan_servertool_response_stage_runtime_action(
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::RunAutoHooks,
             response_hook_name: None,
+            result_mode: None,
         };
     }
 
@@ -89,6 +93,7 @@ pub fn plan_servertool_response_stage_runtime_action(
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::ReturnAutoHookResult,
             response_hook_name: None,
+            result_mode: None,
         };
     }
 
@@ -96,12 +101,14 @@ pub fn plan_servertool_response_stage_runtime_action(
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::ReturnRequiredResponseHookEmpty,
             response_hook_name: resolve_response_hook_name(&input),
+            result_mode: None,
         };
     }
 
     ServertoolResponseStageRuntimeActionPlan {
         action: ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult,
         response_hook_name: None,
+        result_mode: Some("passthrough".to_string()),
     }
 }
 
@@ -123,6 +130,7 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass
         );
+        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
     }
 
     #[test]
@@ -139,6 +147,7 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::RunAutoHooks
         );
+        assert_eq!(plan.result_mode, None);
     }
 
     #[test]
@@ -155,6 +164,7 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnAutoHookResult
         );
+        assert_eq!(plan.result_mode, None);
     }
 
     #[test]
@@ -171,6 +181,7 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult
         );
+        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
     }
 
     #[test]
@@ -187,6 +198,7 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult
         );
+        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
     }
 
     #[test]
@@ -211,6 +223,7 @@ mod tests {
             plan.response_hook_name.as_deref(),
             Some("stop_message_auto")
         );
+        assert_eq!(plan.result_mode, None);
     }
 
     #[test]

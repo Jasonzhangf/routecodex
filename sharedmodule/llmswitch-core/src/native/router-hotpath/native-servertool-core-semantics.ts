@@ -385,15 +385,18 @@ export interface ServertoolExecutionLoopEffectPlan {
   handlerErrorMessage?: string;
 }
 
-export interface ServertoolResponseStageRuntimeActionPlan {
-  action:
-    | 'return_passthrough_bypass'
-    | 'run_auto_hooks'
-    | 'return_auto_hook_result'
-    | 'return_required_response_hook_empty'
-    | 'return_passthrough_no_auto_hook_result';
-  responseHookName?: string;
-}
+export type ServertoolResponseStageRuntimeActionPlan =
+  | {
+      action: 'return_passthrough_bypass' | 'return_passthrough_no_auto_hook_result';
+      resultMode: 'passthrough';
+    }
+  | {
+      action: 'return_required_response_hook_empty';
+      responseHookName?: string;
+    }
+  | {
+      action: 'run_auto_hooks' | 'return_auto_hook_result';
+    };
 
 export interface ServertoolResponseStageOrchestrationOutputPlan {
   returnAction: 'return_executed_payload' | 'return_original_payload';
@@ -2691,12 +2694,35 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
   if (record.action === 'return_auto_hook_result' && input.hasAutoHookResult !== true) {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned return_auto_hook_result without auto-hook result');
   }
-  return {
-    action: record.action,
-    ...(typeof record.responseHookName === 'string' && record.responseHookName.trim()
-      ? { responseHookName: record.responseHookName.trim() }
-      : {})
-  };
+  const isPassthroughAction =
+    record.action === 'return_passthrough_bypass' ||
+    record.action === 'return_passthrough_no_auto_hook_result';
+  if (isPassthroughAction && record.resultMode !== 'passthrough') {
+    throw new Error('planServertoolResponseStageRuntimeActionJson native returned passthrough action without passthrough resultMode');
+  }
+  if (!isPassthroughAction && record.resultMode !== undefined) {
+    throw new Error('planServertoolResponseStageRuntimeActionJson native returned resultMode for non-passthrough action');
+  }
+  if (isPassthroughAction) {
+    return {
+      action: record.action,
+      resultMode: 'passthrough'
+    };
+  }
+  if (record.action === 'return_required_response_hook_empty') {
+    return {
+      action: 'return_required_response_hook_empty',
+      ...(typeof record.responseHookName === 'string' && record.responseHookName.trim()
+        ? { responseHookName: record.responseHookName.trim() }
+        : {})
+    };
+  }
+  if (record.action === 'run_auto_hooks' || record.action === 'return_auto_hook_result') {
+    return {
+      action: record.action
+    };
+  }
+  throw new Error('planServertoolResponseStageRuntimeActionJson native returned unhandled action');
 }
 
 export function planServertoolResponseStageOrchestrationOutputWithNative(input: {

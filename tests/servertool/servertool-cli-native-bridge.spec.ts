@@ -654,7 +654,8 @@ describe('servertool CLI native bridge', () => {
         responseHookRequired: false
       })
     ).toEqual({
-      action: 'return_passthrough_bypass'
+      action: 'return_passthrough_bypass',
+      resultMode: 'passthrough'
     });
 
     expect(
@@ -701,7 +702,8 @@ describe('servertool CLI native bridge', () => {
         responseHookRequired: false
       })
     ).toEqual({
-      action: 'return_passthrough_no_auto_hook_result'
+      action: 'return_passthrough_no_auto_hook_result',
+      resultMode: 'passthrough'
     });
 
     expect(
@@ -712,7 +714,8 @@ describe('servertool CLI native bridge', () => {
         responseHookRequired: true
       })
     ).toEqual({
-      action: 'return_passthrough_no_auto_hook_result'
+      action: 'return_passthrough_no_auto_hook_result',
+      resultMode: 'passthrough'
     });
   });
 

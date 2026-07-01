@@ -6094,11 +6094,18 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
+    'mode: finalizeRuntimeAction.resultMode'
+  );
+  assertContains(
+    'servertool-response-stage-finalize-shell-owner',
+    TS_RESPONSE_STAGE_FINALIZE_SHELL,
+    responseStageFinalizeShell,
     'invalid response-stage finalize action'
   );
   for (const marker of [
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
     'return passthroughResult;',
+    "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
     'initialResponseStageGatePlan',
     'planServertoolResponseStageGateWithNative',
     'readRuntimeControlFromAnyBoundMetadataCenter',

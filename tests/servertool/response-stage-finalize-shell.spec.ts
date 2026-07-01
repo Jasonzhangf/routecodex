@@ -28,7 +28,8 @@ describe('response-stage-finalize-shell', () => {
       action: 'continue_without_result'
     });
     planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
-      action: 'return_passthrough_no_auto_hook_result'
+      action: 'return_passthrough_no_auto_hook_result',
+      resultMode: 'passthrough'
     });
   });
 
@@ -72,7 +73,8 @@ describe('response-stage-finalize-shell', () => {
       action: 'return_passthrough_bypass'
     });
     planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
-      action: 'return_passthrough_bypass'
+      action: 'return_passthrough_bypass',
+      resultMode: 'passthrough'
     });
 
     const result = await finalizeServertoolResponseStage({
@@ -148,6 +150,8 @@ describe('response-stage-finalize-shell', () => {
     expect(source).not.toContain('autoHookResult == null');
     expect(source).not.toContain('native response-stage finalize requested auto-hook result but result was empty');
     expect(source).toContain('switch (finalizeRuntimeAction.action)');
+    expect(source).toContain('mode: finalizeRuntimeAction.resultMode');
+    expect(source).not.toContain("return { mode: 'passthrough', finalChatResponse: args.baseObject };");
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
   });
 
