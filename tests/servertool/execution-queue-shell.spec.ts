@@ -176,6 +176,12 @@ describe('execution-queue-shell', () => {
 
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('planServertoolExecutionLoopRuntimeActionWithNative');
+    expect(source).toContain('switch (initialLoopAction)');
+    expect(source).toContain('switch (resultLoopAction)');
+    expect(source).not.toContain("if (initialLoopActionPlan.action === 'skip_non_tool_call_handler')");
+    expect(source).not.toContain("if (initialLoopActionPlan.action === 'throw_dispatch_spec_mismatch')");
+    expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_materialized_result')");
+    expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')");
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
     expect(source).toContain('message: errorEffectPlan.handlerErrorMessage as string');
     expect(source).not.toContain("String(lastErr ?? 'unknown')");

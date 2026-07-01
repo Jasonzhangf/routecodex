@@ -46,19 +46,24 @@ export async function runServertoolIoExecutionQueue(args: {
       hasMaterializedResult: false,
       hasHandlerError: false
     });
-    if (initialLoopActionPlan.action === 'skip_non_tool_call_handler') {
-      continue;
-    }
-    if (initialLoopActionPlan.action === 'throw_dispatch_spec_mismatch') {
-      throw createServertoolProviderProtocolErrorFromPlan(
-        planServertoolExecutionDispatchErrorWithNative({
-          kind: 'dispatch_spec_mismatch',
-          requestId: args.options.requestId,
-          toolName: toolCall.name,
-          nativeExecutionMode: entry?.registration.executionMode ?? '',
-          tsExecutionMode: toolCall.executionMode
-        })
-      );
+    const initialLoopAction = initialLoopActionPlan.action;
+    switch (initialLoopAction) {
+      case 'skip_non_tool_call_handler':
+        continue;
+      case 'throw_dispatch_spec_mismatch':
+        throw createServertoolProviderProtocolErrorFromPlan(
+          planServertoolExecutionDispatchErrorWithNative({
+            kind: 'dispatch_spec_mismatch',
+            requestId: args.options.requestId,
+            toolName: toolCall.name,
+            nativeExecutionMode: entry?.registration.executionMode ?? '',
+            tsExecutionMode: toolCall.executionMode
+          })
+        );
+      case 'continue_without_effect':
+        break;
+      default:
+        throw new Error(`[servertool] invalid execution loop initial action: ${String(initialLoopAction)}`);
     }
     const ctx = { ...args.contextBase, base: args.baseForExecution, toolCall };
     let planned = null;
@@ -82,39 +87,46 @@ export async function runServertoolIoExecutionQueue(args: {
       hasMaterializedResult: result != null,
       hasHandlerError
     });
-    if (resultLoopActionPlan.action === 'apply_materialized_result') {
-      replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse as JsonObject);
-      executionState = appendServertoolExecutedRecordWithNative({
-        state: executionState,
-        toolCall,
-        execution: result.execution
-      });
-      continue;
-    }
-    if (resultLoopActionPlan.action === 'apply_handler_error_tool_output') {
-      const errorEffectPlan = planServertoolExecutionLoopEffectWithNative({
-        mode: 'handler_error',
-        toolCall: {
-          id: toolCall.id,
-          name: toolCall.name,
-          arguments: toolCall.arguments,
-          executionMode: toolCall.executionMode,
-          stripAfterExecute: toolCall.stripAfterExecute
-        },
-        handlerErrorMessage: lastErr
-      });
-      const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({
-        base: args.baseForExecution as Record<string, unknown>,
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        message: errorEffectPlan.handlerErrorMessage as string
-      }) as JsonObject;
-      replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
-      executionState = appendServertoolExecutedRecordWithNative({
-        state: executionState,
-        toolCall: errorEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall'],
-        execution: errorEffectPlan.execution as ServerToolExecution
-      });
+    const resultLoopAction = resultLoopActionPlan.action;
+    switch (resultLoopAction) {
+      case 'apply_materialized_result':
+        replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse as JsonObject);
+        executionState = appendServertoolExecutedRecordWithNative({
+          state: executionState,
+          toolCall,
+          execution: result.execution
+        });
+        continue;
+      case 'apply_handler_error_tool_output': {
+        const errorEffectPlan = planServertoolExecutionLoopEffectWithNative({
+          mode: 'handler_error',
+          toolCall: {
+            id: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+            executionMode: toolCall.executionMode,
+            stripAfterExecute: toolCall.stripAfterExecute
+          },
+          handlerErrorMessage: lastErr
+        });
+        const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({
+          base: args.baseForExecution as Record<string, unknown>,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          message: errorEffectPlan.handlerErrorMessage as string
+        }) as JsonObject;
+        replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
+        executionState = appendServertoolExecutedRecordWithNative({
+          state: executionState,
+          toolCall: errorEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall'],
+          execution: errorEffectPlan.execution as ServerToolExecution
+        });
+        break;
+      }
+      case 'continue_without_effect':
+        break;
+      default:
+        throw new Error(`[servertool] invalid execution loop result action: ${String(resultLoopAction)}`);
     }
   }
 

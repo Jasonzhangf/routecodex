@@ -161,6 +161,12 @@ describe('execution queue dispatch runtime', () => {
     expect(source).not.toContain("String(lastErr ?? 'unknown')");
     expect(source).not.toContain('lastErr instanceof Error ? lastErr.message : lastErr');
     expect(source).not.toContain('Boolean(lastErr)');
+    expect(source).not.toContain("if (initialLoopActionPlan.action === 'skip_non_tool_call_handler')");
+    expect(source).not.toContain("if (initialLoopActionPlan.action === 'throw_dispatch_spec_mismatch')");
+    expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_materialized_result')");
+    expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')");
+    expect(source).toContain('switch (initialLoopAction)');
+    expect(source).toContain('switch (resultLoopAction)');
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).toContain('message: errorEffectPlan.handlerErrorMessage as string');
   });
