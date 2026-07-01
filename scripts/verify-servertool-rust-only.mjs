@@ -5768,17 +5768,21 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
-    'planServertoolResponseStageGateWithNative'
+    'runServertoolResponseStageAutoHookPass'
   );
   assertContains(
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
-    'runServertoolResponseStageAutoHookPass'
+    'responseStageGatePlan: args.responseStageGatePlan'
   );
   for (const marker of [
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
     'return passthroughResult;',
+    'initialResponseStageGatePlan',
+    'planServertoolResponseStageGateWithNative',
+    'readRuntimeControlFromAnyBoundMetadataCenter',
+    'responseHookMatched === true',
   ]) {
     if (responseStageFinalizeShell.includes(marker)) {
       fail(

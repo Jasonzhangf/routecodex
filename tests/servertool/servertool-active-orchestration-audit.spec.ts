@@ -185,10 +185,14 @@ const TARGETS = [
     forbidden: [
       "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
       'return passthroughResult;',
+      'initialResponseStageGatePlan',
+      'planServertoolResponseStageGateWithNative',
+      'readRuntimeControlFromAnyBoundMetadataCenter',
+      'responseHookMatched === true',
     ],
     required: [
-      'planServertoolResponseStageGateWithNative',
       'runServertoolResponseStageAutoHookPass',
+      'responseStageGatePlan: args.responseStageGatePlan',
       "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
     ],
   },

@@ -1,3 +1,9 @@
+# 2026-07-01: servertool response-stage finalize gate reuse removed from TS
+- Slice: `response-stage-finalize-shell.ts` no longer re-plans response-stage gate semantics based on `initialResponseStageGatePlan?.responseHookMatched === true`; finalize now requires and directly consumes the `responseStageGatePlan` produced by prepass, so response-stage gate truth stays single-owner in prepass/native.
+- Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now forbid `initialResponseStageGatePlan`, `planServertoolResponseStageGateWithNative`, runtimeControl reread, and local `responseHookMatched === true` branching in finalize shell; tests lock that finalize only consumes the provided gate plan.
+- Verification: focused Jest `response-stage-finalize-shell + execution-stage-shell + servertool-active-orchestration-audit` PASS 51/51; sharedmodule `tsc` PASS; `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `build:base`, and `git diff --check` PASS.
+- Commit scope note: unrelated dirty router-direct/SSE/VR/package/build-info files remain excluded from this servertool slice.
+
 # 2026-07-01: servertool response-stage bypass skipReason guard moved to native parser
 - Slice: `response-stage-orchestration-shell.ts` no longer throws the local `native response-stage gate bypass missing skipReason` shape guard; `parseServertoolResponseStageGatePayload()` now rejects bypass gate payloads without a non-empty `skipReason`, so shell only consumes the validated native gate plan.
 - Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now forbid the old shell-side `skipReason` type/trim/throw markers; `response-stage-orchestration-shell.spec.ts` locks parser rejection and shell thinness.

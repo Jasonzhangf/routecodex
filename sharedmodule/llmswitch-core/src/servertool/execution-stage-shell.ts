@@ -81,6 +81,6 @@ export async function runServertoolExecutionStage(args: {
     contextBase: args.contextBase as ServerToolHandlerContext,
     includeAutoHookIds: args.includeAutoHookIds,
     excludeAutoHookIds: args.excludeAutoHookIds,
-    initialResponseStageGatePlan: args.responseStageGatePlan
+    responseStageGatePlan: args.responseStageGatePlan
   });
 }
