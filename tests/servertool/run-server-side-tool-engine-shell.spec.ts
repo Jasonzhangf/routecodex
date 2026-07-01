@@ -114,6 +114,26 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(runServertoolResponseStagePrePass).not.toHaveBeenCalled();
   });
 
+  test('fails fast for unknown entry context action', async () => {
+    runServertoolEntryPreflight.mockReturnValue({
+      action: 'continue',
+      baseObject: { ok: true }
+    });
+    extractToolCallsFromResponseStage.mockReturnValue([]);
+    resolveServertoolEntryContext.mockReturnValue({ action: 'unknown_entry_context_action' });
+
+    await expect(
+      orchestrateServertoolEngine({
+        chatResponse: { ok: true },
+        adapterContext: {},
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-entry-context-unknown',
+        providerProtocol: 'openai-responses'
+      } as any)
+    ).rejects.toThrow('[servertool] invalid entry context action: unknown_entry_context_action');
+    expect(runServertoolResponseStagePrePass).not.toHaveBeenCalled();
+  });
+
   test('forwards pre-pass early result without entering execution stage', async () => {
     runServertoolEntryPreflight.mockReturnValue({
       action: 'continue',

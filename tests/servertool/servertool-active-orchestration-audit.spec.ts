@@ -415,6 +415,8 @@ const TARGETS = [
       'switch (entryPreflightAction)',
       'switch (entryContextAction)',
       'switch (responseStagePrePassAction)',
+      "case 'return_non_object_base':",
+      'invalid entry context action',
     ],
   },
   {

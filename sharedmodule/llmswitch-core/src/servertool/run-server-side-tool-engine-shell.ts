@@ -35,8 +35,10 @@ export async function orchestrateServertoolEngine(
   switch (entryContextAction) {
     case 'continue':
       break;
-    default:
+    case 'return_non_object_base':
       return { mode: 'passthrough', finalChatResponse: options.chatResponse };
+    default:
+      throw new Error(`[servertool] invalid entry context action: ${String(entryContextAction)}`);
   }
   const responseStagePrePass = await runServertoolResponseStagePrePass({
     options,

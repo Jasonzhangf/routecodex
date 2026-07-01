@@ -5385,7 +5385,9 @@ function checkServertoolRustOutcomeCloseout() {
     'runServertoolExecutionStage',
     'switch (entryPreflightAction)',
     'switch (entryContextAction)',
-    'switch (responseStagePrePassAction)'
+    'switch (responseStagePrePassAction)',
+    "case 'return_non_object_base':",
+    'invalid entry context action'
   ]) {
     if (!runServerSideToolEngineShell.includes(marker)) {
       fail(
