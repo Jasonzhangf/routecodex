@@ -450,6 +450,8 @@ const TARGETS = [
       'const entryPreflightAction = entryPreflight.action',
       'const entryContextAction = entryContext.action',
       'const responseStagePrePassAction = responseStagePrePass.action',
+      'entryPreflight as { action: unknown }',
+      'enginePrepassAction as { action: unknown }',
     ],
     required: [
       'orchestrateServertoolEngine',

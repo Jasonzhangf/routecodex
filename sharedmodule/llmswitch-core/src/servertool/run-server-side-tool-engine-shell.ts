@@ -20,9 +20,7 @@ export async function orchestrateServertoolEngine(
     case 'continue':
       break;
     default:
-      throw new Error(
-        `[servertool] invalid entry preflight result action: ${String((entryPreflight as { action: unknown }).action)}`
-      );
+      throw new Error('[servertool] invalid entry preflight result action');
   }
   const toolCalls = extractToolCallsFromResponseStage(
     entryPreflight.baseObject,
@@ -53,9 +51,7 @@ export async function orchestrateServertoolEngine(
     case 'continue_to_execution':
       break;
     default:
-      throw new Error(
-        `[servertool] invalid engine prepass action: ${String((enginePrepassAction as { action: unknown }).action)}`
-      );
+      throw new Error('[servertool] invalid engine prepass action');
   }
   return runServertoolExecutionStage({
     options,

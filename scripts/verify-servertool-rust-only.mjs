@@ -5529,6 +5529,8 @@ function checkServertoolRustOutcomeCloseout() {
     'const entryPreflightAction = entryPreflight.action',
     'const entryContextAction = entryContext.action',
     'const responseStagePrePassAction = responseStagePrePass.action',
+    'entryPreflight as { action: unknown }',
+    'enginePrepassAction as { action: unknown }',
   ]) {
     if (runServerSideToolEngineShell.includes(marker)) {
       fail(

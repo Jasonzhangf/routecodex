@@ -84,10 +84,69 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain('const entryPreflightAction = entryPreflight.action');
     expect(source).not.toContain('const entryContextAction = entryContext.action');
     expect(source).not.toContain('const responseStagePrePassAction = responseStagePrePass.action');
+    expect(source).not.toContain('entryPreflight as { action: unknown }');
+    expect(source).not.toContain('enginePrepassAction as { action: unknown }');
     expect(source).not.toContain('const base =');
     expect(source).not.toContain("typeof options.chatResponse === 'object'");
     expect(source).not.toContain("case 'return_non_object_base':");
     expect(source).not.toContain('invalid entry context action');
+  });
+
+  test('fails fast on unknown entry preflight action without reading action payload in TS', async () => {
+    runServertoolEntryPreflight.mockReturnValue({
+      action: 'unknown_entry_preflight_action'
+    });
+
+    await expect(
+      orchestrateServertoolEngine({
+        chatResponse: { ok: true },
+        adapterContext: {},
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-unknown-entry-preflight',
+        providerProtocol: 'openai-responses'
+      } as any)
+    ).rejects.toThrow('[servertool] invalid entry preflight result action');
+
+    expect(extractToolCallsFromResponseStage).not.toHaveBeenCalled();
+    expect(resolveServertoolEntryContext).not.toHaveBeenCalled();
+    expect(runServertoolResponseStagePrePass).not.toHaveBeenCalled();
+    expect(runServertoolExecutionStage).not.toHaveBeenCalled();
+  });
+
+  test('fails fast on unknown engine prepass action without reading action payload in TS', async () => {
+    runServertoolEntryPreflight.mockReturnValue({
+      action: 'continue',
+      baseObject: { ok: true }
+    });
+    extractToolCallsFromResponseStage.mockReturnValue([{ id: 'call_1', name: 'web_search' }]);
+    resolveServertoolEntryContext.mockReturnValue({
+      action: 'continue',
+      baseObject: { ok: true },
+      contextBase: { base: { ok: true }, toolCalls: [], adapterContext: {}, requestId: 'req-unknown-prepass', entryEndpoint: 'openai', providerProtocol: 'openai-chat' },
+      includeToolCallNames: null,
+      excludeToolCallNames: null,
+      includeAutoHookIds: null,
+      excludeAutoHookIds: null
+    });
+    runServertoolResponseStagePrePass.mockResolvedValue({
+      action: 'continue_to_execution',
+      responseStageGatePlan: { nextAction: 'continue_to_execution' }
+    });
+    planServertoolEnginePrepassActionWithNative.mockReturnValue({
+      action: 'unknown_engine_prepass_action'
+    });
+
+    await expect(
+      orchestrateServertoolEngine({
+        chatResponse: { ok: true },
+        adapterContext: {},
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-unknown-prepass',
+        providerProtocol: 'openai-responses'
+      } as any)
+    ).rejects.toThrow('[servertool] invalid engine prepass action');
+
+    expect(runServertoolExecutionStage).not.toHaveBeenCalled();
   });
 
   test('returns preflight early result when preflight short-circuits', async () => {
