@@ -202,11 +202,15 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
-    forbidden: [],
+    forbidden: [
+      'responseHookMatched !== true',
+      'responseStageGatePlan.responseHookMatched !== true',
+    ],
     required: [
       'planServertoolResponseStageGateWithNative',
+      'planServertoolResponseStageRuntimeActionWithNative',
+      "prepassRuntimeAction.action !== 'run_auto_hooks'",
       'runServertoolResponseStageAutoHookPass',
-      'responseHookMatched !== true',
       "action: 'continue_to_execution' as const",
       'responseStageGatePlan',
     ],

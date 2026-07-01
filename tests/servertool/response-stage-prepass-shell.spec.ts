@@ -1,12 +1,22 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageGateWithNative = jest.fn();
+const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
 const runServertoolResponseStageAutoHookPass = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
     planServertoolResponseStageGateWithNative
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    planServertoolResponseStageRuntimeActionWithNative,
+    inspectStopGatewaySignalWithNative: jest.fn(() => ({ reason: 'test' })),
+    normalizeStopMessageCompareContextWithNative: jest.fn(() => ({ source: 'test' }))
   })
 );
 
@@ -26,7 +36,11 @@ describe('response-stage-prepass-shell', () => {
     jest.clearAllMocks();
     planServertoolResponseStageGateWithNative.mockReturnValue({
       responseHookMatched: false,
-      responseHookRequired: false
+      responseHookRequired: false,
+      nextAction: 'continue_to_execution'
+    });
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'return_passthrough_no_auto_hook_result'
     });
     runServertoolResponseStageAutoHookPass.mockResolvedValue({
       action: 'continue_without_result'
@@ -46,12 +60,22 @@ describe('response-stage-prepass-shell', () => {
       action: 'continue_to_execution',
       responseStageGatePlan: {
         responseHookMatched: false,
-        responseHookRequired: false
+        responseHookRequired: false,
+        nextAction: 'continue_to_execution'
       }
     });
     expect(planServertoolResponseStageGateWithNative).toHaveBeenCalledWith({
       payload: { ok: true },
       adapterContext: { trace: true }
+    });
+    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledWith({
+      responseStageGatePlan: {
+        responseHookMatched: false,
+        responseHookRequired: false,
+        nextAction: 'continue_to_execution'
+      },
+      autoHookEvaluated: false,
+      hasAutoHookResult: false
     });
     expect(runServertoolResponseStageAutoHookPass).not.toHaveBeenCalled();
   });
@@ -59,7 +83,11 @@ describe('response-stage-prepass-shell', () => {
   test('returns early auto-hook result when matched response hook materializes one', async () => {
     planServertoolResponseStageGateWithNative.mockReturnValue({
       responseHookMatched: true,
-      responseHookRequired: false
+      responseHookRequired: false,
+      nextAction: 'run_auto_hooks'
+    });
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'run_auto_hooks'
     });
     runServertoolResponseStageAutoHookPass.mockResolvedValue({
       action: 'return_auto_hook_result',
@@ -82,7 +110,8 @@ describe('response-stage-prepass-shell', () => {
       action: 'return_result',
       responseStageGatePlan: {
         responseHookMatched: true,
-        responseHookRequired: false
+        responseHookRequired: false,
+        nextAction: 'run_auto_hooks'
       },
       result: {
         mode: 'tool_flow',
@@ -94,9 +123,23 @@ describe('response-stage-prepass-shell', () => {
       expect.objectContaining({
         responseStageGatePlan: {
           responseHookMatched: true,
-          responseHookRequired: false
+          responseHookRequired: false,
+          nextAction: 'run_auto_hooks'
         }
       })
     );
+  });
+
+  test('keeps prepass auto-hook decision in Rust runtime action plan', async () => {
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(
+      'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
+      'utf8'
+    );
+
+    expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
+    expect(source).toContain("prepassRuntimeAction.action !== 'run_auto_hooks'");
+    expect(source).not.toContain('responseStageGatePlan.responseHookMatched !== true');
+    expect(source).not.toContain('responseHookMatched !== true');
   });
 });

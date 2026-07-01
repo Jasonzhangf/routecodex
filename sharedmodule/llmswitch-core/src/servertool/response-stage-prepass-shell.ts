@@ -5,6 +5,7 @@ import type {
 } from './types.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { planServertoolResponseStageGateWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import { planServertoolResponseStageRuntimeActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
@@ -30,7 +31,13 @@ export async function runServertoolResponseStagePrePass(args: {
     )
   }) as Record<string, unknown>;
 
-  if (responseStageGatePlan.responseHookMatched !== true) {
+  const prepassRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  });
+
+  if (prepassRuntimeAction.action !== 'run_auto_hooks') {
     return {
       action: 'continue_to_execution' as const,
       responseStageGatePlan
