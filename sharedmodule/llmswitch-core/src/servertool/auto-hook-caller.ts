@@ -31,8 +31,10 @@ function buildAutoHookQueuesFromNativePlan(args: {
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
 }): {
-  optionalQueue: AutoHookExecutionItem[];
-  mandatoryQueue: AutoHookExecutionItem[];
+  queueOrder: Array<{
+    queueName: ServerToolAutoHookTraceEvent['queue'];
+    hooks: AutoHookExecutionItem[];
+  }>;
 } {
   const queueConfig = planServertoolSkeletonDerivedConfigWithNative().autoHookQueueConfig as {
     optionalPrimaryOrder: string[];
@@ -62,8 +64,10 @@ function buildAutoHookQueuesFromNativePlan(args: {
       return hook;
     });
   return {
-    optionalQueue: mapQueue(nativePlan.optionalQueue),
-    mandatoryQueue: mapQueue(nativePlan.mandatoryQueue)
+    queueOrder: nativePlan.queueOrder.map((queue) => ({
+      queueName: queue.queue,
+      hooks: mapQueue(queue.entries)
+    }))
   };
 }
 
@@ -143,18 +147,11 @@ export async function runServertoolAutoHookCaller(args: {
   excludeAutoHookIds: Set<string> | null;
 }): Promise<ServerSideToolEngineResult | null> {
   const autoHookExecutionList = listAutoServerToolHooks();
-  const { optionalQueue, mandatoryQueue } = buildAutoHookQueuesFromNativePlan({
+  const { queueOrder } = buildAutoHookQueuesFromNativePlan({
     hooks: autoHookExecutionList,
     includeAutoHookIds: args.includeAutoHookIds,
     excludeAutoHookIds: args.excludeAutoHookIds
   });
-  const queueOrder: Array<{
-    queueName: ServerToolAutoHookTraceEvent['queue'];
-    hooks: AutoHookExecutionItem[];
-  }> = [
-    { queueName: 'A_optional', hooks: optionalQueue },
-    { queueName: 'B_mandatory', hooks: mandatoryQueue }
-  ];
 
   for (let queueIndex = 0; queueIndex < queueOrder.length; queueIndex += 1) {
     const queue = queueOrder[queueIndex];

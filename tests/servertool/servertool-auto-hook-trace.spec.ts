@@ -82,7 +82,20 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
     planAutoHookRuntimeAttemptWithNative: planAutoHookRuntimeAttemptWithNativeMock,
-    planAutoHookCallerFinalizationWithNative: planAutoHookCallerFinalizationWithNativeMock
+    planAutoHookCallerFinalizationWithNative: planAutoHookCallerFinalizationWithNativeMock,
+    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(async (input: any) => {
+      const hook = registryHooks.find(
+        (entry) => entry.id === input?.name && entry.execution.kind === 'builtin'
+      );
+      if (!hook || typeof hook.execution.__testHandler !== 'function') {
+        throw new Error(`missing test builtin handler for ${String(input?.name ?? '')}`);
+      }
+      return await hook.execution.__testHandler({
+        base: input?.base,
+        requestId: input?.requestId,
+        runtimeMetadata: input?.runtimeMetadata
+      } as any);
+    })
   })
 );
 
@@ -94,12 +107,26 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
-    buildAutoHookQueuesFromConfig: jest.fn((input: any) => ({
-      optionalQueue: [...(input?.hooks ?? [])].filter((hook: any) => hook.priority < 100),
-      mandatoryQueue: [...(input?.hooks ?? [])].filter((hook: any) => hook.priority >= 100)
-    }))
+    planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
+      autoHookQueueConfig: {
+        optionalPrimaryOrder: [],
+        mandatoryOrder: []
+      }
+    })),
+    planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => {
+      const optionalQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority < 100);
+      const mandatoryQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority >= 100);
+      return {
+        optionalQueue,
+        mandatoryQueue,
+        queueOrder: [
+          { queue: 'A_optional', entries: optionalQueue },
+          { queue: 'B_mandatory', entries: mandatoryQueue }
+        ]
+      };
+    })
   })
 );
 

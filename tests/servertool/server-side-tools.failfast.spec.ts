@@ -171,6 +171,12 @@ jest.unstable_mockModule(
       }
       return parsed;
     }),
+    buildServertoolCliProjectionRuntimeBranchWithNative: jest.fn((input: any) => ({
+      chatResponse: input?.base ?? {},
+      execution: {
+        flowId: String(input?.toolName ?? 'client_exec_cli_projection')
+      }
+    })),
     planServertoolEntryContextWithNative: jest.fn((input: any) => ({
       includeToolCallNames: input?.includeToolCallHandlerNames,
       excludeToolCallNames: input?.excludeToolCallHandlerNames,
@@ -195,6 +201,9 @@ jest.unstable_mockModule(
         message: flowId
           ? `[servertool] client disconnected during followup flow=${flowId}`
           : '[servertool] client disconnected during followup',
+        code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+        category: 'CLIENT_DISCONNECTED',
+        status: 499,
         details: {
           requestId,
           ...(flowId ? { flowId } : {})
@@ -502,7 +511,17 @@ jest.unstable_mockModule(
     }),
     planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => ({
       optionalQueue: Array.isArray(input?.hooks) ? [...input.hooks] : [],
-      mandatoryQueue: []
+      mandatoryQueue: [],
+      queueOrder: [
+        {
+          queue: 'A_optional',
+          entries: Array.isArray(input?.hooks) ? [...input.hooks] : []
+        },
+        {
+          queue: 'B_mandatory',
+          entries: []
+        }
+      ]
     })),
     runServertoolOrchestrationMutationWithNative: jest.fn((input: any) => {
       const op = String(input?.op ?? '').trim();

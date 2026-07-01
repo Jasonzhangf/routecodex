@@ -80,7 +80,17 @@ const runServertoolOrchestrationMutationWithNative = jest.fn((input: any) => {
 });
 const planServertoolAutoHookQueuesWithNative = jest.fn((input: any) => ({
   optionalQueue: [...input.hooks].sort((a, b) => a.priority - b.priority),
-  mandatoryQueue: []
+  mandatoryQueue: [],
+  queueOrder: [
+    {
+      queue: 'A_optional',
+      entries: [...input.hooks].sort((a, b) => a.priority - b.priority)
+    },
+    {
+      queue: 'B_mandatory',
+      entries: []
+    }
+  ]
 }));
 
 function mockToolSpec(name: unknown): any | null {

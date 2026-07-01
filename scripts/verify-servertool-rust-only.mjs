@@ -5610,11 +5610,25 @@ function checkServertoolAutoHookCallerThinShell() {
     'planServertoolAutoHookQueuesWithNative({',
     'sourceIndex',
     'args.hooks[entry.sourceIndex]',
+    'queueOrder: nativePlan.queueOrder.map(',
   ]) {
     if (!autoHookCallerShell.includes(marker)) {
       fail(
         'servertool-auto-hook-queue-single-rust-plan',
         `auto-hook-caller.ts must consume Rust-planned auto-hook queues by sourceIndex marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    "{ queueName: 'A_optional'",
+    "{ queueName: 'B_mandatory'",
+    "queueName: 'A_optional'",
+    "queueName: 'B_mandatory'",
+  ]) {
+    if (autoHookCallerShell.includes(marker)) {
+      fail(
+        'servertool-auto-hook-queue-single-rust-plan',
+        `auto-hook-caller.ts must not locally hard-code Rust-owned auto-hook queue order marker ${marker}`
       );
     }
   }

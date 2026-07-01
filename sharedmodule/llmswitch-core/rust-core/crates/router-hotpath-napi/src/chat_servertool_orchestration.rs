@@ -253,7 +253,7 @@ struct ServertoolAutoHookPlannerInput {
     mandatory_hook_order: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ServertoolAutoHookPlanEntry {
     id: String,
@@ -269,9 +269,17 @@ struct ServertoolAutoHookPlanEntry {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ServertoolAutoHookQueuePlan {
+    queue: String,
+    entries: Vec<ServertoolAutoHookPlanEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ServertoolAutoHookPlannerOutput {
     optional_queue: Vec<ServertoolAutoHookPlanEntry>,
     mandatory_queue: Vec<ServertoolAutoHookPlanEntry>,
+    queue_order: Vec<ServertoolAutoHookQueuePlan>,
 }
 
 fn detect_provider_response_shape(payload: &Value) -> &'static str {
@@ -2341,7 +2349,7 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
 
     let optional_total = optional_specs.len() as i64;
     let mandatory_total = mandatory_specs.len() as i64;
-    let optional_queue = optional_specs
+    let optional_queue: Vec<ServertoolAutoHookPlanEntry> = optional_specs
         .into_iter()
         .enumerate()
         .map(|(index, hook)| ServertoolAutoHookPlanEntry {
@@ -2355,7 +2363,7 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
             queue_total: optional_total,
         })
         .collect();
-    let mandatory_queue = mandatory_specs
+    let mandatory_queue: Vec<ServertoolAutoHookPlanEntry> = mandatory_specs
         .into_iter()
         .enumerate()
         .map(|(index, hook)| ServertoolAutoHookPlanEntry {
@@ -2370,9 +2378,20 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
         })
         .collect();
 
+    let queue_order = vec![
+        ServertoolAutoHookQueuePlan {
+            queue: "A_optional".to_string(),
+            entries: optional_queue.clone(),
+        },
+        ServertoolAutoHookQueuePlan {
+            queue: "B_mandatory".to_string(),
+            entries: mandatory_queue.clone(),
+        },
+    ];
     let output = ServertoolAutoHookPlannerOutput {
         optional_queue,
         mandatory_queue,
+        queue_order,
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -3651,6 +3670,19 @@ mod tests {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
+        let queue_order = parsed
+            .get("queueOrder")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            queue_order[0].get("queue").and_then(|v| v.as_str()),
+            Some("A_optional")
+        );
+        assert_eq!(
+            queue_order[1].get("queue").and_then(|v| v.as_str()),
+            Some("B_mandatory")
+        );
         let ids: Vec<String> = optional
             .iter()
             .filter_map(|entry| {

@@ -143,11 +143,20 @@ export type ServertoolAutoHookPlanEntryPayload = {
   priority: number;
   order: number;
   sourceIndex: number;
+  queue: 'A_optional' | 'B_mandatory';
+  queueIndex: number;
+  queueTotal: number;
+};
+
+export type ServertoolAutoHookQueuePayload = {
+  queue: 'A_optional' | 'B_mandatory';
+  entries: ServertoolAutoHookPlanEntryPayload[];
 };
 
 export type ServertoolAutoHookQueuesPayload = {
   optionalQueue: ServertoolAutoHookPlanEntryPayload[];
   mandatoryQueue: ServertoolAutoHookPlanEntryPayload[];
+  queueOrder: ServertoolAutoHookQueuePayload[];
 };
 
 export type ServertoolGenericFollowupPayload = {
@@ -623,6 +632,7 @@ export function parseServertoolAutoHookQueuesPayload(raw: string): ServertoolAut
     | {
       optionalQueue?: unknown;
       mandatoryQueue?: unknown;
+      queueOrder?: unknown;
     }
     | typeof JSON_PARSE_FAILED;
   if (
@@ -634,7 +644,13 @@ export function parseServertoolAutoHookQueuesPayload(raw: string): ServertoolAut
     return null;
   }
 
-  const normalizeQueue = (entries: unknown[]): ServertoolAutoHookPlanEntryPayload[] =>
+  const normalizeQueueName = (queue: unknown): 'A_optional' | 'B_mandatory' | null =>
+    queue === 'A_optional' || queue === 'B_mandatory' ? queue : null;
+
+  const normalizeQueue = (
+    entries: unknown[],
+    fallbackQueue: 'A_optional' | 'B_mandatory'
+  ): ServertoolAutoHookPlanEntryPayload[] =>
     entries
       .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)))
       .map((entry) => ({
@@ -651,13 +667,45 @@ export function parseServertoolAutoHookQueuesPayload(raw: string): ServertoolAut
         sourceIndex:
           typeof entry.sourceIndex === 'number' && Number.isInteger(entry.sourceIndex) && entry.sourceIndex >= 0
             ? entry.sourceIndex
-            : -1
+            : -1,
+        queue: normalizeQueueName(entry.queue) ?? fallbackQueue,
+        queueIndex:
+          typeof entry.queueIndex === 'number' && Number.isInteger(entry.queueIndex) && entry.queueIndex > 0
+            ? entry.queueIndex
+            : 0,
+        queueTotal:
+          typeof entry.queueTotal === 'number' && Number.isInteger(entry.queueTotal) && entry.queueTotal >= 0
+            ? entry.queueTotal
+            : 0
       }))
-      .filter((entry) => entry.id.length > 0 && entry.sourceIndex >= 0);
+      .filter((entry) => entry.id.length > 0 && entry.sourceIndex >= 0 && entry.queueIndex > 0);
+
+  const optionalQueue = normalizeQueue(parsed.optionalQueue, 'A_optional');
+  const mandatoryQueue = normalizeQueue(parsed.mandatoryQueue, 'B_mandatory');
+  const queueOrder =
+    Array.isArray(parsed.queueOrder)
+      ? parsed.queueOrder
+        .filter((queue): queue is Record<string, unknown> => Boolean(queue && typeof queue === 'object' && !Array.isArray(queue)))
+        .map((queue) => {
+          const queueName = normalizeQueueName(queue.queue);
+          if (!queueName || !Array.isArray(queue.entries)) {
+            return null;
+          }
+          return {
+            queue: queueName,
+            entries: normalizeQueue(queue.entries, queueName)
+          };
+        })
+        .filter((queue): queue is ServertoolAutoHookQueuePayload => Boolean(queue))
+      : [
+        { queue: 'A_optional' as const, entries: optionalQueue },
+        { queue: 'B_mandatory' as const, entries: mandatoryQueue }
+      ];
 
   return {
-    optionalQueue: normalizeQueue(parsed.optionalQueue),
-    mandatoryQueue: normalizeQueue(parsed.mandatoryQueue)
+    optionalQueue,
+    mandatoryQueue,
+    queueOrder
   };
 }
 
