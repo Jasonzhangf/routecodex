@@ -152,6 +152,7 @@ type NativeRouterHotpathJsonBinding = {
 
   // -- hub_pipeline batch #6 --
   resolveEntryProtocolFromEndpointJson?: (entryEndpoint: string) => string;
+  captureReqInboundResponsesContextSnapshotJson?: (inputJson: string) => string;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -548,7 +549,7 @@ function invokeRouterHotpathJsonCapability(capability: keyof NativeRouterHotpath
   }
 }
 
-function assertNativeObject(capability: keyof NativeRouterHotpathJsonBinding, value: unknown): AnyRecord {
+function assertNativeObject(capability: string, value: unknown): AnyRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`[llmswitch-bridge] ${String(capability)} returned invalid payload`);
   }

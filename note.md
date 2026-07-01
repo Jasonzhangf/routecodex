@@ -4,6 +4,11 @@
 - Verification: `tests/server/runtime/http-server/router-direct-pipeline.spec.ts` PASS 24/24; `tests/sharedmodule/provider-response-rust-plan.spec.ts` PASS 21/21; sharedmodule `tsc` PASS; `git diff --check` PASS.
 - Commit scope note: unrelated dirty files remain from other/generated work (`package*`, `src/build-info.ts`, SSE/Responses files); do not include them in this slice.
 
+# 2026-07-01: native bridge binding compile blocker
+- Finding: root `tsc` failed because `NativeRouterHotpathJsonBinding` did not list `captureReqInboundResponsesContextSnapshotJson`, and `assertNativeObject()` incorrectly required its label to be a native binding key.
+- Fix: add the real router-hotpath JSON capability key and make `assertNativeObject()` accept a plain string label, avoiding a fake `normalizeResponsesInputItemsForProviderWireNative` native capability.
+- Verification: root `tsc` PASS; direct pipeline Jest PASS 24/24; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:function-map-compile-gate`, and `build:base` PASS; `git diff --check` PASS.
+
 # 2026-07-01: servertool postflight session truth removed from TS
 - Slice: `engine-postflight-shell.ts` no longer reads/trims `metadataCenterSnapshot.requestTruth.sessionId`; it passes the metadata-center snapshot carrier to native `buildStoplessAutoCliProjectionFromEngineWithNative()`, where Rust `stopless_auto_handler_bridge.rs` owns session truth extraction.
 - Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now forbid `const requestTruth = metadataCenterSnapshot?.requestTruth`, `const rawSessionId = requestTruth?.sessionId`, and `rawSessionId.trim()` in postflight.
