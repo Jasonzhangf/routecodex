@@ -808,7 +808,9 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
 - `sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/entry-context-shell.spec.ts`
 
 Forbidden paths:
 - `src/providers`

@@ -37,6 +37,10 @@ describe('entry-context-shell', () => {
     expect(source).not.toContain('Servertool entry context requires metadata center runtime_control.providerProtocol');
     expect(source).not.toContain('export function asServertoolJsonObject(');
     expect(source).not.toContain('function tokenSetFromNativePlan(');
+    expect(source).not.toContain('entryContextPlan.includeToolCallNames.length > 0');
+    expect(source).not.toContain('entryContextPlan.excludeToolCallNames.length > 0');
+    expect(source).not.toContain('entryContextPlan.includeAutoHookIds.length > 0');
+    expect(source).not.toContain('entryContextPlan.excludeAutoHookIds.length > 0');
     expect(source).not.toContain('.trim().toLowerCase()');
     expect(typesSource).not.toMatch(/export interface ServerSideToolEngineOptions\s*\{[\s\S]{0,260}providerProtocol:\s*string;/);
   });

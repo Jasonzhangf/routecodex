@@ -9,6 +9,10 @@ import {
 } from './metadata-center-carrier.js';
 import { planServertoolEntryContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
+function nativeEntryTokenSet(tokens: readonly string[] | undefined): Set<string> | null {
+  return tokens ? new Set(tokens) : null;
+}
+
 export function resolveServertoolEntryContext(args: {
   options: ServerSideToolEngineOptions;
   toolCalls: ToolCall[];
@@ -39,22 +43,10 @@ export function resolveServertoolEntryContext(args: {
     includeAutoHookIds: args.options.includeAutoHookIds,
     excludeAutoHookIds: args.options.excludeAutoHookIds
   });
-  const includeToolCallNames =
-    entryContextPlan.includeToolCallNames && entryContextPlan.includeToolCallNames.length > 0
-      ? new Set(entryContextPlan.includeToolCallNames)
-      : null;
-  const excludeToolCallNames =
-    entryContextPlan.excludeToolCallNames && entryContextPlan.excludeToolCallNames.length > 0
-      ? new Set(entryContextPlan.excludeToolCallNames)
-      : null;
-  const includeAutoHookIds =
-    entryContextPlan.includeAutoHookIds && entryContextPlan.includeAutoHookIds.length > 0
-      ? new Set(entryContextPlan.includeAutoHookIds)
-      : null;
-  const excludeAutoHookIds =
-    entryContextPlan.excludeAutoHookIds && entryContextPlan.excludeAutoHookIds.length > 0
-      ? new Set(entryContextPlan.excludeAutoHookIds)
-      : null;
+  const includeToolCallNames = nativeEntryTokenSet(entryContextPlan.includeToolCallNames);
+  const excludeToolCallNames = nativeEntryTokenSet(entryContextPlan.excludeToolCallNames);
+  const includeAutoHookIds = nativeEntryTokenSet(entryContextPlan.includeAutoHookIds);
+  const excludeAutoHookIds = nativeEntryTokenSet(entryContextPlan.excludeAutoHookIds);
 
   return {
     action: 'continue',

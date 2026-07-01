@@ -1,3 +1,9 @@
+# 2026-07-01: servertool entry-context Set empty semantics removed from TS
+- Slice: `entry-context-shell.ts` no longer decides native filter arrays with repeated `length > 0 ? new Set(...) : null`; Rust `server_side_tool_entry_contract.rs` remains the owner for trim/lowercase/dedupe/empty-list-to-none semantics, while TS only converts a present native token array into a runtime `Set`.
+- Gate: `verify-servertool-rust-only` and `servertool-active-orchestration-audit` now forbid the old entry-context native-plan length checks; function/verification map and generated servertool ownership wiki now include the entry-context shell/test under the Rust entry contract feature.
+- Verification: `cargo test -p servertool-core server_side_tool_entry_contract --lib -- --nocapture` PASS 4/4; focused Jest `entry-context + active audit + failfast + cli-native-bridge` PASS 72/72; sharedmodule `tsc` PASS; `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `build:base`, and `git diff --check` PASS.
+- Commit scope note: unrelated dirty router-direct/native-exports/VR/SSE files remain excluded from this servertool slice.
+
 # 2026-07-01: 4444 spark image failure is not direct cleanup
 - Evidence: latest 4444 sample `openai-responses-router-gpt-5.5-20260701T121608549-439094-131` fails first hop with upstream HTTP 400 `model "gpt-5.3-codex-spark" does not support image input`; its `providerRequestShape.hasMetadata=false` and input item types are valid, so this is not MetadataCenter leakage.
 - Direct boundary fix: removed `normalizeResponsesInputItemsForProviderWireNative` / `applyDirectResponsesProviderWireNormalization` from router-direct; direct must not clean or normalize Responses input before provider send.

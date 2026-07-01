@@ -264,6 +264,10 @@ const TARGETS = [
       'export function asServertoolJsonObject(',
       'readProviderProtocolFromAnyBoundMetadataCenter',
       'Servertool entry context requires metadata center runtime_control.providerProtocol',
+      'entryContextPlan.includeToolCallNames.length > 0',
+      'entryContextPlan.excludeToolCallNames.length > 0',
+      'entryContextPlan.includeAutoHookIds.length > 0',
+      'entryContextPlan.excludeAutoHookIds.length > 0',
     ],
     required: [
       'resolveServertoolEntryContext',
