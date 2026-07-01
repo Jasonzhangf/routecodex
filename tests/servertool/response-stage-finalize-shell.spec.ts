@@ -150,4 +150,21 @@ describe('response-stage-finalize-shell', () => {
     expect(source).toContain('switch (finalizeRuntimeAction.action)');
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
   });
+
+  test('fails fast for unknown finalize native runtime action', async () => {
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'unknown_finalize_action'
+    });
+
+    await expect(
+      finalizeServertoolResponseStage({
+        options: { adapterContext: {}, requestId: 'req-unknown-finalize' } as any,
+        baseObject: { ok: true },
+        contextBase: {} as any,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null,
+        responseStageGatePlan: { responseHookMatched: false, responseHookRequired: false }
+      })
+    ).rejects.toThrow('[servertool] invalid response-stage finalize action: unknown_finalize_action');
+  });
 });

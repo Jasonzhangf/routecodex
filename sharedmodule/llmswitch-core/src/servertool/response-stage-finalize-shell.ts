@@ -31,6 +31,12 @@ export async function finalizeServertoolResponseStage(args: {
   switch (finalizeRuntimeAction.action) {
     case 'return_auto_hook_result':
       return autoHookResult as ServerSideToolEngineResult;
+    case 'return_passthrough_bypass':
+    case 'return_passthrough_no_auto_hook_result':
+      return { mode: 'passthrough', finalChatResponse: args.baseObject };
+    default:
+      throw new Error(
+        `[servertool] invalid response-stage finalize action: ${String((finalizeRuntimeAction as { action: string }).action)}`
+      );
   }
-  return { mode: 'passthrough', finalChatResponse: args.baseObject };
 }

@@ -233,6 +233,7 @@ const TARGETS = [
       'hasAutoHookResult: autoHookResult != null',
       'return autoHookResult as ServerSideToolEngineResult',
       "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
+      'invalid response-stage finalize action',
     ],
   },
   {
