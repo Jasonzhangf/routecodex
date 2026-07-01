@@ -215,10 +215,6 @@ export async function* sequenceChatResponse(
         content: typeof d.content !== 'undefined' ? d.content : null,
         tool_calls: Array.isArray(d.tool_calls) ? d.tool_calls : undefined
       };
-      // 为了下游 finish 事件合理性，缺省 finish_reason：若存在工具调用则用 tool_calls，否则 stop
-      if (!('finish_reason' in choice)) {
-        (choice as any).finish_reason = message.tool_calls ? 'tool_calls' : 'stop';
-      }
     }
 
     message = normalizeFunctionCall(message);
@@ -235,9 +231,14 @@ export async function* sequenceChatResponse(
     // 序列化消息内容
     yield* sequenceMessageContent(message, context, config);
 
-    // 发送finish_reason事件（若未提供则根据消息推断）
+    const finishReason = (choice as any).finish_reason;
+    if (typeof finishReason !== 'string' || !finishReason.trim()) {
+      throw new Error('Invalid ChatCompletionResponse choice: missing finish_reason');
+    }
+
+    // 发送显式finish_reason事件
     yield buildFinishEvent(
-      (choice as any).finish_reason || (message?.tool_calls ? 'tool_calls' : 'stop'),
+      finishReason as 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call',
       context,
       config,
       response.usage

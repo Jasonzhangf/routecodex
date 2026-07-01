@@ -1,3 +1,8 @@
+# 2026-07-01: Chat SSE finish_reason fallback removed
+- Red evidence: focused `chat-sse-usage-no-fallback` first showed missing `choices[0].finish_reason` was synthesized into `"finish_reason":"stop"` and `[DONE]`; `verify:sse-architecture-boundary` first failed on the old `finish_reason` inference markers in `chat-sequencer.ts`.
+- Fix: Chat JSON->SSE now requires explicit `finish_reason`; missing/blank finish reason emits the native error path with `Invalid ChatCompletionResponse choice: missing finish_reason`, and no synthesized `stop` / `[DONE]` is emitted.
+- Verification: focused Jest `chat-sse-usage-no-fallback + chat-sse-function-call-args-no-fallback` PASS 11/11; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:function-map-compile-gate`, sharedmodule/root `tsc --noEmit --pretty false`, real 4444 Responses SSE replay, `git diff --check`, and `build:base` PASS. Build generated version `0.90.3412`.
+
 # 2026-07-01: Chat SSE tool_call arguments skip removed
 - Red evidence: `verify:sse-architecture-boundary` first failed on `if (!args) return;` in `event-generators/chat.ts` and `if (toolCall.function?.arguments) {` in `chat-sequencer.ts`; focused `chat-sse-function-call-args-no-fallback` added missing `message.tool_calls[].function.arguments` coverage.
 - Fix: Chat JSON->SSE no longer silently skips malformed modern `tool_calls` arguments; the path now enters Rust/NAPI `buildChatSseToolCallArgsDeltaPayloadWithNative()`, where missing `arguments` fails fast with `Chat SSE tool call args delta payload missing arguments` and no `finish_reason=tool_calls` / `[DONE]` is emitted.

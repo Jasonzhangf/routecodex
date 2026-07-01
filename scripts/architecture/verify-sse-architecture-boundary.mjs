@@ -302,9 +302,12 @@ for (const forbidden of [
 const chatSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts');
 for (const forbidden of [
   'if (toolCall.function?.arguments) {',
+  "if (!('finish_reason' in choice)) {",
+  "message.tool_calls ? 'tool_calls' : 'stop'",
+  '(choice as any).finish_reason ||',
 ]) {
   if (chatSequencer.includes(forbidden)) {
-    failures.push(`Chat SSE sequencer must not silently skip malformed tool_call arguments: ${forbidden}`);
+    failures.push(`Chat SSE sequencer must not silently synthesize malformed chat terminal semantics: ${forbidden}`);
   }
 }
 
