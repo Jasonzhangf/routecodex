@@ -1,3 +1,8 @@
+# 2026-07-02: servertool extract normalized payload truthiness removed
+- Slice: `extract-tool-calls-shell.ts` no longer uses truthiness to decide whether native response-stage `normalizedPayload` should replace the in-place JSON object; it now uses explicit `!= null` plus object/array validation.
+- Gate: `extract-tool-calls-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid the old `stage.normalizedPayload && typeof ...` marker and require the nullish presence check.
+- Evidence: focused extract-tool-calls Jest PASS 2/2; focused active audit PASS 44/44; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool entry preflight truthiness removed
 - Slice: `entry-preflight-shell.ts` no longer uses truthiness to decide whether `chatResponse` is the base object for native entry preflight planning; it now uses explicit `!= null` plus object/array validation.
 - Gate: `entry-preflight-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid the old `args.options.chatResponse && typeof ...` marker and require the nullish presence check.

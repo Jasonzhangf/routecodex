@@ -12,6 +12,8 @@ describe('extract-tool-calls-shell', () => {
 
     expect(source).toContain('runServertoolResponseStageWithNative');
     expect(source).toContain('replaceJsonObjectInPlace');
+    expect(source).not.toContain("stage.normalizedPayload && typeof stage.normalizedPayload === 'object'");
+    expect(source).toContain("stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object'");
   });
 
   test('extracts normalized tool calls and writes canonical payload in place', () => {

@@ -285,10 +285,12 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.ts',
     forbidden: [
       'function asObject(',
+      "stage.normalizedPayload && typeof stage.normalizedPayload === 'object'",
     ],
     required: [
       'runServertoolResponseStageWithNative',
       'replaceJsonObjectInPlace',
+      "stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object'",
       'stage.toolCalls.map(',
     ],
   },

@@ -5122,6 +5122,7 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export const extractToolCallsFromResponseStage =',
     'runServertoolResponseStageWithNative',
+    "stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object'",
     'replaceJsonObjectInPlace'
   ]) {
     if (!extractToolCallsShell.includes(marker)) {
@@ -5131,11 +5132,16 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
-  if (extractToolCallsShell.includes('function asObject(')) {
-    fail(
-      'servertool-extract-tool-calls-shell-owner',
-      'extract-tool-calls-shell.ts must not restore local asObject carrier helper'
-    );
+  for (const marker of [
+    'function asObject(',
+    "stage.normalizedPayload && typeof stage.normalizedPayload === 'object'",
+  ]) {
+    if (extractToolCallsShell.includes(marker)) {
+      fail(
+        'servertool-extract-tool-calls-shell-owner',
+        `extract-tool-calls-shell.ts must not restore local carrier/truthiness marker ${marker}`
+      );
+    }
   }
   const dispatchPreparationShell = readRequired(TS_DISPATCH_PREPARATION_SHELL);
   for (const marker of [

@@ -6,7 +6,7 @@ import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 export const extractToolCallsFromResponseStage = (chatResponse: JsonObject, requestId = ''): ToolCall[] => {
   const stage = runServertoolResponseStageWithNative(chatResponse, requestId);
   const normalizedPayload =
-    stage.normalizedPayload && typeof stage.normalizedPayload === 'object' && !Array.isArray(stage.normalizedPayload)
+    stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object' && !Array.isArray(stage.normalizedPayload)
       ? (stage.normalizedPayload as JsonObject)
       : chatResponse;
   replaceJsonObjectInPlace(chatResponse, normalizedPayload);
