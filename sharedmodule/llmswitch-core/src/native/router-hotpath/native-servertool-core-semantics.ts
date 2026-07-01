@@ -521,14 +521,6 @@ export interface ServertoolErrorPlan {
   details: Record<string, unknown>;
 }
 
-export interface ServertoolMaterializationProgressPlan {
-  action:
-    | 'finalize_without_backend'
-    | 'return_handler_result'
-    | 'invalid_plan_missing_finalize'
-    | 'invalid_plan_result';
-}
-
 export interface StopMessageBlockedReport {
   summary: string;
   blocker: string;
@@ -3235,38 +3227,6 @@ export function appendServertoolExecutedRecordWithNative(input: {
     throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
   }
   return parseServertoolExecutionLoopState(resultJson, capability);
-}
-
-export function planServertoolMaterializationProgressWithNative(input: {
-  hasFinalizeFunction: boolean;
-  hasChatResponseObject: boolean;
-  hasExecutionObject: boolean;
-  hasExecutionFlowId: boolean;
-  hasPlanMarkers: boolean;
-}): ServertoolMaterializationProgressPlan {
-  const capability = 'planServertoolMaterializationProgressJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolMaterializationProgressJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolMaterializationProgressJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolMaterializationProgressJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    record.action !== 'finalize_without_backend' &&
-    record.action !== 'return_handler_result' &&
-    record.action !== 'invalid_plan_missing_finalize' &&
-    record.action !== 'invalid_plan_result'
-  ) {
-    throw new Error('planServertoolMaterializationProgressJson native returned invalid action');
-  }
-  return { action: record.action };
 }
 
 export function planStopMessageFetchFailedErrorWithNative(input: {

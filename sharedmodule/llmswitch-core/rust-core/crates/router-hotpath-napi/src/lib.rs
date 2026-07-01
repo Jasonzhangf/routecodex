@@ -1541,12 +1541,6 @@ pub fn append_servertool_executed_record_json(input_json: String) -> NapiResult<
 }
 
 #[napi]
-pub fn plan_servertool_materialization_progress_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_servertool_materialization_progress_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
 pub fn resolve_default_stop_message_snapshot_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::resolve_default_stop_message_snapshot_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

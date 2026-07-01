@@ -607,6 +607,25 @@
         <tr><td>mtc-08</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         </tbody>
         </table>
+        <h2>sse.chat_stream_projection.mainline</h2>
+        <p>Chat JSON response projection into client-visible SSE frames; malformed encode-side semantics fail fast instead of being synthesized into error frames.</p>
+        <p>Entry contract: <code>HubRespOutbound04ClientSemantic</code> via <code>docs/design/pipeline-type-topology-and-module-boundaries.md</code></p>
+        <pre class="mermaid">flowchart LR
+          ServerRespOutbound05ClientFrame[&quot;ServerRespOutbound05ClientFrame&quot;]
+          HubRespOutbound04ClientSemantic[&quot;HubRespOutbound04ClientSemantic&quot;]
+          HubRespOutbound04ClientSemantic --&gt;|chat-sse-01| ServerRespOutbound05ClientFrame
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class HubRespOutbound04ClientSemantic anchored;
+          class ServerRespOutbound05ClientFrame anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>chat-sse-01</td><td><code>HubRespOutbound04ClientSemantic -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>processResponseToSseWithFunctions -&gt; sequenceResponse</code></td><td></td><td><code>sse.chat_stream_projection</code>&lt;br/&gt;OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas</td></tr>
+        </tbody>
+        </table>
         <h2>Shared Multi-Reference Functions</h2>
         <table>
         <thead><tr><th>function_id</th><th>symbol</th><th>owner</th><th>note</th></tr></thead>

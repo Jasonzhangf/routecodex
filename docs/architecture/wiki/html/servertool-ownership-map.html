@@ -146,7 +146,7 @@
         <tr><td><code>hub.servertool_engine_skip_contract</code></td><td>servertool engine skip planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_branch_contract</code></td><td>servertool execution branch and CLI projection target planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_dispatch_contract</code></td><td>servertool execution dispatch error and followup contract planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
-        <tr><td><code>hub.servertool_execution_handler_contract</code></td><td>servertool handler contract, materialization, and runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_execution_handler_contract</code></td><td>servertool handler materialization planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_loop_effect_contract</code></td><td>servertool execution loop effect planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_loop_runtime_action_contract</code></td><td>servertool execution loop runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_outcome_runtime_action_contract</code></td><td>servertool execution outcome runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
@@ -649,21 +649,16 @@
           <li>Rust owns dispatch mismatch and missing execution-contract error planning.</li>
         </ul>
         <h2>hub.servertool_execution_handler_contract</h2>
-        <p>Summary: servertool handler contract, materialization, and runtime action planning</p>
-        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs</code> Owner scope: servertool handler contract, materialization, and runtime action planning</p>
+        <p>Summary: servertool handler materialization planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs</code> Owner scope: servertool handler materialization planning</p>
         <p>Canonical types:</p>
         <ul>
-          <li><code>ServertoolHandlerContractInput</code></li>
-          <li><code>ServertoolMaterializationProgressInput</code></li>
-          <li><code>ServertoolHandlerRuntimeActionInput</code></li>
-          <li><code>ServertoolHandlerRuntimeActionPlan</code></li>
+          <li><code>ServertoolHandlerMaterializationInput</code></li>
+          <li><code>ServertoolHandlerMaterializationPlan</code></li>
         </ul>
         <p>Canonical builders:</p>
         <ul>
-          <li><code>plan_servertool_handler_contract</code></li>
-          <li><code>plan_servertool_materialization_progress</code></li>
-          <li><code>plan_servertool_handler_runtime_action</code></li>
-          <li><code>plan_servertool_handler_failed_error</code></li>
+          <li><code>plan_servertool_handler_materialization</code></li>
         </ul>
         <p>Allowed paths:</p>
         <ul>
@@ -692,7 +687,7 @@
         </ul>
         <p>Notes:</p>
         <ul>
-          <li>Rust owns handler contract and runtime action planning.</li>
+          <li>Rust owns handler materialization action and error-plan composition; retired progress/runtime public bridges must stay absent.</li>
         </ul>
         <h2>hub.servertool_execution_loop_effect_contract</h2>
         <p>Summary: servertool execution loop effect planning</p>

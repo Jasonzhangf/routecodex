@@ -93,3 +93,12 @@ chains:
       Virtual Router online diagnostics is fully anchored: HTTP/CLI shells
       project Rust-produced status and dry-run diagnostics without route
       recomputation.
+  - chain_id: sse.chat_stream_projection.mainline
+    expected_total_edges: 1
+    min_anchored_edges: 1
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Chat JSON-to-SSE projection is fully anchored at the converter->sequencer
+      adjacent edge; encode-side malformed semantics must fail fast and must not
+      synthesize fallback error frames.

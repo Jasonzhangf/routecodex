@@ -5525,7 +5525,7 @@ function checkServertoolRustOutcomeCloseout() {
     napiBlocks,
     'plan_servertool_handler_materialization_json'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-export',
     `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
     napiBlocks,
@@ -5549,7 +5549,7 @@ function checkServertoolRustOutcomeCloseout() {
     napiLib,
     'pub fn plan_servertool_handler_materialization_json'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-export',
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
@@ -5573,7 +5573,7 @@ function checkServertoolRustOutcomeCloseout() {
     requiredExports,
     'planServertoolHandlerMaterializationJson'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-required-export',
     NATIVE_REQUIRED_EXPORTS,
     requiredExports,
@@ -5603,7 +5603,7 @@ function checkServertoolRustOutcomeCloseout() {
     nativeCoreWrapper,
     'planServertoolHandlerMaterializationForPlannedWithNative'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeCoreWrapper,

@@ -340,7 +340,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildServertoolPostflightObservationSummaryJson",
   "createServertoolExecutionLoopStateJson",
   "appendServertoolExecutedRecordJson",
-  "planServertoolMaterializationProgressJson",
   "planStopMessageFetchFailedErrorJson",
   "readClientInjectOnlyJson",
   "normalizeClientInjectTextJson",

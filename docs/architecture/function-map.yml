@@ -404,20 +404,15 @@ owners:
 
   - feature_id: hub.servertool_execution_handler_contract
     status: active
-    summary: "servertool handler contract, materialization, and runtime action planning"
+    summary: "servertool handler materialization planning"
     owner_kind: rust_ssot
-    owner_scope: "servertool handler contract, materialization, and runtime action planning"
+    owner_scope: "servertool handler materialization planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs
     canonical_types:
-      - ServertoolHandlerContractInput
-      - ServertoolMaterializationProgressInput
-      - ServertoolHandlerRuntimeActionInput
-      - ServertoolHandlerRuntimeActionPlan
+      - ServertoolHandlerMaterializationInput
+      - ServertoolHandlerMaterializationPlan
     canonical_builders:
-      - plan_servertool_handler_contract
-      - plan_servertool_materialization_progress
-      - plan_servertool_handler_runtime_action
-      - plan_servertool_handler_failed_error
+      - plan_servertool_handler_materialization
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
@@ -437,7 +432,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Rust owns handler contract and runtime action planning."
+      - "Rust owns handler materialization action and error-plan composition; retired progress/runtime public bridges must stay absent."
 
   - feature_id: hub.servertool_execution_loop_effect_contract
     status: active

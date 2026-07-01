@@ -101,19 +101,7 @@ jest.unstable_mockModule(
     planServertoolExecutionOutcomeMaterializationWithNative: jest.fn(() => ({
       action: 'return_tool_flow',
       executionFlowId: 'flow-test'
-    })),
-    planServertoolMaterializationProgressWithNative: jest.fn((input: any) => {
-      if (input?.hasFinalizeFunction) {
-        return { action: 'finalize_without_backend' };
-      }
-      if (input?.hasChatResponseObject && input?.hasExecutionObject && input?.hasExecutionFlowId) {
-        return { action: 'return_handler_result' };
-      }
-      if (input?.hasPlanMarkers) {
-        return { action: 'invalid_plan_missing_finalize' };
-      }
-      return { action: 'invalid_plan_result' };
-    })
+    }))
   })
 );
 

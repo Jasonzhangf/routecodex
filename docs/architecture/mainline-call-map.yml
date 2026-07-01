@@ -917,6 +917,25 @@ chains:
         status: anchored
         note: "The closeout helper is invoked by JSON response completion, SSE finish/close cleanup, and SSE bridge-error early-close paths. Closeout may mark release only; it must not repair or backfill prior families."
 
+  - chain_id: sse.chat_stream_projection.mainline
+    summary: "Chat JSON response projection into client-visible SSE frames; malformed encode-side semantics fail fast instead of being synthesized into error frames."
+    entry_contract:
+      node: HubRespOutbound04ClientSemantic
+      owner_doc: docs/design/pipeline-type-topology-and-module-boundaries.md
+    edges:
+      - step_id: chat-sse-01
+        from_node: HubRespOutbound04ClientSemantic
+        to_node: ServerRespOutbound05ClientFrame
+        caller_symbol: processResponseToSseWithFunctions
+        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
+        callee_symbol: sequenceResponse
+        callee_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts
+        owner_feature_id: sse.chat_stream_projection
+        semantic_input: "validated ChatCompletionResponse plus request-scoped ChatJsonToSseContext"
+        semantic_output: "ordered ChatSseEvent stream for role/content/reasoning/tool-call/finish/done frames"
+        status: anchored
+        note: "The adjacent encode edge may project frames only. It must not synthesize fallback error frames for malformed response semantics; encode failures surface through the stream error path."
+
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture
     binding_status: confirmed

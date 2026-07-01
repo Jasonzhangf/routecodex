@@ -23,7 +23,7 @@ Feature scope: `hub.servertool_*`
 | `hub.servertool_engine_skip_contract` | servertool engine skip planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_execution_branch_contract` | servertool execution branch and CLI projection target planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_execution_dispatch_contract` | servertool execution dispatch error and followup contract planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
-| `hub.servertool_execution_handler_contract` | servertool handler contract, materialization, and runtime action planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
+| `hub.servertool_execution_handler_contract` | servertool handler materialization planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_execution_loop_effect_contract` | servertool execution loop effect planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_execution_loop_runtime_action_contract` | servertool execution loop runtime action planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_execution_outcome_runtime_action_contract` | servertool execution outcome runtime action planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
@@ -506,23 +506,18 @@ Notes:
 
 ## hub.servertool_execution_handler_contract
 
-Summary: servertool handler contract, materialization, and runtime action planning
+Summary: servertool handler materialization planning
 
 Owner kind: `rust_ssot`
 Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs`
-Owner scope: servertool handler contract, materialization, and runtime action planning
+Owner scope: servertool handler materialization planning
 
 Canonical types:
-- `ServertoolHandlerContractInput`
-- `ServertoolMaterializationProgressInput`
-- `ServertoolHandlerRuntimeActionInput`
-- `ServertoolHandlerRuntimeActionPlan`
+- `ServertoolHandlerMaterializationInput`
+- `ServertoolHandlerMaterializationPlan`
 
 Canonical builders:
-- `plan_servertool_handler_contract`
-- `plan_servertool_materialization_progress`
-- `plan_servertool_handler_runtime_action`
-- `plan_servertool_handler_failed_error`
+- `plan_servertool_handler_materialization`
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs`
@@ -546,7 +541,7 @@ Required gates:
 - `npm run verify:function-map-compile-gate`
 
 Notes:
-- Rust owns handler contract and runtime action planning.
+- Rust owns handler materialization action and error-plan composition; retired progress/runtime public bridges must stay absent.
 
 ## hub.servertool_execution_loop_effect_contract
 

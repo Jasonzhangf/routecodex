@@ -659,16 +659,6 @@ pub fn append_servertool_executed_record_json(input_json: &str) -> Result<String
     .map_err(|e| format!("serialize servertool appended execution state: {e}"))
 }
 
-pub fn plan_servertool_materialization_progress_json(input_json: &str) -> Result<String, String> {
-    let input: execution_handler_contract::ServertoolMaterializationProgressInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool materialization progress input: {e}"))?;
-    serde_json::to_string(
-        &execution_handler_contract::plan_servertool_materialization_progress(&input),
-    )
-    .map_err(|e| format!("serialize servertool materialization progress plan: {e}"))
-}
-
 pub fn resolve_default_stop_message_snapshot_json(input_json: &str) -> Result<String, String> {
     let input: persisted_lookup::StopMessageDefaultSnapshotInput = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize default stop-message snapshot input: {e}"))?;
@@ -3228,23 +3218,6 @@ fn plans_servertool_execution_state_via_servertool_core_bridge() {
         appended_value["lastExecution"]["flowId"],
         serde_json::json!("flow_1")
     );
-}
-
-#[test]
-fn plans_servertool_materialization_progress_via_servertool_core_bridge() {
-    let plan = plan_servertool_materialization_progress_json(
-        &serde_json::json!({
-            "hasFinalizeFunction": true,
-            "hasChatResponseObject": false,
-            "hasExecutionObject": false,
-            "hasExecutionFlowId": false,
-            "hasPlanMarkers": true
-        })
-        .to_string(),
-    )
-    .expect("materialization progress plan");
-    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(parsed["action"], "finalize_without_backend");
 }
 
 #[test]

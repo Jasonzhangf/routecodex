@@ -519,6 +519,28 @@ flowchart LR
 | mtc-07 | `MetaResp07BridgeMetadataBound -> MetaResp07ServertoolContextProjected` | anchored | `runServertoolResponseStageOrchestrationShell -> readRuntimeControlFromAnyBoundMetadataCenter` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-08 | `MetaResp07ServertoolContextProjected -> MetaResp08CloseoutReleased` | anchored | `releaseMetadataCenterForHttpResponse -> markReleased` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 
+## sse.chat_stream_projection.mainline
+
+Chat JSON response projection into client-visible SSE frames; malformed encode-side semantics fail fast instead of being synthesized into error frames.
+
+Entry contract: `HubRespOutbound04ClientSemantic` via `docs/design/pipeline-type-topology-and-module-boundaries.md`
+
+```mermaid
+flowchart LR
+  ServerRespOutbound05ClientFrame["ServerRespOutbound05ClientFrame"]
+  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
+  HubRespOutbound04ClientSemantic -->|chat-sse-01| ServerRespOutbound05ClientFrame
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubRespOutbound04ClientSemantic anchored;
+  class ServerRespOutbound05ClientFrame anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| chat-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `processResponseToSseWithFunctions -> sequenceResponse` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
+
 ## Shared Multi-Reference Functions
 
 | function_id | symbol | owner | note |
