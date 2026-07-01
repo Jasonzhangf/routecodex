@@ -54,9 +54,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
         }
       };
     default:
-      throw new Error(
-        `[servertool] invalid execution outcome materialization action: ${String((materializationPlan as { action: unknown }).action)}`
-      );
+      throw new Error('[servertool] invalid execution outcome materialization action');
   }
 }
 
@@ -78,8 +76,6 @@ export const materializeServertoolPlannedResult = async (
     case 'return_handler_result':
       return planned as ServerToolHandlerResult;
     default:
-      throw new Error(
-        `[servertool] invalid handler materialization action: ${String((actionPlan as { action: string }).action)}`
-      );
+      throw new Error('[servertool] invalid handler materialization action');
   }
 };

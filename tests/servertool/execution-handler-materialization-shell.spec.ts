@@ -167,6 +167,7 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).toContain('planServertoolExecutionOutcomeMaterializationWithNative({');
     expect(source).not.toContain("if (materializationPlan.action === 'throw_dispatch_error')");
     expect(source).toContain('switch (materializationPlan.action)');
+    expect(source).not.toContain('materializationPlan as { action: unknown }');
     expect(source).not.toContain('const materializationAction = materializationPlan.action');
     expect(source).not.toContain('Boolean(args.executionState.lastExecution)');
     expect(source).toContain('hasLastExecution: args.executionState.lastExecution != null');
@@ -178,6 +179,7 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain("if (actionPlan.action === 'finalize_without_backend')");
     expect(source).not.toContain("if (actionPlan.action === 'throw_handler_error')");
     expect(source).toContain('switch (actionPlan.action)');
+    expect(source).not.toContain('actionPlan as { action: string }');
     expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome'");
     expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract'");
     expect(source).not.toContain('record.executionFlowId.trim()');
@@ -185,6 +187,7 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain('function throwServertoolExecutionDispatchError(');
     expect(source).toContain('mode: materializationPlan.resultMode');
     expect(source).not.toContain("mode: 'tool_flow'");
+    expect(source).toContain('invalid execution outcome materialization action');
     expect(source).toContain('finalChatResponse: args.baseForExecution');
     expect(source).not.toContain('export const buildServertoolOutcomePlanInput =');
     expect(source).not.toContain('structuredClone(args.base)');
@@ -359,6 +362,31 @@ describe('execution-handler-materialization-shell', () => {
     });
   });
 
+  test('execution outcome materialization fails fast for unknown native action', () => {
+    planServertoolOutcomeWithNative.mockReturnValue({
+      outcomeMode: 'servertool_only',
+      requiresPendingInjection: false,
+      remainingToolCallIds: [],
+      flowId: 'servertool_multi'
+    });
+    planServertoolExecutionOutcomeMaterializationWithNative.mockReturnValue({
+      action: 'unknown_outcome_action'
+    });
+
+    expect(() =>
+      materializeNativeToolCallExecutionOutcome({
+        baseForExecution: { id: 'base-unknown-outcome-action' } as any,
+        options: { requestId: 'req-unknown-outcome-action', adapterContext: {} } as any,
+        toolCalls: [],
+        executionState: {
+          executedToolCalls: [],
+          executedIds: [],
+          executedFlowIds: []
+        }
+      })
+    ).toThrow('[servertool] invalid execution outcome materialization action');
+  });
+
   test('rejects retired pending-injection projection', () => {
     planServertoolOutcomeWithNative.mockReturnValue({
       outcomeMode: 'mixed_client_tools',
@@ -490,6 +518,6 @@ describe('execution-handler-materialization-shell', () => {
         requestId: 'req-unknown-handler-action',
         adapterContext: {},
       } as any)
-    ).rejects.toThrow('[servertool] invalid handler materialization action: unknown_handler_action');
+    ).rejects.toThrow('[servertool] invalid handler materialization action');
   });
 });
