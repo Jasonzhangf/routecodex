@@ -16,8 +16,6 @@ async function collectEvents(response: any): Promise<any[]> {
     enableTimestampGeneration: false,
     chunkSize: 0,
     enableRecovery: false,
-    maxOutputItems: 10,
-    maxContentParts: 10
   } as any)) {
     events.push(event);
   }

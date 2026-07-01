@@ -154,8 +154,6 @@ describe('responses SSE usage no-fallback boundary', () => {
         enableTimestampGeneration: false,
         chunkSize: 256,
         enableValidation: false,
-        maxOutputItems: 10,
-        maxContentParts: 10
       } as any
     ))).rejects.toThrow('Unknown output item type: unknown_item');
   });

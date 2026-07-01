@@ -21,8 +21,6 @@ async function collectEvents(response: any, overrides: Record<string, unknown> =
     enableTimestampGeneration: false,
     chunkSize: 0,
     enableRecovery: false,
-    maxOutputItems: 10,
-    maxContentParts: 10,
     ...overrides
   } as any)) {
     events.push(event);

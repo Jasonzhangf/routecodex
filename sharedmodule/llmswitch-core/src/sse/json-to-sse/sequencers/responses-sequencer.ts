@@ -36,16 +36,12 @@ import { canonicalizeResponsesSseEventPayloadWithNative } from '../../../native/
 
 // 排列器配置
 export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig {
-  maxOutputItems: number;
-  maxContentParts: number;
   submittedToolOutputs?: ResponsesFunctionCallOutputItem[];
 }
 
 // 默认配置
 export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesSequencerConfig = {
   ...DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG,
-  maxOutputItems: 50,
-  maxContentParts: 100,
   submittedToolOutputs: undefined
 };
 
@@ -64,10 +60,6 @@ function validateResponse(response: ResponsesResponse, config: ResponsesSequence
   if (!response.output || !Array.isArray(response.output)) {
     throw new Error('Invalid response: missing or invalid output array');
   }
-
-  if (response.output.length > config.maxOutputItems) {
-    throw new Error(`Too many output items: ${response.output.length} > ${config.maxOutputItems}`);
-  }
 }
 
 /**
@@ -83,10 +75,6 @@ async function* sequenceMessageItem(
 
   // 2. 发送content_part事件序列
   for (let contentIndex = 0; contentIndex < item.content.length; contentIndex++) {
-    if (contentIndex >= config.maxContentParts) {
-      throw new Error(`Too many content parts: ${contentIndex} >= ${config.maxContentParts}`);
-    }
-
     const content = item.content[contentIndex];
     context.contentIndexCounter.set(item.id, contentIndex);
 
