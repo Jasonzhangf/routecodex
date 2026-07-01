@@ -3524,6 +3524,7 @@ function checkServertoolRegistryRustOwner() {
     'export function listRegisteredServerToolHandlerRecords(',
     'export function isRegisteredServerToolName(',
     'resolveServertoolRegisteredNameWithNative',
+    'export {\n  type ServerToolAutoHookDescriptor,',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(

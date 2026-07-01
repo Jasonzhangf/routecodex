@@ -11,11 +11,6 @@ import type {
   ServerToolHandlerEntry
 } from './types.js';
 
-export {
-  type ServerToolAutoHookDescriptor,
-  type ServerToolHandlerEntry
-} from './types.js';
-
 export const getServerToolHandler = (
   name: string
 ): ServerToolHandlerEntry | undefined => {

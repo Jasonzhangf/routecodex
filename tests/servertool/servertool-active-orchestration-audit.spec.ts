@@ -478,6 +478,7 @@ const TARGETS = [
       'projectAutoServerToolHookDescriptors',
       'export function isRegisteredServerToolName(',
       'resolveServertoolRegisteredNameWithNative',
+      'export {\n  type ServerToolAutoHookDescriptor,',
     ],
     required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
