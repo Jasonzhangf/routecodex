@@ -56,6 +56,8 @@ describe('entry-preflight-shell', () => {
     expect(source).toContain('planServertoolClientDisconnectedErrorWithNative');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
     expect(source).not.toContain('Boolean(base)');
+    expect(source).not.toContain("args.options.chatResponse && typeof args.options.chatResponse === 'object'");
+    expect(source).toContain("args.options.chatResponse != null && typeof args.options.chatResponse === 'object'");
     expect(source).toContain('hasBaseObject: base != null');
     expect(source).not.toContain("if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')");
     expect(source).not.toContain("if (entryPreflightPlan.action === 'throw_client_disconnected')");

@@ -3811,12 +3811,24 @@ function checkServertoolEntryPreflightRustOwner() {
     'servertool-entry-preflight-ts-thin-shell',
     TS_ENTRY_PREFLIGHT_SHELL,
     readRequired(TS_ENTRY_PREFLIGHT_SHELL),
+    "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'"
+  );
+  assertContains(
+    'servertool-entry-preflight-ts-thin-shell',
+    TS_ENTRY_PREFLIGHT_SHELL,
+    readRequired(TS_ENTRY_PREFLIGHT_SHELL),
     'hasBaseObject: base != null'
   );
-  if (readRequired(TS_ENTRY_PREFLIGHT_SHELL).includes('Boolean(base)')) {
+  for (const marker of [
+    'Boolean(base)',
+    "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
+  ]) {
+    if (!readRequired(TS_ENTRY_PREFLIGHT_SHELL).includes(marker)) {
+      continue;
+    }
     fail(
       'servertool-entry-preflight-ts-thin-shell',
-      'entry-preflight-shell.ts must not use TS truthiness Boolean(base) for native presence facts'
+      `entry-preflight-shell.ts must not use TS truthiness marker ${marker} for native presence facts`
     );
   }
   pass('servertool-entry-preflight-no-ts-owner', 'entry preflight TS semantics stay out of deleted server-side-tools facade');
@@ -5325,6 +5337,7 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEntryPreflightWithNative',
     'planServertoolClientDisconnectedErrorWithNative',
     'createServertoolProviderProtocolErrorFromPlan',
+    "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'",
     'hasBaseObject: base != null',
     'switch (entryPreflightPlan.action)',
     "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }"
@@ -5336,13 +5349,9 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
-  if (entryPreflightShell.includes('Boolean(base)')) {
-    fail(
-      'servertool-entry-preflight-shell-owner',
-      'entry-preflight-shell.ts must not restore Boolean(base) presence semantics'
-    );
-  }
   for (const marker of [
+    'Boolean(base)',
+    "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
     "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')",
     "if (entryPreflightPlan.action === 'throw_client_disconnected')",
   ]) {

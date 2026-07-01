@@ -15,7 +15,7 @@ export function runServertoolEntryPreflight(args: {
   | { action: 'continue'; baseObject: JsonObject }
   | { action: 'return_result'; result: ServerSideToolEngineResult } {
   const base =
-    args.options.chatResponse && typeof args.options.chatResponse === 'object' && !Array.isArray(args.options.chatResponse)
+    args.options.chatResponse != null && typeof args.options.chatResponse === 'object' && !Array.isArray(args.options.chatResponse)
       ? args.options.chatResponse as JsonObject
       : null;
   const entryPreflightPlan = planServertoolEntryPreflightWithNative({
