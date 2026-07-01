@@ -108,7 +108,6 @@ const PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER = {
 
 function buildBridgeAdapterContext(args: {
   metadata: Record<string, unknown>;
-  entryOriginRequest?: Record<string, unknown>;
   requestId: string;
   entryEndpoint?: string;
   providerProtocol?: string;
@@ -121,7 +120,6 @@ function buildBridgeAdapterContext(args: {
     ...(args.entryEndpoint ? { entryEndpoint: args.entryEndpoint } : {}),
     ...(args.providerProtocol ? { providerProtocol: args.providerProtocol } : {}),
     ...(args.serverToolsEnabled !== undefined ? { serverToolsEnabled: args.serverToolsEnabled } : {}),
-    ...(args.entryOriginRequest ? { entryOriginRequest: args.entryOriginRequest } : {}),
   };
   const center = MetadataCenter.read(args.metadata);
   if (center) {
@@ -428,7 +426,6 @@ export async function convertProviderResponseIfNeeded(
   try {
     const adapterContext = buildBridgeAdapterContext({
       metadata: responseMetadataBag,
-      entryOriginRequest: options.entryOriginRequest,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol: effectiveProviderProtocol,

@@ -25,6 +25,8 @@ describe('provider-response-converter contract', () => {
     expect(source).not.toContain('normalizeResponsesToolCallsViaRustSsot');
     expect(source).not.toContain('normalizeResponsesToolCallArgumentsForClientWithNative');
     expect(source).not.toContain('clientToolsRaw: options.entryOriginRequest.tools');
+    expect(source).not.toContain('entryOriginRequest: args.entryOriginRequest');
+    expect(source).not.toContain('entryOriginRequest: options.entryOriginRequest');
     expect(source).not.toContain('restoreDirectChatVisibleContentFromSse');
     expect(source).not.toContain('recoverVisibleAssistantContentFromChatSseText');
     expect(source).not.toContain('isImagePathLike');
