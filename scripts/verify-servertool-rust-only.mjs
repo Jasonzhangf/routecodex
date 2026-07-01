@@ -5873,6 +5873,12 @@ function checkServertoolResponseStageGateThinShell() {
     responseStageFinalizeShell,
     'hasAutoHookResult: autoHookResult != null'
   );
+  assertContains(
+    'servertool-response-stage-finalize-shell-owner',
+    TS_RESPONSE_STAGE_FINALIZE_SHELL,
+    responseStageFinalizeShell,
+    'switch (finalizeRuntimeAction.action)'
+  );
   for (const marker of [
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
     'return passthroughResult;',
@@ -5882,6 +5888,7 @@ function checkServertoolResponseStageGateThinShell() {
     'responseHookMatched === true',
     "responseStageAutoHook.action === 'return_passthrough_bypass'",
     "responseStageAutoHook.action === 'return_auto_hook_result'",
+    "if (finalizeRuntimeAction.action === 'return_auto_hook_result')",
   ]) {
     if (responseStageFinalizeShell.includes(marker)) {
       fail(

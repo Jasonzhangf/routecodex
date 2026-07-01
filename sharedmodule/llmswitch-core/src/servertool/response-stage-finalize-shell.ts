@@ -28,11 +28,12 @@ export async function finalizeServertoolResponseStage(args: {
     autoHookEvaluated: true,
     hasAutoHookResult: autoHookResult != null
   });
-  if (finalizeRuntimeAction.action === 'return_auto_hook_result') {
-    if (autoHookResult == null) {
-      throw new Error('native response-stage finalize requested auto-hook result but result was empty');
-    }
-    return autoHookResult;
+  switch (finalizeRuntimeAction.action) {
+    case 'return_auto_hook_result':
+      if (autoHookResult == null) {
+        throw new Error('native response-stage finalize requested auto-hook result but result was empty');
+      }
+      return autoHookResult;
   }
   return { mode: 'passthrough', finalChatResponse: args.baseObject };
 }

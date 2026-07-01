@@ -144,6 +144,8 @@ describe('response-stage-finalize-shell', () => {
     expect(source).not.toContain('responseHookMatched === true');
     expect(source).not.toContain("responseStageAutoHook.action === 'return_passthrough_bypass'");
     expect(source).not.toContain("responseStageAutoHook.action === 'return_auto_hook_result'");
+    expect(source).not.toContain("if (finalizeRuntimeAction.action === 'return_auto_hook_result')");
+    expect(source).toContain('switch (finalizeRuntimeAction.action)');
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
   });
 });

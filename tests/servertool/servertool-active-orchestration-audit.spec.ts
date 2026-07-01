@@ -208,11 +208,13 @@ const TARGETS = [
       'responseHookMatched === true',
       "responseStageAutoHook.action === 'return_passthrough_bypass'",
       "responseStageAutoHook.action === 'return_auto_hook_result'",
+      "if (finalizeRuntimeAction.action === 'return_auto_hook_result')",
     ],
     required: [
       'runServertoolResponseStageAutoHookPass',
       'responseStageGatePlan: args.responseStageGatePlan',
       'planServertoolResponseStageRuntimeActionWithNative',
+      'switch (finalizeRuntimeAction.action)',
       'hasAutoHookResult: autoHookResult != null',
       "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
     ],
