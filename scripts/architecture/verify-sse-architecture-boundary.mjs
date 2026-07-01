@@ -292,9 +292,19 @@ for (const forbidden of [
   'record.outputTokens',
   'record.totalTokens',
   '(promptTokens ?? 0) + (completionTokens ?? 0)',
+  'if (!args) return;',
 ]) {
   if (chatEventGenerator.includes(forbidden)) {
     failures.push(`Chat SSE generator must not synthesize response id/created/usage truth: ${forbidden}`);
+  }
+}
+
+const chatSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts');
+for (const forbidden of [
+  'if (toolCall.function?.arguments) {',
+]) {
+  if (chatSequencer.includes(forbidden)) {
+    failures.push(`Chat SSE sequencer must not silently skip malformed tool_call arguments: ${forbidden}`);
   }
 }
 
@@ -544,7 +554,6 @@ for (const forbidden of [
   }
 }
 
-const chatSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts');
 for (const forbidden of [
   'sequenceChatRequest(',
   'sequenceRequest(request',

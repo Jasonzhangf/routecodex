@@ -122,6 +122,42 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
     expect(text).toContain('Invalid legacy function_call: missing id');
   });
 
+  it('fails tool_calls without function arguments instead of emitting tool_call start and terminal frames', async () => {
+    const response: ChatCompletionResponse = {
+      id: 'chatcmpl_missing_tool_call_args',
+      object: 'chat.completion',
+      created: 1,
+      model: 'gpt-5.5',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'call_missing_args',
+            type: 'function',
+            function: {
+              name: 'exec_command'
+            }
+          } as any]
+        },
+        finish_reason: 'tool_calls'
+      }]
+    };
+
+    const converter = new ChatJsonToSseConverterRefactored();
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_chat_tool_calls_missing_args',
+      model: response.model
+    });
+    const text = await collectText(stream);
+
+    expect(text).toContain('"code":"generation_error"');
+    expect(text).toContain('Chat SSE tool call args delta payload missing arguments');
+    expect(text).not.toContain('"finish_reason":"tool_calls"');
+    expect(text).not.toContain('data: [DONE]');
+  });
+
   it('fails chunk delta without role instead of defaulting to assistant', async () => {
     const response: ChatCompletionResponse = {
       id: 'chatcmpl_delta_missing_role',

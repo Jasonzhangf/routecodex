@@ -242,7 +242,6 @@ export function* buildToolCallArgsDeltas(
   context: ChatEventGeneratorContext,
   config: ChatEventGeneratorConfig = DEFAULT_CHAT_EVENT_GENERATOR_CONFIG
 ): Generator<ChatSseEvent> {
-  if (!args) return;
   const baseChunk = createBaseChunk(context, config);
   const payload = buildChatSseToolCallArgsDeltaPayloadWithNative({
     responseId: baseChunk.id,

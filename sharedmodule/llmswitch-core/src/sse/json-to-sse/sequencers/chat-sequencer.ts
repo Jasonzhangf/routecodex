@@ -180,12 +180,10 @@ async function* sequenceMessageContent(
 
       yield buildToolCallStart(toolCall, toolCallIndex, context, config);
 
-      if (toolCall.function?.arguments) {
-        yield* withSequencing(
-          buildToolCallArgsDeltas(toolCall.function.arguments, toolCallIndex, context, config),
-          config
-        );
-      }
+      yield* withSequencing(
+        buildToolCallArgsDeltas(toolCall.function?.arguments, toolCallIndex, context, config),
+        config
+      );
     }
   }
 }

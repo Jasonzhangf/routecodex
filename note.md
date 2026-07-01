@@ -1,3 +1,8 @@
+# 2026-07-01: Chat SSE tool_call arguments skip removed
+- Red evidence: `verify:sse-architecture-boundary` first failed on `if (!args) return;` in `event-generators/chat.ts` and `if (toolCall.function?.arguments) {` in `chat-sequencer.ts`; focused `chat-sse-function-call-args-no-fallback` added missing `message.tool_calls[].function.arguments` coverage.
+- Fix: Chat JSON->SSE no longer silently skips malformed modern `tool_calls` arguments; the path now enters Rust/NAPI `buildChatSseToolCallArgsDeltaPayloadWithNative()`, where missing `arguments` fails fast with `Chat SSE tool call args delta payload missing arguments` and no `finish_reason=tool_calls` / `[DONE]` is emitted.
+- Verification: native hotpath build PASS; focused Jest `chat-sse-function-call-args-no-fallback` PASS 6/6; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:function-map-compile-gate`, sharedmodule/root `tsc --noEmit --pretty false`, real 4444 Responses SSE replay, `git diff --check`, and `build:base` PASS. Build generated version `0.90.3411`.
+
 # 2026-07-01: SSE handler stale repair coverage removed and build version generated
 - Slice already committed in two steps: `4bbb94552 fix(sse): drop handler terminal repair spec` deletes the stale handler terminal repair regression and locks it with `verify:responses-handler-single-bridge-surface`; `a00bf68f6 test(sse): trim stale handler repair coverage` trims `handler-response-sse-write-after-end.regression.spec.ts` to transport-only late-write/no-uncaught coverage.
 - Block resolved: stale tests expected handler-side terminal repair and chat JSON->SSE fallback; production code was not changed to satisfy those obsolete expectations.
