@@ -3392,6 +3392,8 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookRuntimeAttemptWithNative');
   assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookCallerFinalizationWithNative');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const attemptPlan = planAutoHookRuntimeAttemptWithNative({');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const result = planned != null');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'switch (attemptPlan.returnResult)');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationPlan = planAutoHookCallerFinalizationWithNative({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'includeAutoHookIds: args.includeAutoHookIds != null ? [...args.includeAutoHookIds] : null');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'excludeAutoHookIds: args.excludeAutoHookIds != null ? [...args.excludeAutoHookIds] : null');
@@ -3429,7 +3431,9 @@ function checkAutoHookExecutionRustOwner() {
     "hook.execution?.kind !== 'adhoc'",
     'hook.execution.handler',
     'runServertoolHandler',
+    'if (planned) {',
     'if (!planned) {',
+    'if (attemptPlan.returnResult)',
     'Boolean(planned)',
     'Boolean(result)',
     'Boolean(queueResult)',

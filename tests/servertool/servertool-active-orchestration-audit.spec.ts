@@ -161,7 +161,9 @@ const TARGETS = [
       'errorAttemptInput',
       'runtimeAttemptInput',
       'callerFinalizationInput',
+      'if (planned) {',
       'if (!planned) {',
+      'if (attemptPlan.returnResult)',
       'if (result) {',
       'if (!result)',
       'if (!queueResult)',
@@ -194,6 +196,8 @@ const TARGETS = [
     ],
     required: [
       'const attemptPlan = planAutoHookRuntimeAttemptWithNative({',
+      'const result = planned != null',
+      'switch (attemptPlan.returnResult)',
       'planServertoolAutoHookQueueItemsWithNative({',
       'const finalizationPlan = planAutoHookCallerFinalizationWithNative({',
       'switch (finalizationPlan.action)',

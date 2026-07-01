@@ -447,6 +447,10 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).not.toContain('Boolean(result)');
     expect(callerSource).not.toContain('Boolean(queueResult)');
     expect(callerSource).toContain('hasPlannedResult: planned != null');
+    expect(callerSource).toContain('const result = planned != null');
+    expect(callerSource).toContain('switch (attemptPlan.returnResult)');
+    expect(callerSource).not.toContain('if (planned) {');
+    expect(callerSource).not.toContain('if (attemptPlan.returnResult)');
     expect(callerSource).toContain('hasMaterializedResult: result != null');
     expect(callerSource).toContain('resultPresent: queueResult != null');
     expect(callerSource).toContain('switch (finalizationPlan.action)');
