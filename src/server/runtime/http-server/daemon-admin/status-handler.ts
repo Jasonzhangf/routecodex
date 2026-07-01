@@ -113,7 +113,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
     }
   });
 
-  // Best-effort "refresh" semantics for modules that expose refreshNow()/reset().
+  // Refresh is supported only by modules that explicitly expose refreshNow().
   app.post('/daemon/modules/:id/refresh', async (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
@@ -129,7 +129,6 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
     const mod = daemon.getModule(id) as
       | (ManagerModule & {
           refreshNow?: (opts?: unknown) => Promise<unknown>;
-          reset?: (opts?: unknown) => Promise<unknown>;
         })
       | undefined;
     if (!mod) {
@@ -142,15 +141,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
         res.status(200).json({ ok: true, id, action: 'refresh', refreshedAt: Date.now(), result });
         return;
       }
-      if (typeof mod.reset === 'function') {
-        const result = await mod.reset({ persist: true });
-        res.status(200).json({ ok: true, id, action: 'refresh', refreshedAt: Date.now(), result, fallback: 'reset' });
-        return;
-      }
-      await mod.stop();
-      await mod.init({ serverId: options.getServerId() });
-      await mod.start();
-      res.status(200).json({ ok: true, id, action: 'refresh', refreshedAt: Date.now(), fallback: 'restart' });
+      res.status(501).json({ error: { message: 'module refresh is not supported', code: 'module_refresh_unsupported' } });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'module_refresh_failed' } });
@@ -180,11 +171,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
         res.status(200).json({ ok: true, id, action: 'reset', resetAt: Date.now(), result });
         return;
       }
-      // Fallback: best-effort restart semantics (stop → init → start).
-      await mod.stop();
-      await mod.init({ serverId: options.getServerId() });
-      await mod.start();
-      res.status(200).json({ ok: true, id, action: 'reset', resetAt: Date.now(), fallback: true });
+      res.status(501).json({ error: { message: 'module reset is not supported', code: 'module_reset_unsupported' } });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'module_reset_failed' } });

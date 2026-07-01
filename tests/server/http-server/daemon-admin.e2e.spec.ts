@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import fs from 'node:fs/promises';
@@ -6,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { RouteCodexHttpServer } from '../../../src/server/runtime/http-server/index.js';
 import type { ServerConfigV2 } from '../../../src/server/runtime/http-server/types.js';
+import { registerStatusRoutes } from '../../../src/server/runtime/http-server/daemon-admin/status-handler.js';
 import { writeDaemonLoginRecord } from '../../../src/server/runtime/http-server/daemon-admin/auth-store.js';
 
 // 基于最小配置启动一个内存内 HTTP server，并调用 daemon-admin 相关只读 API。
@@ -160,6 +162,33 @@ async function postJson(
   }
   const setCookie = res.headers.get('set-cookie');
   return { status: res.status, body: parsed, setCookie };
+}
+
+async function withStatusRouteTestServer(
+  managerDaemon: unknown,
+  fn: (baseUrl: string) => Promise<void>
+): Promise<void> {
+  const app = express();
+  app.locals['routecodex.daemonAdmin.authRequired'] = false;
+  registerStatusRoutes(app, {
+    app,
+    getManagerDaemon: () => managerDaemon,
+    getServerId: () => 'test-server',
+    getVirtualRouterArtifacts: () => null
+  });
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address() as AddressInfo;
+  try {
+    await fn(`http://127.0.0.1:${addr.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
 }
 
 async function setupDaemonAdminAuth(baseUrl: string): Promise<string> {
@@ -361,6 +390,37 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
     } finally {
       await stopTestServer(server, configDir, restoreEnv);
     }
+  });
+
+  it('returns explicit unsupported errors instead of refresh/reset fallback restart semantics', async () => {
+    const calls: string[] = [];
+    const module = {
+      id: 'test-module',
+      init: jest.fn(async () => {
+        calls.push('init');
+      }),
+      start: jest.fn(async () => {
+        calls.push('start');
+      }),
+      stop: jest.fn(async () => {
+        calls.push('stop');
+      })
+    };
+    const managerDaemon = {
+      getModule: (id: string) => (id === 'test-module' ? module : undefined)
+    };
+
+    await withStatusRouteTestServer(managerDaemon, async (baseUrl) => {
+      const refresh = await postJson(baseUrl, '/daemon/modules/test-module/refresh');
+      expect(refresh.status).toBe(501);
+      expect(refresh.body).toHaveProperty('error.code', 'module_refresh_unsupported');
+      expect(calls).toEqual([]);
+
+      const reset = await postJson(baseUrl, '/daemon/modules/test-module/reset');
+      expect(reset.status).toBe(501);
+      expect(reset.body).toHaveProperty('error.code', 'module_reset_unsupported');
+      expect(calls).toEqual([]);
+    });
   });
 
   it('supports /daemon/restart for reloading config from disk', async () => {

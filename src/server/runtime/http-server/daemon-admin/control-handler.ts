@@ -17,7 +17,6 @@ import {
   extractRoutingGroupsSnapshot,
   extractRoutingSnapshot
 } from './providers-handler-routing-utils.js';
-import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
 import {
   getServerToolRuntimeState,
   readServerToolStatsSnapshot,
@@ -50,10 +49,6 @@ type ControlSnapshot = {
   };
   stats?: unknown;
   llmsStats?: unknown;
-  x7e?: {
-    gate: Record<string, boolean | string>;
-    phase0ApiCompatible: boolean;
-  };
 };
 
 
@@ -263,11 +258,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         policyHash
       },
       stats: typeof options.getStatsSnapshot === 'function' ? options.getStatsSnapshot() : undefined,
-      llmsStats: llmsBridge.getLlmsStatsSnapshot?.() ?? undefined,
-      x7e: {
-        gate: getGateState(),
-        phase0ApiCompatible: true
-      }
+      llmsStats: llmsBridge.getLlmsStatsSnapshot?.() ?? undefined
     };
     res.status(200).json(snapshot);
   });
@@ -312,7 +303,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
           policyHash: writeResult.policyHash,
           wroteAtMs: writeResult.wroteAtMs,
           selfReload,
-          ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
+          schema: 'v2',
+          updatedVia: 'unified_control'
         });
       } catch (e: any) {
         res.status(400).json({ error: { message: e?.message || 'invalid policy', code: 'bad_request' } });
@@ -367,7 +359,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
           policyHash,
           wroteAtMs: writeResult.wroteAtMs,
           selfReload,
-          ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
+          schema: 'v2',
+          updatedVia: 'unified_control'
         });
       } catch (error: unknown) {
         const status = mapRoutingGroupErrorToStatus(error);
@@ -431,7 +424,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         }
       }
 
-      res.status(200).json({ ok: true, action, nowMs, results, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
+      res.status(200).json({ ok: true, action, nowMs, results, schema: 'v2', updatedVia: 'unified_control' });
       return;
     }
 
@@ -446,7 +439,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         action,
         nowMs,
         state,
-        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
+        schema: 'v2',
+        updatedVia: 'unified_control'
       });
       return;
     }
@@ -457,7 +451,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await options.restartRuntimeFromDisk();
-      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
+      res.status(200).json({ ok: true, action, nowMs, result, schema: 'v2', updatedVia: 'unified_control' });
       return;
     }
 
