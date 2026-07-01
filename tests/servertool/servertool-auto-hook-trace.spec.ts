@@ -81,12 +81,12 @@ const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
 
 const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
   if (input?.resultPresent) {
-    return { returnResult: true, continueNextQueue: false, returnNull: false };
+    return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false };
   }
   if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
-    return { returnResult: false, continueNextQueue: false, returnNull: true };
+    return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };
   }
-  return { returnResult: false, continueNextQueue: true, returnNull: false };
+  return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
 });
 
 jest.unstable_mockModule(
@@ -241,12 +241,12 @@ beforeEach(() => {
   });
   planAutoHookCallerFinalizationWithNativeMock.mockImplementation((input: any) => {
     if (input?.resultPresent) {
-      return { returnResult: true, continueNextQueue: false, returnNull: false };
+      return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false };
     }
     if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
-      return { returnResult: false, continueNextQueue: false, returnNull: true };
+      return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };
     }
-    return { returnResult: false, continueNextQueue: true, returnNull: false };
+    return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
   });
 });
 
@@ -449,6 +449,10 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('hasPlannedResult: planned != null');
     expect(callerSource).toContain('hasMaterializedResult: result != null');
     expect(callerSource).toContain('resultPresent: queueResult != null');
+    expect(callerSource).toContain('switch (finalizationPlan.action)');
+    expect(callerSource).not.toContain('if (finalizationPlan.returnResult)');
+    expect(callerSource).not.toContain('if (finalizationPlan.continueNextQueue)');
+    expect(callerSource).not.toContain('if (finalizationPlan.returnNull)');
     expect(callerSource).not.toContain('...(args.includeAutoHookIds ? { includeAutoHookIds: [...args.includeAutoHookIds] } : {})');
     expect(callerSource).not.toContain('...(args.excludeAutoHookIds ? { excludeAutoHookIds: [...args.excludeAutoHookIds] } : {})');
     expect(callerSource).toContain('includeAutoHookIds: args.includeAutoHookIds != null ? [...args.includeAutoHookIds] : null');

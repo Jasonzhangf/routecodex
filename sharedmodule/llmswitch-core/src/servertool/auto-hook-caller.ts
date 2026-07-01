@@ -147,22 +147,22 @@ export async function runServertoolAutoHookCaller(args: {
       queueIndex: queueIndex + 1,
       queueTotal: queueOrder.length
     });
-    if (finalizationPlan.returnResult) {
-      const queueResultForReturn = queueResult as ServerToolHandlerResult;
-      return {
-        mode: 'tool_flow',
-        finalChatResponse: queueResultForReturn.chatResponse,
-        execution: queueResultForReturn.execution,
-        ...(queueResultForReturn.metadataWritePlan
-          ? { metadataWritePlan: queueResultForReturn.metadataWritePlan }
-          : {})
-      };
-    }
-    if (finalizationPlan.continueNextQueue) {
-      continue;
-    }
-    if (finalizationPlan.returnNull) {
-      return null;
+    switch (finalizationPlan.action) {
+      case 'return_result': {
+        const queueResultForReturn = queueResult as ServerToolHandlerResult;
+        return {
+          mode: 'tool_flow',
+          finalChatResponse: queueResultForReturn.chatResponse,
+          execution: queueResultForReturn.execution,
+          ...(queueResultForReturn.metadataWritePlan
+            ? { metadataWritePlan: queueResultForReturn.metadataWritePlan }
+            : {})
+        };
+      }
+      case 'continue_next_queue':
+        continue;
+      case 'return_null':
+        return null;
     }
   }
 

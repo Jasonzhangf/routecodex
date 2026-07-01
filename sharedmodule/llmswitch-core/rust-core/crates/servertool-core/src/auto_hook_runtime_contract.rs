@@ -53,9 +53,18 @@ pub struct AutoHookCallerFinalizationInput {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoHookCallerFinalizationPlan {
+    pub action: AutoHookCallerFinalizationAction,
     pub return_result: bool,
     pub continue_next_queue: bool,
     pub return_null: bool,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoHookCallerFinalizationAction {
+    ReturnResult,
+    ContinueNextQueue,
+    ReturnNull,
 }
 
 pub fn plan_auto_hook_runtime_attempt(
@@ -98,16 +107,26 @@ pub fn plan_auto_hook_caller_finalization(
 ) -> AutoHookCallerFinalizationPlan {
     if input.result_present {
         return AutoHookCallerFinalizationPlan {
+            action: AutoHookCallerFinalizationAction::ReturnResult,
             return_result: true,
             continue_next_queue: false,
             return_null: false,
         };
     }
     let final_queue = input.queue_total <= 0 || input.queue_index >= input.queue_total;
+    if final_queue {
+        return AutoHookCallerFinalizationPlan {
+            action: AutoHookCallerFinalizationAction::ReturnNull,
+            return_result: false,
+            continue_next_queue: false,
+            return_null: true,
+        };
+    }
     AutoHookCallerFinalizationPlan {
+        action: AutoHookCallerFinalizationAction::ContinueNextQueue,
         return_result: false,
-        continue_next_queue: !final_queue,
-        return_null: final_queue,
+        continue_next_queue: true,
+        return_null: false,
     }
 }
 
@@ -243,6 +262,7 @@ mod tests {
             queue_index: 1,
             queue_total: 2,
         });
+        assert_eq!(next.action, super::AutoHookCallerFinalizationAction::ContinueNextQueue);
         assert!(next.continue_next_queue);
 
         let done = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
@@ -250,6 +270,7 @@ mod tests {
             queue_index: 2,
             queue_total: 2,
         });
+        assert_eq!(done.action, super::AutoHookCallerFinalizationAction::ReturnNull);
         assert!(done.return_null);
 
         let malformed = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
@@ -257,6 +278,7 @@ mod tests {
             queue_index: 0,
             queue_total: 0,
         });
+        assert_eq!(malformed.action, super::AutoHookCallerFinalizationAction::ReturnNull);
         assert!(malformed.return_null);
     }
 }

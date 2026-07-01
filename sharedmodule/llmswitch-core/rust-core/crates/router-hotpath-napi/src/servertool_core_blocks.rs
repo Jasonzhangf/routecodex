@@ -2392,6 +2392,7 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     )
     .expect("auto-hook caller finalization result plan");
     let parsed: serde_json::Value = serde_json::from_str(&result).expect("parse result plan");
+    assert_eq!(parsed["action"], serde_json::json!("return_result"));
     assert_eq!(parsed["returnResult"], true);
     assert_eq!(parsed["continueNextQueue"], false);
     assert_eq!(parsed["returnNull"], false);
@@ -2406,6 +2407,7 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     )
     .expect("auto-hook caller finalization next plan");
     let next_parsed: serde_json::Value = serde_json::from_str(&next).expect("parse next plan");
+    assert_eq!(next_parsed["action"], serde_json::json!("continue_next_queue"));
     assert_eq!(next_parsed["returnResult"], false);
     assert_eq!(next_parsed["continueNextQueue"], true);
     assert_eq!(next_parsed["returnNull"], false);
@@ -2421,6 +2423,7 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     let done_parsed: serde_json::Value =
         serde_json::from_str(&done.expect("auto-hook caller finalization null plan"))
             .expect("parse null plan");
+    assert_eq!(done_parsed["action"], serde_json::json!("return_null"));
     assert_eq!(done_parsed["returnResult"], false);
     assert_eq!(done_parsed["continueNextQueue"], false);
     assert_eq!(done_parsed["returnNull"], true);

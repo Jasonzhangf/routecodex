@@ -128,6 +128,7 @@ export interface AutoHookRuntimeAttemptPlan {
 }
 
 export interface AutoHookCallerFinalizationPlan {
+  action: 'return_result' | 'continue_next_queue' | 'return_null';
   returnResult: boolean;
   continueNextQueue: boolean;
   returnNull: boolean;
@@ -1991,6 +1992,13 @@ export function planAutoHookCallerFinalizationWithNative(input: {
   }
   const record = parsed as Record<string, unknown>;
   if (
+    record.action !== 'return_result' &&
+    record.action !== 'continue_next_queue' &&
+    record.action !== 'return_null'
+  ) {
+    throw new Error('planAutoHookCallerFinalizationJson native returned invalid action');
+  }
+  if (
     typeof record.returnResult !== 'boolean' ||
     typeof record.continueNextQueue !== 'boolean' ||
     typeof record.returnNull !== 'boolean'
@@ -2004,7 +2012,15 @@ export function planAutoHookCallerFinalizationWithNative(input: {
   if (record.returnResult === true && input.resultPresent !== true) {
     throw new Error('planAutoHookCallerFinalizationJson native returned result disposition without queue result');
   }
+  if (
+    (record.action === 'return_result' && record.returnResult !== true) ||
+    (record.action === 'continue_next_queue' && record.continueNextQueue !== true) ||
+    (record.action === 'return_null' && record.returnNull !== true)
+  ) {
+    throw new Error('planAutoHookCallerFinalizationJson native returned action/disposition mismatch');
+  }
   return {
+    action: record.action,
     returnResult: record.returnResult,
     continueNextQueue: record.continueNextQueue,
     returnNull: record.returnNull
