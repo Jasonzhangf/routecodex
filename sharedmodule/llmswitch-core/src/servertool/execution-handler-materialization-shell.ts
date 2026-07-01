@@ -42,16 +42,21 @@ export function materializeNativeToolCallExecutionOutcome(args: {
     flowId: outcomePlan.flowId
   });
 
-  if (materializationPlan.action === 'throw_dispatch_error') {
-    throw createServertoolProviderProtocolErrorFromPlan(materializationPlan.errorPlan);
+  const materializationAction = materializationPlan.action;
+  switch (materializationAction) {
+    case 'throw_dispatch_error':
+      throw createServertoolProviderProtocolErrorFromPlan(materializationPlan.errorPlan);
+    case 'return_tool_flow':
+      return {
+        mode: 'tool_flow',
+        finalChatResponse: args.baseForExecution,
+        execution: {
+          flowId: materializationPlan.executionFlowId
+        }
+      };
+    default:
+      throw new Error(`[servertool] invalid execution outcome materialization action: ${String(materializationAction)}`);
   }
-  return {
-    mode: 'tool_flow',
-    finalChatResponse: args.baseForExecution,
-    execution: {
-      flowId: materializationPlan.executionFlowId
-    }
-  };
 }
 
 export const materializeServertoolPlannedResult = async (
