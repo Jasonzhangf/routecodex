@@ -3891,6 +3891,7 @@ function checkServertoolEntryPreflightRustOwner() {
   for (const marker of [
     'Boolean(base)',
     "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
+    'entryPreflightPlan as { action: unknown }',
   ]) {
     if (!readRequired(TS_ENTRY_PREFLIGHT_SHELL).includes(marker)) {
       continue;
@@ -5431,6 +5432,7 @@ function checkServertoolRustOutcomeCloseout() {
     "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
     "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')",
     "if (entryPreflightPlan.action === 'throw_client_disconnected')",
+    'entryPreflightPlan as { action: unknown }',
     "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }",
   ]) {
     if (entryPreflightShell.includes(marker)) {

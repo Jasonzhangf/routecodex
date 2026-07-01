@@ -40,8 +40,6 @@ export function runServertoolEntryPreflight(args: {
         baseObject: base as JsonObject
       };
     default:
-      throw new Error(
-        `[servertool] invalid entry preflight action: ${String((entryPreflightPlan as { action: unknown }).action)}`
-      );
+      throw new Error('[servertool] invalid entry preflight action');
   }
 }
