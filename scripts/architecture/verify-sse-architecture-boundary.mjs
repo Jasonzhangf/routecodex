@@ -58,6 +58,7 @@ for (const featureId of requiredFeatures) {
 
 const registry = read('sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts');
 for (const forbidden of [
+  "from '../index.js'",
   'export type SseStreamLike = any',
   'export type SseStreamInput = any',
   "return 'unknown'",
@@ -66,6 +67,23 @@ for (const forbidden of [
 ]) {
   if (registry.includes(forbidden)) {
     failures.push(`SSE registry must not expose any stream alias: ${forbidden}`);
+  }
+}
+
+const sseIndex = read('sharedmodule/llmswitch-core/src/sse/index.ts');
+for (const forbidden of [
+  'createChatConverters(',
+  'createResponsesConverters(',
+  'createAnthropicConverters(',
+  'createGeminiConverters(',
+  'async roundTrip(',
+  'export const chatConverters =',
+  'export const responsesConverters =',
+  'export const anthropicConverters =',
+  'export const geminiConverters =',
+]) {
+  if (sseIndex.includes(forbidden)) {
+    failures.push(`SSE index public surface must stay barrel-only: ${forbidden}`);
   }
 }
 

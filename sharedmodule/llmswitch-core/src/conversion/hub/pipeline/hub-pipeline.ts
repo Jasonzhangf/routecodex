@@ -4,8 +4,10 @@ import {
   createVirtualRouterRuntime,
   type VirtualRouterRuntime
 } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
-import type { SseProtocol } from "../../../sse/index.js";
-import { defaultSseCodecRegistry } from "../../../sse/index.js";
+import {
+  defaultSseCodecRegistry,
+  type SseProtocol,
+} from "../../../sse/registry/sse-codec-registry.js";
 import { executeRequestStagePipeline } from "./hub-pipeline-execute-request-stage.js";
 import { clearHubStageTiming } from "./hub-stage-timing.js";
 import {

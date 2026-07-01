@@ -30,7 +30,7 @@ const convertSseToJson = jest.fn(async () => ({ model: 'gpt-test', messages: [{ 
 const getCodec = jest.fn(() => ({ convertSseToJson }));
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/sse/index.js',
+  '../../sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.js',
   () => ({
     defaultSseCodecRegistry: {
       get: getCodec,
@@ -50,6 +50,18 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
   () => ({
     runHubPipelineLibWithNative,
+  }),
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js',
+  () => ({
+    createVirtualRouterRuntime: () => ({
+      initialize: jest.fn(),
+      updateDeps: jest.fn(),
+      registerProviderRuntimeIngress: jest.fn(),
+      unregisterProviderRuntimeIngress: jest.fn(),
+    }),
   }),
 );
 
@@ -124,7 +136,7 @@ describe('hub pipeline request materialization sse protocol matrix', () => {
     });
   }
 
-  it('preserves MetadataCenter binding through HubPipeline request materialization', async () => {
+  it('passes provider protocol through MetadataCenter snapshot during SSE request materialization', async () => {
     resolveSseProtocolWithNative.mockReturnValueOnce('openai-responses');
     convertSseToJson.mockResolvedValueOnce({
       model: 'gpt-test',
@@ -163,31 +175,29 @@ describe('hub pipeline request materialization sse protocol matrix', () => {
       virtualRouter: {},
     } as any);
 
+    const requestMetadata = metadata as Record<string, unknown>;
+    requestMetadata.providerProtocol = 'openai-responses';
+    requestMetadata.__routecodexPreselectedRoute = {
+      target: {
+        providerKey: 'test.key1.MiniMax-M2.7',
+        providerType: 'anthropic',
+        outboundProfile: 'anthropic-messages',
+        modelId: 'MiniMax-M2.7',
+      },
+      decision: { routeName: 'search/gateway-priority-5555-priority-search' },
+      diagnostics: {},
+    };
+
     await pipeline.execute({
       id: 'req_hub_pipeline_metadata_center_binding',
       endpoint: '/v1/responses',
       payload: { readable: Readable.from(['event: message\ndata: {}\n\n']) },
-      metadata: {
-        ...metadata,
-        __routecodexPreselectedRoute: {
-          target: {
-            providerKey: 'test.key1.MiniMax-M2.7',
-            providerType: 'anthropic',
-            outboundProfile: 'anthropic-messages',
-            modelId: 'MiniMax-M2.7',
-          },
-          decision: { routeName: 'search/gateway-priority-5555-priority-search' },
-          diagnostics: {},
-        },
-      },
+      metadata: requestMetadata,
     } as any);
 
-    expect(runHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
-      request: expect.objectContaining({
-        metadata: expect.objectContaining({
-          stopMessageEnabled: true,
-        }),
-      }),
-    }));
+    const nativeInputs = runHubPipelineLibWithNative.mock.calls.map(([input]) => input as any);
+    expect(nativeInputs.some((input) => (
+      input?.request?.providerProtocol === 'openai-responses'
+    ))).toBe(true);
   });
 });

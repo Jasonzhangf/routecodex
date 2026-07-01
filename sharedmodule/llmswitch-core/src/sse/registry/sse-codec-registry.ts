@@ -1,5 +1,4 @@
 // feature_id: sse.codec_registry_surface
-import { chatConverters, responsesConverters, anthropicConverters, geminiConverters } from '../index.js';
 import type { Readable } from 'node:stream';
 import type {
   ChatCompletionResponse,
@@ -10,6 +9,14 @@ import type {
 } from '../types/index.js';
 import type { ChatSseEventStream } from '../types/chat-types.js';
 import type { ResponsesSseEventStream } from '../types/responses-types.js';
+import { ChatJsonToSseConverter } from '../json-to-sse/index.js';
+import { ChatSseToJsonConverter } from '../sse-to-json/index.js';
+import { ResponsesJsonToSseConverter } from '../json-to-sse/index.js';
+import { ResponsesSseToJsonConverter } from '../sse-to-json/index.js';
+import { AnthropicJsonToSseConverter } from '../json-to-sse/anthropic-json-to-sse-converter.js';
+import { AnthropicSseToJsonConverter } from '../sse-to-json/anthropic-sse-to-json-converter.js';
+import { GeminiJsonToSseConverter } from '../json-to-sse/gemini-json-to-sse-converter.js';
+import { GeminiSseToJsonConverter } from '../sse-to-json/gemini-sse-to-json-converter.js';
 
 export type SseProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 
@@ -94,17 +101,19 @@ function resolveModelId(payload: unknown, contextModel?: string): string {
 }
 
 function createChatCodec(): SseCodec {
+  const jsonToSse = new ChatJsonToSseConverter();
+  const sseToJson = new ChatSseToJsonConverter();
   return {
     protocol: 'openai-chat',
     async convertJsonToSse(payload: unknown, context: JsonToSseContext): Promise<SseStreamLike> {
       const model = resolveModelId(payload, context.model);
-      return await chatConverters.jsonToSse.convertResponseToJsonToSse(payload as ChatCompletionResponse, {
+      return await jsonToSse.convertResponseToJsonToSse(payload as ChatCompletionResponse, {
         requestId: context.requestId,
         model
       });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
-      return chatConverters.sseToJson.convertSseToJson(stream, {
+      return sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
         model: resolveModelId(undefined, context.model),
         abortSignal: context.abortSignal,
@@ -121,18 +130,20 @@ function createChatCodec(): SseCodec {
 }
 
 function createResponsesCodec(): SseCodec {
+  const jsonToSse = new ResponsesJsonToSseConverter();
+  const sseToJson = new ResponsesSseToJsonConverter();
   return {
     protocol: 'openai-responses',
     async convertJsonToSse(payload: unknown, context: JsonToSseContext): Promise<SseStreamLike> {
       const model = resolveModelId(payload, context.model);
-      return await responsesConverters.jsonToSse.convertResponseToJsonToSse(payload as ResponsesResponse, {
+      return await jsonToSse.convertResponseToJsonToSse(payload as ResponsesResponse, {
         requestId: context.requestId,
         model,
         resumeToolOutputs: context.resumeToolOutputs
       });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
-      return responsesConverters.sseToJson.convertSseToJson(stream, {
+      return sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
         model: resolveModelId(undefined, context.model),
         abortSignal: context.abortSignal,
@@ -149,17 +160,19 @@ function createResponsesCodec(): SseCodec {
 }
 
 function createAnthropicCodec(): SseCodec {
+  const jsonToSse = new AnthropicJsonToSseConverter();
+  const sseToJson = new AnthropicSseToJsonConverter();
   return {
     protocol: 'anthropic-messages',
     async convertJsonToSse(payload: unknown, context: JsonToSseContext): Promise<SseStreamLike> {
       const model = resolveModelId(payload, context.model);
-      return await anthropicConverters.jsonToSse.convertResponseToJsonToSse(payload as AnthropicMessageResponse, {
+      return await jsonToSse.convertResponseToJsonToSse(payload as AnthropicMessageResponse, {
         requestId: context.requestId,
         model
       });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
-      return anthropicConverters.sseToJson.convertSseToJson(stream, {
+      return sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
         model: context.model,
         abortSignal: context.abortSignal,
@@ -176,17 +189,19 @@ function createAnthropicCodec(): SseCodec {
 }
 
 function createGeminiCodec(): SseCodec {
+  const jsonToSse = new GeminiJsonToSseConverter();
+  const sseToJson = new GeminiSseToJsonConverter();
   return {
     protocol: 'gemini-chat',
     async convertJsonToSse(payload: unknown, context: JsonToSseContext): Promise<SseStreamLike> {
       const model = resolveModelId(payload, context.model);
-      return await geminiConverters.jsonToSse.convertResponseToJsonToSse(payload as GeminiResponse, {
+      return await jsonToSse.convertResponseToJsonToSse(payload as GeminiResponse, {
         requestId: context.requestId,
         model
       });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {
-      return geminiConverters.sseToJson.convertSseToJson(stream, {
+      return sseToJson.convertSseToJson(stream, {
         requestId: context.requestId,
         model: context.model,
         abortSignal: context.abortSignal
