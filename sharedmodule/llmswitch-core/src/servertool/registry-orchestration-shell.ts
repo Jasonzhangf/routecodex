@@ -18,11 +18,8 @@ export const getServerToolHandler = (
     name: typeof name === 'string' ? name : ''
   });
   if (actionPlan.action === 'return_builtin') {
-    if (!actionPlan.canonicalName) {
-      throw new Error('[servertool] native registry lookup returned builtin without canonicalName');
-    }
     const entry = resolveServertoolBuiltinHandlerEntryWithNative({
-      name: actionPlan.canonicalName
+      name: actionPlan.canonicalName as string
     });
     return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
   }

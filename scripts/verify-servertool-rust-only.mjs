@@ -3639,6 +3639,8 @@ function checkServertoolRegistryRustOwner() {
     'planServertoolRegistryProjectionWithNative',
     'native registry auto handler order missing entry',
     'native registry record projection mismatch',
+    'native registry lookup returned builtin without canonicalName',
+    'if (!actionPlan.canonicalName)',
     'if (builtinEntry) {',
     'return getAdHocHandlerEntry(canonicalName);',
     'registerServerToolHandler',
@@ -3662,6 +3664,12 @@ function checkServertoolRegistryRustOwner() {
   pass(
     'servertool-registry-no-ts-owner',
     'registry-orchestration-shell.ts delegates register/get action selection to Rust native plan without registry facade files'
+  );
+  assertContains(
+    'servertool-registry-no-ts-owner',
+    TS_REGISTRY_ORCHESTRATION_SHELL,
+    registryOrchestrationShell,
+    'name: actionPlan.canonicalName as string'
   );
 }
 

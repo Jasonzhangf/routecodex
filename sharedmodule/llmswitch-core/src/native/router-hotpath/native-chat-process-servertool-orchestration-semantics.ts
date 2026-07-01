@@ -690,11 +690,16 @@ export function planServertoolRegistryLookupFromSkeletonWithNative(input: {
     ) {
       return fail('invalid action');
     }
+    const canonicalName =
+      typeof record.canonicalName === 'string' && record.canonicalName.trim()
+        ? record.canonicalName.trim()
+        : undefined;
+    if (record.action === 'return_builtin' && !canonicalName) {
+      return fail('missing canonicalName');
+    }
     return {
       action: record.action,
-      ...(typeof record.canonicalName === 'string' && record.canonicalName.trim()
-        ? { canonicalName: record.canonicalName.trim() }
-        : {})
+      ...(canonicalName ? { canonicalName } : {})
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

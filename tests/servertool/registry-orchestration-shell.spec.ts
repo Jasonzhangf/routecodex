@@ -104,14 +104,14 @@ describe('registry-orchestration-shell', () => {
     expect(source).not.toContain('getServerToolHandlerViaNativePlan');
   });
 
-  test('fails fast when native builtin lookup omits canonicalName', () => {
-    planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
-      action: 'return_builtin',
-    });
-
-    expect(() => getServerToolHandler('Builtin')).toThrow(
-      'native registry lookup returned builtin without canonicalName'
+  test('keeps native builtin lookup contract errors out of the TS shell', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts', 'utf8')
     );
+
+    expect(source).not.toContain('native registry lookup returned builtin without canonicalName');
+    expect(source).not.toContain('if (!actionPlan.canonicalName)');
+    expect(source).toContain('name: actionPlan.canonicalName as string');
   });
 
   test('does not keep a registered-name wrapper around skeleton config', async () => {
