@@ -1,3 +1,15 @@
+# 2026-07-01: 5520 longcontext now uses weighted gpt-5.5 forwarder
+- `gateway_priority_5520.routing.longcontext` now targets `fwd.gpt.gpt-5.5`, so longcontext joins the `ykk:cc = 1:1` weighted forwarder instead of the paid priority chain.
+- `routecodex config show -c ~/.rcc/config.toml` confirms one longcontext entry with target `fwd.gpt.gpt-5.5`; `routecodex restart --port 5520` and `/health` passed.
+
+# 2026-07-01: cc auth now has two usable keys
+- `cc` provider auth uses `selectionMode = "priority"` with `key1 = ${CC_OAI_KEY}` and a second verified key stored outside git (`<redacted>`).
+- Direct upstream `/openai/v1/models` with the new key returned `HTTP 200` and still exposed only `gpt-5.5`.
+
+# 2026-07-01: cc provider baseline narrowed to gpt-5.5
+- `~/.rcc/provider/cc/config.v2.toml` is the cc provider SSOT, using `https://api.anyint.ai/openai/v1` and `CC_OAI_KEY`, and only exposes `gpt-5.5` until other models are实测.
+- `~/.rcc/config.toml` routes `gpt-5.5` with `cc` as top-priority target in `fwd.paid.gpt-5.5`, and keeps the weighted `fwd.gpt.gpt-5.5` split at `ykk:cc = 1:1`.
+
 # 2026-07-01: provider-direct must carry live client abort signal
 - provider-direct path must thread `getClientConnectionAbortSignal(metadata)` into attached provider runtime metadata before direct send; otherwise client close can leave direct provider running because this path bypasses request-executor's abort propagation.
 - Verification: focused `tests/server/runtime/http-server/direct-server-contract.red.spec.ts -t 'provider-direct forwards the live client abort signal into provider runtime metadata'` passed, and the original provider-direct passthrough test still passed.
