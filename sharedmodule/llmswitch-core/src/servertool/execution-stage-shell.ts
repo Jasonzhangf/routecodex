@@ -37,14 +37,9 @@ export async function runServertoolExecutionStage(args: {
     executedToolCallsLen: 0
   });
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
-    const projectedToolCall =
-      typeof preExecutionBranchPlan.projectedToolCallIndex === 'number'
-        ? dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]
-        : undefined;
+    const projectedToolCall = preExecutionBranchPlan.projectedToolCall;
     if (!projectedToolCall) {
-      throw new Error(
-        `[servertool] native execution-branch projected missing tool call index: ${String(preExecutionBranchPlan.projectedToolCallIndex ?? '')}`
-      );
+      throw new Error('[servertool] native execution-branch projected missing tool call');
     }
     const branch = buildServertoolCliProjectionRuntimeBranchWithNative({
       requestId: args.options.requestId,

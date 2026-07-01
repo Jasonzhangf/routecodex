@@ -110,6 +110,7 @@ describe('servertool CLI native bridge', () => {
           {
             id: 'call_cli_projection_1',
             name: 'servertool_fixture',
+            arguments: '{"ok":true}',
             executionMode: 'client_exec_cli_projection'
           }
         ],
@@ -117,6 +118,11 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'client_exec_cli_projection',
+      projectedToolCall: {
+        id: 'call_cli_projection_1',
+        name: 'servertool_fixture',
+        arguments: '{"ok":true}'
+      },
       projectedToolCallId: 'call_cli_projection_1',
       projectedToolCallIndex: 0
     });

@@ -1,3 +1,9 @@
+# 2026-07-01: servertool execution branch projected tool call moved to Rust plan
+- Slice: `execution_branch_contract.rs` now returns `projected_tool_call{id,name,arguments}` for CLI projection branches; `execution-stage-shell.ts` no longer reads `dispatchPlan.executableToolCalls[projectedToolCallIndex]` or builds the missing-index error string locally.
+- Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now require the native projected tool-call object and forbid `preExecutionBranchPlan.projectedToolCallIndex` lookup in the execution-stage shell.
+- Verification: `cargo test -p servertool-core execution_branch --lib -- --nocapture` PASS 4/4; `rustfmt --check` PASS; `build-native-hotpath` PASS; focused Jest `execution-stage-shell + servertool-cli-native-bridge + servertool-active-orchestration-audit + server-side-tools.failfast` PASS 72/72; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS.
+- Commit scope note: unrelated dirty `scripts/architecture/verify-sse-architecture-boundary.mjs` remains SSE boundary work and must not be included in this servertool slice.
+
 # 2026-07-01: direct provider-wire normalization and provider-response requestId fail-fast
 - Slice: `router-direct-pipeline.ts` now normalizes OpenAI Responses `input` through native `normalizeResponsesInputItemsForProviderWireNative()` before `processIncomingDirect()`, and `provider-response.ts` fails fast when `context.requestId` is missing instead of synthesizing `unknown`.
 - Fix: native bridge export now treats invalid normalized entries as hard errors instead of filtering them out; `router-direct-pipeline.spec.ts` now asserts the normalized direct payload shape without the old `type: message` wrapper.

@@ -108,7 +108,11 @@ describe('execution-stage-shell', () => {
     planServertoolExecutionBranchWithNative.mockReset();
     planServertoolExecutionBranchWithNative.mockReturnValue({
       action: 'client_exec_cli_projection',
-      projectedToolCallIndex: 0
+      projectedToolCall: {
+        id: 'call_1',
+        name: 'web_search',
+        arguments: '{}'
+      }
     });
 
     await expect(

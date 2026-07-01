@@ -349,6 +349,8 @@ const TARGETS = [
       "from './cli-projection-runtime-shell.js'",
       'buildServertoolCliProjectionBranchResult',
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
+      'preExecutionBranchPlan.projectedToolCallIndex',
+      'dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]',
       '.find(isClientExecCliProjectionToolCall)',
       'export function isClientExecCliProjectionToolCall(',
       'export const collectAdditionalClientToolCalls',
@@ -373,6 +375,7 @@ const TARGETS = [
     ],
     required: [
       'buildServertoolCliProjectionRuntimeBranchWithNative({',
+      'const projectedToolCall = preExecutionBranchPlan.projectedToolCall',
       'finalChatResponse: branch.chatResponse as JsonObject',
       'execution: branch.execution as {',
     ],

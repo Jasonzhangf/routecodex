@@ -8,6 +8,8 @@ pub struct ServertoolExecutableToolCall {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub arguments: String,
+    #[serde(default)]
     pub execution_mode: String,
 }
 
@@ -33,9 +35,19 @@ pub enum ServertoolExecutionBranchAction {
 pub struct ServertoolExecutionBranchPlan {
     pub action: ServertoolExecutionBranchAction,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub projected_tool_call: Option<ServertoolProjectedToolCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub projected_tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projected_tool_call_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolProjectedToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
 }
 
 pub fn plan_servertool_execution_branch(
@@ -51,13 +63,20 @@ pub fn plan_servertool_execution_branch(
         if projected_tool_call.name.trim() == "stop_message_auto" {
             return ServertoolExecutionBranchPlan {
                 action: ServertoolExecutionBranchAction::ContinueResponseStage,
+                projected_tool_call: None,
                 projected_tool_call_id: None,
                 projected_tool_call_index: None,
             };
         }
         let projected_tool_call_id = projected_tool_call.id.trim();
+        let projected_tool_call_name = projected_tool_call.name.trim();
         return ServertoolExecutionBranchPlan {
             action: ServertoolExecutionBranchAction::ClientExecCliProjection,
+            projected_tool_call: Some(ServertoolProjectedToolCall {
+                id: projected_tool_call_id.to_string(),
+                name: projected_tool_call_name.to_string(),
+                arguments: projected_tool_call.arguments.clone(),
+            }),
             projected_tool_call_id: if projected_tool_call_id.is_empty() {
                 None
             } else {
@@ -69,12 +88,14 @@ pub fn plan_servertool_execution_branch(
     if input.executed_tool_calls_len > 0 {
         return ServertoolExecutionBranchPlan {
             action: ServertoolExecutionBranchAction::ResolveExecutionOutcome,
+            projected_tool_call: None,
             projected_tool_call_id: None,
             projected_tool_call_index: None,
         };
     }
     ServertoolExecutionBranchPlan {
         action: ServertoolExecutionBranchAction::ContinueResponseStage,
+        projected_tool_call: None,
         projected_tool_call_id: None,
         projected_tool_call_index: None,
     }
@@ -93,6 +114,7 @@ mod tests {
             executable_tool_calls: vec![ServertoolExecutableToolCall {
                 id: " call_1 ".to_string(),
                 name: "web_search".to_string(),
+                arguments: "{\"query\":\"rust\"}".to_string(),
                 execution_mode: "client_exec_cli_projection".to_string(),
             }],
             executed_tool_calls_len: 1,
@@ -100,6 +122,14 @@ mod tests {
         assert_eq!(
             plan.action,
             ServertoolExecutionBranchAction::ClientExecCliProjection
+        );
+        assert_eq!(
+            plan.projected_tool_call,
+            Some(super::ServertoolProjectedToolCall {
+                id: "call_1".to_string(),
+                name: "web_search".to_string(),
+                arguments: "{\"query\":\"rust\"}".to_string(),
+            })
         );
         assert_eq!(plan.projected_tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(plan.projected_tool_call_index, Some(0));
@@ -111,6 +141,7 @@ mod tests {
             executable_tool_calls: vec![ServertoolExecutableToolCall {
                 id: " call_stopless ".to_string(),
                 name: " stop_message_auto ".to_string(),
+                arguments: "{}".to_string(),
                 execution_mode: "client_exec_cli_projection".to_string(),
             }],
             executed_tool_calls_len: 0,
@@ -143,6 +174,7 @@ mod tests {
             executable_tool_calls: vec![ServertoolExecutableToolCall {
                 id: "call_2".to_string(),
                 name: "web_search".to_string(),
+                arguments: "{}".to_string(),
                 execution_mode: "backend".to_string(),
             }],
             executed_tool_calls_len: 0,

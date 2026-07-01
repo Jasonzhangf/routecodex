@@ -2815,6 +2815,10 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'planServertoolExecutionBranchWithNative('],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({'],
+    ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'pub projected_tool_call: Option<ServertoolProjectedToolCall>'],
+    ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'pub struct ServertoolProjectedToolCall'],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCall?: {'],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, '...(projectedToolCall ? { projectedToolCall } : {})'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'projected_tool_call_index'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCallIndex'],
     ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'feature_id: hub.servertool_engine_preflight_contract'],
@@ -5265,6 +5269,8 @@ function checkServertoolRustOutcomeCloseout() {
     'function planExecutionBranchRuntimeAction(',
     'const preExecutionBranchPlan = planExecutionBranchRuntimeAction({',
     'const postExecutionBranchPlan = planExecutionBranchRuntimeAction({',
+    'preExecutionBranchPlan.projectedToolCallIndex',
+    'dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]',
   ]) {
     if (executionStageShell.includes(marker)) {
       fail(

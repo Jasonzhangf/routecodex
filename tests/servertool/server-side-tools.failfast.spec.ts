@@ -47,6 +47,11 @@ const planServertoolExecutionBranchWithNativeMock = jest.fn((input: any) => {
   if (cliProjected) {
     return {
       action: 'client_exec_cli_projection',
+      projectedToolCall: {
+        id: String(cliProjected.id ?? ''),
+        name: String(cliProjected.name ?? ''),
+        arguments: String(cliProjected.arguments ?? '')
+      },
       projectedToolCallId: String(cliProjected.id ?? ''),
       projectedToolCallIndex: executableToolCalls.indexOf(cliProjected)
     };

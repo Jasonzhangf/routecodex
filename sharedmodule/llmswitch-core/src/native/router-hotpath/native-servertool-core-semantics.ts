@@ -247,6 +247,11 @@ export interface NativeServertoolExecutionLoopState {
 
 export interface ServertoolExecutionBranchPlan {
   action: 'client_exec_cli_projection' | 'resolve_execution_outcome' | 'continue_response_stage';
+  projectedToolCall?: {
+    id: string;
+    name: string;
+    arguments: string;
+  };
   projectedToolCallId?: string;
   projectedToolCallIndex?: number;
 }
@@ -1949,6 +1954,7 @@ export function planServertoolExecutionBranchWithNative(input: {
   executableToolCalls: Array<{
     id: string;
     name: string;
+    arguments?: string;
     executionMode?: string;
   }>;
   executedToolCallsLen: number;
@@ -1977,14 +1983,35 @@ export function planServertoolExecutionBranchWithNative(input: {
   if (record.projectedToolCallId !== undefined && typeof record.projectedToolCallId !== 'string') {
     throw new Error('planServertoolExecutionBranchJson native returned invalid projectedToolCallId');
   }
+  if (record.projectedToolCall !== undefined) {
+    if (!record.projectedToolCall || typeof record.projectedToolCall !== 'object' || Array.isArray(record.projectedToolCall)) {
+      throw new Error('planServertoolExecutionBranchJson native returned invalid projectedToolCall');
+    }
+    const projected = record.projectedToolCall as Record<string, unknown>;
+    if (
+      typeof projected.id !== 'string' ||
+      typeof projected.name !== 'string' ||
+      typeof projected.arguments !== 'string'
+    ) {
+      throw new Error('planServertoolExecutionBranchJson native returned invalid projectedToolCall');
+    }
+  }
   if (
     record.projectedToolCallIndex !== undefined &&
     (!Number.isInteger(record.projectedToolCallIndex) || Number(record.projectedToolCallIndex) < 0)
   ) {
     throw new Error('planServertoolExecutionBranchJson native returned invalid projectedToolCallIndex');
   }
+  if (record.action === 'client_exec_cli_projection' && record.projectedToolCall === undefined) {
+    throw new Error('planServertoolExecutionBranchJson native returned missing projectedToolCall');
+  }
+  const projectedToolCall =
+    record.projectedToolCall && typeof record.projectedToolCall === 'object' && !Array.isArray(record.projectedToolCall)
+      ? (record.projectedToolCall as { id: string; name: string; arguments: string })
+      : undefined;
   return {
     action: record.action,
+    ...(projectedToolCall ? { projectedToolCall } : {}),
     ...(typeof record.projectedToolCallId === 'string' && record.projectedToolCallId.trim()
       ? { projectedToolCallId: record.projectedToolCallId }
       : {}),
