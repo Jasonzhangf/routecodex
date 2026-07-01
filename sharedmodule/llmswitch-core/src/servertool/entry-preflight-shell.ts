@@ -19,7 +19,7 @@ export function runServertoolEntryPreflight(args: {
       ? args.options.chatResponse as JsonObject
       : null;
   const entryPreflightPlan = planServertoolEntryPreflightWithNative({
-    hasBaseObject: Boolean(base),
+    hasBaseObject: base != null,
     adapterClientDisconnected: isAdapterClientDisconnectedWithNative(args.options.adapterContext)
   });
   if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {

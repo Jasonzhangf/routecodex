@@ -55,6 +55,8 @@ describe('entry-preflight-shell', () => {
     expect(source).toContain('isAdapterClientDisconnectedWithNative(args.options.adapterContext)');
     expect(source).toContain('planServertoolClientDisconnectedErrorWithNative');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
+    expect(source).not.toContain('Boolean(base)');
+    expect(source).toContain('hasBaseObject: base != null');
     expect(source).toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
     expect(source).not.toContain('const passthroughResult =');
   });
