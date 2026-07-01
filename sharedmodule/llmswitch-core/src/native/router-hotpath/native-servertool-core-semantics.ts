@@ -2411,6 +2411,9 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
   ) {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid action');
   }
+  if (record.action === 'return_auto_hook_result' && input.hasAutoHookResult !== true) {
+    throw new Error('planServertoolResponseStageRuntimeActionJson native returned return_auto_hook_result without auto-hook result');
+  }
   return {
     action: record.action,
     ...(typeof record.responseHookName === 'string' && record.responseHookName.trim()

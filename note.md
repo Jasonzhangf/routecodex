@@ -1,3 +1,9 @@
+# 2026-07-01: servertool response-stage auto-hook missing-result contract moved to native wrapper
+- Slice: `response-stage-auto-hook-shell.ts` no longer throws the local `native response-stage requested auto-hook result but result was empty` error. The impossible contract `return_auto_hook_result` while `hasAutoHookResult !== true` is now rejected inside `planServertoolResponseStageRuntimeActionWithNative()`, so the TS shell only consumes a validated native runtime action plan.
+- Gate: `response-stage-auto-hook-shell.spec.ts` now locks that the TS shell does not keep the local missing-result throw, and `verify-servertool-rust-only` forbids the old throw / `if (!autoHookResult)` markers while requiring the thin-shell cast-only return path.
+- Verification: focused Jest `response-stage-auto-hook-shell + servertool-cli-native-bridge + server-side-tools.failfast` PASS 29/29; sharedmodule `tsc` PASS; `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `build:base`, and `git diff --check` PASS.
+- Commit scope note: unrelated dirty SSE/router-direct/VR/package/build-info files remain excluded from this servertool slice.
+
 # 2026-07-01: servertool response-stage finalize gate reuse removed from TS
 - Slice: `response-stage-finalize-shell.ts` no longer re-plans response-stage gate semantics based on `initialResponseStageGatePlan?.responseHookMatched === true`; finalize now requires and directly consumes the `responseStageGatePlan` produced by prepass, so response-stage gate truth stays single-owner in prepass/native.
 - Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now forbid `initialResponseStageGatePlan`, `planServertoolResponseStageGateWithNative`, runtimeControl reread, and local `responseHookMatched === true` branching in finalize shell; tests lock that finalize only consumes the provided gate plan.

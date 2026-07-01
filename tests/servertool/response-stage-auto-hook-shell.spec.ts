@@ -103,6 +103,18 @@ describe('response-stage-auto-hook-shell', () => {
     expect(runServertoolAutoHookCaller).toHaveBeenCalledTimes(1);
   });
 
+  test('keeps missing auto-hook result contract errors out of the TS shell', async () => {
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(
+      'sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts',
+      'utf8'
+    );
+
+    expect(source).not.toContain('[servertool] native response-stage requested auto-hook result but result was empty');
+    expect(source).not.toContain('if (!autoHookResult)');
+    expect(source).toContain('result: autoHookResult as ServerSideToolEngineResult');
+  });
+
   test('throws required hook empty when native plan demands it', async () => {
     runServertoolAutoHookCaller.mockResolvedValue(null);
 

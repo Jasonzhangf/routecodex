@@ -50,12 +50,9 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     );
   }
   if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
-    if (!autoHookResult) {
-      throw new Error('[servertool] native response-stage requested auto-hook result but result was empty');
-    }
     return {
       action: 'return_auto_hook_result',
-      result: autoHookResult
+      result: autoHookResult as ServerSideToolEngineResult
     };
   }
 

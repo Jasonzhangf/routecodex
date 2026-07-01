@@ -5809,6 +5809,8 @@ function checkServertoolResponseStageGateThinShell() {
   for (const marker of [
     'responseHookRequired: args.responseStageGatePlan.responseHookRequired === true',
     "responseHookName: String(args.responseStageGatePlan.responseHookName ?? 'unknown')",
+    '[servertool] native response-stage requested auto-hook result but result was empty',
+    'if (!autoHookResult)',
   ]) {
     if (responseStageAutoHookShell.includes(marker)) {
       fail(
@@ -5822,6 +5824,12 @@ function checkServertoolResponseStageGateThinShell() {
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
     'responseHookName: postAutoHookRuntimeAction.responseHookName as string'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'result: autoHookResult as ServerSideToolEngineResult'
   );
 }
 
