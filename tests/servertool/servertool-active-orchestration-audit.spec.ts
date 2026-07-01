@@ -301,6 +301,8 @@ const TARGETS = [
     forbidden: [
       'stopSignal.observed && preflightAction.action',
       'if (stopSignal.observed) {',
+      "if (preflightAction.action === 'return_original_chat')",
+      "if (preflightAction.action === 'return_original_chat_direct_passthrough')",
     ],
     required: [
       'runEnginePreflight',
@@ -308,6 +310,9 @@ const TARGETS = [
       'inspectStopGatewaySignal(',
       'attachStopGatewayContext(',
       'containsSyntheticRouteCodexControlTextWithNative(',
+      "case 'return_original_chat'",
+      "case 'return_original_chat_direct_passthrough'",
+      "case 'continue_to_engine'",
       'preflightAction.attachStopGatewayContext === true',
       'preflightAction.logStopEntry',
       'preflightAction.logStopCompare',

@@ -72,11 +72,16 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).toContain('inspectStopGatewaySignal(');
     expect(source).toContain('attachStopGatewayContext(');
     expect(source).toContain('containsSyntheticRouteCodexControlTextWithNative(');
+    expect(source).toContain("case 'return_original_chat'");
+    expect(source).toContain("case 'return_original_chat_direct_passthrough'");
+    expect(source).toContain("case 'continue_to_engine'");
     expect(source).toContain('preflightAction.attachStopGatewayContext === true');
     expect(source).toContain('preflightAction.logStopEntry');
     expect(source).toContain('preflightAction.logStopCompare');
     expect(source).not.toContain('stopSignal.observed && preflightAction.action');
     expect(source).not.toContain('if (stopSignal.observed) {');
+    expect(source).not.toContain("if (preflightAction.action === 'return_original_chat')");
+    expect(source).not.toContain("if (preflightAction.action === 'return_original_chat_direct_passthrough')");
   });
 
   test('runServerToolOrchestration routes passthrough/no-execution skip through native planning', () => {

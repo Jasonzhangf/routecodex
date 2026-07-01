@@ -5222,6 +5222,9 @@ function checkServertoolRustOutcomeCloseout() {
     'inspectStopGatewaySignal(',
     'attachStopGatewayContext(',
     'containsSyntheticRouteCodexControlTextWithNative(',
+    "case 'return_original_chat'",
+    "case 'return_original_chat_direct_passthrough'",
+    "case 'continue_to_engine'",
     'preflightAction.attachStopGatewayContext === true',
     'preflightAction.logStopEntry',
     'preflightAction.logStopCompare',
@@ -5236,6 +5239,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'stopSignal.observed && preflightAction.action',
     'if (stopSignal.observed) {',
+    "if (preflightAction.action === 'return_original_chat')",
+    "if (preflightAction.action === 'return_original_chat_direct_passthrough')",
   ]) {
     if (enginePreflightShell.includes(marker)) {
       fail(

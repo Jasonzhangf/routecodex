@@ -45,8 +45,14 @@ export function runEnginePreflight(args: {
     stopSignalObserved: stopSignal.observed,
     adapterContext: args.adapterContext as Record<string, unknown>
   });
-  if (preflightAction.action === 'return_original_chat') {
-    return { kind: 'return_original_chat', chat: args.chat };
+  switch (preflightAction.action) {
+    case 'return_original_chat':
+      return { kind: 'return_original_chat', chat: args.chat };
+    case 'continue_to_engine':
+    case 'return_original_chat_direct_passthrough':
+      break;
+    default:
+      throw new Error(`[servertool] invalid engine preflight action: ${String(preflightAction.action)}`);
   }
   if (preflightAction.attachStopGatewayContext === true) {
     attachStopGatewayContext(args.adapterContext, stopSignal);
@@ -67,8 +73,12 @@ export function runEnginePreflight(args: {
   if (preflightAction.logStopCompare) {
     args.logStopCompare(preflightAction.logStopCompare.stage);
   }
-  if (preflightAction.action === 'return_original_chat_direct_passthrough') {
-    return { kind: 'return_original_chat_direct_passthrough', chat: args.chat };
+  switch (preflightAction.action) {
+    case 'return_original_chat_direct_passthrough':
+      return { kind: 'return_original_chat_direct_passthrough', chat: args.chat };
+    case 'continue_to_engine':
+      return { kind: 'continue', stopSignal };
+    default:
+      throw new Error(`[servertool] invalid engine preflight action: ${String(preflightAction.action)}`);
   }
-  return { kind: 'continue', stopSignal };
 }
