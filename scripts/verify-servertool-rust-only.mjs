@@ -5109,6 +5109,7 @@ function checkServertoolRustOutcomeCloseout() {
     'readProviderProtocolFromAnyBoundMetadataCenter',
     'providerProtocol: args.providerProtocol',
     'Servertool engine orchestration requires metadata center runtime_control.providerProtocol',
+    'Boolean(engineResult.execution)',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(

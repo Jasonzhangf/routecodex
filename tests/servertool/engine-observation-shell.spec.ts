@@ -276,6 +276,8 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('createProgressObservation({');
     expect(source).toContain('runEnginePreflight({');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
+    expect(source).not.toContain('Boolean(engineResult.execution)');
+    expect(source).toContain('hasExecution: engineResult.execution != null');
     expect(source).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
     expect(source).toContain('const skipReason = engineSkipPlan.skipReason as string;');
     expect(source).toContain('planServertoolTimeoutErrorWithNative({');

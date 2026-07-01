@@ -148,7 +148,7 @@ export async function runServerToolOrchestrationShell(
   });
   const engineSkipPlan = planServertoolEngineSkipWithNative({
     engineMode: engineResult.mode,
-    hasExecution: Boolean(engineResult.execution)
+    hasExecution: engineResult.execution != null
   });
   if (
     engineSkipPlan.action === 'return_skipped_passthrough' ||
