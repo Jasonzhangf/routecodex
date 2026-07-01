@@ -47,9 +47,6 @@ interface PersistedTokenSessionEntry {
 interface PersistedTokenStats {
   version: number;
   sessions?: Record<string, PersistedTokenSessionEntry>;
-  alltime?: TokenCounters;
-  daily?: Record<string, TokenCounters>;
-  providers?: Record<string, TokenProviderEntry>;
 }
 
 // ── State ──────────────────────────────────────────────────────────
@@ -178,63 +175,39 @@ function parsePersistedTokenStats(raw: string): Map<string, PersistedTokenSessio
     return out;
   }
 
-  if (data.version >= 2 && data.sessions && typeof data.sessions === 'object') {
-    for (const [sessionId, value] of Object.entries(data.sessions)) {
-      if (!value || typeof value !== 'object') {
-        continue;
-      }
-      const row = value as PersistedTokenSessionEntry;
-      const daily: Record<string, TokenCounters> = {};
-      const providers: Record<string, TokenProviderEntry> = {};
-
-      if (row.daily && typeof row.daily === 'object') {
-        for (const [key, item] of Object.entries(row.daily)) {
-          daily[key] = readCounters(item);
-        }
-      }
-      if (row.providers && typeof row.providers === 'object') {
-        for (const [key, item] of Object.entries(row.providers)) {
-          const entry = readProviderEntry(item);
-          if (entry) {
-            providers[key] = entry;
-          }
-        }
-      }
-
-      out.set(sessionId, {
-        sessionId,
-        updatedAt: Number((row as { updatedAt?: unknown }).updatedAt) || 0,
-        alltime: readCounters(row.alltime),
-        daily,
-        providers
-      });
-    }
+  if (data.version !== 2 || !data.sessions || typeof data.sessions !== 'object') {
     return out;
   }
-
-  // Legacy v1 file: convert whole file into one synthetic foreign session.
-  const legacyDaily: Record<string, TokenCounters> = {};
-  const legacyProviders: Record<string, TokenProviderEntry> = {};
-  if (data.daily && typeof data.daily === 'object') {
-    for (const [key, item] of Object.entries(data.daily)) {
-      legacyDaily[key] = readCounters(item);
+  for (const [sessionId, value] of Object.entries(data.sessions)) {
+    if (!value || typeof value !== 'object') {
+      continue;
     }
-  }
-  if (data.providers && typeof data.providers === 'object') {
-    for (const [key, item] of Object.entries(data.providers)) {
-      const entry = readProviderEntry(item);
-      if (entry) {
-        legacyProviders[key] = entry;
+    const row = value as PersistedTokenSessionEntry;
+    const daily: Record<string, TokenCounters> = {};
+    const providers: Record<string, TokenProviderEntry> = {};
+
+    if (row.daily && typeof row.daily === 'object') {
+      for (const [key, item] of Object.entries(row.daily)) {
+        daily[key] = readCounters(item);
       }
     }
+    if (row.providers && typeof row.providers === 'object') {
+      for (const [key, item] of Object.entries(row.providers)) {
+        const entry = readProviderEntry(item);
+        if (entry) {
+          providers[key] = entry;
+        }
+      }
+    }
+
+    out.set(sessionId, {
+      sessionId,
+      updatedAt: Number((row as { updatedAt?: unknown }).updatedAt) || 0,
+      alltime: readCounters(row.alltime),
+      daily,
+      providers
+    });
   }
-  out.set('legacy-v1', {
-    sessionId: 'legacy-v1',
-    updatedAt: 0,
-    alltime: readCounters(data.alltime),
-    daily: legacyDaily,
-    providers: legacyProviders
-  });
   return out;
 }
 
@@ -354,23 +327,6 @@ function aggregateSnapshot(): TokenStatsSnapshot {
     daily,
     dailyDate: today,
     providers: Array.from(providers.values()).sort((a, b) => b.totalTokens - a.totalTokens)
-  };
-}
-
-function buildLegacySnapshotForTests(): PersistedTokenStats {
-  const aggregate = aggregateSnapshot();
-  return {
-    version: 1,
-    alltime: cloneCounters(aggregate.alltime),
-    daily: {
-      [aggregate.dailyDate]: cloneCounters(aggregate.daily)
-    },
-    providers: Object.fromEntries(
-      aggregate.providers.map((entry) => [
-        providerMapKey(entry.providerKey, entry.model),
-        { ...entry, ...cloneCounters(entry) }
-      ])
-    )
   };
 }
 
@@ -597,16 +553,6 @@ export function getTokenStatsSnapshot(): TokenStatsSnapshot {
  */
 export function flushTokenStats(): void {
   saveToDiskSync(true);
-}
-
-/**
- * Legacy test helper: returns an aggregated v1-shaped snapshot even though the
- * persisted on-disk format is now v2 session-based.
- */
-export function __dumpPersistedTokenStatsForTest(): PersistedTokenStats {
-  ensureLoaded();
-  refreshFromDiskIfNeeded(true);
-  return buildLegacySnapshotForTests();
 }
 
 /**

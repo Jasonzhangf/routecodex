@@ -24,8 +24,8 @@ export function prepareServertoolDispatchStage(args: {
       buildServertoolDispatchPlanInputWithNative({
         toolCalls: args.toolCalls,
         disableToolCallHandlers: args.options.disableToolCallHandlers === true,
-        ...(args.includeToolCallNames ? { includeToolCallHandlerNames: [...args.includeToolCallNames] } : {}),
-        ...(args.excludeToolCallNames ? { excludeToolCallHandlerNames: [...args.excludeToolCallNames] } : {}),
+        includeToolCallHandlerNames: args.includeToolCallNames != null ? [...args.includeToolCallNames] : null,
+        excludeToolCallHandlerNames: args.excludeToolCallNames != null ? [...args.excludeToolCallNames] : null,
         runtimeMetadata
       })
     )

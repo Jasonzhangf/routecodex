@@ -451,8 +451,8 @@ export function readServertoolPrimaryAutoHookIdsWithNative(input: {
 export function buildServertoolDispatchPlanInputWithNative(input: {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   disableToolCallHandlers: boolean;
-  includeToolCallHandlerNames?: string[];
-  excludeToolCallHandlerNames?: string[];
+  includeToolCallHandlerNames?: string[] | null;
+  excludeToolCallHandlerNames?: string[] | null;
   runtimeMetadata?: Record<string, unknown>;
   document?: unknown;
 }): NativeServertoolDispatchPlanInput {
@@ -854,8 +854,8 @@ export function normalizeServertoolProgressFlowIdWithNative(input: {
 export function planServertoolToolCallDispatchWithNative(input: {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   disableToolCallHandlers: boolean;
-  includeToolCallHandlerNames?: string[];
-  excludeToolCallHandlerNames?: string[];
+  includeToolCallHandlerNames?: string[] | null;
+  excludeToolCallHandlerNames?: string[] | null;
   registeredToolCallHandlers: Array<{
     name: string;
     trigger: string;

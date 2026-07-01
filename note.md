@@ -1,3 +1,9 @@
+# 2026-07-01: token-stats legacy v1 snapshot handling removed
+- Slice: `token-stats-store.ts` no longer reads v1 persisted token-stats files into a synthetic `legacy-v1` session, and no longer exports the v1-shaped `__dumpPersistedTokenStatsForTest` helper; persisted truth is v2 `sessions` only.
+- Gate: `token-stats-store.spec.ts` source test forbids `legacy-v1`, `Legacy v1`, `buildLegacySnapshotForTests`, and `__dumpPersistedTokenStatsForTest`.
+- Verification: focused Jest `token-stats-store` PASS 4/4; focused Jest `usage-logger` PASS 20/20; repo scan found 0 consumers of removed legacy markers; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS.
+- Commit scope note: unrelated dirty package/build-info/servertool/SSE files remain excluded from this slice.
+
 # 2026-07-01: daemon admin packaged legacy UI fallback removed
 - Slice: `http-server-bootstrap.ts` no longer reads `docs/daemon-admin-ui.html` when built `dist/daemon-admin-ui/index.html` is missing; daemon admin UI now has a single packaged built artifact path and fails visibly through the existing 500 response if absent.
 - Gate: new `http-server-bootstrap-ui.spec.ts` source test forbids `packagedLegacyFile`, `daemon-admin-ui.html`, `registerDaemonAdminUiRoute.readPackagedIndex`, and `fallback: packagedLegacyFile`.

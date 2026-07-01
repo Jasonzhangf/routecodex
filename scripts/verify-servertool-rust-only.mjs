@@ -5078,6 +5078,8 @@ function checkServertoolRustOutcomeCloseout() {
     "from '../conversion/runtime-metadata.js'",
     'readRuntimeMetadata(',
     'buildServertoolDispatchPlanInput(',
+    '...(args.includeToolCallNames ? { includeToolCallHandlerNames: [...args.includeToolCallNames] } : {})',
+    '...(args.excludeToolCallNames ? { excludeToolCallHandlerNames: [...args.excludeToolCallNames] } : {})',
     'baseObject: JsonObject;',
     'baseForExecution: JsonObject;',
     'readProviderProtocolFromAnyBoundMetadataCenter',

@@ -240,6 +240,8 @@ const TARGETS = [
       'resolveServertoolRuntimePreCommandState',
       'applyPreCommandHooksToToolCalls',
       'buildServertoolDispatchPlanInput(',
+      '...(args.includeToolCallNames ? { includeToolCallHandlerNames: [...args.includeToolCallNames] } : {})',
+      '...(args.excludeToolCallNames ? { excludeToolCallHandlerNames: [...args.excludeToolCallNames] } : {})',
       'baseObject: JsonObject;',
       'baseForExecution: JsonObject;',
       'readProviderProtocolFromAnyBoundMetadataCenter',

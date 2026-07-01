@@ -76,14 +76,15 @@ describe('dispatch-preparation-shell', () => {
     expect(buildServertoolDispatchPlanInputMock).toHaveBeenCalledWith(
       expect.objectContaining({
         toolCalls,
-        runtimeMetadata: {
-          metadataCenterSnapshot: {
-            requestTruth: {},
+        includeToolCallHandlerNames: null,
+        excludeToolCallHandlerNames: null,
+        runtimeMetadata: expect.objectContaining({
+          metadataCenterSnapshot: expect.objectContaining({
             runtimeControl: expect.objectContaining({
               providerProtocol: 'openai-responses'
             })
-          }
-        }
+          })
+        })
       })
     );
     expect(result.dispatchPlan.executableToolCalls).toEqual(toolCalls);
@@ -105,15 +106,37 @@ describe('dispatch-preparation-shell', () => {
 
     expect(buildServertoolDispatchPlanInputMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        runtimeMetadata: {
-          metadataCenterSnapshot: {
-            requestTruth: {},
-            runtimeControl: {},
-            providerObservation: {}
-          }
-        }
+        includeToolCallHandlerNames: null,
+        excludeToolCallHandlerNames: null,
+        runtimeMetadata: expect.objectContaining({
+          metadataCenterSnapshot: expect.objectContaining({
+            runtimeControl: expect.any(Object)
+          })
+        })
       })
     );
     expect(result.dispatchPlan.executableToolCalls).toEqual([{ id: 'call_1', name: 'web_search', arguments: '{}' }]);
+  });
+
+  test('passes filter carriers explicitly to native owner', () => {
+    const adapterContext: Record<string, unknown> = {};
+    MetadataCenter.attach(adapterContext);
+    prepareServertoolDispatchStage({
+      options: {
+        requestId: 'req-1',
+        entryEndpoint: '/v1/responses',
+        adapterContext
+      } as any,
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+      includeToolCallNames: new Set([' Web_Search ', 'exec_command']),
+      excludeToolCallNames: new Set([' Vision_Auto '])
+    });
+
+    expect(buildServertoolDispatchPlanInputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeToolCallHandlerNames: [' Web_Search ', 'exec_command'],
+        excludeToolCallHandlerNames: [' Vision_Auto ']
+      })
+    );
   });
 });
