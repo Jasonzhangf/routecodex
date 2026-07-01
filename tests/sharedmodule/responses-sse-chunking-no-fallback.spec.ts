@@ -9,11 +9,11 @@ describe('responses SSE chunking no-fallback boundary', () => {
     jest.restoreAllMocks();
   });
 
-  it('surfaces chunking errors instead of falling back to the original text', async () => {
+  it('uses the native chunking owner instead of falling back to the retired TS chunker', async () => {
     const chunkStringSpy = jest
       .spyOn(StringUtils, 'chunkString')
       .mockImplementation(() => {
-        throw new Error('chunking failed');
+        throw new Error('retired TS chunker must not be called');
       });
 
     const context: ResponsesEventGeneratorContext = {
@@ -32,12 +32,15 @@ describe('responses SSE chunking no-fallback boundary', () => {
       { chunkSize: 8, chunkDelayMs: 0, enableIdGeneration: true, enableTimestampGeneration: false, enableSequenceNumbers: false, enableDelay: false }
     );
 
-    await expect((async () => {
-      for await (const _event of generator) {
-        void _event;
-      }
-    })()).rejects.toThrow('chunking failed');
+    const deltas = [];
+    for await (const event of generator) {
+      deltas.push(event);
+    }
 
-    expect(chunkStringSpy).toHaveBeenCalledTimes(1);
+    expect(chunkStringSpy).not.toHaveBeenCalled();
+    expect(deltas.map((event) => (event.data as { delta?: unknown }).delta)).toEqual([
+      'hello ',
+      'world'
+    ]);
   });
 });

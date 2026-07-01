@@ -14,7 +14,12 @@ import type {
   ResponsesSseEventStream
 } from '../types/index.js';
 import { ErrorUtils } from '../shared/utils.js';
-import { createResponsesSequencer } from './sequencers/responses-sequencer.js';
+import {
+  DEFAULT_RESPONSES_SEQUENCER_CONFIG,
+  sequenceResponse
+} from './sequencers/responses-sequencer.js';
+import type { ResponsesSequencerConfig } from './sequencers/responses-sequencer.js';
+import { createDefaultResponsesContext } from './event-generators/responses.js';
 import { createResponsesStreamWriter } from '../shared/writer.js';
 
 /**
@@ -77,8 +82,9 @@ export class ResponsesJsonToSseConverterRefactored {
         onError: (error) => this.handleStreamError(context, error, stream)
       });
 
-      // 3. 创建事件序列化器
-      const sequencerConfig: Parameters<typeof createResponsesSequencer>[0] = {
+      // 3. 直接调用 sequencer 函数，避免长期保留第二套配置 facade。
+      const sequencerConfig: ResponsesSequencerConfig = {
+        ...DEFAULT_RESPONSES_SEQUENCER_CONFIG,
         enableDelay: typeof context.options.delayMs === 'number' && context.options.delayMs > 0
       };
       if (typeof context.options.chunkSize === 'number') {
@@ -87,10 +93,13 @@ export class ResponsesJsonToSseConverterRefactored {
       if (typeof context.options.delayMs === 'number') {
         sequencerConfig.chunkDelayMs = context.options.delayMs;
       }
-      const sequencer = createResponsesSequencer(sequencerConfig);
 
       // 4. 生成事件序列并写入流
-      const eventStream = sequencer.sequenceResponse(response, context.requestId);
+      const eventStream = sequenceResponse(
+        response,
+        createDefaultResponsesContext(context.requestId, response.model),
+        sequencerConfig
+      );
       await writer.writeResponsesEvents(eventStream);
 
       // 5. 完成流

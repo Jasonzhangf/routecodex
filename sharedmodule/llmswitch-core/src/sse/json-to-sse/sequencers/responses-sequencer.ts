@@ -278,27 +278,3 @@ export async function* sequenceResponse(
     yield canonicalizeResponsesSseEventPayloadWithNative(event) as unknown as ResponsesSseEvent;
   }
 }
-
-/**
- * 创建Responses事件序列化器工厂
- */
-export function createResponsesSequencer(config?: Partial<ResponsesSequencerConfig>) {
-  const finalConfig = { ...DEFAULT_RESPONSES_SEQUENCER_CONFIG, ...config };
-
-  return {
-    /**
-     * 序列化响应
-     */
-    async *sequenceResponse(response: ResponsesResponse, requestId: string) {
-      const context = createDefaultResponsesContext(requestId, response.model);
-      yield* sequenceResponse(response, context, finalConfig);
-    },
-
-    /**
-     * 获取当前配置
-     */
-    getConfig(): ResponsesSequencerConfig {
-      return { ...finalConfig };
-    }
-  };
-}
