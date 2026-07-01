@@ -62,9 +62,7 @@ export async function runServertoolIoExecutionQueue(args: {
       case 'continue_without_effect':
         break;
       default:
-        throw new Error(
-          `[servertool] invalid execution loop initial action: ${String(initialLoopActionPlan.action)}`
-        );
+        throw new Error('[servertool] invalid execution loop initial action');
     }
     const ctx = { ...args.contextBase, base: args.baseForExecution, toolCall };
     let planned = null;
@@ -126,9 +124,7 @@ export async function runServertoolIoExecutionQueue(args: {
       case 'continue_without_effect':
         break;
       default:
-        throw new Error(
-          `[servertool] invalid execution loop result action: ${String(resultLoopActionPlan.action)}`
-        );
+        throw new Error('[servertool] invalid execution loop result action');
     }
   }
 

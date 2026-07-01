@@ -199,6 +199,69 @@ describe('execution-queue-shell', () => {
     expect(source).toContain('hasMaterializedResult: result != null');
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).not.toContain('buildServertoolDispatchPlanInputWithNative');
+    expect(source).not.toContain('String(initialLoopActionPlan.action)');
+    expect(source).not.toContain('String(resultLoopActionPlan.action)');
+  });
+
+  test('fails fast on unknown initial native loop action without reading action payload in TS', async () => {
+    planServertoolExecutionLoopRuntimeActionWithNative.mockReturnValueOnce({
+      action: 'unknown_initial_action'
+    });
+
+    await expect(
+      runServertoolIoExecutionQueue({
+        dispatchPlan: {
+          executableToolCalls: [
+            {
+              id: 'call-invalid-initial',
+              name: 'web_search',
+              arguments: '{}',
+              executionMode: 'guarded',
+              stripAfterExecute: false
+            }
+          ],
+          noopToolCalls: []
+        } as any,
+        options: { requestId: 'req-invalid-initial' } as any,
+        contextBase: { base: {}, toolCalls: [], adapterContext: {}, requestId: 'req-invalid-initial', entryEndpoint: 'openai', providerProtocol: 'openai-chat' } as any,
+        baseForExecution: {} as any
+      })
+    ).rejects.toThrow('[servertool] invalid execution loop initial action');
+
+    expect(runStoplessBuiltinHandlerForRuntimeWithNative).not.toHaveBeenCalled();
+    expect(materializeServertoolPlannedResult).not.toHaveBeenCalled();
+    expect(appendServertoolExecutedRecordWithNative).not.toHaveBeenCalled();
+  });
+
+  test('fails fast on unknown result native loop action without reading action payload in TS', async () => {
+    planServertoolExecutionLoopRuntimeActionWithNative
+      .mockReturnValueOnce({ action: 'continue_without_effect' })
+      .mockReturnValueOnce({ action: 'unknown_result_action' });
+    materializeServertoolPlannedResult.mockResolvedValue(null);
+
+    await expect(
+      runServertoolIoExecutionQueue({
+        dispatchPlan: {
+          executableToolCalls: [
+            {
+              id: 'call-invalid-result',
+              name: 'web_search',
+              arguments: '{}',
+              executionMode: 'guarded',
+              stripAfterExecute: false
+            }
+          ],
+          noopToolCalls: []
+        } as any,
+        options: { requestId: 'req-invalid-result' } as any,
+        contextBase: { base: {}, toolCalls: [], adapterContext: {}, requestId: 'req-invalid-result', entryEndpoint: 'openai', providerProtocol: 'openai-chat' } as any,
+        baseForExecution: {} as any
+      })
+    ).rejects.toThrow('[servertool] invalid execution loop result action');
+
+    expect(runStoplessBuiltinHandlerForRuntimeWithNative).toHaveBeenCalledTimes(1);
+    expect(materializeServertoolPlannedResult).toHaveBeenCalledTimes(1);
+    expect(appendServertoolExecutedRecordWithNative).not.toHaveBeenCalled();
   });
 
   test('executes materialized handler result and records execution', async () => {

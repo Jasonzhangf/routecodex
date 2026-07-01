@@ -108,6 +108,8 @@ const TARGETS = [
       "if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')",
       'const initialLoopAction = initialLoopActionPlan.action',
       'const resultLoopAction = resultLoopActionPlan.action',
+      'String(initialLoopActionPlan.action)',
+      'String(resultLoopActionPlan.action)',
       'errorEffectPlan.handlerErrorMessage as string',
     ],
     required: [

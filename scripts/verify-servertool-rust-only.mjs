@@ -2788,6 +2788,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     "if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')",
     'const initialLoopAction = initialLoopActionPlan.action',
     'const resultLoopAction = resultLoopActionPlan.action',
+    'String(initialLoopActionPlan.action)',
+    'String(resultLoopActionPlan.action)',
     'Boolean(entry)',
     'Boolean(result)',
     'planned ? await materializeServertoolPlannedResult',
