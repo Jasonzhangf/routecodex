@@ -5394,9 +5394,9 @@ function checkServertoolRustOutcomeCloseout() {
     'resolveServertoolEntryContext',
     'runServertoolResponseStagePrePass',
     'runServertoolExecutionStage',
-    'switch (entryPreflightAction)',
-    'switch (entryContextAction)',
-    'switch (responseStagePrePassAction)',
+    'switch (entryPreflight.action)',
+    'switch (entryContext.action)',
+    'switch (responseStagePrePass.action)',
     "case 'return_non_object_base':",
     'invalid entry context action'
   ]) {
@@ -5415,6 +5415,9 @@ function checkServertoolRustOutcomeCloseout() {
     "if (entryPreflight.action === 'return_result')",
     "if (entryContext.action !== 'continue')",
     "if (responseStagePrePass.action === 'return_result')",
+    'const entryPreflightAction = entryPreflight.action',
+    'const entryContextAction = entryContext.action',
+    'const responseStagePrePassAction = responseStagePrePass.action',
   ]) {
     if (runServerSideToolEngineShell.includes(marker)) {
       fail(

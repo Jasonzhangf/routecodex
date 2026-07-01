@@ -1,3 +1,8 @@
+# 2026-07-02: servertool coordinator action aliases removed
+- Slice: `run-server-side-tool-engine-shell.ts` no longer copies stage result discriminants into `entryPreflightAction`, `entryContextAction`, or `responseStagePrePassAction`; the coordinator now switches directly on each stage result action.
+- Gate: `run-server-side-tool-engine-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid the local action aliases and require direct stage-action switches.
+- Evidence: focused Jest `run-server-side-tool-engine-shell` PASS 5/5; focused `servertool-active-orchestration-audit` PASS 44/44 on coordinator slice. Remaining commit gates: sharedmodule `tsc`, `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `git diff --check`.
+
 # 2026-07-02: servertool auto-hook truthiness presence removed
 - Slice: `auto-hook-caller.ts` no longer uses truthiness for `result.execution` / `metadataWritePlan` presence checks; TS now uses explicit `!= null` checks before passing materialized flowId and metadata write plan through the native-planned shell.
 - Gate: `servertool-auto-hook-trace.spec.ts`, `execution-shell.auto-hook-failfast.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` now forbid the old truthiness markers and require the explicit nullish markers.

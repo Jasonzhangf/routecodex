@@ -13,14 +13,15 @@ export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
   const entryPreflight = runServertoolEntryPreflight({ options });
-  const entryPreflightAction = entryPreflight.action;
-  switch (entryPreflightAction) {
+  switch (entryPreflight.action) {
     case 'return_result':
       return entryPreflight.result;
     case 'continue':
       break;
     default:
-      throw new Error(`[servertool] invalid entry preflight result action: ${String(entryPreflightAction)}`);
+      throw new Error(
+        `[servertool] invalid entry preflight result action: ${String((entryPreflight as { action: unknown }).action)}`
+      );
   }
   const toolCalls = extractToolCallsFromResponseStage(
     entryPreflight.baseObject,
@@ -31,14 +32,15 @@ export async function orchestrateServertoolEngine(
     toolCalls,
     base: entryPreflight.baseObject
   });
-  const entryContextAction = entryContext.action;
-  switch (entryContextAction) {
+  switch (entryContext.action) {
     case 'continue':
       break;
     case 'return_non_object_base':
       return { mode: 'passthrough', finalChatResponse: options.chatResponse };
     default:
-      throw new Error(`[servertool] invalid entry context action: ${String(entryContextAction)}`);
+      throw new Error(
+        `[servertool] invalid entry context action: ${String((entryContext as { action: unknown }).action)}`
+      );
   }
   const responseStagePrePass = await runServertoolResponseStagePrePass({
     options,
@@ -47,14 +49,15 @@ export async function orchestrateServertoolEngine(
     includeAutoHookIds: entryContext.includeAutoHookIds,
     excludeAutoHookIds: entryContext.excludeAutoHookIds
   });
-  const responseStagePrePassAction = responseStagePrePass.action;
-  switch (responseStagePrePassAction) {
+  switch (responseStagePrePass.action) {
     case 'return_result':
       return responseStagePrePass.result;
     case 'continue_to_execution':
       break;
     default:
-      throw new Error(`[servertool] invalid response-stage prepass action: ${String(responseStagePrePassAction)}`);
+      throw new Error(
+        `[servertool] invalid response-stage prepass action: ${String((responseStagePrePass as { action: unknown }).action)}`
+      );
   }
   return runServertoolExecutionStage({
     options,

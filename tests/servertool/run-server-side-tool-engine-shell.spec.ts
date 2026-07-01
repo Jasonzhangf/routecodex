@@ -66,9 +66,12 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain("if (entryPreflight.action === 'return_result')");
     expect(source).not.toContain("if (entryContext.action !== 'continue')");
     expect(source).not.toContain("if (responseStagePrePass.action === 'return_result')");
-    expect(source).toContain('switch (entryPreflightAction)');
-    expect(source).toContain('switch (entryContextAction)');
-    expect(source).toContain('switch (responseStagePrePassAction)');
+    expect(source).toContain('switch (entryPreflight.action)');
+    expect(source).toContain('switch (entryContext.action)');
+    expect(source).toContain('switch (responseStagePrePass.action)');
+    expect(source).not.toContain('const entryPreflightAction = entryPreflight.action');
+    expect(source).not.toContain('const entryContextAction = entryContext.action');
+    expect(source).not.toContain('const responseStagePrePassAction = responseStagePrePass.action');
     expect(source).not.toContain('const base =');
     expect(source).not.toContain("typeof options.chatResponse === 'object'");
   });
