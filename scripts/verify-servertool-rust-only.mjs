@@ -5018,6 +5018,18 @@ function checkServertoolRustOutcomeCloseout() {
       fail('servertool-cli-runtime-shell', `execution-stage-shell.ts must not carry legacy servertool marker ${marker}`);
     }
   }
+  if (executionStageShell.includes('}\n\n  return finalizeServertoolResponseStage({')) {
+    fail(
+      'servertool-execution-stage-no-implicit-finalize',
+      'execution-stage-shell.ts must finalize only from explicit native continue_response_stage action'
+    );
+  }
+  if (!executionStageShell.includes("case 'continue_response_stage':")) {
+    fail(
+      'servertool-execution-stage-explicit-continue-response-stage',
+      'execution-stage-shell.ts must explicitly consume native continue_response_stage action'
+    );
+  }
   for (const marker of ['memory_cache_auto', 'executeServertoolBackendPlan']) {
     if (executionStageShell.includes(marker)) {
       fail(

@@ -89,6 +89,8 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('buildServertoolCliProjectionRuntimeBranchWithNative');
     expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
+    expect(source).toContain("case 'continue_response_stage':");
+    expect(source).toContain("throw new Error(`[servertool] invalid post-execution branch action:");
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
     expect(source).toContain('finalizeServertoolResponseStage');
@@ -202,5 +204,46 @@ describe('execution-stage-shell', () => {
       }
     });
     expect(finalizeServertoolResponseStage).not.toHaveBeenCalled();
+  });
+
+  test('finalizes response stage only when post-execution branch explicitly continues', async () => {
+    planServertoolExecutionBranchWithNative.mockReset();
+    planServertoolExecutionBranchWithNative
+      .mockReturnValueOnce({
+        action: 'continue_response_stage'
+      })
+      .mockReturnValueOnce({
+        action: 'continue_response_stage'
+      });
+    runServertoolIoExecutionQueue.mockResolvedValueOnce({
+      executedToolCalls: []
+    });
+
+    await expect(
+      runServertoolExecutionStage({
+        options: { requestId: 'req-continue' } as any,
+        baseObject: { ok: true } as any,
+        toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+        contextBase: {} as any,
+        includeToolCallNames: null,
+        excludeToolCallNames: null,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null,
+        responseStageGatePlan: { responseHookMatched: false }
+      })
+    ).resolves.toEqual({
+      mode: 'passthrough',
+      finalChatResponse: { ok: true }
+    });
+
+    expect(materializeNativeToolCallExecutionOutcome).not.toHaveBeenCalled();
+    expect(finalizeServertoolResponseStage).toHaveBeenCalledWith({
+      options: { requestId: 'req-continue' },
+      baseObject: { ok: true },
+      contextBase: {},
+      includeAutoHookIds: null,
+      excludeAutoHookIds: null,
+      responseStageGatePlan: { responseHookMatched: false }
+    });
   });
 });

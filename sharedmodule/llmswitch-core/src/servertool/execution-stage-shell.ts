@@ -76,14 +76,16 @@ export async function runServertoolExecutionStage(args: {
         toolCalls: args.toolCalls,
         executionState
       });
+    case 'continue_response_stage':
+      return finalizeServertoolResponseStage({
+        options: args.options,
+        baseObject: args.baseObject,
+        contextBase: args.contextBase as ServerToolHandlerContext,
+        includeAutoHookIds: args.includeAutoHookIds,
+        excludeAutoHookIds: args.excludeAutoHookIds,
+        responseStageGatePlan: args.responseStageGatePlan
+      });
+    default:
+      throw new Error(`[servertool] invalid post-execution branch action: ${String(postExecutionBranchPlan.action)}`);
   }
-
-  return finalizeServertoolResponseStage({
-    options: args.options,
-    baseObject: args.baseObject,
-    contextBase: args.contextBase as ServerToolHandlerContext,
-    includeAutoHookIds: args.includeAutoHookIds,
-    excludeAutoHookIds: args.excludeAutoHookIds,
-    responseStageGatePlan: args.responseStageGatePlan
-  });
 }
