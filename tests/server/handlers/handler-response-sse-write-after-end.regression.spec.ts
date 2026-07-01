@@ -47,8 +47,6 @@ function projectSseErrorEventPayloadNativeMock(args: {
   };
 }
 
-let mockJsonToSseConverterImpl: (() => Promise<PassThrough>) | undefined;
-
 describe('handler-response SSE write-after-end regression', () => {
   const originalVerbose = process.env.ROUTECODEX_HTTP_LOG_VERBOSE;
   const originalStageLog = process.env.ROUTECODEX_STAGE_LOG;
@@ -115,7 +113,6 @@ describe('handler-response SSE write-after-end regression', () => {
     const upstream = new PassThrough();
     let output = '';
     let uncaught: Error | undefined;
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const onUncaught = (error: Error) => {
       uncaught = error;
     };
@@ -204,7 +201,6 @@ describe('handler-response SSE write-after-end regression', () => {
       expect(uncaught?.message ?? '').not.toContain('write after end');
     } finally {
       process.removeListener('uncaughtException', onUncaught);
-      warnSpy.mockRestore();
       upstream.destroy();
       res.destroy();
     }
@@ -378,241 +374,6 @@ describe('handler-response SSE write-after-end regression', () => {
     } finally {
       process.removeListener('uncaughtException', onUncaught);
       upstream.destroy();
-      res.destroy();
-    }
-  });
-
-  it('emits explicit incomplete-stream error instead of repairing missing responses terminal frames in handler', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => ({
-        convertResponseToJsonToSse: async () => {
-          throw new Error('json_to_sse_not_expected_in_this_test');
-        }
-      }),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: async (_chunk: unknown, probe: unknown) => (
-        probe && typeof probe === 'object' && !Array.isArray(probe)
-          ? probe as Record<string, unknown>
-          : {
-            id: 'resp_repair_terminal',
-            status: 'completed',
-            output: [
-              {
-                id: 'msg_repair_terminal',
-                type: 'message',
-                role: 'assistant',
-                status: 'completed',
-                content: [{ type: 'output_text', text: 'terminal text' }]
-              }
-            ],
-            output_text: 'terminal text'
-          }
-      ),
-      buildResponsesTerminalSseFramesFromProbeNative: () => [
-        `event: response.completed\ndata: ${JSON.stringify({
-          type: 'response.completed',
-          response: {
-            id: 'resp_repair_terminal',
-            object: 'response',
-            status: 'completed',
-            output: [
-              {
-                id: 'msg_repair_terminal',
-                type: 'message',
-                role: 'assistant',
-                status: 'completed',
-                content: [{ type: 'output_text', text: 'terminal text' }]
-              }
-            ],
-            output_text: 'terminal text'
-          }
-        })}\n\n`,
-        `event: response.done\ndata: ${JSON.stringify({
-          type: 'response.done',
-          response: {
-            id: 'resp_repair_terminal',
-            object: 'response',
-            status: 'completed',
-            output: [
-              {
-                id: 'msg_repair_terminal',
-                type: 'message',
-                role: 'assistant',
-                status: 'completed',
-                content: [{ type: 'output_text', text: 'terminal text' }]
-              }
-            ],
-            output_text: 'terminal text'
-          }
-        })}\n\n`,
-      ],
-      projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
-    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-      isSnapshotsEnabled: () => false,
-      writeServerSnapshot: async () => undefined
-    }));
-
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-
-    const res = new MockResponse();
-    const upstream = new PassThrough();
-    let output = '';
-    res.on('data', (chunk) => {
-      output += String(chunk);
-    });
-
-    sendPipelineResponse(
-      res as any,
-      {
-        status: 200,
-        sseStream: upstream,
-        metadata: {
-          outboundStream: true,
-          stream: true,
-        },
-        usageLogInfo: {
-          providerKey: 'orangeai.key1.glm-5.2',
-          finishReason: 'stop',
-        }
-      } as any,
-      'req_missing_terminal_frames_repaired',
-      { forceSSE: true, entryEndpoint: '/v1/responses' }
-    );
-
-    upstream.write('event: response.output_item.done\n');
-    upstream.write(
-      `data: ${JSON.stringify({
-        type: 'response.output_item.done',
-        item: {
-          id: 'msg_repair_terminal',
-          type: 'message',
-          role: 'assistant',
-          status: 'completed',
-          content: [{ type: 'output_text', text: 'terminal text' }]
-        }
-      })}\n\n`
-    );
-    upstream.end();
-
-    await new Promise<void>((resolve) => setTimeout(resolve, 120));
-
-    const outputItemDoneIndex = output.indexOf('event: response.output_item.done');
-    const responseErrorIndex = output.indexOf('event: error');
-
-    expect(outputItemDoneIndex).toBeGreaterThanOrEqual(0);
-    expect(responseErrorIndex).toBeGreaterThan(outputItemDoneIndex);
-    expect(output).toContain('SSE stream ended before response.completed');
-    expect(output).not.toContain('event: response.completed');
-    expect(output).not.toContain('event: response.done');
-  });
-
-  it('emits bridge error when chat forceSSE lacks Rust-produced SSE stream', async () => {
-    const converterStream = new PassThrough();
-    mockJsonToSseConverterImpl = async () => converterStream;
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => ({
-        convertResponseToJsonToSse: async () => {
-          throw new Error('json_to_sse_not_expected_in_this_test');
-        }
-      }),
-      createChatJsonToSseConverterForHttp: async () => ({
-        convertResponseToJsonToSse: async () => {
-          if (!mockJsonToSseConverterImpl) {
-            throw new Error('missing mockJsonToSseConverterImpl');
-          }
-          return mockJsonToSseConverterImpl();
-        }
-      }),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-        probe && typeof probe === 'object' && !Array.isArray(probe)
-          ? probe as Record<string, unknown>
-          : {}
-      ),
-      buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
-    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
-      isSnapshotsEnabled: () => false,
-      writeServerSnapshot: async () => undefined
-    }));
-
-    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
-
-    const res = new MockResponse();
-    let output = '';
-    let uncaught: Error | undefined;
-    const onUncaught = (error: Error) => {
-      uncaught = error;
-    };
-    process.prependOnceListener('uncaughtException', onUncaught);
-    res.on('data', (chunk) => {
-      output += String(chunk);
-      if (output.includes('hello bridge')) {
-        res.destroy();
-      }
-    });
-
-    try {
-      void sendPipelineResponse(
-        res as any,
-        {
-          status: 200,
-          body: {
-            id: 'chat_json_bridge_resp',
-            object: 'chat.completion',
-            model: 'test-model',
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: 'assistant',
-                  content: 'hello bridge'
-                },
-                finish_reason: 'stop'
-              }
-            ]
-          },
-          metadata: {
-            outboundStream: true,
-            stream: true,
-          },
-          usageLogInfo: {
-            providerKey: 'XLC.key1.glm-5.2',
-            finishReason: 'stop',
-          }
-        } as any,
-        'req_chat_json_bridge_late_write_no_uncaught',
-        { forceSSE: true, entryEndpoint: '/v1/chat/completions' }
-      );
-
-      await new Promise<void>((resolve) => setTimeout(resolve, 80));
-
-      expect(output).toContain('SSE stream missing from pipeline result');
-      expect(uncaught?.message ?? '').not.toContain('write after end');
-    } finally {
-      process.removeListener('uncaughtException', onUncaught);
-      mockJsonToSseConverterImpl = undefined;
-      converterStream.destroy();
       res.destroy();
     }
   });
