@@ -6196,6 +6196,8 @@ function checkServertoolResponseStageGateThinShell() {
     '[servertool] native response-stage requested auto-hook result but result was empty',
     'if (!autoHookResult)',
     'Boolean(autoHookResult)',
+    'responseHookName: postAutoHookRuntimeAction.responseHookName as string',
+    'result: autoHookResult as ServerSideToolEngineResult',
     "if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass')",
     "if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty')",
     "if (postAutoHookRuntimeAction.action === 'return_auto_hook_result')",
@@ -6223,13 +6225,19 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'responseHookName: postAutoHookRuntimeAction.responseHookName as string'
+    'responseHookName: postAutoHookRuntimeAction.responseHookName'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'result: autoHookResult as ServerSideToolEngineResult'
+    'result: autoHookResult'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'hasServerSideToolEngineResult(autoHookResult)'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',

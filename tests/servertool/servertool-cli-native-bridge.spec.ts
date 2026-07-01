@@ -730,14 +730,17 @@ describe('servertool CLI native bridge', () => {
 
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
-        responseStageNextAction: 'run_auto_hooks',
+        responseStageGatePlan: {
+          nextAction: 'run_auto_hooks',
+          responseHookRequired: true,
+          responseHookName: 'stop_message_auto'
+        },
         autoHookEvaluated: true,
-        hasAutoHookResult: false,
-        responseHookRequired: true
+        hasAutoHookResult: false
       })
     ).toEqual({
-      action: 'return_passthrough_no_auto_hook_result',
-      resultMode: 'passthrough'
+      action: 'return_required_response_hook_empty',
+      responseHookName: 'stop_message_auto'
     });
   });
 

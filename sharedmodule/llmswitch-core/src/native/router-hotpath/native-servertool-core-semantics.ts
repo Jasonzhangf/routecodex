@@ -395,7 +395,7 @@ export type ServertoolResponseStageRuntimeActionPlan =
     }
   | {
       action: 'return_required_response_hook_empty';
-      responseHookName?: string;
+      responseHookName: string;
     }
   | {
       action: 'run_auto_hooks' | 'return_auto_hook_result';
@@ -2723,7 +2723,7 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
   if (!isPassthroughAction && record.resultMode !== undefined) {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned resultMode for non-passthrough action');
   }
-  if (isPassthroughAction) {
+  if (record.action === 'return_passthrough_bypass' || record.action === 'return_passthrough_no_auto_hook_result') {
     return {
       action: record.action,
       resultMode: 'passthrough',
@@ -2731,11 +2731,12 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     };
   }
   if (record.action === 'return_required_response_hook_empty') {
+    if (typeof record.responseHookName !== 'string' || !record.responseHookName) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned required hook empty without responseHookName');
+    }
     return {
       action: 'return_required_response_hook_empty',
-      ...(typeof record.responseHookName === 'string' && record.responseHookName.trim()
-        ? { responseHookName: record.responseHookName.trim() }
-        : {})
+      responseHookName: record.responseHookName
     };
   }
   if (record.action === 'run_auto_hooks' || record.action === 'return_auto_hook_result') {
