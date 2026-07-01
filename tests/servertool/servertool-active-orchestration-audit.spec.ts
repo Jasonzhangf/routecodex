@@ -60,6 +60,9 @@ const TARGETS = [
       'function throwServertoolExecutionDispatchError(',
       'planServertoolExecutionDispatchErrorWithNative(args)',
       'planServertoolExecutionDispatchErrorWithNative({',
+      'planServertoolHandlerContractErrorWithNative(',
+      "actionPlan.action === 'invalid_plan_missing_finalize'",
+      "actionPlan.action === 'invalid_plan_result'",
       "outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome'",
       "outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract'",
       "import { ProviderProtocolError }",
@@ -72,6 +75,7 @@ const TARGETS = [
     required: [
       'throw createServertoolProviderProtocolErrorFromPlan(',
       'planServertoolExecutionOutcomeMaterializationWithNative({',
+      'planServertoolHandlerMaterializationForPlannedWithNative(',
       'const outcomePlan = planServertoolOutcomeWithNative(',
       'buildServertoolOutcomePlanInputWithNative({',
     ],

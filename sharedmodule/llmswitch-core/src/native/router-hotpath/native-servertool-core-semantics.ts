@@ -354,6 +354,18 @@ export interface ServertoolHandlerRuntimeActionPlan {
     | 'invalid_plan_result';
 }
 
+export type ServertoolHandlerMaterializationPlan =
+  | {
+      action: 'finalize_without_backend';
+    }
+  | {
+      action: 'return_handler_result';
+    }
+  | {
+      action: 'throw_handler_error';
+      errorPlan: ServertoolErrorPlan;
+    };
+
 export interface StoplessLearnedNoteWritePlanInput {
   adapterContext: Record<string, unknown>;
   requestId: string;
@@ -2782,6 +2794,69 @@ export function planServertoolHandlerRuntimeActionForPlannedWithNative(
       ? (record.execution as Record<string, unknown>)
       : undefined;
   return planServertoolHandlerRuntimeActionWithNative({
+    hasFinalizeFunction: typeof record.finalize === 'function',
+    hasChatResponseObject: Boolean(record.chatResponse && typeof record.chatResponse === 'object' && !Array.isArray(record.chatResponse)),
+    hasExecutionObject: Boolean(record.execution && typeof record.execution === 'object' && !Array.isArray(record.execution)),
+    hasExecutionFlowId: typeof execution?.flowId === 'string',
+    hasPlanMarkers: typeof record.flowId === 'string' || record.finalize !== undefined
+  });
+}
+
+export function planServertoolHandlerMaterializationWithNative(input: {
+  requestId: string;
+  hasFinalizeFunction: boolean;
+  hasChatResponseObject: boolean;
+  hasExecutionObject: boolean;
+  hasExecutionFlowId: boolean;
+  hasPlanMarkers: boolean;
+}): ServertoolHandlerMaterializationPlan {
+  const capability = 'planServertoolHandlerMaterializationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolHandlerMaterializationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolHandlerMaterializationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolHandlerMaterializationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'finalize_without_backend' &&
+    record.action !== 'return_handler_result' &&
+    record.action !== 'throw_handler_error'
+  ) {
+    throw new Error('planServertoolHandlerMaterializationJson native returned invalid action');
+  }
+  if (record.action === 'throw_handler_error') {
+    if (!record.errorPlan || typeof record.errorPlan !== 'object' || Array.isArray(record.errorPlan)) {
+      throw new Error('planServertoolHandlerMaterializationJson native returned invalid errorPlan');
+    }
+    return {
+      action: 'throw_handler_error',
+      errorPlan: parseServertoolErrorPlan(JSON.stringify(record.errorPlan), capability)
+    };
+  }
+  return { action: record.action };
+}
+
+export function planServertoolHandlerMaterializationForPlannedWithNative(
+  planned: unknown,
+  requestId: string
+): ServertoolHandlerMaterializationPlan {
+  const record =
+    planned && typeof planned === 'object' && !Array.isArray(planned)
+      ? (planned as Record<string, unknown>)
+      : {};
+  const execution =
+    record.execution && typeof record.execution === 'object' && !Array.isArray(record.execution)
+      ? (record.execution as Record<string, unknown>)
+      : undefined;
+  return planServertoolHandlerMaterializationWithNative({
+    requestId,
     hasFinalizeFunction: typeof record.finalize === 'function',
     hasChatResponseObject: Boolean(record.chatResponse && typeof record.chatResponse === 'object' && !Array.isArray(record.chatResponse)),
     hasExecutionObject: Boolean(record.execution && typeof record.execution === 'object' && !Array.isArray(record.execution)),

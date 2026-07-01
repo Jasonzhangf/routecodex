@@ -690,6 +690,16 @@ pub fn plan_servertool_handler_runtime_action_json(input_json: &str) -> Result<S
     .map_err(|e| format!("serialize servertool handler runtime action plan: {e}"))
 }
 
+pub fn plan_servertool_handler_materialization_json(input_json: &str) -> Result<String, String> {
+    let input: execution_handler_contract::ServertoolHandlerMaterializationInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool handler materialization input: {e}"))?;
+    serde_json::to_string(
+        &execution_handler_contract::plan_servertool_handler_materialization(&input),
+    )
+    .map_err(|e| format!("serialize servertool handler materialization plan: {e}"))
+}
+
 pub fn create_servertool_execution_loop_state_json() -> Result<String, String> {
     serde_json::to_string(&execution_state_contract::create_servertool_execution_loop_state())
         .map_err(|e| format!("serialize servertool execution loop state: {e}"))
@@ -2560,6 +2570,72 @@ fn plans_servertool_handler_runtime_action_via_servertool_core_bridge() {
         parsed["action"],
         serde_json::json!("finalize_without_backend")
     );
+}
+
+#[test]
+fn plans_servertool_handler_materialization_via_servertool_core_bridge() {
+    let finalize = plan_servertool_handler_materialization_json(
+        &serde_json::json!({
+            "requestId": "req-finalize",
+            "hasFinalizeFunction": true,
+            "hasChatResponseObject": false,
+            "hasExecutionObject": false,
+            "hasExecutionFlowId": false,
+            "hasPlanMarkers": true
+        })
+        .to_string(),
+    )
+    .expect("handler materialization finalize plan");
+    let finalize_value: serde_json::Value =
+        serde_json::from_str(&finalize).expect("parse finalize materialization plan");
+    assert_eq!(
+        finalize_value["action"],
+        serde_json::json!("finalize_without_backend")
+    );
+    assert!(finalize_value.get("errorPlan").is_none());
+
+    let invalid = plan_servertool_handler_materialization_json(
+        &serde_json::json!({
+            "requestId": "req-invalid",
+            "hasFinalizeFunction": false,
+            "hasChatResponseObject": false,
+            "hasExecutionObject": false,
+            "hasExecutionFlowId": false,
+            "hasPlanMarkers": true
+        })
+        .to_string(),
+    )
+    .expect("handler materialization invalid plan");
+    let invalid_value: serde_json::Value =
+        serde_json::from_str(&invalid).expect("parse invalid materialization plan");
+    assert_eq!(
+        invalid_value["action"],
+        serde_json::json!("throw_handler_error")
+    );
+    assert_eq!(
+        invalid_value["errorPlan"]["message"],
+        serde_json::json!("[servertool] invalid handler plan contract: missing finalize")
+    );
+
+    let returned = plan_servertool_handler_materialization_json(
+        &serde_json::json!({
+            "requestId": "req-return",
+            "hasFinalizeFunction": false,
+            "hasChatResponseObject": true,
+            "hasExecutionObject": true,
+            "hasExecutionFlowId": true,
+            "hasPlanMarkers": false
+        })
+        .to_string(),
+    )
+    .expect("handler materialization return plan");
+    let returned_value: serde_json::Value =
+        serde_json::from_str(&returned).expect("parse return materialization plan");
+    assert_eq!(
+        returned_value["action"],
+        serde_json::json!("return_handler_result")
+    );
+    assert!(returned_value.get("errorPlan").is_none());
 }
 
 #[test]

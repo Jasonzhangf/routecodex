@@ -5408,7 +5408,10 @@ function checkServertoolRustOutcomeCloseout() {
     'buildHandlerRuntimeActionInput',
     'buildProviderProtocolError',
     "import { ProviderProtocolError }",
+    'planServertoolHandlerContractErrorWithNative(',
     'planServertoolHandlerRuntimeActionWithNative(',
+    "actionPlan.action === 'invalid_plan_missing_finalize'",
+    "actionPlan.action === 'invalid_plan_result'",
     "await import('./builtin-handler-catalog.js')",
     'getBuiltinHandlerEntry(args.builtinName)',
     'builtin handler missing execution descriptor',
@@ -5425,7 +5428,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-shell-ts-orchestration-guard',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    'planServertoolHandlerRuntimeActionForPlannedWithNative'
+    'planServertoolHandlerMaterializationForPlannedWithNative'
   );
   assertContains(
     'servertool-execution-handler-builtin-runtime-thin-shell',
@@ -5452,6 +5455,9 @@ function checkServertoolRustOutcomeCloseout() {
     'pub struct ServertoolHandlerRuntimeActionInput',
     'pub struct ServertoolHandlerRuntimeActionPlan',
     'pub fn plan_servertool_handler_runtime_action',
+    'pub struct ServertoolHandlerMaterializationInput',
+    'pub struct ServertoolHandlerMaterializationPlan',
+    'pub fn plan_servertool_handler_materialization',
     'pub fn plan_servertool_handler_failed_error',
   ]) {
     assertContains(
@@ -5517,6 +5523,12 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-handler-contract-native-export',
     `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
     napiBlocks,
+    'plan_servertool_handler_materialization_json'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
     'plan_servertool_materialization_progress_json'
   );
   assertContains(
@@ -5530,6 +5542,12 @@ function checkServertoolRustOutcomeCloseout() {
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
     'pub fn plan_servertool_handler_runtime_action_json'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn plan_servertool_handler_materialization_json'
   );
   assertContains(
     'servertool-execution-handler-contract-native-export',
@@ -5553,6 +5571,12 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-handler-contract-required-export',
     NATIVE_REQUIRED_EXPORTS,
     requiredExports,
+    'planServertoolHandlerMaterializationJson'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
     'planServertoolMaterializationProgressJson'
   );
   assertContains(
@@ -5571,19 +5595,19 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-handler-contract-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeCoreWrapper,
+    'planServertoolHandlerMaterializationForPlannedWithNative'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'planServertoolMaterializationProgressWithNative'
   );
   assertContains(
     'servertool-execution-handler-contract-ts-thin-shell',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    'planServertoolHandlerContractErrorWithNative'
-  );
-  assertContains(
-    'servertool-execution-handler-contract-ts-thin-shell',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
-    'planServertoolHandlerRuntimeActionForPlannedWithNative'
+    'planServertoolHandlerMaterializationForPlannedWithNative'
   );
 
   pass('servertool-outcome-rust-owner', 'servertool-core owns outcome planning and cli contract');

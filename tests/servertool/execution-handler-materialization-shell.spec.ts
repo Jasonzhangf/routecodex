@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const buildServertoolOutcomePlanInputWithNativeMock = jest.fn((input: any) => input);
 const planServertoolOutcomeWithNative = jest.fn();
 const planServertoolExecutionOutcomeMaterializationWithNative = jest.fn();
+const planServertoolHandlerMaterializationForPlannedWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/provider-protocol-error.js',
@@ -70,7 +71,8 @@ jest.unstable_mockModule(
     })),
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
     parseServertoolCliProjectionToolArgumentsWithNative: jest.fn(() => ({})),
-    planServertoolExecutionOutcomeMaterializationWithNative
+    planServertoolExecutionOutcomeMaterializationWithNative,
+    planServertoolHandlerMaterializationForPlannedWithNative
   })
 );
 
@@ -106,7 +108,8 @@ jest.unstable_mockModule(
 );
 
 const {
-  materializeNativeToolCallExecutionOutcome
+  materializeNativeToolCallExecutionOutcome,
+  materializeServertoolPlannedResult
 } = await import(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js'
 );
@@ -151,6 +154,9 @@ describe('execution-handler-materialization-shell', () => {
         }
       };
     });
+    planServertoolHandlerMaterializationForPlannedWithNative.mockReturnValue({
+      action: 'return_handler_result'
+    });
   });
 
   test('outcome materialization shell forwards adapter/base context to native outcome-plan builder', async () => {
@@ -169,6 +175,10 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).toContain('throw createServertoolProviderProtocolErrorFromPlan(');
     expect(source).toContain('planServertoolExecutionOutcomeMaterializationWithNative({');
     expect(source).not.toContain('planServertoolExecutionDispatchErrorWithNative({');
+    expect(source).toContain('planServertoolHandlerMaterializationForPlannedWithNative(');
+    expect(source).not.toContain('planServertoolHandlerContractErrorWithNative(');
+    expect(source).not.toContain("actionPlan.action === 'invalid_plan_missing_finalize'");
+    expect(source).not.toContain("actionPlan.action === 'invalid_plan_result'");
     expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome'");
     expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract'");
     expect(source).not.toContain('record.executionFlowId.trim()');
@@ -359,5 +369,73 @@ describe('execution-handler-materialization-shell', () => {
       adapterContext: { sessionId: 'sess_dispatch_1' },
       baseForExecution: { id: 'base-dispatch-1' }
     });
+  });
+
+  test('planned handler materialization executes finalize only when Rust plan requests it', async () => {
+    const finalized = {
+      chatResponse: { id: 'finalized-chat' },
+      execution: { flowId: 'flow-finalized' }
+    };
+    const finalize = jest.fn(async () => finalized);
+    const planned = {
+      flowId: 'flow-plan',
+      finalize
+    };
+    planServertoolHandlerMaterializationForPlannedWithNative.mockReturnValue({
+      action: 'finalize_without_backend'
+    });
+
+    await expect(
+      materializeServertoolPlannedResult(planned as any, {
+        requestId: 'req-finalize-plan',
+        adapterContext: {},
+      } as any)
+    ).resolves.toBe(finalized);
+
+    expect(planServertoolHandlerMaterializationForPlannedWithNative).toHaveBeenCalledWith(
+      planned,
+      'req-finalize-plan'
+    );
+    expect(finalize).toHaveBeenCalledTimes(1);
+  });
+
+  test('planned handler materialization throws Rust-owned error plan for invalid handler plan', async () => {
+    const planned = { flowId: 'missing-finalize' };
+    planServertoolHandlerMaterializationForPlannedWithNative.mockReturnValue({
+      action: 'throw_handler_error',
+      errorPlan: {
+        code: 'SERVERTOOL_HANDLER_FAILED',
+        category: 'INTERNAL_ERROR',
+        status: 500,
+        message: '[native-handler-contract] invalid_handler_plan_missing_finalize',
+        details: {
+          requestId: 'req-invalid-plan'
+        }
+      }
+    });
+
+    await expect(
+      materializeServertoolPlannedResult(planned as any, {
+        requestId: 'req-invalid-plan',
+        adapterContext: {},
+      } as any)
+    ).rejects.toThrow('[native-handler-contract] invalid_handler_plan_missing_finalize');
+  });
+
+  test('planned handler materialization returns handler result when Rust plan accepts it', async () => {
+    const planned = {
+      chatResponse: { id: 'handler-result-chat' },
+      execution: { flowId: 'flow-handler-result' }
+    };
+    planServertoolHandlerMaterializationForPlannedWithNative.mockReturnValue({
+      action: 'return_handler_result'
+    });
+
+    await expect(
+      materializeServertoolPlannedResult(planned as any, {
+        requestId: 'req-return-result',
+        adapterContext: {},
+      } as any)
+    ).resolves.toBe(planned);
   });
 });

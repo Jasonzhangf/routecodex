@@ -1,8 +1,7 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   planServertoolExecutionOutcomeMaterializationWithNative,
-  planServertoolHandlerContractErrorWithNative,
-  planServertoolHandlerRuntimeActionForPlannedWithNative,
+  planServertoolHandlerMaterializationForPlannedWithNative,
   type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
@@ -59,26 +58,16 @@ export const materializeServertoolPlannedResult = async (
   planned: ServerToolHandlerPlan | ServerToolHandlerResult,
   options: ServerSideToolEngineOptions
 ): Promise<ServerToolHandlerResult | null> => {
-  const actionPlan = planServertoolHandlerRuntimeActionForPlannedWithNative(planned);
+  const actionPlan = planServertoolHandlerMaterializationForPlannedWithNative(
+    planned,
+    options.requestId
+  );
   if (actionPlan.action === 'finalize_without_backend') {
     const plan = planned as ServerToolHandlerPlan;
     return await plan.finalize();
   }
-  if (actionPlan.action === 'invalid_plan_missing_finalize') {
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolHandlerContractErrorWithNative({
-        kind: 'invalid_handler_plan_missing_finalize',
-        requestId: options.requestId
-      })
-    );
-  }
-  if (actionPlan.action === 'invalid_plan_result') {
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolHandlerContractErrorWithNative({
-        kind: 'invalid_handler_plan_result',
-        requestId: options.requestId
-      })
-    );
+  if (actionPlan.action === 'throw_handler_error') {
+    throw createServertoolProviderProtocolErrorFromPlan(actionPlan.errorPlan);
   }
   return planned as ServerToolHandlerResult;
 };

@@ -1535,6 +1535,12 @@ pub fn plan_servertool_handler_runtime_action_json(input_json: String) -> NapiRe
 }
 
 #[napi]
+pub fn plan_servertool_handler_materialization_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_handler_materialization_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn create_servertool_execution_loop_state_json() -> NapiResult<String> {
     servertool_core_blocks::create_servertool_execution_loop_state_json()
         .map_err(|e| napi::Error::from_reason(e))
