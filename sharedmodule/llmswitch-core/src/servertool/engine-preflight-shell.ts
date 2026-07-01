@@ -10,6 +10,7 @@ import {
 import { planServertoolEnginePreflightWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 type StopGatewayContext = ReturnType<typeof inspectStopGatewaySignal>;
+type EnginePreflightNativePlan = ReturnType<typeof planServertoolEnginePreflightWithNative>;
 
 export type EnginePreflightResult =
   | {
@@ -33,6 +34,36 @@ type LogStopEntry = (
 
 type LogStopCompare = (stage: 'entry' | 'trigger', flowId?: string) => void;
 
+function runPreflightSideEffects(args: {
+  preflightAction: EnginePreflightNativePlan;
+  stopSignal: StopGatewayContext;
+  adapterContext: AdapterContext;
+  logStopEntry: LogStopEntry;
+  logStopCompare: LogStopCompare;
+}): void {
+  if (args.preflightAction.attachStopGatewayContext === true) {
+    attachStopGatewayContext(args.adapterContext, args.stopSignal);
+  }
+  const logStopEntry = args.preflightAction.logStopEntry;
+  if (logStopEntry) {
+    args.logStopEntry(logStopEntry.stage, logStopEntry.result, {
+      reason: args.stopSignal.reason,
+      source: args.stopSignal.source,
+      eligible: args.stopSignal.eligible,
+      ...(logStopEntry.includeChoiceFacts && typeof args.stopSignal.choiceIndex === 'number'
+        ? { choiceIndex: args.stopSignal.choiceIndex }
+        : {}),
+      ...(logStopEntry.includeChoiceFacts && typeof args.stopSignal.hasToolCalls === 'boolean'
+        ? { hasToolCalls: args.stopSignal.hasToolCalls }
+        : {})
+    });
+  }
+  const logStopCompare = args.preflightAction.logStopCompare;
+  if (logStopCompare) {
+    args.logStopCompare(logStopCompare.stage);
+  }
+}
+
 export function runEnginePreflight(args: {
   chat: JsonObject;
   adapterContext: AdapterContext;
@@ -49,46 +80,22 @@ export function runEnginePreflight(args: {
     case 'return_original_chat':
       return { kind: 'return_original_chat', chat: args.chat };
     case 'return_original_chat_direct_passthrough':
-      if (preflightAction.attachStopGatewayContext === true) {
-        attachStopGatewayContext(args.adapterContext, stopSignal);
-      }
-      if (preflightAction.logStopEntry) {
-        args.logStopEntry(preflightAction.logStopEntry.stage, preflightAction.logStopEntry.result, {
-          reason: stopSignal.reason,
-          source: stopSignal.source,
-          eligible: stopSignal.eligible,
-          ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.choiceIndex === 'number'
-            ? { choiceIndex: stopSignal.choiceIndex }
-            : {}),
-          ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.hasToolCalls === 'boolean'
-            ? { hasToolCalls: stopSignal.hasToolCalls }
-            : {})
-        });
-      }
-      if (preflightAction.logStopCompare) {
-        args.logStopCompare(preflightAction.logStopCompare.stage);
-      }
+      runPreflightSideEffects({
+        preflightAction,
+        stopSignal,
+        adapterContext: args.adapterContext,
+        logStopEntry: args.logStopEntry,
+        logStopCompare: args.logStopCompare
+      });
       return { kind: 'return_original_chat_direct_passthrough', chat: args.chat };
     case 'continue_to_engine':
-      if (preflightAction.attachStopGatewayContext === true) {
-        attachStopGatewayContext(args.adapterContext, stopSignal);
-      }
-      if (preflightAction.logStopEntry) {
-        args.logStopEntry(preflightAction.logStopEntry.stage, preflightAction.logStopEntry.result, {
-          reason: stopSignal.reason,
-          source: stopSignal.source,
-          eligible: stopSignal.eligible,
-          ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.choiceIndex === 'number'
-            ? { choiceIndex: stopSignal.choiceIndex }
-            : {}),
-          ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.hasToolCalls === 'boolean'
-            ? { hasToolCalls: stopSignal.hasToolCalls }
-            : {})
-        });
-      }
-      if (preflightAction.logStopCompare) {
-        args.logStopCompare(preflightAction.logStopCompare.stage);
-      }
+      runPreflightSideEffects({
+        preflightAction,
+        stopSignal,
+        adapterContext: args.adapterContext,
+        logStopEntry: args.logStopEntry,
+        logStopCompare: args.logStopCompare
+      });
       return { kind: 'continue', stopSignal };
     default:
       throw new Error(`[servertool] invalid engine preflight action: ${String(preflightAction.action)}`);

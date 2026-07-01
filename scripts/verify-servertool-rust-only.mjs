@@ -5253,6 +5253,7 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     'export function runEnginePreflight(',
+    'function runPreflightSideEffects(',
     'planServertoolEnginePreflightWithNative',
     'inspectStopGatewaySignal(',
     'attachStopGatewayContext(',
@@ -5276,6 +5277,8 @@ function checkServertoolRustOutcomeCloseout() {
     'if (stopSignal.observed) {',
     "if (preflightAction.action === 'return_original_chat')",
     "if (preflightAction.action === 'return_original_chat_direct_passthrough')",
+    'preflightAction.logStopEntry.stage',
+    'preflightAction.logStopEntry.result',
   ]) {
     if (enginePreflightShell.includes(marker)) {
       fail(

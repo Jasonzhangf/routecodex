@@ -321,9 +321,12 @@ const TARGETS = [
       'if (stopSignal.observed) {',
       "if (preflightAction.action === 'return_original_chat')",
       "if (preflightAction.action === 'return_original_chat_direct_passthrough')",
+      'preflightAction.logStopEntry.stage',
+      'preflightAction.logStopEntry.result',
     ],
     required: [
       'runEnginePreflight',
+      'function runPreflightSideEffects(',
       'planServertoolEnginePreflightWithNative',
       'inspectStopGatewaySignal(',
       'attachStopGatewayContext(',

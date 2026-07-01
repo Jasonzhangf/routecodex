@@ -71,6 +71,7 @@ describe('engine stopless session thin-shell guard', () => {
     );
 
     expect(source).toContain('planServertoolEnginePreflightWithNative');
+    expect(source).toContain('function runPreflightSideEffects(');
     expect(source).toContain('inspectStopGatewaySignal(');
     expect(source).toContain('attachStopGatewayContext(');
     expect(source).toContain('containsSyntheticRouteCodexControlTextWithNative(');
@@ -80,6 +81,8 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).toContain('preflightAction.attachStopGatewayContext === true');
     expect(source).toContain('preflightAction.logStopEntry');
     expect(source).toContain('preflightAction.logStopCompare');
+    expect(source).not.toContain('preflightAction.logStopEntry.stage');
+    expect(source).not.toContain('preflightAction.logStopEntry.result');
     expect(source).not.toContain('stopSignal.observed && preflightAction.action');
     expect(source).not.toContain('if (stopSignal.observed) {');
     expect(source).not.toContain("if (preflightAction.action === 'return_original_chat')");
