@@ -191,7 +191,8 @@ describe('servertool CLI native bridge', () => {
         stoplessDisabledOnDirectRoute: true
       })
     ).toEqual({
-      action: 'return_original_chat'
+      action: 'return_original_chat',
+      attachStopGatewayContext: false
     });
 
     expect(
@@ -201,7 +202,16 @@ describe('servertool CLI native bridge', () => {
         stoplessDisabledOnDirectRoute: true
       })
     ).toEqual({
-      action: 'return_original_chat_direct_passthrough'
+      action: 'return_original_chat_direct_passthrough',
+      attachStopGatewayContext: true,
+      logStopEntry: {
+        stage: 'trigger',
+        result: 'skipped_direct_passthrough',
+        includeChoiceFacts: false
+      },
+      logStopCompare: {
+        stage: 'trigger'
+      }
     });
 
     expect(
@@ -211,7 +221,13 @@ describe('servertool CLI native bridge', () => {
         stoplessDisabledOnDirectRoute: false
       })
     ).toEqual({
-      action: 'continue_to_engine'
+      action: 'continue_to_engine',
+      attachStopGatewayContext: true,
+      logStopEntry: {
+        stage: 'entry',
+        result: 'observed',
+        includeChoiceFacts: true
+      }
     });
 
     expect(
@@ -225,7 +241,16 @@ describe('servertool CLI native bridge', () => {
         }
       })
     ).toEqual({
-      action: 'return_original_chat_direct_passthrough'
+      action: 'return_original_chat_direct_passthrough',
+      attachStopGatewayContext: true,
+      logStopEntry: {
+        stage: 'trigger',
+        result: 'skipped_direct_passthrough',
+        includeChoiceFacts: false
+      },
+      logStopCompare: {
+        stage: 'trigger'
+      }
     });
   });
 

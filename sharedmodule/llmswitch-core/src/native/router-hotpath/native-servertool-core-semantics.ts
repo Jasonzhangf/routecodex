@@ -274,6 +274,15 @@ export interface ServertoolEnginePreflightPlan {
     | 'return_original_chat'
     | 'return_original_chat_direct_passthrough'
     | 'continue_to_engine';
+  attachStopGatewayContext: boolean;
+  logStopEntry?: {
+    stage: 'entry' | 'trigger';
+    result: string;
+    includeChoiceFacts: boolean;
+  };
+  logStopCompare?: {
+    stage: 'entry' | 'trigger';
+  };
 }
 
 export interface ServertoolEngineRuntimeActionPlan {
@@ -2094,8 +2103,57 @@ export function planServertoolEnginePreflightWithNative(input: {
   ) {
     throw new Error('planServertoolEnginePreflightJson native returned invalid action');
   }
+  if (typeof record.attachStopGatewayContext !== 'boolean') {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid attachStopGatewayContext');
+  }
+  const logStopEntry = parseServertoolEnginePreflightLogStopEntry(record.logStopEntry);
+  const logStopCompare = parseServertoolEnginePreflightLogStopCompare(record.logStopCompare);
   return {
-    action: record.action
+    action: record.action,
+    attachStopGatewayContext: record.attachStopGatewayContext,
+    ...(logStopEntry ? { logStopEntry } : {}),
+    ...(logStopCompare ? { logStopCompare } : {})
+  };
+}
+
+function parseServertoolEnginePreflightStage(value: unknown, field: string): 'entry' | 'trigger' {
+  if (value === 'entry' || value === 'trigger') {
+    return value;
+  }
+  throw new Error(`planServertoolEnginePreflightJson native returned invalid ${field}`);
+}
+
+function parseServertoolEnginePreflightLogStopEntry(value: unknown): ServertoolEnginePreflightPlan['logStopEntry'] {
+  if (value == null) {
+    return undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid logStopEntry');
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.result !== 'string') {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid logStopEntry.result');
+  }
+  if (typeof record.includeChoiceFacts !== 'boolean') {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid logStopEntry.includeChoiceFacts');
+  }
+  return {
+    stage: parseServertoolEnginePreflightStage(record.stage, 'logStopEntry.stage'),
+    result: record.result,
+    includeChoiceFacts: record.includeChoiceFacts
+  };
+}
+
+function parseServertoolEnginePreflightLogStopCompare(value: unknown): ServertoolEnginePreflightPlan['logStopCompare'] {
+  if (value == null) {
+    return undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid logStopCompare');
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    stage: parseServertoolEnginePreflightStage(record.stage, 'logStopCompare.stage')
   };
 }
 

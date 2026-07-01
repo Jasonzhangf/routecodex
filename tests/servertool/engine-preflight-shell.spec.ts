@@ -44,6 +44,12 @@ describe('engine-preflight-shell', () => {
     });
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'continue_to_engine',
+      attachStopGatewayContext: true,
+      logStopEntry: {
+        stage: 'entry',
+        result: 'observed',
+        includeChoiceFacts: true
+      }
     });
   });
 
@@ -59,6 +65,11 @@ describe('engine-preflight-shell', () => {
     expect(source).toContain('inspectStopGatewaySignal(');
     expect(source).toContain('attachStopGatewayContext(');
     expect(source).toContain('containsSyntheticRouteCodexControlTextWithNative(');
+    expect(source).not.toContain('stopSignal.observed && preflightAction.action');
+    expect(source).not.toContain('if (stopSignal.observed) {');
+    expect(source).toContain('preflightAction.attachStopGatewayContext === true');
+    expect(source).toContain('preflightAction.logStopEntry');
+    expect(source).toContain('preflightAction.logStopCompare');
     expect(source).not.toContain('./stop-gateway-context.js');
     expect(source).not.toContain('./orchestration-policy-block.js');
   });
@@ -66,6 +77,7 @@ describe('engine-preflight-shell', () => {
   test('returns original chat when native preflight says so', () => {
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'return_original_chat',
+      attachStopGatewayContext: false
     });
 
     const result = runEnginePreflight({
@@ -87,6 +99,15 @@ describe('engine-preflight-shell', () => {
     const logStopCompare = jest.fn();
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'return_original_chat_direct_passthrough',
+      attachStopGatewayContext: true,
+      logStopEntry: {
+        stage: 'trigger',
+        result: 'skipped_direct_passthrough',
+        includeChoiceFacts: false
+      },
+      logStopCompare: {
+        stage: 'trigger'
+      }
     });
 
     const result = runEnginePreflight({

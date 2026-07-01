@@ -94,18 +94,6 @@ function buildChoicesArrayBridgeDebugDetails(args: {
   };
 }
 
-const PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER = {
-  module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
-  symbol: 'syncAdapterContextRuntimeBackToPipelineMetadata',
-  stage: 'provider_response_runtime_control'
-} as const;
-
-const PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER = {
-  module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
-  symbol: 'syncAdapterContextRuntimeBackToPipelineMetadata',
-  stage: 'provider_response_debug_snapshot'
-} as const;
-
 function buildBridgeAdapterContext(args: {
   metadata: Record<string, unknown>;
   requestId: string;
@@ -172,47 +160,6 @@ function shouldEnableHubStageRecorder(): boolean {
     ?? ""
   ).trim().toLowerCase();
   return TRUTHY_VALUES.has(raw);
-}
-function syncAdapterContextRuntimeBackToPipelineMetadata(options: {
-  pipelineMetadata?: Record<string, unknown>;
-  adapterContext: Record<string, unknown>;
-}): void {
-  const pipelineMetadata = asRecord(options.pipelineMetadata);
-  if (!pipelineMetadata) {
-    return;
-  }
-  const adapterCenter = MetadataCenter.read(options.adapterContext);
-  const pipelineCenter = MetadataCenter.read(pipelineMetadata);
-  if (adapterCenter && !pipelineCenter) {
-    MetadataCenter.bind(pipelineMetadata, adapterCenter);
-  } else if (adapterCenter && pipelineCenter && pipelineCenter !== adapterCenter) {
-    const runtimeControl = adapterCenter.readRuntimeControl();
-    if (runtimeControl.stopless) {
-      pipelineCenter.writeRuntimeControl(
-        'stopless',
-        runtimeControl.stopless,
-        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        'provider response stopless runtime pipeline sync'
-      );
-    }
-    if (runtimeControl.stopMessageCompareContext) {
-      pipelineCenter.writeRuntimeControl(
-        'stopMessageCompareContext',
-        runtimeControl.stopMessageCompareContext,
-        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        'provider response stop-message compare pipeline sync'
-      );
-    }
-    const debugSnapshot = adapterCenter.readDebugSnapshot();
-    if (Array.isArray(debugSnapshot.hubStageTop) && debugSnapshot.hubStageTop.length > 0) {
-      pipelineCenter.writeDebugSnapshot(
-        'hubStageTop',
-        debugSnapshot.hubStageTop,
-        PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER,
-        'provider response hub-stage-top debug snapshot sync'
-      );
-    }
-  }
 }
 
 function readRuntimeControlForProviderResponseConverter(
@@ -474,10 +421,6 @@ export async function convertProviderResponseIfNeeded(
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
       stageRecorder
-    });
-    syncAdapterContextRuntimeBackToPipelineMetadata({
-      pipelineMetadata: options.pipelineMetadata,
-      adapterContext
     });
     logPipelineStage('convert.bridge.completed', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,

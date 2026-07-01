@@ -36,17 +36,16 @@ function createDeps() {
   };
 }
 
-describe('provider-response-converter stopless runtime sync', () => {
-  it('syncs current-turn stopless runtime control back into pipeline metadata before continuation save', async () => {
+describe('provider-response-converter bridge metadata center binding', () => {
+  it('passes the same MetadataCenter into bridge context for current-turn runtime control', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockConvertProviderResponse.mockImplementation(async ({ context }: { context: Record<string, unknown> }) => {
-      const isolatedAdapterCenter = new MetadataCenter();
-      MetadataCenter.bind(context, isolatedAdapterCenter);
-      if (context.metadata && typeof context.metadata === 'object' && !Array.isArray(context.metadata)) {
-        MetadataCenter.bind(context.metadata as Record<string, unknown>, isolatedAdapterCenter);
+      const center = MetadataCenter.read(context);
+      if (!center) {
+        throw new Error('bridge context missing bound MetadataCenter');
       }
-      isolatedAdapterCenter.writeRuntimeControl(
+      center.writeRuntimeControl(
         'stopless',
         {
           flowId: 'stop_message_flow',
@@ -58,11 +57,11 @@ describe('provider-response-converter stopless runtime sync', () => {
         },
         {
           module: 'tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts',
-          symbol: 'syncs current-turn stopless runtime control back into pipeline metadata before continuation save',
+          symbol: 'passes the same MetadataCenter into bridge context for current-turn runtime control',
           stage: 'test'
         }
       );
-      isolatedAdapterCenter.writeRuntimeControl(
+      center.writeRuntimeControl(
         'stopMessageCompareContext',
         {
           decision: 'trigger',
@@ -71,7 +70,7 @@ describe('provider-response-converter stopless runtime sync', () => {
         },
         {
           module: 'tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts',
-          symbol: 'syncs current-turn stopless runtime control back into pipeline metadata before continuation save',
+          symbol: 'passes the same MetadataCenter into bridge context for current-turn runtime control',
           stage: 'test'
         }
       );
@@ -93,7 +92,7 @@ describe('provider-response-converter stopless runtime sync', () => {
       'openai-responses',
       {
         module: 'tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts',
-        symbol: 'syncs current-turn stopless runtime control back into pipeline metadata before continuation save',
+        symbol: 'passes the same MetadataCenter into bridge context for current-turn runtime control',
         stage: 'test'
       }
     );
@@ -108,7 +107,7 @@ describe('provider-response-converter stopless runtime sync', () => {
       },
       {
         module: 'tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts',
-        symbol: 'syncs current-turn stopless runtime control back into pipeline metadata before continuation save',
+        symbol: 'passes the same MetadataCenter into bridge context for current-turn runtime control',
         stage: 'test'
       }
     );
@@ -154,16 +153,15 @@ describe('provider-response-converter stopless runtime sync', () => {
     expect(pipelineCenter.readRuntimeControl().stopMessageState).toBeUndefined();
   });
 
-  it('syncs hubStageTop through MetadataCenter debug snapshot instead of __rt', async () => {
+  it('passes the same MetadataCenter into bridge context for hubStageTop debug observation', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockConvertProviderResponse.mockImplementation(async ({ context }: { context: Record<string, unknown> }) => {
-      const isolatedAdapterCenter = new MetadataCenter();
-      MetadataCenter.bind(context, isolatedAdapterCenter);
-      if (context.metadata && typeof context.metadata === 'object' && !Array.isArray(context.metadata)) {
-        MetadataCenter.bind(context.metadata as Record<string, unknown>, isolatedAdapterCenter);
+      const center = MetadataCenter.read(context);
+      if (!center) {
+        throw new Error('bridge context missing bound MetadataCenter');
       }
-      isolatedAdapterCenter.writeDebugSnapshot(
+      center.writeDebugSnapshot(
         'hubStageTop',
         [
           {
@@ -174,7 +172,7 @@ describe('provider-response-converter stopless runtime sync', () => {
         ],
         {
           module: 'tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts',
-          symbol: 'syncs hubStageTop through MetadataCenter debug snapshot instead of __rt',
+          symbol: 'passes the same MetadataCenter into bridge context for hubStageTop debug observation',
           stage: 'test'
         }
       );
@@ -196,7 +194,7 @@ describe('provider-response-converter stopless runtime sync', () => {
       'openai-responses',
       {
         module: 'tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts',
-        symbol: 'syncs hubStageTop through MetadataCenter debug snapshot instead of __rt',
+        symbol: 'passes the same MetadataCenter into bridge context for hubStageTop debug observation',
         stage: 'test'
       }
     );

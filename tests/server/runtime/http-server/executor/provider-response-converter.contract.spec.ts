@@ -27,6 +27,9 @@ describe('provider-response-converter contract', () => {
     expect(source).not.toContain('clientToolsRaw: options.entryOriginRequest.tools');
     expect(source).not.toContain('entryOriginRequest: args.entryOriginRequest');
     expect(source).not.toContain('entryOriginRequest: options.entryOriginRequest');
+    expect(source).not.toContain('syncAdapterContextRuntimeBackToPipelineMetadata');
+    expect(source).not.toContain('provider response stopless runtime pipeline sync');
+    expect(source).not.toContain('provider response hub-stage-top debug snapshot sync');
     expect(source).not.toContain('restoreDirectChatVisibleContentFromSse');
     expect(source).not.toContain('recoverVisibleAssistantContentFromChatSseText');
     expect(source).not.toContain('isImagePathLike');

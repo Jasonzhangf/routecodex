@@ -48,24 +48,27 @@ export function runEnginePreflight(args: {
   if (preflightAction.action === 'return_original_chat') {
     return { kind: 'return_original_chat', chat: args.chat };
   }
-  attachStopGatewayContext(args.adapterContext, stopSignal);
-  if (stopSignal.observed && preflightAction.action === 'return_original_chat_direct_passthrough') {
-    args.logStopEntry('trigger', 'skipped_direct_passthrough', {
-      reason: stopSignal.reason,
-      source: stopSignal.source,
-      eligible: stopSignal.eligible
-    });
-    args.logStopCompare('trigger');
-    return { kind: 'return_original_chat_direct_passthrough', chat: args.chat };
+  if (preflightAction.attachStopGatewayContext === true) {
+    attachStopGatewayContext(args.adapterContext, stopSignal);
   }
-  if (stopSignal.observed) {
-    args.logStopEntry('entry', 'observed', {
+  if (preflightAction.logStopEntry) {
+    args.logStopEntry(preflightAction.logStopEntry.stage, preflightAction.logStopEntry.result, {
       reason: stopSignal.reason,
       source: stopSignal.source,
       eligible: stopSignal.eligible,
-      ...(typeof stopSignal.choiceIndex === 'number' ? { choiceIndex: stopSignal.choiceIndex } : {}),
-      ...(typeof stopSignal.hasToolCalls === 'boolean' ? { hasToolCalls: stopSignal.hasToolCalls } : {})
+      ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.choiceIndex === 'number'
+        ? { choiceIndex: stopSignal.choiceIndex }
+        : {}),
+      ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.hasToolCalls === 'boolean'
+        ? { hasToolCalls: stopSignal.hasToolCalls }
+        : {})
     });
+  }
+  if (preflightAction.logStopCompare) {
+    args.logStopCompare(preflightAction.logStopCompare.stage);
+  }
+  if (preflightAction.action === 'return_original_chat_direct_passthrough') {
+    return { kind: 'return_original_chat_direct_passthrough', chat: args.chat };
   }
   return { kind: 'continue', stopSignal };
 }

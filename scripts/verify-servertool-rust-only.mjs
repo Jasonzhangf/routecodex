@@ -5216,12 +5216,25 @@ function checkServertoolRustOutcomeCloseout() {
     'inspectStopGatewaySignal(',
     'attachStopGatewayContext(',
     'containsSyntheticRouteCodexControlTextWithNative(',
-    'return_original_chat_direct_passthrough',
+    'preflightAction.attachStopGatewayContext === true',
+    'preflightAction.logStopEntry',
+    'preflightAction.logStopCompare',
   ]) {
     if (!enginePreflightShell.includes(marker)) {
       fail(
         'servertool-engine-preflight-shell-owner',
         `engine-preflight-shell.ts must keep engine preflight owner marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'stopSignal.observed && preflightAction.action',
+    'if (stopSignal.observed) {',
+  ]) {
+    if (enginePreflightShell.includes(marker)) {
+      fail(
+        'servertool-engine-preflight-shell-no-local-observed-branch',
+        `engine-preflight-shell.ts must not derive preflight logging locally with marker ${marker}`
       );
     }
   }

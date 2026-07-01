@@ -1,3 +1,9 @@
+# 2026-07-01: provider response adapter context backwrite removed
+- Slice: `provider-response-converter.ts` no longer copies runtime-control/debug snapshot values from bridge `adapterContext` back into pipeline metadata after conversion. The bridge context must use the same bound `MetadataCenter`, so there is no second-center post-bridge sync path.
+- Gate: `provider-response-converter.contract.spec.ts` forbids `syncAdapterContextRuntimeBackToPipelineMetadata` and the old stopless/debug snapshot sync reason strings; stopless runtime tests now assert same-center binding instead of host backwrite.
+- Evidence: focused provider-response converter Jest PASS 4/4; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
+- Commit scope note: unrelated dirty servertool/SSE/package/build-info work remains excluded.
+
 # 2026-07-01: metadata-center generated source residue removed
 - Slice: physically deleted tracked generated artifacts from `src/server/runtime/http-server/metadata-center`: `dualwrite-api.{js,d.ts}`, `metadata-center.{js,d.ts}`, `metadata-center-types.{js,d.ts}`, and `request-truth-readers.{js,d.ts}`. TS source is now the only source truth for the metadata-center family.
 - Gate: extended `source-generated-residue.spec.ts` and `verify-architecture-deleted-path.mjs` to forbid all deleted metadata-center artifacts from returning; removed stale `.js` allowlist from `verify-servertool-rust-only` and removed stale no-fallback rule targeting deleted `metadata-center.js`.

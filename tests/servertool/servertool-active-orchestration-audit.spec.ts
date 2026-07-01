@@ -272,14 +272,19 @@ const TARGETS = [
   },
   {
     file: 'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
-    forbidden: [],
+    forbidden: [
+      'stopSignal.observed && preflightAction.action',
+      'if (stopSignal.observed) {',
+    ],
     required: [
       'runEnginePreflight',
       'planServertoolEnginePreflightWithNative',
       'inspectStopGatewaySignal(',
       'attachStopGatewayContext(',
       'containsSyntheticRouteCodexControlTextWithNative(',
-      'return_original_chat_direct_passthrough',
+      'preflightAction.attachStopGatewayContext === true',
+      'preflightAction.logStopEntry',
+      'preflightAction.logStopCompare',
     ],
   },
   {

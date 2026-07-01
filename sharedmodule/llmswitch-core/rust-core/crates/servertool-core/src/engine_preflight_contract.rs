@@ -25,6 +25,25 @@ pub enum ServertoolEnginePreflightAction {
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolEnginePreflightPlan {
     pub action: ServertoolEnginePreflightAction,
+    pub attach_stop_gateway_context: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_stop_entry: Option<ServertoolEnginePreflightLogStopEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_stop_compare: Option<ServertoolEnginePreflightLogStopCompare>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEnginePreflightLogStopEntry {
+    pub stage: String,
+    pub result: String,
+    pub include_choice_facts: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEnginePreflightLogStopCompare {
+    pub stage: String,
 }
 
 pub fn plan_servertool_engine_preflight(
@@ -37,15 +56,39 @@ pub fn plan_servertool_engine_preflight(
     if input.has_synthetic_control_text {
         return ServertoolEnginePreflightPlan {
             action: ServertoolEnginePreflightAction::ReturnOriginalChat,
+            attach_stop_gateway_context: false,
+            log_stop_entry: None,
+            log_stop_compare: None,
         };
     }
     if input.stop_signal_observed && stopless_disabled_on_direct_route {
         return ServertoolEnginePreflightPlan {
             action: ServertoolEnginePreflightAction::ReturnOriginalChatDirectPassthrough,
+            attach_stop_gateway_context: true,
+            log_stop_entry: Some(ServertoolEnginePreflightLogStopEntry {
+                stage: "trigger".to_string(),
+                result: "skipped_direct_passthrough".to_string(),
+                include_choice_facts: false,
+            }),
+            log_stop_compare: Some(ServertoolEnginePreflightLogStopCompare {
+                stage: "trigger".to_string(),
+            }),
         };
     }
+    let log_stop_entry = if input.stop_signal_observed {
+        Some(ServertoolEnginePreflightLogStopEntry {
+            stage: "entry".to_string(),
+            result: "observed".to_string(),
+            include_choice_facts: true,
+        })
+    } else {
+        None
+    };
     ServertoolEnginePreflightPlan {
         action: ServertoolEnginePreflightAction::ContinueToEngine,
+        attach_stop_gateway_context: true,
+        log_stop_entry,
+        log_stop_compare: None,
     }
 }
 
@@ -89,6 +132,9 @@ mod tests {
             plan.action,
             ServertoolEnginePreflightAction::ReturnOriginalChat
         );
+        assert!(!plan.attach_stop_gateway_context);
+        assert_eq!(plan.log_stop_entry, None);
+        assert_eq!(plan.log_stop_compare, None);
     }
 
     #[test]
@@ -102,6 +148,21 @@ mod tests {
         assert_eq!(
             plan.action,
             ServertoolEnginePreflightAction::ReturnOriginalChatDirectPassthrough
+        );
+        assert!(plan.attach_stop_gateway_context);
+        assert_eq!(
+            plan.log_stop_entry,
+            Some(ServertoolEnginePreflightLogStopEntry {
+                stage: "trigger".to_string(),
+                result: "skipped_direct_passthrough".to_string(),
+                include_choice_facts: false,
+            })
+        );
+        assert_eq!(
+            plan.log_stop_compare,
+            Some(ServertoolEnginePreflightLogStopCompare {
+                stage: "trigger".to_string(),
+            })
         );
     }
 
@@ -117,6 +178,16 @@ mod tests {
             plan.action,
             ServertoolEnginePreflightAction::ContinueToEngine
         );
+        assert!(plan.attach_stop_gateway_context);
+        assert_eq!(
+            plan.log_stop_entry,
+            Some(ServertoolEnginePreflightLogStopEntry {
+                stage: "entry".to_string(),
+                result: "observed".to_string(),
+                include_choice_facts: true,
+            })
+        );
+        assert_eq!(plan.log_stop_compare, None);
     }
 
     #[test]
