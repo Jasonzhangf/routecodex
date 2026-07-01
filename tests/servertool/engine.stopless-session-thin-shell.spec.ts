@@ -64,6 +64,8 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain('function planStoplessEngineRuntime(');
     expect(source).not.toContain('const stoplessExecutionInput = {');
     expect(source).not.toContain('const hasServertoolCliProjectionContext =');
+    expect(source).not.toContain('hasServertoolCliProjectionContext:');
+    expect(source).toContain('stoplessExecutionFlowId:');
     expect(source).not.toContain('const postflightEngineResult = {');
     expect(source).toContain('engineResult: {');
   });

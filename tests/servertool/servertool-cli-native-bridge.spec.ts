@@ -192,7 +192,7 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolEngineRuntimeActionWithNative({
         isStopMessageFlow: true,
-        hasServertoolCliProjectionContext: true,
+        stoplessExecutionFlowId: 'servertool_cli_projection',
         stoplessAction: 'terminal_final'
       })
     ).toEqual({
@@ -202,7 +202,7 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolEngineRuntimeActionWithNative({
         isStopMessageFlow: false,
-        hasServertoolCliProjectionContext: true,
+        stoplessExecutionFlowId: ' servertool_cli_projection ',
         stoplessAction: 'cli_projection'
       })
     ).toEqual({
@@ -212,6 +212,7 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolEngineRuntimeActionWithNative({
         isStopMessageFlow: true,
+        stoplessExecutionFlowId: 'stop_message_flow',
         stoplessAction: 'cli_projection'
       })
     ).toEqual({

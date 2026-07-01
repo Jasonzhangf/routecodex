@@ -291,6 +291,8 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('switch (preflightOrchestrationAction.action)');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
     expect(source).toContain('switch (engineSkipPlan.action)');
+    expect(source).not.toContain('hasServertoolCliProjectionContext:');
+    expect(source).toContain('stoplessExecutionFlowId:');
     expect(source).not.toContain('const engineSkipAction = engineSkipPlan.action as');
     expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_passthrough' ||");
     expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_no_execution'");

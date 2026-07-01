@@ -2281,7 +2281,7 @@ function parseServertoolEnginePreflightLogStopCompare(value: unknown): Servertoo
 
 export function planServertoolEngineRuntimeActionWithNative(input: {
   isStopMessageFlow: boolean;
-  hasServertoolCliProjectionContext?: boolean;
+  stoplessExecutionFlowId?: string;
   stoplessAction: string;
 }): ServertoolEngineRuntimeActionPlan {
   const capability = 'planServertoolEngineRuntimeActionJson';
@@ -2291,7 +2291,9 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   }
   const payload: Record<string, unknown> = {
     isStopMessageFlow: input.isStopMessageFlow,
-    hasServertoolCliProjectionContext: input.hasServertoolCliProjectionContext === true,
+    ...(typeof input.stoplessExecutionFlowId === 'string'
+      ? { stoplessExecutionFlowId: input.stoplessExecutionFlowId }
+      : {}),
     stoplessAction: input.stoplessAction
   };
   const raw = fn(JSON.stringify(payload));

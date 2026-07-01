@@ -2894,6 +2894,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-engine-skip-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineSkipWithNative'],
     ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'feature_id: hub.servertool_engine_runtime_action_contract'],
     ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'pub fn plan_servertool_engine_runtime_action'],
+    ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'stopless_execution_flow_id'],
     ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'pub fn plan_servertool_engine_trigger_observation'],
     ['servertool-engine-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_runtime_action_contract'],
     ['servertool-engine-runtime-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_engine_runtime_action_json'],
@@ -6286,6 +6287,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'const preflightKind = preflight.kind',
     'switch (preflightKind)',
     'invalid engine preflight result kind',
+    'hasServertoolCliProjectionContext:',
   ]) {
     if (engineSource.includes(marker)) {
       fail(
@@ -6322,6 +6324,12 @@ function checkServertoolEngineStoplessSessionThinShell() {
     fail(
       'servertool-engine-stopless-session-thin-shell',
       'engine-orchestration-shell.ts must keep engine skip dispatch as a thin switch over native-planned result'
+    );
+  }
+  if (!engineSource.includes('stoplessExecutionFlowId:')) {
+    fail(
+      'servertool-engine-stopless-session-thin-shell',
+      'engine-orchestration-shell.ts must pass stoplessExecutionFlowId into Rust runtime action planning'
     );
   }
   for (const marker of [

@@ -3265,7 +3265,7 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
     let terminal = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
             "isStopMessageFlow": true,
-            "hasServertoolCliProjectionContext": true,
+            "stoplessExecutionFlowId": "servertool_cli_projection",
             "stoplessAction": "terminal_final"
         })
         .to_string(),
@@ -3281,7 +3281,7 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
     let cli_projection = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
             "isStopMessageFlow": false,
-            "hasServertoolCliProjectionContext": true,
+            "stoplessExecutionFlowId": " servertool_cli_projection ",
             "stoplessAction": "continue"
         })
         .to_string(),
@@ -3297,7 +3297,7 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
     let stopless_cli = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
             "isStopMessageFlow": true,
-            "hasServertoolCliProjectionContext": false,
+            "stoplessExecutionFlowId": "stop_message_flow",
             "stoplessAction": "cli_projection"
         })
         .to_string(),

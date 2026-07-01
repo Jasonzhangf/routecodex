@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolEngineRuntimeActionInput {
     pub is_stop_message_flow: bool,
-    pub has_servertool_cli_projection_context: bool,
+    #[serde(default)]
+    pub stopless_execution_flow_id: Option<String>,
     pub stopless_action: String,
 }
 
@@ -60,7 +61,15 @@ pub struct ServertoolEngineTriggerLogStopCompare {
 pub fn plan_servertool_engine_runtime_action(
     input: ServertoolEngineRuntimeActionInput,
 ) -> Result<ServertoolEngineRuntimeActionPlan, String> {
-    if !input.is_stop_message_flow && input.has_servertool_cli_projection_context {
+    let stopless_execution_flow_id = input
+        .stopless_execution_flow_id
+        .as_deref()
+        .unwrap_or_default()
+        .trim();
+    let has_servertool_cli_projection_context =
+        stopless_execution_flow_id == "servertool_cli_projection";
+
+    if !input.is_stop_message_flow && has_servertool_cli_projection_context {
         return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal,
         });
@@ -76,11 +85,11 @@ pub fn plan_servertool_engine_runtime_action(
         });
     }
     Err(format!(
-        "servertool runtime action has no reenter mainline: isStopMessageFlow={} stoplessAction={} hasPendingInjection={} hasServertoolCliProjectionContext={}",
+        "servertool runtime action has no reenter mainline: isStopMessageFlow={} stoplessAction={} hasPendingInjection={} stoplessExecutionFlowId={}",
         input.is_stop_message_flow,
         input.stopless_action.trim(),
         false,
-        input.has_servertool_cli_projection_context
+        stopless_execution_flow_id
     ))
 }
 
@@ -120,7 +129,7 @@ mod tests {
     fn returns_generic_cli_projection_for_non_stop_flow() {
         let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             is_stop_message_flow: false,
-            has_servertool_cli_projection_context: true,
+            stopless_execution_flow_id: Some(" servertool_cli_projection ".to_string()),
             stopless_action: "cli_projection".to_string(),
         })
         .expect("cli projection plan");
@@ -134,7 +143,7 @@ mod tests {
     fn returns_terminal_final_for_stop_message_terminal_action() {
         let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             is_stop_message_flow: true,
-            has_servertool_cli_projection_context: false,
+            stopless_execution_flow_id: None,
             stopless_action: "terminal_final".to_string(),
         })
         .expect("terminal plan");
@@ -148,7 +157,7 @@ mod tests {
     fn builds_stop_message_cli_projection_only_for_stop_flow() {
         let plan = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             is_stop_message_flow: true,
-            has_servertool_cli_projection_context: false,
+            stopless_execution_flow_id: None,
             stopless_action: "cli_projection".to_string(),
         })
         .expect("stopless cli plan");
@@ -162,7 +171,7 @@ mod tests {
     fn fails_fast_when_residual_reenter_mainline_is_requested() {
         let err = plan_servertool_engine_runtime_action(ServertoolEngineRuntimeActionInput {
             is_stop_message_flow: false,
-            has_servertool_cli_projection_context: false,
+            stopless_execution_flow_id: Some("generic_flow".to_string()),
             stopless_action: "continue".to_string(),
         })
         .expect_err("residual reenter mainline must fail");
