@@ -5915,7 +5915,13 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-prepass-shell-owner',
     TS_RESPONSE_STAGE_PREPASS_SHELL,
     responseStagePrePassShell,
-    "prepassRuntimeAction.action !== 'run_auto_hooks'"
+    'switch (prepassRuntimeAction.action)'
+  );
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
+    'switch (responseStageAutoHook.action)'
   );
   assertContains(
     'servertool-response-stage-prepass-shell-owner',
@@ -5926,6 +5932,8 @@ function checkServertoolResponseStageGateThinShell() {
   for (const marker of [
     'responseHookMatched !== true',
     'responseStageGatePlan.responseHookMatched !== true',
+    "prepassRuntimeAction.action !== 'run_auto_hooks'",
+    "if (responseStageAutoHook.action === 'return_auto_hook_result')",
   ]) {
     if (responseStagePrePassShell.includes(marker)) {
       fail(

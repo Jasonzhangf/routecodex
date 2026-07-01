@@ -238,11 +238,14 @@ const TARGETS = [
     forbidden: [
       'responseHookMatched !== true',
       'responseStageGatePlan.responseHookMatched !== true',
+      "prepassRuntimeAction.action !== 'run_auto_hooks'",
+      "if (responseStageAutoHook.action === 'return_auto_hook_result')",
     ],
     required: [
       'planServertoolResponseStageGateWithNative',
       'planServertoolResponseStageRuntimeActionWithNative',
-      "prepassRuntimeAction.action !== 'run_auto_hooks'",
+      'switch (prepassRuntimeAction.action)',
+      'switch (responseStageAutoHook.action)',
       'runServertoolResponseStageAutoHookPass',
       "action: 'continue_to_execution' as const",
       'responseStageGatePlan',

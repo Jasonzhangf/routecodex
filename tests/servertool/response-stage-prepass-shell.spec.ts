@@ -138,7 +138,10 @@ describe('response-stage-prepass-shell', () => {
     );
 
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
-    expect(source).toContain("prepassRuntimeAction.action !== 'run_auto_hooks'");
+    expect(source).not.toContain("prepassRuntimeAction.action !== 'run_auto_hooks'");
+    expect(source).not.toContain("if (responseStageAutoHook.action === 'return_auto_hook_result')");
+    expect(source).toContain('switch (prepassRuntimeAction.action)');
+    expect(source).toContain('switch (responseStageAutoHook.action)');
     expect(source).not.toContain('responseStageGatePlan.responseHookMatched !== true');
     expect(source).not.toContain('responseHookMatched !== true');
   });

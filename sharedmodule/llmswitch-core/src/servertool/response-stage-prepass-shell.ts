@@ -37,11 +37,14 @@ export async function runServertoolResponseStagePrePass(args: {
     hasAutoHookResult: false
   });
 
-  if (prepassRuntimeAction.action !== 'run_auto_hooks') {
-    return {
-      action: 'continue_to_execution' as const,
-      responseStageGatePlan
-    };
+  switch (prepassRuntimeAction.action) {
+    case 'run_auto_hooks':
+      break;
+    default:
+      return {
+        action: 'continue_to_execution' as const,
+        responseStageGatePlan
+      };
   }
 
   const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
@@ -51,12 +54,13 @@ export async function runServertoolResponseStagePrePass(args: {
     excludeAutoHookIds: args.excludeAutoHookIds,
     responseStageGatePlan
   });
-  if (responseStageAutoHook.action === 'return_auto_hook_result') {
-    return {
-      action: 'return_result',
-      responseStageGatePlan,
-      result: responseStageAutoHook.result
-    };
+  switch (responseStageAutoHook.action) {
+    case 'return_auto_hook_result':
+      return {
+        action: 'return_result',
+        responseStageGatePlan,
+        result: responseStageAutoHook.result
+      };
   }
 
   return {
