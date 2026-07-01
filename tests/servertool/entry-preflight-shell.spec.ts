@@ -57,6 +57,9 @@ describe('entry-preflight-shell', () => {
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
     expect(source).not.toContain('Boolean(base)');
     expect(source).toContain('hasBaseObject: base != null');
+    expect(source).not.toContain("if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')");
+    expect(source).not.toContain("if (entryPreflightPlan.action === 'throw_client_disconnected')");
+    expect(source).toContain('switch (entryPreflightPlan.action)');
     expect(source).toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
     expect(source).not.toContain('const passthroughResult =');
   });

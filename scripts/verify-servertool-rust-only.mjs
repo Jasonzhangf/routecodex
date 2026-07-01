@@ -5256,6 +5256,7 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolClientDisconnectedErrorWithNative',
     'createServertoolProviderProtocolErrorFromPlan',
     'hasBaseObject: base != null',
+    'switch (entryPreflightPlan.action)',
     "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }"
   ]) {
     if (!entryPreflightShell.includes(marker)) {
@@ -5270,6 +5271,17 @@ function checkServertoolRustOutcomeCloseout() {
       'servertool-entry-preflight-shell-owner',
       'entry-preflight-shell.ts must not restore Boolean(base) presence semantics'
     );
+  }
+  for (const marker of [
+    "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')",
+    "if (entryPreflightPlan.action === 'throw_client_disconnected')",
+  ]) {
+    if (entryPreflightShell.includes(marker)) {
+      fail(
+        'servertool-entry-preflight-shell-owner',
+        `entry-preflight-shell.ts must not retain TS action-if dispatch marker ${marker}`
+      );
+    }
   }
   const entryContextShell = readRequired(TS_ENTRY_CONTEXT_SHELL);
   for (const marker of [

@@ -22,21 +22,24 @@ export function runServertoolEntryPreflight(args: {
     hasBaseObject: base != null,
     adapterClientDisconnected: isAdapterClientDisconnectedWithNative(args.options.adapterContext)
   });
-  if (entryPreflightPlan.action === 'return_passthrough_non_object_chat') {
-    return {
-      action: 'return_result',
-      result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }
-    };
+  switch (entryPreflightPlan.action) {
+    case 'return_passthrough_non_object_chat':
+      return {
+        action: 'return_result',
+        result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }
+      };
+    case 'throw_client_disconnected':
+      throw createServertoolProviderProtocolErrorFromPlan(
+        planServertoolClientDisconnectedErrorWithNative({
+          requestId: args.options.requestId
+        })
+      );
+    case 'continue_to_tool_flow':
+      return {
+        action: 'continue',
+        baseObject: base as JsonObject
+      };
+    default:
+      throw new Error(`[servertool] invalid entry preflight action: ${String(entryPreflightPlan.action)}`);
   }
-  if (entryPreflightPlan.action === 'throw_client_disconnected') {
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolClientDisconnectedErrorWithNative({
-        requestId: args.options.requestId
-      })
-    );
-  }
-  return {
-    action: 'continue',
-    baseObject: base as JsonObject
-  };
 }

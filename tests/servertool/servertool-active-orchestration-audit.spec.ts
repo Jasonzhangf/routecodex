@@ -288,11 +288,14 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts',
     forbidden: [
       'createServerToolClientDisconnectedError',
+      "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')",
+      "if (entryPreflightPlan.action === 'throw_client_disconnected')",
     ],
     required: [
       'planServertoolEntryPreflightWithNative',
       'planServertoolClientDisconnectedErrorWithNative',
       'createServertoolProviderProtocolErrorFromPlan',
+      'switch (entryPreflightPlan.action)',
       "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }",
     ],
   },
