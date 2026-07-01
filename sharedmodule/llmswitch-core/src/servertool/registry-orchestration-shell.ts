@@ -17,11 +17,13 @@ export const getServerToolHandler = (
   const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({
     name: typeof name === 'string' ? name : ''
   });
-  if (actionPlan.action === 'return_builtin') {
-    const entry = resolveServertoolBuiltinHandlerEntryWithNative({
-      name: actionPlan.canonicalName as string
-    });
-    return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
+  switch (actionPlan.action) {
+    case 'return_builtin': {
+      const entry = resolveServertoolBuiltinHandlerEntryWithNative({
+        name: actionPlan.canonicalName as string
+      });
+      return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
+    }
   }
   return undefined;
 };

@@ -116,6 +116,8 @@ describe('registry-orchestration-shell', () => {
 
     expect(source).not.toContain('function resolveBuiltinEntry(');
     expect(source).not.toContain('.trim().toLowerCase()');
+    expect(source).not.toContain("if (actionPlan.action === 'return_builtin')");
+    expect(source).toContain('switch (actionPlan.action)');
     expect(source).toContain("planServertoolRegistryLookupFromSkeletonWithNative({");
     expect(source).toContain('planServertoolRegistryBuiltinAutoHookEntriesWithNative({');
     expect(source).not.toContain("from './registry-projection-shell.js'");

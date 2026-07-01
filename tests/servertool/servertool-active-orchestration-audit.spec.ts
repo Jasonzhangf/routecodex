@@ -574,9 +574,11 @@ const TARGETS = [
       'export function isRegisteredServerToolName(',
       'resolveServertoolRegisteredNameWithNative',
       'export {\n  type ServerToolAutoHookDescriptor,',
+      "if (actionPlan.action === 'return_builtin')",
     ],
     required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
+      'switch (actionPlan.action)',
       'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
     ],
   },

@@ -3591,6 +3591,7 @@ function checkServertoolRegistryRustOwner() {
     'export function isRegisteredServerToolName(',
     'resolveServertoolRegisteredNameWithNative',
     'export {\n  type ServerToolAutoHookDescriptor,',
+    "if (actionPlan.action === 'return_builtin')",
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
@@ -3614,6 +3615,7 @@ function checkServertoolRegistryRustOwner() {
   }
   for (const needle of [
     'planServertoolRegistryLookupFromSkeletonWithNative({',
+    'switch (actionPlan.action)',
     'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
   ]) {
     assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
