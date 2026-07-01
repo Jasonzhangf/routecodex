@@ -47,7 +47,7 @@ export async function runServertoolExecutionStage(args: {
         base: args.baseObject
       });
       return {
-        mode: 'tool_flow',
+        mode: branch.resultMode,
         finalChatResponse: branch.chatResponse as JsonObject,
         execution: branch.execution as {
           flowId: string;

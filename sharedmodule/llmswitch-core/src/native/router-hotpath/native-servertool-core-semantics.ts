@@ -205,6 +205,7 @@ export interface ServertoolCliProjectionRuntimeBranchInput {
 }
 
 export interface ServertoolCliProjectionRuntimeBranchOutput {
+  resultMode: 'tool_flow';
   chatResponse: Record<string, unknown>;
   execution: ServertoolCliProjectionExecutionContextOutput;
 }
@@ -1750,11 +1751,15 @@ export function buildServertoolCliProjectionRuntimeBranchWithNative(
   if (!record.chatResponse || typeof record.chatResponse !== 'object' || Array.isArray(record.chatResponse)) {
     throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid chatResponse');
   }
+  if (record.resultMode !== 'tool_flow') {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid resultMode');
+  }
   const execution = record.execution as Record<string, unknown> | undefined;
   if (!execution || execution.flowId !== 'servertool_cli_projection') {
     throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid execution');
   }
   return {
+    resultMode: 'tool_flow',
     chatResponse: record.chatResponse as Record<string, unknown>,
     execution: {
       flowId: 'servertool_cli_projection'

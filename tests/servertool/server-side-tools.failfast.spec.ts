@@ -195,6 +195,7 @@ jest.unstable_mockModule(
       return parsed;
     }),
     buildServertoolCliProjectionRuntimeBranchWithNative: jest.fn((input: any) => ({
+      resultMode: 'tool_flow',
       chatResponse: input?.base ?? {},
       execution: {
         flowId: String(input?.toolName ?? 'client_exec_cli_projection')

@@ -71,6 +71,7 @@ describe('execution-stage-shell', () => {
       finalChatResponse: { ok: true }
     });
     buildServertoolCliProjectionRuntimeBranchWithNative.mockReturnValue({
+      resultMode: 'tool_flow',
       chatResponse: { cli: true },
       execution: { flowId: 'servertool_cli_projection' }
     });
@@ -87,6 +88,7 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('prepareServertoolDispatchStage');
     expect(source).toContain('planServertoolExecutionBranchWithNative');
     expect(source).toContain('buildServertoolCliProjectionRuntimeBranchWithNative');
+    expect(source).toContain('mode: branch.resultMode');
     expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('switch (preExecutionBranchPlan.action)');
@@ -105,6 +107,7 @@ describe('execution-stage-shell', () => {
     expect(source).not.toContain('filterOutExecutedToolCalls');
     expect(source).not.toContain('stripToolOutputs');
     expect(source).not.toContain('structuredClone(args.baseObject)');
+    expect(source).not.toContain("mode: 'tool_flow'");
     expect(source).not.toContain('const baseForExecution = args.baseObject;');
     expect(source).not.toContain('isStopMessageAutoPreProjection');
   });

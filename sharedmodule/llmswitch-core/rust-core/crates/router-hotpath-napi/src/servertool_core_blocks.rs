@@ -66,6 +66,7 @@ struct ServertoolCliProjectionRuntimeBranchInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ServertoolCliProjectionRuntimeBranchOutput {
+    result_mode: String,
     chat_response: serde_json::Value,
     execution: serde_json::Value,
 }
@@ -947,6 +948,7 @@ pub fn build_servertool_cli_projection_runtime_branch_json(
     )
     .map_err(|e| e.to_string())?;
     let output = ServertoolCliProjectionRuntimeBranchOutput {
+        result_mode: "tool_flow".to_string(),
         chat_response,
         execution,
     };
@@ -3378,6 +3380,7 @@ fn builds_cli_projection_runtime_branch_via_servertool_core_bridge() {
     )
     .expect("cli projection runtime branch");
     let parsed: serde_json::Value = serde_json::from_str(&output).expect("runtime branch json");
+    assert_eq!(parsed["resultMode"], "tool_flow");
     assert_eq!(parsed["execution"]["flowId"], "servertool_cli_projection");
     assert_eq!(
         parsed["chatResponse"]["choices"][0]["message"]["tool_calls"][0]["function"]["name"],

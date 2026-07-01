@@ -1,3 +1,9 @@
+# 2026-07-02: servertool CLI projection result mode moved to Rust runtime branch
+- Slice: `build_servertool_cli_projection_runtime_branch_json()` now returns Rust/NAPI-owned `resultMode=tool_flow`; `execution-stage-shell.ts` consumes `branch.resultMode` instead of hardcoding `mode: 'tool_flow'` in the CLI projection return path.
+- Gate: `execution-stage-shell.spec.ts`, `servertool-cli-native-bridge.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` now require `mode: branch.resultMode` and forbid restoring local `mode: 'tool_flow'` in `execution-stage-shell.ts`.
+- Evidence: Rust `servertool-core execution_branch` PASS 4/4; Rust `router-hotpath-napi builds_cli_projection_runtime_branch_via_servertool_core_bridge` PASS 1/1; native hotpath rebuild PASS; focused Jest PASS 4 suites / 80 tests; llmswitch-core `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+- Commit scope note: unrelated dirty wiki/package/build-info/provider-failure/SSE formatting files remain excluded from this servertool slice.
+
 # 2026-07-02: servertool execution outcome result mode moved to Rust plan
 - Slice: `ServertoolExecutionOutcomeMaterializationPlan` now carries Rust-owned `resultMode=tool_flow`; `execution-handler-materialization-shell.ts` uses `materializationPlan.resultMode` instead of hardcoding `mode: 'tool_flow'`.
 - Gate: `execution-handler-materialization-shell.spec.ts`, `servertool-cli-native-bridge.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` require the Rust result mode and forbid the execution-handler shell from restoring local `mode: 'tool_flow'`.

@@ -538,9 +538,11 @@ const TARGETS = [
       'servertool_cli_projection',
       'reasoningText',
       '继续执行本地 hook',
+      "mode: 'tool_flow'",
     ],
     required: [
       'buildServertoolCliProjectionRuntimeBranchWithNative({',
+      'mode: branch.resultMode',
       'const projectedToolCall = preExecutionBranchPlan.projectedToolCall',
       'finalChatResponse: branch.chatResponse as JsonObject',
       'execution: branch.execution as {',

@@ -5142,6 +5142,7 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     'buildServertoolCliProjectionRuntimeBranchWithNative({',
+    'mode: branch.resultMode',
     'finalChatResponse: branch.chatResponse as JsonObject',
     'execution: branch.execution as {',
   ]) {
@@ -5169,6 +5170,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool_cli_projection',
     'reasoningText',
     '继续执行本地 hook',
+    "mode: 'tool_flow'",
   ]) {
     if (executionStageShell.includes(marker)) {
       fail(

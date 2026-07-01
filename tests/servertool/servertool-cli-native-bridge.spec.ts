@@ -2,6 +2,7 @@ import {
   buildClientExecCliProjectionOutputWithNative,
   buildServertoolCliProjectionExecutionContextWithNative,
   buildClientVisibleProjectionShellWithNative,
+  buildServertoolCliProjectionRuntimeBranchWithNative,
   parseServertoolCliProjectionToolArgumentsWithNative,
   planServertoolEnginePreflightWithNative,
   planServertoolEngineSkipWithNative,
@@ -105,6 +106,35 @@ describe('servertool CLI native bridge', () => {
     expect(execution).toEqual({
       flowId: 'servertool_cli_projection'
     });
+  });
+
+  it('uses Rust-owned CLI projection runtime branch result mode', () => {
+    const branch = buildServertoolCliProjectionRuntimeBranchWithNative({
+      requestId: 'req_native_runtime_branch',
+      toolName: 'web_search',
+      toolArguments: '{"query":"rust"}',
+      projectedToolCallId: 'call_web_search_1',
+      base: {
+        choices: [{
+          message: {
+            tool_calls: [{
+              id: 'call_web_search_1',
+              type: 'function',
+              function: {
+                name: 'web_search',
+                arguments: '{"query":"rust"}'
+              }
+            }]
+          }
+        }]
+      }
+    });
+
+    expect(branch.resultMode).toBe('tool_flow');
+    expect(branch.execution).toEqual({
+      flowId: 'servertool_cli_projection'
+    });
+    expect((branch.chatResponse as any).choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 
   it('uses Rust-owned execution-branch planning for CLI projection and post-execution outcome', () => {
