@@ -1,3 +1,8 @@
+# 2026-07-02: servertool auto-hook truthiness presence removed
+- Slice: `auto-hook-caller.ts` no longer uses truthiness for `result.execution` / `metadataWritePlan` presence checks; TS now uses explicit `!= null` checks before passing materialized flowId and metadata write plan through the native-planned shell.
+- Gate: `servertool-auto-hook-trace.spec.ts`, `execution-shell.auto-hook-failfast.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` now forbid the old truthiness markers and require the explicit nullish markers.
+- Evidence: focused Jest `servertool-auto-hook-trace` PASS 1/1 for the source guard, `execution-shell.auto-hook-failfast` PASS 1/1, and focused `servertool-active-orchestration-audit` PASS 44/44 on auto-hook slice. Remaining commit gates: sharedmodule `tsc`, `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `git diff --check`.
+
 # 2026-07-02: servertool execution-queue action aliases removed
 - Slice: `execution-queue-shell.ts` no longer copies native execution-loop discriminants into `initialLoopAction` / `resultLoopAction`; the shell switches directly on `initialLoopActionPlan.action` and `resultLoopActionPlan.action`.
 - Gate: `tests/servertool/execution-queue-shell.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` now forbid the local action aliases and require direct switches over native plan actions.

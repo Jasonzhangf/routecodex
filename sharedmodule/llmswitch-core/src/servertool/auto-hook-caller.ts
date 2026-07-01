@@ -104,7 +104,7 @@ async function runAutoHookExecutionQueue(args: {
       ...traceBase,
       hasPlannedResult: planned != null,
       hasMaterializedResult: result != null,
-      ...(result?.execution && typeof result.execution.flowId === 'string'
+      ...(result?.execution != null && typeof result.execution.flowId === 'string'
         ? { materializedFlowId: result.execution.flowId }
         : {})
     });
@@ -158,7 +158,7 @@ export async function runServertoolAutoHookCaller(args: {
           mode: 'tool_flow',
           finalChatResponse: queueResultForReturn.chatResponse,
           execution: queueResultForReturn.execution,
-          ...(queueResultForReturn.metadataWritePlan
+          ...(queueResultForReturn.metadataWritePlan != null
             ? { metadataWritePlan: queueResultForReturn.metadataWritePlan }
             : {})
         };
