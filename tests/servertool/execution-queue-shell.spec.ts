@@ -185,7 +185,8 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_materialized_result')");
     expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')");
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
-    expect(source).toContain('message: errorEffectPlan.handlerErrorMessage as string');
+    expect(source).not.toContain('errorEffectPlan.handlerErrorMessage as string');
+    expect(source).toContain('message: errorEffectPlan.handlerErrorMessage');
     expect(source).not.toContain("String(lastErr ?? 'unknown')");
     expect(source).not.toContain("lastErr instanceof Error ? lastErr.message : String");
     expect(source).not.toContain('lastErr instanceof Error ? lastErr.message : lastErr');

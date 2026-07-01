@@ -373,7 +373,7 @@ function parseNativeJson(capability: string, raw: unknown): unknown {
   return JSON.parse(raw) as unknown;
 }
 
-export interface ServertoolExecutionLoopEffectPlan {
+export interface ServertoolExecutionLoopEffectBasePlan {
   toolCall: {
     id: string;
     name: string;
@@ -385,8 +385,15 @@ export interface ServertoolExecutionLoopEffectPlan {
     flowId: string;
     followup?: unknown;
   };
-  handlerErrorMessage?: string;
 }
+
+export interface ServertoolExecutionLoopHandlerErrorEffectPlan extends ServertoolExecutionLoopEffectBasePlan {
+  handlerErrorMessage: string;
+}
+
+export type ServertoolExecutionLoopEffectPlan =
+  | ServertoolExecutionLoopHandlerErrorEffectPlan
+  | ServertoolExecutionLoopEffectBasePlan;
 
 export type ServertoolResponseStageRuntimeActionPlan =
   | {
@@ -2599,6 +2606,30 @@ export function planServertoolExecutionLoopRuntimeActionWithNative(input: {
 }
 
 export function planServertoolExecutionLoopEffectWithNative(input: {
+  mode: 'handler_error';
+  toolCall: {
+    id: string;
+    name: string;
+    arguments: string;
+    executionMode?: string;
+    stripAfterExecute?: boolean;
+  };
+  noopFlowId?: string;
+  handlerErrorMessage?: unknown;
+}): ServertoolExecutionLoopHandlerErrorEffectPlan;
+export function planServertoolExecutionLoopEffectWithNative(input: {
+  mode: string;
+  toolCall: {
+    id: string;
+    name: string;
+    arguments: string;
+    executionMode?: string;
+    stripAfterExecute?: boolean;
+  };
+  noopFlowId?: string;
+  handlerErrorMessage?: unknown;
+}): ServertoolExecutionLoopEffectBasePlan;
+export function planServertoolExecutionLoopEffectWithNative(input: {
   mode: string;
   toolCall: {
     id: string;
@@ -2638,7 +2669,7 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
   if (typeof execution.flowId !== 'string') {
     throw new Error('planServertoolExecutionLoopEffectJson native returned invalid execution flowId');
   }
-  return {
+  const basePlan = {
     toolCall: {
       id: toolCall.id,
       name: toolCall.name,
@@ -2648,9 +2679,18 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     },
     execution: {
       flowId: execution.flowId
-    },
-    ...(typeof record.handlerErrorMessage === 'string' ? { handlerErrorMessage: record.handlerErrorMessage } : {})
+    }
   };
+  if (input.mode === 'handler_error') {
+    if (typeof record.handlerErrorMessage !== 'string') {
+      throw new Error('planServertoolExecutionLoopEffectJson native returned handler_error without handlerErrorMessage');
+    }
+    return {
+      ...basePlan,
+      handlerErrorMessage: record.handlerErrorMessage
+    };
+  }
+  return basePlan;
 }
 
 function encodeServertoolExecutionLoopEffectInput(input: unknown): Record<string, unknown> {

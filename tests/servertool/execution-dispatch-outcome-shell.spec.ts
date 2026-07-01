@@ -165,10 +165,11 @@ describe('execution queue dispatch runtime', () => {
     expect(source).not.toContain("if (initialLoopActionPlan.action === 'throw_dispatch_spec_mismatch')");
     expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_materialized_result')");
     expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')");
-    expect(source).toContain('switch (initialLoopAction)');
-    expect(source).toContain('switch (resultLoopAction)');
+    expect(source).toContain('switch (initialLoopActionPlan.action)');
+    expect(source).toContain('switch (resultLoopActionPlan.action)');
     expect(source).toContain('handlerErrorMessage: lastErr');
-    expect(source).toContain('message: errorEffectPlan.handlerErrorMessage as string');
+    expect(source).not.toContain('errorEffectPlan.handlerErrorMessage as string');
+    expect(source).toContain('message: errorEffectPlan.handlerErrorMessage');
   });
 
   beforeEach(() => {

@@ -2821,7 +2821,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'servertool-execution-dispatch-rust-owner',
     TS_EXECUTION_QUEUE_SHELL,
     executionQueueShell,
-    'message: errorEffectPlan.handlerErrorMessage as string'
+    'message: errorEffectPlan.handlerErrorMessage'
   );
   for (const marker of [
     'hasHandlerEntry: entry != null',

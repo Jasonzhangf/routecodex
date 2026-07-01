@@ -106,6 +106,7 @@ const TARGETS = [
       "if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')",
       'const initialLoopAction = initialLoopActionPlan.action',
       'const resultLoopAction = resultLoopActionPlan.action',
+      'errorEffectPlan.handlerErrorMessage as string',
     ],
     required: [
       'runServertoolIoExecutionQueue',
@@ -118,7 +119,7 @@ const TARGETS = [
       'hasHandlerEntry: entry != null',
       'planned != null ? await materializeServertoolPlannedResult',
       'hasMaterializedResult: result != null',
-      'message: errorEffectPlan.handlerErrorMessage as string',
+      'message: errorEffectPlan.handlerErrorMessage',
     ],
   },
   {

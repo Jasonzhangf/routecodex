@@ -113,7 +113,7 @@ export async function runServertoolIoExecutionQueue(args: {
           base: args.baseForExecution as Record<string, unknown>,
           toolCallId: toolCall.id,
           toolName: toolCall.name,
-          message: errorEffectPlan.handlerErrorMessage as string
+          message: errorEffectPlan.handlerErrorMessage
         }) as JsonObject;
         replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
         executionState = appendServertoolExecutedRecordWithNative({
