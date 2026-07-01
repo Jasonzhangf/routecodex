@@ -442,8 +442,6 @@ export const DEFAULT_RESPONSES_CONVERSION_CONFIG: ResponsesConversionConfig = {
 export interface ResponsesSseEventStream extends AsyncIterable<ResponsesSseEvent> {
   // 获取流统计
   getStats(): ResponsesEventStats;
-  // 获取当前配置
-  getConfig(): ResponsesConversionConfig;
   // 手动完成流
   complete(): void;
   // 手动中止流

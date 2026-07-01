@@ -5,7 +5,6 @@
 
 // feature_id: sse.responses_encode_projection
 import { PassThrough } from 'stream';
-import { DEFAULT_RESPONSES_CONVERSION_CONFIG } from '../types/index.js';
 import type {
   ResponsesResponse,
   ResponsesSseEvent,
@@ -23,14 +22,6 @@ import { createResponsesStreamWriter } from '../shared/writer.js';
  * 采用函数化架构，专注于编排而非具体业务逻辑
  */
 export class ResponsesJsonToSseConverterRefactored {
-  private config = DEFAULT_RESPONSES_CONVERSION_CONFIG;
-
-  constructor(config?: Partial<typeof DEFAULT_RESPONSES_CONVERSION_CONFIG>) {
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
-  }
-
   /**
    * 将Responses响应转换为SSE流
    */
@@ -56,7 +47,6 @@ export class ResponsesJsonToSseConverterRefactored {
       direction: 'json_to_sse' as const,
       requestId: options.requestId,
       getStats: () => context.eventStats,
-      getConfig: () => this.config,
       complete: () => this.completeStream(context, stream),
       abort: (error?: Error) => this.abortStream(context, stream, error)
     }) as ResponsesSseEventStream;
@@ -88,11 +78,16 @@ export class ResponsesJsonToSseConverterRefactored {
       });
 
       // 3. 创建事件序列化器
-      const sequencer = createResponsesSequencer({
-        chunkSize: context.options.chunkSize || this.config.defaultChunkSize,
-        chunkDelayMs: context.options.delayMs || this.config.defaultDelayMs,
-        enableDelay: !!context.options.delayMs
-      });
+      const sequencerConfig: Parameters<typeof createResponsesSequencer>[0] = {
+        enableDelay: typeof context.options.delayMs === 'number' && context.options.delayMs > 0
+      };
+      if (typeof context.options.chunkSize === 'number') {
+        sequencerConfig.chunkSize = context.options.chunkSize;
+      }
+      if (typeof context.options.delayMs === 'number') {
+        sequencerConfig.chunkDelayMs = context.options.delayMs;
+      }
+      const sequencer = createResponsesSequencer(sequencerConfig);
 
       // 4. 生成事件序列并写入流
       const eventStream = sequencer.sequenceResponse(response, context.requestId);

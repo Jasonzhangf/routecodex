@@ -66,4 +66,20 @@ describe('responses JSON-to-SSE context dead-state boundary', () => {
     expect(source).not.toContain('getContext(');
     expect(source).not.toContain('clearContext(');
   });
+
+  it('does not keep converter-level config defaults or falsy chunk fallback', () => {
+    const sourcePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts'
+    );
+    const source = fs.readFileSync(sourcePath, 'utf8');
+
+    expect(source).not.toContain('DEFAULT_RESPONSES_CONVERSION_CONFIG');
+    expect(source).not.toContain('private config =');
+    expect(source).not.toContain('constructor(config?');
+    expect(source).not.toContain('this.config.defaultChunkSize');
+    expect(source).not.toContain('this.config.defaultDelayMs');
+    expect(source).not.toContain('context.options.chunkSize ||');
+    expect(source).not.toContain('context.options.delayMs ||');
+  });
 });

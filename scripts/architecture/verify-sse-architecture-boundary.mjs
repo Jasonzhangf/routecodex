@@ -159,6 +159,14 @@ for (const forbidden of [
   'getContext(requestId: string)',
   'clearContext(requestId: string)',
   'getActiveContexts(): Map<string, ResponsesJsonToSseContext>',
+  'DEFAULT_RESPONSES_CONVERSION_CONFIG',
+  'private config =',
+  'constructor(config?',
+  'getConfig: () =>',
+  'this.config.defaultChunkSize',
+  'this.config.defaultDelayMs',
+  'context.options.chunkSize ||',
+  'context.options.delayMs ||',
 ]) {
   if (responsesJsonToSseConverter.includes(forbidden)) {
     failures.push(`Responses JSON->SSE converter must not keep dead context state: ${forbidden}`);
