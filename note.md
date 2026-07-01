@@ -1,3 +1,8 @@
+# 2026-07-01: provider response diagnostics fallbackTools counter removed
+- Slice: `describeRequestSemanticsResolution()` no longer computes or emits `fallbackToolsCount`; this was diagnostic-only fallback wording in server runtime response utilities, not a semantic owner for request tools.
+- Gate: `provider-response-utils.spec.ts` source test forbids `fallbackTools` / `fallbackToolsCount` from returning.
+- Verification: focused Jest `provider-response-utils` PASS 6/6; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS.
+
 # 2026-07-01: SSE wrapper malformed JSON raw-string fallback removed
 - Slice: `sse-error-handler.ts` no longer salvages JSON-looking malformed SSE wrapper `error` strings into structured upstream errors. If a wrapper string starts as JSON but cannot parse, extraction returns `undefined` instead of projecting the bad raw string as an upstream error.
 - Gate: new `sse-error-handler.spec.ts` source/behavior test forbids the `fallback to raw string` marker and locks malformed JSON-looking strings from becoming `SseWrapperErrorInfo`.

@@ -1,4 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   buildProviderLabel,
   extractClientModelId,
@@ -7,7 +10,21 @@ import {
 import { resolveProviderRequestContext } from '../../../../../src/server/runtime/http-server/executor/provider-request-context';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const providerResponseUtilsSourcePath = path.resolve(
+  __dirname,
+  '../../../../../src/server/runtime/http-server/executor/provider-response-utils.ts'
+);
+
 describe('buildProviderLabel', () => {
+  it('does not keep diagnostic fallback tools counters in request semantics resolution', () => {
+    const source = fs.readFileSync(providerResponseUtilsSourcePath, 'utf8');
+
+    expect(source).not.toContain('fallbackTools');
+    expect(source).not.toContain('fallbackToolsCount');
+  });
+
   it('deduplicates model suffix when providerKey already ends with model', () => {
     const label = buildProviderLabel('crs.key2.gpt-5.3-codex', 'gpt-5.3-codex');
     expect(label).toBe('crs.key2.gpt-5.3-codex');

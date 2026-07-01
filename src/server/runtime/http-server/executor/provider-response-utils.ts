@@ -238,8 +238,6 @@ export function describeRequestSemanticsResolution(
   requestMetadata?: Record<string, unknown>,
   resolved?: Record<string, unknown>
 ): Record<string, unknown> {
-  const readRootTools = (value?: Record<string, unknown>): unknown[] | undefined =>
-    Array.isArray(value?.tools) ? value.tools : undefined;
   const readMetadata = (value?: Record<string, unknown>): Record<string, unknown> | undefined =>
     value?.metadata && typeof value.metadata === 'object' && value.metadata
       ? (value.metadata as Record<string, unknown>)
@@ -264,13 +262,11 @@ export function describeRequestSemanticsResolution(
     standardized?.semantics && typeof standardized.semantics === 'object' && standardized.semantics
       ? (standardized.semantics as Record<string, unknown>)
       : undefined;
-  const fallbackTools = readRootTools(processed) ?? readRootTools(standardized);
 
   return {
     metadataRequestSemantics: summarizeSemanticsNode(metadataRequestSemantics),
     processedSemantics: summarizeSemanticsNode(processedSemantics),
     standardizedSemantics: summarizeSemanticsNode(standardizedSemantics),
-    fallbackToolsCount: countArrayItems(fallbackTools),
     resolved: summarizeSemanticsNode(resolved)
   };
 }
