@@ -607,6 +607,13 @@ export function parseServertoolResponseStageGatePayload(raw: string): Servertool
       : parsed.shouldBypass
         ? 'bypass'
         : 'continue_to_execution';
+  const skipReason =
+    typeof parsed.skipReason === 'string' && parsed.skipReason.trim()
+      ? parsed.skipReason.trim()
+      : undefined;
+  if (nextAction === 'bypass' && !skipReason) {
+    return null;
+  }
   return {
     shouldBypass: parsed.shouldBypass,
     nextAction,
@@ -621,9 +628,7 @@ export function parseServertoolResponseStageGatePayload(raw: string): Servertool
     ...(typeof parsed.schemaSource === 'string' && parsed.schemaSource.trim()
       ? { schemaSource: parsed.schemaSource.trim() }
       : {}),
-    ...(typeof parsed.skipReason === 'string' && parsed.skipReason.trim()
-      ? { skipReason: parsed.skipReason.trim() }
-      : {})
+    ...(skipReason ? { skipReason } : {})
   };
 }
 

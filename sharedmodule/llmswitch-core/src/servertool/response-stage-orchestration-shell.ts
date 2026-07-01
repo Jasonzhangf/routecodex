@@ -41,10 +41,7 @@ export async function runServertoolResponseStageOrchestrationShell(
   });
 
   if (gatePlan.nextAction === 'bypass') {
-    if (typeof gatePlan.skipReason !== 'string' || !gatePlan.skipReason.trim()) {
-      throw new Error('[servertool] native response-stage gate bypass missing skipReason');
-    }
-    const skipReason = gatePlan.skipReason;
+    const skipReason = gatePlan.skipReason as string;
     recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: false,
       skipReason,

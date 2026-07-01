@@ -5321,6 +5321,9 @@ function checkServertoolRustOutcomeCloseout() {
     "gatePlan.skipReason || 'followup_bypass'",
     "gatePlan.skipReason === 'no_servertool_support'",
     "gatePlan.skipReason === 'followup_bypass'",
+    "throw new Error('[servertool] native response-stage gate bypass missing skipReason')",
+    'typeof gatePlan.skipReason',
+    'gatePlan.skipReason.trim()',
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
@@ -5332,7 +5335,6 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'const gatePlan = planServertoolResponseStageGateWithNative({',
     'detectProviderResponseShapeWithNative',
-    "throw new Error('[servertool] native response-stage gate bypass missing skipReason')",
     'const orchestration = await runServerToolOrchestrationShell(',
     'runServerToolOrchestrationShell',
     'payload: options.payload',

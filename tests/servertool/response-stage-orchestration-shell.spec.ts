@@ -46,23 +46,29 @@ describe('response-stage-orchestration-shell', () => {
     });
   });
 
-  test('fails fast when native bypass plan omits skipReason', async () => {
-    planServertoolResponseStageGateWithNative.mockReturnValue({
+  test('rejects bypass gate payload without skipReason at native parser boundary', async () => {
+    const { parseServertoolResponseStageGatePayload } = await import(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.js'
+    );
+
+    expect(parseServertoolResponseStageGatePayload(JSON.stringify({
       nextAction: 'bypass',
       shouldBypass: true,
       responseHookMatched: false,
       responseHookRequired: false
-    });
+    }))).toBeNull();
+  });
 
-    await expect(
-      runServertoolResponseStageOrchestrationShell({
-        payload: { id: 'resp_1' },
-        adapterContext: {} as any,
-        requestId: 'req-missing-skip',
-        entryEndpoint: '/v1/responses'
-      })
-    ).rejects.toThrow('[servertool] native response-stage gate bypass missing skipReason');
-    expect(runServerToolOrchestrationShell).not.toHaveBeenCalled();
+  test('keeps bypass skipReason validation out of the orchestration shell', async () => {
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(
+      'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+      'utf8'
+    );
+
+    expect(source).not.toContain("throw new Error('[servertool] native response-stage gate bypass missing skipReason')");
+    expect(source).not.toContain('typeof gatePlan.skipReason');
+    expect(source).not.toContain('gatePlan.skipReason.trim()');
   });
 
   test('returns native skipReason without TS fallback or whitelist filtering', async () => {
