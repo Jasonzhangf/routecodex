@@ -391,6 +391,23 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
     })).rejects.toThrow('Responses reasoning delta payload missing value');
   });
 
+  it('fails malformed reasoning content instead of silently treating it as empty', async () => {
+    await expect(collectEvents({
+      id: 'resp_reasoning_malformed_content',
+      object: 'response',
+      created_at: 1710000000,
+      status: 'completed',
+      model: 'gpt-test',
+      output: [{
+        id: 'rs_malformed_content',
+        type: 'reasoning',
+        summary: [],
+        content: { type: 'reasoning_text', text: 'think' } as any
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    })).rejects.toThrow('Invalid Responses reasoning content: expected array');
+  });
+
   it('builds reasoning delta payloads through the native owner directly', () => {
     expect(buildResponsesSseReasoningDeltaPayloadWithNative(
       'text',

@@ -293,6 +293,15 @@ fn insert_string_if_present(
     }
 }
 
+fn validate_reasoning_content_shape(source: &Map<String, Value>) -> Result<(), String> {
+    if let Some(content) = source.get("content") {
+        if !content.is_array() {
+            return Err("Invalid Responses reasoning content: expected array".to_string());
+        }
+    }
+    Ok(())
+}
+
 fn build_responses_sse_output_item_added_descriptor(
     source: &Map<String, Value>,
 ) -> Result<Value, String> {
@@ -328,6 +337,7 @@ fn build_responses_sse_output_item_added_descriptor(
             }
         }
         "reasoning" => {
+            validate_reasoning_content_shape(source)?;
             if let Some(summary) = source.get("summary") {
                 let normalized = normalize_responses_sse_reasoning_summary(summary)?;
                 if normalized
@@ -351,6 +361,7 @@ fn build_responses_sse_output_item_done_descriptor(
     let mut item = source.clone();
     item.insert("status".to_string(), Value::String("completed".to_string()));
     if source.get("type").and_then(Value::as_str) == Some("reasoning") {
+        validate_reasoning_content_shape(source)?;
         if let Some(summary) = source.get("summary") {
             let normalized = normalize_responses_sse_reasoning_summary(summary)?;
             if normalized
@@ -2011,6 +2022,22 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Responses output item descriptor missing type"));
+    }
+
+    #[test]
+    fn rejects_responses_sse_reasoning_descriptor_malformed_content() {
+        let err = build_responses_sse_output_item_descriptor(
+            json!({
+                "id": "rs_malformed_content",
+                "type": "reasoning",
+                "summary": [],
+                "content": { "type": "reasoning_text", "text": "think" }
+            }),
+            Some("done"),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Invalid Responses reasoning content: expected array"));
     }
 
     #[test]

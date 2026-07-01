@@ -682,6 +682,7 @@ for (const relPath of providerNeutralProjectionFiles) {
     "response.status ?? 'completed'",
     'if (!content.text) continue;',
     'if (!text) return;',
+    'const contents = Array.isArray(reasoning.content) ? reasoning.content : [];',
     'normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []',
     'if (!text) continue;',
     '&& !!content.text',

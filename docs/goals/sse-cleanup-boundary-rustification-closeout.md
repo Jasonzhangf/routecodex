@@ -90,6 +90,15 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses reasoning content malformed-array fail-fast slice
+
+- Red evidence: focused `responses-sse-reasoning-summary-no-normalize` first failed because `buildReasoningDeltas()` used `Array.isArray(reasoning.content) ? reasoning.content : []`, so malformed non-array reasoning content was silently treated as no deltas and the response still emitted `response.completed` / `response.done`.
+- Fix: Rust `responses_sse_event_payload.rs` now validates reasoning output item descriptors and rejects non-array `content` with `Invalid Responses reasoning content: expected array`; TS generator no longer has the silent non-array-to-empty fallback.
+- Gate: `verify:sse-architecture-boundary` now forbids the old `const contents = Array.isArray(reasoning.content) ? reasoning.content : [];` marker.
+- Positive / reverse tests: valid reasoning content still emits `response.reasoning_text.delta`, `response.completed`, and `response.done`; malformed content fails fast through both the generator and native output item descriptor wrapper.
+- Verification: focused Rust `rejects_responses_sse_reasoning_descriptor_malformed_content` PASS; focused Jest `responses-sse-reasoning-summary-no-normalize + responses-sse-output-item-descriptor-native` PASS 27/27; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:function-map-compile-gate`, sharedmodule/root `tsc --noEmit --pretty false`, native hotpath build, and `build:base BUILD_EXIT:0` PASS.
+- Replay evidence: no 4444 provider-response sample with `bodyText` / `rawBody` / `sseText` is currently available in `~/.rcc` or `/Volumes/extension/.rcc`; source replay emitted valid reasoning events including `response.completed` / `response.done` and failed malformed content with `Invalid Responses reasoning content: expected array`.
+
 ### 2026-07-01 Responses content_part.done partless TS synthesis removal slice
 
 - Red evidence: focused `responses-sse-content-part-descriptor-native` first failed because exported TS `buildContentPartDoneEvent()` accepted `undefined` content and generated a partless `response.content_part.done` instead of failing.

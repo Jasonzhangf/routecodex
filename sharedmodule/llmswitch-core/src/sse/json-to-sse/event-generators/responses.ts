@@ -364,7 +364,10 @@ export function* buildReasoningDeltas(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
-  const contents = Array.isArray(reasoning.content) ? reasoning.content : [];
+  if (reasoning.content !== undefined && !Array.isArray(reasoning.content)) {
+    throw new Error('Invalid Responses reasoning content: expected array');
+  }
+  const contents = reasoning.content ?? [];
   let contentIndex = 0;
   for (const content of contents) {
     if (content.type === 'reasoning_text') {

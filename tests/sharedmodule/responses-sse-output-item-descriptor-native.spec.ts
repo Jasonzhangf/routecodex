@@ -71,6 +71,15 @@ describe('responses SSE output item descriptor native owner', () => {
     }, 'added')).toThrow('Responses output item descriptor missing type');
   });
 
+  it('fails malformed reasoning content instead of serializing non-array content', () => {
+    expect(() => buildResponsesSseOutputItemDescriptorWithNative({
+      id: 'rs_malformed_content',
+      type: 'reasoning',
+      summary: [],
+      content: { type: 'reasoning_text', text: 'think' }
+    }, 'done')).toThrow('Invalid Responses reasoning content: expected array');
+  });
+
   it('builds output_text.done payloads through the native owner', () => {
     const payload = buildResponsesSseOutputTextDonePayloadWithNative(3, 'msg_1', 1, 'final text');
 
