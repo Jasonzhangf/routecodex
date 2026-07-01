@@ -2018,6 +2018,7 @@ verification:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
     contract:
+      - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
     integration: []
     smoke:

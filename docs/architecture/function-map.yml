@@ -3637,6 +3637,7 @@ owners:
       - sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
+      - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
@@ -3644,6 +3645,7 @@ owners:
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/process
     required_tests:
+      - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary

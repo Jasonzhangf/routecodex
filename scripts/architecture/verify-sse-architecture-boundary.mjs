@@ -337,6 +337,21 @@ for (const forbidden of [
   }
 }
 
+const chatJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts');
+for (const forbidden of [
+  'CONTEXT_TTL_MS',
+  'MAX_CONTEXTS',
+  'pruneChatContexts(',
+  'private contexts = new Map<string, ChatJsonToSseContext>()',
+  'getContext(requestId: string)',
+  'clearContext(requestId: string)',
+  'getActiveContexts(): Map<string, ChatJsonToSseContext>',
+]) {
+  if (chatJsonToSseConverter.includes(forbidden)) {
+    failures.push(`Chat JSON->SSE converter must not keep dead context state: ${forbidden}`);
+  }
+}
+
 const sharedOwnerFiles = [
   'sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts',
   'sharedmodule/llmswitch-core/src/sse/shared/writer.ts',
@@ -572,7 +587,6 @@ for (const forbidden of [
   }
 }
 
-const chatJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts');
 for (const forbidden of [
   'convertRequestToJsonToSse(',
   'processRequestToSseWithFunctions',

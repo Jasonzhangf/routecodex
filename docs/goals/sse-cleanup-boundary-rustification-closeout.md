@@ -98,6 +98,14 @@ Focused tests to use as slice gates:
 - Verification: focused Jest `responses-sse-content-part-descriptor-native` PASS 5/5; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; `verify:hub-response-provider-sse-materialization` PASS; `verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `git diff --check` PASS; `build:base BUILD_EXIT:0` PASS.
 - Replay evidence: real 4444 provider-response sample `~/.rcc/codex-samples/openai-responses/ports/4444/req_1782794773576_s7okhowx0/provider-response_1.json` replayed through Responses SSE decode->encode with `entryPort=4444`, `status=completed`, `outputCount=2`, `response.completed=true`, and `response.done=true`; the sample has no `content_part.done` frames, so source replay covers the positive content-part path.
 
+### 2026-07-01 Chat JSON->SSE converter context-cache removal slice
+
+- Red evidence: new focused `chat-json-to-sse-context-no-dead-state` and `verify:sse-architecture-boundary` first failed because `chat-json-to-sse-converter.ts` still kept converter-level `CONTEXT_TTL_MS`, `MAX_CONTEXTS`, `private contexts`, `getContext`, `clearContext`, and `getActiveContexts`.
+- Fix: `ChatJsonToSseConverterRefactored` now keeps request state only in the local stream context returned for that conversion. The long-lived context map, TTL pruning, public active-context APIs, and cleanup branches were physically removed.
+- Positive / reverse tests: completed Chat JSON->SSE projection still emits `[DONE]` and the upstream chat id; source/audit tests prove the old cache/API markers cannot return.
+- Verification: focused Jest `chat-json-to-sse-context-no-dead-state + chat-sse-usage-roundtrip` PASS 14/14; `verify:sse-architecture-boundary` PASS; sharedmodule/root TypeScript PASS; `verify:responses-sse-business-module` PASS; `verify:function-map-compile-gate` PASS; `verify:hub-response-responses-chat-projection` PASS; `build:base` exit `0`; `git diff --check` PASS.
+- Replay evidence: real 4444 provider-response sample `~/.rcc/codex-samples/openai-responses/ports/4444/req_1782794773576_s7okhowx0/provider-response_1.json` replayed through Responses SSE decode->encode with `entryPort=4444`, `status=completed`, `outputCount=2`, `response.completed=true`, `response.done=true`, and no `response.error`.
+
 ### 2026-07-01 Responses SSE decode TS wire synthesis removal slice
 
 - Red evidence: new focused `responses-sse-decode-no-ts-wire-synthesis` first proved object-mode AsyncIterable chunks were serialized by TS into `event/data` wire frames and could materialize as successful `response.done`; `verify:sse-architecture-boundary` also failed on `serializeEventToSSE()` and fallback `event: data` markers.

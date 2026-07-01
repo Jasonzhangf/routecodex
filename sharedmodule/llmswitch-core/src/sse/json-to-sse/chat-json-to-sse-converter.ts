@@ -18,38 +18,12 @@ import { ErrorUtils } from '../shared/utils.js';
 import { createChatSequencer } from './sequencers/chat-sequencer.js';
 import { createChatStreamWriter } from '../shared/writer.js';
 
-// Memory management constants
-const CONTEXT_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_CONTEXTS = 2048;
-
-/**
- * Prune contexts by TTL and max-size
- */
-function pruneChatContexts(contexts: Map<string, ChatJsonToSseContext>): void {
-  const now = Date.now();
-  // TTL sweep
-  for (const [id, ctx] of contexts) {
-    if (now - ctx.startTime > CONTEXT_TTL_MS) {
-      contexts.delete(id);
-    }
-  }
-  // Max-size protection: remove oldest 25% if at capacity
-  if (contexts.size >= MAX_CONTEXTS) {
-    const sorted = [...contexts.entries()].sort((a, b) => a[1].startTime - b[1].startTime);
-    const toRemove = Math.ceil(sorted.length * 0.25);
-    for (let i = 0; i < toRemove; i++) {
-      contexts.delete(sorted[i][0]);
-    }
-  }
-}
-
 /**
  * 重构后的Chat JSON到SSE转换器
  * 采用函数化架构，专注于编排而非具体业务逻辑
  */
 export class ChatJsonToSseConverterRefactored {
   private config = DEFAULT_CHAT_CONVERSION_CONFIG;
-  private contexts = new Map<string, ChatJsonToSseContext>();
 
   constructor(config?: Partial<typeof DEFAULT_CHAT_CONVERSION_CONFIG>) {
     if (config) {
@@ -64,8 +38,6 @@ export class ChatJsonToSseConverterRefactored {
     response: ChatCompletionResponse,
     options: ChatJsonToSseOptions
   ): Promise<ChatSseEventStream> {
-    // TTL + max-size prune on every public entry
-    pruneChatContexts(this.contexts);
     try {
       this.validateResponse(response);
     } catch (error) {
@@ -73,7 +45,6 @@ export class ChatJsonToSseConverterRefactored {
     }
     // 1. 创建上下文
     const context = this.createResponseContext(response, options);
-    this.contexts.set(options.requestId, context);
 
     // 2. 创建底层流
     const stream = new PassThrough({ objectMode: true });
@@ -133,8 +104,6 @@ export class ChatJsonToSseConverterRefactored {
 
     } catch (error) {
       throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, context.requestId);
-    } finally {
-      this.contexts.delete(context.requestId);
     }
   }
 
@@ -206,7 +175,6 @@ export class ChatJsonToSseConverterRefactored {
     if (stream.writable) {
       stream.destroy(wrappedError);
     }
-    this.contexts.delete(context.requestId);
   }
 
   /**
@@ -219,7 +187,6 @@ export class ChatJsonToSseConverterRefactored {
     if (stream.writable) {
       stream.end();
     }
-    this.contexts.delete(context.requestId);
   }
 
   /**
@@ -235,7 +202,6 @@ export class ChatJsonToSseConverterRefactored {
 
     if (stream.writable) {
       stream.destroy(error);
-      this.contexts.delete(context.requestId);
     }
   }
 
@@ -272,26 +238,6 @@ export class ChatJsonToSseConverterRefactored {
     };
   }
 
-  /**
-   * 获取上下文
-   */
-  getContext(requestId: string): ChatJsonToSseContext | undefined {
-    return this.contexts.get(requestId);
-  }
-
-  /**
-   * 清理上下文
-   */
-  clearContext(requestId: string): void {
-    this.contexts.delete(requestId);
-  }
-
-  /**
-   * 获取所有活跃的上下文
-   */
-  getActiveContexts(): Map<string, ChatJsonToSseContext> {
-    return new Map(this.contexts);
-  }
 }
 
 // 为了向后兼容，导出原有名称
