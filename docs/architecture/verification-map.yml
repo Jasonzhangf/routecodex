@@ -364,6 +364,7 @@ verification:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts
     contract:
+      - tests/servertool/response-stage-orchestration-shell.spec.ts
       - tests/servertool/server-side-tools.failfast.spec.ts
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
