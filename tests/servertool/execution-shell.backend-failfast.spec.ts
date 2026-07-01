@@ -59,7 +59,7 @@ jest.unstable_mockModule(
       message: 'fetch failed',
       details: {}
     })),
-    planServertoolHandlerRuntimeActionForPlannedWithNative: jest.fn((planned: any) => {
+    planServertoolHandlerMaterializationForPlannedWithNative: jest.fn((planned: any, requestId: string) => {
       const execution = planned?.execution;
       if (typeof planned?.finalize === 'function') {
         return { action: 'finalize_without_backend' };
@@ -76,10 +76,32 @@ jest.unstable_mockModule(
         return { action: 'return_handler_result' };
       }
       if (typeof planned?.flowId === 'string' || planned?.finalize !== undefined) {
-        return { action: 'invalid_plan_missing_finalize' };
+        return {
+          action: 'throw_handler_error',
+          errorPlan: {
+            code: 'SERVERTOOL_HANDLER_FAILED',
+            category: 'INTERNAL_ERROR',
+            status: 500,
+            message: '[servertool] invalid handler plan contract: missing finalize',
+            details: { requestId }
+          }
+        };
       }
-      return { action: 'invalid_plan_result' };
+      return {
+        action: 'throw_handler_error',
+        errorPlan: {
+          code: 'SERVERTOOL_HANDLER_FAILED',
+          category: 'INTERNAL_ERROR',
+          status: 500,
+          message: '[servertool] invalid handler plan/result contract',
+          details: { requestId }
+        }
+      };
     }),
+    planServertoolExecutionOutcomeMaterializationWithNative: jest.fn(() => ({
+      action: 'return_tool_flow',
+      executionFlowId: 'flow-test'
+    })),
     planServertoolMaterializationProgressWithNative: jest.fn((input: any) => {
       if (input?.hasFinalizeFunction) {
         return { action: 'finalize_without_backend' };
@@ -91,40 +113,6 @@ jest.unstable_mockModule(
         return { action: 'invalid_plan_missing_finalize' };
       }
       return { action: 'invalid_plan_result' };
-    }),
-    planServertoolHandlerContractErrorWithNative: jest.fn((input: any) => {
-      const kind = String(input?.kind ?? '').trim();
-      if (kind === 'handler_failed') {
-        return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: `[servertool] handler failed: ${String(input?.toolName ?? '')}: ${String(input?.error ?? '')}`,
-          details: {
-            toolName: String(input?.toolName ?? ''),
-            requestId: String(input?.requestId ?? ''),
-            entryEndpoint: String(input?.entryEndpoint ?? ''),
-            providerProtocol: String(input?.providerProtocol ?? ''),
-            error: String(input?.error ?? '')
-          }
-        };
-      }
-      if (kind === 'invalid_handler_plan_missing_finalize') {
-        return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: '[servertool] invalid handler plan contract: missing finalize',
-          details: { requestId: String(input?.requestId ?? '') }
-        };
-      }
-      return {
-        code: 'SERVERTOOL_HANDLER_FAILED',
-        category: 'INTERNAL_ERROR',
-        status: 500,
-        message: '[servertool] invalid handler plan/result contract',
-        details: { requestId: String(input?.requestId ?? '') }
-      };
     })
   })
 );

@@ -346,14 +346,6 @@ export interface ServertoolEntryPreflightPlan {
   | 'continue_to_tool_flow';
 }
 
-export interface ServertoolHandlerRuntimeActionPlan {
-  action:
-    | 'finalize_without_backend'
-    | 'return_handler_result'
-    | 'invalid_plan_missing_finalize'
-    | 'invalid_plan_result';
-}
-
 export type ServertoolHandlerMaterializationPlan =
   | {
       action: 'finalize_without_backend';
@@ -2748,60 +2740,6 @@ export function planServertoolRegistrySourceProjectionWithNative(input: {
   };
 }
 
-export function planServertoolHandlerRuntimeActionWithNative(input: {
-  hasFinalizeFunction: boolean;
-  hasChatResponseObject: boolean;
-  hasExecutionObject: boolean;
-  hasExecutionFlowId: boolean;
-  hasPlanMarkers: boolean;
-}): ServertoolHandlerRuntimeActionPlan {
-  const capability = 'planServertoolHandlerRuntimeActionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolHandlerRuntimeActionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolHandlerRuntimeActionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolHandlerRuntimeActionJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    record.action !== 'finalize_without_backend' &&
-    record.action !== 'return_handler_result' &&
-    record.action !== 'invalid_plan_missing_finalize' &&
-    record.action !== 'invalid_plan_result'
-  ) {
-    throw new Error('planServertoolHandlerRuntimeActionJson native returned invalid action');
-  }
-  return {
-    action: record.action
-  };
-}
-
-export function planServertoolHandlerRuntimeActionForPlannedWithNative(
-  planned: unknown
-): ServertoolHandlerRuntimeActionPlan {
-  const record =
-    planned && typeof planned === 'object' && !Array.isArray(planned)
-      ? (planned as Record<string, unknown>)
-      : {};
-  const execution =
-    record.execution && typeof record.execution === 'object' && !Array.isArray(record.execution)
-      ? (record.execution as Record<string, unknown>)
-      : undefined;
-  return planServertoolHandlerRuntimeActionWithNative({
-    hasFinalizeFunction: typeof record.finalize === 'function',
-    hasChatResponseObject: Boolean(record.chatResponse && typeof record.chatResponse === 'object' && !Array.isArray(record.chatResponse)),
-    hasExecutionObject: Boolean(record.execution && typeof record.execution === 'object' && !Array.isArray(record.execution)),
-    hasExecutionFlowId: typeof execution?.flowId === 'string',
-    hasPlanMarkers: typeof record.flowId === 'string' || record.finalize !== undefined
-  });
-}
-
 export function planServertoolHandlerMaterializationWithNative(input: {
   requestId: string;
   hasFinalizeFunction: boolean;
@@ -3221,30 +3159,6 @@ export function planServertoolRequiredResponseHookEmptyErrorWithNative(input: {
   return parseServertoolErrorPlan(
     callServertoolErrorPlanNative('planServertoolRequiredResponseHookEmptyErrorJson', input),
     'planServertoolRequiredResponseHookEmptyErrorJson'
-  );
-}
-
-export function planServertoolHandlerContractErrorWithNative(input:
-  | {
-      kind: 'handler_failed';
-      toolName: string;
-      requestId: string;
-      entryEndpoint: string;
-      providerProtocol: string;
-      error: string;
-    }
-  | {
-      kind: 'invalid_handler_plan_missing_finalize';
-      requestId: string;
-    }
-  | {
-      kind: 'invalid_handler_plan_result';
-      requestId: string;
-    }
-): ServertoolErrorPlan {
-  return parseServertoolErrorPlan(
-    callServertoolErrorPlanNative('planServertoolHandlerContractErrorJson', input),
-    'planServertoolHandlerContractErrorJson'
   );
 }
 

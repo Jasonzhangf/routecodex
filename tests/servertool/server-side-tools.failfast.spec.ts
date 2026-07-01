@@ -281,7 +281,7 @@ jest.unstable_mockModule(
       }
       return { action: 'invalid_plan_result' };
     }),
-    planServertoolHandlerRuntimeActionForPlannedWithNative: jest.fn((planned: any) => {
+    planServertoolHandlerMaterializationForPlannedWithNative: jest.fn((planned: any, requestId: string) => {
       const execution = planned?.execution;
       if (typeof planned?.finalize === 'function') {
         return { action: 'finalize_without_backend' };
@@ -298,43 +298,25 @@ jest.unstable_mockModule(
         return { action: 'return_handler_result' };
       }
       if (typeof planned?.flowId === 'string' || planned?.finalize !== undefined) {
-        return { action: 'invalid_plan_missing_finalize' };
-      }
-      return { action: 'invalid_plan_result' };
-    }),
-    planServertoolHandlerContractErrorWithNative: jest.fn((input: any) => {
-      const kind = String(input?.kind ?? 'unknown_handler_contract_error');
-      const toolName = String(input?.toolName ?? 'auto');
-      const requestId = String(input?.requestId ?? '');
-      const entryEndpoint = String(input?.entryEndpoint ?? '');
-      const providerProtocol = String(input?.providerProtocol ?? '');
-      const error = String(input?.error ?? '');
-      if (kind === 'handler_failed') {
         return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 502,
-          message: `[servertool] ${toolName} failed: ${error}`,
-          details: {
-            requestId,
-            entryEndpoint,
-            providerProtocol,
-            toolName,
-            error
+          action: 'throw_handler_error',
+          errorPlan: {
+            code: 'SERVERTOOL_HANDLER_CONTRACT_ERROR',
+            category: 'INTERNAL_ERROR',
+            status: 500,
+            message: '[servertool] invalid_handler_plan_missing_finalize',
+            details: { requestId }
           }
         };
       }
       return {
-        code: 'SERVERTOOL_HANDLER_CONTRACT_ERROR',
-        category: 'INTERNAL_ERROR',
-        status: 500,
-        message: `[servertool] ${kind}`,
-        details: {
-          requestId,
-          entryEndpoint,
-          providerProtocol,
-          toolName,
-          error
+        action: 'throw_handler_error',
+        errorPlan: {
+          code: 'SERVERTOOL_HANDLER_CONTRACT_ERROR',
+          category: 'INTERNAL_ERROR',
+          status: 500,
+          message: '[servertool] invalid_handler_plan_result',
+          details: { requestId }
         }
       };
     }),
@@ -470,41 +452,17 @@ jest.unstable_mockModule(
         remainingToolCallIds: []
       };
     }),
-    planServertoolHandlerContractErrorWithNative: jest.fn((input: any) => {
-      const kind = String(input?.kind ?? '').trim();
-      if (kind === 'handler_failed') {
-        return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: `[servertool] handler failed: ${String(input?.toolName ?? '')}: ${String(input?.error ?? '')}`,
-          details: {
-            toolName: String(input?.toolName ?? ''),
-            requestId: String(input?.requestId ?? ''),
-            entryEndpoint: String(input?.entryEndpoint ?? ''),
-            providerProtocol: String(input?.providerProtocol ?? ''),
-            error: String(input?.error ?? '')
-          }
-        };
-      }
-      if (kind === 'invalid_handler_plan_missing_finalize') {
-        return {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: '[servertool] invalid handler plan contract: missing finalize',
-          details: {
-            requestId: String(input?.requestId ?? '')
-          }
-        };
-      }
+    planServertoolHandlerMaterializationForPlannedWithNative: jest.fn((_planned: any, requestId: string) => {
       return {
-        code: 'SERVERTOOL_HANDLER_FAILED',
-        category: 'INTERNAL_ERROR',
-        status: 500,
-        message: '[servertool] invalid handler plan/result contract',
-        details: {
-          requestId: String(input?.requestId ?? '')
+        action: 'throw_handler_error',
+        errorPlan: {
+          code: 'SERVERTOOL_HANDLER_FAILED',
+          category: 'INTERNAL_ERROR',
+          status: 500,
+          message: '[servertool] invalid handler plan/result contract',
+          details: {
+            requestId
+          }
         }
       };
     }),

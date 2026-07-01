@@ -59,16 +59,6 @@ jest.unstable_mockModule(
       executedIds: [],
       executedFlowIds: []
     })),
-    planServertoolHandlerContractErrorWithNative: jest.fn((input: any) => ({
-      code: 'SERVERTOOL_HANDLER_FAILED',
-      category: 'INTERNAL_ERROR',
-      status: 500,
-      message: `[native-handler-contract] ${String(input?.kind ?? 'unknown')}`,
-      details: input ?? {}
-    })),
-    planServertoolHandlerRuntimeActionForPlannedWithNative: jest.fn(() => ({
-      action: 'return_handler_result'
-    })),
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
     parseServertoolCliProjectionToolArgumentsWithNative: jest.fn(() => ({})),
     planServertoolExecutionOutcomeMaterializationWithNative,

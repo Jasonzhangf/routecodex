@@ -5507,13 +5507,13 @@ function checkServertoolRustOutcomeCloseout() {
     servertoolCoreLib,
     'pub mod execution_handler_contract'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-export',
     `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
     napiBlocks,
     'plan_servertool_handler_contract_error_json'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-export',
     `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
     napiBlocks,
@@ -5531,13 +5531,13 @@ function checkServertoolRustOutcomeCloseout() {
     napiBlocks,
     'plan_servertool_materialization_progress_json'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-export',
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
     'pub fn plan_servertool_handler_contract_error_json'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-export',
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
@@ -5555,13 +5555,13 @@ function checkServertoolRustOutcomeCloseout() {
     napiLib,
     'pub fn plan_servertool_materialization_progress_json'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-required-export',
     NATIVE_REQUIRED_EXPORTS,
     requiredExports,
     'planServertoolHandlerContractErrorJson'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-required-export',
     NATIVE_REQUIRED_EXPORTS,
     requiredExports,
@@ -5579,17 +5579,23 @@ function checkServertoolRustOutcomeCloseout() {
     requiredExports,
     'planServertoolMaterializationProgressJson'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeCoreWrapper,
     'planServertoolHandlerContractErrorWithNative'
   );
-  assertContains(
+  assertMissing(
     'servertool-execution-handler-contract-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeCoreWrapper,
     'planServertoolHandlerRuntimeActionForPlannedWithNative'
+  );
+  assertMissing(
+    'servertool-execution-handler-contract-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
+    'planServertoolHandlerRuntimeActionWithNative'
   );
   assertContains(
     'servertool-execution-handler-contract-native-bridge',

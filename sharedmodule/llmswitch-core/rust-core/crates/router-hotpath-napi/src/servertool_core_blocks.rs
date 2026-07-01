@@ -574,52 +574,6 @@ pub fn plan_engine_selection_after_run_json(input_json: &str) -> Result<String, 
     .map_err(|e| format!("serialize engine selection after-run plan: {e}"))
 }
 
-pub fn plan_servertool_handler_contract_error_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool handler contract error input: {e}"))?;
-    let kind = input
-        .get("kind")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    match kind {
-        "handler_failed" => {
-            let parsed: execution_handler_contract::ServertoolHandlerFailedErrorInput =
-                serde_json::from_value(input)
-                    .map_err(|e| format!("deserialize handler failed error input: {e}"))?;
-            serde_json::to_string(
-                &execution_handler_contract::plan_servertool_handler_failed_error(&parsed),
-            )
-            .map_err(|e| format!("serialize handler failed error plan: {e}"))
-        }
-        "invalid_handler_plan_missing_finalize" => {
-            let parsed: execution_handler_contract::ServertoolInvalidHandlerPlanErrorInput =
-                serde_json::from_value(input).map_err(|e| {
-                    format!("deserialize invalid handler plan missing finalize input: {e}")
-                })?;
-            serde_json::to_string(
-                &execution_handler_contract::plan_servertool_invalid_handler_plan_missing_finalize_error(
-                    &parsed,
-                ),
-            )
-            .map_err(|e| format!("serialize invalid handler plan missing finalize error plan: {e}"))
-        }
-        "invalid_handler_plan_result" => {
-            let parsed: execution_handler_contract::ServertoolInvalidHandlerPlanErrorInput =
-                serde_json::from_value(input)
-                    .map_err(|e| format!("deserialize invalid handler plan result input: {e}"))?;
-            serde_json::to_string(
-                &execution_handler_contract::plan_servertool_invalid_handler_plan_result_error(
-                    &parsed,
-                ),
-            )
-            .map_err(|e| format!("serialize invalid handler plan result error plan: {e}"))
-        }
-        _ => Err(format!(
-            "deserialize servertool handler contract error input: unknown kind {kind}"
-        )),
-    }
-}
-
 pub fn plan_servertool_execution_dispatch_error_json(input_json: &str) -> Result<String, String> {
     let input: serde_json::Value = serde_json::from_str(input_json)
         .map_err(|e| format!("deserialize servertool execution-dispatch error input: {e}"))?;
@@ -678,16 +632,6 @@ pub fn build_servertool_postflight_observation_summary_json(
         postflight_observation_contract::build_servertool_postflight_observation_summary(input)?;
     serde_json::to_string(&output)
         .map_err(|e| format!("serialize servertool postflight observation summary: {e}"))
-}
-
-pub fn plan_servertool_handler_runtime_action_json(input_json: &str) -> Result<String, String> {
-    let input: execution_handler_contract::ServertoolHandlerRuntimeActionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool handler runtime action input: {e}"))?;
-    serde_json::to_string(
-        &execution_handler_contract::plan_servertool_handler_runtime_action(&input),
-    )
-    .map_err(|e| format!("serialize servertool handler runtime action plan: {e}"))
 }
 
 pub fn plan_servertool_handler_materialization_json(input_json: &str) -> Result<String, String> {
@@ -2477,25 +2421,6 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
 }
 
 #[test]
-fn plans_servertool_handler_contract_error_via_servertool_core_bridge() {
-    let plan = plan_servertool_handler_contract_error_json(
-        &serde_json::json!({
-            "kind": "handler_failed",
-            "toolName": "tool_a",
-            "requestId": "req-1",
-            "entryEndpoint": "/v1/responses",
-            "providerProtocol": "openai-responses",
-            "error": "boom"
-        })
-        .to_string(),
-    )
-    .expect("handler contract error plan");
-    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(parsed["code"], "SERVERTOOL_HANDLER_FAILED");
-    assert_eq!(parsed["details"]["toolName"], "tool_a");
-}
-
-#[test]
 fn plans_servertool_execution_dispatch_error_via_servertool_core_bridge() {
     let plan = plan_servertool_execution_dispatch_error_json(
         &serde_json::json!({
@@ -2549,26 +2474,6 @@ fn builds_servertool_postflight_observation_summary_via_servertool_core_bridge()
     assert_eq!(
         parsed["followup"]["injectionOps"],
         serde_json::json!(["append"])
-    );
-}
-
-#[test]
-fn plans_servertool_handler_runtime_action_via_servertool_core_bridge() {
-    let plan = plan_servertool_handler_runtime_action_json(
-        &serde_json::json!({
-            "hasFinalizeFunction": true,
-            "hasChatResponseObject": false,
-            "hasExecutionObject": false,
-            "hasExecutionFlowId": false,
-            "hasPlanMarkers": true
-        })
-        .to_string(),
-    )
-    .expect("handler runtime action plan");
-    let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(
-        parsed["action"],
-        serde_json::json!("finalize_without_backend")
     );
 }
 

@@ -1509,12 +1509,6 @@ pub fn plan_engine_selection_after_run_json(input_json: String) -> NapiResult<St
 }
 
 #[napi]
-pub fn plan_servertool_handler_contract_error_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_servertool_handler_contract_error_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
 pub fn plan_servertool_execution_dispatch_error_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_execution_dispatch_error_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1525,12 +1519,6 @@ pub fn build_servertool_postflight_observation_summary_json(
     input_json: String,
 ) -> NapiResult<String> {
     servertool_core_blocks::build_servertool_postflight_observation_summary_json(&input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
-pub fn plan_servertool_handler_runtime_action_json(input_json: String) -> NapiResult<String> {
-    servertool_core_blocks::plan_servertool_handler_runtime_action_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
