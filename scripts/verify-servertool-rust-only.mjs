@@ -3408,6 +3408,8 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const queueResultForReturn = queueResult as ServerToolHandlerResult');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'finalChatResponse: queueResultForReturn.chatResponse');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'execution: queueResultForReturn.execution');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'invalid auto-hook attempt return disposition');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'invalid auto-hook caller finalization action');
   for (const keyword of [
     'export async function runAutoHookExecutionQueue(',
     'errorAttemptInput',

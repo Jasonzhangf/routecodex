@@ -208,6 +208,8 @@ const TARGETS = [
       'const queueResultForReturn = queueResult as ServerToolHandlerResult',
       'finalChatResponse: queueResultForReturn.chatResponse',
       'execution: queueResultForReturn.execution',
+      'invalid auto-hook attempt return disposition',
+      'invalid auto-hook caller finalization action',
     ],
   },
   {

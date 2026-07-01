@@ -542,4 +542,68 @@ describe('servertool auto hook trace', () => {
       })
     ).rejects.toThrow('trace sink failed');
   });
+
+  test('fails fast for invalid native attempt return disposition', async () => {
+    registryHooks.push({
+      id: 'vision_auto',
+      phase: 'default',
+      priority: 20,
+      order: 1,
+      execution: {
+        kind: 'builtin',
+        builtinName: 'vision_auto',
+        __testHandler: async () => null
+      }
+    });
+    planAutoHookRuntimeAttemptWithNativeMock.mockReturnValue({
+      returnResult: 'unknown_return_disposition',
+      traceEvent: {
+        hookId: 'vision_auto',
+        phase: 'default',
+        priority: 20,
+        queue: 'A_optional',
+        queueIndex: 1,
+        queueTotal: 1,
+        result: 'miss',
+        reason: 'test'
+      }
+    });
+    const options = createOptions([]);
+
+    await expect(
+      runServertoolAutoHookCaller({
+        options,
+        contextBase: createContextBase(options),
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null
+      })
+    ).rejects.toThrow('[servertool] invalid auto-hook attempt return disposition: unknown_return_disposition');
+  });
+
+  test('fails fast for invalid native caller finalization action', async () => {
+    registryHooks.push({
+      id: 'vision_auto',
+      phase: 'default',
+      priority: 20,
+      order: 1,
+      execution: {
+        kind: 'builtin',
+        builtinName: 'vision_auto',
+        __testHandler: async () => null
+      }
+    });
+    planAutoHookCallerFinalizationWithNativeMock.mockReturnValue({
+      action: 'unknown_finalization_action'
+    });
+    const options = createOptions([]);
+
+    await expect(
+      runServertoolAutoHookCaller({
+        options,
+        contextBase: createContextBase(options),
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null
+      })
+    ).rejects.toThrow('[servertool] invalid auto-hook caller finalization action: unknown_finalization_action');
+  });
 });

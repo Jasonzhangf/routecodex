@@ -115,6 +115,10 @@ async function runAutoHookExecutionQueue(args: {
         return result as ServerToolHandlerResult;
       case false:
         continue;
+      default:
+        throw new Error(
+          `[servertool] invalid auto-hook attempt return disposition: ${String(attemptPlan.returnResult)}`
+        );
     }
   }
 
@@ -163,6 +167,12 @@ export async function runServertoolAutoHookCaller(args: {
         continue;
       case 'return_null':
         return null;
+      default:
+        throw new Error(
+          `[servertool] invalid auto-hook caller finalization action: ${String(
+            (finalizationPlan as { action: string }).action
+          )}`
+        );
     }
   }
 
