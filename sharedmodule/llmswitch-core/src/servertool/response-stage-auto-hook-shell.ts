@@ -26,8 +26,9 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     autoHookEvaluated: false,
     hasAutoHookResult: false
   });
-  if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass') {
-    return { action: 'return_passthrough_bypass' };
+  switch (preAutoHookRuntimeAction.action) {
+    case 'return_passthrough_bypass':
+      return { action: 'return_passthrough_bypass' };
   }
 
   const autoHookResult = await runServertoolAutoHookCaller({
@@ -41,19 +42,19 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     autoHookEvaluated: true,
     hasAutoHookResult: autoHookResult !== null
   });
-  if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolRequiredResponseHookEmptyErrorWithNative({
-        requestId: args.options.requestId,
-        responseHookName: postAutoHookRuntimeAction.responseHookName as string
-      })
-    );
-  }
-  if (postAutoHookRuntimeAction.action === 'return_auto_hook_result') {
-    return {
-      action: 'return_auto_hook_result',
-      result: autoHookResult as ServerSideToolEngineResult
-    };
+  switch (postAutoHookRuntimeAction.action) {
+    case 'return_required_response_hook_empty':
+      throw createServertoolProviderProtocolErrorFromPlan(
+        planServertoolRequiredResponseHookEmptyErrorWithNative({
+          requestId: args.options.requestId,
+          responseHookName: postAutoHookRuntimeAction.responseHookName as string
+        })
+      );
+    case 'return_auto_hook_result':
+      return {
+        action: 'return_auto_hook_result',
+        result: autoHookResult as ServerSideToolEngineResult
+      };
   }
 
   return { action: 'continue_without_result' };

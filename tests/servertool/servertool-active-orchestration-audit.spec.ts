@@ -218,6 +218,20 @@ const TARGETS = [
     ],
   },
   {
+    file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts',
+    forbidden: [
+      "if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass')",
+      "if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty')",
+      "if (postAutoHookRuntimeAction.action === 'return_auto_hook_result')",
+    ],
+    required: [
+      'switch (preAutoHookRuntimeAction.action)',
+      'switch (postAutoHookRuntimeAction.action)',
+      'result: autoHookResult as ServerSideToolEngineResult',
+      'responseHookName: postAutoHookRuntimeAction.responseHookName as string',
+    ],
+  },
+  {
     file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
     forbidden: [
       'responseHookMatched !== true',
