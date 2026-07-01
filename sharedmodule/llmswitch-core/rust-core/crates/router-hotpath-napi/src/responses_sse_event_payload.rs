@@ -230,6 +230,20 @@ fn normalize_strict_responses_usage(usage_raw: &Value) -> Result<Value, String> 
     Ok(Value::Object(out))
 }
 
+fn read_required_response_string(
+    source: &Map<String, Value>,
+    field: &str,
+    message: &str,
+) -> Result<String, String> {
+    source
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| message.to_string())
+}
+
 fn normalize_responses_sse_reasoning_summary(summary_raw: &Value) -> Result<Value, String> {
     if summary_raw.is_null() {
         return Ok(Value::Array(Vec::new()));
@@ -925,18 +939,45 @@ pub fn normalize_responses_sse_response_payload(
 
     let mut payload_row = source.clone();
     payload_row.remove("metadata");
-
-    if !payload_row.contains_key("object") || payload_row.get("object").is_none_or(Value::is_null) {
-        payload_row.insert("object".to_string(), Value::String("response".to_string()));
+    let object = read_required_response_string(
+        &source,
+        "object",
+        "Invalid Responses response: missing object",
+    )?;
+    if object != "response" {
+        return Err("Invalid Responses response: object must be response".to_string());
     }
+    let id = read_required_response_string(
+        &source,
+        "id",
+        "Invalid Responses response: missing id",
+    )?;
+    let model = read_required_response_string(
+        &source,
+        "model",
+        "Invalid Responses response: missing model",
+    )?;
+    let explicit_status = source
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Invalid Responses response: missing status".to_string())?;
+    let response_output = source
+        .get("output")
+        .filter(|value| value.is_array())
+        .cloned()
+        .ok_or_else(|| "Invalid Responses response: missing output array".to_string())?;
+
+    payload_row.insert("object".to_string(), Value::String(object));
+    payload_row.insert("id".to_string(), Value::String(id));
+    payload_row.insert("model".to_string(), Value::String(model));
     payload_row.insert("created_at".to_string(), read_required_created_at(&source)?);
     payload_row.insert(
         "status".to_string(),
-        Value::String(status.unwrap_or("in_progress").to_string()),
+        Value::String(status.unwrap_or(explicit_status).to_string()),
     );
-    if !payload_row.contains_key("output") {
-        payload_row.insert("output".to_string(), Value::Array(Vec::new()));
-    }
+    payload_row.insert("output".to_string(), response_output);
     if !payload_row.contains_key("background") {
         payload_row.insert("background".to_string(), Value::Bool(false));
     }
@@ -1853,6 +1894,40 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Invalid Responses response: missing created_at"));
+    }
+
+    #[test]
+    fn rejects_responses_sse_response_payload_missing_object() {
+        let err = normalize_responses_sse_response_payload(
+            json!({
+                "id": "resp_sse_payload_missing_object",
+                "created_at": 1781149537,
+                "status": "completed",
+                "model": "gpt-test",
+                "output": []
+            }),
+            Some("completed"),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Invalid Responses response: missing object"));
+    }
+
+    #[test]
+    fn rejects_responses_sse_response_payload_missing_output_array() {
+        let err = normalize_responses_sse_response_payload(
+            json!({
+                "id": "resp_sse_payload_missing_output",
+                "object": "response",
+                "created_at": 1781149537,
+                "status": "completed",
+                "model": "gpt-test"
+            }),
+            Some("completed"),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Invalid Responses response: missing output array"));
     }
 
     #[test]

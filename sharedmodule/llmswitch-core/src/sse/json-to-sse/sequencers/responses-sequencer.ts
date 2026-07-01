@@ -39,23 +39,6 @@ export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesEventGeneratorConfig =
 };
 
 /**
- * 验证响应格式
- */
-function validateResponse(response: ResponsesResponse, config: ResponsesEventGeneratorConfig): void {
-  if (!response.id || !response.model) {
-    throw new Error('Invalid response: missing required fields');
-  }
-
-  if (typeof response.status !== 'string' || !response.status.trim()) {
-    throw new Error('Invalid Responses response: missing status');
-  }
-
-  if (!response.output || !Array.isArray(response.output)) {
-    throw new Error('Invalid response: missing or invalid output array');
-  }
-}
-
-/**
  * 序列化消息输出项
  */
 async function* sequenceMessageItem(
@@ -184,15 +167,12 @@ async function* sequenceResponseCore(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
 ): AsyncGenerator<ResponsesSseEvent> {
-  // 1. 验证响应格式
-  validateResponse(response, config);
-
-  // 2. 发送response.start事件
+  // 1. 发送response.start事件
   yield* buildResponseStartEvents(response, context, config);
 
   const normalizedOutput = normalizeResponsesOutputItems(response.output);
 
-  // 3. 序列化所有输出项
+  // 2. 序列化所有输出项
   for (let outputIndex = 0; outputIndex < normalizedOutput.length; outputIndex++) {
     const item = normalizedOutput[outputIndex];
     context.outputIndexCounter = outputIndex;
@@ -200,7 +180,7 @@ async function* sequenceResponseCore(
     yield* sequenceOutputItem(item, context, config);
   }
 
-  // 4. 发送终止事件；工具调用已通过标准 output_item/function_call_arguments 事件表达。
+  // 3. 发送终止事件；工具调用已通过标准 output_item/function_call_arguments 事件表达。
   yield buildResponseCompletedEvent(response, context, config);
   yield buildResponseDoneEvent(response, context, config);
 }

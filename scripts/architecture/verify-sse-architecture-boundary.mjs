@@ -195,6 +195,10 @@ for (const forbidden of [
 
 const responsesJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts');
 for (const forbidden of [
+  'private validateResponse(',
+  'Invalid ResponsesResponse: missing required fields',
+  'Invalid ResponsesResponse: object must be "response"',
+  'Invalid ResponsesResponse: output must be an array',
   'responsesRequest: {} as any',
   'outputItemStates: new Map()',
   'CONTEXT_TTL_MS',
@@ -297,6 +301,9 @@ for (const forbidden of [
 
 const responsesSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts');
 for (const forbidden of [
+  'function validateResponse(',
+  'Invalid response: missing required fields',
+  'Invalid response: missing or invalid output array',
   'enableValidation: boolean',
   'if (!config.enableValidation) return',
   'if (config.enableValidation) {',

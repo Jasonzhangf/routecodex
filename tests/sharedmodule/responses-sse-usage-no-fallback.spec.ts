@@ -119,6 +119,38 @@ describe('responses SSE usage no-fallback boundary', () => {
     await expect(collectText(stream)).rejects.toThrow('Invalid Responses response: missing status');
   });
 
+  it('fails missing output instead of synthesizing an empty output array in SSE', async () => {
+    const converter = new ResponsesJsonToSseConverterRefactored();
+    const response: ResponsesResponse = {
+      id: 'resp_missing_output',
+      object: 'response',
+      created_at: 1781149537,
+      status: 'completed',
+      model: 'gpt-5.5'
+    } as ResponsesResponse;
+
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_responses_missing_output'
+    });
+    await expect(collectText(stream)).rejects.toThrow('Invalid Responses response: missing output array');
+  });
+
+  it('fails missing object instead of synthesizing a response object in SSE', async () => {
+    const converter = new ResponsesJsonToSseConverterRefactored();
+    const response: ResponsesResponse = {
+      id: 'resp_missing_object',
+      created_at: 1781149537,
+      status: 'completed',
+      model: 'gpt-5.5',
+      output: []
+    } as ResponsesResponse;
+
+    const stream = await converter.convertResponseToJsonToSse(response, {
+      requestId: 'req_responses_missing_object'
+    });
+    await expect(collectText(stream)).rejects.toThrow('Invalid Responses response: missing object');
+  });
+
   it('does not recover an invalid output item by synthesizing a response.error event', async () => {
     const converter = new ResponsesJsonToSseConverterRefactored();
     const response: ResponsesResponse = {

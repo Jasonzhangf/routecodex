@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses JSON->SSE top-level validation moved to Rust owner
+
+- Red evidence: after adding boundary markers, `npm run verify:sse-architecture-boundary` failed on `function validateResponse(` plus converter/sequencer local `Invalid ResponsesResponse` / `Invalid response` messages, proving Responses JSON->SSE still kept TS semantic validation.
+- Fix: removed `ResponsesJsonToSseConverterRefactored.validateResponse()` and `responses-sequencer.ts::validateResponse()`. Rust `responses_sse_event_payload::normalize_responses_sse_response_payload()` now requires explicit `object:"response"`, `id`, `model`, `status`, and array `output`; it no longer synthesizes `object:"response"` or empty `output`.
+- Positive / reverse tests: valid source replay still emits `response.completed` and `response.done`; missing `output` and missing `object` fail fast with native-owner errors instead of being accepted or repaired by SSE.
+- Verification: `cargo test -p router-hotpath-napi responses_sse_response_payload --lib -- --nocapture` PASS 6/6; native hotpath build PASS; focused Jest `responses-sse-usage-no-fallback + responses-sse-output-item-descriptor-native` PASS 21/21; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:function-map-compile-gate`, sharedmodule/root `tsc --noEmit`, `git diff --check`, and `build:base BUILD_BASE_EXIT:0` PASS.
+- Replay evidence: current 4444 provider-response snapshots contain error bodies and no success SSE wire fields (`bodyText` / `rawBody` / `sseText`); source replay confirmed valid completed/done and native fail-fast for missing `output` / `object`.
+
 ### 2026-07-01 Responses reasoning content malformed-array fail-fast slice
 
 - Red evidence: focused `responses-sse-reasoning-summary-no-normalize` first failed because `buildReasoningDeltas()` used `Array.isArray(reasoning.content) ? reasoning.content : []`, so malformed non-array reasoning content was silently treated as no deltas and the response still emitted `response.completed` / `response.done`.

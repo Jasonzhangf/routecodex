@@ -34,12 +34,6 @@ export class ResponsesJsonToSseConverterRefactored {
     response: ResponsesResponse,
     options: ResponsesJsonToSseOptions
   ): Promise<ResponsesSseEventStream> {
-    try {
-      this.validateResponse(response);
-    } catch (error) {
-      throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, options.requestId);
-    }
-
     // 1. 创建上下文
     const context = this.createResponseContext(response, options);
 
@@ -73,16 +67,13 @@ export class ResponsesJsonToSseConverterRefactored {
     stream: PassThrough
   ): Promise<void> {
     try {
-      // 1. 验证响应
-      this.validateResponse(response);
-
-      // 2. 创建流写入器
+      // 1. 创建流写入器
       const writer = createResponsesStreamWriter(stream, {
         onEvent: (event) => this.updateStats(context, event as ResponsesSseEvent),
         onError: (error) => this.handleStreamError(context, error, stream)
       });
 
-      // 3. 直接调用 sequencer 函数，避免长期保留第二套配置 facade。
+      // 2. 直接调用 sequencer 函数，避免长期保留第二套配置 facade。
       const sequencerConfig: ResponsesEventGeneratorConfig = {
         ...DEFAULT_RESPONSES_SEQUENCER_CONFIG
       };
@@ -90,7 +81,7 @@ export class ResponsesJsonToSseConverterRefactored {
         sequencerConfig.chunkSize = context.options.chunkSize;
       }
 
-      // 4. 生成事件序列并写入流
+      // 3. 生成事件序列并写入流
       const eventStream = sequenceResponse(
         response,
         createDefaultResponsesContext(context.requestId, response.model),
@@ -98,28 +89,11 @@ export class ResponsesJsonToSseConverterRefactored {
       );
       await writer.writeResponsesEvents(eventStream);
 
-      // 5. 完成流
+      // 4. 完成流
       writer.complete();
 
     } catch (error) {
       throw this.wrapError('RESPONSE_CONVERSION_ERROR', error as Error, context.requestId);
-    }
-  }
-
-  /**
-   * 验证响应格式
-   */
-  private validateResponse(response: ResponsesResponse): void {
-    if (!response.id || !response.model || !response.object) {
-      throw new Error('Invalid ResponsesResponse: missing required fields');
-    }
-
-    if (response.object !== 'response') {
-      throw new Error('Invalid ResponsesResponse: object must be "response"');
-    }
-
-    if (!Array.isArray(response.output)) {
-      throw new Error('Invalid ResponsesResponse: output must be an array');
     }
   }
 
