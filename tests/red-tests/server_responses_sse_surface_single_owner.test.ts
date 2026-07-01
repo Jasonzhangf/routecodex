@@ -71,4 +71,14 @@ describe('server responses SSE surface single owner', () => {
     expect(indexSource).not.toContain('projectResponsesSseFrameForClientForHttp');
     expect(indexSource).not.toContain('assertDirectPassthroughResponsesSseMetadataIsolationForHttp');
   });
+
+  it('keeps responses-sse-bridge limited to SSE transport exports', () => {
+    const bridgeSource = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
+
+    expect(bridgeSource).not.toContain('buildResponsesRequestLogContextForHttp');
+    expect(bridgeSource).not.toContain('prepareResponsesJsonClientDispatchPlanForHttp');
+    expect(bridgeSource).not.toContain('importResponsesHandlerCoreDist');
+    expect(bridgeSource).not.toContain('requireResponsesHandlerCoreDist');
+    expect(bridgeSource).not.toContain('ResponsesRequestContextForHttp');
+  });
 });

@@ -60,6 +60,11 @@ expectNotContains(responseLifecycleBridgeSource, 'shouldDispatchResponsesSseToCl
 expectNotContains(responseLifecycleBridgeSource, 'buildClientSseKeepaliveFrameForHttp', 'responses-response-bridge.ts must not own keepalive framing');
 expectNotContains(sseBridgeSource, 'resolveResponsesRequestContextForHttp', 'responses-sse-bridge.ts must not re-export request-context facade salvage');
 expectNotContains(sseBridgeSource, 'shouldDispatchResponsesSseToClientForHttp', 'responses-sse-bridge.ts must not re-export SSE dispatch facade salvage');
+expectNotContains(sseBridgeSource, 'buildResponsesRequestLogContextForHttp', 'responses-sse-bridge.ts must not re-export response request-log helpers; response bridge owns that facade');
+expectNotContains(sseBridgeSource, 'prepareResponsesJsonClientDispatchPlanForHttp', 'responses-sse-bridge.ts must not re-export JSON client dispatch; response bridge owns projection IO');
+expectNotContains(sseBridgeSource, 'importResponsesHandlerCoreDist', 'responses-sse-bridge.ts must not re-export module-loader helpers');
+expectNotContains(sseBridgeSource, 'requireResponsesHandlerCoreDist', 'responses-sse-bridge.ts must not re-export module-loader helpers');
+expectNotContains(sseBridgeSource, 'ResponsesRequestContextForHttp', 'responses-sse-bridge.ts must not re-export response request context types');
 
 for (const forbiddenLocalDefinition of [
   'async function streamResponsesJsonAsSse(',

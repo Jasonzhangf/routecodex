@@ -44,7 +44,7 @@ expectContains(requestBridgeFeature, 'scripts/architecture/verify-server-functio
 expectContains(responseSseBridgeFeature, 'opaque SSE/body handoff facade only', 'function-map: server.responses_sse_bridge_surface must say opaque SSE/body handoff facade only');
 expectContains(responseSseBridgeFeature, 'no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS', 'function-map: SSE bridge notes must forbid TS response protocol semantics');
 expectContains(responseSseBridgeFeature, 'scripts/architecture/verify-server-function-map-boundary.mjs', 'function-map: SSE bridge allowed_paths must include verify-server-function-map-boundary.mjs');
-expectContains(responseBridgeFeature, 'opaque continuation/conversation facade only', 'function-map: server.responses_response_handler_bridge_surface must say opaque continuation/conversation facade only');
+expectContains(responseBridgeFeature, 'opaque response projection/conversation facade', 'function-map: server.responses_response_handler_bridge_surface must say opaque response projection/conversation facade');
 expectContains(responseBridgeFeature, 'response-id rebinding, continuation retention/finalization, or conversation clear-policy semantics', 'function-map: lifecycle bridge notes must forbid handler-owned lifecycle semantics');
 expectContains(responseBridgeFeature, 'scripts/architecture/verify-server-function-map-boundary.mjs', 'function-map: lifecycle bridge allowed_paths must include verify-server-function-map-boundary.mjs');
 
