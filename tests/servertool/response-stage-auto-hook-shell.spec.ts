@@ -112,6 +112,8 @@ describe('response-stage-auto-hook-shell', () => {
 
     expect(source).not.toContain('[servertool] native response-stage requested auto-hook result but result was empty');
     expect(source).not.toContain('if (!autoHookResult)');
+    expect(source).not.toContain('Boolean(autoHookResult)');
+    expect(source).toContain('hasAutoHookResult: autoHookResult !== null');
     expect(source).toContain('result: autoHookResult as ServerSideToolEngineResult');
   });
 

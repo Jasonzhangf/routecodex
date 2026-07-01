@@ -5833,6 +5833,7 @@ function checkServertoolResponseStageGateThinShell() {
     "responseHookName: String(args.responseStageGatePlan.responseHookName ?? 'unknown')",
     '[servertool] native response-stage requested auto-hook result but result was empty',
     'if (!autoHookResult)',
+    'Boolean(autoHookResult)',
   ]) {
     if (responseStageAutoHookShell.includes(marker)) {
       fail(

@@ -39,7 +39,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: true,
-    hasAutoHookResult: Boolean(autoHookResult)
+    hasAutoHookResult: autoHookResult !== null
   });
   if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
     throw createServertoolProviderProtocolErrorFromPlan(
