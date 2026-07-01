@@ -68,6 +68,7 @@ const RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT = `${ROOT}/sharedmodule/llmswit
 const RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs`;
 const RUST_SERVERTOOL_ENTRY_PREFLIGHT_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs`;
 const RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs`;
+const RUST_SERVERTOOL_ENGINE_PREPASS_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs`;
 const RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs`;
 const RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs`;
 const RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs`;
@@ -3747,6 +3748,7 @@ function checkServertoolRegistryRustOwner() {
 
 function checkServertoolEntryPreflightRustOwner() {
   const rustEntryPreflight = readRequired(RUST_SERVERTOOL_ENTRY_PREFLIGHT_CONTRACT);
+  const rustEnginePrepass = readRequired(RUST_SERVERTOOL_ENGINE_PREPASS_ACTION_CONTRACT);
   const servertoolCoreLib = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`);
   const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
@@ -3764,11 +3766,25 @@ function checkServertoolEntryPreflightRustOwner() {
   ]) {
     assertContains('servertool-entry-preflight-rust-owner', RUST_SERVERTOOL_ENTRY_PREFLIGHT_CONTRACT, rustEntryPreflight, needle);
   }
+  for (const needle of [
+    'feature_id: hub.servertool_engine_prepass_action_contract',
+    'pub struct ServertoolEnginePrepassActionInput',
+    'pub struct ServertoolEnginePrepassActionPlan',
+    'pub fn plan_servertool_engine_prepass_action',
+  ]) {
+    assertContains('servertool-engine-prepass-action-rust-owner', RUST_SERVERTOOL_ENGINE_PREPASS_ACTION_CONTRACT, rustEnginePrepass, needle);
+  }
   assertContains(
     'servertool-entry-preflight-rust-owner',
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
     servertoolCoreLib,
     'pub mod server_side_tool_entry_contract'
+  );
+  assertContains(
+    'servertool-engine-prepass-action-rust-owner',
+    `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`,
+    servertoolCoreLib,
+    'pub mod engine_prepass_action_contract'
   );
   assertContains(
     'servertool-entry-preflight-native-export',
@@ -3783,6 +3799,12 @@ function checkServertoolEntryPreflightRustOwner() {
     'plan_servertool_entry_context_json'
   );
   assertContains(
+    'servertool-engine-prepass-action-native-export',
+    `${RUST_SRC_DIR}/servertool_core_blocks.rs`,
+    napiBlocks,
+    'plan_servertool_engine_prepass_action_json'
+  );
+  assertContains(
     'servertool-entry-preflight-native-export',
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
@@ -3793,6 +3815,12 @@ function checkServertoolEntryPreflightRustOwner() {
     RUST_ROUTER_HOTPATH_NAPI_LIB,
     napiLib,
     'pub fn plan_servertool_entry_context_json'
+  );
+  assertContains(
+    'servertool-engine-prepass-action-native-export',
+    RUST_ROUTER_HOTPATH_NAPI_LIB,
+    napiLib,
+    'pub fn plan_servertool_engine_prepass_action_json'
   );
   assertContains(
     'servertool-entry-preflight-required-export',
@@ -3807,6 +3835,12 @@ function checkServertoolEntryPreflightRustOwner() {
     'planServertoolEntryContextJson'
   );
   assertContains(
+    'servertool-engine-prepass-action-required-export',
+    NATIVE_REQUIRED_EXPORTS,
+    requiredExports,
+    'planServertoolEnginePrepassActionJson'
+  );
+  assertContains(
     'servertool-entry-preflight-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,
@@ -3817,6 +3851,12 @@ function checkServertoolEntryPreflightRustOwner() {
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,
     'planServertoolEntryContextWithNative'
+  );
+  assertContains(
+    'servertool-engine-prepass-action-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'planServertoolEnginePrepassActionWithNative'
   );
   assertContains(
     'servertool-entry-preflight-ts-thin-shell',
@@ -5443,8 +5483,9 @@ function checkServertoolRustOutcomeCloseout() {
     'resolveServertoolEntryContext',
     'runServertoolResponseStagePrePass',
     'runServertoolExecutionStage',
+    'planServertoolEnginePrepassActionWithNative',
     'switch (entryPreflight.action)',
-    'switch (responseStagePrePass.action)',
+    'switch (enginePrepassAction.action)',
   ]) {
     if (!runServerSideToolEngineShell.includes(marker)) {
       fail(
@@ -5463,6 +5504,7 @@ function checkServertoolRustOutcomeCloseout() {
     "case 'return_non_object_base':",
     'invalid entry context action',
     "if (responseStagePrePass.action === 'return_result')",
+    'switch (responseStagePrePass.action)',
     'const entryPreflightAction = entryPreflight.action',
     'const entryContextAction = entryContext.action',
     'const responseStagePrePassAction = responseStagePrePass.action',

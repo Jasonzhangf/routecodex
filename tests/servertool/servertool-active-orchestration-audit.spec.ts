@@ -433,8 +433,9 @@ const TARGETS = [
       'resolveServertoolEntryContext',
       'runServertoolResponseStagePrePass',
       'runServertoolExecutionStage',
+      'planServertoolEnginePrepassActionWithNative',
       'switch (entryPreflight.action)',
-      'switch (responseStagePrePass.action)',
+      'switch (enginePrepassAction.action)',
     ],
   },
   {

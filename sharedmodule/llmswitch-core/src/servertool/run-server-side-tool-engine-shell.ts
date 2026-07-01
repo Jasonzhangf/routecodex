@@ -8,6 +8,7 @@ import { runServertoolEntryPreflight } from './entry-preflight-shell.js';
 import { runServertoolResponseStagePrePass } from './response-stage-prepass-shell.js';
 import { runServertoolExecutionStage } from './execution-stage-shell.js';
 import { resolveServertoolEntryContext } from './entry-context-shell.js';
+import { planServertoolEnginePrepassActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
@@ -39,14 +40,21 @@ export async function orchestrateServertoolEngine(
     includeAutoHookIds: entryContext.includeAutoHookIds,
     excludeAutoHookIds: entryContext.excludeAutoHookIds
   });
-  switch (responseStagePrePass.action) {
-    case 'return_result':
-      return responseStagePrePass.result;
+  const prepassResult = 'result' in responseStagePrePass ? responseStagePrePass.result : null;
+  const enginePrepassAction = planServertoolEnginePrepassActionWithNative({
+    hasPrepassResult: prepassResult != null
+  });
+  switch (enginePrepassAction.action) {
+    case 'return_prepass_result':
+      if (prepassResult == null) {
+        throw new Error('[servertool] native engine prepass requested result but prepass result was empty');
+      }
+      return prepassResult;
     case 'continue_to_execution':
       break;
     default:
       throw new Error(
-        `[servertool] invalid response-stage prepass action: ${String((responseStagePrePass as { action: unknown }).action)}`
+        `[servertool] invalid engine prepass action: ${String((enginePrepassAction as { action: unknown }).action)}`
       );
   }
   return runServertoolExecutionStage({

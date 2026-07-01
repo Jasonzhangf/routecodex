@@ -5,6 +5,7 @@ import {
   parseServertoolCliProjectionToolArgumentsWithNative,
   planServertoolEnginePreflightWithNative,
   planServertoolEngineSkipWithNative,
+  planServertoolEnginePrepassActionWithNative,
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineTriggerObservationWithNative,
   planStoplessCliProjectionContextWithNative,
@@ -311,6 +312,24 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'continue_to_tool_flow'
+    });
+  });
+
+  it('uses Rust-owned server-side-tool engine prepass action planning', () => {
+    expect(
+      planServertoolEnginePrepassActionWithNative({
+        hasPrepassResult: true
+      })
+    ).toEqual({
+      action: 'return_prepass_result'
+    });
+
+    expect(
+      planServertoolEnginePrepassActionWithNative({
+        hasPrepassResult: false
+      })
+    ).toEqual({
+      action: 'continue_to_execution'
     });
   });
 

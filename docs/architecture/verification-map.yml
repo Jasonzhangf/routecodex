@@ -201,6 +201,25 @@ verification:
     notes:
       - "Rust owns engine runtime action and trigger observation planning."
 
+  - feature_id: hub.servertool_engine_prepass_action_contract
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts
+    contract:
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+    integration:
+      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Rust owns engine prepass action selection; TS shell only dispatches the native plan."
+
   - feature_id: hub.servertool_engine_skip_contract
     change_risk: medium
     unit:

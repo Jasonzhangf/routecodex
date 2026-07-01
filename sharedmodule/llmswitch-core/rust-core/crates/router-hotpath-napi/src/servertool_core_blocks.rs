@@ -8,6 +8,7 @@ use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::cli_result_guard;
 use servertool_core::engine_preflight_contract;
+use servertool_core::engine_prepass_action_contract;
 use servertool_core::engine_runtime_action_contract;
 use servertool_core::engine_selection_contract;
 use servertool_core::engine_skip_contract;
@@ -511,6 +512,17 @@ pub fn plan_servertool_entry_context_json(input_json: &str) -> Result<String, St
             .map_err(|e| format!("deserialize servertool entry context input: {e}"))?;
     serde_json::to_string(&server_side_tool_entry_contract::plan_servertool_entry_context(input))
         .map_err(|e| format!("serialize servertool entry context plan: {e}"))
+}
+
+pub fn plan_servertool_engine_prepass_action_json(input_json: &str) -> Result<String, String> {
+    let input: engine_prepass_action_contract::ServertoolEnginePrepassActionInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool engine prepass action input: {e}")
+        })?;
+    serde_json::to_string(&engine_prepass_action_contract::plan_servertool_engine_prepass_action(
+        input,
+    ))
+    .map_err(|e| format!("serialize servertool engine prepass action plan: {e}"))
 }
 
 pub fn plan_servertool_registry_lookup_action_json(input_json: &str) -> Result<String, String> {
@@ -2312,6 +2324,37 @@ fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
     assert_eq!(
         disconnected_parsed["action"],
         serde_json::Value::String("throw_client_disconnected".to_string())
+    );
+}
+
+#[test]
+fn plans_servertool_engine_prepass_action_via_servertool_core_bridge() {
+    let return_result = plan_servertool_engine_prepass_action_json(
+        &serde_json::json!({
+            "hasPrepassResult": true
+        })
+        .to_string(),
+    )
+    .expect("return prepass result action");
+    let return_result_value: serde_json::Value =
+        serde_json::from_str(&return_result).expect("parse return prepass result action");
+    assert_eq!(
+        return_result_value["action"],
+        serde_json::json!("return_prepass_result")
+    );
+
+    let continue_execution = plan_servertool_engine_prepass_action_json(
+        &serde_json::json!({
+            "hasPrepassResult": false
+        })
+        .to_string(),
+    )
+    .expect("continue execution prepass action");
+    let continue_execution_value: serde_json::Value =
+        serde_json::from_str(&continue_execution).expect("parse continue execution action");
+    assert_eq!(
+        continue_execution_value["action"],
+        serde_json::json!("continue_to_execution")
     );
 }
 

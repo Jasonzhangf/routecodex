@@ -1,3 +1,8 @@
+# 2026-07-02: servertool engine prepass action moved to Rust plan
+- Slice: `run-server-side-tool-engine-shell.ts` no longer switches on `responseStagePrePass.action`; it asks Rust `plan_servertool_engine_prepass_action` whether to return the prepass result or continue to execution, and TS only dispatches `enginePrepassAction.action`.
+- Gate: `servertool-cli-native-bridge.spec.ts`, `run-server-side-tool-engine-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` require the native bridge/action switch and forbid `switch (responseStagePrePass.action)`.
+- Evidence pending in this slice: Rust unit/bridge and focused Jest already passed before map completion; rerun full required gate before commit.
+
 # 2026-07-02: servertool metadata carrier object truthiness removed
 - Slice: `metadata-center-carrier.ts` no longer uses truthiness to decide whether runtime control, request truth, provider observation, or generic carrier values are object records; it now uses explicit `!= null` plus object/array validation.
 - Gate: `stop-gateway-context.spec.ts`, `stop-message-compare-context.spec.ts`, and `verify-servertool-rust-only` forbid the old carrier object truthiness markers and require nullish object checks.

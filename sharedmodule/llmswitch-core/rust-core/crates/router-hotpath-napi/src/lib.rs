@@ -1479,6 +1479,12 @@ pub fn plan_servertool_entry_context_json(input_json: String) -> NapiResult<Stri
 }
 
 #[napi]
+pub fn plan_servertool_engine_prepass_action_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_engine_prepass_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_registry_lookup_action_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_registry_lookup_action_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

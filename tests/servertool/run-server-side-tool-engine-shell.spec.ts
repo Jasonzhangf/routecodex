@@ -5,6 +5,7 @@ const extractToolCallsFromResponseStage = jest.fn();
 const resolveServertoolEntryContext = jest.fn();
 const runServertoolResponseStagePrePass = jest.fn();
 const runServertoolExecutionStage = jest.fn();
+const planServertoolEnginePrepassActionWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.js',
@@ -41,6 +42,13 @@ jest.unstable_mockModule(
   })
 );
 
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    planServertoolEnginePrepassActionWithNative
+  })
+);
+
 const { orchestrateServertoolEngine } = await import(
   '../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js'
 );
@@ -48,6 +56,9 @@ const { orchestrateServertoolEngine } = await import(
 describe('run-server-side-tool-engine-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    planServertoolEnginePrepassActionWithNative.mockReturnValue({
+      action: 'continue_to_execution'
+    });
   });
 
   test('owns the full engine orchestration chain as a dedicated shell', async () => {
@@ -66,8 +77,10 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain("if (entryPreflight.action === 'return_result')");
     expect(source).not.toContain("if (entryContext.action !== 'continue')");
     expect(source).not.toContain("if (responseStagePrePass.action === 'return_result')");
+    expect(source).toContain('planServertoolEnginePrepassActionWithNative');
     expect(source).toContain('switch (entryPreflight.action)');
-    expect(source).toContain('switch (responseStagePrePass.action)');
+    expect(source).toContain('switch (enginePrepassAction.action)');
+    expect(source).not.toContain('switch (responseStagePrePass.action)');
     expect(source).not.toContain('const entryPreflightAction = entryPreflight.action');
     expect(source).not.toContain('const entryContextAction = entryContext.action');
     expect(source).not.toContain('const responseStagePrePassAction = responseStagePrePass.action');
@@ -114,6 +127,9 @@ describe('run-server-side-tool-engine-shell', () => {
       action: 'return_result',
       result: { mode: 'passthrough', finalChatResponse: { early: true } }
     });
+    planServertoolEnginePrepassActionWithNative.mockReturnValue({
+      action: 'return_prepass_result'
+    });
 
     await expect(
       orchestrateServertoolEngine({
@@ -124,6 +140,48 @@ describe('run-server-side-tool-engine-shell', () => {
         providerProtocol: 'openai-responses'
       } as any)
     ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { early: true } });
+    expect(planServertoolEnginePrepassActionWithNative).toHaveBeenCalledWith({
+      hasPrepassResult: true
+    });
     expect(runServertoolExecutionStage).not.toHaveBeenCalled();
+  });
+
+  test('uses Rust engine prepass action before entering execution stage', async () => {
+    runServertoolEntryPreflight.mockReturnValue({
+      action: 'continue',
+      baseObject: { ok: true }
+    });
+    extractToolCallsFromResponseStage.mockReturnValue([{ id: 'call_1', name: 'web_search' }]);
+    resolveServertoolEntryContext.mockReturnValue({
+      action: 'continue',
+      baseObject: { ok: true },
+      contextBase: { base: { ok: true }, toolCalls: [], adapterContext: {}, requestId: 'req-pass', entryEndpoint: 'openai', providerProtocol: 'openai-chat' },
+      includeToolCallNames: null,
+      excludeToolCallNames: null,
+      includeAutoHookIds: null,
+      excludeAutoHookIds: null
+    });
+    runServertoolResponseStagePrePass.mockResolvedValue({
+      action: 'continue_to_execution',
+      responseStageGatePlan: { nextAction: 'continue_to_execution' }
+    });
+    runServertoolExecutionStage.mockResolvedValue({
+      mode: 'passthrough',
+      finalChatResponse: { executed: true }
+    });
+
+    await expect(
+      orchestrateServertoolEngine({
+        chatResponse: { ok: true },
+        adapterContext: {},
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-pass',
+        providerProtocol: 'openai-responses'
+      } as any)
+    ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { executed: true } });
+    expect(planServertoolEnginePrepassActionWithNative).toHaveBeenCalledWith({
+      hasPrepassResult: false
+    });
+    expect(runServertoolExecutionStage).toHaveBeenCalled();
   });
 });

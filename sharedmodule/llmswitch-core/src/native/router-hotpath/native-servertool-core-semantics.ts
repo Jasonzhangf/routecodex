@@ -2684,6 +2684,10 @@ export interface ServertoolEntryContextPlan {
   excludeAutoHookIds?: string[];
 }
 
+export interface ServertoolEnginePrepassActionPlan {
+  action: 'return_prepass_result' | 'continue_to_execution';
+}
+
 export function planServertoolEntryContextWithNative(input: {
   includeToolCallHandlerNames?: string[];
   excludeToolCallHandlerNames?: string[];
@@ -2720,6 +2724,34 @@ export function planServertoolEntryContextWithNative(input: {
     excludeToolCallNames: record.excludeToolCallNames == null ? undefined : record.excludeToolCallNames as string[],
     includeAutoHookIds: record.includeAutoHookIds == null ? undefined : record.includeAutoHookIds as string[],
     excludeAutoHookIds: record.excludeAutoHookIds == null ? undefined : record.excludeAutoHookIds as string[]
+  };
+}
+
+export function planServertoolEnginePrepassActionWithNative(input: {
+  hasPrepassResult: boolean;
+}): ServertoolEnginePrepassActionPlan {
+  const capability = 'planServertoolEnginePrepassActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEnginePrepassActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEnginePrepassActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEnginePrepassActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.action !== 'return_prepass_result' &&
+    record.action !== 'continue_to_execution'
+  ) {
+    throw new Error('planServertoolEnginePrepassActionJson native returned invalid action');
+  }
+  return {
+    action: record.action
   };
 }
 

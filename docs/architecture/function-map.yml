@@ -304,6 +304,39 @@ owners:
     notes:
       - "Rust owns engine runtime action selection and trigger observation planning."
 
+  - feature_id: hub.servertool_engine_prepass_action_contract
+    status: active
+    summary: "servertool engine prepass action planning"
+    owner_kind: rust_ssot
+    owner_scope: "servertool engine prepass action planning"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
+    canonical_types:
+      - ServertoolEnginePrepassActionInput
+      - ServertoolEnginePrepassAction
+      - ServertoolEnginePrepassActionPlan
+    canonical_builders:
+      - plan_servertool_engine_prepass_action
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Rust owns engine prepass action selection; TS shell may only execute returned prepass/continue action."
+
   - feature_id: hub.servertool_engine_skip_contract
     status: active
     summary: "servertool engine skip planning"
