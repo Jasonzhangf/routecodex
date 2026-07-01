@@ -1,3 +1,9 @@
+# 2026-07-01: http-server usage-aggregator generated source residue removed
+- Slice: physically deleted tracked generated artifacts `src/server/runtime/http-server/executor/usage-aggregator.js` and `usage-aggregator.d.ts`; `usage-aggregator.ts` remains the only source truth.
+- Gate: extended `source-generated-residue.spec.ts` to forbid the usage-aggregator `.js/.d.ts` artifacts from returning.
+- Evidence: focused Jest `source-generated-residue + usage-aggregator` PASS 2/2 suites and 24/24 tests; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
+- Remaining source-residue candidate family: `metadata-center/*.{js,d.ts}` requires a separate metadata-center owner audit before deletion.
+
 # 2026-07-01: http-server stats-manager generated source residue removed
 - Slice: physically deleted tracked generated artifacts from `src/server/runtime/http-server`: `stats-manager.js`, `stats-manager.d.ts`, `stats-manager-internals.js`, `stats-manager-internals.d.ts`, `stats-manager-table.js`, and `stats-manager-table.d.ts`. TS source remains the only source truth for this family.
 - Gate: added `source-generated-residue.spec.ts` to forbid the deleted stats-manager `.js/.d.ts` artifacts from returning to the source tree.

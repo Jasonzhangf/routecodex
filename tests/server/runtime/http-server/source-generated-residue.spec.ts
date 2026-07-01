@@ -25,4 +25,15 @@ describe('http-server source generated residue cleanup', () => {
       expect(fs.existsSync(path.join(httpServerSourceDir, artifact))).toBe(false);
     }
   });
+
+  it('does not keep tracked usage-aggregator JS or declaration artifacts in the source tree', () => {
+    const forbiddenArtifacts = [
+      'executor/usage-aggregator.js',
+      'executor/usage-aggregator.d.ts'
+    ];
+
+    for (const artifact of forbiddenArtifacts) {
+      expect(fs.existsSync(path.join(httpServerSourceDir, artifact))).toBe(false);
+    }
+  });
 });
