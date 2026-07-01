@@ -1906,7 +1906,8 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
 
 export function planAutoHookCallerFinalizationWithNative(input: {
   resultPresent: boolean;
-  finalQueue: boolean;
+  queueIndex: number;
+  queueTotal: number;
 }): AutoHookCallerFinalizationPlan {
   const capability = 'planAutoHookCallerFinalizationJson';
   const fn = readNativeFunction(capability);

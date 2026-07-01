@@ -43,7 +43,9 @@ pub struct AutoHookCallerFinalizationInput {
     #[serde(default)]
     pub result_present: bool,
     #[serde(default)]
-    pub final_queue: bool,
+    pub queue_index: i64,
+    #[serde(default)]
+    pub queue_total: i64,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -90,10 +92,11 @@ pub fn plan_auto_hook_caller_finalization(
             return_null: false,
         };
     }
+    let final_queue = input.queue_total <= 0 || input.queue_index >= input.queue_total;
     AutoHookCallerFinalizationPlan {
         return_result: false,
-        continue_next_queue: !input.final_queue,
-        return_null: input.final_queue,
+        continue_next_queue: !final_queue,
+        return_null: final_queue,
     }
 }
 
@@ -167,14 +170,23 @@ mod tests {
 
         let next = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
             result_present: false,
-            final_queue: false,
+            queue_index: 1,
+            queue_total: 2,
         });
         assert!(next.continue_next_queue);
 
         let done = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
             result_present: false,
-            final_queue: true,
+            queue_index: 2,
+            queue_total: 2,
         });
         assert!(done.return_null);
+
+        let malformed = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
+            result_present: false,
+            queue_index: 0,
+            queue_total: 0,
+        });
+        assert!(malformed.return_null);
     }
 }

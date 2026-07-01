@@ -72,7 +72,7 @@ const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
   if (input?.resultPresent) {
     return { returnResult: true, continueNextQueue: false, returnNull: false };
   }
-  if (input?.finalQueue) {
+  if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
     return { returnResult: false, continueNextQueue: false, returnNull: true };
   }
   return { returnResult: false, continueNextQueue: true, returnNull: false };
@@ -194,7 +194,7 @@ beforeEach(() => {
     if (input?.resultPresent) {
       return { returnResult: true, continueNextQueue: false, returnNull: false };
     }
-    if (input?.finalQueue) {
+    if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
       return { returnResult: false, continueNextQueue: false, returnNull: true };
     }
     return { returnResult: false, continueNextQueue: true, returnNull: false };

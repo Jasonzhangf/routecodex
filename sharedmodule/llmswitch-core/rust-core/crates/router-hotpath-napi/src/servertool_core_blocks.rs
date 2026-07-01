@@ -1,6 +1,7 @@
 // feature_id: hub.servertool_stopless_cli_continuation
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
+use serde::{Deserialize, Serialize};
 use servertool_core::auto_hook_runtime_contract;
 use servertool_core::blocked_report_contract;
 use servertool_core::cli_contract;
@@ -38,7 +39,6 @@ use servertool_core::stopless_decision_context_signals;
 use servertool_core::stopless_learned_note_contract;
 use servertool_core::stopless_orchestration_contract;
 use servertool_core::text_extraction;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 const SERVERTOOL_INTERNAL_TOOL_NAMES: &[&str] = &[
@@ -2375,7 +2375,8 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     let result = plan_auto_hook_caller_finalization_json(
         &serde_json::json!({
             "resultPresent": true,
-            "finalQueue": false
+            "queueIndex": 1,
+            "queueTotal": 2
         })
         .to_string(),
     )
@@ -2388,7 +2389,8 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     let next = plan_auto_hook_caller_finalization_json(
         &serde_json::json!({
             "resultPresent": false,
-            "finalQueue": false
+            "queueIndex": 1,
+            "queueTotal": 2
         })
         .to_string(),
     )
@@ -2401,7 +2403,8 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     let done = plan_auto_hook_caller_finalization_json(
         &serde_json::json!({
             "resultPresent": false,
-            "finalQueue": true
+            "queueIndex": 2,
+            "queueTotal": 2
         })
         .to_string(),
     );
@@ -2503,7 +2506,10 @@ fn plans_servertool_handler_runtime_action_via_servertool_core_bridge() {
     )
     .expect("handler runtime action plan");
     let parsed: serde_json::Value = serde_json::from_str(&plan).expect("parse plan");
-    assert_eq!(parsed["action"], serde_json::json!("finalize_without_backend"));
+    assert_eq!(
+        parsed["action"],
+        serde_json::json!("finalize_without_backend")
+    );
 }
 
 #[test]
