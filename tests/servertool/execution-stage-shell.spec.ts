@@ -89,6 +89,9 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('buildServertoolCliProjectionRuntimeBranchWithNative');
     expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
+    expect(source).toContain('switch (preExecutionBranchPlan.action)');
+    expect(source).toContain("case 'continue_response_stage':");
+    expect(source).toContain('invalid pre-execution branch action');
     expect(source).toContain("case 'continue_response_stage':");
     expect(source).toContain("throw new Error(`[servertool] invalid post-execution branch action:");
     expect(source).toContain('runServertoolIoExecutionQueue');
@@ -142,6 +145,31 @@ describe('execution-stage-shell', () => {
       projectedToolCallId: 'call_1',
       base: { ok: true }
     });
+  });
+
+  test('fails fast when pre-execution branch returns an unknown native action', async () => {
+    planServertoolExecutionBranchWithNative.mockReset();
+    planServertoolExecutionBranchWithNative.mockReturnValue({
+      action: 'unknown_native_action'
+    });
+
+    await expect(
+      runServertoolExecutionStage({
+        options: { requestId: 'req-invalid-pre' } as any,
+        baseObject: { ok: true } as any,
+        toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+        contextBase: {} as any,
+        includeToolCallNames: null,
+        excludeToolCallNames: null,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null,
+        responseStageGatePlan: { responseHookMatched: false }
+      })
+    ).rejects.toThrow('[servertool] invalid pre-execution branch action: unknown_native_action');
+
+    expect(runServertoolIoExecutionQueue).not.toHaveBeenCalled();
+    expect(materializeNativeToolCallExecutionOutcome).not.toHaveBeenCalled();
+    expect(finalizeServertoolResponseStage).not.toHaveBeenCalled();
   });
 
   test('projects executable tool calls directly into the native execution-branch planner', async () => {

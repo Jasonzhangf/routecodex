@@ -55,6 +55,12 @@ export async function runServertoolExecutionStage(args: {
         }
       };
     }
+    case 'continue_response_stage':
+      break;
+    default:
+      throw new Error(
+        `[servertool] invalid pre-execution branch action: ${String(preExecutionBranchPlan.action)}`
+      );
   }
 
   const executionState = await runServertoolIoExecutionQueue({
