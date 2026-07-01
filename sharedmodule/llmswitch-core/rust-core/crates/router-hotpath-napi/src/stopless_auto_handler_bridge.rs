@@ -140,6 +140,12 @@ pub fn plan_stopless_execution_json(input_json: String) -> NapiResult<String> {
         napi::Error::from_reason(format!("deserialize StoplessExecutionPlanInput: {e}"))
     })?;
     let execution = build_stopless_execution_value(&input);
+    let request_truth_session_id = input.request_truth_session_id.clone().or_else(|| {
+        read_metadata_center_request_truth_string(
+            input.metadata_center_snapshot.as_ref(),
+            "sessionId",
+        )
+    });
     let stopless_control = input
         .runtime_control
         .as_ref()
@@ -151,7 +157,7 @@ pub fn plan_stopless_execution_json(input_json: String) -> NapiResult<String> {
         StoplessOrchestrationPlanInput {
             flow_id: input.flow_id.clone(),
             execution: execution.clone(),
-            request_truth_session_id: input.request_truth_session_id.clone(),
+            request_truth_session_id,
             stopless_control,
         },
     );
@@ -178,6 +184,21 @@ fn build_stopless_execution_value(input: &StoplessExecutionPlanInput) -> Value {
     }
 
     Value::Object(execution)
+}
+
+fn read_metadata_center_request_truth_string(
+    metadata_center_snapshot: Option<&Value>,
+    key: &str,
+) -> Option<String> {
+    metadata_center_snapshot
+        .and_then(Value::as_object)
+        .and_then(|snapshot| snapshot.get("requestTruth"))
+        .and_then(Value::as_object)
+        .and_then(|request_truth| request_truth.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 #[napi]
@@ -706,6 +727,7 @@ pub struct StoplessExecutionPlanInput {
     pub flow_id: Option<String>,
     pub execution: Value,
     pub request_truth_session_id: Option<String>,
+    pub metadata_center_snapshot: Option<Value>,
     pub runtime_control: Option<Value>,
 }
 
@@ -888,6 +910,41 @@ mod tests {
         assert!(context.get("sessionId").is_none());
         assert!(context.get("requestTruth").is_none());
         assert!(!context.contains_key("stopless"));
+    }
+
+    #[test]
+    fn stopless_execution_plan_reads_session_truth_from_metadata_center_snapshot() {
+        let result = plan_stopless_execution_json(
+            json!({
+                "flowId": "stop_message_flow",
+                "execution": {
+                    "flowId": "stop_message_flow",
+                    "context": { "assistantStopText": "continue" }
+                },
+                "metadataCenterSnapshot": {
+                    "requestTruth": {
+                        "sessionId": " sess-from-snapshot "
+                    }
+                },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 1,
+                        "maxRepeats": 3,
+                        "active": true
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("stopless execution plan");
+        let output: Value = serde_json::from_str(&result).expect("json parse");
+        assert_eq!(output["orchestrationPlan"]["action"], "cli_projection");
+        let context = output["execution"]["context"]
+            .as_object()
+            .expect("execution context");
+        assert!(context.get("sessionId").is_none());
+        assert!(context.get("requestTruth").is_none());
     }
 
     #[test]

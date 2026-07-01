@@ -555,6 +555,7 @@ export function planStoplessExecutionWithNative(input: {
   flowId?: string;
   execution: Record<string, unknown>;
   requestTruthSessionId?: string;
+  metadataCenterSnapshot?: Record<string, unknown> | null;
   runtimeControl?: Record<string, unknown> | null;
 }): StoplessExecutionPlanOutput {
   const capability = 'planStoplessExecutionJson';
@@ -566,6 +567,7 @@ export function planStoplessExecutionWithNative(input: {
     flowId: input.flowId ?? null,
     execution: input.execution,
     requestTruthSessionId: input.requestTruthSessionId ?? null,
+    metadataCenterSnapshot: input.metadataCenterSnapshot ?? null,
     runtimeControl: input.runtimeControl ?? null
   }));
   const parsed = parseNativeJson(capability, raw);

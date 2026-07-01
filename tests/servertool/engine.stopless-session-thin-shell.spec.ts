@@ -12,6 +12,10 @@ describe('engine stopless session thin-shell guard', () => {
 
     expect(source).not.toContain('function normalizeStoplessSessionToken(');
     expect(source).not.toContain('function readStoplessSessionId(');
+    expect(source).not.toContain('const requestTruth = metadataCenterSnapshot?.requestTruth');
+    expect(source).not.toContain('const rawSessionId = requestTruth?.sessionId');
+    expect(source).not.toContain('requestTruthSessionId,');
+    expect(source).toContain('metadataCenterSnapshot: metadataCenterSnapshot ?? null');
     expect(source).toContain('adapterContext: options.adapterContext');
   });
 

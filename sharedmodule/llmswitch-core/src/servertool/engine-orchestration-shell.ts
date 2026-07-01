@@ -185,19 +185,13 @@ export async function runServerToolOrchestrationShell(
     options.adapterContext as Record<string, unknown>
   );
   const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
-  const requestTruth = metadataCenterSnapshot?.requestTruth as Record<string, unknown> | undefined;
-  const rawSessionId = requestTruth?.sessionId;
-  const requestTruthSessionId =
-    typeof rawSessionId === 'string' && rawSessionId.trim()
-      ? rawSessionId.trim()
-      : undefined;
   const stoplessExecutionPlan = planStoplessExecutionWithNative({
     flowId,
     execution:
       engineResult.execution && typeof engineResult.execution === 'object'
         ? (engineResult.execution as unknown as Record<string, unknown>)
         : {},
-    requestTruthSessionId,
+    metadataCenterSnapshot: metadataCenterSnapshot ?? null,
     runtimeControl:
       runtimeControl && typeof runtimeControl === 'object'
         ? (runtimeControl as Record<string, unknown>)
