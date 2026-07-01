@@ -34,13 +34,27 @@ export function cloneErrorForReporting(error: unknown): unknown {
       cloned.stack = error.stack;
     }
     Object.assign(cloned, error);
-    delete (cloned as { [PROVIDER_ERROR_REPORTED_MARKER]?: unknown })[PROVIDER_ERROR_REPORTED_MARKER];
     return cloned;
   }
   if (Array.isArray(error)) {
     return [...error];
   }
   return { ...(error as Record<string, unknown>) };
+}
+
+export function hasProviderErrorAlreadyReported(error: unknown): boolean {
+  return Boolean(
+    error
+      && typeof error === 'object'
+      && (error as { [PROVIDER_ERROR_REPORTED_MARKER]?: unknown })[PROVIDER_ERROR_REPORTED_MARKER] === true
+  );
+}
+
+export function markProviderErrorAlreadyReported(error: unknown): void {
+  if (!error || typeof error !== 'object') {
+    return;
+  }
+  (error as { [PROVIDER_ERROR_REPORTED_MARKER]?: boolean })[PROVIDER_ERROR_REPORTED_MARKER] = true;
 }
 
 export function logNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {

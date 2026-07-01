@@ -2628,14 +2628,20 @@ mod tests {
             Some("port:4444|entry:responses|owner:relay|session:s1"),
         );
 
-        let payload = materialized.get("payload").and_then(Value::as_object).unwrap();
+        let payload = materialized
+            .get("payload")
+            .and_then(Value::as_object)
+            .unwrap();
         let input = payload.get("input").and_then(Value::as_array).unwrap();
         assert_eq!(input.len(), 4);
         assert_eq!(input[0]["content"][0]["text"], json!("start"));
         assert_eq!(input[3]["content"][0]["text"], json!("continue"));
 
         let meta = materialized.get("meta").and_then(Value::as_object).unwrap();
-        assert_eq!(meta.get("incomingInputItems").and_then(Value::as_u64), Some(4));
+        assert_eq!(
+            meta.get("incomingInputItems").and_then(Value::as_u64),
+            Some(4)
+        );
         assert_eq!(
             meta.get("continuationDeltaItems").and_then(Value::as_u64),
             Some(1)

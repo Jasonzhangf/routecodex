@@ -947,11 +947,8 @@ pub fn normalize_responses_sse_response_payload(
     if object != "response" {
         return Err("Invalid Responses response: object must be response".to_string());
     }
-    let id = read_required_response_string(
-        &source,
-        "id",
-        "Invalid Responses response: missing id",
-    )?;
+    let id =
+        read_required_response_string(&source, "id", "Invalid Responses response: missing id")?;
     let model = read_required_response_string(
         &source,
         "model",

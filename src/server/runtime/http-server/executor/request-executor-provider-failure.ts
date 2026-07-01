@@ -24,7 +24,9 @@ import {
   resolveProviderFailureOutcome
 } from '../../../../providers/core/runtime/provider-failure-policy.js';
 import {
-  cloneErrorForReporting
+  cloneErrorForReporting,
+  hasProviderErrorAlreadyReported,
+  markProviderErrorAlreadyReported
 } from './request-executor-error-report.js';
 
 export function resolveRequestExecutorProviderErrorReportPlan(args: {
@@ -84,6 +86,9 @@ export {
 export async function reportRequestExecutorProviderError(
   args: ReportRequestExecutorProviderErrorArgs
 ): Promise<void> {
+  if (hasProviderErrorAlreadyReported(args.error)) {
+    return;
+  }
   const reportPlan = resolveRequestExecutorProviderErrorReportPlan({
     error: args.error,
     retryError: args.retryError,
@@ -148,4 +153,5 @@ export async function reportRequestExecutorProviderError(
       ...(args.extraDetails ?? {})
     }
   });
+  markProviderErrorAlreadyReported(args.error);
 }

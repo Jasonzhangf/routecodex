@@ -29,6 +29,16 @@ type StatsCenterLike = {
   recordProviderUsage(ev: ProviderUsageEvent): void;
 };
 
+function cloneProviderHttpTelemetryError(error: Error): Error {
+  const cloned = new Error(error.message);
+  cloned.name = error.name;
+  if (typeof error.stack === 'string') {
+    cloned.stack = error.stack;
+  }
+  Object.assign(cloned, error);
+  return cloned;
+}
+
 export abstract class BaseProvider implements IProviderV2 {
   readonly id: string;
   readonly abstract type: string;
@@ -334,7 +344,6 @@ export abstract class BaseProvider implements IProviderV2 {
     const upstreamMessage = classification.upstreamMessage;
     const providerKey = _context.providerKey || runtimeProfile?.providerKey;
 
-    const affectsHealth = classification.affectsHealth;
     const recoverable = classification.recoverable;
 
     const logErrorMessage = typeof msg === 'string' ? truncateLogMessage(msg) : msg;
@@ -389,13 +398,13 @@ export abstract class BaseProvider implements IProviderV2 {
 
     try {
       await emitProviderErrorAndWait({
-        error: augmentedError,
+        error: cloneProviderHttpTelemetryError(augmentedError),
         stage: 'provider.http',
         runtime: buildRuntimeFromProviderContext(_context),
         dependencies: this.dependencies,
         statusCode,
         recoverable,
-        affectsHealth,
+        affectsHealth: false,
         details: enrichedDetails
       });
     } catch (reportError) {

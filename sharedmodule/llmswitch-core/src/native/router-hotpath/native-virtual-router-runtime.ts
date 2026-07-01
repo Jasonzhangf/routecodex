@@ -181,7 +181,7 @@ export class VirtualRouterEngine implements VirtualRouterRuntime {
     if (typeof this.nativeProxy.diagnoseRoute !== 'function') {
       throw new Error('VirtualRouterEngineProxy.diagnoseRoute is not available');
     }
-    const nativeMetadata = injectVirtualRouterRuntimeMetadata(metadata);
+    const nativeMetadata = injectVirtualRouterRuntimeMetadata(buildVirtualRouterDryRunMetadata(metadata));
     const raw = this.nativeProxy.diagnoseRoute(JSON.stringify(request), JSON.stringify(nativeMetadata));
     return JSON.parse(raw) as VirtualRouterDryRunDiagnostics;
   }
@@ -253,6 +253,34 @@ export function computeRequestTokens(
   _fallbackText = ''
 ): number {
   return invokeTokenEstimator(request);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function buildVirtualRouterDryRunMetadata(
+  metadata: RouterMetadataInput | Record<string, unknown>
+): Record<string, unknown> {
+  const metadataRecord = isPlainRecord(metadata) ? metadata : {};
+  if (isPlainRecord(metadataRecord.metadataCenterSnapshot)) {
+    return metadataRecord;
+  }
+  const snapshot: Record<string, unknown> = {
+    runtimeControl: isPlainRecord(metadataRecord.runtimeControl)
+      ? metadataRecord.runtimeControl
+      : {}
+  };
+  for (const key of ['requestId', 'sessionId', 'conversationId', 'excludedProviderKeys', 'continuation']) {
+    const value = metadataRecord[key];
+    if (value !== undefined) {
+      snapshot[key] = value;
+    }
+  }
+  return {
+    ...metadataRecord,
+    metadataCenterSnapshot: snapshot
+  };
 }
 
 function normalizeNativeVirtualRouterError(error: unknown): Error {

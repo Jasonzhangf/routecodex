@@ -158,7 +158,7 @@ describe('request-executor provider health impact', () => {
     );
   });
 
-  test('executor provider error report ignores prior provider-runtime reported marker', async () => {
+  test('executor provider error report does not double count prior provider-runtime reported marker', async () => {
     const providerErrorReportedMarker = Symbol.for('routecodex.provider.errorReported');
     const error = Object.assign(new Error('upstream unavailable'), {
       code: 'HTTP_503',
@@ -191,15 +191,42 @@ describe('request-executor provider health impact', () => {
       excludedProviderKeys: new Set<string>()
     });
 
-    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stage: 'provider.send',
-        affectsHealth: true,
-        runtime: expect.objectContaining({
-          providerKey: 'primary.key1.gpt-test',
-          routecodexRoutingPolicyGroup: 'gateway_priority_5555'
-        })
-      })
-    );
+    expect(mockEmitProviderErrorAndWait).not.toHaveBeenCalled();
+  });
+
+  test('executor provider error report marks original error to avoid duplicate health strikes', async () => {
+    const error = Object.assign(new Error('upstream unavailable'), {
+      code: 'HTTP_503',
+      statusCode: 503
+    });
+    const baseArgs = {
+      error,
+      retryError: {
+        statusCode: 503,
+        errorCode: 'HTTP_503',
+        reason: 'upstream unavailable'
+      },
+      requestId: 'req-executor-duplicate-provider-send',
+      providerKey: 'primary.key1.gpt-test',
+      providerId: 'primary',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      routeName: 'thinking',
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      runtimeKey: 'primary.key1',
+      target: { providerKey: 'primary.key1.gpt-test', runtimeKey: 'primary.key1' },
+      dependencies: {} as any,
+      attempt: 1,
+      logStage: () => undefined,
+      stageHint: 'provider.send' as const,
+      routePool: ['primary.key1.gpt-test', 'backup.key1.gpt-test'],
+      excludedProviderKeys: new Set<string>()
+    };
+
+    await reportRequestExecutorProviderError(baseArgs);
+    await reportRequestExecutorProviderError(baseArgs);
+
+    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledTimes(1);
   });
 });

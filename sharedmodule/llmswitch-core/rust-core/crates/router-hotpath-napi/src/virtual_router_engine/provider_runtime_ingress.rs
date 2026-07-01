@@ -81,23 +81,32 @@ fn dispatch_to_registered_runtimes(event: &Value, kind: RuntimeEventKind) {
             for core in &cores {
                 if let Ok(mut guard) = core.write() {
                     if runtime_owns_provider_event_for_group(&guard, &provider_key, group) {
+                        if dispatched {
+                            mirror_runtime_event(&mut guard, event, kind);
+                        } else {
+                            dispatch_runtime_event(&mut guard, event, kind);
+                            dispatched = true;
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        let mut dispatched = false;
+        for core in &cores {
+            if let Ok(mut guard) = core.write() {
+                if runtime_owns_provider_event(&guard, &provider_key) {
+                    if dispatched {
+                        mirror_runtime_event(&mut guard, event, kind);
+                    } else {
                         dispatch_runtime_event(&mut guard, event, kind);
                         dispatched = true;
                     }
                 }
             }
-            if dispatched {
-                return;
-            }
-            return;
         }
-        for core in &cores {
-            if let Ok(mut guard) = core.write() {
-                if runtime_owns_provider_event(&guard, &provider_key) {
-                    dispatch_runtime_event(&mut guard, event, kind);
-                    return;
-                }
-            }
+        if dispatched {
+            return;
         }
     }
 
@@ -116,6 +125,17 @@ fn dispatch_runtime_event(
     match kind {
         RuntimeEventKind::Error => core.handle_provider_error(event),
         RuntimeEventKind::Success => core.handle_provider_success(event),
+    }
+}
+
+fn mirror_runtime_event(
+    core: &mut VirtualRouterEngineCore,
+    event: &Value,
+    kind: RuntimeEventKind,
+) {
+    match kind {
+        RuntimeEventKind::Error => core.mirror_provider_error_in_memory(event),
+        RuntimeEventKind::Success => core.mirror_provider_success_in_memory(event),
     }
 }
 
@@ -505,6 +525,64 @@ mod tests {
             .expect("group health state");
         assert_eq!(global_state.failure_count, 0);
         assert_eq!(group_state.failure_count, 1);
+
+        reset_for_tests();
+        let _ = fs::remove_dir_all(session_dir);
+    }
+
+    #[test]
+    fn group_scoped_provider_error_records_once_when_duplicate_group_runtimes_are_registered() {
+        let _guard = test_guard();
+        reset_for_tests();
+        let session_dir = unique_temp();
+        fs::create_dir_all(&session_dir).unwrap();
+        let provider_key = "primary.key1.gpt-test";
+        let first = build_registered_identity_core_for_group(provider_key, "gateway_priority_5555");
+        let second = build_registered_identity_core_for_group(provider_key, "gateway_priority_5555");
+
+        with_session_dir_override(session_dir.to_str(), || {
+            report_provider_error(&json!({
+                "code": "HTTP_503",
+                "message": "upstream unavailable",
+                "stage": "provider.send",
+                "status": 503,
+                "affectsHealth": true,
+                "runtime": {
+                    "requestId": "req-duplicate-group",
+                    "providerKey": provider_key,
+                    "routecodexRoutingPolicyGroup": "gateway_priority_5555",
+                    "sessionDir": session_dir
+                }
+            }));
+            let persisted = load_provider_health_state().expect("provider-health persisted");
+            let entries = persisted
+                .get("providerCooldowns")
+                .and_then(|value| value.as_array())
+                .expect("providerCooldowns array");
+            assert_eq!(entries.len(), 1);
+            assert_eq!(
+                entries[0]
+                    .get("failureCount")
+                    .and_then(|value| value.as_i64()),
+                Some(1),
+                "one group-scoped provider error must record exactly one strike"
+            );
+        });
+
+        for core in [first, second] {
+            let state = core
+                .read()
+                .expect("runtime read lock")
+                .health_manager
+                .snapshot()
+                .into_iter()
+                .find(|entry| entry.provider_key == "primary.1.gpt-test")
+                .expect("runtime health state");
+            assert_eq!(
+                state.failure_count, 1,
+                "each duplicate runtime must mirror the single strike in memory"
+            );
+        }
 
         reset_for_tests();
         let _ = fs::remove_dir_all(session_dir);

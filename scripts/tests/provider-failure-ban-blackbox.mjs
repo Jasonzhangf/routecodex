@@ -536,7 +536,7 @@ async function run503Scenario() {
     const thirdBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl);
     assert.equal(thirdBeforeRestart.status, 200);
     assert.match(thirdBeforeRestart.body, /ok-from-backup-503/);
-    assert.equal(primaryHits, 2, 'third request should bypass runtime-cooled primary');
+    assert.equal(primaryHits, 3, 'third request should record the third provider strike before cooldown');
     assert.equal(backupHits, 3);
 
     const runtimeHealthAfter503 = readRoutingGroupHealth(firstServer.routeCodex, 'gateway_priority_5555');
@@ -584,12 +584,12 @@ async function run503Scenario() {
     assert.match(third.body, /ok-from-backup-503/);
     assert.equal(primaryHits - beforeRestartPrimaryHits, 0);
     assert.equal(backupHits - beforeRestartBackupHits, 1);
-    assert.equal(primaryHits, 2, 'restart should preserve port-scoped runtime cooldown and bypass primary');
+    assert.equal(primaryHits, 3, 'restart should preserve port-scoped runtime cooldown and bypass primary');
 
     return {
       firstRequest: { primaryHits: 1, backupHits: 1 },
       secondRequestTotals: { primaryHits: 2, backupHits: 2 },
-      thirdRequestTotals: { primaryHits: 2, backupHits: 3 },
+      thirdRequestTotals: { primaryHits: 3, backupHits: 3 },
       restartRequest: {
         primaryHitsDelta: primaryHits - beforeRestartPrimaryHits,
         backupHitsDelta: backupHits - beforeRestartBackupHits
@@ -770,24 +770,24 @@ async function runPortIsolationScenario() {
     assert.deepEqual(hits, { primarya: 2, backupa: 2, primaryb: 0, backupb: 0 }, 'group A should accumulate runtime-only failures locally');
 
     const aThird = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
-    assert.equal(aThird.status, 200, 'third group A request should bypass runtime-cooled primarya');
+    assert.equal(aThird.status, 200, 'third group A request should record third primarya strike before cooldown');
     assert.match(aThird.body, /ok-from-backup-a/);
-    assert.deepEqual(hits, { primarya: 2, backupa: 3, primaryb: 0, backupb: 0 }, 'third group A request should bypass runtime-cooled primarya');
+    assert.deepEqual(hits, { primarya: 3, backupa: 3, primaryb: 0, backupb: 0 }, 'third group A request should record third primarya strike before cooldown');
 
     const bFirst = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
     assert.equal(bFirst.status, 200, 'port 6666 should route within group B');
     assert.match(bFirst.body, /ok-from-primary-b/);
-    assert.deepEqual(hits, { primarya: 2, backupa: 3, primaryb: 1, backupb: 0 }, 'group A runtime cooldown must not affect group B');
+    assert.deepEqual(hits, { primarya: 3, backupa: 3, primaryb: 1, backupb: 0 }, 'group A runtime cooldown must not affect group B');
 
     const aFourth = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
     assert.equal(aFourth.status, 200, 'fourth group A request should skip runtime-cooled primarya');
     assert.match(aFourth.body, /ok-from-backup-a/);
-    assert.deepEqual(hits, { primarya: 2, backupa: 4, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after local runtime cooldown');
+    assert.deepEqual(hits, { primarya: 3, backupa: 4, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after local runtime cooldown');
 
     const bSecond = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
     assert.equal(bSecond.status, 200, 'group B should remain unaffected after group A cooldown is active');
     assert.match(bSecond.body, /ok-from-primary-b/);
-    assert.deepEqual(hits, { primarya: 2, backupa: 4, primaryb: 2, backupb: 0 }, 'group B must remain isolated after group A cooldown');
+    assert.deepEqual(hits, { primarya: 3, backupa: 4, primaryb: 2, backupb: 0 }, 'group B must remain isolated after group A cooldown');
 
     return { hits };
   });

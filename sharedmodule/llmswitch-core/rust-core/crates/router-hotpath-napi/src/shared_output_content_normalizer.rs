@@ -445,10 +445,7 @@ fn normalize_responses_message_item_value(
 
     let mut message = source.clone();
     message.insert("id".to_string(), Value::String(base_id.to_string()));
-    message.insert(
-        "content".to_string(),
-        Value::Array(normalized_parts),
-    );
+    message.insert("content".to_string(), Value::Array(normalized_parts));
 
     let mut output = Map::new();
     output.insert("message".to_string(), Value::Object(message));

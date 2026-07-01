@@ -49,6 +49,31 @@ impl VirtualRouterEngineCore {
         self.persist_provider_health();
     }
 
+    pub(crate) fn mirror_provider_success_in_memory(&mut self, event: &Value) {
+        let provider_key = event
+            .get("runtime")
+            .and_then(|v| v.get("providerKey"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if provider_key.is_empty() {
+            return;
+        }
+        self.health_manager.record_success(provider_key);
+        if let Some(runtime_key) = event
+            .get("runtime")
+            .and_then(|v| v.get("runtimeKey"))
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.trim().is_empty() && *value != provider_key)
+        {
+            self.health_manager.record_success(runtime_key);
+        }
+        if let Some(alias_key) = provider_key.rsplit_once('.').map(|(base, _)| base) {
+            if alias_key != provider_key {
+                self.health_manager.record_success(alias_key);
+            }
+        }
+    }
+
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
         let session_dir = resolve_event_session_dir(event);
         match session_dir.as_deref() {
@@ -107,6 +132,20 @@ impl VirtualRouterEngineCore {
         }
         self.handle_provider_failure(event);
         self.persist_provider_health();
+    }
+
+    pub(crate) fn mirror_provider_error_in_memory(&mut self, event: &Value) {
+        if !event_affects_health(event) {
+            return;
+        }
+        let provider_key = resolve_provider_key(event).unwrap_or_default();
+        if provider_key.is_empty() {
+            return;
+        }
+        let reason = extract_error_reason(event);
+        let now = now_ms();
+        self.health_manager
+            .record_failure(&provider_key, reason, now);
     }
 
     fn apply_classified_provider_error(

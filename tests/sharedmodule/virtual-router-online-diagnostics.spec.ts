@@ -114,6 +114,22 @@ describe('virtual router online diagnostics', () => {
     expect(secondLive.target.providerKey).toBe('one.key1.gpt-test');
   });
 
+  it('dry-run accepts minimal diagnostic metadata and builds the Rust metadata snapshot envelope', () => {
+    const engine = new VirtualRouterEngine();
+    engine.initialize(buildConfig() as any);
+
+    const dryRun = (engine as any).diagnoseRoute(
+      { messages: [{ role: 'user', content: 'hello' }] },
+      { requestId: 'req-diag-minimal' }
+    );
+
+    expect(dryRun.ok).toBe(true);
+    expect(dryRun.decision).toEqual(expect.objectContaining({
+      selectedRouteName: 'default',
+      selectedProviderKey: 'sdfv.key1.gpt-test'
+    }));
+  });
+
   it('dry-run returns structured provider-unavailable explanation', () => {
     const engine = new VirtualRouterEngine();
     engine.initialize(buildConfig() as any);

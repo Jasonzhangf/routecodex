@@ -95,6 +95,16 @@ pub(crate) fn bootstrap_virtual_router_config_json(input_json: String) -> NapiRe
     let mut config = Map::new();
     config.insert("routing".to_string(), routing.clone());
     config.insert("providers".to_string(), profiles.clone());
+    if let Some(routing_policy_group) = read_non_empty_string(
+        section
+            .get("routingPolicyGroup")
+            .or_else(|| section.get("routing_policy_group")),
+    ) {
+        config.insert(
+            "routingPolicyGroup".to_string(),
+            Value::String(routing_policy_group),
+        );
+    }
     config.insert(
         "classifier".to_string(),
         require_field(&config_meta, "classifier")?,
@@ -165,6 +175,8 @@ fn extract_virtual_router_section(input: &Value) -> Map<String, Value> {
         section.insert("forwarders".to_string(), value);
     }
     for key in [
+        "routingPolicyGroup",
+        "routing_policy_group",
         "classifier",
         "loadBalancing",
         "health",
@@ -327,6 +339,32 @@ mod tests {
         assert_eq!(
             output["config"]["routing"]["default"][0]["targets"][0],
             json!("openai.key1.gpt-4o")
+        );
+    }
+
+    #[test]
+    fn bootstrap_virtual_router_config_preserves_routing_policy_group() {
+        let input = json!({
+            "routingPolicyGroup": "gateway_priority_5555",
+            "providers": {
+                "primary": {
+                    "type": "responses",
+                    "baseURL": "https://primary.example.test/v1",
+                    "auth": { "type": "apikey", "apiKey": "primary-key" },
+                    "models": { "gpt-test": {} }
+                }
+            },
+            "routing": {
+                "default": ["primary.gpt-test"]
+            }
+        });
+
+        let raw = bootstrap_virtual_router_config_json(input.to_string()).unwrap();
+        let output: Value = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(
+            output["config"]["routingPolicyGroup"],
+            json!("gateway_priority_5555")
         );
     }
 }
