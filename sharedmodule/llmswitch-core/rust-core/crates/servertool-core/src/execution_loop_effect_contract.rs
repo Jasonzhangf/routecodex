@@ -175,7 +175,9 @@ mod tests {
                 strip_after_execute: Some(true),
             },
             noop_flow_id: None,
-            handler_error_message: Some(serde_json::json!({ "message": " boom-from-error-object " })),
+            handler_error_message: Some(
+                serde_json::json!({ "message": " boom-from-error-object " }),
+            ),
         });
         assert_eq!(
             plan.handler_error_message.as_deref(),

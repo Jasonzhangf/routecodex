@@ -3417,6 +3417,7 @@ function checkAutoHookExecutionRustOwner() {
     'result.execution.flowId.trim()',
     "String(error ?? 'unknown')",
     'error instanceof Error ? error.message : String',
+    "typeof error === 'string' ? error",
     '// best-effort',
   ]) {
     if (autoHookCaller.includes(keyword)) {

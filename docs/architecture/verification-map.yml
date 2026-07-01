@@ -2038,6 +2038,7 @@ verification:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
     contract:
+      - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     integration: []
     smoke:

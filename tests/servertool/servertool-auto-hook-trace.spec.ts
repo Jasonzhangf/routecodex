@@ -16,12 +16,23 @@ const registryHooks: Array<{
   execution: ServerToolExecutionDescriptor & { __testHandler?: (ctx: ServerToolHandlerContext) => Promise<any> };
 }> = [];
 
+function normalizeMockAutoHookError(error: any): string {
+  if (typeof error === 'string') {
+    return error.trim() || 'unknown';
+  }
+  if (typeof error?.message === 'string') {
+    return error.message.trim() || 'unknown';
+  }
+  return error === undefined ? '' : 'unknown';
+}
+
 const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
   const flowId =
     typeof input?.materializedFlowId === 'string' && input.materializedFlowId.trim()
       ? input.materializedFlowId.trim()
       : undefined;
-  const outcome = input?.message
+  const errorMessage = normalizeMockAutoHookError(input?.error);
+  const outcome = input?.error !== undefined
     ? 'error'
     : input?.hasPlannedResult !== true
       ? 'planned_null'
@@ -60,7 +71,7 @@ const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
       result: outcome === 'error' ? 'error' : 'miss',
       reason:
         outcome === 'error'
-          ? String(input?.message ?? 'unknown')
+          ? errorMessage
           : outcome === 'planned_null'
             ? 'predicate_false'
             : 'empty_materialized_result'
@@ -171,7 +182,8 @@ beforeEach(() => {
       typeof input?.materializedFlowId === 'string' && input.materializedFlowId.trim()
         ? input.materializedFlowId.trim()
         : undefined;
-    const outcome = input?.message
+    const errorMessage = normalizeMockAutoHookError(input?.error);
+    const outcome = input?.error !== undefined
       ? 'error'
       : input?.hasPlannedResult !== true
         ? 'planned_null'
@@ -210,7 +222,7 @@ beforeEach(() => {
         result: outcome === 'error' ? 'error' : 'miss',
         reason:
           outcome === 'error'
-            ? String(input?.message ?? 'unknown')
+            ? errorMessage
             : outcome === 'planned_null'
               ? 'predicate_false'
               : 'empty_materialized_result'
@@ -420,11 +432,55 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).not.toContain('native auto-hook queue progress requested result but queue result was empty');
     expect(callerSource).not.toContain('if (!result)');
     expect(callerSource).not.toContain('if (!queueResult)');
+    expect(callerSource).not.toContain('error instanceof Error ? error.message');
+    expect(callerSource).not.toContain("typeof error === 'string' ? error");
+    expect(callerSource).toContain('error');
     expect(nativeWrapperSource).toContain(
       'planAutoHookRuntimeAttemptJson native returned result disposition without materialized result'
     );
     expect(nativeWrapperSource).toContain(
       'planAutoHookCallerFinalizationJson native returned result disposition without queue result'
+    );
+  });
+
+  test('passes raw auto-hook handler errors to native attempt planning', async () => {
+    const traces: ServerToolAutoHookTraceEvent[] = [];
+    registryHooks.push({
+      id: 'vision_auto',
+      phase: 'default',
+      priority: 20,
+      order: 1,
+      execution: {
+        kind: 'builtin',
+        builtinName: 'vision_auto',
+        __testHandler: async () => {
+          throw new Error('boom-from-auto-hook');
+        }
+      }
+    });
+    const options = createOptions(traces);
+
+    await expect(
+      runServertoolAutoHookCaller({
+        options,
+        contextBase: createContextBase(options),
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null
+      })
+    ).rejects.toThrow('boom-from-auto-hook');
+
+    expect(planAutoHookRuntimeAttemptWithNativeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hookId: 'vision_auto',
+        error: expect.any(Error)
+      })
+    );
+    expect(traces).toContainEqual(
+      expect.objectContaining({
+        hookId: 'vision_auto',
+        result: 'error',
+        reason: 'boom-from-auto-hook'
+      })
     );
   });
 

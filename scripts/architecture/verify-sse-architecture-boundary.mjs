@@ -433,6 +433,27 @@ if (!anthropicSequencer.includes('Invalid Anthropic tool_result block: missing t
   failures.push('Anthropic SSE sequencer must fail fast when tool_result.tool_use_id is missing');
 }
 
+for (const [relPath, source] of [
+  [
+    'sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts',
+    read('sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts')
+  ],
+  [
+    'sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts',
+    read('sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts')
+  ],
+]) {
+  for (const forbidden of [
+    'private contexts = new Map',
+    'this.contexts.set(',
+    'this.contexts.delete(',
+  ]) {
+    if (source.includes(forbidden)) {
+      failures.push(`${relPath}: protocol JSON->SSE converter must not keep dead context state: ${forbidden}`);
+    }
+  }
+}
+
 const providerResponseShell = read('sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
 for (const forbidden of [
   "options.context.requestId || 'unknown'",

@@ -13,7 +13,6 @@ import { createGeminiStreamWriter } from '../shared/writer.js';
 
 export class GeminiJsonToSseConverter {
   private config = DEFAULT_GEMINI_CONVERSION_CONFIG;
-  private contexts = new Map<string, GeminiJsonToSseContext>();
 
   constructor(config?: Partial<typeof DEFAULT_GEMINI_CONVERSION_CONFIG>) {
     if (config) {
@@ -26,7 +25,6 @@ export class GeminiJsonToSseConverter {
     options: GeminiJsonToSseOptions
   ): Promise<PassThrough> {
     const context = this.createContext(response, options);
-    this.contexts.set(options.requestId, context);
 
     const stream = new PassThrough({ objectMode: true });
     const writer = createGeminiStreamWriter(stream, {
@@ -90,7 +88,6 @@ export class GeminiJsonToSseConverter {
       writer.abort(error as Error);
       throw this.wrapError('GEMINI_JSON_TO_SSE_FAILED', error as Error, context.requestId);
     } finally {
-      this.contexts.delete(context.requestId);
       stream.end();
     }
   }

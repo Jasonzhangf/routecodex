@@ -21,6 +21,8 @@ pub struct AutoHookRuntimeAttemptInput {
     #[serde(default)]
     pub has_materialized_result: bool,
     #[serde(default)]
+    pub error: Option<serde_json::Value>,
+    #[serde(default)]
     pub message: Option<String>,
     #[serde(default)]
     pub materialized_flow_id: Option<String>,
@@ -59,6 +61,11 @@ pub struct AutoHookCallerFinalizationPlan {
 pub fn plan_auto_hook_runtime_attempt(
     input: AutoHookRuntimeAttemptInput,
 ) -> AutoHookRuntimeAttemptPlan {
+    let error_message = normalize_error_message(input.error.as_ref(), input.message.as_deref());
+    let error_reason = error_message
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+    let has_error = input.error.is_some() || input.message.is_some();
     let decision = plan_auto_hook_execution_decision(AutoHookExecutionDecisionInput {
         hook_id: input.hook_id,
         phase: input.phase,
@@ -66,10 +73,14 @@ pub fn plan_auto_hook_runtime_attempt(
         queue: input.queue,
         queue_index: input.queue_index,
         queue_total: input.queue_total,
-        outcome: input.message.as_ref().map(|_| "error".to_string()),
+        outcome: if has_error {
+            Some("error".to_string())
+        } else {
+            None
+        },
         has_planned_result: input.has_planned_result,
         has_materialized_result: input.has_materialized_result,
-        message: input.message.clone(),
+        message: Some(error_reason).filter(|_| has_error),
         flow_id: None,
         materialized_flow_id: input.materialized_flow_id,
     });
@@ -78,7 +89,7 @@ pub fn plan_auto_hook_runtime_attempt(
         return_result: decision.action == AutoHookExecutionAction::ReturnResult,
         continue_queue: decision.action == AutoHookExecutionAction::ContinueQueue,
         rethrow_error: decision.action == AutoHookExecutionAction::RethrowError,
-        error_message: input.message.and_then(normalize_optional_text),
+        error_message: if has_error { error_message } else { None },
     }
 }
 
@@ -109,6 +120,25 @@ fn normalize_optional_text(value: String) -> Option<String> {
     }
 }
 
+fn normalize_error_message(
+    error: Option<&serde_json::Value>,
+    legacy_message: Option<&str>,
+) -> Option<String> {
+    let raw = match error {
+        Some(serde_json::Value::String(text)) => text.trim().to_string(),
+        Some(serde_json::Value::Number(number)) => number.to_string(),
+        Some(serde_json::Value::Bool(value)) => value.to_string(),
+        Some(serde_json::Value::Object(object)) => object
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        _ => legacy_message.unwrap_or_default().trim().to_string(),
+    };
+    normalize_optional_text(raw)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -127,6 +157,7 @@ mod tests {
             queue_total: 2,
             has_planned_result: false,
             has_materialized_result: false,
+            error: None,
             message: None,
             materialized_flow_id: None,
         });
@@ -143,6 +174,7 @@ mod tests {
             queue_total: 2,
             has_planned_result: true,
             has_materialized_result: true,
+            error: None,
             message: None,
             materialized_flow_id: Some("stop_message_flow".to_string()),
         });
@@ -162,6 +194,7 @@ mod tests {
             queue_total: 1,
             has_planned_result: false,
             has_materialized_result: false,
+            error: None,
             message: Some(" boom ".to_string()),
             materialized_flow_id: None,
         });
@@ -177,12 +210,33 @@ mod tests {
             queue_total: 1,
             has_planned_result: false,
             has_materialized_result: false,
+            error: None,
             message: Some("   ".to_string()),
             materialized_flow_id: None,
         });
         assert!(blank_error.rethrow_error);
         assert_eq!(blank_error.trace_event.reason, "unknown");
         assert_eq!(blank_error.error_message, None);
+
+        let object_error = plan_auto_hook_runtime_attempt(AutoHookRuntimeAttemptInput {
+            hook_id: "stop_message_auto".to_string(),
+            phase: "default".to_string(),
+            priority: 40,
+            queue: "A_optional".to_string(),
+            queue_index: 1,
+            queue_total: 1,
+            has_planned_result: false,
+            has_materialized_result: false,
+            error: Some(serde_json::json!({ "message": " boom-from-error-object " })),
+            message: None,
+            materialized_flow_id: None,
+        });
+        assert!(object_error.rethrow_error);
+        assert_eq!(object_error.trace_event.reason, "boom-from-error-object");
+        assert_eq!(
+            object_error.error_message.as_deref(),
+            Some("boom-from-error-object")
+        );
 
         let next = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
             result_present: false,

@@ -165,6 +165,7 @@ const TARGETS = [
       'finalQueue',
       "String(error ?? 'unknown')",
       'error instanceof Error ? error.message : String',
+      "typeof error === 'string' ? error",
     ],
     required: [
       'const attemptPlan = planAutoHookRuntimeAttemptWithNative({',

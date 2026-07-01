@@ -13,7 +13,6 @@ import { createAnthropicStreamWriter } from '../shared/writer.js';
 
 export class AnthropicJsonToSseConverter {
   private config = DEFAULT_ANTHROPIC_CONVERSION_CONFIG;
-  private contexts = new Map<string, AnthropicJsonToSseContext>();
 
   constructor(config?: Partial<typeof DEFAULT_ANTHROPIC_CONVERSION_CONFIG>) {
     if (config) {
@@ -26,7 +25,6 @@ export class AnthropicJsonToSseConverter {
     options: AnthropicJsonToSseOptions
   ): Promise<PassThrough> {
     const context = this.createContext(response, options);
-    this.contexts.set(options.requestId, context);
     const stream = new PassThrough({ objectMode: true });
     const writer = createAnthropicStreamWriter(stream, {
       onEvent: (event) => this.updateStats(context, event as any),
@@ -92,7 +90,6 @@ export class AnthropicJsonToSseConverter {
       writer.abort(error as Error);
       throw this.wrapError('ANTHROPIC_JSON_TO_SSE_FAILED', error as Error, context.requestId);
     } finally {
-      this.contexts.delete(context.requestId);
       stream.end();
     }
   }

@@ -3676,12 +3676,14 @@ owners:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
       - sharedmodule/llmswitch-core/src/sse/shared/serializers/anthropic-event-serializer.ts
       - sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts
+      - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/process
     required_tests:
+      - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary

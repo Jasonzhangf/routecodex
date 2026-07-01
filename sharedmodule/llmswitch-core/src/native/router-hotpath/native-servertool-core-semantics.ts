@@ -1868,7 +1868,7 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
   queueTotal: number;
   hasPlannedResult?: boolean;
   hasMaterializedResult?: boolean;
-  message?: string;
+  error?: unknown;
   materializedFlowId?: string;
 }): AutoHookRuntimeAttemptPlan {
   const capability = 'planAutoHookRuntimeAttemptJson';
@@ -1876,7 +1876,7 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
   if (!fn) {
     throw new Error('planAutoHookRuntimeAttemptJson native unavailable');
   }
-  const resultJson = fn(JSON.stringify(input));
+  const resultJson = fn(JSON.stringify(encodeAutoHookRuntimeAttemptInput(input)));
   if (typeof resultJson !== 'string') {
     throw new Error(`planAutoHookRuntimeAttemptJson native returned non-string: ${typeof resultJson}`);
   }
@@ -1932,6 +1932,24 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
     ...(typeof record.errorMessage === 'string' && record.errorMessage.trim()
       ? { errorMessage: record.errorMessage.trim() }
       : {})
+  };
+}
+
+function encodeAutoHookRuntimeAttemptInput(input: {
+  hookId: string;
+  phase: string;
+  priority: number;
+  queue: string;
+  queueIndex: number;
+  queueTotal: number;
+  hasPlannedResult?: boolean;
+  hasMaterializedResult?: boolean;
+  error?: unknown;
+  materializedFlowId?: string;
+}): Record<string, unknown> {
+  return {
+    ...input,
+    error: encodeServertoolHandlerErrorCarrier(input.error)
   };
 }
 

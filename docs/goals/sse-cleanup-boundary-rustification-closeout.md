@@ -732,3 +732,11 @@ Focused tests to use as slice gates:
 - Positive / reverse tests: native export test covers split `response.completed` blocks; handler upstream-incomplete regression still emits `upstream_stream_incomplete` when the stream ends before terminal and does not emit it when terminal is split across chunks; residue audit locks bridge/transport against restoring old probe owner.
 - Verification: native hotpath build PASS; focused Jest `native-exports.responses-sse-contract + handler-response-sse-upstream-incomplete + handler-response-utils.force-sse-json-responses + handler-response-utils.required-action-split-frame` PASS 21/21; `verify:responses-handler-single-bridge-surface` PASS; `verify:responses-sse-business-module` PASS; `verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit` PASS; `git diff --check` PASS.
 - Replay: real 4444 sample `/Volumes/extension/.rcc/codex-samples/openai-responses/ports/4444/req_1782794868950_3m64se1xv/provider-response_1.json` materializes then re-encodes with `completed=true`, `done=true`, `error=false`, `missingType=0`, `missingSequence=0`, `malformedWire=0`, and `eventCount=25`.
+
+### 2026-07-01 Anthropic/Gemini JSON->SSE converter context cache removed
+
+- Boundary: SSE remains wire/frame/codec only; this slice deletes converter-level cross-request state and does not add business semantics, lifecycle decisions, recovery, or compatibility synthesis.
+- Red evidence: `anthropic-gemini-json-to-sse-context-no-dead-state` and `verify:sse-architecture-boundary` first failed because Anthropic/Gemini JSON->SSE converters still had `private contexts = new Map`, `this.contexts.set(...)`, and `this.contexts.delete(...)`.
+- Fix: `AnthropicJsonToSseConverter` and `GeminiJsonToSseConverter` now keep only per-call local conversion context; the dead converter-level context maps were physically removed.
+- Positive tests: the focused spec proves Anthropic `message_start/message_stop` and Gemini `gemini.data/gemini.done` framing still works without converter-level state.
+- Reverse tests/gates: the same spec and `verify:sse-architecture-boundary` forbid the old converter-level cache markers from returning.
