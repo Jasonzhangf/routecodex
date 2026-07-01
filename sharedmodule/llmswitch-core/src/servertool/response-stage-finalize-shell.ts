@@ -22,15 +22,14 @@ export async function finalizeServertoolResponseStage(args: {
     excludeAutoHookIds: args.excludeAutoHookIds,
     responseStageGatePlan: args.responseStageGatePlan
   });
-  const autoHookResult = 'result' in responseStageAutoHook ? responseStageAutoHook.result : null;
   const finalizeRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: true,
-    hasAutoHookResult: autoHookResult != null
+    hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'
   });
   switch (finalizeRuntimeAction.action) {
     case 'return_auto_hook_result':
-      return autoHookResult as ServerSideToolEngineResult;
+      return responseStageAutoHook.result;
     case 'return_passthrough_bypass':
     case 'return_passthrough_no_auto_hook_result':
       return { mode: finalizeRuntimeAction.resultMode, finalChatResponse: args.baseObject };

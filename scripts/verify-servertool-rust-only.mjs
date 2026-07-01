@@ -6083,7 +6083,13 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
-    'hasAutoHookResult: autoHookResult != null'
+    "hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'"
+  );
+  assertContains(
+    'servertool-response-stage-finalize-shell-owner',
+    TS_RESPONSE_STAGE_FINALIZE_SHELL,
+    responseStageFinalizeShell,
+    'return responseStageAutoHook.result'
   );
   assertContains(
     'servertool-response-stage-finalize-shell-owner',
@@ -6112,9 +6118,9 @@ function checkServertoolResponseStageGateThinShell() {
     'readRuntimeControlFromAnyBoundMetadataCenter',
     'responseHookMatched === true',
     "responseStageAutoHook.action === 'return_passthrough_bypass'",
-    "responseStageAutoHook.action === 'return_auto_hook_result'",
     "if (finalizeRuntimeAction.action === 'return_auto_hook_result')",
     'autoHookResult == null',
+    'autoHookResult as ServerSideToolEngineResult',
     'native response-stage finalize requested auto-hook result but result was empty',
   ]) {
     if (responseStageFinalizeShell.includes(marker)) {
@@ -6148,7 +6154,7 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-prepass-shell-owner',
     TS_RESPONSE_STAGE_PREPASS_SHELL,
     responseStagePrePassShell,
-    'switch (postAutoHookRuntimeAction.action)'
+    'switch (responseStageAutoHook.action)'
   );
   assertContains(
     'servertool-response-stage-prepass-shell-owner',
@@ -6166,14 +6172,15 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-prepass-shell-owner',
     TS_RESPONSE_STAGE_PREPASS_SHELL,
     responseStagePrePassShell,
-    'invalid response-stage post auto-hook action'
+    'invalid response-stage prepass auto-hook action'
   );
   for (const marker of [
     'responseHookMatched !== true',
     'responseStageGatePlan.responseHookMatched !== true',
     "prepassRuntimeAction.action !== 'run_auto_hooks'",
     "if (responseStageAutoHook.action === 'return_auto_hook_result')",
-    'switch (responseStageAutoHook.action)',
+    'autoHookResult as ServerSideToolEngineResult',
+    'postAutoHookRuntimeAction',
   ]) {
     if (responseStagePrePassShell.includes(marker)) {
       fail(

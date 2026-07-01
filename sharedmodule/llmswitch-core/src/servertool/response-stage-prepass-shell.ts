@@ -1,8 +1,8 @@
 import type {
   ServerSideToolEngineOptions,
-  ServerSideToolEngineResult,
   ServerToolHandlerContext
 } from './types.js';
+import type { ServerSideToolEngineResult } from './types.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { planServertoolResponseStageGateWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { planServertoolResponseStageRuntimeActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -58,27 +58,22 @@ export async function runServertoolResponseStagePrePass(args: {
     excludeAutoHookIds: args.excludeAutoHookIds,
     responseStageGatePlan
   });
-  const autoHookResult = 'result' in responseStageAutoHook ? responseStageAutoHook.result : null;
-  const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-    responseStageGatePlan,
-    autoHookEvaluated: true,
-    hasAutoHookResult: autoHookResult != null
-  });
-  switch (postAutoHookRuntimeAction.action) {
+  switch (responseStageAutoHook.action) {
     case 'return_auto_hook_result':
       return {
         action: 'return_result',
         responseStageGatePlan,
-        result: autoHookResult as ServerSideToolEngineResult
+        result: responseStageAutoHook.result
       };
-    case 'return_passthrough_no_auto_hook_result':
+    case 'continue_without_result':
+    case 'return_passthrough_bypass':
       return {
         action: 'continue_to_execution' as const,
         responseStageGatePlan
       };
     default:
       throw new Error(
-        `[servertool] invalid response-stage post auto-hook action: ${String((postAutoHookRuntimeAction as { action: string }).action)}`
+        `[servertool] invalid response-stage prepass auto-hook action: ${String((responseStageAutoHook as { action: string }).action)}`
       );
   }
 }

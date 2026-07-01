@@ -10,17 +10,18 @@ import {
 import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
+export type ServertoolResponseStageAutoHookPassResult =
+  | { action: 'return_passthrough_bypass'; result?: never }
+  | { action: 'continue_without_result'; result?: never }
+  | { action: 'return_auto_hook_result'; result: ServerSideToolEngineResult };
+
 export async function runServertoolResponseStageAutoHookPass(args: {
   options: ServerSideToolEngineOptions;
   contextBase: ServerToolHandlerContext;
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
   responseStageGatePlan: Record<string, unknown>;
-}): Promise<
-  | { action: 'return_passthrough_bypass' }
-  | { action: 'continue_without_result' }
-  | { action: 'return_auto_hook_result'; result: ServerSideToolEngineResult }
-> {
+}): Promise<ServertoolResponseStageAutoHookPassResult> {
   const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: false,

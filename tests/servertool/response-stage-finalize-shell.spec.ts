@@ -145,11 +145,13 @@ describe('response-stage-finalize-shell', () => {
     expect(source).not.toContain('readRuntimeControlFromAnyBoundMetadataCenter');
     expect(source).not.toContain('responseHookMatched === true');
     expect(source).not.toContain("responseStageAutoHook.action === 'return_passthrough_bypass'");
-    expect(source).not.toContain("responseStageAutoHook.action === 'return_auto_hook_result'");
     expect(source).not.toContain("if (finalizeRuntimeAction.action === 'return_auto_hook_result')");
     expect(source).not.toContain('autoHookResult == null');
+    expect(source).not.toContain('autoHookResult as ServerSideToolEngineResult');
     expect(source).not.toContain('native response-stage finalize requested auto-hook result but result was empty');
     expect(source).toContain('switch (finalizeRuntimeAction.action)');
+    expect(source).toContain("hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'");
+    expect(source).toContain('return responseStageAutoHook.result');
     expect(source).toContain('mode: finalizeRuntimeAction.resultMode');
     expect(source).not.toContain("return { mode: 'passthrough', finalChatResponse: args.baseObject };");
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
