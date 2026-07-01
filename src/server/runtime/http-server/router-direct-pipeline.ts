@@ -29,6 +29,7 @@ import { resolveInboundProtocolFromEntryPath } from './provider-direct-pipeline.
 import { extractResponseStatus } from './executor/provider-response-utils.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
+import { normalizeResponsesInputItemsForProviderWireNative } from '../../../modules/llmswitch/bridge/native-exports.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -318,8 +319,26 @@ function applyDirectRouteHooks(
   }
 
   result = applyTargetModelRequestCapabilityHook(result, effectiveModelId, providerRuntime);
+  result = applyDirectResponsesProviderWireNormalization(result);
 
   return { payload: result, originalClientModel };
+}
+
+function applyDirectResponsesProviderWireNormalization(payload: Record<string, unknown>): Record<string, unknown> {
+  const input = payload.input;
+  if (!Array.isArray(input)) {
+    return payload;
+  }
+  const normalizedInput = normalizeResponsesInputItemsForProviderWireNative({
+    rawRequest: payload,
+  });
+  if (normalizedInput.length === input.length && normalizedInput.every((entry, index) => entry === input[index])) {
+    return payload;
+  }
+  return {
+    ...payload,
+    input: normalizedInput,
+  };
 }
 
 function applyTargetModelRequestCapabilityHook(

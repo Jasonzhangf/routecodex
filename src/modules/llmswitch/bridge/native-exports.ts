@@ -636,6 +636,33 @@ export function captureReqInboundResponsesContextSnapshotJson(input: {
   return fn(input) as AnyRecord;
 }
 
+export function normalizeResponsesInputItemsForProviderWireNative(input: {
+  rawRequest: Record<string, unknown>;
+  requestId?: string;
+  toolCallIdStyle?: unknown;
+}): AnyRecord[] {
+  const context = assertNativeObject(
+    'normalizeResponsesInputItemsForProviderWireNative',
+    invokeRouterHotpathJsonCapability('captureReqInboundResponsesContextSnapshotJson', [
+      {
+        rawRequest: input.rawRequest,
+        requestId: input.requestId,
+        toolCallIdStyle: input.toolCallIdStyle,
+      }
+    ])
+  );
+  const normalizedInput = context.input;
+  if (!Array.isArray(normalizedInput)) {
+    throw new Error('[llmswitch-bridge] normalizeResponsesInputItemsForProviderWireNative returned invalid input');
+  }
+  return normalizedInput.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('[llmswitch-bridge] normalizeResponsesInputItemsForProviderWireNative returned invalid input item');
+    }
+    return entry as AnyRecord;
+  });
+}
+
 export async function captureReqInboundResponsesContextSnapshot(input: {
   rawRequest: Record<string, unknown>;
   requestId?: string;

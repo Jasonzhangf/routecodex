@@ -1,3 +1,9 @@
+# 2026-07-01: direct provider-wire normalization and provider-response requestId fail-fast
+- Slice: `router-direct-pipeline.ts` now normalizes OpenAI Responses `input` through native `normalizeResponsesInputItemsForProviderWireNative()` before `processIncomingDirect()`, and `provider-response.ts` fails fast when `context.requestId` is missing instead of synthesizing `unknown`.
+- Fix: native bridge export now treats invalid normalized entries as hard errors instead of filtering them out; `router-direct-pipeline.spec.ts` now asserts the normalized direct payload shape without the old `type: message` wrapper.
+- Verification: `tests/server/runtime/http-server/router-direct-pipeline.spec.ts` PASS 24/24; `tests/sharedmodule/provider-response-rust-plan.spec.ts` PASS 21/21; sharedmodule `tsc` PASS; `git diff --check` PASS.
+- Commit scope note: unrelated dirty files remain from other/generated work (`package*`, `src/build-info.ts`, SSE/Responses files); do not include them in this slice.
+
 # 2026-07-01: servertool postflight session truth removed from TS
 - Slice: `engine-postflight-shell.ts` no longer reads/trims `metadataCenterSnapshot.requestTruth.sessionId`; it passes the metadata-center snapshot carrier to native `buildStoplessAutoCliProjectionFromEngineWithNative()`, where Rust `stopless_auto_handler_bridge.rs` owns session truth extraction.
 - Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now forbid `const requestTruth = metadataCenterSnapshot?.requestTruth`, `const rawSessionId = requestTruth?.sessionId`, and `rawSessionId.trim()` in postflight.

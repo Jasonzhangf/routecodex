@@ -381,6 +381,25 @@ export function captureReqInboundResponsesContextSnapshotJson(input) {
     }
     return fn(input);
 }
+export function normalizeResponsesInputItemsForProviderWireNative(input) {
+    const context = assertNativeObject('normalizeResponsesInputItemsForProviderWireNative', invokeRouterHotpathJsonCapability('captureReqInboundResponsesContextSnapshotJson', [
+        {
+            rawRequest: input.rawRequest,
+            requestId: input.requestId,
+            toolCallIdStyle: input.toolCallIdStyle,
+        }
+    ]));
+    const normalizedInput = context.input;
+    if (!Array.isArray(normalizedInput)) {
+        throw new Error('[llmswitch-bridge] normalizeResponsesInputItemsForProviderWireNative returned invalid input');
+    }
+    return normalizedInput.map((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            throw new Error('[llmswitch-bridge] normalizeResponsesInputItemsForProviderWireNative returned invalid input item');
+        }
+        return entry;
+    });
+}
 export async function captureReqInboundResponsesContextSnapshot(input) {
     await assertSharedBindings();
     const mod = await getSharedConversionSemantics();

@@ -433,7 +433,10 @@ describe('router-direct-pipeline', () => {
       const result = await executeRouterDirectPipeline(input);
       expect(result.used).toBe(true);
       expect(handle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
-      expect(handle.instance.processIncomingDirect).toHaveBeenCalledWith(input.requestPayload);
+      expect(handle.instance.processIncomingDirect).toHaveBeenCalledWith({
+        model: 'gpt-5.4-medium',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      });
       expect(handle.instance.processIncoming).not.toHaveBeenCalled();
     });
 
