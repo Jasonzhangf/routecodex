@@ -39,4 +39,28 @@ describe('responses SSE decode wire input boundary', () => {
       model: 'gpt-test'
     })).rejects.toThrow('Responses SSE decode requires wire string, Buffer, or Uint8Array chunks');
   });
+
+  it('does not synthesize provider failure metadata from malformed SSE text', async () => {
+    const converter = new ResponsesSseToJsonConverter();
+
+    try {
+      await converter.convertSseToJson([
+        'event: response.created',
+        'data: not-json',
+        ''
+      ].join('\n'), {
+        requestId: 'req_responses_decode_no_failure_metadata_synthesis',
+        model: 'gpt-test'
+      });
+      throw new Error('expected malformed SSE text to fail');
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'SSE_TO_JSON_ERROR',
+        requestExecutorProviderErrorStage: 'provider.sse_decode'
+      });
+      expect('upstreamCode' in (error as Record<string, unknown>)).toBe(false);
+      expect('statusCode' in (error as Record<string, unknown>)).toBe(false);
+      expect('retryable' in (error as Record<string, unknown>)).toBe(false);
+    }
+  });
 });

@@ -166,75 +166,6 @@ export class ResponsesSseToJsonConverterRefactored {
     return payload as unknown as ResponsesResponse;
   }
 
-  private resolveSseFailureMetadata(error: Error): {
-    upstreamCode: string;
-    statusCode: number;
-    retryable: boolean;
-  } {
-    const explicitUpstreamCode =
-      typeof (error as { upstreamCode?: unknown }).upstreamCode === 'string'
-        ? String((error as { upstreamCode?: string }).upstreamCode).trim()
-        : '';
-    const explicitStatusCode =
-      typeof (error as { statusCode?: unknown }).statusCode === 'number'
-        ? Number((error as { statusCode?: number }).statusCode)
-        : typeof (error as { status?: unknown }).status === 'number'
-          ? Number((error as { status?: number }).status)
-          : undefined;
-    const explicitRetryable =
-      typeof (error as { retryable?: unknown }).retryable === 'boolean'
-        ? Boolean((error as { retryable?: boolean }).retryable)
-        : undefined;
-    const errorCode = typeof (error as { code?: unknown }).code === 'string'
-      ? String((error as { code?: string }).code).trim().toUpperCase()
-      : '';
-    const normalized = error.message.toLowerCase();
-    const normalizedUpstreamCode = explicitUpstreamCode.toLowerCase();
-    if (
-      normalizedUpstreamCode.includes('context_length_exceeded')
-      || normalizedUpstreamCode.includes('context_window_exceeded')
-      || normalizedUpstreamCode.includes('model_context_window_exceeded')
-      || errorCode === 'CONTEXT_LENGTH_EXCEEDED'
-      || normalized.includes('context_length_exceeded')
-      || normalized.includes('context window')
-    ) {
-      return {
-        upstreamCode: explicitUpstreamCode || 'context_length_exceeded',
-        statusCode: explicitStatusCode ?? 400,
-        retryable: explicitRetryable ?? false
-      };
-    }
-    if (explicitUpstreamCode || explicitStatusCode !== undefined || explicitRetryable !== undefined) {
-      return {
-        upstreamCode: explicitUpstreamCode || errorCode || 'SSE_TO_JSON_ERROR',
-        statusCode: explicitStatusCode ?? 502,
-        retryable: explicitRetryable ?? true
-      };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_IDLE_TIMEOUT' || normalized.includes('upstream_stream_idle_timeout')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT' || normalized.includes('upstream_stream_no_content_timeout')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT' || normalized.includes('upstream_stream_content_idle_timeout')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_TIMEOUT' || normalized.includes('upstream_stream_timeout')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_HEADERS_TIMEOUT' || normalized.includes('upstream_headers_timeout')) {
-      return { upstreamCode: 'UPSTREAM_HEADERS_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_INCOMPLETE' || normalized.includes('stream incomplete')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_INCOMPLETE', statusCode: 502, retryable: true };
-    }
-    if (errorCode === 'TERMINATED' || normalized.includes('terminated')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_TERMINATED', statusCode: 502, retryable: true };
-    }
-    return { upstreamCode: errorCode || 'SSE_TO_JSON_ERROR', statusCode: 502, retryable: true };
-  }
-
   private createReadableStream(sseStream: ResponsesSseEventStream | Readable | AsyncIterable<string | Buffer>): Readable {
     if (sseStream instanceof Readable) {
       return sseStream;
@@ -487,16 +418,26 @@ export class ResponsesSseToJsonConverterRefactored {
   }
 
   private wrapError(code: string, originalError: Error, requestId: string): Error {
-    const failure = this.resolveSseFailureMetadata(originalError);
+    const explicitUpstreamCode =
+      typeof (originalError as { upstreamCode?: unknown }).upstreamCode === 'string'
+        ? String((originalError as { upstreamCode?: string }).upstreamCode).trim()
+        : '';
+    const explicitStatusCode =
+      typeof (originalError as { statusCode?: unknown }).statusCode === 'number'
+        ? Number((originalError as { statusCode?: number }).statusCode)
+        : typeof (originalError as { status?: unknown }).status === 'number'
+          ? Number((originalError as { status?: number }).status)
+          : undefined;
+    const explicitRetryable =
+      typeof (originalError as { retryable?: unknown }).retryable === 'boolean'
+        ? Boolean((originalError as { retryable?: boolean }).retryable)
+        : undefined;
     const wrapped = ErrorUtils.createError(
       `${code}: ${originalError.message}`,
       code,
       {
         requestId,
         originalError,
-        upstreamCode: failure.upstreamCode,
-        statusCode: failure.statusCode,
-        retryable: failure.retryable,
         requestExecutorProviderErrorStage: 'provider.sse_decode'
       }
     ) as Error & {
@@ -505,11 +446,21 @@ export class ResponsesSseToJsonConverterRefactored {
       retryable?: boolean;
       upstreamCode?: string;
       requestExecutorProviderErrorStage?: string;
+      context?: Record<string, unknown>;
     };
-    wrapped.status = failure.statusCode;
-    wrapped.statusCode = failure.statusCode;
-    wrapped.retryable = failure.retryable;
-    wrapped.upstreamCode = failure.upstreamCode;
+    if (explicitStatusCode !== undefined) {
+      wrapped.status = explicitStatusCode;
+      wrapped.statusCode = explicitStatusCode;
+      (wrapped.context as Record<string, unknown>).statusCode = explicitStatusCode;
+    }
+    if (explicitRetryable !== undefined) {
+      wrapped.retryable = explicitRetryable;
+      (wrapped.context as Record<string, unknown>).retryable = explicitRetryable;
+    }
+    if (explicitUpstreamCode) {
+      wrapped.upstreamCode = explicitUpstreamCode;
+      (wrapped.context as Record<string, unknown>).upstreamCode = explicitUpstreamCode;
+    }
     wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
     return wrapped;
   }

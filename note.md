@@ -15,6 +15,11 @@
 - Fix: add the real router-hotpath JSON capability key and make `assertNativeObject()` accept a plain string label, avoiding a fake `normalizeResponsesInputItemsForProviderWireNative` native capability.
 - Verification: root `tsc` PASS; direct pipeline Jest PASS 24/24; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:function-map-compile-gate`, and `build:base` PASS; `git diff --check` PASS.
 
+# 2026-07-01: Responses SSE decode failure metadata synthesis removed
+- Red evidence: `verify:sse-architecture-boundary` first failed after adding markers for `resolveSseFailureMetadata()` and local message-based upstream/status/retryable synthesis in `responses-sse-to-json-converter.ts`.
+- Fix: removed TS failure metadata classifier; Responses SSE decode now only preserves explicit `upstreamCode` / `statusCode` / `retryable` fields already present on the source error, while malformed generic decode errors no longer get synthesized provider failure metadata.
+- Verification: focused Responses SSE decode/materialize/parser Jest PASS 14/14; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:hub-response-provider-sse-materialization`, sharedmodule/root `tsc`, real 4444 sample replay, `build:base`, and `git diff --check` PASS.
+
 # 2026-07-01: servertool postflight session truth removed from TS
 - Slice: `engine-postflight-shell.ts` no longer reads/trims `metadataCenterSnapshot.requestTruth.sessionId`; it passes the metadata-center snapshot carrier to native `buildStoplessAutoCliProjectionFromEngineWithNative()`, where Rust `stopless_auto_handler_bridge.rs` owns session truth extraction.
 - Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now forbid `const requestTruth = metadataCenterSnapshot?.requestTruth`, `const rawSessionId = requestTruth?.sessionId`, and `rawSessionId.trim()` in postflight.

@@ -193,6 +193,11 @@ for (const forbidden of [
   "const type = typeof event.type === 'string' ? event.type : 'data';",
   "const data = event.data ? JSON.stringify(event.data) : '';",
   'event: ${type}\\ndata: ${data}\\n\\n',
+  'private resolveSseFailureMetadata(',
+  "normalized.includes('context window')",
+  "normalized.includes('stream incomplete')",
+  "normalized.includes('terminated')",
+  "return { upstreamCode: errorCode || 'SSE_TO_JSON_ERROR', statusCode: 502, retryable: true };",
 ]) {
   if (responsesSseToJsonConverter.includes(forbidden)) {
     failures.push(`Responses SSE decode must not synthesize wire frames in TS: ${forbidden}`);
