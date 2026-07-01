@@ -744,6 +744,18 @@ pub fn parse_servertool_timeout_ms_json(input_json: &str) -> Result<String, Stri
     .map_err(|e| format!("serialize servertool timeout: {e}"))
 }
 
+pub fn resolve_servertool_timeout_ms_from_env_candidates_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: orchestration_policy_contract::ServertoolTimeoutEnvCandidatesInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool timeout env candidates input: {e}"))?;
+    serde_json::to_string(
+        &orchestration_policy_contract::resolve_servertool_timeout_ms_from_env_candidates(&input)?,
+    )
+    .map_err(|e| format!("serialize servertool timeout env candidates: {e}"))
+}
+
 pub fn plan_servertool_timeout_watcher_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolTimeoutWatcherInput =
         serde_json::from_str(input_json)

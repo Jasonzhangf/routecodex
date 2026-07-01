@@ -12,6 +12,21 @@ pub struct ServertoolTimeoutPolicyInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ServertoolTimeoutEnvCandidate {
+    pub key: String,
+    #[serde(default)]
+    pub value: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolTimeoutEnvCandidatesInput {
+    #[serde(default)]
+    pub candidates: Vec<ServertoolTimeoutEnvCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ServertoolStateLoadFailedErrorInput {
     pub request_id: String,
     pub sticky_key: String,
@@ -125,6 +140,27 @@ pub fn parse_servertool_timeout_ms(input: &ServertoolTimeoutPolicyInput) -> Resu
         return Err("parseTimeoutMs: invalid timeout value".to_string());
     }
     Ok(value.floor() as u64)
+}
+
+pub fn resolve_servertool_timeout_ms_from_env_candidates(
+    input: &ServertoolTimeoutEnvCandidatesInput,
+) -> Result<u64, String> {
+    for candidate in &input.candidates {
+        let Some(value) = candidate.value.as_ref() else {
+            continue;
+        };
+        if value
+            .as_str()
+            .map(|text| text.trim().is_empty())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        return parse_servertool_timeout_ms(&ServertoolTimeoutPolicyInput {
+            raw: Some(value.clone()),
+        });
+    }
+    Ok(0)
 }
 
 pub fn plan_servertool_timeout_watcher(
@@ -598,6 +634,48 @@ mod tests {
         assert!(parse_servertool_timeout_ms(&ServertoolTimeoutPolicyInput {
             raw: Some(json!("0"))
         })
+        .is_err());
+    }
+
+    #[test]
+    fn resolves_timeout_from_env_candidates_in_rust() {
+        assert_eq!(
+            resolve_servertool_timeout_ms_from_env_candidates(
+                &ServertoolTimeoutEnvCandidatesInput {
+                    candidates: vec![
+                        ServertoolTimeoutEnvCandidate {
+                            key: "ROUTECODEX_SERVERTOOL_TIMEOUT_MS".to_string(),
+                            value: Some(json!("  ")),
+                        },
+                        ServertoolTimeoutEnvCandidate {
+                            key: "RCC_SERVERTOOL_TIMEOUT_MS".to_string(),
+                            value: Some(json!("1200.8")),
+                        },
+                        ServertoolTimeoutEnvCandidate {
+                            key: "LLMSWITCH_SERVERTOOL_TIMEOUT_MS".to_string(),
+                            value: Some(json!("5000")),
+                        },
+                    ],
+                }
+            )
+            .unwrap(),
+            1200
+        );
+        assert_eq!(
+            resolve_servertool_timeout_ms_from_env_candidates(
+                &ServertoolTimeoutEnvCandidatesInput { candidates: vec![] }
+            )
+            .unwrap(),
+            0
+        );
+        assert!(resolve_servertool_timeout_ms_from_env_candidates(
+            &ServertoolTimeoutEnvCandidatesInput {
+                candidates: vec![ServertoolTimeoutEnvCandidate {
+                    key: "ROUTECODEX_SERVERTOOL_TIMEOUT_MS".to_string(),
+                    value: Some(json!("bad")),
+                }],
+            }
+        )
         .is_err());
     }
 

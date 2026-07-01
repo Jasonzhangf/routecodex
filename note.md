@@ -1,3 +1,9 @@
+# 2026-07-01: servertool timeout env priority moved to Rust
+- Slice: `engine-orchestration-shell.ts` no longer maps timeout env names and finds the first truthy value in TS; it now passes env candidates to native `resolveServertoolTimeoutMsFromEnvCandidatesWithNative()`, where Rust `orchestration_policy_contract.rs` owns candidate priority, empty-value skip, numeric parse, and invalid-value fail-fast.
+- Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` require the new native resolver and forbid the old `parseServertoolTimeoutMsWithNative({ raw: raw || undefined })` / `.map(...).find(...)` TS shape in the engine shell.
+- Verification: `cargo test -p servertool-core orchestration_policy_contract --lib -- --nocapture` PASS 8/8; scoped `rustfmt --check` PASS; `build-native-hotpath` PASS; sharedmodule `tsc` PASS; focused Jest `servertool-active-orchestration-audit + server-side-tools.failfast + servertool-cli-native-bridge` PASS 68/68; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Commit scope note: unrelated SSE dirty files remain and are excluded from this servertool slice.
+
 # 2026-07-01: servertool execution branch projected tool call moved to Rust plan
 - Slice: `execution_branch_contract.rs` now returns `projected_tool_call{id,name,arguments}` for CLI projection branches; `execution-stage-shell.ts` no longer reads `dispatchPlan.executableToolCalls[projectedToolCallIndex]` or builds the missing-index error string locally.
 - Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now require the native projected tool-call object and forbid `preExecutionBranchPlan.projectedToolCallIndex` lookup in the execution-stage shell.

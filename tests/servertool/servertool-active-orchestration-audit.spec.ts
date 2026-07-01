@@ -443,9 +443,11 @@ const TARGETS = [
       'readProviderProtocolFromAnyBoundMetadataCenter',
       'providerProtocol: args.providerProtocol',
       'Servertool engine orchestration requires metadata center runtime_control.providerProtocol',
+      'parseServertoolTimeoutMsWithNative({ raw: raw || undefined })',
+      '.map((key) => process.env[key]).find((value) => Boolean(value))',
     ],
     required: [
-      'parseServertoolTimeoutMsWithNative({ raw: raw || undefined })',
+      'resolveServertoolTimeoutMsFromEnvCandidatesWithNative({',
       'function resolveServerToolTimeoutMs()',
       'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
       'const runtimeAction = planServertoolEngineRuntimeActionWithNative({',

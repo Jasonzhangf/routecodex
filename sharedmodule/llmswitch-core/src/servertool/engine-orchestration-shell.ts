@@ -26,7 +26,7 @@ import {
 import {
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineSkipWithNative,
-  parseServertoolTimeoutMsWithNative,
+  resolveServertoolTimeoutMsFromEnvCandidatesWithNative,
   planServertoolTimeoutErrorWithNative,
   planStoplessExecutionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -72,12 +72,22 @@ function createProgressObservation(args: {
 }
 
 function resolveServerToolTimeoutMs(): number {
-  const raw = [
-    'ROUTECODEX_SERVERTOOL_TIMEOUT_MS',
-    'RCC_SERVERTOOL_TIMEOUT_MS',
-    'LLMSWITCH_SERVERTOOL_TIMEOUT_MS'
-  ].map((key) => process.env[key]).find((value) => Boolean(value));
-  return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });
+  return resolveServertoolTimeoutMsFromEnvCandidatesWithNative({
+    candidates: [
+      {
+        key: 'ROUTECODEX_SERVERTOOL_TIMEOUT_MS',
+        value: process.env.ROUTECODEX_SERVERTOOL_TIMEOUT_MS
+      },
+      {
+        key: 'RCC_SERVERTOOL_TIMEOUT_MS',
+        value: process.env.RCC_SERVERTOOL_TIMEOUT_MS
+      },
+      {
+        key: 'LLMSWITCH_SERVERTOOL_TIMEOUT_MS',
+        value: process.env.LLMSWITCH_SERVERTOOL_TIMEOUT_MS
+      }
+    ]
+  });
 }
 
 export async function runServerToolOrchestrationShell(

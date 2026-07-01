@@ -2968,6 +2968,25 @@ export function parseServertoolTimeoutMsWithNative(input: ServertoolTimeoutPolic
   return parsed;
 }
 
+export function resolveServertoolTimeoutMsFromEnvCandidatesWithNative(input: {
+  candidates: Array<{ key: string; value?: unknown }>;
+}): number {
+  const capability = 'resolveServertoolTimeoutMsFromEnvCandidatesJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('resolveServertoolTimeoutMsFromEnvCandidatesJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`resolveServertoolTimeoutMsFromEnvCandidatesJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (typeof parsed !== 'number' || !Number.isInteger(parsed) || parsed < 0) {
+    throw new Error('resolveServertoolTimeoutMsFromEnvCandidatesJson native returned invalid timeout');
+  }
+  return parsed;
+}
+
 export function planServertoolTimeoutWatcherWithNative(timeoutMs: unknown): ServertoolTimeoutWatcherPlan {
   const capability = 'planServertoolTimeoutWatcherJson';
   const fn = readNativeFunction(capability);

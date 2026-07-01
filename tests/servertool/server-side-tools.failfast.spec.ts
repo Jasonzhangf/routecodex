@@ -232,6 +232,14 @@ jest.unstable_mockModule(
         timeoutMs: normalized
       };
     }),
+    resolveServertoolTimeoutMsFromEnvCandidatesWithNative: jest.fn((input: any) => {
+      const candidates = Array.isArray(input?.candidates) ? input.candidates : [];
+      const first = candidates.find((candidate: any) => {
+        const value = typeof candidate?.value === 'string' ? candidate.value.trim() : '';
+        return value.length > 0;
+      });
+      return first ? Math.floor(Number(first.value)) : 0;
+    }),
     planServertoolTimeoutErrorWithNative: jest.fn(() => ({
       code: 'SERVERTOOL_TIMEOUT',
       category: 'INTERNAL_ERROR',

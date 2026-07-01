@@ -1389,6 +1389,14 @@ pub fn plan_servertool_execution_branch_json(input_json: String) -> NapiResult<S
 }
 
 #[napi]
+pub fn resolve_servertool_timeout_ms_from_env_candidates_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::resolve_servertool_timeout_ms_from_env_candidates_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_engine_preflight_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_engine_preflight_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

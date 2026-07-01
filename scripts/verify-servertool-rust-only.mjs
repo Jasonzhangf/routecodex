@@ -2441,6 +2441,7 @@ function checkOrchestrationPolicyRustOwner() {
   }
   for (const needle of [
     'parseServertoolTimeoutMsWithNative',
+    'resolveServertoolTimeoutMsFromEnvCandidatesWithNative',
     'readClientInjectOnlyWithNative',
     'normalizeClientInjectTextWithNative',
     'compactFollowupErrorReasonWithNative',
@@ -2455,6 +2456,7 @@ function checkOrchestrationPolicyRustOwner() {
   }
   for (const needle of [
     'parseServertoolTimeoutMsJson',
+    'resolveServertoolTimeoutMsFromEnvCandidatesJson',
     'planServertoolTimeoutWatcherJson',
     'isAdapterClientDisconnectedJson',
     'planClientDisconnectWatcherJson',
@@ -2531,8 +2533,8 @@ function checkOrchestrationPolicyRustOwner() {
     }
   }
   for (const needle of [
-    'parseServertoolTimeoutMsWithNative',
-    'return parseServertoolTimeoutMsWithNative({ raw: raw || undefined });',
+    'resolveServertoolTimeoutMsFromEnvCandidatesWithNative',
+    'return resolveServertoolTimeoutMsFromEnvCandidatesWithNative({',
   ]) {
     assertContains(
       'servertool-orchestration-policy-ts-thin-shell',
@@ -2549,6 +2551,8 @@ function checkOrchestrationPolicyRustOwner() {
   );
   for (const keyword of [
     'function resolveServerToolTimeoutMsFromEnv(',
+    'parseServertoolTimeoutMsWithNative({ raw: raw || undefined })',
+    '.map((key) => process.env[key]).find((value) => Boolean(value))',
     'SERVERTOOL_TIMEOUT_ERROR_FEATURE_ID',
     'Number.isFinite',
     'Math.floor',
