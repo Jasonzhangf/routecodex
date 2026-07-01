@@ -58,28 +58,27 @@ export async function runServertoolResponseStagePrePass(args: {
     excludeAutoHookIds: args.excludeAutoHookIds,
     responseStageGatePlan
   });
-  switch (responseStageAutoHook.action) {
+  const autoHookResult = 'result' in responseStageAutoHook ? responseStageAutoHook.result : null;
+  const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan,
+    autoHookEvaluated: true,
+    hasAutoHookResult: autoHookResult != null
+  });
+  switch (postAutoHookRuntimeAction.action) {
     case 'return_auto_hook_result':
       return {
         action: 'return_result',
         responseStageGatePlan,
-        result: responseStageAutoHook.result
+        result: autoHookResult as ServerSideToolEngineResult
       };
-    case 'continue_without_result':
-      break;
-    case 'return_passthrough_bypass':
+    case 'return_passthrough_no_auto_hook_result':
       return {
         action: 'continue_to_execution' as const,
         responseStageGatePlan
       };
     default:
       throw new Error(
-        `[servertool] invalid response-stage auto-hook action: ${String((responseStageAutoHook as { action: string }).action)}`
+        `[servertool] invalid response-stage post auto-hook action: ${String((postAutoHookRuntimeAction as { action: string }).action)}`
       );
   }
-
-  return {
-    action: 'continue_to_execution' as const,
-    responseStageGatePlan
-  };
 }

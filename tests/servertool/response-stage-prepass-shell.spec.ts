@@ -86,9 +86,13 @@ describe('response-stage-prepass-shell', () => {
       responseHookRequired: false,
       nextAction: 'run_auto_hooks'
     });
-    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
-      action: 'run_auto_hooks'
-    });
+    planServertoolResponseStageRuntimeActionWithNative
+      .mockReturnValueOnce({
+        action: 'run_auto_hooks'
+      })
+      .mockReturnValueOnce({
+        action: 'return_auto_hook_result'
+      });
     runServertoolResponseStageAutoHookPass.mockResolvedValue({
       action: 'return_auto_hook_result',
       result: {
@@ -128,6 +132,59 @@ describe('response-stage-prepass-shell', () => {
         }
       })
     );
+    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenLastCalledWith({
+      responseStageGatePlan: {
+        responseHookMatched: true,
+        responseHookRequired: false,
+        nextAction: 'run_auto_hooks'
+      },
+      autoHookEvaluated: true,
+      hasAutoHookResult: true
+    });
+  });
+
+  test('keeps post-auto-hook passthrough decision in Rust runtime action plan', async () => {
+    planServertoolResponseStageGateWithNative.mockReturnValue({
+      responseHookMatched: true,
+      responseHookRequired: false,
+      nextAction: 'run_auto_hooks'
+    });
+    planServertoolResponseStageRuntimeActionWithNative
+      .mockReturnValueOnce({
+        action: 'run_auto_hooks'
+      })
+      .mockReturnValueOnce({
+        action: 'return_passthrough_no_auto_hook_result'
+      });
+    runServertoolResponseStageAutoHookPass.mockResolvedValue({
+      action: 'continue_without_result'
+    });
+
+    await expect(
+      runServertoolResponseStagePrePass({
+        options: { adapterContext: {}, requestId: 'req-post-auto-hook-passthrough' } as any,
+        baseObject: { ok: true },
+        contextBase: { base: { ok: true }, toolCalls: [] } as any,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null
+      })
+    ).resolves.toEqual({
+      action: 'continue_to_execution',
+      responseStageGatePlan: {
+        responseHookMatched: true,
+        responseHookRequired: false,
+        nextAction: 'run_auto_hooks'
+      }
+    });
+    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenLastCalledWith({
+      responseStageGatePlan: {
+        responseHookMatched: true,
+        responseHookRequired: false,
+        nextAction: 'run_auto_hooks'
+      },
+      autoHookEvaluated: true,
+      hasAutoHookResult: false
+    });
   });
 
   test('keeps prepass auto-hook decision in Rust runtime action plan', async () => {
@@ -141,13 +198,14 @@ describe('response-stage-prepass-shell', () => {
     expect(source).not.toContain("prepassRuntimeAction.action !== 'run_auto_hooks'");
     expect(source).not.toContain("if (responseStageAutoHook.action === 'return_auto_hook_result')");
     expect(source).toContain('switch (prepassRuntimeAction.action)');
-    expect(source).toContain('switch (responseStageAutoHook.action)');
+    expect(source).toContain('switch (postAutoHookRuntimeAction.action)');
+    expect(source).not.toContain('switch (responseStageAutoHook.action)');
     expect(source).not.toContain('responseStageGatePlan.responseHookMatched !== true');
     expect(source).not.toContain('responseHookMatched !== true');
   });
 
   test('fails fast for unknown prepass native runtime action', async () => {
-    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValueOnce({
       action: 'unknown_prepass_action'
     });
 
