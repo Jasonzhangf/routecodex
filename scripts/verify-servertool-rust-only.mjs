@@ -5393,6 +5393,7 @@ function checkServertoolRustOutcomeCloseout() {
     'typeof gatePlan.skipReason',
     'gatePlan.skipReason.trim()',
     "gatePlan.nextAction === 'bypass'",
+    "if (gateRuntimeAction.action === 'return_passthrough_bypass')",
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
@@ -5404,7 +5405,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'const gatePlan = planServertoolResponseStageGateWithNative({',
     'planServertoolResponseStageRuntimeActionWithNative',
-    "gateRuntimeAction.action === 'return_passthrough_bypass'",
+    'switch (gateRuntimeAction.action)',
+    "case 'return_passthrough_bypass'",
     'detectProviderResponseShapeWithNative',
     'const orchestration = await runServerToolOrchestrationShell(',
     'runServerToolOrchestrationShell',

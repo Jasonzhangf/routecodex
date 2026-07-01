@@ -95,10 +95,12 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain('typeof gatePlan.skipReason');
     expect(source).not.toContain('gatePlan.skipReason.trim()');
     expect(source).not.toContain("gatePlan.nextAction === 'bypass'");
+    expect(source).not.toContain("if (gateRuntimeAction.action === 'return_passthrough_bypass')");
     expect(source).not.toContain('if (orchestration.executed)');
+    expect(source).toContain('switch (gateRuntimeAction.action)');
+    expect(source).toContain("case 'return_passthrough_bypass'");
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
     expect(source).toContain('planServertoolResponseStageOrchestrationOutputWithNative({');
-    expect(source).toContain("gateRuntimeAction.action === 'return_passthrough_bypass'");
   });
 
   test('returns native skipReason without TS fallback or whitelist filtering', async () => {

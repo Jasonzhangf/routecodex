@@ -49,18 +49,20 @@ export async function runServertoolResponseStageOrchestrationShell(
     hasAutoHookResult: false
   });
 
-  if (gateRuntimeAction.action === 'return_passthrough_bypass') {
-    const skipReason = gatePlan.skipReason as string;
-    recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
-      executed: false,
-      skipReason,
-      inputShape: detectProviderResponseShapeWithNative(options.payload)
-    });
-    return {
-      payload: options.payload,
-      executed: false,
-      skipReason
-    };
+  switch (gateRuntimeAction.action) {
+    case 'return_passthrough_bypass': {
+      const skipReason = gatePlan.skipReason as string;
+      recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
+        executed: false,
+        skipReason,
+        inputShape: detectProviderResponseShapeWithNative(options.payload)
+      });
+      return {
+        payload: options.payload,
+        executed: false,
+        skipReason
+      };
+    }
   }
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
 
