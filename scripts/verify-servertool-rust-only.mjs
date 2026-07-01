@@ -5605,6 +5605,7 @@ function checkServertoolRustOutcomeCloseout() {
     "actionPlan.action === 'invalid_plan_missing_finalize'",
     "actionPlan.action === 'invalid_plan_result'",
     "if (materializationPlan.action === 'throw_dispatch_error')",
+    'const materializationAction = materializationPlan.action',
     "await import('./builtin-handler-catalog.js')",
     'getBuiltinHandlerEntry(args.builtinName)',
     'builtin handler missing execution descriptor',
@@ -5627,7 +5628,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-shell-ts-orchestration-guard',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    'switch (materializationAction)'
+    'switch (materializationPlan.action)'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',

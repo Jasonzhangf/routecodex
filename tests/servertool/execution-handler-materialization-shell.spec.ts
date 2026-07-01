@@ -165,7 +165,8 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).toContain('throw createServertoolProviderProtocolErrorFromPlan(');
     expect(source).toContain('planServertoolExecutionOutcomeMaterializationWithNative({');
     expect(source).not.toContain("if (materializationPlan.action === 'throw_dispatch_error')");
-    expect(source).toContain('switch (materializationAction)');
+    expect(source).toContain('switch (materializationPlan.action)');
+    expect(source).not.toContain('const materializationAction = materializationPlan.action');
     expect(source).not.toContain('Boolean(args.executionState.lastExecution)');
     expect(source).toContain('hasLastExecution: args.executionState.lastExecution != null');
     expect(source).not.toContain('planServertoolExecutionDispatchErrorWithNative({');

@@ -1,3 +1,8 @@
+# 2026-07-02: servertool materialization action alias removed
+- Slice: `execution-handler-materialization-shell.ts` no longer copies `materializationPlan.action` into local `materializationAction`; the shell switches directly on the native materialization plan action.
+- Gate: `execution-handler-materialization-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` now require direct `switch (materializationPlan.action)` and forbid `const materializationAction = materializationPlan.action`.
+- Evidence: focused materialization Jest PASS 11/11; focused active audit PASS 44/44; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool coordinator action aliases removed
 - Slice: `run-server-side-tool-engine-shell.ts` no longer copies stage result discriminants into `entryPreflightAction`, `entryContextAction`, or `responseStagePrePassAction`; the coordinator now switches directly on each stage result action.
 - Gate: `run-server-side-tool-engine-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid the local action aliases and require direct stage-action switches.
