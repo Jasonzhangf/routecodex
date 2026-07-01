@@ -1,9 +1,23 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   containsBroadKillCommand,
   validateCanonicalClientToolCall
 } from '../../src/server/runtime/http-server/executor/provider-response-tool-validation-blocks.js';
 
 describe('provider-response-tool-validation-blocks apply_patch normalization', () => {
+  it('does not keep a TS fallback validator beside the native owner', () => {
+    const sourcePath = path.join(
+      process.cwd(),
+      'src/server/runtime/http-server/executor/provider-response-tool-validation-blocks.ts'
+    );
+    const source = fs.readFileSync(sourcePath, 'utf8');
+    expect(source).not.toContain('Fallback');
+    expect(source).not.toContain('tokenizeShellWords');
+    expect(source).not.toContain('unwrapShellWrapperCommand');
+    expect(source).not.toContain('findXargsInvokedCommand');
+  });
+
   it('keeps exec_command cmd exact and does not treat privileged shell text as broad kill', () => {
     const cmd = [
       'osascript -e \'do shell script "echo APPLESCRIPT_AUTH_OK" with administrator privileges\' 2>&1',
