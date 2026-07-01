@@ -128,26 +128,20 @@ describe('execution-handler-materialization-shell', () => {
         return {
           action: 'invalid_mixed_client_tools_outcome',
           reuseLastExecutionEnvelope: false,
-          executionFlowId: typeof input?.flowId === 'string' && input.flowId.trim()
-            ? input.flowId
-            : 'servertool_mixed'
+          executionFlowId: input?.flowId ?? 'servertool_mixed'
         };
       }
       if (input?.hasLastExecution === true || input?.hasResolvedFollowup === true || Number(input?.executedToolCallsLen ?? 0) > 0) {
         return {
           action: 'return_execution_contract',
           reuseLastExecutionEnvelope: false,
-          executionFlowId: typeof input?.flowId === 'string' && input.flowId.trim()
-            ? input.flowId
-            : 'servertool_multi'
+          executionFlowId: input?.flowId ?? 'servertool_multi'
         };
       }
       return {
         action: 'missing_servertool_execution_contract',
         reuseLastExecutionEnvelope: false,
-        executionFlowId: typeof input?.flowId === 'string' && input.flowId.trim()
-          ? input.flowId
-          : 'servertool_multi'
+        executionFlowId: input?.flowId ?? 'servertool_multi'
       };
     });
   });
@@ -167,6 +161,8 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain('const outcomePlanInput =');
     expect(source).toContain('throw createServertoolProviderProtocolErrorFromPlan(');
     expect(source).toContain('planServertoolExecutionDispatchErrorWithNative({');
+    expect(source).not.toContain('record.executionFlowId.trim()');
+    expect(source).not.toContain("input.outcomeMode === 'mixed_client_tools'");
     expect(source).not.toContain('function throwServertoolExecutionDispatchError(');
     expect(source).toContain('finalChatResponse: args.baseForExecution');
     expect(source).not.toContain('export const buildServertoolOutcomePlanInput =');

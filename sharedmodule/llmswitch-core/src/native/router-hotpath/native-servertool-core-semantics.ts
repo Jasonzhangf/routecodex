@@ -2146,18 +2146,16 @@ export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
   ) {
     throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native returned invalid action');
   }
+  if (typeof record.executionFlowId !== 'string') {
+    throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native returned invalid executionFlowId');
+  }
   return {
     action: record.action,
     reuseLastExecutionEnvelope: record.reuseLastExecutionEnvelope === true,
     ...(record.selectedExecutionEnvelope !== undefined
       ? { selectedExecutionEnvelope: record.selectedExecutionEnvelope }
       : {}),
-    executionFlowId:
-      typeof record.executionFlowId === 'string' && record.executionFlowId.trim()
-        ? record.executionFlowId
-        : input.outcomeMode === 'mixed_client_tools'
-          ? 'servertool_mixed'
-          : 'servertool_multi'
+    executionFlowId: record.executionFlowId
   };
 }
 

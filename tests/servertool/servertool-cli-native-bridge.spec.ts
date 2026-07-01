@@ -341,6 +341,18 @@ describe('servertool CLI native bridge', () => {
 
     expect(
       planServertoolExecutionOutcomeRuntimeActionWithNative({
+        outcomeMode: 'mixed_client_tools',
+        hasLastExecution: false,
+        executedToolCallsLen: 0,
+        flowId: '  '
+      })
+    ).toMatchObject({
+      action: 'invalid_mixed_client_tools_outcome',
+      executionFlowId: 'servertool_mixed'
+    });
+
+    expect(
+      planServertoolExecutionOutcomeRuntimeActionWithNative({
         outcomeMode: 'servertool_only',
         hasLastExecution: true,
         executedToolCallsLen: 1,

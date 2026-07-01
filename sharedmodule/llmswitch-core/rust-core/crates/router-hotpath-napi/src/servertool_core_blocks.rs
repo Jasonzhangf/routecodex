@@ -2653,6 +2653,23 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
     );
     assert!(mixed_value.get("pendingInjection").is_none());
 
+    let blank_flow = plan_servertool_execution_outcome_runtime_action_json(
+        &serde_json::json!({
+            "outcomeMode": "mixed_client_tools",
+            "hasLastExecution": false,
+            "executedToolCallsLen": 0,
+            "flowId": "  "
+        })
+        .to_string(),
+    )
+    .expect("execution outcome runtime action blank flow plan");
+    let blank_flow_value: serde_json::Value =
+        serde_json::from_str(&blank_flow).expect("parse blank flow plan");
+    assert_eq!(
+        blank_flow_value["executionFlowId"],
+        serde_json::json!("servertool_mixed")
+    );
+
     let missing = plan_servertool_execution_outcome_runtime_action_json(
         &serde_json::json!({
             "outcomeMode": "servertool_only",

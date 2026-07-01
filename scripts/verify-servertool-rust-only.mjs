@@ -2881,7 +2881,6 @@ function checkServertoolExecutionDispatchRustOwner() {
     assertContains(check, file, content, needle);
   }
   for (const marker of [
-    'record.skipReason.trim()',
     'createServertoolExecutionLoopStateFromNative',
     'appendExecutedToolRecordFromNative',
     'function hydrateExecutionLoopState(',
@@ -2891,6 +2890,18 @@ function checkServertoolExecutionDispatchRustOwner() {
       'servertool-execution-state-wrapper-deleted',
       `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
       readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
+      marker
+    );
+  }
+  for (const marker of [
+    'record.skipReason.trim()',
+    'record.executionFlowId.trim()',
+    "input.outcomeMode === 'mixed_client_tools'",
+  ]) {
+    assertMissing(
+      'servertool-native-wrapper-no-ts-defaulting',
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
+      nativeCoreWrapper,
       marker
     );
   }

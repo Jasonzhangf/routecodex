@@ -164,6 +164,25 @@ mod tests {
         );
         assert!(!plan.reuse_last_execution_envelope);
         assert_eq!(plan.selected_execution_envelope, None);
+        assert_eq!(plan.execution_flow_id, "servertool_multi");
+    }
+
+    #[test]
+    fn defaults_blank_flow_id_in_rust() {
+        let plan = plan_servertool_execution_outcome_runtime_action(
+            ServertoolExecutionOutcomeRuntimeActionInput {
+                outcome_mode: "mixed_client_tools".to_string(),
+                has_last_execution: false,
+                executed_tool_calls_len: 0,
+                last_execution: None,
+                flow_id: Some("  ".to_string()),
+            },
+        );
+        assert_eq!(
+            plan.action,
+            ServertoolExecutionOutcomeRuntimeAction::InvalidMixedClientToolsOutcome
+        );
+        assert_eq!(plan.execution_flow_id, "servertool_mixed");
     }
 
     #[test]
