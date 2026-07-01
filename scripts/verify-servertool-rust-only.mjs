@@ -3591,7 +3591,7 @@ function checkServertoolRegistryRustOwner() {
   }
   for (const needle of [
     'planServertoolRegistryLookupFromSkeletonWithNative({',
-    'planServertoolRegistryAutoHookDescriptorsWithNative({',
+    'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
   ]) {
     assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
   }
@@ -3640,6 +3640,8 @@ function checkServertoolRegistryRustOwner() {
     'native registry auto handler order missing entry',
     'native registry record projection mismatch',
     'native registry lookup returned builtin without canonicalName',
+    'native registry auto-hook descriptor missing entry',
+    'descriptor.sourceIndex',
     'if (!actionPlan.canonicalName)',
     'if (builtinEntry) {',
     'return getAdHocHandlerEntry(canonicalName);',

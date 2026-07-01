@@ -533,7 +533,7 @@ const TARGETS = [
     ],
     required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
-      'planServertoolRegistryAutoHookDescriptorsWithNative({',
+      'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
     ],
   },
 ] as const;

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const getBuiltinHandlerEntryMock = jest.fn();
 const listBuiltinAutoHandlerEntriesMock = jest.fn();
 const planServertoolRegistryLookupFromSkeletonWithNativeMock = jest.fn();
-const planServertoolRegistryAutoHookDescriptorsWithNativeMock = jest.fn();
+const planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
@@ -17,8 +17,8 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolRegistryAutoHookDescriptorsWithNative:
-      planServertoolRegistryAutoHookDescriptorsWithNativeMock,
+    planServertoolRegistryBuiltinAutoHookEntriesWithNative:
+      planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock,
   })
 );
 
@@ -61,8 +61,15 @@ describe('registry-orchestration-shell', () => {
       autoHook: { phase: 'post', priority: 9, order: 1 },
     } as any;
     listBuiltinAutoHandlerEntriesMock.mockReturnValue({ entries: [entry] });
-    planServertoolRegistryAutoHookDescriptorsWithNativeMock.mockReturnValue([
-      { id: 'alpha', phase: 'post', priority: 9, order: 1, sourceIndex: 0 },
+    planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock.mockReturnValue([
+      {
+        id: 'alpha',
+        phase: 'post',
+        priority: 9,
+        order: 1,
+        registration: entry.registration,
+        execution,
+      },
     ]);
 
     expect(listAutoServerToolHooks()).toEqual([
@@ -75,19 +82,30 @@ describe('registry-orchestration-shell', () => {
         execution,
       },
     ]);
-    expect(planServertoolRegistryAutoHookDescriptorsWithNativeMock).toHaveBeenCalledWith({
-      hooks: [{ id: 'alpha', phase: 'post', priority: 9, order: 1 }],
+    expect(planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock).toHaveBeenCalledWith({
+      hooks: [
+        {
+          id: 'alpha',
+          phase: 'post',
+          priority: 9,
+          order: 1,
+          registration: entry.registration,
+          execution,
+        },
+      ],
     });
   });
 
-  test('rejects missing auto-hook descriptor indexes without rematching names in TS', () => {
+  test('surfaces native builtin auto-hook entry contract failures without TS sourceIndex rematch', () => {
     listBuiltinAutoHandlerEntriesMock.mockReturnValue({ entries: [] });
-    planServertoolRegistryAutoHookDescriptorsWithNativeMock.mockReturnValue([
-      { id: 'wrong', phase: 'post', priority: 9, order: 1, sourceIndex: 1 },
-    ]);
+    planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock.mockImplementation(() => {
+      throw new Error(
+        'planServertoolRegistryAutoHookDescriptorsJson native returned descriptor without builtin hook sourceIndex: 1'
+      );
+    });
 
     expect(() => listAutoServerToolHooks()).toThrow(
-      'native registry auto-hook descriptor missing entry'
+      'native returned descriptor without builtin hook sourceIndex: 1'
     );
   });
 
@@ -99,7 +117,7 @@ describe('registry-orchestration-shell', () => {
     expect(source).not.toContain('function resolveBuiltinEntry(');
     expect(source).not.toContain('.trim().toLowerCase()');
     expect(source).toContain("planServertoolRegistryLookupFromSkeletonWithNative({");
-    expect(source).toContain('planServertoolRegistryAutoHookDescriptorsWithNative({');
+    expect(source).toContain('planServertoolRegistryBuiltinAutoHookEntriesWithNative({');
     expect(source).not.toContain("from './registry-projection-shell.js'");
     expect(source).not.toContain('getServerToolHandlerViaNativePlan');
   });
@@ -123,5 +141,15 @@ describe('registry-orchestration-shell', () => {
     expect(source).not.toContain('resolveServertoolRegisteredNameWithNative');
     expect(source).not.toContain('isRegisteredServerToolNameViaNativeConfig');
     expect(source).not.toContain('isServertoolRegisteredNameByConfig');
+  });
+
+  test('does not rematch native auto-hook descriptors by sourceIndex in TS', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts', 'utf8')
+    );
+
+    expect(source).not.toContain('descriptor.sourceIndex');
+    expect(source).not.toContain('native registry auto-hook descriptor missing entry');
+    expect(source).toContain('planServertoolRegistryBuiltinAutoHookEntriesWithNative({');
   });
 });

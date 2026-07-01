@@ -2546,6 +2546,15 @@ export type ServertoolRegistryAutoHookDescriptorPlan = {
   sourceIndex: number;
 };
 
+export type ServertoolRegistryBuiltinAutoHookEntryPlan = {
+  id: string;
+  phase: 'pre' | 'default' | 'post';
+  priority: number;
+  order: number;
+  registration: Record<string, unknown>;
+  execution: Record<string, unknown>;
+};
+
 export function planServertoolRegistryAutoHookDescriptorsWithNative(input: {
   hooks: Array<{
     id: string;
@@ -2597,6 +2606,42 @@ export function planServertoolRegistryAutoHookDescriptorsWithNative(input: {
       priority: record.priority,
       order: record.order,
       sourceIndex: record.sourceIndex
+    };
+  });
+}
+
+export function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: {
+  hooks: Array<{
+    id: string;
+    phase?: string;
+    priority?: number;
+    order?: number;
+    registration: Record<string, unknown>;
+    execution: Record<string, unknown>;
+  }>;
+}): ServertoolRegistryBuiltinAutoHookEntryPlan[] {
+  const descriptors = planServertoolRegistryAutoHookDescriptorsWithNative({
+    hooks: input.hooks.map((hook) => ({
+      id: hook.id,
+      phase: hook.phase,
+      priority: hook.priority,
+      order: hook.order,
+    })),
+  });
+  return descriptors.map((descriptor) => {
+    const source = input.hooks[descriptor.sourceIndex];
+    if (!source || typeof source !== 'object') {
+      throw new Error(
+        `planServertoolRegistryAutoHookDescriptorsJson native returned descriptor without builtin hook sourceIndex: ${descriptor.sourceIndex}`
+      );
+    }
+    return {
+      id: descriptor.id,
+      phase: descriptor.phase,
+      priority: descriptor.priority,
+      order: descriptor.order,
+      registration: source.registration,
+      execution: source.execution,
     };
   });
 }

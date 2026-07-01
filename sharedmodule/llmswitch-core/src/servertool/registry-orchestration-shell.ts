@@ -4,7 +4,7 @@ import {
   resolveServertoolBuiltinHandlerEntryWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  planServertoolRegistryAutoHookDescriptorsWithNative
+  planServertoolRegistryBuiltinAutoHookEntriesWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import type {
   ServerToolAutoHookDescriptor,
@@ -28,27 +28,21 @@ export const getServerToolHandler = (
 
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
   const entries = planServertoolBuiltinAutoHandlerEntriesWithNative().entries as unknown as ServerToolHandlerEntry[];
-  return planServertoolRegistryAutoHookDescriptorsWithNative({
+  return planServertoolRegistryBuiltinAutoHookEntriesWithNative({
     hooks: entries.map((entry) => ({
       id: entry.name,
       phase: entry.autoHook?.phase,
       priority: entry.autoHook?.priority,
-      order: entry.autoHook?.order
+      order: entry.autoHook?.order,
+      registration: entry.registration as unknown as Record<string, unknown>,
+      execution: entry.execution as Record<string, unknown>
     }))
-  }).map((descriptor) => {
-    const entry = entries[descriptor.sourceIndex];
-    if (!entry) {
-      throw new Error(
-        `[servertool] native registry auto-hook descriptor missing entry for sourceIndex: ${descriptor.sourceIndex}`
-      );
-    }
-    return {
-      id: descriptor.id,
-      phase: descriptor.phase,
-      priority: descriptor.priority,
-      order: descriptor.order,
-      registration: entry.registration,
-      execution: entry.execution
-    };
-  });
+  }).map((entry) => ({
+    id: entry.id,
+    phase: entry.phase,
+    priority: entry.priority,
+    order: entry.order,
+    registration: entry.registration as unknown as ServerToolHandlerEntry['registration'],
+    execution: entry.execution as ServerToolHandlerEntry['execution']
+  }));
 };
