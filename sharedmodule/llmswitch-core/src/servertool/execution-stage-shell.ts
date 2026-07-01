@@ -38,9 +38,6 @@ export async function runServertoolExecutionStage(args: {
   });
   if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
     const projectedToolCall = preExecutionBranchPlan.projectedToolCall;
-    if (!projectedToolCall) {
-      throw new Error('[servertool] native execution-branch projected missing tool call');
-    }
     const branch = buildServertoolCliProjectionRuntimeBranchWithNative({
       requestId: args.options.requestId,
       toolName: projectedToolCall.name,

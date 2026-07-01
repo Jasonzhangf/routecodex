@@ -245,15 +245,28 @@ export interface NativeServertoolExecutionLoopState {
   lastExecution?: NativeServertoolExecutionSummary;
 }
 
-export interface ServertoolExecutionBranchPlan {
-  action: 'client_exec_cli_projection' | 'resolve_execution_outcome' | 'continue_response_stage';
-  projectedToolCall?: {
-    id: string;
-    name: string;
-    arguments: string;
-  };
-  projectedToolCallId?: string;
-  projectedToolCallIndex?: number;
+export type ServertoolExecutionBranchPlan =
+  | {
+      action: 'client_exec_cli_projection';
+      projectedToolCall: {
+        id: string;
+        name: string;
+        arguments: string;
+      };
+      projectedToolCallId?: string;
+      projectedToolCallIndex?: number;
+    }
+  | {
+      action: 'resolve_execution_outcome' | 'continue_response_stage';
+      projectedToolCall?: never;
+      projectedToolCallId?: never;
+      projectedToolCallIndex?: never;
+    };
+
+export interface ServertoolProjectedToolCall {
+  id: string;
+  name: string;
+  arguments: string;
 }
 
 export interface ServertoolEnginePreflightPlan {
@@ -2011,13 +2024,13 @@ export function planServertoolExecutionBranchWithNative(input: {
   if (record.action === 'client_exec_cli_projection' && record.projectedToolCall === undefined) {
     throw new Error('planServertoolExecutionBranchJson native returned missing projectedToolCall');
   }
-  const projectedToolCall =
-    record.projectedToolCall && typeof record.projectedToolCall === 'object' && !Array.isArray(record.projectedToolCall)
-      ? (record.projectedToolCall as { id: string; name: string; arguments: string })
-      : undefined;
+  if (record.action !== 'client_exec_cli_projection') {
+    return { action: record.action };
+  }
+  const projectedToolCall = record.projectedToolCall as ServertoolProjectedToolCall;
   return {
     action: record.action,
-    ...(projectedToolCall ? { projectedToolCall } : {}),
+    projectedToolCall,
     ...(typeof record.projectedToolCallId === 'string' && record.projectedToolCallId.trim()
       ? { projectedToolCallId: record.projectedToolCallId }
       : {}),

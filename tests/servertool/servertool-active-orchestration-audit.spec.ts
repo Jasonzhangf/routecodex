@@ -317,6 +317,8 @@ const TARGETS = [
       'function planExecutionBranchRuntimeAction(',
       'const preExecutionBranchPlan = planExecutionBranchRuntimeAction({',
       'const postExecutionBranchPlan = planExecutionBranchRuntimeAction({',
+      'if (!projectedToolCall)',
+      'native execution-branch projected missing tool call',
     ],
     required: [
       'prepareServertoolDispatchStage',
@@ -358,6 +360,8 @@ const TARGETS = [
       'toolCall.id === preExecutionBranchPlan.projectedToolCallId',
       'preExecutionBranchPlan.projectedToolCallIndex',
       'dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]',
+      'if (!projectedToolCall)',
+      'native execution-branch projected missing tool call',
       '.find(isClientExecCliProjectionToolCall)',
       'export function isClientExecCliProjectionToolCall(',
       'export const collectAdditionalClientToolCalls',
