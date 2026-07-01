@@ -231,6 +231,7 @@ export function logUsageSummary(
       ? info.logSessionColorKey.trim()
       : undefined;
   registerRequestLogContext(requestId, requestLogContext);
+  const requestColor = resolveRequestLogColorToken(requestId, requestLogContext) ?? '';
   const timingSuffix = formatRequestTimingSummary(requestId, {
     latencyMs: info.latencyMs,
     requestIds: info.timingRequestIds,
@@ -324,7 +325,6 @@ export function logUsageSummary(
       : (typeof info.inputRequestId === 'string' && info.inputRequestId.trim())
         ? info.inputRequestId.trim()
         : requestId;
-  const requestColor = resolveRequestLogColorToken(requestId, requestLogContext) ?? '';
   const finishReason = info.finishReason && info.finishReason.trim() ? info.finishReason.trim() : 'unknown';
   const usage = info.usage;
   const inputTokens = usage?.prompt_tokens ?? 'n/a';
