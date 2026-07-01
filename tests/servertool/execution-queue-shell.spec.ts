@@ -182,6 +182,12 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain("lastErr instanceof Error ? lastErr.message : String");
     expect(source).not.toContain('lastErr instanceof Error ? lastErr.message : lastErr');
     expect(source).not.toContain('Boolean(lastErr)');
+    expect(source).not.toContain('Boolean(entry)');
+    expect(source).not.toContain('Boolean(result)');
+    expect(source).not.toContain('planned ? await materializeServertoolPlannedResult');
+    expect(source).toContain('hasHandlerEntry: entry != null');
+    expect(source).toContain('planned != null ? await materializeServertoolPlannedResult');
+    expect(source).toContain('hasMaterializedResult: result != null');
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).not.toContain('buildServertoolDispatchPlanInputWithNative');
   });

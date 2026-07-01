@@ -2765,6 +2765,9 @@ function checkServertoolExecutionDispatchRustOwner() {
     'entry.execution.handler',
     'runServertoolHandler',
     'if (result) {',
+    'Boolean(entry)',
+    'Boolean(result)',
+    'planned ? await materializeServertoolPlannedResult',
     'if (lastErr) {',
     'Boolean(lastErr)',
     "String(lastErr ?? 'unknown')",
@@ -2797,6 +2800,18 @@ function checkServertoolExecutionDispatchRustOwner() {
     executionQueueShell,
     'message: errorEffectPlan.handlerErrorMessage as string'
   );
+  for (const marker of [
+    'hasHandlerEntry: entry != null',
+    'planned != null ? await materializeServertoolPlannedResult',
+    'hasMaterializedResult: result != null',
+  ]) {
+    assertContains(
+      'servertool-execution-dispatch-rust-owner',
+      TS_EXECUTION_QUEUE_SHELL,
+      executionQueueShell,
+      marker
+    );
+  }
 
   assertMissingFile(
     'servertool-execution-shell-deleted',

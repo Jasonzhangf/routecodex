@@ -39,7 +39,7 @@ export async function runServertoolIoExecutionQueue(args: {
   for (const toolCall of args.dispatchPlan.executableToolCalls) {
     const entry = getServerToolHandler(toolCall.name);
     const initialLoopActionPlan = planServertoolExecutionLoopRuntimeActionWithNative({
-      hasHandlerEntry: Boolean(entry),
+      hasHandlerEntry: entry != null,
       triggerMode: entry?.trigger,
       nativeExecutionMode: entry?.registration.executionMode,
       tsExecutionMode: toolCall.executionMode,
@@ -75,11 +75,11 @@ export async function runServertoolIoExecutionQueue(args: {
       lastErr = err;
       hasHandlerError = true;
     }
-    const result = planned ? await materializeServertoolPlannedResult(planned, args.options) : null;
+    const result = planned != null ? await materializeServertoolPlannedResult(planned, args.options) : null;
     const resultLoopActionPlan = planServertoolExecutionLoopRuntimeActionWithNative({
       hasHandlerEntry: true,
       triggerMode: entry.trigger,
-      hasMaterializedResult: Boolean(result),
+      hasMaterializedResult: result != null,
       hasHandlerError
     });
     if (resultLoopActionPlan.action === 'apply_materialized_result') {
