@@ -63,6 +63,12 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).toContain('resolveServertoolEntryContext');
     expect(source).toContain('runServertoolResponseStagePrePass');
     expect(source).toContain('runServertoolExecutionStage');
+    expect(source).not.toContain("if (entryPreflight.action === 'return_result')");
+    expect(source).not.toContain("if (entryContext.action !== 'continue')");
+    expect(source).not.toContain("if (responseStagePrePass.action === 'return_result')");
+    expect(source).toContain('switch (entryPreflightAction)');
+    expect(source).toContain('switch (entryContextAction)');
+    expect(source).toContain('switch (responseStagePrePassAction)');
     expect(source).not.toContain('const base =');
     expect(source).not.toContain("typeof options.chatResponse === 'object'");
   });

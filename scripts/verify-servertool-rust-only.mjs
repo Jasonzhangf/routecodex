@@ -5343,7 +5343,10 @@ function checkServertoolRustOutcomeCloseout() {
     'extractToolCallsFromResponseStage',
     'resolveServertoolEntryContext',
     'runServertoolResponseStagePrePass',
-    'runServertoolExecutionStage'
+    'runServertoolExecutionStage',
+    'switch (entryPreflightAction)',
+    'switch (entryContextAction)',
+    'switch (responseStagePrePassAction)'
   ]) {
     if (!runServerSideToolEngineShell.includes(marker)) {
       fail(
@@ -5357,6 +5360,9 @@ function checkServertoolRustOutcomeCloseout() {
     "import type { JsonObject } from '../conversion/hub/types/json.js';",
     'const base =',
     "typeof options.chatResponse === 'object'",
+    "if (entryPreflight.action === 'return_result')",
+    "if (entryContext.action !== 'continue')",
+    "if (responseStagePrePass.action === 'return_result')",
   ]) {
     if (runServerSideToolEngineShell.includes(marker)) {
       fail(

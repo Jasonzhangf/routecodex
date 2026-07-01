@@ -377,6 +377,9 @@ const TARGETS = [
     forbidden: [
       "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
       "import type { JsonObject } from '../conversion/hub/types/json.js';",
+      "if (entryPreflight.action === 'return_result')",
+      "if (entryContext.action !== 'continue')",
+      "if (responseStagePrePass.action === 'return_result')",
     ],
     required: [
       'orchestrateServertoolEngine',
@@ -385,6 +388,9 @@ const TARGETS = [
       'resolveServertoolEntryContext',
       'runServertoolResponseStagePrePass',
       'runServertoolExecutionStage',
+      'switch (entryPreflightAction)',
+      'switch (entryContextAction)',
+      'switch (responseStagePrePassAction)',
     ],
   },
   {

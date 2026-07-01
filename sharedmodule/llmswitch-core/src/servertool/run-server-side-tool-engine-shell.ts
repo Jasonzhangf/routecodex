@@ -13,8 +13,14 @@ export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
   const entryPreflight = runServertoolEntryPreflight({ options });
-  if (entryPreflight.action === 'return_result') {
-    return entryPreflight.result;
+  const entryPreflightAction = entryPreflight.action;
+  switch (entryPreflightAction) {
+    case 'return_result':
+      return entryPreflight.result;
+    case 'continue':
+      break;
+    default:
+      throw new Error(`[servertool] invalid entry preflight result action: ${String(entryPreflightAction)}`);
   }
   const toolCalls = extractToolCallsFromResponseStage(
     entryPreflight.baseObject,
@@ -25,8 +31,12 @@ export async function orchestrateServertoolEngine(
     toolCalls,
     base: entryPreflight.baseObject
   });
-  if (entryContext.action !== 'continue') {
-    return { mode: 'passthrough', finalChatResponse: options.chatResponse };
+  const entryContextAction = entryContext.action;
+  switch (entryContextAction) {
+    case 'continue':
+      break;
+    default:
+      return { mode: 'passthrough', finalChatResponse: options.chatResponse };
   }
   const responseStagePrePass = await runServertoolResponseStagePrePass({
     options,
@@ -35,8 +45,14 @@ export async function orchestrateServertoolEngine(
     includeAutoHookIds: entryContext.includeAutoHookIds,
     excludeAutoHookIds: entryContext.excludeAutoHookIds
   });
-  if (responseStagePrePass.action === 'return_result') {
-    return responseStagePrePass.result;
+  const responseStagePrePassAction = responseStagePrePass.action;
+  switch (responseStagePrePassAction) {
+    case 'return_result':
+      return responseStagePrePass.result;
+    case 'continue_to_execution':
+      break;
+    default:
+      throw new Error(`[servertool] invalid response-stage prepass action: ${String(responseStagePrePassAction)}`);
   }
   return runServertoolExecutionStage({
     options,
