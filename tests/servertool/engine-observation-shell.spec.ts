@@ -206,6 +206,10 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('const followupSummary: Record<string, unknown> = {');
     expect(source).not.toContain("if ('payload' in followup)");
     expect(source).not.toContain('followup.injection?.ops');
+    expect(source).not.toContain("if (runtimeAction.action === 'return_servertool_cli_projection_final')");
+    expect(source).not.toContain("if (runtimeAction.action === 'return_stop_message_terminal_final')");
+    expect(source).not.toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
+    expect(source).toContain('switch (runtimeAction.action)');
 
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
     const stageRecorder = {

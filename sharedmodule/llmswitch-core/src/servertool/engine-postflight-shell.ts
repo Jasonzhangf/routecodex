@@ -65,52 +65,50 @@ export async function runServertoolEnginePostflight(args: {
     });
     args.stageRecorder.record('servertool.execution', summary);
   }
-  if (runtimeAction.action === 'return_servertool_cli_projection_final') {
-    args.logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution?.flowId
-    };
-  }
-
-  if (runtimeAction.action === 'return_stop_message_terminal_final') {
-    args.logProgress(5, totalSteps, 'completed (stop_message terminal)', { flowId });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: true,
-      flowId: engineResult.execution?.flowId
-    };
-  }
-
-  if (runtimeAction.action === 'build_stop_message_cli_projection') {
-    const adapterRecord = options.adapterContext as unknown as Record<string, unknown>;
-    const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterRecord);
-    const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(adapterRecord);
-    const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
-    const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (
-      runtimeControl ? { runtimeControl } : null
-    );
-    const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
-      metadataCenterSnapshot: nativeMetadataCenterSnapshot,
-      execution: engineResult.execution ?? null,
-      metadataWritePlan: engineResult.metadataWritePlan ?? null,
-      requestId: options.requestId ?? null
-    });
-    args.logProgress(5, totalSteps, 'completed (stop_message cli projection; no reenter)', { flowId });
-    return {
-      chat: projection.chatResponse,
-      executed: true,
-      flowId
-    };
-  }
-
-  throw Object.assign(new Error(`[servertool] unexpected runtime action for flow ${flowId}`), {
-    code: 'SERVERTOOL_RUNTIME_ACTION_INVALID',
-    details: {
-      requestId: options.requestId,
-      flowId,
-      runtimeAction: runtimeAction.action
+  switch (runtimeAction.action) {
+    case 'return_servertool_cli_projection_final':
+      args.logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
+      return {
+        chat: engineResult.finalChatResponse,
+        executed: true,
+        flowId: engineResult.execution?.flowId
+      };
+    case 'return_stop_message_terminal_final':
+      args.logProgress(5, totalSteps, 'completed (stop_message terminal)', { flowId });
+      return {
+        chat: engineResult.finalChatResponse,
+        executed: true,
+        flowId: engineResult.execution?.flowId
+      };
+    case 'build_stop_message_cli_projection': {
+      const adapterRecord = options.adapterContext as unknown as Record<string, unknown>;
+      const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterRecord);
+      const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(adapterRecord);
+      const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
+      const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (
+        runtimeControl ? { runtimeControl } : null
+      );
+      const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
+        metadataCenterSnapshot: nativeMetadataCenterSnapshot,
+        execution: engineResult.execution ?? null,
+        metadataWritePlan: engineResult.metadataWritePlan ?? null,
+        requestId: options.requestId ?? null
+      });
+      args.logProgress(5, totalSteps, 'completed (stop_message cli projection; no reenter)', { flowId });
+      return {
+        chat: projection.chatResponse,
+        executed: true,
+        flowId
+      };
     }
-  });
+    default:
+      throw Object.assign(new Error(`[servertool] unexpected runtime action for flow ${flowId}`), {
+        code: 'SERVERTOOL_RUNTIME_ACTION_INVALID',
+        details: {
+          requestId: options.requestId,
+          flowId,
+          runtimeAction: runtimeAction.action
+        }
+      });
+  }
 }

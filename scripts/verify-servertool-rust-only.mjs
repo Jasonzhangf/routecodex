@@ -6000,7 +6000,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'export async function runServerToolOrchestrationShell('
   );
   for (const marker of [
-    "if (runtimeAction.action === 'build_stop_message_cli_projection')",
+    'switch (runtimeAction.action)',
+    "case 'build_stop_message_cli_projection'",
     'buildStoplessAutoCliProjectionFromEngineWithNative({',
   ]) {
     if (!postflightSource.includes(marker)) {

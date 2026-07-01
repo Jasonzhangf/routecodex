@@ -472,8 +472,12 @@ const TARGETS = [
       'const requestTruth = metadataCenterSnapshot?.requestTruth',
       'const rawSessionId = requestTruth?.sessionId',
       'rawSessionId.trim()',
+      "if (runtimeAction.action === 'return_servertool_cli_projection_final')",
+      "if (runtimeAction.action === 'return_stop_message_terminal_final')",
+      "if (runtimeAction.action === 'build_stop_message_cli_projection')",
     ],
     required: [
+      'switch (runtimeAction.action)',
       'buildServertoolPostflightObservationSummaryWithNative({',
       "args.stageRecorder.record('servertool.execution', summary);",
       'chat: engineResult.finalChatResponse',
