@@ -130,7 +130,7 @@
    - 导致 `finish_reason=stop` + 无 finalized marker 的 wrapper 仍可 200 透传
 
 4. **engine 仍是超大聚合体**
-   - `sharedmodule/llmswitch-core/src/servertool/engine.ts` ≈ 2317 行
+   - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts` ≈ 2317 行
    - `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts` ≈ 1037 行
    - `sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop-guard.ts` ≈ 705 行
    - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` ≈ 665 行

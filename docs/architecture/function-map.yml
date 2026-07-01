@@ -147,7 +147,7 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
       - tests/servertool/stop-message-auto.goal-default.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
       - docs
@@ -255,7 +255,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -287,7 +287,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -319,7 +319,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
     forbidden_paths:
       - src/providers
       - src/server/runtime/http-server/executor
@@ -689,7 +689,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine.ts
+      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
       - tests/servertool/engine.stopless-session-thin-shell.spec.ts
     forbidden_paths:
       - src/providers

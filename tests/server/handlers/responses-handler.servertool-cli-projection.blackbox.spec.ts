@@ -1,4 +1,4 @@
-import { runServerToolOrchestration } from '../../../sharedmodule/llmswitch-core/src/servertool/engine.js';
+import { runServerToolOrchestrationShell as runServerToolOrchestration } from '../../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js';
 import { buildResponsesPayloadFromChatWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import fs from 'node:fs';

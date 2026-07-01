@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import { describe, expect, test } from '@jest/globals';
-import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
+import { runServerToolOrchestrationShell as runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('engine stopless session thin-shell guard', () => {

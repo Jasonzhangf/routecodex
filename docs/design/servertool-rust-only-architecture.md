@@ -37,7 +37,7 @@ HubRespChatProcess03Governed
 
 - Rust 已具备部分 servertool 热路径语义与 plan/export 能力；
 - 但真实 servertool 执行主链仍在 TS：
-  - `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+  - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
   - `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts`
 - handler 注册仍是代码 side-effect 注册，不是 JSON skeleton 驱动；
 - `reasoning.stop / clock / stop_message_auto / continue_execution / web_search` 仍有 TS 业务真相残留；
@@ -547,7 +547,7 @@ servertool 的真正骨架层：
 
 最终删除：
 
-- `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts`
 - 大部分 `sharedmodule/llmswitch-core/src/servertool/handlers/*.ts`
 

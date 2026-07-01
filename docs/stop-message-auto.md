@@ -90,7 +90,7 @@ Provider response
 - Stopless loop state owner: request-scoped MetadataCenter `runtime_control.stopless` plus current request tool output; goal state is removed.
 - NAPI bridge: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - TS native thin wrapper: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- TS execution shell: `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- TS execution shell: `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - Focused tests: `tests/servertool/stopless-cli-continuation.spec.ts`
 
 ## 7. 验证

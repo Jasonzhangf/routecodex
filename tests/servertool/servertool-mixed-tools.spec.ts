@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
-import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
+import { runServerToolOrchestrationShell as runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-mixed-tools-sessions');
 

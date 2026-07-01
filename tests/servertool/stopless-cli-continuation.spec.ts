@@ -2,7 +2,7 @@ import { describe, expect, jest, test } from '@jest/globals';
 import { Command } from 'commander';
 import path from 'node:path';
 
-import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
+import { runServerToolOrchestrationShell as runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js';
 
 import { readNativeFunction } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
 

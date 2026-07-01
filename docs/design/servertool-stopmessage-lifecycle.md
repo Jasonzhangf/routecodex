@@ -98,7 +98,7 @@ No stopless step in this loop may depend on tmux, `ROUTECODEX_SESSION_DIR`, file
 - Orchestration action: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`
 - Native bridge: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - TS thin shell: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- Runtime side effect shell: `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- Runtime side effect shell: `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 
 ## Stop Schema
 

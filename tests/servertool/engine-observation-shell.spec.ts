@@ -18,14 +18,14 @@ function bindProviderProtocol(adapterContext: Record<string, unknown>, providerP
 }
 
 describe('engine-observation-shell', () => {
-  test('engine.ts delegates orchestration into engine-orchestration-shell', () => {
+  test('engine.ts facade stays deleted and orchestration owner remains explicit', () => {
+    expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine.ts')).toBe(false);
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
 
-    expect(source).toContain("from './engine-orchestration-shell.js'");
-    expect(source).toContain('runServerToolOrchestration');
+    expect(source).toContain('export async function runServerToolOrchestrationShell(');
     expect(source).not.toContain('createServertoolObservation({');
     expect(source).not.toContain('recordServertoolEngineMatchSkipped({');
     expect(source).not.toContain('recordServertoolEngineMatchHit({');

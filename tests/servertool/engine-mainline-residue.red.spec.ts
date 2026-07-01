@@ -2,8 +2,9 @@ import * as fs from 'node:fs';
 import { describe, expect, test } from '@jest/globals';
 
 describe('engine mainline residue red gate', () => {
-  test('engine.ts still contains local stopless mainline owner branches that must be removed', () => {
-    const source = fs.readFileSync('sharedmodule/llmswitch-core/src/servertool/engine.ts', 'utf8');
+  test('engine.ts facade stays physically deleted after orchestration moved to owner shell', () => {
+    expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine.ts')).toBe(false);
+    const source = fs.readFileSync('sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts', 'utf8');
 
     expect(source).not.toContain("if (runtimeAction.action === 'persist_pending_injection_and_return' && engineResult.pendingInjection)");
     expect(source).not.toContain("if (runtimeAction.action === 'return_servertool_cli_projection_final')");
@@ -13,6 +14,6 @@ describe('engine mainline residue red gate', () => {
     expect(source).not.toContain('throw Object.assign(new Error(`[servertool] retired followup/reenter mainline reached for flow ${flowId}`), {');
     expect(source).not.toContain('function resolveStoplessCliProjectionContext(');
     expect(source).not.toContain('planStoplessCliProjectionContextWithNative');
-    expect(source).not.toContain('planServertoolEnginePreflightWithNative');
+    expect(source).toContain('runEnginePreflight');
   });
 });

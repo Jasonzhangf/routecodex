@@ -140,7 +140,7 @@ if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || ...)
 ### 4. `engine.ts` 仍承担 flow-level 叙事与控制分支
 
 文件：
-- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 
 表现：
 - stop gateway 观察、tool_flow / passthrough、pending injection、followup mainline 调度都混在一个壳

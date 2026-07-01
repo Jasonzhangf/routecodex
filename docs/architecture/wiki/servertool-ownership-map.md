@@ -204,7 +204,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `tests/servertool/stop-message-auto.goal-default.spec.ts`
 - `tests/servertool/stopless-cli-continuation.spec.ts`
 - `docs`
@@ -326,7 +326,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Forbidden paths:
@@ -365,7 +365,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Forbidden paths:
@@ -404,7 +404,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 
 Forbidden paths:
 - `src/providers`
@@ -851,7 +851,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine.ts`
+- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
 
 Forbidden paths:

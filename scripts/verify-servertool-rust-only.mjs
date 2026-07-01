@@ -237,7 +237,7 @@ const STOPLESS_SESSION_LOCK_FILES = [
 const SERVERTOOL_ACTIVE_ORCHESTRATION_AUDIT = `${ROOT}/tests/servertool/servertool-active-orchestration-audit.spec.ts`;
 const SERVERTOOL_ACTIVE_ORCHESTRATION_OWNER_FILES = [
   `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-  `${SERVERTOOL_TS_DIR}/engine.ts`,
+  `${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`,
 ];
 const SERVERTOOL_DISPATCH_OUTCOME_FORBIDDEN_MARKERS = [
   'args.appendToolOutput(',
@@ -5699,7 +5699,12 @@ function checkServertoolResponseStageGateThinShell() {
 }
 
 function checkServertoolEngineStoplessSessionThinShell() {
-  const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine.ts`);
+  assertMissingFile(
+    'servertool-engine-facade-deleted',
+    `${SERVERTOOL_TS_DIR}/engine.ts`,
+    'engine.ts must stay physically deleted; import engine-orchestration-shell.ts directly'
+  );
+  const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`);
   const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
   const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
   const registryOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`);
@@ -5713,14 +5718,13 @@ function checkServertoolEngineStoplessSessionThinShell() {
   );
   for (const marker of [
     'function logServerToolNonBlocking(',
-    'createServertoolProgressLogger({',
     "args.stageRecorder?.record('servertool.match'",
     'appendServerToolProgressFileEvent({',
   ]) {
     if (engineSource.includes(marker)) {
       fail(
         'servertool-engine-observation-inline-semantic',
-        `engine.ts must not retain engine observation inline semantic marker ${marker}`
+        `engine-orchestration-shell.ts must not retain engine observation inline semantic marker ${marker}`
       );
     }
   }
@@ -5731,16 +5735,16 @@ function checkServertoolEngineStoplessSessionThinShell() {
     if (engineSource.includes(marker)) {
       fail(
         'servertool-engine-stopless-session-inline-semantic',
-        `engine.ts must not retain stopless session inline semantic marker ${marker}`
+        `engine-orchestration-shell.ts must not retain stopless session inline semantic marker ${marker}`
       );
     }
   }
-  if (!engineSource.includes('from \'./engine-orchestration-shell.js\'')) {
-    fail(
-      'servertool-engine-stopless-session-thin-shell',
-      'engine.ts must re-export orchestration from engine-orchestration-shell.ts'
-    );
-  }
+  assertContains(
+    'servertool-engine-stopless-session-thin-shell',
+    `${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`,
+    engineSource,
+    'export async function runServerToolOrchestrationShell('
+  );
   for (const marker of [
     "if (runtimeAction.action === 'build_stop_message_cli_projection')",
     'buildStoplessAutoCliProjectionFromEngineWithNative({',
