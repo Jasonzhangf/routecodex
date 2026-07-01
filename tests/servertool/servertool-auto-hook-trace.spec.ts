@@ -456,6 +456,7 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('const result = planned != null');
     expect(callerSource).toContain('result?.execution != null && typeof result.execution.flowId');
     expect(callerSource).toContain('switch (attemptPlan.action)');
+    expect(callerSource).not.toContain('attemptPlan as { action: unknown }');
     expect(callerSource).not.toContain('switch (attemptPlan.returnResult)');
     expect(callerSource).not.toContain('if (planned) {');
     expect(callerSource).not.toContain('if (attemptPlan.returnResult)');
@@ -592,7 +593,7 @@ describe('servertool auto hook trace', () => {
         includeAutoHookIds: null,
         excludeAutoHookIds: null
       })
-    ).rejects.toThrow('[servertool] invalid auto-hook attempt action: unknown_attempt_action');
+    ).rejects.toThrow('[servertool] invalid auto-hook attempt action');
   });
 
   test('fails fast for invalid native caller finalization action', async () => {

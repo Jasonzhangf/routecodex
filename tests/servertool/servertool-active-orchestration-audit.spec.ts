@@ -191,6 +191,7 @@ const TARGETS = [
       'ServerToolHandlerPlan',
       'function planAutoHookRuntimeAttempt(',
       'const attemptPlan = planAutoHookRuntimeAttempt({',
+      'attemptPlan as { action: unknown }',
       'function planAutoHookCallerFinalization(',
       'const finalizationPlan = planAutoHookCallerFinalization({',
       'if (finalizationPlan.returnResult)',

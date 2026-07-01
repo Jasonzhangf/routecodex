@@ -120,9 +120,7 @@ async function runAutoHookExecutionQueue(args: {
           `[servertool] native auto-hook attempt requested rethrow after successful handler execution: ${hook.id}`
         );
       default:
-        throw new Error(
-          `[servertool] invalid auto-hook attempt action: ${String((attemptPlan as { action: unknown }).action)}`
-        );
+        throw new Error('[servertool] invalid auto-hook attempt action');
     }
   }
 

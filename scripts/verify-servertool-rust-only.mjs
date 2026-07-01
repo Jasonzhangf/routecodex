@@ -3450,6 +3450,7 @@ function checkAutoHookExecutionRustOwner() {
     'callerFinalizationInput',
     'function planAutoHookRuntimeAttempt(',
     'const attemptPlan = planAutoHookRuntimeAttempt({',
+    'attemptPlan as { action: unknown }',
     'function planAutoHookCallerFinalization(',
     'const finalizationPlan = planAutoHookCallerFinalization({',
     'finalizationPlan as { action: string }',
