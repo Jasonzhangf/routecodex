@@ -1,3 +1,9 @@
+# 2026-07-02: servertool engine postflight flowIdSource payload read removed
+- Slice: `engine-postflight-shell.ts` no longer reads `String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)` in TS; unknown native `flowIdSource` now fails fast with a fixed error message.
+- Gate: `engine-observation-shell.spec.ts` adds a behavior test for unknown `flowIdSource`, `servertool-active-orchestration-audit.spec.ts` and `verify-servertool-rust-only.mjs` forbid the TS payload-read marker.
+- Evidence: focused Jest `engine-observation-shell + servertool-active-orchestration-audit` PASS 53/53; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+- Commit: `d60173f` `fix(servertool): close postflight flow source cast`
+
 # 2026-07-02: servertool CLI projection result mode moved to Rust runtime branch
 - Slice: `build_servertool_cli_projection_runtime_branch_json()` now returns Rust/NAPI-owned `resultMode=tool_flow`; `execution-stage-shell.ts` consumes `branch.resultMode` instead of hardcoding `mode: 'tool_flow'` in the CLI projection return path.
 - Gate: `execution-stage-shell.spec.ts`, `servertool-cli-native-bridge.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` now require `mode: branch.resultMode` and forbid restoring local `mode: 'tool_flow'` in `execution-stage-shell.ts`.

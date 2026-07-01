@@ -1,3 +1,9 @@
+# 2026-07-02: servertool postflight flowIdSource payload read removed
+- `sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts` no longer reads `String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)` in TS; unknown native `flowIdSource` now fails fast with a fixed error message.
+- `tests/servertool/engine-observation-shell.spec.ts` locks the behavior with a negative test, and `tests/servertool/servertool-active-orchestration-audit.spec.ts` plus `scripts/verify-servertool-rust-only.mjs` forbid the TS payload-read marker.
+- Verified slice: focused Jest `engine-observation-shell + servertool-active-orchestration-audit` PASS 53/53; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+- Commit: `d60173f` `fix(servertool): close postflight flow source cast`
+
 # 2026-07-01: Responses JSON->SSE top-level response shape is Rust-owned
 - SSE JSON->SSE converter/sequencer must not keep local `validateResponse()` or synthesize top-level Responses fields such as `object:"response"` / empty `output`; top-level response shape fail-fast belongs to Rust `responses_sse_event_payload::normalize_responses_sse_response_payload()`.
 - Gate: `verify:sse-architecture-boundary` forbids the retired converter/sequencer validation markers. Verification for the slice passed focused Rust/Jest, SSE gates, function-map gate, sharedmodule/root TS checks, native hotpath build, `build:base`, and source replay; local 4444 provider-response samples still lacked success SSE wire fields.
