@@ -520,6 +520,8 @@ const TARGETS = [
       'gatePlan.skipReason as string',
       "gatePlan.nextAction === 'bypass'",
       "if (gateRuntimeAction.action === 'return_passthrough_bypass')",
+      'String(gateRuntimeAction.action)',
+      'String(outputPlan.returnAction)',
       'if (orchestration.executed)',
     ],
     required: [

@@ -95,6 +95,8 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain('typeof gatePlan.skipReason');
     expect(source).not.toContain('gatePlan.skipReason.trim()');
     expect(source).not.toContain('gatePlan.skipReason as string');
+    expect(source).not.toContain('String(gateRuntimeAction.action)');
+    expect(source).not.toContain('String(outputPlan.returnAction)');
     expect(source).not.toContain("gatePlan.nextAction === 'bypass'");
     expect(source).not.toContain("if (gateRuntimeAction.action === 'return_passthrough_bypass')");
     expect(source).not.toContain('if (orchestration.executed)');
@@ -211,7 +213,7 @@ describe('response-stage-orchestration-shell', () => {
         requestId: 'req-unknown-response-stage-action',
         entryEndpoint: '/v1/responses'
       })
-    ).rejects.toThrow('[servertool] invalid response-stage orchestration action: unknown_response_stage_action');
+    ).rejects.toThrow('[servertool] invalid response-stage orchestration action');
     expect(runServerToolOrchestrationShell).not.toHaveBeenCalled();
   });
 
@@ -232,6 +234,6 @@ describe('response-stage-orchestration-shell', () => {
         requestId: 'req-unknown-response-stage-output-action',
         entryEndpoint: '/v1/responses'
       })
-    ).rejects.toThrow('[servertool] invalid response-stage orchestration output action: unknown_response_stage_output');
+    ).rejects.toThrow('[servertool] invalid response-stage orchestration output action');
   });
 });

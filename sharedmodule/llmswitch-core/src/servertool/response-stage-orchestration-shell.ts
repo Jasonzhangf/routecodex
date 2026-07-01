@@ -66,7 +66,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     case 'run_auto_hooks':
       break;
     default:
-      throw new Error(`[servertool] invalid response-stage orchestration action: ${String(gateRuntimeAction.action)}`);
+      throw new Error('[servertool] invalid response-stage orchestration action');
   }
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
 
@@ -111,7 +111,7 @@ export async function runServertoolResponseStageOrchestrationShell(
     case 'return_original_payload':
       break;
     default:
-      throw new Error(`[servertool] invalid response-stage orchestration output action: ${String(outputPlan.returnAction)}`);
+      throw new Error('[servertool] invalid response-stage orchestration output action');
   }
 
   recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {

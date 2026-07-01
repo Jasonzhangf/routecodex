@@ -5594,6 +5594,8 @@ function checkServertoolRustOutcomeCloseout() {
     'gatePlan.skipReason.trim()',
     "gatePlan.nextAction === 'bypass'",
     "if (gateRuntimeAction.action === 'return_passthrough_bypass')",
+    'String(gateRuntimeAction.action)',
+    'String(outputPlan.returnAction)',
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
