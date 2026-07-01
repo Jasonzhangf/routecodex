@@ -2224,6 +2224,10 @@ function checkStopGatewayContextRustOwner() {
     'export function isStopEligibleForServerTool(',
     'export function readStopGatewayContext(',
     'normalizeStopGatewayContextWithNative',
+    "return value && typeof value === 'object'",
+    "runtimeControl && typeof runtimeControl === 'object'",
+    "requestTruth && typeof requestTruth === 'object'",
+    "providerObservation && typeof providerObservation === 'object'",
   ]) {
     if (metadataCenterCarrier.includes(keyword)) {
       fail(
@@ -2244,6 +2248,19 @@ function checkStopGatewayContextRustOwner() {
     metadataCenterCarrier,
     "key: 'stopGatewayContext'"
   );
+  for (const marker of [
+    "return value != null && typeof value === 'object'",
+    "runtimeControl != null && typeof runtimeControl === 'object'",
+    "requestTruth != null && typeof requestTruth === 'object'",
+    "providerObservation != null && typeof providerObservation === 'object'",
+  ]) {
+    assertContains(
+      'stop-gateway-context-metadata-carrier',
+      TS_METADATA_CENTER_CARRIER,
+      metadataCenterCarrier,
+      marker
+    );
+  }
   pass('stop-gateway-context-rust-owner', 'servertool-core owns stop-gateway inspect and metadata normalization');
 }
 

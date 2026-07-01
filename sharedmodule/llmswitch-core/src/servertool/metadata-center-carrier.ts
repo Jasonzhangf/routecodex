@@ -49,7 +49,7 @@ const STOP_MESSAGE_COMPARE_WRITER = {
 export type { StopGatewayContext, StopMessageCompareContext };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
 }
@@ -127,7 +127,7 @@ function readRuntimeControlFromBoundMetadataCenter(
     return undefined;
   }
   const runtimeControl = center.readRuntimeControl();
-  return runtimeControl && typeof runtimeControl === 'object' && !Array.isArray(runtimeControl)
+  return runtimeControl != null && typeof runtimeControl === 'object' && !Array.isArray(runtimeControl)
     ? runtimeControl
     : undefined;
 }
@@ -188,7 +188,7 @@ function readRequestTruthFromAnyBoundMetadataCenter(
   const directCenter = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
   if (directCenter && typeof directCenter.readRequestTruth === 'function') {
     const requestTruth = directCenter.readRequestTruth();
-    return requestTruth && typeof requestTruth === 'object' && !Array.isArray(requestTruth)
+    return requestTruth != null && typeof requestTruth === 'object' && !Array.isArray(requestTruth)
       ? requestTruth
       : undefined;
   }
@@ -205,7 +205,7 @@ function readProviderObservationFromAnyBoundMetadataCenter(
   const directCenter = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
   if (directCenter && typeof directCenter.readProviderObservation === 'function') {
     const providerObservation = directCenter.readProviderObservation();
-    return providerObservation && typeof providerObservation === 'object' && !Array.isArray(providerObservation)
+    return providerObservation != null && typeof providerObservation === 'object' && !Array.isArray(providerObservation)
       ? providerObservation
       : undefined;
   }

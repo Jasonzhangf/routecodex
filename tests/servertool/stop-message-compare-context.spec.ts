@@ -57,6 +57,24 @@ function makeAdapterWithCompareContext(value: Record<string, unknown>): Record<s
 }
 
 describe('servertool stop-message compare context', () => {
+  test('metadata carrier uses explicit nullish object presence checks', async () => {
+    const source = await import('node:fs/promises').then((fs) =>
+      fs.readFile(
+        'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts',
+        'utf8'
+      )
+    );
+
+    expect(source).not.toContain("return value && typeof value === 'object'");
+    expect(source).toContain("return value != null && typeof value === 'object'");
+    expect(source).not.toContain("runtimeControl && typeof runtimeControl === 'object'");
+    expect(source).toContain("runtimeControl != null && typeof runtimeControl === 'object'");
+    expect(source).not.toContain("requestTruth && typeof requestTruth === 'object'");
+    expect(source).toContain("requestTruth != null && typeof requestTruth === 'object'");
+    expect(source).not.toContain("providerObservation && typeof providerObservation === 'object'");
+    expect(source).toContain("providerObservation != null && typeof providerObservation === 'object'");
+  });
+
   test('reads MetadataCenter runtime_control compare context through native normalization', () => {
     const context = readStopMessageCompareContext(makeAdapterWithCompareContext({
       ...BASE_CONTEXT,

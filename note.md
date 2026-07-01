@@ -1,3 +1,8 @@
+# 2026-07-02: servertool metadata carrier object truthiness removed
+- Slice: `metadata-center-carrier.ts` no longer uses truthiness to decide whether runtime control, request truth, provider observation, or generic carrier values are object records; it now uses explicit `!= null` plus object/array validation.
+- Gate: `stop-gateway-context.spec.ts`, `stop-message-compare-context.spec.ts`, and `verify-servertool-rust-only` forbid the old carrier object truthiness markers and require nullish object checks.
+- Evidence: focused stop-gateway/stop-message-compare Jest PASS 14/14; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool entry context token truthiness removed
 - Slice: `entry-context-shell.ts` no longer uses truthiness to decide whether native entry context token arrays should become Set carriers; it now uses explicit `tokens != null`.
 - Gate: `entry-context-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid `return tokens ? new Set(tokens) : null;` and require the nullish token check.
