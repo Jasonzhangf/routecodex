@@ -1,7 +1,6 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
-  planServertoolExecutionDispatchErrorWithNative,
-  planServertoolExecutionOutcomeRuntimeActionWithNative,
+  planServertoolExecutionOutcomeMaterializationWithNative,
   planServertoolHandlerContractErrorWithNative,
   planServertoolHandlerRuntimeActionForPlannedWithNative,
   type NativeServertoolExecutionLoopState
@@ -34,39 +33,24 @@ export function materializeNativeToolCallExecutionOutcome(args: {
     })
   );
 
-  const outcomeRuntimeActionPlan = planServertoolExecutionOutcomeRuntimeActionWithNative({
+  const materializationPlan = planServertoolExecutionOutcomeMaterializationWithNative({
+    requestId: args.options.requestId,
     outcomeMode: outcomePlan.outcomeMode,
+    requiresPendingInjection: outcomePlan.requiresPendingInjection,
     hasLastExecution: Boolean(args.executionState.lastExecution),
     executedToolCallsLen: args.executionState.executedToolCalls.length,
     lastExecution: args.executionState.lastExecution,
     flowId: outcomePlan.flowId
   });
 
-  if (outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome') {
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolExecutionDispatchErrorWithNative({
-        kind: 'invalid_mixed_client_tools_outcome',
-        requestId: args.options.requestId,
-        outcomeMode: outcomePlan.outcomeMode,
-        requiresPendingInjection: outcomePlan.requiresPendingInjection
-      })
-    );
-  }
-
-  if (outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract') {
-    throw createServertoolProviderProtocolErrorFromPlan(
-      planServertoolExecutionDispatchErrorWithNative({
-        kind: 'missing_servertool_execution_contract',
-        requestId: args.options.requestId,
-        outcomeMode: outcomePlan.outcomeMode
-      })
-    );
+  if (materializationPlan.action === 'throw_dispatch_error') {
+    throw createServertoolProviderProtocolErrorFromPlan(materializationPlan.errorPlan);
   }
   return {
     mode: 'tool_flow',
     finalChatResponse: args.baseForExecution,
     execution: {
-      flowId: outcomeRuntimeActionPlan.executionFlowId
+      flowId: materializationPlan.executionFlowId
     }
   };
 }

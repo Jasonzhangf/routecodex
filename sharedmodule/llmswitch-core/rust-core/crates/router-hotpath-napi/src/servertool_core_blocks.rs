@@ -416,6 +416,21 @@ pub fn plan_servertool_execution_outcome_runtime_action_json(
     .map_err(|e| format!("serialize servertool execution outcome runtime action plan: {e}"))
 }
 
+pub fn plan_servertool_execution_outcome_materialization_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: execution_outcome_runtime_action_contract::ServertoolExecutionOutcomeMaterializationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool execution outcome materialization input: {e}")
+        })?;
+    serde_json::to_string(
+        &execution_outcome_runtime_action_contract::plan_servertool_execution_outcome_materialization(
+            input,
+        ),
+    )
+    .map_err(|e| format!("serialize servertool execution outcome materialization plan: {e}"))
+}
+
 pub fn plan_servertool_execution_loop_runtime_action_json(
     input_json: &str,
 ) -> Result<String, String> {
@@ -2755,6 +2770,79 @@ fn plans_servertool_execution_outcome_runtime_action_via_servertool_core_bridge(
     );
     assert!(reuse_value.as_object().is_some_and(|row| row.len() == 3));
     assert!(reuse_value.get("selectedExecutionEnvelope").is_none());
+}
+
+#[test]
+fn plans_servertool_execution_outcome_materialization_via_servertool_core_bridge() {
+    let mixed = plan_servertool_execution_outcome_materialization_json(
+        &serde_json::json!({
+            "requestId": "req-mixed",
+            "outcomeMode": "mixed_client_tools",
+            "requiresPendingInjection": true,
+            "hasLastExecution": false,
+            "executedToolCallsLen": 0
+        })
+        .to_string(),
+    )
+    .expect("execution outcome materialization mixed plan");
+    let mixed_value: serde_json::Value =
+        serde_json::from_str(&mixed).expect("parse mixed materialization plan");
+    assert_eq!(
+        mixed_value["action"],
+        serde_json::json!("throw_dispatch_error")
+    );
+    assert_eq!(
+        mixed_value["errorPlan"]["details"]["requiresPendingInjection"],
+        serde_json::json!(true)
+    );
+
+    let missing = plan_servertool_execution_outcome_materialization_json(
+        &serde_json::json!({
+            "requestId": "req-missing",
+            "outcomeMode": "servertool_only",
+            "requiresPendingInjection": false,
+            "hasLastExecution": false,
+            "executedToolCallsLen": 0
+        })
+        .to_string(),
+    )
+    .expect("execution outcome materialization missing plan");
+    let missing_value: serde_json::Value =
+        serde_json::from_str(&missing).expect("parse missing materialization plan");
+    assert_eq!(
+        missing_value["action"],
+        serde_json::json!("throw_dispatch_error")
+    );
+    assert_eq!(
+        missing_value["errorPlan"]["message"],
+        serde_json::json!(
+            "[servertool] missing native execution contract for servertool-only outcome"
+        )
+    );
+
+    let tool_flow = plan_servertool_execution_outcome_materialization_json(
+        &serde_json::json!({
+            "requestId": "req-tool-flow",
+            "outcomeMode": "servertool_only",
+            "requiresPendingInjection": false,
+            "hasLastExecution": true,
+            "executedToolCallsLen": 1,
+            "flowId": "flow-native"
+        })
+        .to_string(),
+    )
+    .expect("execution outcome materialization tool flow plan");
+    let tool_flow_value: serde_json::Value =
+        serde_json::from_str(&tool_flow).expect("parse tool flow materialization plan");
+    assert_eq!(
+        tool_flow_value["action"],
+        serde_json::json!("return_tool_flow")
+    );
+    assert_eq!(
+        tool_flow_value["executionFlowId"],
+        serde_json::json!("flow-native")
+    );
+    assert!(tool_flow_value.get("errorPlan").is_none());
 }
 
 #[test]

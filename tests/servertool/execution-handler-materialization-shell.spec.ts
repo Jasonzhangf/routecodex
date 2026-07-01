@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const buildServertoolOutcomePlanInputWithNativeMock = jest.fn((input: any) => input);
 const planServertoolOutcomeWithNative = jest.fn();
-const planServertoolExecutionOutcomeRuntimeActionWithNative = jest.fn();
-const planServertoolExecutionDispatchErrorWithNative = jest.fn();
+const planServertoolExecutionOutcomeMaterializationWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/provider-protocol-error.js',
@@ -71,8 +70,7 @@ jest.unstable_mockModule(
     })),
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
     parseServertoolCliProjectionToolArgumentsWithNative: jest.fn(() => ({})),
-    planServertoolExecutionDispatchErrorWithNative,
-    planServertoolExecutionOutcomeRuntimeActionWithNative
+    planServertoolExecutionOutcomeMaterializationWithNative
   })
 );
 
@@ -116,32 +114,41 @@ const {
 describe('execution-handler-materialization-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    planServertoolExecutionDispatchErrorWithNative.mockImplementation((input: any) => ({
-      code: 'SERVERTOOL_HANDLER_FAILED',
-      category: 'INTERNAL_ERROR',
-      status: 500,
-      message: `[native-dispatch-contract] ${String(input?.kind ?? 'unknown')}`,
-      details: input ?? {}
-    }));
-    planServertoolExecutionOutcomeRuntimeActionWithNative.mockImplementation((input: any) => {
+    planServertoolExecutionOutcomeMaterializationWithNative.mockImplementation((input: any) => {
       if (input?.outcomeMode === 'mixed_client_tools') {
         return {
-          action: 'invalid_mixed_client_tools_outcome',
-          reuseLastExecutionEnvelope: false,
-          executionFlowId: input?.flowId ?? 'servertool_mixed'
+          action: 'throw_dispatch_error',
+          errorPlan: {
+            code: 'SERVERTOOL_HANDLER_FAILED',
+            category: 'INTERNAL_ERROR',
+            status: 500,
+            message: '[native-dispatch-contract] invalid_mixed_client_tools_outcome',
+            details: {
+              requestId: input?.requestId,
+              outcomeMode: input?.outcomeMode,
+              requiresPendingInjection: input?.requiresPendingInjection
+            }
+          }
         };
       }
-      if (input?.hasLastExecution === true || input?.hasResolvedFollowup === true || Number(input?.executedToolCallsLen ?? 0) > 0) {
+      if (input?.hasLastExecution === true || Number(input?.executedToolCallsLen ?? 0) > 0) {
         return {
-          action: 'return_execution_contract',
-          reuseLastExecutionEnvelope: false,
+          action: 'return_tool_flow',
           executionFlowId: input?.flowId ?? 'servertool_multi'
         };
       }
       return {
-        action: 'missing_servertool_execution_contract',
-        reuseLastExecutionEnvelope: false,
-        executionFlowId: input?.flowId ?? 'servertool_multi'
+        action: 'throw_dispatch_error',
+        errorPlan: {
+          code: 'SERVERTOOL_HANDLER_FAILED',
+          category: 'INTERNAL_ERROR',
+          status: 500,
+          message: '[native-dispatch-contract] missing_servertool_execution_contract',
+          details: {
+            requestId: input?.requestId,
+            outcomeMode: input?.outcomeMode
+          }
+        }
       };
     });
   });
@@ -160,7 +167,10 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).toContain('buildServertoolOutcomePlanInputWithNative({');
     expect(source).not.toContain('const outcomePlanInput =');
     expect(source).toContain('throw createServertoolProviderProtocolErrorFromPlan(');
-    expect(source).toContain('planServertoolExecutionDispatchErrorWithNative({');
+    expect(source).toContain('planServertoolExecutionOutcomeMaterializationWithNative({');
+    expect(source).not.toContain('planServertoolExecutionDispatchErrorWithNative({');
+    expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome'");
+    expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract'");
     expect(source).not.toContain('record.executionFlowId.trim()');
     expect(source).not.toContain("input.outcomeMode === 'mixed_client_tools'");
     expect(source).not.toContain('function throwServertoolExecutionDispatchError(');
@@ -196,18 +206,14 @@ describe('execution-handler-materialization-shell', () => {
       })
     ).toThrow('[native-dispatch-contract] invalid_mixed_client_tools_outcome');
 
-    expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
+    expect(planServertoolExecutionOutcomeMaterializationWithNative).toHaveBeenCalledWith({
+      requestId: 'req-invalid-mixed-1',
       outcomeMode: 'mixed_client_tools',
+      requiresPendingInjection: false,
       hasLastExecution: false,
       executedToolCallsLen: 0,
       lastExecution: undefined,
       flowId: undefined
-    });
-    expect(planServertoolExecutionDispatchErrorWithNative).toHaveBeenCalledWith({
-      kind: 'invalid_mixed_client_tools_outcome',
-      requestId: 'req-invalid-mixed-1',
-      outcomeMode: 'mixed_client_tools',
-      requiresPendingInjection: false
     });
   });
 
@@ -232,21 +238,18 @@ describe('execution-handler-materialization-shell', () => {
       })
     ).toThrow('[native-dispatch-contract] missing_servertool_execution_contract');
 
-    expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
+    expect(planServertoolExecutionOutcomeMaterializationWithNative).toHaveBeenCalledWith({
+      requestId: 'req-missing-followup-1',
       outcomeMode: 'servertool_only',
+      requiresPendingInjection: false,
       hasLastExecution: false,
       executedToolCallsLen: 0,
       lastExecution: undefined,
       flowId: 'servertool_multi'
     });
-    expect(planServertoolExecutionDispatchErrorWithNative).toHaveBeenCalledWith({
-      kind: 'missing_servertool_execution_contract',
-      requestId: 'req-missing-followup-1',
-      outcomeMode: 'servertool_only'
-    });
   });
 
-  test('uses Rust-owned execution outcome runtime action planning', () => {
+  test('uses Rust-owned execution outcome materialization planning', () => {
     planServertoolOutcomeWithNative.mockReturnValue({
       outcomeMode: 'servertool_only',
       requiresPendingInjection: false,
@@ -287,8 +290,10 @@ describe('execution-handler-materialization-shell', () => {
         baseForExecution: { id: 'base-3' }
       })
     );
-    expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
+    expect(planServertoolExecutionOutcomeMaterializationWithNative).toHaveBeenCalledWith({
+      requestId: 'req-outcome-runtime-action-1',
       outcomeMode: 'servertool_only',
+      requiresPendingInjection: false,
       hasLastExecution: true,
       executedToolCallsLen: 1,
       lastExecution: {
@@ -323,8 +328,10 @@ describe('execution-handler-materialization-shell', () => {
         }
       })
     ).toThrow('[native-dispatch-contract] invalid_mixed_client_tools_outcome');
-    expect(planServertoolExecutionOutcomeRuntimeActionWithNative).toHaveBeenCalledWith({
+    expect(planServertoolExecutionOutcomeMaterializationWithNative).toHaveBeenCalledWith({
+      requestId: 'req-pending-injection-1',
       outcomeMode: 'mixed_client_tools',
+      requiresPendingInjection: true,
       hasLastExecution: false,
       executedToolCallsLen: 0,
       lastExecution: undefined,

@@ -59,6 +59,9 @@ const TARGETS = [
       'buildProviderProtocolError',
       'function throwServertoolExecutionDispatchError(',
       'planServertoolExecutionDispatchErrorWithNative(args)',
+      'planServertoolExecutionDispatchErrorWithNative({',
+      "outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome'",
+      "outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract'",
       "import { ProviderProtocolError }",
       'planServertoolHandlerRuntimeActionWithNative(',
       '[servertool] vision_analysis backend requires reenterPipeline',
@@ -68,7 +71,7 @@ const TARGETS = [
     ],
     required: [
       'throw createServertoolProviderProtocolErrorFromPlan(',
-      'planServertoolExecutionDispatchErrorWithNative({',
+      'planServertoolExecutionOutcomeMaterializationWithNative({',
       'const outcomePlan = planServertoolOutcomeWithNative(',
       'buildServertoolOutcomePlanInputWithNative({',
     ],

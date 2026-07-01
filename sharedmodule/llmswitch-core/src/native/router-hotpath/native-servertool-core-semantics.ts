@@ -288,6 +288,16 @@ export interface ServertoolExecutionOutcomeRuntimeActionPlan {
   executionFlowId: string;
 }
 
+export type ServertoolExecutionOutcomeMaterializationPlan =
+  | {
+      action: 'throw_dispatch_error';
+      errorPlan: ServertoolErrorPlan;
+    }
+  | {
+      action: 'return_tool_flow';
+      executionFlowId: string;
+    };
+
 export interface ServertoolExecutionLoopRuntimeActionPlan {
   action:
     | 'skip_non_tool_call_handler'
@@ -2182,6 +2192,50 @@ export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
     ...(record.selectedExecutionEnvelope !== undefined
       ? { selectedExecutionEnvelope: record.selectedExecutionEnvelope }
       : {}),
+    executionFlowId: record.executionFlowId
+  };
+}
+
+export function planServertoolExecutionOutcomeMaterializationWithNative(input: {
+  requestId: string;
+  outcomeMode: string;
+  requiresPendingInjection: boolean;
+  hasLastExecution: boolean;
+  executedToolCallsLen: number;
+  lastExecution?: unknown;
+  flowId?: string;
+}): ServertoolExecutionOutcomeMaterializationPlan {
+  const capability = 'planServertoolExecutionOutcomeMaterializationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolExecutionOutcomeMaterializationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolExecutionOutcomeMaterializationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolExecutionOutcomeMaterializationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.action !== 'throw_dispatch_error' && record.action !== 'return_tool_flow') {
+    throw new Error('planServertoolExecutionOutcomeMaterializationJson native returned invalid action');
+  }
+  if (record.action === 'throw_dispatch_error') {
+    if (!record.errorPlan || typeof record.errorPlan !== 'object' || Array.isArray(record.errorPlan)) {
+      throw new Error('planServertoolExecutionOutcomeMaterializationJson native returned invalid errorPlan');
+    }
+    return {
+      action: 'throw_dispatch_error',
+      errorPlan: parseServertoolErrorPlan(JSON.stringify(record.errorPlan), capability)
+    };
+  }
+  if (typeof record.executionFlowId !== 'string') {
+    throw new Error('planServertoolExecutionOutcomeMaterializationJson native returned invalid executionFlowId');
+  }
+  return {
+    action: 'return_tool_flow',
     executionFlowId: record.executionFlowId
   };
 }

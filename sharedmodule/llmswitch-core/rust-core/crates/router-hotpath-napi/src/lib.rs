@@ -1423,6 +1423,14 @@ pub fn plan_servertool_execution_outcome_runtime_action_json(
 }
 
 #[napi]
+pub fn plan_servertool_execution_outcome_materialization_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_execution_outcome_materialization_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_execution_loop_runtime_action_json(
     input_json: String,
 ) -> NapiResult<String> {
