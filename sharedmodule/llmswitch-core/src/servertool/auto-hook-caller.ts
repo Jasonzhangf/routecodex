@@ -124,10 +124,7 @@ async function runAutoHookExecutionQueue(args: {
     args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
 
     if (attemptPlan.returnResult) {
-      if (!result) {
-        throw new Error('[servertool] native auto-hook execution requested result but materialization was empty');
-      }
-      return result;
+      return result as ServerToolHandlerResult;
     }
     if (attemptPlan.continueQueue) {
       continue;
@@ -167,14 +164,14 @@ export async function runServertoolAutoHookCaller(args: {
       queueTotal: queueOrder.length
     });
     if (finalizationPlan.returnResult) {
-      if (!queueResult) {
-        throw new Error('[servertool] native auto-hook queue progress requested result but queue result was empty');
-      }
+      const queueResultForReturn = queueResult as ServerToolHandlerResult;
       return {
         mode: 'tool_flow',
-        finalChatResponse: queueResult.chatResponse,
-        execution: queueResult.execution,
-        ...(queueResult.metadataWritePlan ? { metadataWritePlan: queueResult.metadataWritePlan } : {})
+        finalChatResponse: queueResultForReturn.chatResponse,
+        execution: queueResultForReturn.execution,
+        ...(queueResultForReturn.metadataWritePlan
+          ? { metadataWritePlan: queueResultForReturn.metadataWritePlan }
+          : {})
       };
     }
     if (finalizationPlan.continueNextQueue) {

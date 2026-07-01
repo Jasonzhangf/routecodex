@@ -403,44 +403,29 @@ describe('servertool auto hook trace', () => {
     expect(optionalTraceIds).toEqual(['vision_auto', 'stop_message_auto']);
   });
 
-  test('fails fast when native requests result but materialization is empty', async () => {
-    const traces: ServerToolAutoHookTraceEvent[] = [];
-    registryHooks.push({
-      id: 'stop_message_auto',
-      phase: 'default',
-      priority: 40,
-      order: 1,
-      execution: {
-        kind: 'builtin',
-        builtinName: 'stop_message_auto',
-        __testHandler: async () => null
-      }
-    });
-    planAutoHookRuntimeAttemptWithNativeMock.mockImplementationOnce((input: any) => ({
-      returnResult: true,
-      continueQueue: false,
-      rethrowError: false,
-      traceEvent: {
-        hookId: String(input?.hookId ?? ''),
-        phase: String(input?.phase ?? ''),
-        priority: Number(input?.priority ?? 0),
-        queue: String(input?.queue ?? ''),
-        queueIndex: Number(input?.queueIndex ?? 0),
-        queueTotal: Number(input?.queueTotal ?? 0),
-        result: 'match',
-        reason: 'matched_without_flow'
-      }
-    }));
+  test('keeps impossible result-disposition guard in native wrapper instead of auto-hook caller', async () => {
+    const [callerSource, nativeWrapperSource] = await Promise.all([
+      import('node:fs/promises').then((fs) =>
+        fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8')
+      ),
+      import('node:fs/promises').then((fs) =>
+        fs.readFile(
+          'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
+          'utf8'
+        )
+      )
+    ]);
 
-    const options = createOptions(traces);
-    await expect(
-  runServertoolAutoHookCaller({
-        options,
-        contextBase: createContextBase(options),
-        includeAutoHookIds: null,
-        excludeAutoHookIds: null
-      })
-    ).rejects.toThrow('native auto-hook execution requested result but materialization was empty');
+    expect(callerSource).not.toContain('native auto-hook execution requested result but materialization was empty');
+    expect(callerSource).not.toContain('native auto-hook queue progress requested result but queue result was empty');
+    expect(callerSource).not.toContain('if (!result)');
+    expect(callerSource).not.toContain('if (!queueResult)');
+    expect(nativeWrapperSource).toContain(
+      'planAutoHookRuntimeAttemptJson native returned result disposition without materialized result'
+    );
+    expect(nativeWrapperSource).toContain(
+      'planAutoHookCallerFinalizationJson native returned result disposition without queue result'
+    );
   });
 
   test('fails fast when auto-hook trace callback fails', async () => {

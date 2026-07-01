@@ -1909,6 +1909,9 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
   if (dispositions !== 1) {
     throw new Error('planAutoHookRuntimeAttemptJson native returned invalid disposition cardinality');
   }
+  if (record.returnResult === true && input.hasMaterializedResult !== true) {
+    throw new Error('planAutoHookRuntimeAttemptJson native returned result disposition without materialized result');
+  }
   return {
     traceEvent: {
       hookId: traceRecord.hookId,
@@ -1961,6 +1964,9 @@ export function planAutoHookCallerFinalizationWithNative(input: {
   const dispositions = [record.returnResult, record.continueNextQueue, record.returnNull].filter(Boolean).length;
   if (dispositions !== 1) {
     throw new Error('planAutoHookCallerFinalizationJson native returned invalid disposition cardinality');
+  }
+  if (record.returnResult === true && input.resultPresent !== true) {
+    throw new Error('planAutoHookCallerFinalizationJson native returned result disposition without queue result');
   }
   return {
     returnResult: record.returnResult,

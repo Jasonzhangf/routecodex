@@ -3374,8 +3374,9 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'queueIndex: queueIndex + 1');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'queueTotal: queueOrder.length');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, "mode: 'tool_flow'");
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'finalChatResponse: queueResult.chatResponse');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'execution: queueResult.execution');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const queueResultForReturn = queueResult as ServerToolHandlerResult');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'finalChatResponse: queueResultForReturn.chatResponse');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'execution: queueResultForReturn.execution');
   for (const keyword of [
     'export async function runAutoHookExecutionQueue(',
     'errorAttemptInput',
@@ -3406,6 +3407,10 @@ function checkAutoHookExecutionRustOwner() {
     'runServertoolHandler',
     'if (!planned) {',
     'if (result) {',
+    'if (!result)',
+    'if (!queueResult)',
+    'native auto-hook execution requested result but materialization was empty',
+    'native auto-hook queue progress requested result but queue result was empty',
     'if (optionalResult) {',
     'if (mandatoryResult) {',
     'result.execution.flowId.trim()',
