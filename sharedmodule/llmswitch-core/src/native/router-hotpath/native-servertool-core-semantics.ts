@@ -327,13 +327,14 @@ export interface ServertoolEngineTriggerObservationPlan {
   };
 }
 
-export interface ServertoolEngineSkipPlan {
-  action:
-    | 'return_skipped_passthrough'
-    | 'return_skipped_no_execution'
-    | 'continue_matched_flow';
-  skipReason?: string;
-}
+export type ServertoolEngineSkipPlan =
+  | {
+      action: 'return_skipped_passthrough' | 'return_skipped_no_execution';
+      skipReason: string;
+    }
+  | {
+      action: 'continue_matched_flow';
+    };
 
 export interface ServertoolExecutionOutcomeRuntimeActionPlan {
   action:
@@ -2458,22 +2459,17 @@ export function planServertoolEngineSkipWithNative(input: {
   if (record.skipReason !== undefined && typeof record.skipReason !== 'string') {
     throw new Error('planServertoolEngineSkipJson native returned invalid skipReason');
   }
-  const rawSkipReason =
-    typeof record.skipReason === 'string' ? record.skipReason : undefined;
-  const hasNonBlankSkipReason =
-    rawSkipReason !== undefined && /\S/.test(rawSkipReason);
-  const skipReason = hasNonBlankSkipReason ? rawSkipReason : undefined;
-  if (
-    (record.action === 'return_skipped_passthrough' || record.action === 'return_skipped_no_execution') &&
-    !hasNonBlankSkipReason
-  ) {
-    throw new Error('planServertoolEngineSkipJson native returned skipped action without skipReason');
+  if (record.action === 'return_skipped_passthrough' || record.action === 'return_skipped_no_execution') {
+    if (typeof record.skipReason !== 'string' || !/\S/.test(record.skipReason)) {
+      throw new Error('planServertoolEngineSkipJson native returned skipped action without skipReason');
+    }
+    return {
+      action: record.action,
+      skipReason: record.skipReason
+    };
   }
   return {
-    action: record.action,
-    ...(skipReason !== undefined
-      ? { skipReason }
-      : {})
+    action: record.action
   };
 }
 
