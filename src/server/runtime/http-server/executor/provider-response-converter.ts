@@ -276,7 +276,7 @@ export type ConvertProviderResponseOptions = {
 
 export type ConvertProviderResponseDeps = {
   runtimeManager: {
-    resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
+    resolveRuntimeKey(providerKey?: string): string | undefined;
     getHandleByRuntimeKey(runtimeKey?: string): ProviderHandle | undefined;
   };
   executeNested(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
@@ -286,7 +286,7 @@ function buildProviderContextForResponseConversion(
   options: ConvertProviderResponseOptions,
   deps: ConvertProviderResponseDeps
 ): ProviderContext {
-  const runtimeKey = deps.runtimeManager.resolveRuntimeKey(options.providerKey, options.providerKey);
+  const runtimeKey = deps.runtimeManager.resolveRuntimeKey(options.providerKey);
   const handle = deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
   const runtimeExtensions = asRecord(handle?.runtime?.extensions);
   const metadataExtensions = asRecord(options.pipelineMetadata?.extensions);

@@ -1,8 +1,10 @@
 import type { ProviderHandle } from '../types.js';
 import type { ModuleDependencies } from '../../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 
+export const SERVER_RUNTIME_KEY_RESOLUTION_FEATURE_ID = 'feature_id: server.runtime_key_resolution';
+
 type RuntimeManager = {
-  resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
+  resolveRuntimeKey(providerKey?: string, metadata?: Record<string, unknown>): string | undefined;
   getHandleByRuntimeKey(runtimeKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined;
 };
 
@@ -24,7 +26,7 @@ export async function resolveProviderRuntimeOrThrow(options: {
   const { requestId, target, routeName, runtimeKeyHint, runtimeManager, dependencies, metadata } = options;
   void routeName;
   void dependencies;
-  let runtimeKey = runtimeManager.resolveRuntimeKey(target.providerKey, undefined, metadata);
+  let runtimeKey = runtimeManager.resolveRuntimeKey(target.providerKey, metadata);
   if (!runtimeKey) {
     runtimeKey = runtimeKeyHint;
   }
@@ -43,24 +45,6 @@ export async function resolveProviderRuntimeOrThrow(options: {
 
   const handle = runtimeManager.getHandleByRuntimeKey(runtimeKey, metadata);
   if (!handle) {
-    const directHandle = runtimeManager.getHandleByRuntimeKey(target.providerKey, metadata);
-    if (directHandle) {
-      return { runtimeKey: target.providerKey, handle: directHandle };
-    }
-    const normalizedProviderKey = target.providerKey.replace(/\.key(\d+)\./i, '.$1.');
-    if (normalizedProviderKey !== target.providerKey) {
-      const normalizedHandle = runtimeManager.getHandleByRuntimeKey(normalizedProviderKey, metadata);
-      if (normalizedHandle) {
-        return { runtimeKey: normalizedProviderKey, handle: normalizedHandle };
-      }
-    }
-    const normalizedRuntimeKey = runtimeKey.replace(/\.key(\d+)$/i, '.$1');
-    if (normalizedRuntimeKey !== runtimeKey) {
-      const normalizedRuntimeHandle = runtimeManager.getHandleByRuntimeKey(normalizedRuntimeKey, metadata);
-      if (normalizedRuntimeHandle) {
-        return { runtimeKey: normalizedRuntimeKey, handle: normalizedRuntimeHandle };
-      }
-    }
     const runtimeMissingError = Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
       code: 'ERR_PROVIDER_NOT_FOUND',
       requestId,

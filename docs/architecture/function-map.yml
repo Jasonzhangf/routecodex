@@ -922,6 +922,42 @@ owners:
       - "Provider availability/quota/upstream transport errors are provider/server truth, not session truth."
       - "429/502/503/504, fetch-failed, provider-unavailable, and pool-exhaustion class errors must not write session_storm cooldown state."
 
+  - feature_id: server.runtime_key_resolution
+    status: active
+    summary: "server-side provider binding to initialized runtime-key resolution without fallback probing"
+    owner_kind: transitional
+    owner_scope: "provider binding/runtime key lookup for server runtime handles; provider selection is consumed as route truth, unresolved runtime keys fail fast"
+    owner_module: src/server/runtime/http-server/executor/provider-runtime-resolver.ts
+    canonical_types:
+      - ProviderRuntimeManager
+      - ProviderHandle
+    canonical_builders:
+      - resolveProviderRuntimeOrThrow
+    allowed_paths:
+      - src/server/runtime/http-server/runtime-manager.ts
+      - src/server/runtime/http-server/index.ts
+      - src/server/runtime/http-server/http-server-runtime-providers.ts
+      - src/server/runtime/http-server/executor/provider-runtime-resolver.ts
+      - src/server/runtime/http-server/executor/provider-response-converter.ts
+      - docs
+      - tests/server/runtime/http-server
+    forbidden_paths:
+      - src/providers/profile
+      - src/client
+      - sharedmodule/llmswitch-core/src/conversion
+    required_tests:
+      - tests/server/runtime/http-server/runtime-manager.spec.ts
+      - tests/server/runtime/http-server/executor/provider-runtime-resolver.spec.ts
+      - tests/server/runtime/http-server/provider-binding-resolution.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-fallback-denylist
+    migration_target: rust
+    notes:
+      - "Runtime key resolution must not return a fallback/raw provider key when the selected binding is unknown."
+      - "`resolveProviderRuntimeOrThrow` must not probe raw provider keys, normalized provider keys, or normalized runtime keys after the selected runtime key has no handle."
+      - "Provider pool failover remains an ErrorErr04/VR policy concern; runtime-key lookup only resolves the current selected target to an initialized handle or fails fast."
+
   - feature_id: error.backoff_action_queue
     status: active
     summary: "unified blocking backoff queue for host-side error action categories"

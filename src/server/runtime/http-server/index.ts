@@ -412,7 +412,7 @@ export class RouteCodexHttpServer {
 
     this.requestExecutor = createRequestExecutor({
       runtimeManager: {
-        resolveRuntimeKey: (providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined => {
+        resolveRuntimeKey: (providerKey?: string, metadata?: Record<string, unknown>): string | undefined => {
           const tryVariants = (candidate: string | undefined): string | undefined => {
             if (!candidate) {
               return undefined;
@@ -465,7 +465,7 @@ export class RouteCodexHttpServer {
             }
           }
 
-          return tryVariants(fallback) ?? fallback;
+          return undefined;
         },
         getHandleByRuntimeKey: (runtimeKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined => {
           if (!runtimeKey) {
@@ -1988,8 +1988,8 @@ export class RouteCodexHttpServer {
           },
           dependencies: this.getModuleDependencies(),
           runtimeManager: {
-            resolveRuntimeKey: (bindingKey, fallback, scopedMetadata) =>
-              this.resolveRuntimeKeyForProviderBinding(bindingKey ?? fallback, scopedMetadata),
+            resolveRuntimeKey: (bindingKey, scopedMetadata) =>
+              this.resolveRuntimeKeyForProviderBinding(bindingKey, scopedMetadata),
           },
           attempt: directAttempt,
           maxAttempts: retryState.maxAttempts,

@@ -72,7 +72,7 @@ export function resolveProviderRetryExecutionPlanExhaustionGate(args: {
 }
 
 type RuntimeManager = {
-  resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
+  resolveRuntimeKey(providerKey?: string, metadata?: Record<string, unknown>): string | undefined;
 };
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;

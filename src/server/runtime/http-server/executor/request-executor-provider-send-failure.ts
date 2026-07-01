@@ -42,7 +42,7 @@ type RequestExecutorProviderSendFailureArgs = {
   target: Record<string, unknown>;
   dependencies: ModuleDependencies;
   runtimeManager: {
-    resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
+    resolveRuntimeKey(providerKey?: string, metadata?: Record<string, unknown>): string | undefined;
   };
   attempt: number;
   maxAttempts: number;

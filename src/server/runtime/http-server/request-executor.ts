@@ -382,7 +382,7 @@ import {
 } from './executor/request-executor-response-inspect.js';
 export type RequestExecutorDeps = {
   runtimeManager: {
-    resolveRuntimeKey(providerKey?: string, fallback?: string, metadata?: Record<string, unknown>): string | undefined;
+    resolveRuntimeKey(providerKey?: string, metadata?: Record<string, unknown>): string | undefined;
     getHandleByRuntimeKey(runtimeKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined;
   };
   getHubPipeline(routingPolicyGroup?: string): HubPipeline | null;

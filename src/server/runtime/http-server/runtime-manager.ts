@@ -38,11 +38,11 @@ export class ProviderRuntimeManager {
     }
   }
 
-  resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined {
+  resolveRuntimeKey(providerKey?: string): string | undefined {
     if (providerKey && this.providerKeyToRuntimeKey.has(providerKey)) {
       return this.providerKeyToRuntimeKey.get(providerKey);
     }
-    return fallback;
+    return undefined;
   }
 
   getHandleByRuntimeKey(runtimeKey?: string): ProviderHandle | undefined {

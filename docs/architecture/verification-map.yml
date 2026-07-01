@@ -122,6 +122,27 @@ verification:
       - "Focused Rust gates: `cargo test -p servertool-core stopless --lib -- --nocapture`, `cargo test -p servertool-core cli_contract --lib -- --nocapture`, and `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`."
       - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/execution-stage-shell.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`."
 
+  - feature_id: server.runtime_key_resolution
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/runtime-manager.ts
+      - src/server/runtime/http-server/index.ts
+      - src/server/runtime/http-server/executor/provider-runtime-resolver.ts
+      - src/server/runtime/http-server/executor/provider-response-converter.ts
+    contract:
+      - tests/server/runtime/http-server/runtime-manager.spec.ts
+      - tests/server/runtime/http-server/executor/provider-runtime-resolver.spec.ts
+      - tests/server/runtime/http-server/provider-binding-resolution.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-fallback-denylist
+    build:
+      - npx tsc --noEmit --pretty false
+      - npm run build:base
+    notes:
+      - "Red tests must prove unknown provider bindings and selected runtime keys without handles do not fall back to raw/fallback/normalized keys."
+
   - feature_id: hub.servertool_auto_hook_execution
     change_risk: medium
     unit:
