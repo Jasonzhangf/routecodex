@@ -204,6 +204,19 @@ for (const forbidden of [
   }
 }
 
+const anthropicSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts');
+for (const forbidden of [
+  'private resolveSseFailureMetadata(',
+  "normalized.includes('upstream_stream_idle_timeout')",
+  "normalized.includes('stream incomplete')",
+  "normalized.includes('terminated')",
+  "return { upstreamCode: errorCode || 'ANTHROPIC_SSE_TO_JSON_FAILED', statusCode: 502, retryable: true };",
+]) {
+  if (anthropicSseToJsonConverter.includes(forbidden)) {
+    failures.push(`Anthropic SSE decode must not synthesize provider failure metadata in TS: ${forbidden}`);
+  }
+}
+
 const sseTypesIndex = read('sharedmodule/llmswitch-core/src/sse/types/index.ts');
 for (const forbidden of [
   'DEFAULT_RESPONSES_CONVERSION_CONFIG',

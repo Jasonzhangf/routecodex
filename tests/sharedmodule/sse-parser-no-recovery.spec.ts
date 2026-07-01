@@ -40,6 +40,34 @@ describe('SSE parser no-recovery boundary', () => {
     });
   });
 
+  it('does not synthesize Anthropic SSE failure metadata from generic decode errors', async () => {
+    const converter = new AnthropicSseToJsonConverter();
+
+    let caught: any;
+    try {
+      await converter.convertSseToJson(Readable.from([
+        'event: message_start\n',
+        'data: not-json\n\n'
+      ]), {
+        requestId: 'req_anthropic_no_synthetic_failure_metadata',
+        model: 'claude-sonnet-4-5'
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught.code).toBe('ANTHROPIC_SSE_TO_JSON_FAILED');
+    expect(caught.requestExecutorProviderErrorStage).toBe('provider.sse_decode');
+    expect(caught.upstreamCode).toBeUndefined();
+    expect(caught.statusCode).toBeUndefined();
+    expect(caught.status).toBeUndefined();
+    expect(caught.retryable).toBeUndefined();
+    expect(caught.context?.upstreamCode).toBeUndefined();
+    expect(caught.context?.statusCode).toBeUndefined();
+    expect(caught.context?.retryable).toBeUndefined();
+  });
+
   it('fails malformed Gemini SSE frames instead of recovering past them', async () => {
     const converter = new GeminiSseToJsonConverter();
 

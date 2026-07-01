@@ -15,12 +15,6 @@ type AnthropicSseToJsonConverterConfig = {
   strictMode: boolean;
 } & typeof DEFAULT_ANTHROPIC_CONVERSION_CONFIG;
 
-type SseFailureMetadata = {
-  upstreamCode: string;
-  statusCode: number;
-  retryable: boolean;
-};
-
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
 const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
 const DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS = 45_000;
@@ -116,56 +110,6 @@ export class AnthropicSseToJsonConverter {
     } finally {
       this.contexts.delete(options.requestId);
     }
-  }
-
-  private resolveSseFailureMetadata(error: Error): SseFailureMetadata {
-    const explicitUpstreamCode =
-      typeof (error as { upstreamCode?: unknown }).upstreamCode === 'string'
-        ? String((error as { upstreamCode?: string }).upstreamCode).trim()
-        : '';
-    const explicitStatusCode =
-      typeof (error as { statusCode?: unknown }).statusCode === 'number'
-        ? Number((error as { statusCode?: number }).statusCode)
-        : typeof (error as { status?: unknown }).status === 'number'
-          ? Number((error as { status?: number }).status)
-          : undefined;
-    const explicitRetryable =
-      typeof (error as { retryable?: unknown }).retryable === 'boolean'
-        ? Boolean((error as { retryable?: boolean }).retryable)
-        : undefined;
-    const errorCode = typeof (error as { code?: unknown }).code === 'string'
-      ? String((error as { code?: string }).code).trim().toUpperCase()
-      : '';
-    const normalized = error.message.toLowerCase();
-    if (explicitUpstreamCode || explicitStatusCode !== undefined || explicitRetryable !== undefined) {
-      return {
-        upstreamCode: explicitUpstreamCode || errorCode || 'ANTHROPIC_SSE_TO_JSON_FAILED',
-        statusCode: explicitStatusCode ?? 502,
-        retryable: explicitRetryable ?? true
-      };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_IDLE_TIMEOUT' || normalized.includes('upstream_stream_idle_timeout')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT' || normalized.includes('upstream_stream_no_content_timeout')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT' || normalized.includes('upstream_stream_content_idle_timeout')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_TIMEOUT' || normalized.includes('upstream_stream_timeout')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_HEADERS_TIMEOUT' || normalized.includes('upstream_headers_timeout')) {
-      return { upstreamCode: 'UPSTREAM_HEADERS_TIMEOUT', statusCode: 504, retryable: true };
-    }
-    if (errorCode === 'UPSTREAM_STREAM_INCOMPLETE' || normalized.includes('stream incomplete')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_INCOMPLETE', statusCode: 502, retryable: true };
-    }
-    if (errorCode === 'TERMINATED' || normalized.includes('terminated')) {
-      return { upstreamCode: 'UPSTREAM_STREAM_TERMINATED', statusCode: 502, retryable: true };
-    }
-    return { upstreamCode: errorCode || 'ANTHROPIC_SSE_TO_JSON_FAILED', statusCode: 502, retryable: true };
   }
 
   private createContext(options: SseToAnthropicJsonOptions): SseToAnthropicJsonContext {
@@ -422,12 +366,22 @@ export class AnthropicSseToJsonConverter {
   }
 
   private wrapError(code: string, error: Error, requestId: string): Error {
-    const failure = this.resolveSseFailureMetadata(error);
+    const explicitUpstreamCode =
+      typeof (error as { upstreamCode?: unknown }).upstreamCode === 'string'
+        ? String((error as { upstreamCode?: string }).upstreamCode).trim()
+        : '';
+    const explicitStatusCode =
+      typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        ? Number((error as { statusCode?: number }).statusCode)
+        : typeof (error as { status?: unknown }).status === 'number'
+          ? Number((error as { status?: number }).status)
+          : undefined;
+    const explicitRetryable =
+      typeof (error as { retryable?: unknown }).retryable === 'boolean'
+        ? Boolean((error as { retryable?: boolean }).retryable)
+        : undefined;
     const wrapped = ErrorUtils.createError(error.message, code, {
       requestId,
-      upstreamCode: failure.upstreamCode,
-      statusCode: failure.statusCode,
-      retryable: failure.retryable,
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     }) as Error & {
       status?: number;
@@ -435,11 +389,21 @@ export class AnthropicSseToJsonConverter {
       retryable?: boolean;
       upstreamCode?: string;
       requestExecutorProviderErrorStage?: string;
+      context?: Record<string, unknown>;
     };
-    wrapped.status = failure.statusCode;
-    wrapped.statusCode = failure.statusCode;
-    wrapped.retryable = failure.retryable;
-    wrapped.upstreamCode = failure.upstreamCode;
+    if (explicitStatusCode !== undefined) {
+      wrapped.status = explicitStatusCode;
+      wrapped.statusCode = explicitStatusCode;
+      (wrapped.context as Record<string, unknown>).statusCode = explicitStatusCode;
+    }
+    if (explicitRetryable !== undefined) {
+      wrapped.retryable = explicitRetryable;
+      (wrapped.context as Record<string, unknown>).retryable = explicitRetryable;
+    }
+    if (explicitUpstreamCode) {
+      wrapped.upstreamCode = explicitUpstreamCode;
+      (wrapped.context as Record<string, unknown>).upstreamCode = explicitUpstreamCode;
+    }
     wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
     return wrapped;
   }
