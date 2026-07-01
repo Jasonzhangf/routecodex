@@ -1,4 +1,5 @@
 import type {
+  ServerToolAutoHookDescriptor,
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
   ServerToolHandlerContext,
@@ -16,24 +17,15 @@ import {
   planServertoolSkeletonDerivedConfigWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { materializeServertoolPlannedResult } from './execution-handler-materialization-shell.js';
-import type { ServerToolExecutionDescriptor } from './types.js';
-
-type AutoHookExecutionItem = {
-  id: string;
-  phase: string;
-  priority: number;
-  order: number;
-  execution: ServerToolExecutionDescriptor;
-};
 
 function buildAutoHookQueuesFromNativePlan(args: {
-  hooks: AutoHookExecutionItem[];
+  hooks: ServerToolAutoHookDescriptor[];
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
 }): {
   queueOrder: Array<{
     queueName: ServerToolAutoHookTraceEvent['queue'];
-    hooks: AutoHookExecutionItem[];
+    hooks: ServerToolAutoHookDescriptor[];
   }>;
 } {
   const queueConfig = planServertoolSkeletonDerivedConfigWithNative().autoHookQueueConfig as {
@@ -41,13 +33,7 @@ function buildAutoHookQueuesFromNativePlan(args: {
     mandatoryOrder: string[];
   };
   const nativePlan = planServertoolAutoHookQueueItemsWithNative({
-    hooks: args.hooks.map((hook) => ({
-      id: hook.id,
-      phase: hook.phase,
-      priority: hook.priority,
-      order: hook.order,
-      execution: hook.execution
-    })),
+    hooks: args.hooks,
     includeAutoHookIds: args.includeAutoHookIds != null ? [...args.includeAutoHookIds] : null,
     excludeAutoHookIds: args.excludeAutoHookIds != null ? [...args.excludeAutoHookIds] : null,
     optionalPrimaryHookOrder: queueConfig.optionalPrimaryOrder,
@@ -63,7 +49,7 @@ function buildAutoHookQueuesFromNativePlan(args: {
 
 async function runAutoHookExecutionQueue(args: {
   queueName: ServerToolAutoHookTraceEvent['queue'];
-  hooks: AutoHookExecutionItem[];
+  hooks: ServerToolAutoHookDescriptor[];
   options: ServerSideToolEngineOptions;
   contextBase: ServerToolHandlerContext;
 }): Promise<ServerToolHandlerResult | null> {

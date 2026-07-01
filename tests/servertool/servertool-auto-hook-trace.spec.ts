@@ -474,6 +474,9 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).not.toContain('...(args.excludeAutoHookIds ? { excludeAutoHookIds: [...args.excludeAutoHookIds] } : {})');
     expect(callerSource).toContain('includeAutoHookIds: args.includeAutoHookIds != null ? [...args.includeAutoHookIds] : null');
     expect(callerSource).toContain('excludeAutoHookIds: args.excludeAutoHookIds != null ? [...args.excludeAutoHookIds] : null');
+    expect(callerSource).not.toContain('type AutoHookExecutionItem =');
+    expect(callerSource).not.toContain('hooks: args.hooks.map((hook)');
+    expect(callerSource).not.toContain('execution: hook.execution');
     expect(callerSource).not.toContain('error instanceof Error ? error.message');
     expect(callerSource).not.toContain("typeof error === 'string' ? error");
     expect(callerSource).toContain('error');
