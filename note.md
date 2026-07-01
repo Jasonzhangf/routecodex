@@ -1,3 +1,8 @@
+# 2026-07-01: servertool handler materialization action moved to Rust
+- Slice: `materializeServertoolPlannedResult()` no longer branches in TS for missing `finalize` / invalid handler result. It now calls `planServertoolHandlerMaterializationForPlannedWithNative(planned, requestId)` and only executes the Rust-returned action: finalize, throw Rust-owned error plan, or return handler result.
+- Build blocker: first `npm run build:base` waited on Cargo package/artifact file locks; no code compile error was found. The lock cleared and native build completed, producing `0.90.3414`.
+- Verification: focused Jest `execution-handler-materialization-shell + servertool-active-orchestration-audit` PASS 43/43; Rust `cargo test -p servertool-core execution_handler_contract --lib -- --nocapture` PASS 3/3; `verify:servertool-rust-only`, sharedmodule/root `tsc --noEmit --pretty false`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `build-native-hotpath`, `git diff --check`, and `build:base` PASS.
+
 # 2026-07-01: Chat SSE finish_reason fallback removed
 - Red evidence: focused `chat-sse-usage-no-fallback` first showed missing `choices[0].finish_reason` was synthesized into `"finish_reason":"stop"` and `[DONE]`; `verify:sse-architecture-boundary` first failed on the old `finish_reason` inference markers in `chat-sequencer.ts`.
 - Fix: Chat JSON->SSE now requires explicit `finish_reason`; missing/blank finish reason emits the native error path with `Invalid ChatCompletionResponse choice: missing finish_reason`, and no synthesized `stop` / `[DONE]` is emitted.
