@@ -10,6 +10,7 @@ import {
   planServertoolEnginePrepassActionWithNative,
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineTriggerObservationWithNative,
+  planEngineSelectionAfterRunWithNative,
   planAutoHookCallerFinalizationWithNative,
   planAutoHookRuntimeAttemptWithNative,
   planStoplessCliProjectionContextWithNative,
@@ -885,6 +886,32 @@ describe('servertool CLI native bridge', () => {
       returnResult: false,
       continueNextQueue: true,
       returnNull: false
+    });
+  });
+
+  it('uses Rust-owned engine selection rerun overrides without TS empty-object fallback', () => {
+    expect(
+      planEngineSelectionAfterRunWithNative({
+        primaryAutoHookIds: [' stop_message_auto ', 'vision_auto'],
+        engineResult: { mode: 'passthrough' }
+      })
+    ).toEqual({
+      action: 'rerun_excluding_primary_hooks',
+      overrides: {
+        excludeAutoHookIds: ['stop_message_auto', 'vision_auto']
+      }
+    });
+
+    expect(
+      planEngineSelectionAfterRunWithNative({
+        primaryAutoHookIds: ['stop_message_auto'],
+        engineResult: {
+          mode: 'tool_flow',
+          execution: { flowId: 'flow_engine_selection' }
+        }
+      })
+    ).toEqual({
+      action: 'return_current'
     });
   });
 

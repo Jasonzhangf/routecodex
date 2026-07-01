@@ -32,6 +32,8 @@ describe('servertool engine selection block', () => {
     expect(source).not.toContain("if (afterRunPlan.action === 'rerun_excluding_primary_hooks')");
     expect(source).toContain('switch (afterRunPlan.action)');
     expect(source).not.toContain('String(afterRunPlan.action)');
+    expect(source).not.toContain('afterRunPlan.overrides ?? {}');
+    expect(source).toContain('return await args.runEngine(afterRunPlan.overrides);');
     expect(source).toContain("[servertool] invalid engine selection action");
   });
 

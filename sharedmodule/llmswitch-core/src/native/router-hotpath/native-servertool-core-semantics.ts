@@ -161,10 +161,12 @@ export interface EngineSelectionStartPlan {
   primaryAutoHookIds: string[];
 }
 
-export interface EngineSelectionAfterRunPlan {
-  action: 'rerun_excluding_primary_hooks' | 'return_current';
-  overrides?: EngineSelectionOverridesPlan;
-}
+export type EngineSelectionAfterRunPlan = {
+  action: 'return_current';
+} | {
+  action: 'rerun_excluding_primary_hooks';
+  overrides: EngineSelectionOverridesPlan;
+};
 
 export interface ClientExecCliProjectionInput {
   toolName?: string;
@@ -3401,12 +3403,16 @@ export function planEngineSelectionAfterRunWithNative(input: {
   if (record.action !== 'rerun_excluding_primary_hooks' && record.action !== 'return_current') {
     throw new Error('planEngineSelectionAfterRunJson native returned invalid action');
   }
-  return {
-    action: record.action,
-    ...(record.overrides === undefined || record.overrides === null
-      ? {}
-      : { overrides: parseEngineSelectionOverridesPlan(record.overrides, capability) })
-  };
+  if (record.action === 'rerun_excluding_primary_hooks') {
+    return {
+      action: record.action,
+      overrides: parseEngineSelectionOverridesPlan(record.overrides, capability)
+    };
+  }
+  if (record.overrides !== undefined && record.overrides !== null) {
+    throw new Error('planEngineSelectionAfterRunJson native returned overrides for return_current action');
+  }
+  return { action: record.action };
 }
 
 function parseEngineSelectionOverridesPlan(value: unknown, capability: string): EngineSelectionOverridesPlan {

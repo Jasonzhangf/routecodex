@@ -3991,6 +3991,17 @@ function checkEngineSelectionRustOwner() {
       needle
     );
   }
+  for (const needle of [
+    "record.action === 'rerun_excluding_primary_hooks'",
+    "throw new Error('planEngineSelectionAfterRunJson native returned overrides for return_current action')",
+  ]) {
+    assertContains(
+      'servertool-engine-selection-native-bridge',
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
+      nativeWrapper,
+      needle
+    );
+  }
   assertContains(
     'servertool-engine-selection-ts-thin-shell',
     TS_ENGINE_SELECTION,
@@ -4019,6 +4030,7 @@ function checkEngineSelectionRustOwner() {
     'Array.isArray(overrides.excludeAutoHookIds)',
     "if (afterRunPlan.action === 'rerun_excluding_primary_hooks')",
     'String(afterRunPlan.action)',
+    'afterRunPlan.overrides ?? {}',
   ]) {
     if (engineSelectionShell.includes(keyword)) {
       fail(
@@ -4032,6 +4044,12 @@ function checkEngineSelectionRustOwner() {
     TS_ENGINE_SELECTION,
     engineSelectionShell,
     'switch (afterRunPlan.action)'
+  );
+  assertContains(
+    'servertool-engine-selection-ts-thin-shell',
+    TS_ENGINE_SELECTION,
+    engineSelectionShell,
+    'return await args.runEngine(afterRunPlan.overrides);'
   );
   pass(
     'servertool-engine-selection-no-ts-owner',

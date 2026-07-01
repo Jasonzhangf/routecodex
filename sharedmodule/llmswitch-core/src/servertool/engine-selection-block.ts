@@ -23,7 +23,7 @@ export async function runPrimaryServerToolEngineSelection(args: {
   });
   switch (afterRunPlan.action) {
     case 'rerun_excluding_primary_hooks':
-      return await args.runEngine(afterRunPlan.overrides ?? {});
+      return await args.runEngine(afterRunPlan.overrides);
     case 'return_current':
       return engineResult;
     default:

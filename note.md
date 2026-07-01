@@ -1,3 +1,8 @@
+# 2026-07-02: servertool engine selection rerun overrides fallback removed
+- Slice: `engine-selection-block.ts` no longer calls `args.runEngine(afterRunPlan.overrides ?? {})`; Rust/native wrapper now requires `rerun_excluding_primary_hooks` to carry explicit overrides and rejects `return_current` with overrides.
+- Gate: `engine-selection-block.spec.ts`, `servertool-cli-native-bridge.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the TS empty-object fallback and require direct native overrides.
+- Evidence: focused Jest `engine-selection-block + servertool-cli-native-bridge + servertool-active-orchestration-audit` PASS 78/78; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool response-stage auto-hook presence helper removed
 - Slice: `response-stage-auto-hook-shell.ts` no longer keeps a local `hasServerSideToolEngineResult()` type-guard helper; it now uses `autoHookResult != null` as the only presence check and `autoHookResult == null` as the fail-fast guard.
 - Gate: `response-stage-auto-hook-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the helper marker and require the nullish presence check.

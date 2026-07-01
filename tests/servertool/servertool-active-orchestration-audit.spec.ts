@@ -433,6 +433,7 @@ const TARGETS = [
       'Array.isArray(overrides.excludeAutoHookIds)',
       "if (afterRunPlan.action === 'rerun_excluding_primary_hooks')",
       'String(afterRunPlan.action)',
+      'afterRunPlan.overrides ?? {}',
     ],
     required: [
       'readServertoolPrimaryAutoHookIdsWithNative',
@@ -440,7 +441,7 @@ const TARGETS = [
       'planEngineSelectionAfterRunWithNative',
       'const engineResult = await args.runEngine(startPlan.overrides);',
       'switch (afterRunPlan.action)',
-      'return await args.runEngine(afterRunPlan.overrides ?? {});',
+      'return await args.runEngine(afterRunPlan.overrides);',
     ],
   },
   {
