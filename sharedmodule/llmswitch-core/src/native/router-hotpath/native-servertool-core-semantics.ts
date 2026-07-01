@@ -1173,7 +1173,7 @@ export function planStoplessDecisionContextSignalsWithNative(input: {
   if (!fn) {
     throw new Error('planStoplessDecisionContextSignalsJson native unavailable');
   }
-  const resultJson = fn(JSON.stringify(input));
+  const resultJson = fn(JSON.stringify(encodeServertoolExecutionLoopEffectInput(input)));
   if (typeof resultJson !== 'string') {
     throw new Error(`planStoplessDecisionContextSignalsJson native returned non-string: ${typeof resultJson}`);
   }
@@ -2344,6 +2344,24 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     },
     ...(typeof record.handlerErrorMessage === 'string' ? { handlerErrorMessage: record.handlerErrorMessage } : {})
   };
+}
+
+function encodeServertoolExecutionLoopEffectInput(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return { handlerErrorMessage: input };
+  }
+  const record = input as Record<string, unknown>;
+  return {
+    ...record,
+    handlerErrorMessage: encodeServertoolHandlerErrorCarrier(record.handlerErrorMessage)
+  };
+}
+
+function encodeServertoolHandlerErrorCarrier(error: unknown): unknown {
+  if (error instanceof Error) {
+    return { message: error.message };
+  }
+  return error;
 }
 
 export function planServertoolResponseStageRuntimeActionWithNative(input: {

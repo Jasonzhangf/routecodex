@@ -88,6 +88,12 @@ fn normalize_handler_error_message(value: Option<&serde_json::Value>) -> String 
         Some(serde_json::Value::String(text)) => text.trim().to_string(),
         Some(serde_json::Value::Number(number)) => number.to_string(),
         Some(serde_json::Value::Bool(value)) => value.to_string(),
+        Some(serde_json::Value::Object(object)) => object
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
         _ => String::new(),
     };
     if raw.is_empty() {
@@ -155,5 +161,25 @@ mod tests {
             handler_error_message: Some(serde_json::json!("  ")),
         });
         assert_eq!(plan.handler_error_message.as_deref(), Some("unknown"));
+    }
+
+    #[test]
+    fn normalizes_error_object_message_in_rust() {
+        let plan = plan_servertool_execution_loop_effect(ServertoolExecutionLoopEffectInput {
+            mode: "handler_error".to_string(),
+            tool_call: ServertoolExecutionLoopEffectToolCallInput {
+                id: "call_1".to_string(),
+                name: "web_search".to_string(),
+                arguments: "{}".to_string(),
+                execution_mode: Some("guarded".to_string()),
+                strip_after_execute: Some(true),
+            },
+            noop_flow_id: None,
+            handler_error_message: Some(serde_json::json!({ "message": " boom-from-error-object " })),
+        });
+        assert_eq!(
+            plan.handler_error_message.as_deref(),
+            Some("boom-from-error-object")
+        );
     }
 }

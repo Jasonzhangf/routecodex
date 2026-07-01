@@ -144,6 +144,8 @@ describe('execution-queue-shell', () => {
       handlerErrorMessage:
         typeof input?.handlerErrorMessage === 'string'
           ? input.handlerErrorMessage.trim() || 'unknown'
+          : typeof input?.handlerErrorMessage?.message === 'string'
+            ? input.handlerErrorMessage.message.trim() || 'unknown'
           : 'unknown'
     }));
     materializeServertoolPlannedResult.mockResolvedValue({
@@ -178,6 +180,8 @@ describe('execution-queue-shell', () => {
     expect(source).toContain('message: errorEffectPlan.handlerErrorMessage as string');
     expect(source).not.toContain("String(lastErr ?? 'unknown')");
     expect(source).not.toContain("lastErr instanceof Error ? lastErr.message : String");
+    expect(source).not.toContain('lastErr instanceof Error ? lastErr.message : lastErr');
+    expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).not.toContain('buildServertoolDispatchPlanInputWithNative');
   });
 

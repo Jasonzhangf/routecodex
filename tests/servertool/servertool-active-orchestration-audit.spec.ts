@@ -86,6 +86,7 @@ const TARGETS = [
       '  ToolCall\n} from \'./types.js\';',
       "String(lastErr ?? 'unknown')",
       "lastErr instanceof Error ? lastErr.message : String",
+      'lastErr instanceof Error ? lastErr.message : lastErr',
     ],
     required: [
       'runServertoolIoExecutionQueue',

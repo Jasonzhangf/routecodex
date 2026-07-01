@@ -2768,6 +2768,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'if (lastErr) {',
     "String(lastErr ?? 'unknown')",
     "lastErr instanceof Error ? lastErr.message : String",
+    'lastErr instanceof Error ? lastErr.message : lastErr',
     'executedToolCalls: [],',
     'executedIds: new Set<string>()',
     'executedFlowIds: []',

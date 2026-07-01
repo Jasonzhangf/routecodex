@@ -99,7 +99,7 @@ export async function runServertoolIoExecutionQueue(args: {
           executionMode: toolCall.executionMode,
           stripAfterExecute: toolCall.stripAfterExecute
         },
-        handlerErrorMessage: lastErr instanceof Error ? lastErr.message : lastErr
+        handlerErrorMessage: lastErr
       });
       const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({
         base: args.baseForExecution as Record<string, unknown>,
