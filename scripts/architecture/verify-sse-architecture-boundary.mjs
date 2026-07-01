@@ -173,6 +173,25 @@ for (const forbidden of [
   }
 }
 
+const responsesSseTypes = read('sharedmodule/llmswitch-core/src/sse/types/responses-types.ts');
+for (const forbidden of [
+  'interface ResponsesConversionConfig',
+  'DEFAULT_RESPONSES_CONVERSION_CONFIG',
+]) {
+  if (responsesSseTypes.includes(forbidden)) {
+    failures.push(`Responses SSE types must not keep dead conversion config surface: ${forbidden}`);
+  }
+}
+
+const sseTypesIndex = read('sharedmodule/llmswitch-core/src/sse/types/index.ts');
+for (const forbidden of [
+  'DEFAULT_RESPONSES_CONVERSION_CONFIG',
+]) {
+  if (sseTypesIndex.includes(forbidden)) {
+    failures.push(`SSE type barrel must not export dead Responses conversion config: ${forbidden}`);
+  }
+}
+
 const responsesSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts');
 for (const forbidden of [
   'enableValidation: boolean',

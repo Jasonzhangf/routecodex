@@ -381,63 +381,6 @@ export const RESPONSES_CONVERSION_ERROR_CODES = {
   STREAM_ERROR: 'RESPONSES_STREAM_ERROR'
 } as const;
 
-// Responses转换配置
-export interface ResponsesConversionConfig {
-  // 超时配置
-  defaultTimeoutMs: number;
-  heartbeatIntervalMs: number;
-  eventTimeoutMs: number;
-
-  // 分块配置
-  defaultChunkSize: number;
-  defaultDelayMs: number;
-  reasoningChunkSize: number;
-  textChunkSize: number;
-  functionCallChunkSize: number;
-
-  // 验证配置
-  enableEventValidation: boolean;
-  enableSequenceValidation: boolean;
-  strictMode: boolean;
-  validateOutputItems: boolean;
-
-  // 性能配置
-  maxConcurrentOutputItems: number;
-  maxConcurrentContentParts: number;
-  eventBufferSize: number;
-
-  // 调试配置
-  debugMode: boolean;
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
-  enableMetrics: boolean;
-}
-
-// 默认Responses转换配置
-export const DEFAULT_RESPONSES_CONVERSION_CONFIG: ResponsesConversionConfig = {
-  defaultTimeoutMs: 900000,
-  heartbeatIntervalMs: 15000,
-  eventTimeoutMs: 5000,
-
-  defaultChunkSize: 12,
-  defaultDelayMs: 8,
-  reasoningChunkSize: 24,
-  textChunkSize: 128,
-  functionCallChunkSize: 24,
-
-  enableEventValidation: true,
-  enableSequenceValidation: true,
-  strictMode: false,
-  validateOutputItems: true,
-
-  maxConcurrentOutputItems: 10,
-  maxConcurrentContentParts: 50,
-  eventBufferSize: 1000,
-
-  debugMode: false,
-  logLevel: 'info',
-  enableMetrics: true
-};
-
 // Responses SSE事件流 - 简化类型定义，支持AsyncIterable
 export interface ResponsesSseEventStream extends AsyncIterable<ResponsesSseEvent> {
   // 获取流统计

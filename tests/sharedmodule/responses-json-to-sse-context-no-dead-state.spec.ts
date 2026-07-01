@@ -82,4 +82,21 @@ describe('responses JSON-to-SSE context dead-state boundary', () => {
     expect(source).not.toContain('context.options.chunkSize ||');
     expect(source).not.toContain('context.options.delayMs ||');
   });
+
+  it('does not keep dead Responses conversion config types or exports', () => {
+    const responsesTypesPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/types/responses-types.ts'
+    );
+    const typesIndexPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/types/index.ts'
+    );
+    const responsesTypes = fs.readFileSync(responsesTypesPath, 'utf8');
+    const typesIndex = fs.readFileSync(typesIndexPath, 'utf8');
+
+    expect(responsesTypes).not.toContain('interface ResponsesConversionConfig');
+    expect(responsesTypes).not.toContain('DEFAULT_RESPONSES_CONVERSION_CONFIG');
+    expect(typesIndex).not.toContain('DEFAULT_RESPONSES_CONVERSION_CONFIG');
+  });
 });

@@ -103,4 +103,4 @@ export type { ResponsesSseToJsonConverterRefactored as ResponsesSseToJsonConvert
 
 // 常量
 export { DEFAULT_CHAT_CONVERSION_CONFIG, CHAT_CONVERSION_ERROR_CODES } from './chat-types.js';
-export { DEFAULT_RESPONSES_CONVERSION_CONFIG, RESPONSES_CONVERSION_ERROR_CODES } from './responses-types.js';
+export { RESPONSES_CONVERSION_ERROR_CODES } from './responses-types.js';
