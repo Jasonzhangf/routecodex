@@ -368,10 +368,12 @@ const TARGETS = [
       'entryContextPlan.excludeToolCallNames.length > 0',
       'entryContextPlan.includeAutoHookIds.length > 0',
       'entryContextPlan.excludeAutoHookIds.length > 0',
+      'return tokens ? new Set(tokens) : null;',
     ],
     required: [
       'resolveServertoolEntryContext',
       'planServertoolEntryContextWithNative',
+      'return tokens != null ? new Set(tokens) : null;',
       'const includeToolCallNames =',
     ],
   },

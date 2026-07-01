@@ -1,3 +1,8 @@
+# 2026-07-02: servertool entry context token truthiness removed
+- Slice: `entry-context-shell.ts` no longer uses truthiness to decide whether native entry context token arrays should become Set carriers; it now uses explicit `tokens != null`.
+- Gate: `entry-context-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid `return tokens ? new Set(tokens) : null;` and require the nullish token check.
+- Evidence: focused entry-context Jest PASS 4/4; focused active audit PASS 44/44; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool extract normalized payload truthiness removed
 - Slice: `extract-tool-calls-shell.ts` no longer uses truthiness to decide whether native response-stage `normalizedPayload` should replace the in-place JSON object; it now uses explicit `!= null` plus object/array validation.
 - Gate: `extract-tool-calls-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid the old `stage.normalizedPayload && typeof ...` marker and require the nullish presence check.

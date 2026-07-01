@@ -10,7 +10,7 @@ import {
 import { planServertoolEntryContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 function nativeEntryTokenSet(tokens: readonly string[] | undefined): Set<string> | null {
-  return tokens ? new Set(tokens) : null;
+  return tokens != null ? new Set(tokens) : null;
 }
 
 export function resolveServertoolEntryContext(args: {

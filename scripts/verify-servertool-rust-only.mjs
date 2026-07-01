@@ -5376,6 +5376,7 @@ function checkServertoolRustOutcomeCloseout() {
     'const excludeToolCallNames =',
     'const includeAutoHookIds =',
     'const excludeAutoHookIds =',
+    'return tokens != null ? new Set(tokens) : null;',
   ]) {
     if (!entryContextShell.includes(marker)) {
       fail(
@@ -5406,6 +5407,7 @@ function checkServertoolRustOutcomeCloseout() {
     '.trim().toLowerCase()',
     '.filter((hook): hook is',
     '.filter(Boolean)',
+    'return tokens ? new Set(tokens) : null;',
   ]) {
     if (entryContextShell.includes(marker)) {
       fail(
