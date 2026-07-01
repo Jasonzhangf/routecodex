@@ -191,13 +191,16 @@ export async function executeRouterDirectPipeline(
 
   // Write model override info to metadata center (on the metadata carrier)
   if (hookResult.originalClientModel) {
-    const metadataCenterAttached = MetadataCenter.attach(input.requestPayload);
+    // Use a clone of requestPayload for MetadataCenter to avoid attaching
+    // control-plane carrier to the data-plane outbound body
+    const metadataCarrier = { ...input.requestPayload };
+    const metadataCenterAttached = MetadataCenter.attach(metadataCarrier);
     const pipelineMetadataCenter =
       input.pipelineMetadata && typeof input.pipelineMetadata === 'object' && !Array.isArray(input.pipelineMetadata)
         ? MetadataCenter.attach(input.pipelineMetadata)
         : undefined;
     auditContext.originalClientModel = hookResult.originalClientModel;
-    // Write both on the request payload's metadata center for request-side consumption
+    // Write both on the metadata carrier for consumption by caller
     metadataCenterAttached.writeProviderObservation(
       'clientModelId',
       hookResult.originalClientModel,

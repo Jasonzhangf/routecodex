@@ -796,13 +796,8 @@ export async function prepareResponsesHandlerRuntimeForHttp(
     acceptsSse: args.acceptsSse,
     requestTimeoutMs: args.requestTimeoutMs,
   });
-  const requestBodyMetadata = readRequestBodyMetadataForHttp(args.payload);
-  const effectiveRequestMetadata = {
-    ...(requestBodyMetadata ?? {}),
-    ...(args.requestMetadata ?? {})
-  };
-  const sessionId = readResponsesSessionIdFromHttp(effectiveRequestMetadata);
-  const conversationId = readResponsesConversationIdFromHttp(effectiveRequestMetadata);
+  const sessionId = readResponsesSessionIdFromHttp(args.requestMetadata);
+  const conversationId = readResponsesConversationIdFromHttp(args.requestMetadata);
   try {
     const preparedEntry = await prepareResponsesHandlerEntryForHttp({
       payload: args.payload,
@@ -832,7 +827,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
     const requestContext = await buildResponsesRequestContextForHttp({
       payload,
       requestId: args.requestId,
-      metadata: effectiveRequestMetadata,
+      metadata: args.requestMetadata,
       resumeMeta: preparedEntry.resumeMeta,
       matchedPort: args.portScope?.matchedPort,
       routingPolicyGroup: args.portScope?.routingPolicyGroup,

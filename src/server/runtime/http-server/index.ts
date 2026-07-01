@@ -1024,6 +1024,16 @@ export class RouteCodexHttpServer {
     return await this.requestExecutor.execute(input);
   }
 
+  private buildHubPipelineInput(input: PipelineExecutionInput): PipelineExecutionInput {
+    if (input.hubBody === undefined) {
+      return input;
+    }
+    return {
+      ...input,
+      body: input.hubBody,
+    };
+  }
+
   private resolveRuntimeKeyForProviderBinding(bindingKey?: string, metadata?: Record<string, unknown>): string | undefined {
     if (!bindingKey) {
       return undefined;
@@ -1363,13 +1373,13 @@ export class RouteCodexHttpServer {
             );
           }
           return await this.executePipeline({
-            ...nextInput,
+            ...this.buildHubPipelineInput(nextInput),
             metadata: relayMetadata,
           });
         }
-        return await this.executePipeline(nextInput);
+        return await this.executePipeline(this.buildHubPipelineInput(nextInput));
       }
-      return await this.executePipeline(nextInput);
+      return await this.executePipeline(this.buildHubPipelineInput(nextInput));
     }
 
     const handle = this.resolveProviderHandleForBinding(portConfig.providerBinding, metadata);
@@ -1385,7 +1395,7 @@ export class RouteCodexHttpServer {
     }
 
     return await this.executePipeline({
-      ...nextInput,
+      ...this.buildHubPipelineInput(nextInput),
       metadata: {
         ...(nextInput.metadata ?? {}),
         allowedProviders: [portConfig.providerBinding].filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
@@ -1793,7 +1803,10 @@ export class RouteCodexHttpServer {
       }
       throw resolveError;
     }
-    attachProviderRuntimeMetadata(requestPayload, {
+    // Attach provider runtime metadata on a clone of requestPayload to keep
+    // control-plane carrier off the data-plane outbound body object
+    const requestPayloadWithCarrier = { ...requestPayload };
+    attachProviderRuntimeMetadata(requestPayloadWithCarrier, {
       requestId: input.requestId,
       providerId: directProviderHandle.providerId,
       providerKey,
@@ -1826,7 +1839,7 @@ export class RouteCodexHttpServer {
       directOutcome = await executeRouterDirectPipeline({
       portConfig,
       providerPayload,
-      requestPayload,
+      requestPayload: requestPayloadWithCarrier,
       requestId: input.requestId,
       target: {
         providerKey,

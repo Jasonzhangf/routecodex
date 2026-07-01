@@ -25,6 +25,12 @@
 - Evidence: focused provider-response converter Jest PASS 4/4; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
 - Commit scope note: unrelated dirty servertool/SSE/package/build-info work remains excluded.
 
+# 2026-07-01: servertool engine preflight observed/log action moved to Rust plan
+- Slice: `engine_preflight_contract.rs` now returns explicit `attachStopGatewayContext`, `logStopEntry`, and `logStopCompare` actions; `engine-preflight-shell.ts` no longer derives stop-gateway entry/trigger logging from local `stopSignal.observed` branches and only executes the native plan.
+- Gate: `engine-preflight-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, `engine.stopless-session-thin-shell.spec.ts`, and `verify-servertool-rust-only` now forbid the old local observed branch markers and require the native preflight action fields.
+- Evidence: red focused Jest first failed on `stopSignal.observed && preflightAction.action`; `cargo test -p servertool-core engine_preflight --lib -- --nocapture` PASS 4/4; `build-native-hotpath` PASS; focused Jest preflight/bridge/active-audit/stopless-thin PASS 4 suites, 76/76 tests; sharedmodule `tsc` PASS; `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and `git diff --check` PASS.
+- Commit scope note: unrelated dirty SSE/provider-response/runtime/package/build-info/note work remains excluded from this servertool slice.
+
 # 2026-07-01: metadata-center generated source residue removed
 - Slice: physically deleted tracked generated artifacts from `src/server/runtime/http-server/metadata-center`: `dualwrite-api.{js,d.ts}`, `metadata-center.{js,d.ts}`, `metadata-center-types.{js,d.ts}`, and `request-truth-readers.{js,d.ts}`. TS source is now the only source truth for the metadata-center family.
 - Gate: extended `source-generated-residue.spec.ts` and `verify-architecture-deleted-path.mjs` to forbid all deleted metadata-center artifacts from returning; removed stale `.js` allowlist from `verify-servertool-rust-only` and removed stale no-fallback rule targeting deleted `metadata-center.js`.
@@ -23364,3 +23370,56 @@ NODE_OPTIONS='--experimental-vm-modules'是本地调试ESM测试的正确方式�
 - Fix: `buildBridgeAdapterContext` no longer accepts or writes `entryOriginRequest`; `ConvertProviderResponseOptions.entryOriginRequest` remains as external option for now, but host converter does not propagate it into adapter context.
 - Verification: focused provider-response-converter contract/stopless/runtime protocol Jest PASS 4/4; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `git diff --check` PASS; `build:base` PASS.
 - Residual: full `provider-response-converter.unified-semantics.spec.ts` still has existing failures around direct chat SSE reprojection/requestSemantics mocks; not claimed fixed in this slice.
+
+# 2026-07-01: metadata center dual-write API first active slice
+- Objective source: `/Users/fanzhang/.codex/attachments/e756560c-0e41-4586-8efd-32e4d372c078/pasted-text-1.txt`.
+- Red evidence: `metadata-center-dualwrite.spec.ts` first failed because `applyMetadataCenterRustWriteResult(...)` wrote only the Rust snapshot, leaving JS `MetadataCenter.readRuntimeControl().stopless` undefined. Later `build:dev` exposed a wrong cross-root import from `sharedmodule/llmswitch-core` into repo `src/server/...`, and `verify:servertool-rust-only` rejected resurrecting TS `stopMessageState` mirror.
+- Fix: `applyMetadataCenterRustWriteResult(...)` now writes through `writeMetadataCenterSlot(...)` before committing the final Rust-readable snapshot; `buildMetadataCenterRustSnapshot(...)` now includes provider/response/closeout/debug families; Rust `metadata_center` typed structs/readers now cover declared manifest families. Request-stage runtime-control writer keeps a local slot shell inside llmswitch-core instead of importing repo server code. TS `stopMessageState` mirror was not added because current servertool gate forbids it; canonical stopless remains `runtime_control.stopless`, with `serverToolLoopState` only as existing migration mirror.
+- Tests/gates: `metadata-center-dualwrite.spec.ts` PASS 8/8; new `tests/servertool/stopless-metadata-center.spec.ts` PASS; target Jest four-file stack PASS 40/40; `cargo test -p router-hotpath-napi metadata_center --lib -- --nocapture` PASS 22; `verify:metadata-center-dualwrite-api`, `verify:architecture-metadata-center-manifest-code-sync`, `verify:function-map-compile-gate`, and `verify:servertool-rust-only` PASS.
+- Build evidence: `build:base` progressed through native hotpath rebuild, llmswitch-core build, clean, build-info auto-bump to `0.90.3466`, TypeScript, webui build, copy assets, and `fix:cli-permission` in `/tmp/routecodex-build-dev-metadata-center.log`.
+- Residual: active slice is not full Rust-only metadata center closeout. Remaining migration work is moving all other direct MetadataCenter method callers to unified API and then deleting JS mirror/payload residue.
+
+# 2026-07-01: metadata-data coupling audit and fixes
+
+## Audit findings
+
+### Violation 1 (critical): body.metadata carries both data and control signals
+- Location: `src/modules/llmswitch/bridge/responses-request-bridge.ts:readRequestBodyMetadataForHttp`
+- Path: client body.metadata -> readRequestBodyMetadataForHttp -> effectiveRequestMetadata -> sessionId/conversationId extraction
+- Violation: same field (body.metadata) used as RouteCodex control signal AND passthrough data to upstream
+- AGENTS.md rule: 'metadata走metadata center，数据走数据通道'
+
+### Violation 2 (medium): MetadataCenter.attach on outbound payload
+- Location: `src/server/runtime/http-server/router-direct-pipeline.ts:194`
+- MetadataCenter (control plane) attached to requestPayload (data plane outbound body)
+
+### Violation 3 (medium): attachProviderRuntimeMetadata on outbound payload
+- Location: `src/server/runtime/http-server/index.ts:1806`
+- providerId/providerKey/providerType/routeName/runtimeKey/target written to outbound body via Symbol
+
+### Confirmed clean
+- client_metadata passthrough: data field per AGENTS.md
+- finish_reason=unknown: 502 error body no finish_reason, normal fallback
+
+## Fixes applied
+
+### Fix 1: prepareResponsesHandlerRuntimeForHttp no longer reads sessionId/conversationId from body.metadata
+- File: `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+- Change: removed `effectiveRequestMetadata = { ...requestBodyMetadata, ...args.requestMetadata }`; now reads sessionId/conversationId from `args.requestMetadata` only
+- Rationale: client body.metadata is data plane (passthrough to provider); control signals must come from metadata carrier / HTTP headers
+
+### Fix 2: MetadataCenter.attach on a clone of requestPayload
+- File: `src/server/runtime/http-server/router-direct-pipeline.ts`
+- Change: `const metadataCarrier = { ...input.requestPayload }; const metadataCenterAttached = MetadataCenter.attach(metadataCarrier);`
+- Rationale: data plane payload stays free of control plane Symbol carrier
+
+### Fix 3: attachProviderRuntimeMetadata on a clone of requestPayload
+- File: `src/server/runtime/http-server/index.ts`
+- Change: `const requestPayloadWithCarrier = { ...requestPayload }; attachProviderRuntimeMetadata(requestPayloadWithCarrier, ...); executeRouterDirectPipeline({ requestPayload: requestPayloadWithCarrier, ... });`
+- Rationale: data plane payload stays free of control plane Symbol carrier
+
+## Verification
+- `npx tsc --noEmit --pretty false` PASS
+- Focused Jest: `metadata-center*` PASS, `router-direct-pipeline` PASS, `provider-runtime-metadata.isolation` PASS
+- Pre-existing failures (4 suites, 7 tests) unchanged: `responses-request-bridge.request-context-normalization`, `router-direct-chat-model.blackbox`, `responses-request-bridge.tool-history-errorsample`, `router-direct-passthrough.blackbox` — verified identical to baseline
+- Test delta: 7 failed, 114 passed (baseline) -> 7 failed, 116 passed (after fix). Same 7 failures, 2 new passing tests under metadata-center spec
