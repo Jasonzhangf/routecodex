@@ -322,7 +322,6 @@ const mockBridgeModule = async () => ({
     && (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs')
   )),
   summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
-  shouldDropClientSseFrameForHttp: jest.fn(() => false),
   inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn((input: {
     chunk: unknown;
     finishReason?: string;

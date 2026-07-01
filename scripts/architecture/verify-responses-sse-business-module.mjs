@@ -54,7 +54,7 @@ expectContains(packageJson, 'npm run verify:responses-sse-business-module', 'pac
 expectContains(handlerSource, "from '../../modules/llmswitch/bridge/responses-sse-bridge.js'", 'handler-response-sse.ts must import the dedicated SSE bridge facade');
 expectContains(sseBridgeSource, '// feature_id: server.responses_sse_bridge_surface', 'responses-sse-bridge.ts must stay feature-anchored');
 expectContains(sseTransportSource, 'export function buildClientSseKeepaliveFrameForHttp(', 'responses-sse-transport.ts must own keepalive framing');
-expectContains(sseTransportSource, 'export function shouldDropClientSseFrameForHttp(', 'responses-sse-transport.ts must own transport-only frame drop policy');
+expectNotContains(sseTransportSource, 'export function shouldDropClientSseFrameForHttp(', 'responses-sse-transport.ts must not own frame-drop policy');
 expectNotContains(responseLifecycleBridgeSource, 'resolveResponsesRequestContextForHttp', 'responses-response-bridge.ts must not keep request-context facade salvage');
 expectNotContains(responseLifecycleBridgeSource, 'shouldDispatchResponsesSseToClientForHttp', 'responses-response-bridge.ts must not keep SSE dispatch facade salvage');
 expectNotContains(responseLifecycleBridgeSource, 'buildClientSseKeepaliveFrameForHttp', 'responses-response-bridge.ts must not own keepalive framing');
@@ -190,6 +190,12 @@ expectNotContains(
   handlerSource,
   'shouldDropClientSseFrameForHttp(frame, entryEndpoint)',
   'handler-response-sse.ts must not decide semantic frame drop in the transport loop; SSE bridge may only frame already-finalized payload'
+);
+
+expectNotContains(
+  sseBridgeSource,
+  'shouldDropClientSseFrameForHttp',
+  'responses-sse-bridge.ts must not re-export semantic frame-drop policy'
 );
 
 for (const forbiddenDirectNativeImport of [

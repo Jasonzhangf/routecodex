@@ -5,8 +5,7 @@
  * behavior. Response projection and lifecycle facades stay in
  * responses-response-bridge.ts.
  */
-import { buildClientSseKeepaliveFrameForHttp as buildClientSseKeepaliveFrameForHttpImpl, shouldDropClientSseFrameForHttp as shouldDropClientSseFrameForHttpImpl } from './responses-sse-transport.js';
+import { buildClientSseKeepaliveFrameForHttp as buildClientSseKeepaliveFrameForHttpImpl } from './responses-sse-transport.js';
 import { updateResponsesSseTransportTerminalStateNative } from './native-exports.js';
 export declare const buildClientSseKeepaliveFrameForHttp: typeof buildClientSseKeepaliveFrameForHttpImpl;
-export declare const shouldDropClientSseFrameForHttp: typeof shouldDropClientSseFrameForHttpImpl;
 export declare const updateResponsesSseTransportTerminalStateForHttp: typeof updateResponsesSseTransportTerminalStateNative;

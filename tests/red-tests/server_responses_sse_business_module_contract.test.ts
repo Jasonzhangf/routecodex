@@ -17,7 +17,8 @@ describe('server responses SSE business module contract', () => {
     expect(handler).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
     expect(bridge).toContain('// feature_id: server.responses_sse_bridge_surface');
     expect(sseTransport).toContain('export function buildClientSseKeepaliveFrameForHttp(');
-    expect(sseTransport).toContain('export function shouldDropClientSseFrameForHttp(');
+    expect(sseTransport).not.toContain('export function shouldDropClientSseFrameForHttp(');
+    expect(bridge).not.toContain('shouldDropClientSseFrameForHttp');
 
     for (const forbiddenLocalDefinition of [
       'async function streamResponsesJsonAsSse(',
@@ -68,6 +69,7 @@ describe('server responses SSE business module contract', () => {
       'inspectResponsesContinuationProbeForHttp',
       'resolveResponsesTerminalProbeFinishReasonForHttp',
       'shouldRequireResponsesTerminalEventForHttp',
+      'shouldDropClientSseFrameForHttp',
     ]) {
       expect(bridge).not.toContain(forbiddenBridgeSemantic);
       expect(responseLifecycleBridge).not.toContain(forbiddenBridgeSemantic);

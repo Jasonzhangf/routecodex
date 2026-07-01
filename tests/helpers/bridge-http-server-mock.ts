@@ -159,7 +159,6 @@ export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMo
     resolveResponsesClientPayloadFinishReasonForHttp: () => undefined,
     resolveResponsesRequestContextForHttp: () => ({}),
     shouldDispatchResponsesSseToClientForHttp: () => false,
-    shouldDropClientSseFrameForHttp: () => false,
     shouldReprojectRelayResponsesSseForHttp: () => false,
     resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
     resumeLatestResponsesContinuationByScope: async () => null,

@@ -3365,7 +3365,6 @@ owners:
       - ServerRespOutbound05ClientFrame
     canonical_builders:
       - buildClientSseKeepaliveFrameForHttp
-      - shouldDropClientSseFrameForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-sse-bridge.ts
       - src/server/handlers/handler-response-sse.ts

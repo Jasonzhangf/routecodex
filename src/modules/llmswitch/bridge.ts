@@ -47,7 +47,6 @@ export {
 } from './bridge/responses-request-bridge.js';
 export {
   buildClientSseKeepaliveFrameForHttp,
-  shouldDropClientSseFrameForHttp,
 } from './bridge/responses-sse-bridge.js';
 export {
   buildResponsesRequestLogContextForHttp,

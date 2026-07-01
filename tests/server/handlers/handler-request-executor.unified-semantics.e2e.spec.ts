@@ -447,7 +447,6 @@ const buildResponsesSseBridgeDirectMockModule = () => {
     sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
     shouldDispatchResponsesSseToClientForHttp: jest.fn((args: any) => args?.forceSSE === true),
     shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),
-    shouldDropClientSseFrameForHttp: jest.fn(() => false),
     shouldReprojectRelayResponsesSseForHttp: jest.fn(() => false),
     isDirectPassthroughTransportKeepaliveFrameForHttp: jest.fn(() => false),
     isToolCallContinuationResponseForHttp: jest.fn(() => false),

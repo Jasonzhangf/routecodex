@@ -152,7 +152,6 @@ const createResponsesBridgeMock = () => ({
   shouldClearResponsesConversationOnClientCloseForHttp: jest.fn(() => false),
   shouldClearResponsesConversationOnFailureForHttp: jest.fn(() => false),
   shouldDispatchResponsesSseToClientForHttp: jest.fn(() => false),
-  shouldDropClientSseFrameForHttp: jest.fn(() => false),
   shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),
   summarizeResponsesSseFrameForLogForHttp: jest.fn(() => ({ kind: 'sse_frame' })),
   updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: { chunk?: unknown; state?: Record<string, unknown> }) => ({

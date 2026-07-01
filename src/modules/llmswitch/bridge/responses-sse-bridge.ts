@@ -11,12 +11,10 @@
 
 import {
   buildClientSseKeepaliveFrameForHttp as buildClientSseKeepaliveFrameForHttpImpl,
-  shouldDropClientSseFrameForHttp as shouldDropClientSseFrameForHttpImpl,
 } from './responses-sse-transport.js';
 import {
   updateResponsesSseTransportTerminalStateNative,
 } from './native-exports.js';
 
 export const buildClientSseKeepaliveFrameForHttp = buildClientSseKeepaliveFrameForHttpImpl;
-export const shouldDropClientSseFrameForHttp = shouldDropClientSseFrameForHttpImpl;
 export const updateResponsesSseTransportTerminalStateForHttp = updateResponsesSseTransportTerminalStateNative;
