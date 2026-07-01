@@ -75,6 +75,10 @@ for (const forbidden of [
   'response.unknown',
   '临时实现',
   '仅用于避免编译错误',
+  'private writeQueue',
+  'private isWriting',
+  'timeoutMs?:',
+  'timeoutMs: config.timeoutMs',
   'this.config.onError(error as Error);\n    }\n  }\n\n  /**\n   * 处理背压',
   'this.config.onError(error as Error);\n    }\n  }\n\n  /**\n   * 同步写入事件数组',
 ]) {

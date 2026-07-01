@@ -1,4 +1,6 @@
 import { PassThrough } from 'node:stream';
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, jest } from '@jest/globals';
 
 import { createResponsesStreamWriter } from '../../sharedmodule/llmswitch-core/src/sse/shared/writer.js';
@@ -22,5 +24,18 @@ describe('SSE writer no error swallow boundary', () => {
 
     expect(onError).toHaveBeenCalledTimes(1);
     expect(writer.getStats().errors).toBe(1);
+  });
+
+  it('does not keep dead queue state or timeout config in the shared writer', () => {
+    const sourcePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/shared/writer.ts'
+    );
+    const source = fs.readFileSync(sourcePath, 'utf8');
+
+    expect(source).not.toContain('private writeQueue');
+    expect(source).not.toContain('private isWriting');
+    expect(source).not.toContain('timeoutMs?:');
+    expect(source).not.toContain('timeoutMs: config.timeoutMs');
   });
 });

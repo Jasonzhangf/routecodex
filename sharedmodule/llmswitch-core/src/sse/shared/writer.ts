@@ -14,7 +14,6 @@ import { serializeChatEventToSSE } from './chat-serializer.js';
 
 // 写入器配置
 export interface StreamWriterConfig {
-  timeoutMs?: number;
   enableHeartbeat?: boolean;
   heartbeatIntervalMs?: number;
   maxBufferSize?: number;
@@ -41,15 +40,12 @@ export class StreamWriter {
   private stats: StreamWriterStats;
   private heartbeatInterval?: NodeJS.Timeout;
   private isActive = true;
-  private writeQueue: BaseSseEvent[] = [];
-  private isWriting = false;
 
   constructor(
     private stream: PassThrough,
     config: StreamWriterConfig = {}
   ) {
     this.config = {
-      timeoutMs: config.timeoutMs || 30000,
       enableHeartbeat: config.enableHeartbeat ?? false,
       heartbeatIntervalMs: config.heartbeatIntervalMs || 15000,
       maxBufferSize: config.maxBufferSize || 1000,
