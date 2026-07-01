@@ -129,7 +129,7 @@ function normalizeSseWrapperErrorValue(
           return parsedInfo;
         }
       } catch {
-        // fallback to raw string
+        return undefined;
       }
     }
 

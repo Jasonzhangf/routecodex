@@ -1,3 +1,8 @@
+# 2026-07-01: SSE wrapper malformed JSON raw-string fallback removed
+- Slice: `sse-error-handler.ts` no longer salvages JSON-looking malformed SSE wrapper `error` strings into structured upstream errors. If a wrapper string starts as JSON but cannot parse, extraction returns `undefined` instead of projecting the bad raw string as an upstream error.
+- Gate: new `sse-error-handler.spec.ts` source/behavior test forbids the `fallback to raw string` marker and locks malformed JSON-looking strings from becoming `SseWrapperErrorInfo`.
+- Verification: focused Jest `sse-error-handler` PASS 2/2; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
+
 # 2026-07-01: token-stats legacy v1 snapshot handling removed
 - Slice: `token-stats-store.ts` no longer reads v1 persisted token-stats files into a synthetic `legacy-v1` session, and no longer exports the v1-shaped `__dumpPersistedTokenStatsForTest` helper; persisted truth is v2 `sessions` only.
 - Gate: `token-stats-store.spec.ts` source test forbids `legacy-v1`, `Legacy v1`, `buildLegacySnapshotForTests`, and `__dumpPersistedTokenStatsForTest`.
