@@ -62,12 +62,14 @@ export const materializeServertoolPlannedResult = async (
     planned,
     options.requestId
   );
-  if (actionPlan.action === 'finalize_without_backend') {
-    const plan = planned as ServerToolHandlerPlan;
-    return await plan.finalize();
+  switch (actionPlan.action) {
+    case 'finalize_without_backend': {
+      const plan = planned as ServerToolHandlerPlan;
+      return await plan.finalize();
+    }
+    case 'throw_handler_error':
+      throw createServertoolProviderProtocolErrorFromPlan(actionPlan.errorPlan);
+    case 'return_handler_result':
+      return planned as ServerToolHandlerResult;
   }
-  if (actionPlan.action === 'throw_handler_error') {
-    throw createServertoolProviderProtocolErrorFromPlan(actionPlan.errorPlan);
-  }
-  return planned as ServerToolHandlerResult;
 };

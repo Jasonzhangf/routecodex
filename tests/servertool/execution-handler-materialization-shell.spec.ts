@@ -171,6 +171,9 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain('planServertoolHandlerContractErrorWithNative(');
     expect(source).not.toContain("actionPlan.action === 'invalid_plan_missing_finalize'");
     expect(source).not.toContain("actionPlan.action === 'invalid_plan_result'");
+    expect(source).not.toContain("if (actionPlan.action === 'finalize_without_backend')");
+    expect(source).not.toContain("if (actionPlan.action === 'throw_handler_error')");
+    expect(source).toContain('switch (actionPlan.action)');
     expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome'");
     expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract'");
     expect(source).not.toContain('record.executionFlowId.trim()');
