@@ -1,5 +1,8 @@
 import type { Readable } from 'node:stream';
-import { defaultSseCodecRegistry, type SseProtocol } from '../../../sse/index.js';
+import {
+  defaultSseCodecRegistry,
+  type SseProtocol,
+} from '../../../sse/registry/sse-codec-registry.js';
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { JsonObject } from '../types/json.js';
 import type { StageRecorder } from '../format-adapters/index.js';

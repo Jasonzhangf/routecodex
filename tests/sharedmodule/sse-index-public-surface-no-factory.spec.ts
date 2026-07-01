@@ -28,4 +28,17 @@ describe('SSE index public surface no factory boundary', () => {
     expect(typeof mod.defaultSseCodecRegistry?.get).toBe('function');
     expect(typeof mod.SseCodecRegistry).toBe('function');
   });
+
+  it('does not let runtime modules use the public SSE barrel as registry indirection', () => {
+    const runtimeFiles = [
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+    ];
+
+    for (const file of runtimeFiles) {
+      const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
+      expect(source).not.toContain('sse/index.js');
+      expect(source).toContain('sse/registry/sse-codec-registry.js');
+    }
+  });
 });

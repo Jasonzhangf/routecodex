@@ -785,3 +785,9 @@ Focused tests to use as slice gates:
 - Reverse tests/gates: new `sse-index-public-surface-no-factory` plus `verify:sse-architecture-boundary` forbid the retired factory/default-singleton/roundTrip markers from returning and forbid registry importing back through `../index.js`.
 - Verification: focused Jest `sse-index-public-surface-no-factory + sse-codec-registry-no-model-fallback + hub-pipeline-normalize-request-sse-protocol` PASS 8/8; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; registry source smoke decoded a valid Responses SSE stream to `{ id: "resp_registry_smoke", status: "completed", outputCount: 0 }`.
 - Real-sample gap: current `4444` provider-response sample store still has no success SSE wire payload field (`bodyText` / `rawBody` / `sseText`), so no real sample success replay is possible for this public-surface slice.
+
+### 2026-07-01 Provider response registry owner import tightened
+
+- Boundary: runtime response code must not use `sse/index.ts` as registry indirection. `sse/index.ts` stays a barrel; runtime modules that need codec dispatch bind to `registry/sse-codec-registry.ts` directly.
+- Fix: `provider-response.ts` now imports `defaultSseCodecRegistry` / `SseProtocol` from the registry owner, matching `HubPipeline`. The boundary gate and `sse-index-public-surface-no-factory` test now forbid runtime modules from importing `sse/index.js` for registry access.
+- Verification: focused Jest `sse-index-public-surface-no-factory + sse-codec-registry-no-model-fallback + hub-pipeline-normalize-request-sse-protocol + provider-response-rust-plan` PASS 30/30; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS.

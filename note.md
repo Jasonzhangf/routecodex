@@ -1,3 +1,9 @@
+# 2026-07-01: Provider response registry owner import tightened
+- Slice: `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` no longer imports `defaultSseCodecRegistry` / `SseProtocol` from `sse/index.js`; it now binds directly to `sse/registry/sse-codec-registry.js`, matching `HubPipeline`.
+- Boundary: runtime response modules must not use the public SSE barrel as registry indirection. `sse/index.ts` remains a barrel-only public export surface.
+- Gate: `tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts` and `verify-sse-architecture-boundary.mjs` now forbid runtime modules from importing registry via `sse/index.js`.
+- Verification: focused Jest `sse-index-public-surface-no-factory + sse-codec-registry-no-model-fallback + hub-pipeline-normalize-request-sse-protocol + provider-response-rust-plan` PASS 30/30; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS.
+
 # 2026-07-01: SSE index factory/default singleton surface removed
 - Slice: `sharedmodule/llmswitch-core/src/sse/index.ts` is now barrel-only. Removed public `createChatConverters/createResponsesConverters/createAnthropicConverters/createGeminiConverters`, all `roundTrip()` helpers, and default converter singletons `chatConverters/responsesConverters/anthropicConverters/geminiConverters`.
 - Boundary: `sse-codec-registry.ts` now imports concrete converter constructors from owning modules and creates codec-local instances. `HubPipeline` imports `defaultSseCodecRegistry` directly from `registry/sse-codec-registry.ts`, not through the public barrel.

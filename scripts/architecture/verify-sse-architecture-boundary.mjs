@@ -87,6 +87,16 @@ for (const forbidden of [
   }
 }
 
+for (const relPath of [
+  'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts',
+  'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+]) {
+  const runtimeSource = read(relPath);
+  if (runtimeSource.includes('sse/index.js')) {
+    failures.push(`${relPath}: runtime must import SSE registry owner directly, not public sse/index.js`);
+  }
+}
+
 const writer = read('sharedmodule/llmswitch-core/src/sse/shared/writer.ts');
 for (const forbidden of [
   'ignore and fallback',
