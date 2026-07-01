@@ -51,7 +51,7 @@ describe('port-config-validator: sameProtocolBehavior', () => {
   describe('normalizePortsConfig', () => {
     it('extracts sameProtocolBehavior from httpserver config', () => {
       const configs = normalizePortsConfig({
-        port: 5520, host: '0.0.0.0', sameProtocolBehavior: 'relay',
+        ports: [{ port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'relay' }],
       });
       expect(configs).toHaveLength(1);
       expect(configs[0].sameProtocolBehavior).toBe('relay');
@@ -59,16 +59,18 @@ describe('port-config-validator: sameProtocolBehavior', () => {
 
     it('defaults to direct when sameProtocolBehavior is valid', () => {
       const configs = normalizePortsConfig({
-        port: 5520, host: '0.0.0.0', sameProtocolBehavior: 'direct',
+        ports: [{ port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'direct' }],
       });
       expect(configs[0].sameProtocolBehavior).toBe('direct');
     });
 
     it('ignores invalid sameProtocolBehavior values', () => {
       const configs = normalizePortsConfig({
-        port: 5520, host: '0.0.0.0', sameProtocolBehavior: 'invalid',
+        ports: [{ port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'invalid' }],
       } as any);
-      expect(configs[0].sameProtocolBehavior).toBeUndefined();
+      const result = validatePortConfigs(configs);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.field === 'sameProtocolBehavior')).toBe(true);
     });
 
     it('preserves per-port stopMessage disable in ports array', () => {
@@ -81,9 +83,9 @@ describe('port-config-validator: sameProtocolBehavior', () => {
       expect(result.valid).toBe(true);
     });
 
-    it('preserves top-level stopMessage disable for legacy single port config', () => {
-      const configs = normalizePortsConfig({ port: 5520, host: '0.0.0.0', stopMessage: { enabled: false } });
-      expect(configs[0].stopMessage).toEqual({ enabled: false });
+    it('rejects legacy single port config without ports array', () => {
+      expect(() => normalizePortsConfig({ port: 5520, host: '0.0.0.0', stopMessage: { enabled: false } }))
+        .toThrow('httpserver.ports[] is required');
     });
 
     it('preserves stopMessage.includeDirect opt-in in ports array', () => {
@@ -105,11 +107,9 @@ describe('port-config-validator: sameProtocolBehavior', () => {
       expect(result.errors.some(e => e.field === 'stopMessage.includeDirect')).toBe(true);
     });
 
-    it('defaults router mode for legacy configs without ports array', () => {
-      const configs = normalizePortsConfig({ port: 8080, host: '0.0.0.0' });
-      expect(configs).toHaveLength(1);
-      expect(configs[0].mode).toBe('router');
-      expect(configs[0].routingPolicyGroup).toBe('default');
+    it('does not synthesize default router ports for configs without ports array', () => {
+      expect(() => normalizePortsConfig({ port: 8080, host: '0.0.0.0' }))
+        .toThrow('legacy single-port normalization has been removed');
     });
   });
 });

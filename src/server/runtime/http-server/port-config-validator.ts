@@ -10,7 +10,6 @@
  */
 
 import type { PortConfig, ProtocolBehavior } from './port-config-types.js';
-import type { SameProtocolBehavior } from './port-config-types.js';
 import type { ProviderProtocol } from './types.js';
 
 // feature_id: server.port_config_provider_failure_exemption
@@ -31,7 +30,6 @@ const VALID_PORT_MAX = 65535;
 const VALID_MODES: ReadonlySet<string> = new Set(['router', 'provider']);
 const VALID_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay', 'auto']);
 const VALID_SAME_PROTOCOL_BEHAVIORS: ReadonlySet<string> = new Set(['direct', 'relay']);
-const VALID_PROVIDER_FAILURE_EXEMPTIONS: ReadonlySet<string> = new Set(['single_binding_rethrow']);
 
 function validateStopMessageConfig(config: PortConfig, errors: PortValidationError[]): void {
   const stopMessage = config.stopMessage;
@@ -70,6 +68,7 @@ function readStopMessageConfig(value: unknown): PortConfig['stopMessage'] | unde
 function validatePortConfig(config: PortConfig): PortValidationError[] {
   const errors: PortValidationError[] = [];
   const { port, host, mode, protocolBehavior, providerBinding, routingPolicyGroup } = config;
+  const rawConfig = config as PortConfig & { providerFailureExemption?: unknown };
   validateStopMessageConfig(config, errors);
 
   // Port range
@@ -115,11 +114,11 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
         });
       }
     }
-    if (config.providerFailureExemption !== undefined && config.providerFailureExemption !== null) {
+    if (rawConfig.providerFailureExemption !== undefined && rawConfig.providerFailureExemption !== null) {
       errors.push({
         port,
         field: 'providerFailureExemption',
-        message: 'Router mode does not support providerFailureExemption'
+        message: 'providerFailureExemption has been removed'
       });
     }
     return errors;
@@ -147,15 +146,11 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
         message: 'Provider mode does not support sameProtocolBehavior'
       });
     }
-    if (
-      config.providerFailureExemption !== undefined
-      && config.providerFailureExemption !== null
-      && !VALID_PROVIDER_FAILURE_EXEMPTIONS.has(config.providerFailureExemption)
-    ) {
+    if (rawConfig.providerFailureExemption !== undefined && rawConfig.providerFailureExemption !== null) {
       errors.push({
         port,
         field: 'providerFailureExemption',
-        message: `Provider mode providerFailureExemption must be "single_binding_rethrow", got: "${config.providerFailureExemption}"`
+        message: 'providerFailureExemption has been removed'
       });
     }
   }
@@ -207,25 +202,5 @@ export function normalizePortsConfig(rawHttpserver: Record<string, unknown>): Po
       return stopMessage ? { ...entry, stopMessage } : entry;
     });
   }
-  const port =
-    typeof rawHttpserver.port === 'number'
-      ? rawHttpserver.port
-      : typeof rawHttpserver.port === 'string'
-        ? parseInt(rawHttpserver.port, 10)
-        : 8080;
-  const host =
-    typeof rawHttpserver.host === 'string' && rawHttpserver.host.trim()
-      ? rawHttpserver.host.trim()
-      : '0.0.0.0';
-  const sameProtocolBehavior = rawHttpserver.sameProtocolBehavior;
-  const stopMessage = readStopMessageConfig(rawHttpserver.stopMessage);
-  // Fallback to router with default group (legacy compat for old configs without ports[])
-  const portConfig: PortConfig = { port, host, mode: 'router', routingPolicyGroup: 'default' };
-  if (typeof sameProtocolBehavior === 'string' && VALID_SAME_PROTOCOL_BEHAVIORS.has(sameProtocolBehavior)) {
-    portConfig.sameProtocolBehavior = sameProtocolBehavior as SameProtocolBehavior;
-  }
-  if (stopMessage) {
-    portConfig.stopMessage = stopMessage;
-  }
-  return [portConfig];
+  throw new Error('httpserver.ports[] is required; legacy single-port normalization has been removed');
 }

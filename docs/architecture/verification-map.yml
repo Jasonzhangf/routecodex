@@ -2186,13 +2186,13 @@ verification:
       - src/server/runtime/http-server/port-config-validator.ts
       - src/server/runtime/http-server/port-config-types.ts
     contract:
-      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+      - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption-removed.spec.ts
     integration:
-      - pnpm exec jest tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+      - pnpm exec jest tests/server/runtime/http-server/port-config-validator-provider-failure-exemption-removed.spec.ts
     smoke:
       - npm run verify:function-map-compile-gate
-      - pnpm exec jest tests/server/runtime/http-server/port-config-validator-provider-failure-exemption.spec.ts
+      - pnpm exec jest tests/server/runtime/http-server/port-config-validator-provider-failure-exemption-removed.spec.ts
     build:
       - npm run build:base
     notes:
-      - "Provider-mode single-binding rethrow exemption is a port spec; router-mode must not declare it."
+      - "Provider-mode single-binding rethrow exemption is removed; port config must reject it."

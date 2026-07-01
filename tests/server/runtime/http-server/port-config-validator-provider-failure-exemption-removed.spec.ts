@@ -1,8 +1,25 @@
 import { describe, expect, it } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { normalizePortsConfig, validatePortConfigs } from '../../../../src/server/runtime/http-server/port-config-validator.js';
 import type { PortConfig } from '../../../../src/server/runtime/http-server/port-config-types.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const portConfigTypesSourcePath = path.resolve(
+  __dirname,
+  '../../../../src/server/runtime/http-server/port-config-types.ts'
+);
+
 describe('port-config-validator: providerFailureExemption removed', () => {
+  it('does not keep providerFailureExemption in the port config type surface', () => {
+    const source = fs.readFileSync(portConfigTypesSourcePath, 'utf8');
+
+    expect(source).not.toContain('ProviderFailureExemption');
+    expect(source).not.toContain('providerFailureExemption?:');
+  });
+
   it('rejects providerFailureExemption on provider-mode ports', () => {
     const config = {
       port: 5555,
@@ -44,15 +61,11 @@ describe('port-config-validator: providerFailureExemption removed', () => {
     ]));
   });
 
-  it('legacy single-port normalization does not create providerFailureExemption', () => {
-    const configs = normalizePortsConfig({
+  it('legacy single-port normalization is removed', () => {
+    expect(() => normalizePortsConfig({
       port: 5557,
       host: '127.0.0.1',
       providerFailureExemption: 'single_binding_rethrow',
-    });
-
-    expect(configs).toHaveLength(1);
-    expect(configs[0]).not.toHaveProperty('providerFailureExemption');
-    expect(validatePortConfigs(configs).valid).toBe(true);
+    })).toThrow('legacy single-port normalization has been removed');
   });
 });

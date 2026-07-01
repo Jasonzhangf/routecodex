@@ -1,3 +1,9 @@
+# 2026-07-01: port config legacy single-port and providerFailureExemption removed
+- Slice: `normalizePortsConfig()` now requires explicit non-empty `httpserver.ports[]`; `RouteCodexHttpServer.getPortConfigs()` no longer synthesizes a default router port from top-level `httpserver.port/host`; v2 config materialization rejects configs without `httpserver.ports[]`.
+- Slice: removed the `ProviderFailureExemption` type surface and deleted the old positive `port-config-validator-provider-failure-exemption.spec.ts`; validator now only rejects raw `providerFailureExemption` as a removed field.
+- Gate: `port-config-validator-provider-failure-exemption-removed.spec.ts` locks the removed type surface and rejection behavior; same-protocol/config-loader fixtures now use explicit per-port config.
+- Verification: focused Jest `port-config-validator-sameprotocol + port-config-validator-provider-failure-exemption-removed + routecodex-config-loader.v2-single-source` PASS 25/25; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
+
 # 2026-07-01: retry payload restore fallback parameter removed
 - Slice: `restoreRequestPayloadFromRetrySnapshot()` no longer accepts or restores from unused `fallbackPayload`; all live callers already restore from `RetryPayloadSeed`, so the second-argument fallback path was dead code.
 - Gate: new `retry-payload-snapshot.spec.ts` source test forbids `fallbackPayload` from returning outside the test marker.

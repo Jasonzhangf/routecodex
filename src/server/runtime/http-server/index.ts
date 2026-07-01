@@ -742,15 +742,7 @@ export class RouteCodexHttpServer {
       rootRecord.httpserver && typeof rootRecord.httpserver === 'object'
         ? (rootRecord.httpserver as Record<string, unknown>)
         : {};
-    if (Array.isArray(rawHttpserver.ports) && rawHttpserver.ports.length > 0) {
-      return normalizePortsConfig(rawHttpserver);
-    }
-    return normalizePortsConfig({
-      ...rawHttpserver,
-      port: this.config.server.port,
-      host: this.config.server.host,
-      apikey: this.config.server.apikey,
-    });
+    return normalizePortsConfig(rawHttpserver);
   }
 
   public getPortConfigForLocalPort(localPort?: number): PortConfig | undefined {

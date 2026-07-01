@@ -88,9 +88,14 @@ export function collectV2ConfigSourceErrors(userConfig: UnknownRecord): string[]
     const allowedHttp = new Set(['host', 'port', 'apikey', 'ports', 'sameProtocolBehavior']);
     for (const key of Object.keys(httpserver)) {
       if (!allowedHttp.has(key)) {
-        errors.push(`v2 config disallows httpserver field "${key}" (only host/port/apikey allowed)`);
+        errors.push(`v2 config disallows httpserver field "${key}" (only host/port/apikey/ports/sameProtocolBehavior allowed)`);
       }
     }
+    if (!Array.isArray(httpserver.ports) || httpserver.ports.length === 0) {
+      errors.push('v2 config requires non-empty httpserver.ports[]');
+    }
+  } else {
+    errors.push('v2 config requires httpserver.ports[]');
   }
 
   const vr = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;

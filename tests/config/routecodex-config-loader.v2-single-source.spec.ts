@@ -75,7 +75,15 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
       virtualrouterMode: 'v2',
       httpserver: {
         host: '127.0.0.1',
-        port: 5555
+        port: 5555,
+        ports: [
+          {
+            port: 5555,
+            host: '127.0.0.1',
+            mode: 'router',
+            routingPolicyGroup: 'default'
+          }
+        ]
       },
       virtualrouter: {
         routingPolicyGroups: {
@@ -117,7 +125,15 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
       virtualrouterMode: 'v2',
       httpserver: {
         host: '127.0.0.1',
-        port: 5555
+        port: 5555,
+        ports: [
+          {
+            port: 5555,
+            host: '127.0.0.1',
+            mode: 'router',
+            routingPolicyGroup: 'default'
+          }
+        ]
       },
       providers: {
         legacy: {}
@@ -158,7 +174,16 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
         httpserver: {
           host: '127.0.0.1',
           port: 5555,
-          sameProtocolBehavior: 'relay'
+          sameProtocolBehavior: 'relay',
+          ports: [
+            {
+              port: 5555,
+              host: '127.0.0.1',
+              mode: 'router',
+              routingPolicyGroup: 'default',
+              sameProtocolBehavior: 'relay'
+            }
+          ]
         },
         virtualrouter: {
           routingPolicyGroups: {
@@ -189,7 +214,15 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
       version: '2.0.0',
       httpserver: {
         host: '127.0.0.1',
-        port: 5555
+        port: 5555,
+        ports: [
+          {
+            port: 5555,
+            host: '127.0.0.1',
+            mode: 'router',
+            routingPolicyGroup: 'canary'
+          }
+        ]
       },
       virtualrouter: {
         activeRoutingPolicyGroup: 'canary',
@@ -236,7 +269,15 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
         virtualrouterMode: 'v2',
         httpserver: {
           host: '127.0.0.1',
-          port: 5555
+          port: 5555,
+          ports: [
+            {
+              port: 5555,
+              host: '127.0.0.1',
+              mode: 'router',
+              routingPolicyGroup: 'default'
+            }
+          ]
         },
         virtualrouter: {
           routingPolicyGroups: {
@@ -271,7 +312,15 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
         virtualrouterMode: 'v2',
         httpserver: {
           host: '127.0.0.1',
-          port: 5555
+          port: 5555,
+          ports: [
+            {
+              port: 5555,
+              host: '127.0.0.1',
+              mode: 'router',
+              routingPolicyGroup: 'default'
+            }
+          ]
         },
         virtualrouter: {
           routingPolicyGroups: {
@@ -306,6 +355,12 @@ virtualrouterMode = "v2"
 host = "127.0.0.1"
 port = 5555
 
+[[httpserver.ports]]
+port = 5555
+host = "127.0.0.1"
+mode = "router"
+routingPolicyGroup = "default"
+
 [virtualrouter.routingPolicyGroups.default.routing]
 default = [{ id = "a", targets = ["ali-coding-plan.glm-5"] }]
 `,
@@ -328,6 +383,12 @@ virtualrouterMode = "v2"
 [httpserver]
 host = "127.0.0.1"
 port = 6666
+
+[[httpserver.ports]]
+port = 6666
+host = "127.0.0.1"
+mode = "router"
+routingPolicyGroup = "default"
 
 [virtualrouter.routingPolicyGroups.default.routing]
 default = [{ id = "b", targets = ["ali-coding-plan.qwen3.5-plus"] }]
@@ -356,6 +417,12 @@ virtualrouterMode = "v2"
 [httpserver]
 host = "127.0.0.1"
 port = 5555
+
+[[httpserver.ports]]
+port = 5555
+host = "127.0.0.1"
+mode = "router"
+routingPolicyGroup = "default"
 
 [[virtualrouter.routingPolicyGroups.default.routing.default]]
 id = "default-primary"
