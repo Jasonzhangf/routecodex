@@ -171,6 +171,6 @@ describe('response-stage-finalize-shell', () => {
         excludeAutoHookIds: null,
         responseStageGatePlan: { responseHookMatched: false, responseHookRequired: false }
       })
-    ).rejects.toThrow('[servertool] invalid response-stage finalize action: unknown_finalize_action');
+    ).rejects.toThrow('[servertool] invalid response-stage finalize action');
   });
 });

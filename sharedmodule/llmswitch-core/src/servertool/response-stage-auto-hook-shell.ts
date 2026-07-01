@@ -39,11 +39,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     case 'run_auto_hooks':
       break;
     default:
-      throw new Error(
-        `[servertool] invalid response-stage pre auto-hook action: ${String(
-          (preAutoHookRuntimeAction as { action: string }).action
-        )}`
-      );
+      throw new Error('[servertool] invalid response-stage pre auto-hook action');
   }
 
   const autoHookResult = await runServertoolAutoHookCaller({
@@ -76,11 +72,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     case 'return_passthrough_no_auto_hook_result':
       break;
     default:
-      throw new Error(
-        `[servertool] invalid response-stage post auto-hook action: ${String(
-          (postAutoHookRuntimeAction as { action: string }).action
-        )}`
-      );
+      throw new Error('[servertool] invalid response-stage post auto-hook action');
   }
 
   return { action: 'continue_without_result' };

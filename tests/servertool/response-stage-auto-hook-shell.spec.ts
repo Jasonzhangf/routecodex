@@ -151,7 +151,7 @@ describe('response-stage-auto-hook-shell', () => {
         excludeAutoHookIds: null,
         responseStageGatePlan: { responseHookRequired: false }
       })
-    ).rejects.toThrow('[servertool] invalid response-stage pre auto-hook action: unknown_pre_auto_hook_action');
+    ).rejects.toThrow('[servertool] invalid response-stage pre auto-hook action');
     expect(runServertoolAutoHookCaller).not.toHaveBeenCalled();
   });
 
@@ -171,7 +171,7 @@ describe('response-stage-auto-hook-shell', () => {
         excludeAutoHookIds: null,
         responseStageGatePlan: { responseHookRequired: false }
       })
-    ).rejects.toThrow('[servertool] invalid response-stage post auto-hook action: unknown_post_auto_hook_action');
+    ).rejects.toThrow('[servertool] invalid response-stage post auto-hook action');
     expect(runServertoolAutoHookCaller).toHaveBeenCalledTimes(1);
   });
 });

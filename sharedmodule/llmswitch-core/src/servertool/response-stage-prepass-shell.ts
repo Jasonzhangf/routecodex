@@ -46,9 +46,7 @@ export async function runServertoolResponseStagePrePass(args: {
         responseStageGatePlan
       };
     default:
-      throw new Error(
-        `[servertool] invalid response-stage prepass action: ${String((prepassRuntimeAction as { action: string }).action)}`
-      );
+      throw new Error('[servertool] invalid response-stage prepass action');
   }
 
   const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
@@ -72,8 +70,6 @@ export async function runServertoolResponseStagePrePass(args: {
         responseStageGatePlan
       };
     default:
-      throw new Error(
-        `[servertool] invalid response-stage prepass auto-hook action: ${String((responseStageAutoHook as { action: string }).action)}`
-      );
+      throw new Error('[servertool] invalid response-stage prepass auto-hook action');
   }
 }

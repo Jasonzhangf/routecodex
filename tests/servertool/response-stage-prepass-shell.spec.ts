@@ -213,7 +213,7 @@ describe('response-stage-prepass-shell', () => {
         includeAutoHookIds: null,
         excludeAutoHookIds: null
       })
-    ).rejects.toThrow('[servertool] invalid response-stage prepass action: unknown_prepass_action');
+    ).rejects.toThrow('[servertool] invalid response-stage prepass action');
     expect(runServertoolResponseStageAutoHookPass).not.toHaveBeenCalled();
   });
 });

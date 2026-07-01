@@ -34,8 +34,6 @@ export async function finalizeServertoolResponseStage(args: {
     case 'return_passthrough_no_auto_hook_result':
       return { mode: finalizeRuntimeAction.resultMode, finalChatResponse: args.baseObject };
     default:
-      throw new Error(
-        `[servertool] invalid response-stage finalize action: ${String((finalizeRuntimeAction as { action: string }).action)}`
-      );
+      throw new Error('[servertool] invalid response-stage finalize action');
   }
 }

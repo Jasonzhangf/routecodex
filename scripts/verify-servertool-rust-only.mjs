@@ -6119,6 +6119,7 @@ function checkServertoolResponseStageGateThinShell() {
     'responseHookMatched === true',
     "responseStageAutoHook.action === 'return_passthrough_bypass'",
     "if (finalizeRuntimeAction.action === 'return_auto_hook_result')",
+    'finalizeRuntimeAction as { action: string }',
     'autoHookResult == null',
     'autoHookResult as ServerSideToolEngineResult',
     'native response-stage finalize requested auto-hook result but result was empty',
@@ -6181,6 +6182,8 @@ function checkServertoolResponseStageGateThinShell() {
     "if (responseStageAutoHook.action === 'return_auto_hook_result')",
     'autoHookResult as ServerSideToolEngineResult',
     'postAutoHookRuntimeAction',
+    'prepassRuntimeAction as { action: string }',
+    'responseStageAutoHook as { action: string }',
   ]) {
     if (responseStagePrePassShell.includes(marker)) {
       fail(
@@ -6198,6 +6201,8 @@ function checkServertoolResponseStageGateThinShell() {
     'Boolean(autoHookResult)',
     'responseHookName: postAutoHookRuntimeAction.responseHookName as string',
     'result: autoHookResult as ServerSideToolEngineResult',
+    'preAutoHookRuntimeAction as { action: string }',
+    'postAutoHookRuntimeAction as { action: string }',
     "if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass')",
     "if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty')",
     "if (postAutoHookRuntimeAction.action === 'return_auto_hook_result')",

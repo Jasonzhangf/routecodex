@@ -236,6 +236,7 @@ const TARGETS = [
       "responseStageAutoHook.action === 'return_passthrough_bypass'",
       "if (finalizeRuntimeAction.action === 'return_auto_hook_result')",
       "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
+      'finalizeRuntimeAction as { action: string }',
       'autoHookResult == null',
       'autoHookResult as ServerSideToolEngineResult',
       'native response-stage finalize requested auto-hook result but result was empty',
@@ -259,6 +260,8 @@ const TARGETS = [
       "if (postAutoHookRuntimeAction.action === 'return_auto_hook_result')",
       'result: autoHookResult as ServerSideToolEngineResult',
       'responseHookName: postAutoHookRuntimeAction.responseHookName as string',
+      'preAutoHookRuntimeAction as { action: string }',
+      'postAutoHookRuntimeAction as { action: string }',
     ],
     required: [
       'switch (preAutoHookRuntimeAction.action)',
@@ -279,6 +282,8 @@ const TARGETS = [
       "if (responseStageAutoHook.action === 'return_auto_hook_result')",
       'autoHookResult as ServerSideToolEngineResult',
       'postAutoHookRuntimeAction',
+      'prepassRuntimeAction as { action: string }',
+      'responseStageAutoHook as { action: string }',
     ],
     required: [
       'planServertoolResponseStageGateWithNative',
