@@ -81,6 +81,7 @@ const TARGETS = [
       'planServertoolHandlerMaterializationForPlannedWithNative(',
       'switch (materializationAction)',
       'switch (actionPlan.action)',
+      'invalid handler materialization action',
       'const outcomePlan = planServertoolOutcomeWithNative(',
       'buildServertoolOutcomePlanInputWithNative({',
     ],

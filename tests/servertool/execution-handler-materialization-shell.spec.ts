@@ -468,4 +468,17 @@ describe('execution-handler-materialization-shell', () => {
       } as any)
     ).resolves.toBe(planned);
   });
+
+  test('planned handler materialization fails fast for unknown native action', async () => {
+    planServertoolHandlerMaterializationForPlannedWithNative.mockReturnValue({
+      action: 'unknown_handler_action'
+    });
+
+    await expect(
+      materializeServertoolPlannedResult({ chatResponse: { id: 'unknown-action' } } as any, {
+        requestId: 'req-unknown-handler-action',
+        adapterContext: {},
+      } as any)
+    ).rejects.toThrow('[servertool] invalid handler materialization action: unknown_handler_action');
+  });
 });

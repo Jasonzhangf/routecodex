@@ -5609,6 +5609,12 @@ function checkServertoolRustOutcomeCloseout() {
     'switch (materializationAction)'
   );
   assertContains(
+    'servertool-execution-shell-ts-orchestration-guard',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    executionMaterializationShell,
+    'invalid handler materialization action'
+  );
+  assertContains(
     'servertool-execution-handler-builtin-runtime-thin-shell',
     `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`,
     autoHookCaller,

@@ -76,5 +76,9 @@ export const materializeServertoolPlannedResult = async (
       throw createServertoolProviderProtocolErrorFromPlan(actionPlan.errorPlan);
     case 'return_handler_result':
       return planned as ServerToolHandlerResult;
+    default:
+      throw new Error(
+        `[servertool] invalid handler materialization action: ${String((actionPlan as { action: string }).action)}`
+      );
   }
 };
