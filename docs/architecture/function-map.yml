@@ -279,8 +279,11 @@ owners:
       - ServertoolEngineRuntimeActionInput
       - ServertoolEngineRuntimeAction
       - ServertoolEngineRuntimeActionPlan
+      - ServertoolEngineTriggerObservationInput
+      - ServertoolEngineTriggerObservationPlan
     canonical_builders:
       - plan_servertool_engine_runtime_action
+      - plan_servertool_engine_trigger_observation
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
@@ -299,7 +302,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Rust owns engine runtime action selection."
+      - "Rust owns engine runtime action selection and trigger observation planning."
 
   - feature_id: hub.servertool_engine_skip_contract
     status: active

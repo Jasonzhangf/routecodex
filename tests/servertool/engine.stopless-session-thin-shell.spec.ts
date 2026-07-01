@@ -55,6 +55,8 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain('!stoplessPlan.isStopMessageFlow &&');
     expect(source).toContain('const stoplessExecutionPlan = planStoplessExecutionWithNative({');
     expect(source).toContain('const runtimeAction = planServertoolEngineRuntimeActionWithNative({');
+    expect(source).toContain('planServertoolEngineTriggerObservationWithNative({');
+    expect(source).not.toContain('if (stopSignal.observed) {');
     expect(source).not.toContain('function planStoplessEngineRuntime(');
     expect(source).not.toContain('const stoplessExecutionInput = {');
     expect(source).not.toContain('const hasServertoolCliProjectionContext =');

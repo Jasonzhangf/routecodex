@@ -578,6 +578,7 @@ const TARGETS = [
       "if (preflight.kind === 'return_original_chat' || preflight.kind === 'return_original_chat_direct_passthrough')",
       "engineSkipPlan.action === 'return_skipped_passthrough' ||",
       "engineSkipPlan.action === 'return_skipped_no_execution'",
+      'if (stopSignal.observed) {',
     ],
     required: [
       'resolveServertoolTimeoutMsFromEnvCandidatesWithNative({',
@@ -586,6 +587,7 @@ const TARGETS = [
       'switch (engineSkipAction)',
       'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
       'const runtimeAction = planServertoolEngineRuntimeActionWithNative({',
+      'planServertoolEngineTriggerObservationWithNative({',
       'engineResult: {',
     ],
   },

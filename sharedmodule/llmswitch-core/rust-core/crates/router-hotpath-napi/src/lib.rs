@@ -1409,6 +1409,12 @@ pub fn plan_servertool_engine_runtime_action_json(input_json: String) -> NapiRes
 }
 
 #[napi]
+pub fn plan_servertool_engine_trigger_observation_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_engine_trigger_observation_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_engine_skip_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_engine_skip_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

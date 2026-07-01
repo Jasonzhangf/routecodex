@@ -2865,11 +2865,16 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-engine-skip-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineSkipWithNative'],
     ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'feature_id: hub.servertool_engine_runtime_action_contract'],
     ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'pub fn plan_servertool_engine_runtime_action'],
+    ['servertool-engine-runtime-action-rust-owner', RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_RUNTIME_ACTION_CONTRACT), 'pub fn plan_servertool_engine_trigger_observation'],
     ['servertool-engine-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_runtime_action_contract'],
     ['servertool-engine-runtime-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_engine_runtime_action_json'],
+    ['servertool-engine-runtime-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_engine_trigger_observation_json'],
     ['servertool-engine-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_runtime_action_json'],
+    ['servertool-engine-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_trigger_observation_json'],
     ['servertool-engine-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEngineRuntimeActionJson'],
+    ['servertool-engine-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEngineTriggerObservationJson'],
     ['servertool-engine-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineRuntimeActionWithNative'],
+    ['servertool-engine-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineTriggerObservationWithNative'],
     ['servertool-execution-loop-effect-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT, rustExecutionLoopEffect, 'feature_id: hub.servertool_execution_loop_effect_contract'],
     ['servertool-execution-loop-effect-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT, rustExecutionLoopEffect, 'pub fn plan_servertool_execution_loop_effect'],
     ['servertool-execution-loop-effect-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_loop_effect_contract'],
@@ -5140,6 +5145,7 @@ function checkServertoolRustOutcomeCloseout() {
     'recordServertoolEngineMatchHit({',
     'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
     'const runtimeAction = planServertoolEngineRuntimeActionWithNative({',
+    'planServertoolEngineTriggerObservationWithNative({',
     'engineResult: {',
     'runServertoolEnginePostflight({',
   ]) {
@@ -5265,6 +5271,12 @@ function checkServertoolRustOutcomeCloseout() {
         `engine-preflight-shell.ts must not derive preflight logging locally with marker ${marker}`
       );
     }
+  }
+  if (engineOrchestrationShell.includes('if (stopSignal.observed) {')) {
+    fail(
+      'servertool-engine-orchestration-no-local-trigger-observed-branch',
+      'engine-orchestration-shell.ts must consume native trigger observation plans instead of branching on stopSignal.observed'
+    );
   }
   const entryPreflightShell = readRequired(TS_ENTRY_PREFLIGHT_SHELL);
   for (const marker of [

@@ -6,6 +6,7 @@ import {
   planServertoolEnginePreflightWithNative,
   planServertoolEngineSkipWithNative,
   planServertoolEngineRuntimeActionWithNative,
+  planServertoolEngineTriggerObservationWithNative,
   planStoplessCliProjectionContextWithNative,
   planServertoolExecutionBranchWithNative,
   planServertoolExecutionLoopEffectWithNative,
@@ -180,6 +181,36 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'build_stop_message_cli_projection'
+    });
+  });
+
+  it('uses Rust-owned engine trigger observation planning', () => {
+    expect(
+      planServertoolEngineTriggerObservationWithNative({
+        stopSignalObserved: false,
+        result: 'non_stop_flow',
+        flowId: 'flow_1'
+      })
+    ).toEqual({
+      shouldLog: false
+    });
+
+    expect(
+      planServertoolEngineTriggerObservationWithNative({
+        stopSignalObserved: true,
+        result: ' skipped_passthrough ',
+        flowId: ' flow_1 '
+      })
+    ).toEqual({
+      shouldLog: true,
+      logStopEntry: {
+        stage: 'trigger',
+        result: 'skipped_passthrough'
+      },
+      logStopCompare: {
+        stage: 'trigger',
+        flowId: 'flow_1'
+      }
     });
   });
 

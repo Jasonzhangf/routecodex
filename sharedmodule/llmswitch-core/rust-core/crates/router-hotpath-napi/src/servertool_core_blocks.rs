@@ -394,6 +394,16 @@ pub fn plan_servertool_engine_runtime_action_json(input_json: &str) -> Result<St
         .map_err(|e| format!("serialize servertool engine runtime action plan: {e}"))
 }
 
+pub fn plan_servertool_engine_trigger_observation_json(input_json: &str) -> Result<String, String> {
+    let input: engine_runtime_action_contract::ServertoolEngineTriggerObservationInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool engine trigger observation input: {e}"))?;
+    serde_json::to_string(
+        &engine_runtime_action_contract::plan_servertool_engine_trigger_observation(input),
+    )
+    .map_err(|e| format!("serialize servertool engine trigger observation plan: {e}"))
+}
+
 pub fn plan_servertool_engine_skip_json(input_json: &str) -> Result<String, String> {
     let input: engine_skip_contract::ServertoolEngineSkipInput =
         serde_json::from_str(input_json)
@@ -2407,7 +2417,10 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     )
     .expect("auto-hook caller finalization next plan");
     let next_parsed: serde_json::Value = serde_json::from_str(&next).expect("parse next plan");
-    assert_eq!(next_parsed["action"], serde_json::json!("continue_next_queue"));
+    assert_eq!(
+        next_parsed["action"],
+        serde_json::json!("continue_next_queue")
+    );
     assert_eq!(next_parsed["returnResult"], false);
     assert_eq!(next_parsed["continueNextQueue"], true);
     assert_eq!(next_parsed["returnNull"], false);
@@ -3042,7 +3055,10 @@ fn plans_servertool_response_stage_orchestration_output_via_servertool_core_brid
         passthrough_value["returnAction"],
         serde_json::json!("return_original_payload")
     );
-    assert_eq!(passthrough_value["recordExecuted"], serde_json::json!(false));
+    assert_eq!(
+        passthrough_value["recordExecuted"],
+        serde_json::json!(false)
+    );
     assert!(passthrough_value.get("recordFlowId").is_none());
 }
 

@@ -23,6 +23,40 @@ pub struct ServertoolEngineRuntimeActionPlan {
     pub action: ServertoolEngineRuntimeAction,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEngineTriggerObservationInput {
+    pub stop_signal_observed: bool,
+    pub result: String,
+    #[serde(default)]
+    pub flow_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEngineTriggerObservationPlan {
+    pub should_log: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_stop_entry: Option<ServertoolEngineTriggerLogStopEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_stop_compare: Option<ServertoolEngineTriggerLogStopCompare>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEngineTriggerLogStopEntry {
+    pub stage: String,
+    pub result: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolEngineTriggerLogStopCompare {
+    pub stage: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow_id: Option<String>,
+}
+
 pub fn plan_servertool_engine_runtime_action(
     input: ServertoolEngineRuntimeActionInput,
 ) -> Result<ServertoolEngineRuntimeActionPlan, String> {
@@ -48,6 +82,34 @@ pub fn plan_servertool_engine_runtime_action(
         false,
         input.has_servertool_cli_projection_context
     ))
+}
+
+pub fn plan_servertool_engine_trigger_observation(
+    input: ServertoolEngineTriggerObservationInput,
+) -> ServertoolEngineTriggerObservationPlan {
+    if !input.stop_signal_observed {
+        return ServertoolEngineTriggerObservationPlan {
+            should_log: false,
+            log_stop_entry: None,
+            log_stop_compare: None,
+        };
+    }
+
+    let result = input.result.trim().to_string();
+    ServertoolEngineTriggerObservationPlan {
+        should_log: true,
+        log_stop_entry: Some(ServertoolEngineTriggerLogStopEntry {
+            stage: "trigger".to_string(),
+            result,
+        }),
+        log_stop_compare: Some(ServertoolEngineTriggerLogStopCompare {
+            stage: "trigger".to_string(),
+            flow_id: input
+                .flow_id
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -105,5 +167,43 @@ mod tests {
         })
         .expect_err("residual reenter mainline must fail");
         assert!(err.contains("no reenter mainline"));
+    }
+
+    #[test]
+    fn trigger_observation_noops_when_stop_signal_unobserved() {
+        let plan =
+            plan_servertool_engine_trigger_observation(ServertoolEngineTriggerObservationInput {
+                stop_signal_observed: false,
+                result: "non_stop_flow".to_string(),
+                flow_id: Some("flow_1".to_string()),
+            });
+        assert!(!plan.should_log);
+        assert!(plan.log_stop_entry.is_none());
+        assert!(plan.log_stop_compare.is_none());
+    }
+
+    #[test]
+    fn trigger_observation_logs_trigger_entry_and_compare() {
+        let plan =
+            plan_servertool_engine_trigger_observation(ServertoolEngineTriggerObservationInput {
+                stop_signal_observed: true,
+                result: " skipped_passthrough ".to_string(),
+                flow_id: Some(" flow_1 ".to_string()),
+            });
+        assert!(plan.should_log);
+        assert_eq!(
+            plan.log_stop_entry,
+            Some(ServertoolEngineTriggerLogStopEntry {
+                stage: "trigger".to_string(),
+                result: "skipped_passthrough".to_string(),
+            })
+        );
+        assert_eq!(
+            plan.log_stop_compare,
+            Some(ServertoolEngineTriggerLogStopCompare {
+                stage: "trigger".to_string(),
+                flow_id: Some("flow_1".to_string()),
+            })
+        );
     }
 }

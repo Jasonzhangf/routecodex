@@ -25,6 +25,7 @@ import {
 } from './metadata-center-carrier.js';
 import {
   planServertoolEngineRuntimeActionWithNative,
+  planServertoolEngineTriggerObservationWithNative,
   planServertoolEngineSkipWithNative,
   resolveServertoolTimeoutMsFromEnvCandidatesWithNative,
   planServertoolTimeoutErrorWithNative,
@@ -69,6 +70,33 @@ function createProgressObservation(args: {
     gold: '\x1b[38;5;220m',
     reset: '\x1b[0m'
   });
+}
+
+function runTriggerObservationPlan(args: {
+  stopSignal: NonNullable<Extract<ReturnType<typeof runEnginePreflight>, { kind: 'continue' }>['stopSignal']>;
+  result: string;
+  flowId?: string;
+  logStopEntry: ServertoolProgressLogger['logStopEntry'];
+  logStopCompare: ServertoolProgressLogger['logStopCompare'];
+}): void {
+  const triggerObservationPlan = planServertoolEngineTriggerObservationWithNative({
+    stopSignalObserved: args.stopSignal.observed,
+    result: args.result,
+    ...(args.flowId !== undefined ? { flowId: args.flowId } : {})
+  });
+  const entry = triggerObservationPlan.logStopEntry;
+  if (entry) {
+    args.logStopEntry(entry.stage, entry.result, {
+      ...(args.flowId !== undefined ? { flowId: args.flowId } : {}),
+      reason: args.stopSignal.reason,
+      source: args.stopSignal.source,
+      eligible: args.stopSignal.eligible
+    });
+  }
+  const compare = triggerObservationPlan.logStopCompare;
+  if (compare) {
+    args.logStopCompare(compare.stage, compare.flowId);
+  }
 }
 
 function resolveServerToolTimeoutMs(): number {
@@ -166,14 +194,12 @@ export async function runServerToolOrchestrationShell(
     case 'return_skipped_passthrough':
     case 'return_skipped_no_execution': {
       const skipReason = engineSkipPlan.skipReason as string;
-      if (stopSignal.observed) {
-        logStopEntry('trigger', `skipped_${skipReason}`, {
-          reason: stopSignal.reason,
-          source: stopSignal.source,
-          eligible: stopSignal.eligible
-        });
-        logStopCompare('trigger');
-      }
+      runTriggerObservationPlan({
+        stopSignal,
+        result: `skipped_${skipReason}`,
+        logStopEntry,
+        logStopCompare
+      });
       recordServertoolEngineMatchSkipped({
         requestId: options.requestId,
         entryEndpoint: options.entryEndpoint,
@@ -225,15 +251,13 @@ export async function runServerToolOrchestrationShell(
     hasServertoolCliProjectionContext: stoplessExecution.flowId === 'servertool_cli_projection',
     stoplessAction: stoplessPlan.action
   });
-  if (stopSignal.observed) {
-    logStopEntry('trigger', 'non_stop_flow', {
-      flowId,
-      reason: stopSignal.reason,
-      source: stopSignal.source,
-      eligible: stopSignal.eligible
-    });
-    logStopCompare('trigger', flowId);
-  }
+  runTriggerObservationPlan({
+    stopSignal,
+    result: 'non_stop_flow',
+    flowId,
+    logStopEntry,
+    logStopCompare
+  });
   logProgress(1, totalSteps, 'matched', { flowId });
   return runServertoolEnginePostflight({
     options: {

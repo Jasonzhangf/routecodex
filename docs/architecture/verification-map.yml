@@ -199,7 +199,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Rust owns engine runtime action planning."
+      - "Rust owns engine runtime action and trigger observation planning."
 
   - feature_id: hub.servertool_engine_skip_contract
     change_risk: medium

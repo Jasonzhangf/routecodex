@@ -293,6 +293,18 @@ export interface ServertoolEngineRuntimeActionPlan {
     | 'build_stop_message_cli_projection';
 }
 
+export interface ServertoolEngineTriggerObservationPlan {
+  shouldLog: boolean;
+  logStopEntry?: {
+    stage: 'trigger';
+    result: string;
+  };
+  logStopCompare?: {
+    stage: 'trigger';
+    flowId?: string;
+  };
+}
+
 export interface ServertoolEngineSkipPlan {
   action:
     | 'return_skipped_passthrough'
@@ -2233,6 +2245,83 @@ export function runStoplessBuiltinHandlerForRuntimeWithNative(input: {
     throw new Error(`runStoplessBuiltinHandlerForRuntimeJson native returned non-string: ${typeof raw}`);
   }
   return JSON.parse(raw) as unknown;
+}
+
+export function planServertoolEngineTriggerObservationWithNative(input: {
+  stopSignalObserved: boolean;
+  result: string;
+  flowId?: string;
+}): ServertoolEngineTriggerObservationPlan {
+  const capability = 'planServertoolEngineTriggerObservationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEngineTriggerObservationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify({
+    stopSignalObserved: input.stopSignalObserved,
+    result: input.result,
+    ...(input.flowId !== undefined ? { flowId: input.flowId } : {})
+  }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEngineTriggerObservationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEngineTriggerObservationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.shouldLog !== 'boolean') {
+    throw new Error('planServertoolEngineTriggerObservationJson native returned invalid shouldLog');
+  }
+  const logStopEntry = parseServertoolEngineTriggerLogStopEntry(record.logStopEntry);
+  const logStopCompare = parseServertoolEngineTriggerLogStopCompare(record.logStopCompare);
+  return {
+    shouldLog: record.shouldLog,
+    ...(logStopEntry ? { logStopEntry } : {}),
+    ...(logStopCompare ? { logStopCompare } : {})
+  };
+}
+
+function parseServertoolEngineTriggerLogStopEntry(value: unknown): ServertoolEngineTriggerObservationPlan['logStopEntry'] {
+  if (value == null) {
+    return undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('planServertoolEngineTriggerObservationJson native returned invalid logStopEntry');
+  }
+  const record = value as Record<string, unknown>;
+  if (record.stage !== 'trigger') {
+    throw new Error('planServertoolEngineTriggerObservationJson native returned invalid logStopEntry.stage');
+  }
+  if (typeof record.result !== 'string' || !record.result.trim()) {
+    throw new Error('planServertoolEngineTriggerObservationJson native returned invalid logStopEntry.result');
+  }
+  return {
+    stage: 'trigger',
+    result: record.result
+  };
+}
+
+function parseServertoolEngineTriggerLogStopCompare(value: unknown): ServertoolEngineTriggerObservationPlan['logStopCompare'] {
+  if (value == null) {
+    return undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('planServertoolEngineTriggerObservationJson native returned invalid logStopCompare');
+  }
+  const record = value as Record<string, unknown>;
+  if (record.stage !== 'trigger') {
+    throw new Error('planServertoolEngineTriggerObservationJson native returned invalid logStopCompare.stage');
+  }
+  if (record.flowId !== undefined && typeof record.flowId !== 'string') {
+    throw new Error('planServertoolEngineTriggerObservationJson native returned invalid logStopCompare.flowId');
+  }
+  return {
+    stage: 'trigger',
+    ...(typeof record.flowId === 'string' && record.flowId.trim()
+      ? { flowId: record.flowId }
+      : {})
+  };
 }
 
 export function planServertoolEngineSkipWithNative(input: {
