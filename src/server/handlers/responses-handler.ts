@@ -420,6 +420,7 @@ export async function handleResponses(
     await sendPipelineResponse(res, result, effectiveRequestId, {
       forceSSE: wantsStream,
       entryEndpoint: pipelineEntryEndpoint,
+      responsesRequestContext: requestContext,
       ...(isVideoRequest ? { sseTotalTimeoutMs: requestTimeoutMs } : {})
     });
   } catch (error: unknown) {

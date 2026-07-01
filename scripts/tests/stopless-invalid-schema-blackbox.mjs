@@ -66,7 +66,7 @@ const STOPLESS_HARNESS_ROUTE_CONTROL = {
       outboundProfile: 'openai-responses',
       providerType: 'responses'
     },
-    decision: { routeName: 'thinking' },
+    decision: { routeName: 'thinking', providerProtocol: 'openai-responses' },
     diagnostics: {}
   }
 };

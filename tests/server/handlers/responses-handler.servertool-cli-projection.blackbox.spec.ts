@@ -280,7 +280,7 @@ describe('servertool CLI projection blackbox', () => {
     expect(toolCall.function.name).toBe('exec_command');
     expect(command).toContain("routecodex hook run servertool_fixture --input-json '{\"value\":1}'");
     expect(command).not.toContain('--session-id');
-    expect(command).not.toContain('--request-id');
+    expect(command).toContain("--request-id 'req_servertool_blackbox'");
     expect(command).not.toContain(['--', 'tic', 'ket'].join(''));
     expect(command).not.toContain(['st', 'cli_'].join(''));
     expect(command).not.toContain(['rcc', '_cli_'].join(''));
