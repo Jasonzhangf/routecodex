@@ -214,6 +214,7 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
     expect(source).toContain('switch (runtimeAction.action)');
     expect(source).toContain('resolvePostflightFlowId({');
+    expect(source).not.toContain('String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)');
     expect(source).toContain('executed: runtimeAction.executed');
     expect(source).not.toContain('executed: true');
     expect(source).not.toContain('const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (');
@@ -278,6 +279,34 @@ describe('engine-observation-shell', () => {
         }
       })
     );
+  });
+
+  test('postflight rejects unknown native flow id source without reading the payload in TS', async () => {
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
+
+    await expect(
+      mod.runServertoolEnginePostflight({
+        options: {
+          requestId: 'req-postflight-invalid-flow-source',
+          adapterContext: {} as any
+        },
+        engineResult: {
+          mode: 'tool_flow',
+          finalChatResponse: { id: 'chat-postflight-invalid-flow-source' },
+          execution: {
+            flowId: 'flow-engine'
+          }
+        } as any,
+        runtimeAction: {
+          action: 'return_servertool_cli_projection_final',
+          executed: true,
+          flowIdSource: 'unknown_flow_id_source'
+        } as any,
+        flowId: 'flow-current',
+        totalSteps: 5,
+        logProgress: jest.fn()
+      })
+    ).rejects.toThrow('[servertool] invalid postflight flowIdSource');
   });
 
   test('engine-orchestration-shell owns the engine mainline body', () => {

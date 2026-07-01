@@ -6837,6 +6837,7 @@ function checkServertoolPostflightLoggingFailFast() {
     'const engineFinalResult = {',
     'return engineFinalResult;',
     "engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'",
+    'String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)',
     'executed: true',
   ]) {
     if (postflightSource.includes(marker)) {

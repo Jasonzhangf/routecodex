@@ -599,6 +599,7 @@ const TARGETS = [
       'const requestTruth = metadataCenterSnapshot?.requestTruth',
       'const rawSessionId = requestTruth?.sessionId',
       'rawSessionId.trim()',
+      'String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)',
       "if (runtimeAction.action === 'return_servertool_cli_projection_final')",
       "if (runtimeAction.action === 'return_stop_message_terminal_final')",
       "if (runtimeAction.action === 'build_stop_message_cli_projection')",

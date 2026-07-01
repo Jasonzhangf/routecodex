@@ -34,9 +34,7 @@ function resolvePostflightFlowId(args: {
     case 'current_flow':
       return args.flowId;
     default:
-      throw new Error(
-        `[servertool] invalid postflight flowIdSource: ${String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)}`
-      );
+      throw new Error('[servertool] invalid postflight flowIdSource');
   }
 }
 
