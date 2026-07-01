@@ -30,10 +30,7 @@ export async function finalizeServertoolResponseStage(args: {
   });
   switch (finalizeRuntimeAction.action) {
     case 'return_auto_hook_result':
-      if (autoHookResult == null) {
-        throw new Error('native response-stage finalize requested auto-hook result but result was empty');
-      }
-      return autoHookResult;
+      return autoHookResult as ServerSideToolEngineResult;
   }
   return { mode: 'passthrough', finalChatResponse: args.baseObject };
 }

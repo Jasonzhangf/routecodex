@@ -145,6 +145,8 @@ describe('response-stage-finalize-shell', () => {
     expect(source).not.toContain("responseStageAutoHook.action === 'return_passthrough_bypass'");
     expect(source).not.toContain("responseStageAutoHook.action === 'return_auto_hook_result'");
     expect(source).not.toContain("if (finalizeRuntimeAction.action === 'return_auto_hook_result')");
+    expect(source).not.toContain('autoHookResult == null');
+    expect(source).not.toContain('native response-stage finalize requested auto-hook result but result was empty');
     expect(source).toContain('switch (finalizeRuntimeAction.action)');
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
   });

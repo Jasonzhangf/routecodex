@@ -5936,6 +5936,8 @@ function checkServertoolResponseStageGateThinShell() {
     "responseStageAutoHook.action === 'return_passthrough_bypass'",
     "responseStageAutoHook.action === 'return_auto_hook_result'",
     "if (finalizeRuntimeAction.action === 'return_auto_hook_result')",
+    'autoHookResult == null',
+    'native response-stage finalize requested auto-hook result but result was empty',
   ]) {
     if (responseStageFinalizeShell.includes(marker)) {
       fail(
