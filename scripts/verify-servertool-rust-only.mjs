@@ -3902,6 +3902,7 @@ function checkEngineSelectionRustOwner() {
     'typeof overrides.disableToolCallHandlers',
     'Array.isArray(overrides.includeAutoHookIds)',
     'Array.isArray(overrides.excludeAutoHookIds)',
+    "if (afterRunPlan.action === 'rerun_excluding_primary_hooks')",
   ]) {
     if (engineSelectionShell.includes(keyword)) {
       fail(
@@ -3910,6 +3911,12 @@ function checkEngineSelectionRustOwner() {
       );
     }
   }
+  assertContains(
+    'servertool-engine-selection-ts-thin-shell',
+    TS_ENGINE_SELECTION,
+    engineSelectionShell,
+    'switch (afterRunPlan.action)'
+  );
   pass(
     'servertool-engine-selection-no-ts-owner',
     'engine-selection-block.ts is native-plan shell for primary hook first-pass and rerun decisions'

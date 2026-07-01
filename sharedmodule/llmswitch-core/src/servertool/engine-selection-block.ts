@@ -21,8 +21,12 @@ export async function runPrimaryServerToolEngineSelection(args: {
     primaryAutoHookIds: startPlan.primaryAutoHookIds,
     engineResult
   });
-  if (afterRunPlan.action === 'rerun_excluding_primary_hooks') {
-    return await args.runEngine(afterRunPlan.overrides ?? {});
+  switch (afterRunPlan.action) {
+    case 'rerun_excluding_primary_hooks':
+      return await args.runEngine(afterRunPlan.overrides ?? {});
+    case 'return_current':
+      return engineResult;
+    default:
+      throw new Error(`[servertool] invalid engine selection action: ${String(afterRunPlan.action)}`);
   }
-  return engineResult;
 }
