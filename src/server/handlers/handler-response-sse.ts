@@ -131,23 +131,13 @@ function createSseClientResponseClosedError(): Error & { code: string; name: str
   });
 }
 
-function buildMissingSseBridgeErrorPayloadForHttp(requestLabel: string, status = 502): Record<string, unknown> {
-  return projectSseErrorEventPayload({
-    requestId: requestLabel,
-    status,
-    message: 'SSE stream missing from pipeline result',
-    code: 'sse_bridge_error',
-  });
-}
-
 function sendSseBridgeError(
   res: Response,
   requestLabel: string,
-  status = 502,
+  payload: Record<string, unknown>,
   metadata?: Record<string, unknown>,
   releaseReason = 'sse_bridge_error_closeout'
 ): void {
-  const payload = buildMissingSseBridgeErrorPayloadForHttp(requestLabel, status);
   if (!res.headersSent) {
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -173,7 +163,12 @@ function sendSseBridgeError(
 export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs): Promise<boolean | Error> {
   const { res, result, requestLabel, status, forceSSE, expectsStream, entryEndpoint } = args;
   if (forceSSE && result.sseStream === undefined) {
-    const missingSsePayload = buildMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
+    const missingSsePayload = projectSseErrorEventPayload({
+      requestId: requestLabel,
+      status: 502,
+      message: 'SSE stream missing from pipeline result',
+      code: 'sse_bridge_error',
+    });
     logPipelineStage('response.sse.missing', requestLabel, { status });
     finalizeSseTransportCloseout({
       releaseReason: 'force_sse_missing_stream_observed',
@@ -204,7 +199,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     sendSseBridgeError(
       res,
       requestLabel,
-      502,
+      missingSsePayload,
       result.metadata as Record<string, unknown> | undefined,
       'force_sse_missing_stream_closeout'
     );
@@ -230,7 +225,12 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       ? resultMetadata.clientConnectionState as { disconnected?: unknown }
       : undefined;
   if (!stream) {
-    const missingSsePayload = buildMissingSseBridgeErrorPayloadForHttp(requestLabel, 502);
+    const missingSsePayload = projectSseErrorEventPayload({
+      requestId: requestLabel,
+      status: 502,
+      message: 'SSE stream missing from pipeline result',
+      code: 'sse_bridge_error',
+    });
     logPipelineStage('response.sse.missing', requestLabel, {});
     finalizeSseTransportCloseout({
       metadata: resultMetadata,
@@ -257,7 +257,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     sendSseBridgeError(
       res,
       requestLabel,
-      502,
+      missingSsePayload,
       resultMetadata,
       'missing_stream_closeout'
     );

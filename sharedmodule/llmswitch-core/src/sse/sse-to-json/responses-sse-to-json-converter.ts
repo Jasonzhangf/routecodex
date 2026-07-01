@@ -59,10 +59,10 @@ export class ResponsesSseToJsonConverterRefactored {
 
   async convertSseToJson(
     sseStream: ResponsesSseEventStream | Readable | AsyncIterable<string | Buffer>,
-    options: SseToResponsesJsonOptions
+    options: Partial<SseToResponsesJsonOptions> = {}
   ): Promise<ResponsesResponse> {
     const context = this.createContext(options);
-    this.contexts.set(options.requestId, context);
+    this.contexts.set(context.requestId, context);
 
     const abortSignal = options.abortSignal;
     let abortHandler: (() => void) | null = null;
@@ -136,10 +136,10 @@ export class ResponsesSseToJsonConverterRefactored {
       context.endTime = Date.now();
       context.duration = context.endTime - context.startTime;
       options.onError?.(error as Error);
-      throw this.wrapError('SSE_TO_JSON_ERROR', error as Error, options.requestId);
+      throw this.wrapError('SSE_TO_JSON_ERROR', error as Error, context.requestId);
     } finally {
       abortHandler?.();
-      this.clearContext(options.requestId);
+      this.clearContext(context.requestId);
     }
   }
 
@@ -514,7 +514,7 @@ export class ResponsesSseToJsonConverterRefactored {
     return wrapped;
   }
 
-  private createContext(options: SseToResponsesJsonOptions): SseToResponsesJsonContext {
+  private createContext(options: Partial<SseToResponsesJsonOptions>): SseToResponsesJsonContext {
     const eventStats: ResponsesEventStats = {
       totalEvents: 0,
       eventTypes: {},
@@ -527,11 +527,14 @@ export class ResponsesSseToJsonConverterRefactored {
       messageEventsCount: 0,
       errorCount: 0
     };
+    const requestId = typeof options.requestId === 'string' && options.requestId.trim()
+      ? options.requestId.trim()
+      : 'responses-sse-decode';
 
     return {
-      requestId: options.requestId,
-      model: options.model,
-      options,
+      requestId,
+      model: options.model ?? '',
+      options: options as SseToResponsesJsonOptions,
       startTime: Date.now(),
       currentResponse: {},
       eventStats,

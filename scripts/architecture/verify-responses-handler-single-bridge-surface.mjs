@@ -230,6 +230,7 @@ const checks = [
       'function buildStructuredSseErrorPayloadForHttp(',
       'function extractStructuredSseErrorPayload(',
       'function sendStructuredSseError(',
+      'function buildMissingSseBridgeErrorPayloadForHttp(',
       'structured_error_passthrough',
       'function buildTransportLocalSseErrorPayload(',
       'result.usageLogInfo?.finishReason',
