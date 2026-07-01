@@ -775,6 +775,7 @@ Forbidden paths:
 - `src/server/runtime/http-server/executor`
 
 Required tests:
+- `tests/servertool/response-stage-orchestration-shell.spec.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
