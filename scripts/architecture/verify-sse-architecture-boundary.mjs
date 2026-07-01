@@ -122,6 +122,8 @@ for (const forbidden of [
   'signature: content.signature',
   'image_url: content.image_url',
   'item_id: reasoning.id',
+  'content: ResponsesContent | undefined',
+  '? buildResponsesSseContentPartEventPayloadWithNative(',
   'summary: normalizeReasoningSummaryFieldWithNative',
   'data: {\n        ...delta\n      }',
   'data: {\n        ...done\n      }',
@@ -261,6 +263,14 @@ for (const forbidden of [
 ]) {
   if (responsesEventPayloadWrapper.includes(forbidden)) {
     failures.push(`Responses SSE native wrapper must not expose error synthesis/recovery helper: ${forbidden}`);
+  }
+}
+for (const forbidden of [
+  'contentPart?: unknown',
+  '...(contentPart !== undefined ? { content_part: contentPart } : {})',
+]) {
+  if (responsesEventPayloadWrapper.includes(forbidden)) {
+    failures.push(`Responses SSE native wrapper must not allow TS to synthesize partless content_part events: ${forbidden}`);
   }
 }
 

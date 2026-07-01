@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { buildResponsesSseContentPartDescriptorWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildContentPartDoneEvent, createDefaultResponsesContext } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.js';
 import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
 
 async function collectEvents(response: any): Promise<any[]> {
@@ -99,5 +100,24 @@ describe('responses SSE content part descriptor native owner', () => {
       annotations: [{ type: 'file_citation' }],
       logprobs: [{ token: 'hello' }]
     });
+  });
+
+  it('fails missing content_part on done instead of synthesizing a partless done event in TS', () => {
+    const context = createDefaultResponsesContext('req_missing_done_content_part', 'gpt-test');
+
+    expect(() => buildContentPartDoneEvent(
+      'msg_missing_done_part',
+      0,
+      undefined as any,
+      context,
+      {
+        enableTimestampGeneration: false,
+        chunkSize: 0,
+        chunkDelayMs: 0,
+        enableIdGeneration: false,
+        enableSequenceNumbers: true,
+        enableDelay: false
+      }
+    )).toThrow('Invalid Responses content_part.done: missing content part');
   });
 });

@@ -221,25 +221,21 @@ export function* buildContentPartDeltas(
 export function buildContentPartDoneEvent(
   outputItemId: string,
   contentIndex: number,
-  content: ResponsesContent | undefined,
+  content: ResponsesContent,
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): ResponsesSseEvent {
+  if (!content || typeof content !== 'object') {
+    throw new Error('Invalid Responses content_part.done: missing content part');
+  }
   const baseEvent = nextResponsesEventEnvelope(context, config);
-  const part = content
-    ? buildResponsesSseContentPartEventPayloadWithNative(
-        'done',
-        context.outputIndexCounter,
-        outputItemId,
-        contentIndex,
-        content
-      )
-    : buildResponsesSseContentPartEventPayloadWithNative(
-        'done',
-        context.outputIndexCounter,
-        outputItemId,
-        contentIndex
-      );
+  const part = buildResponsesSseContentPartEventPayloadWithNative(
+    'done',
+    context.outputIndexCounter,
+    outputItemId,
+    contentIndex,
+    content
+  );
 
   return {
     type: 'response.content_part.done',

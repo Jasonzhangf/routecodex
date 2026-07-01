@@ -360,7 +360,7 @@ export function buildResponsesSseContentPartEventPayloadWithNative(
   outputIndex: number,
   outputItemId: string,
   contentIndex: number,
-  contentPart?: unknown
+  contentPart: unknown
 ): Record<string, unknown> {
   const capability = 'buildResponsesSseContentPartEventPayloadJson';
   const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
@@ -377,7 +377,7 @@ export function buildResponsesSseContentPartEventPayloadWithNative(
       output_index: outputIndex,
       item_id: outputItemId,
       content_index: contentIndex,
-      ...(contentPart !== undefined ? { content_part: contentPart } : {})
+      content_part: contentPart
     });
   } catch {
     return fail('json stringify failed');

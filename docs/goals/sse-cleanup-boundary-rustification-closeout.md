@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses content_part.done partless TS synthesis removal slice
+
+- Red evidence: focused `responses-sse-content-part-descriptor-native` first failed because exported TS `buildContentPartDoneEvent()` accepted `undefined` content and generated a partless `response.content_part.done` instead of failing.
+- Fix: `buildContentPartDoneEvent()` now requires a concrete `ResponsesContent`; the native TS wrapper no longer accepts optional `contentPart`; `verify:sse-architecture-boundary` forbids the old optional content / ternary native-call markers.
+- Positive / reverse tests: valid source replay still emits `response.content_part.done` with `part`; missing content part now fails fast with `Invalid Responses content_part.done: missing content part`.
+- Verification: focused Jest `responses-sse-content-part-descriptor-native` PASS 5/5; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; `verify:hub-response-provider-sse-materialization` PASS; `verify:function-map-compile-gate` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `git diff --check` PASS; `build:base BUILD_EXIT:0` PASS.
+- Replay evidence: real 4444 provider-response sample `~/.rcc/codex-samples/openai-responses/ports/4444/req_1782794773576_s7okhowx0/provider-response_1.json` replayed through Responses SSE decode->encode with `entryPort=4444`, `status=completed`, `outputCount=2`, `response.completed=true`, and `response.done=true`; the sample has no `content_part.done` frames, so source replay covers the positive content-part path.
+
 ### 2026-07-01 Responses SSE decode TS wire synthesis removal slice
 
 - Red evidence: new focused `responses-sse-decode-no-ts-wire-synthesis` first proved object-mode AsyncIterable chunks were serialized by TS into `event/data` wire frames and could materialize as successful `response.done`; `verify:sse-architecture-boundary` also failed on `serializeEventToSSE()` and fallback `event: data` markers.
