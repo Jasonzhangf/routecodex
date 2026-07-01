@@ -58,9 +58,7 @@ export async function runServertoolExecutionStage(args: {
     case 'continue_response_stage':
       break;
     default:
-      throw new Error(
-        `[servertool] invalid pre-execution branch action: ${String(preExecutionBranchPlan.action)}`
-      );
+      throw new Error('[servertool] invalid pre-execution branch action');
   }
 
   const executionState = await runServertoolIoExecutionQueue({
@@ -92,6 +90,6 @@ export async function runServertoolExecutionStage(args: {
         responseStageGatePlan: args.responseStageGatePlan
       });
     default:
-      throw new Error(`[servertool] invalid post-execution branch action: ${String(postExecutionBranchPlan.action)}`);
+      throw new Error('[servertool] invalid post-execution branch action');
   }
 }

@@ -5566,6 +5566,8 @@ function checkServertoolRustOutcomeCloseout() {
     'dispatchPlan.executableToolCalls[preExecutionBranchPlan.projectedToolCallIndex]',
     'if (!projectedToolCall)',
     'native execution-branch projected missing tool call',
+    'String(preExecutionBranchPlan.action)',
+    'String(postExecutionBranchPlan.action)',
   ]) {
     if (executionStageShell.includes(marker)) {
       fail(

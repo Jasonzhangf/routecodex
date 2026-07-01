@@ -95,7 +95,9 @@ describe('execution-stage-shell', () => {
     expect(source).toContain("case 'continue_response_stage':");
     expect(source).toContain('invalid pre-execution branch action');
     expect(source).toContain("case 'continue_response_stage':");
-    expect(source).toContain("throw new Error(`[servertool] invalid post-execution branch action:");
+    expect(source).toContain("[servertool] invalid post-execution branch action");
+    expect(source).not.toContain('String(preExecutionBranchPlan.action)');
+    expect(source).not.toContain('String(postExecutionBranchPlan.action)');
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
     expect(source).toContain('finalizeServertoolResponseStage');
@@ -168,7 +170,7 @@ describe('execution-stage-shell', () => {
         excludeAutoHookIds: null,
         responseStageGatePlan: { responseHookMatched: false }
       })
-    ).rejects.toThrow('[servertool] invalid pre-execution branch action: unknown_native_action');
+    ).rejects.toThrow('[servertool] invalid pre-execution branch action');
 
     expect(runServertoolIoExecutionQueue).not.toHaveBeenCalled();
     expect(materializeNativeToolCallExecutionOutcome).not.toHaveBeenCalled();
@@ -276,5 +278,36 @@ describe('execution-stage-shell', () => {
       excludeAutoHookIds: null,
       responseStageGatePlan: { responseHookMatched: false }
     });
+  });
+
+  test('fails fast when post-execution branch returns an unknown native action', async () => {
+    planServertoolExecutionBranchWithNative.mockReset();
+    planServertoolExecutionBranchWithNative
+      .mockReturnValueOnce({
+        action: 'continue_response_stage'
+      })
+      .mockReturnValueOnce({
+        action: 'unknown_post_execution_action'
+      });
+    runServertoolIoExecutionQueue.mockResolvedValueOnce({
+      executedToolCalls: []
+    });
+
+    await expect(
+      runServertoolExecutionStage({
+        options: { requestId: 'req-invalid-post' } as any,
+        baseObject: { ok: true } as any,
+        toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+        contextBase: {} as any,
+        includeToolCallNames: null,
+        excludeToolCallNames: null,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null,
+        responseStageGatePlan: { responseHookMatched: false }
+      })
+    ).rejects.toThrow('[servertool] invalid post-execution branch action');
+
+    expect(materializeNativeToolCallExecutionOutcome).not.toHaveBeenCalled();
+    expect(finalizeServertoolResponseStage).not.toHaveBeenCalled();
   });
 });

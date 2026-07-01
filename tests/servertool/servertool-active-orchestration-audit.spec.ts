@@ -476,6 +476,8 @@ const TARGETS = [
       "if (postExecutionBranchPlan.action === 'resolve_execution_outcome')",
       'if (!projectedToolCall)',
       'native execution-branch projected missing tool call',
+      'String(preExecutionBranchPlan.action)',
+      'String(postExecutionBranchPlan.action)',
       '}\n\n  return finalizeServertoolResponseStage({',
     ],
     required: [
