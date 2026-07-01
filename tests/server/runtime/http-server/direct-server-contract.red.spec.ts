@@ -1,4 +1,10 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, jest } from '@jest/globals';
+import { extractProviderRuntimeMetadata } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
+import {
+  getClientConnectionAbortSignal,
+  trackClientConnectionState,
+} from '../../../../src/server/utils/client-connection-state.js';
 
 describe('direct server contract', () => {
   it('RED-GREEN: provider-direct forwards the original request body without stream/model repair', async () => {
@@ -69,6 +75,75 @@ describe('direct server contract', () => {
     expect(sentPayload?.stream).toBeUndefined();
     expect(sentPayload?.stream_options).toEqual({ include_usage: true });
     expect((result.body as Record<string, unknown>).echoedModel).toBe('deepseek-v4-flash');
+  });
+
+  it('RED-GREEN: provider-direct forwards the live client abort signal into provider runtime metadata', async () => {
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    const req = new EventEmitter() as any;
+    req.headers = {};
+    const res = new EventEmitter() as any;
+    res.destroyed = false;
+    res.writableEnded = false;
+    res.writableFinished = false;
+    const clientConnectionState = trackClientConnectionState(req, res);
+    const expectedAbortSignal = getClientConnectionAbortSignal(clientConnectionState);
+
+    const requestBody = {
+      model: 'deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'hello' }],
+    };
+    let sentPayload: Record<string, unknown> | undefined;
+
+    (server as any).resolveRuntimeKeyForProviderBinding = jest.fn(() => 'provider.key1.model');
+    (server as any).resolveProviderHandleForBinding = jest.fn(() => ({
+      runtimeKey: 'provider.key1.model',
+      providerId: 'provider',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-chat',
+      runtime: {},
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, data: { ok: true } };
+        },
+        processIncomingDirect: async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, data: { ok: true } };
+        },
+      },
+    }));
+
+    await (server as any).executeProviderDirectPipelineForPort(
+      {
+        port: 5555,
+        host: '0.0.0.0',
+        mode: 'provider',
+        protocolBehavior: 'auto',
+        providerBinding: 'provider.key1.model',
+      },
+      {
+        requestId: 'req_direct_provider_abort_signal',
+        entryEndpoint: '/v1/chat/completions',
+        method: 'POST',
+        headers: { accept: 'text/event-stream' },
+        query: {},
+        body: requestBody,
+        metadata: {
+          stream: true,
+          clientConnectionState,
+        },
+      },
+    );
+
+    const runtimeMetadata = sentPayload ? extractProviderRuntimeMetadata(sentPayload) : undefined;
+    const abortSignal = runtimeMetadata?.abortSignal as AbortSignal | undefined;
+    expect(abortSignal).toBe(expectedAbortSignal);
+    expect(abortSignal?.aborted).toBe(false);
   });
 
   it('RED-GREEN: router-direct forwards current client model/tools unchanged and does not enter Hub execute', async () => {

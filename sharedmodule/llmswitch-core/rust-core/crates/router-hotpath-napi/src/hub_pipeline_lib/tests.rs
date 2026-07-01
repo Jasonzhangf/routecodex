@@ -1014,6 +1014,104 @@ fn response_path_moves_provider_top_level_metadata_out_of_normal_payload() {
 }
 
 #[test]
+fn response_path_projects_responses_required_action_reasoning_stop_to_exec_command() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-responses-required-action-stopless".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            payload: json!({
+                "id": "resp_required_action_stopless",
+                "object": "response",
+                "status": "requires_action",
+                "model": "gpt-5.5",
+                "output": [
+                    {
+                        "id": "reasoning_1",
+                        "type": "reasoning",
+                        "encrypted_content": "opaque"
+                    },
+                    {
+                        "id": "fc_call_stopless_1",
+                        "type": "function_call",
+                        "call_id": "call_stopless_1",
+                        "name": "reasoningStop",
+                        "arguments": "{\"stopreason\":2,\"reason\":\"not done\",\"next_step\":\"run next check\",\"has_evidence\":1,\"evidence\":\"partial\",\"needs_user_input\":false}"
+                    }
+                ],
+                "required_action": {
+                    "type": "submit_tool_outputs",
+                    "submit_tool_outputs": {
+                        "tool_calls": [{
+                            "id": "call_stopless_1",
+                            "type": "function",
+                            "name": "reasoningStop",
+                            "tool_call_id": "call_stopless_1",
+                            "function": {
+                                "name": "reasoningStop",
+                                "arguments": "{\"stopreason\":2,\"reason\":\"not done\",\"next_step\":\"run next check\",\"has_evidence\":1,\"evidence\":\"partial\",\"needs_user_input\":false}"
+                            }
+                        }]
+                    }
+                }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "stream": false
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": {
+                    "requestId": "req-responses-required-action-stopless",
+                    "sessionId": "sess-responses-required-action-stopless"
+                },
+                "runtimeControl": {
+                    "stopless": {
+                        "active": true,
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 1,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.expect("projected response payload");
+    let serialized = payload.to_string();
+    assert!(
+        serialized.contains("routecodex hook run reasoningStop"),
+        "client-visible response must contain CLI projection: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("\"name\":\"exec_command\""),
+        "client-visible response must expose exec_command: {}",
+        serialized
+    );
+    assert!(
+        !serialized.contains("\"name\":\"reasoningStop\""),
+        "client-visible response must not leak internal reasoningStop: {}",
+        serialized
+    );
+    assert_eq!(
+        payload
+            .pointer("/required_action/submit_tool_outputs/tool_calls/0/function/name")
+            .and_then(|value| value.as_str()),
+        Some("exec_command"),
+        "required_action must expose the CLI shell tool, not the internal tool: {}",
+        payload
+    );
+}
+
+#[test]
 fn anthropic_response_remaps_to_openai_responses_client_payload() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine

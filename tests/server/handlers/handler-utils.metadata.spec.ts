@@ -127,4 +127,21 @@ describe('handler metadata merge (Phase Server-B fail-fast whitelist)', () => {
     });
     expect(original.metadata).toEqual({ session_id: 'must-not-leak' });
   });
+
+  it('keeps top-level client_metadata in pipeline body as protocol data', () => {
+    const original = {
+      model: 'gpt-test',
+      client_metadata: { session_id: 'protocol-data' },
+      input: [{ role: 'user', content: 'hello' }]
+    };
+
+    const stripped = stripRequestBodyMetadataForPipeline(original) as Record<string, unknown>;
+
+    expect(stripped).toEqual({
+      model: 'gpt-test',
+      client_metadata: { session_id: 'protocol-data' },
+      input: [{ role: 'user', content: 'hello' }]
+    });
+    expect(original.client_metadata).toEqual({ session_id: 'protocol-data' });
+  });
 });

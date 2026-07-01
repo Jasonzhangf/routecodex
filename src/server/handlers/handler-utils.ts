@@ -88,6 +88,17 @@ function shouldLogHttpErrorMeta(): boolean {
   );
 }
 
+function formatCompactLogShape(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
 function shouldEmitHttpErrorMeta(args: {
   rawMeta: RequestLogMeta;
   fields: { statusCode?: number; errorCode?: string; upstreamCode?: string };
@@ -354,7 +365,20 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
           typeof bag.clientAcceptsSse === 'boolean' ? `acceptsSse=${bag.clientAcceptsSse}` : undefined,
           typeof bag.timeoutMs === 'number' ? `timeoutMs=${bag.timeoutMs}` : undefined,
           typeof bag.videoRequest === 'boolean' ? `video=${bag.videoRequest}` : undefined,
-          typeof bag.type === 'string' && bag.type.trim() ? `type=${bag.type}` : undefined
+          typeof bag.type === 'string' && bag.type.trim() ? `type=${bag.type}` : undefined,
+          typeof bag.rawInputItems === 'number' ? `rawInputItems=${bag.rawInputItems}` : undefined,
+          typeof bag.preparedInputItems === 'number' ? `preparedInputItems=${bag.preparedInputItems}` : undefined,
+          formatCompactLogShape(bag.rawInputShape)
+            ? `rawInputShape=${formatCompactLogShape(bag.rawInputShape)}`
+            : undefined,
+          formatCompactLogShape(bag.preparedInputShape)
+            ? `preparedInputShape=${formatCompactLogShape(bag.preparedInputShape)}`
+            : undefined,
+          typeof bag.plannedEntryMode === 'string' && bag.plannedEntryMode.trim()
+            ? `plannedEntryMode=${bag.plannedEntryMode}`
+            : undefined,
+          typeof bag.resumeFullInputItems === 'number' ? `resumeFullInputItems=${bag.resumeFullInputItems}` : undefined,
+          typeof bag.resumeDeltaInputItems === 'number' ? `resumeDeltaInputItems=${bag.resumeDeltaInputItems}` : undefined
         ]
           .filter((item): item is string => Boolean(item))
           .join(' ');

@@ -35,9 +35,8 @@ impl VirtualRouterEngineCore {
 
     pub(crate) fn diagnose_route(&self, env: Env, request: &Value, metadata: &Value) -> Value {
         let mut dry_run_core = self.clone();
-        let result = with_session_dir_persistence_disabled(|| {
-            dry_run_core.route(env, request, metadata)
-        });
+        let result =
+            with_session_dir_persistence_disabled(|| dry_run_core.route(env, request, metadata));
         match result {
             Ok(route_result) => json!({
                 "ok": true,
@@ -100,8 +99,7 @@ impl VirtualRouterEngineCore {
                         if !resolved_targets.contains(&forwarder_target.provider_key) {
                             resolved_targets.push(forwarder_target.provider_key.clone());
                         }
-                        let status =
-                            self.forwarder_target_status_snapshot(forwarder_target, now);
+                        let status = self.forwarder_target_status_snapshot(forwarder_target, now);
                         if status
                             .get("available")
                             .and_then(|value| value.as_bool())
@@ -194,7 +192,12 @@ impl VirtualRouterEngineCore {
         Value::Array(forwarders)
     }
 
-    fn provider_target_status_snapshot(&self, provider_key: &str, disabled: bool, now: i64) -> Value {
+    fn provider_target_status_snapshot(
+        &self,
+        provider_key: &str,
+        disabled: bool,
+        now: i64,
+    ) -> Value {
         let profile = self.provider_registry.get(provider_key);
         let provider_enabled = profile.map(|item| item.enabled).unwrap_or(false);
         let runtime_key = profile.and_then(|item| item.runtime_key.clone());

@@ -195,10 +195,7 @@ pub enum GovernorError {
         max: u32,
     },
     /// 超时
-    Timeout {
-        operation: String,
-        timeout_ms: u64,
-    },
+    Timeout { operation: String, timeout_ms: u64 },
     /// 文件 I/O 错误
     IoError(String),
     /// 序列化错误
@@ -210,13 +207,27 @@ pub enum GovernorError {
 impl std::fmt::Display for GovernorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GovernorError::ConcurrencySaturated { runtime_key, current, max } => {
-                write!(f, "concurrency saturated for {runtime_key}: {current}/{max}")
+            GovernorError::ConcurrencySaturated {
+                runtime_key,
+                current,
+                max,
+            } => {
+                write!(
+                    f,
+                    "concurrency saturated for {runtime_key}: {current}/{max}"
+                )
             }
-            GovernorError::RpmExceeded { runtime_key, current, max } => {
+            GovernorError::RpmExceeded {
+                runtime_key,
+                current,
+                max,
+            } => {
                 write!(f, "RPM exceeded for {runtime_key}: {current}/{max}")
             }
-            GovernorError::Timeout { operation, timeout_ms } => {
+            GovernorError::Timeout {
+                operation,
+                timeout_ms,
+            } => {
                 write!(f, "{operation} timed out after {timeout_ms}ms")
             }
             GovernorError::IoError(msg) => write!(f, "I/O error: {msg}"),

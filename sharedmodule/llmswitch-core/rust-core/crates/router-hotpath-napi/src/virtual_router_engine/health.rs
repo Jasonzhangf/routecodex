@@ -211,14 +211,109 @@ impl ProviderHealthManager {
 
     pub(crate) fn clear_imported_persisted_state(&mut self) {}
 
-    pub(crate) fn export_persistable_state(&self, _now_ms: i64) -> Value {
+    pub(crate) fn export_persistable_state(&self, now_ms: i64) -> Value {
+        let mut provider_cooldowns: Vec<Value> = self
+            .states
+            .values()
+            .filter_map(|state| {
+                if let Some(cooldown_expires_at) = state.cooldown_expires_at {
+                    if cooldown_expires_at <= now_ms {
+                        return None;
+                    }
+                }
+                if state.failure_count <= 0 && state.cooldown_expires_at.is_none() {
+                    return None;
+                }
+                let mut entry = json!({
+                    "providerKey": state.provider_key,
+                    "state": state.state,
+                    "failureCount": state.failure_count,
+                    "lastFailureAt": state.last_failure_at,
+                    "reason": state.reason,
+                });
+                if let Some(cooldown_expires_at) = state.cooldown_expires_at {
+                    entry["cooldownExpiresAt"] = json!(cooldown_expires_at);
+                }
+                Some(entry)
+            })
+            .collect();
+        provider_cooldowns.sort_by(|a, b| {
+            let a_key = a.get("providerKey").and_then(|v| v.as_str()).unwrap_or("");
+            let b_key = b.get("providerKey").and_then(|v| v.as_str()).unwrap_or("");
+            a_key.cmp(b_key)
+        });
         json!({
             "version": 1,
-            "providerCooldowns": []
+            "providerCooldowns": provider_cooldowns
         })
     }
 
-    pub(crate) fn import_persistable_state(&mut self, _raw: &Value, _now_ms: i64) {}
+    pub(crate) fn import_persistable_state(&mut self, raw: &Value, now_ms: i64) {
+        let Some(entries) = raw.get("providerCooldowns").and_then(|v| v.as_array()) else {
+            return;
+        };
+        for entry in entries {
+            let Some(provider_key) = entry
+                .get("providerKey")
+                .or_else(|| entry.get("provider"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            else {
+                continue;
+            };
+            let cooldown_expires_at = entry
+                .get("cooldownExpiresAt")
+                .or_else(|| entry.get("expires"))
+                .and_then(|v| {
+                    v.as_i64()
+                        .or_else(|| v.as_u64().map(|value| value as i64))
+                        .or_else(|| v.as_f64().map(|value| value.round() as i64))
+                });
+            if matches!(cooldown_expires_at, Some(expiry) if expiry <= now_ms) {
+                continue;
+            }
+            let failure_threshold = self.config.failure_threshold;
+            let raw_failure_count = entry.get("failureCount").and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_u64().map(|value| value as i64))
+                    .or_else(|| v.as_f64().map(|value| value.round() as i64))
+            });
+            if cooldown_expires_at.is_none() && raw_failure_count.unwrap_or(0) <= 0 {
+                continue;
+            }
+            let state = self.get_state_mut(provider_key);
+            state.cooldown_expires_at = cooldown_expires_at;
+            state.failure_count = match cooldown_expires_at {
+                Some(_) => raw_failure_count
+                    .unwrap_or(failure_threshold)
+                    .max(failure_threshold),
+                None => raw_failure_count
+                    .unwrap_or(0)
+                    .clamp(0, failure_threshold.saturating_sub(1)),
+            };
+            state.state = match cooldown_expires_at {
+                Some(_) => entry
+                    .get("state")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or("tripped")
+                    .to_string(),
+                None => "healthy".to_string(),
+            };
+            state.last_failure_at = entry.get("lastFailureAt").and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_u64().map(|value| value as i64))
+                    .or_else(|| v.as_f64().map(|value| value.round() as i64))
+            });
+            state.reason = entry
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+        }
+    }
 
     fn get_state_mut(&mut self, provider_key: &str) -> &mut ProviderInternalState {
         let canonical = Self::canonicalize_provider_key(provider_key);
@@ -333,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn export_and_import_persisted_state_are_noop() {
+    fn export_and_import_persisted_cooldown_state() {
         let mut manager = ProviderHealthManager::new();
         manager.register_providers(&["test-provider".to_string()]);
         manager.record_failure("test-provider", None, 1_000);
@@ -341,12 +436,22 @@ mod tests {
         manager.record_failure("test-provider", None, 3_000);
 
         let exported = manager.export_persistable_state(4_000);
+        let entries = exported
+            .get("providerCooldowns")
+            .and_then(|v| v.as_array())
+            .expect("providerCooldowns array");
+        assert_eq!(entries.len(), 1);
         assert_eq!(
-            exported,
-            json!({
-                "version": 1,
-                "providerCooldowns": []
-            })
+            entries[0].get("providerKey").and_then(|v| v.as_str()),
+            Some("test-provider")
+        );
+        assert_eq!(
+            entries[0].get("state").and_then(|v| v.as_str()),
+            Some("tripped")
+        );
+        assert_eq!(
+            entries[0].get("failureCount").and_then(|v| v.as_i64()),
+            Some(3)
         );
 
         let mut restored = ProviderHealthManager::new();
@@ -354,8 +459,63 @@ mod tests {
         restored.import_persistable_state(&exported, 4_000);
 
         let state = state_for(&restored, "test-provider");
+        assert_eq!(state.state, "tripped");
+        assert_eq!(state.failure_count, 3);
+        assert_eq!(state.cooldown_expires_at, Some(3_000 + DEFAULT_COOLDOWN_MS));
+        assert!(!restored.is_available("test-provider", 4_000));
+    }
+
+    #[test]
+    fn export_and_import_persisted_partial_failure_window() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-provider".to_string()]);
+        manager.record_failure("test-provider", Some("err-1".to_string()), 1_000);
+
+        let exported = manager.export_persistable_state(2_000);
+        let entries = exported
+            .get("providerCooldowns")
+            .and_then(|v| v.as_array())
+            .expect("providerCooldowns array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].get("providerKey").and_then(|v| v.as_str()),
+            Some("test-provider")
+        );
+        assert_eq!(
+            entries[0].get("failureCount").and_then(|v| v.as_i64()),
+            Some(1)
+        );
+        assert!(entries[0].get("cooldownExpiresAt").is_none());
+
+        let mut restored = ProviderHealthManager::new();
+        restored.register_providers(&["test-provider".to_string()]);
+        restored.import_persistable_state(&exported, 2_000);
+
+        let state = state_for(&restored, "test-provider");
         assert_eq!(state.state, "healthy");
-        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.failure_count, 1);
         assert_eq!(state.cooldown_expires_at, None);
+        assert!(restored.is_available("test-provider", 2_000));
+    }
+
+    #[test]
+    fn import_legacy_provider_cooldown_shape() {
+        let mut restored = ProviderHealthManager::new();
+        restored.register_providers(&["test-provider".to_string()]);
+        let raw = json!({
+            "version": 1,
+            "providerCooldowns": [{
+                "provider": "test-provider",
+                "expires": 123_000i64,
+                "reason": "legacy"
+            }]
+        });
+
+        restored.import_persistable_state(&raw, 4_000);
+
+        let state = state_for(&restored, "test-provider");
+        assert_eq!(state.state, "tripped");
+        assert_eq!(state.failure_count, DEFAULT_FAILURE_THRESHOLD);
+        assert_eq!(state.cooldown_expires_at, Some(123_000));
     }
 }

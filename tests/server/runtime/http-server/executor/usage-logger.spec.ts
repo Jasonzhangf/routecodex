@@ -165,7 +165,7 @@ describe('usage logger timing summary', () => {
       expect(line.startsWith(String(expectedColor))).toBe(true);
       expect(line.startsWith(String(requestSessionColor))).toBe(false);
     }
-    expect(renderedLines).toHaveLength(2);
+    expect(renderedLines).toHaveLength(1);
     expect(rendered).toContain('finish_reason=\x1b[97mstop');
     expect(rendered).toContain('project=/tmp/demo-project:5555');
     expect(rendered).toContain('route=tools');
@@ -191,6 +191,57 @@ describe('usage logger timing summary', () => {
     const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
     const matches = plain.match(/finish_reason=tool_calls/g) ?? [];
     expect(matches).toHaveLength(1);
+  });
+
+  it('keeps usage detail logging free of request metadata noise', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await import('../../../../../src/server/utils/stage-logger.js');
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logPipelineStage('hub.start', 'req_usage_noise_slim', {});
+    logPipelineStage('hub.completed', 'req_usage_noise_slim', { elapsedMs: 140 });
+    logPipelineStage('provider.send.start', 'req_usage_noise_slim', {});
+    logPipelineStage('provider.send.completed', 'req_usage_noise_slim', { elapsedMs: 800 });
+    logPipelineStage('response.dispatch.start', 'req_usage_noise_slim', { status: 200, stream: false });
+    logPipelineStage('response.completed', 'req_usage_noise_slim', { elapsedMs: 20 });
+
+    logUsageSummary('req_usage_noise_slim', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      providerRequestId: 'provider-sample-1',
+      inputRequestId: 'input-sample-1',
+      providerAttemptCount: 3,
+      retryCount: 2,
+      finishReason: 'stop',
+      latencyMs: 1100,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+    logUsageSummary('req_usage_noise_slim', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      providerRequestId: 'provider-sample-2',
+      inputRequestId: 'input-sample-2',
+      providerAttemptCount: 3,
+      retryCount: 2,
+      finishReason: 'stop',
+      latencyMs: 1100,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('request.internal=140ms');
+    expect(plain).toContain('hub=140ms');
+    expect(plain).toContain('provider.send=800ms');
+    expect(plain).not.toContain('sample=');
+    expect(plain).not.toContain('attempts=');
+    expect(plain).not.toContain('retries=');
+    expect(plain).not.toContain('day.calls=');
+    expect(plain).not.toContain('req=req_');
   });
 
   it('prints cache read and cache write metrics in realtime session token line', async () => {

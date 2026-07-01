@@ -114,7 +114,7 @@ function isRouterDirectRecoverableResponseStatus(status: number | undefined): st
   if (typeof status !== 'number' || !Number.isFinite(status)) {
     return false;
   }
-  return status === 429 || status >= 500;
+  return status === 401 || status === 402 || status === 403 || status === 429 || status >= 500;
 }
 
 function buildRouterDirectResponseError(response: unknown, status: number): Error {

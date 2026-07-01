@@ -184,9 +184,7 @@ pub fn plan_servertool_handler_runtime_action(
             ServertoolHandlerRuntimeAction::InvalidPlanResult
         }
     };
-    ServertoolHandlerRuntimeActionPlan {
-        action,
-    }
+    ServertoolHandlerRuntimeActionPlan { action }
 }
 
 pub fn plan_servertool_handler_failed_error(input: &ServertoolHandlerFailedErrorInput) -> Value {

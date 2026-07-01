@@ -47,6 +47,85 @@ type ResponsesPayload = {
   [key: string]: unknown;
 };
 
+function countResponsesInputItems(payload: unknown): number | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const input = (payload as Record<string, unknown>).input;
+  return Array.isArray(input) ? input.length : undefined;
+}
+
+function accumulateResponsesTextChars(value: unknown): number {
+  if (typeof value === 'string') {
+    return value.length;
+  }
+  if (Array.isArray(value)) {
+    return value.reduce((total, item) => total + accumulateResponsesTextChars(item), 0);
+  }
+  if (!value || typeof value !== 'object') {
+    return 0;
+  }
+  let total = 0;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      key === 'text'
+      || key === 'input_text'
+      || key === 'output_text'
+      || key === 'content'
+      || key === 'arguments'
+      || key === 'output'
+      || key === 'summary'
+    ) {
+      total += accumulateResponsesTextChars(child);
+    }
+  }
+  return total;
+}
+
+function summarizeResponsesInputShape(payload: unknown): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const input = record.input;
+  const shape: Record<string, unknown> = {
+    inputKind: Array.isArray(input) ? 'array' : typeof input,
+    hasPreviousResponseId: typeof record.previous_response_id === 'string' && record.previous_response_id.trim().length > 0,
+  };
+  if (!Array.isArray(input)) {
+    return shape;
+  }
+  const typeCounts: Record<string, number> = {};
+  const roleCounts: Record<string, number> = {};
+  let estimatedTextChars = 0;
+  for (const item of input) {
+    const itemRecord = item && typeof item === 'object' && !Array.isArray(item)
+      ? item as Record<string, unknown>
+      : undefined;
+    const itemType = itemRecord && typeof itemRecord.type === 'string'
+      ? itemRecord.type
+      : typeof item;
+    typeCounts[itemType] = (typeCounts[itemType] || 0) + 1;
+    const role = itemRecord?.role;
+    if (typeof role === 'string' && role.trim()) {
+      roleCounts[role.trim()] = (roleCounts[role.trim()] || 0) + 1;
+    }
+    estimatedTextChars += accumulateResponsesTextChars(item);
+  }
+  return {
+    ...shape,
+    count: input.length,
+    typeCounts,
+    ...(Object.keys(roleCounts).length > 0 ? { roleCounts } : {}),
+    estimatedTextChars,
+  };
+}
+
+function readNumericMetaField(meta: Record<string, unknown> | undefined, key: string): number | undefined {
+  const value = meta?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function logResponsesHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
     const detailSuffix = details && Object.keys(details).length
@@ -120,6 +199,7 @@ export async function handleResponses(
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const responsesConversationPortScope = buildResponsesConversationPortScopeForHttp(ctx.portContext);
+    const rawInputItems = countResponsesInputItems(payload);
     const preparedRuntime = await prepareResponsesHandlerRuntimeForHttp({
       payload: payload as Record<string, unknown>,
       entryEndpoint,
@@ -136,6 +216,24 @@ export async function handleResponses(
     emitRequestStart({
       clientRequestId,
       ...preparedRuntime.streamPlan.requestStartMeta,
+      rawInputItems,
+      rawInputShape: summarizeResponsesInputShape(payload),
+      preparedInputItems: preparedRuntime.kind === 'ok'
+        ? countResponsesInputItems(preparedRuntime.payload)
+        : undefined,
+      preparedInputShape: preparedRuntime.kind === 'ok'
+        ? summarizeResponsesInputShape(preparedRuntime.payload)
+        : undefined,
+      plannedEntryMode: preparedRuntime.kind === 'ok'
+        ? preparedRuntime.plannedEntryMode
+        : undefined,
+      resumeFullInputItems: preparedRuntime.kind === 'ok'
+        ? readNumericMetaField(preparedRuntime.resumeMeta, 'fullInputItems')
+        : undefined,
+      resumeDeltaInputItems: preparedRuntime.kind === 'ok'
+        ? readNumericMetaField(preparedRuntime.resumeMeta, 'deltaInputItems')
+          ?? readNumericMetaField(preparedRuntime.resumeMeta, 'continuationDeltaItems')
+        : undefined,
     });
     if (!ctx.executePipeline) {
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });

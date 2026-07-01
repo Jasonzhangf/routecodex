@@ -1220,8 +1220,8 @@ pub fn update_responses_sse_transport_terminal_state_json(
             probe_json,
         )?
     };
-    let updated_probe =
-        serde_json::from_str::<Value>(&updated_probe_json).unwrap_or_else(|_| Value::Object(Map::new()));
+    let updated_probe = serde_json::from_str::<Value>(&updated_probe_json)
+        .unwrap_or_else(|_| Value::Object(Map::new()));
     let saw_terminal_event = updated_probe
         .as_object()
         .map(|probe| {

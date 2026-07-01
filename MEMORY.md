@@ -1,3 +1,14 @@
+# 2026-07-01: provider-direct must carry live client abort signal
+- provider-direct path must thread `getClientConnectionAbortSignal(metadata)` into attached provider runtime metadata before direct send; otherwise client close can leave direct provider running because this path bypasses request-executor's abort propagation.
+- Verification: focused `tests/server/runtime/http-server/direct-server-contract.red.spec.ts -t 'provider-direct forwards the live client abort signal into provider runtime metadata'` passed, and the original provider-direct passthrough test still passed.
+- Scope note: router-direct already carried abortSignal through the request payload; this slice closes the provider-direct gap only.
+
+# 2026-07-01: 4444 502 samples are upstream gateway failures, not context overflow
+- Verified 4444 502 samples for `ykk.ykk.gpt-5.4-mini` and `asxs.crsa.gpt-5.4-mini` return HTTP 502 / `upstream_error` or Cloudflare-style HTML `502: Bad gateway`.
+- The examined 502 request shape is a normal OpenAI Responses payload with `input.count=617` and `estimatedTextChars=320470`; `~/.rcc/provider/ykk/config.v2.toml` sets `maxContext=900000` for `gpt-5.4-mini`, so this sample does not show context overflow.
+- Separate 4444 request-field failure still exists: HTTP 400 `unsupported_parameter` on `reasoning.summary` for `gpt-5.3-codex-spark`.
+- Evidence: `~/.rcc/logs/server-4444.log`, `~/.rcc/provider/ykk/config.v2.toml`, `~/.rcc/provider/XL/config.v2.toml`, and `~/.rcc/codex-samples/openai-responses/ports/4444/`.
+
 # 2026-07-01: Responses JSON->SSE converter must not keep request context cache
 - `ResponsesJsonToSseConverterRefactored` must not maintain converter-level `contexts` maps, TTL pruning, `getContext`, `clearContext`, or `getActiveContexts`. Responses JSON->SSE encode is a finite projection stream; per-request stats may live in the returned stream context, but long-lived converter state is not an owner.
 - Gate: `verify:sse-architecture-boundary` forbids `CONTEXT_TTL_MS`, `MAX_CONTEXTS`, `pruneResponsesContexts`, and the active-context APIs in the Responses JSON->SSE converter.
@@ -503,3 +514,7 @@
 - `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts` 删除 `buildServertoolOutcomePlanInput` TS wrapper，materialization 直接调用 `buildServertoolOutcomePlanInputWithNative`。
 - `tests/servertool/execution-handler-materialization-shell.spec.ts`、`tests/servertool/server-side-tools.dispatch-native.spec.ts`、`tests/servertool/servertool-active-orchestration-audit.spec.ts` 和 `scripts/verify-servertool-rust-only.mjs` 已同步改成 native builder 直连并禁止 wrapper 复活。
 - Verification: focused servertool Jest 5 suites passed, sharedmodule TS passed, `npm run verify:servertool-rust-only` passed, `git diff --check` passed.
+
+## 2026-07-01 usage logger detail slimming
+- Verified that `logUsageSummary()` should keep the second line only for timing diagnostics (`request.internal`, `hub`, `provider.send`, provider decode tag, `hub.top`) and not print request/sample/attempt/retry/day.calls metadata noise.
+- Validation: `tests/server/runtime/http-server/executor/usage-logger.spec.ts` passed 20/20 after the change.

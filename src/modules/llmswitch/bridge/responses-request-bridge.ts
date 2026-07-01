@@ -83,6 +83,7 @@ export type PrepareResponsesHandlerRuntimeForHttpResult =
       requestContext: ResponsesRequestContextForHttp;
       pipelineEntryEndpoint: string;
       isSubmitToolOutputs: boolean;
+      plannedEntryMode: 'none' | 'submit_tool_outputs' | 'scope_materialize';
       resumeMeta?: Record<string, unknown>;
       streamPlan: ResponsesHandlerStreamPlanForHttp;
     }
@@ -842,6 +843,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
       requestContext,
       pipelineEntryEndpoint: preparedEntry.pipelineEntryEndpoint,
       isSubmitToolOutputs: preparedEntry.isSubmitToolOutputs,
+      plannedEntryMode: preparedEntry.plannedEntryMode,
       resumeMeta: preparedEntry.resumeMeta,
       streamPlan,
     };

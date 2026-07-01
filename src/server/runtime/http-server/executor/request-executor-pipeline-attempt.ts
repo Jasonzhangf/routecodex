@@ -18,6 +18,12 @@ const PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER = {
   stage: 'request_executor_pipeline_target_observation',
 } as const;
 
+const PIPELINE_ATTEMPT_SELECTION_COMMIT_WRITER = {
+  module: 'src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts',
+  symbol: 'commitRequestExecutorAttemptSelection',
+  stage: 'request_executor_pipeline_selection_commit',
+} as const;
+
 // normalizeExplicitRoutePool and mergeObservedRoutePoolChain are now Rust-native.
 // See: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_executor_pipeline_attempt/route_pool.rs
 
@@ -33,8 +39,103 @@ export type ResolvedRequestExecutorPipelineAttempt =
     routePoolForAttempt: string[];
     providerPayload: Record<string, unknown>;
     target: PipelineAttemptTarget;
-    initialRoutePool: string[] | null;
-  };
+  initialRoutePool: string[] | null;
+};
+
+function readTrimmedString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function commitRequestExecutorAttemptSelection(args: {
+  metadataCenter: MetadataCenter;
+  routingDecision: Record<string, unknown> | undefined;
+  target: PipelineAttemptTarget;
+}): void {
+  const { metadataCenter, routingDecision, target } = args;
+  const targetRecord = target as Record<string, unknown>;
+  const modelId = readTrimmedString(targetRecord.modelId);
+  const clientModelId = readTrimmedString(targetRecord.clientModelId);
+  const routeName = readTrimmedString(routingDecision?.routeName);
+  const routeId = readTrimmedString(routingDecision?.routeId);
+  const providerProtocol = readTrimmedString(routingDecision?.providerProtocol);
+  const targetProviderProtocol = readTrimmedString(targetRecord.outboundProfile);
+  if (!providerProtocol) {
+    throw Object.assign(new Error('Virtual router selection missing providerProtocol'), {
+      code: 'ERR_VR_SELECTION_MISSING_PROVIDER_PROTOCOL',
+      providerKey: target.providerKey,
+      routeName
+    });
+  }
+  if (targetProviderProtocol && targetProviderProtocol !== providerProtocol) {
+    throw Object.assign(
+      new Error(
+        `Virtual router selection providerProtocol mismatch: decision=${providerProtocol} target=${targetProviderProtocol}`
+      ),
+      {
+        code: 'ERR_VR_SELECTION_PROVIDER_PROTOCOL_MISMATCH',
+        providerKey: target.providerKey,
+        routeName,
+        providerProtocol,
+        targetProviderProtocol
+      }
+    );
+  }
+
+  metadataCenter.writeProviderObservation(
+    'target',
+    { ...(target as Record<string, unknown>) },
+    PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+    'selected pipeline target'
+  );
+  metadataCenter.writeProviderObservation(
+    'providerKey',
+    target.providerKey,
+    PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+    'selected pipeline target'
+  );
+  metadataCenter.writeProviderObservation(
+    'assignedModelId',
+    modelId,
+    PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+    'selected pipeline target'
+  );
+  metadataCenter.writeProviderObservation(
+    'modelId',
+    modelId,
+    PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+    'selected pipeline target'
+  );
+  metadataCenter.writeProviderObservation(
+    'clientModelId',
+    clientModelId,
+    PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+    'selected pipeline target'
+  );
+  metadataCenter.writeProviderObservation(
+    'compatibilityProfile',
+    readTrimmedString(target.compatibilityProfile),
+    PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
+    'selected pipeline target'
+  );
+  metadataCenter.writeRuntimeControl(
+    'routeName',
+    routeName,
+    PIPELINE_ATTEMPT_SELECTION_COMMIT_WRITER,
+    'selected pipeline route'
+  );
+  metadataCenter.writeRuntimeControl(
+    'routeId',
+    routeId,
+    PIPELINE_ATTEMPT_SELECTION_COMMIT_WRITER,
+    'selected pipeline route'
+  );
+  metadataCenter.writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    PIPELINE_ATTEMPT_SELECTION_COMMIT_WRITER,
+    'selected pipeline provider protocol'
+  );
+}
 
 export function resolveRequestExecutorPipelineAttempt(args: {
   inputRequestId: string;
@@ -129,53 +230,11 @@ export function resolveRequestExecutorPipelineAttempt(args: {
 
   const metadataCenter = MetadataCenter.read(mergedMetadata);
   if (metadataCenter) {
-    const targetRecord = target as Record<string, unknown>;
-    const modelId =
-      typeof targetRecord.modelId === 'string' && targetRecord.modelId.trim()
-        ? targetRecord.modelId.trim()
-        : undefined;
-    const clientModelId =
-      typeof targetRecord.clientModelId === 'string' && targetRecord.clientModelId.trim()
-        ? targetRecord.clientModelId.trim()
-        : undefined;
-    metadataCenter.writeProviderObservation(
-      'target',
-      { ...(target as Record<string, unknown>) },
-      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
-      'selected pipeline target'
-    );
-    metadataCenter.writeProviderObservation(
-      'providerKey',
-      target.providerKey,
-      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
-      'selected pipeline target'
-    );
-    metadataCenter.writeProviderObservation(
-      'assignedModelId',
-      modelId,
-      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
-      'selected pipeline target'
-    );
-    metadataCenter.writeProviderObservation(
-      'modelId',
-      modelId,
-      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
-      'selected pipeline target'
-    );
-    metadataCenter.writeProviderObservation(
-      'clientModelId',
-      clientModelId,
-      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
-      'selected pipeline target'
-    );
-    metadataCenter.writeProviderObservation(
-      'compatibilityProfile',
-      typeof target.compatibilityProfile === 'string' && target.compatibilityProfile.trim()
-        ? target.compatibilityProfile.trim()
-        : undefined,
-      PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
-      'selected pipeline target'
-    );
+    commitRequestExecutorAttemptSelection({
+      metadataCenter,
+      routingDecision,
+      target
+    });
   }
 
   return {

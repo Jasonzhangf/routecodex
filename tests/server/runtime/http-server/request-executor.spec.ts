@@ -2976,6 +2976,7 @@ describe('HubRequestExecutor failover', () => {
         metadata: {}
       });
 
+      await jest.advanceTimersByTimeAsync(0);
       expect(providerAProcess).toHaveBeenCalledTimes(1);
       expect(logStage.mock.calls.some((call) => call[0] === 'server.global_error_backoff_wait')).toBe(true);
 

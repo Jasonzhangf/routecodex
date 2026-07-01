@@ -79,6 +79,11 @@ pub fn extract_current_assistant_reasoning_stop_arguments(payload: &Value) -> Op
             }
         }
     }
+    if let Some(arguments) =
+        extract_reasoning_stop_arguments_from_required_action(payload.get("required_action"))
+    {
+        return Some(arguments);
+    }
     None
 }
 
@@ -504,6 +509,35 @@ fn extract_reasoning_stop_arguments_from_output_item(item: &Value) -> Option<Str
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn extract_reasoning_stop_arguments_from_required_action(
+    required_action: Option<&Value>,
+) -> Option<String> {
+    let tool_calls = required_action?
+        .get("submit_tool_outputs")?
+        .get("tool_calls")?
+        .as_array()?;
+    for tool_call in tool_calls.iter().rev() {
+        let record = tool_call.as_object()?;
+        let name = record
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .or_else(|| record.get("name"))
+            .and_then(Value::as_str)?;
+        if !is_reasoning_stop_tool_name(name) {
+            continue;
+        }
+        let arguments = record
+            .get("function")
+            .and_then(|function| function.get("arguments"))
+            .or_else(|| record.get("arguments"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        return Some(arguments.to_string());
+    }
+    None
 }
 
 fn is_reasoning_stop_tool_name(name: &str) -> bool {
@@ -1191,6 +1225,32 @@ visible after
         assert_eq!(
             output.payload["output"][0]["content"][0]["text"],
             "停止原因：验证已经完成"
+        );
+    }
+
+    #[test]
+    fn reasoning_stop_arguments_can_come_from_responses_required_action() {
+        let payload = json!({
+            "id": "resp_required_action_reasoning_stop",
+            "status": "requires_action",
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [{
+                        "id": "call_required_action_reasoning_stop",
+                        "type": "function",
+                        "function": {
+                            "name": "reasoningStop",
+                            "arguments": "{\"stopreason\":2,\"reason\":\"continue\"}"
+                        }
+                    }]
+                }
+            }
+        });
+        let arguments = extract_current_assistant_reasoning_stop_arguments(&payload);
+        assert_eq!(
+            arguments.as_deref(),
+            Some("{\"stopreason\":2,\"reason\":\"continue\"}")
         );
     }
 }

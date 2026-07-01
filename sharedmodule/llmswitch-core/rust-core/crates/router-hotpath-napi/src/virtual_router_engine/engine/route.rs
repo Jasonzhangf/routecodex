@@ -32,6 +32,15 @@ use crate::virtual_router_engine::routing_state_store::{
 };
 use crate::virtual_router_engine::time_utils::now_ms;
 
+fn read_target_outbound_profile(target: &Value) -> Option<String> {
+    target
+        .get("outboundProfile")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
 fn parse_retry_provider_key_target(raw: &str) -> Option<InstructionTarget> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -581,11 +590,13 @@ impl VirtualRouterEngineCore {
                         map.insert("processMode".to_string(), Value::String(mode));
                     }
                 }
+                let provider_protocol = read_target_outbound_profile(&target_obj);
                 return Ok(json!({
                     "target": target_obj,
                     "decision": {
                         "routeName": "direct",
                         "providerKey": selection.provider_key,
+                        "providerProtocol": provider_protocol,
                         "pool": selection.pool,
                         "routePool": selection.route_pool,
                         "poolId": selection.pool_id,
@@ -596,6 +607,7 @@ impl VirtualRouterEngineCore {
                     "diagnostics": {
                         "routeName": "direct",
                         "providerKey": selection.provider_key,
+                        "providerProtocol": provider_protocol,
                         "pool": selection.pool,
                         "routePool": selection.route_pool,
                         "poolId": selection.pool_id,
@@ -651,12 +663,14 @@ impl VirtualRouterEngineCore {
                 map.insert("processMode".to_string(), Value::String(mode));
             }
         }
+        let provider_protocol = read_target_outbound_profile(&target_obj);
         let route_changed = selection.route_used != requested_route;
         let reasoning =
             append_reasoning_tag(&classification.reasoning, selection.reasoning_tag.clone());
         let decision = json!({
             "routeName": selection.route_used,
             "providerKey": selection.provider_key,
+            "providerProtocol": provider_protocol,
             "pool": selection.pool,
             "routePool": selection.route_pool,
             "poolId": selection.pool_id,
@@ -668,6 +682,7 @@ impl VirtualRouterEngineCore {
         let diagnostics = json!({
             "routeName": selection.route_used,
             "providerKey": selection.provider_key,
+            "providerProtocol": provider_protocol,
             "pool": selection.pool,
             "routePool": selection.route_pool,
             "poolId": selection.pool_id,
@@ -1023,7 +1038,7 @@ mod tests {
                 "mini27.key1.MiniMax-M2.7": {
                     "providerKey": "mini27.key1.MiniMax-M2.7",
                     "providerType": "openai",
-                    "providerProtocol": "openai-chat",
+                    "outboundProfile": "openai-chat",
                     "modelId": "MiniMax-M2.7",
                     "enabled": true
                 }
@@ -1057,6 +1072,7 @@ mod tests {
             decision["providerKey"].as_str(),
             Some("mini27.key1.MiniMax-M2.7")
         );
+        assert_eq!(decision["providerProtocol"].as_str(), Some("openai-chat"));
     }
 
     #[test]

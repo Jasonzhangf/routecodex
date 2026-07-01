@@ -114,7 +114,11 @@ pub(crate) fn build_meta_route_03_from_metadata(
     }
     if let Some(runtime_control) = runtime_control {
         copy_non_empty_string(runtime_control, &mut control, "routeHint");
-        copy_non_empty_string(runtime_control, &mut control, "routecodexRoutingPolicyGroup");
+        copy_non_empty_string(
+            runtime_control,
+            &mut control,
+            "routecodexRoutingPolicyGroup",
+        );
         copy_non_empty_string(runtime_control, &mut control, "serverToolFollowupSource");
         copy_non_empty_string(runtime_control, &mut control, "providerProtocol");
     }

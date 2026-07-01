@@ -2410,6 +2410,7 @@ export class RouteCodexHttpServer {
                 ? { __responsesDirectPassthrough: true }
                 : {}),
             },
+            abortSignal: getClientConnectionAbortSignal(input.metadata),
             compatibilityProfile: handle.runtime?.compatibilityProfile,
           });
         },

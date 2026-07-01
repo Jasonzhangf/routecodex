@@ -106,14 +106,14 @@ fn read_requested_route_policy_group(metadata: &Value) -> Option<String> {
     metadata
         .get("runtimeControl")
         .and_then(|v| v.as_object())
-        .or_else(|| {
-            metadata
-                .get("runtime_control")
-                .and_then(|v| v.as_object())
-        })
+        .or_else(|| metadata.get("runtime_control").and_then(|v| v.as_object()))
         .and_then(|rt| rt.get("routecodexRoutingPolicyGroup"))
         .and_then(|value| value.as_str())
-        .or_else(|| metadata.get("routecodexRoutingPolicyGroup").and_then(|v| v.as_str()))
+        .or_else(|| {
+            metadata
+                .get("routecodexRoutingPolicyGroup")
+                .and_then(|v| v.as_str())
+        })
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())

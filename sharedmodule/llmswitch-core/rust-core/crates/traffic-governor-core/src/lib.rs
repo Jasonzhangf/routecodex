@@ -7,16 +7,16 @@
 //!
 //! MetadataCenter 作为唯一控制接口，不内建状态变量。
 
+pub mod adaptive;
 pub mod concurrency;
 pub mod metadata;
 pub mod rpm;
-pub mod adaptive;
 pub mod store;
 pub mod types;
 
+use adaptive::AdaptiveController;
 use concurrency::ConcurrencyController;
 use rpm::RpmController;
-use adaptive::AdaptiveController;
 use store::FileStateStore;
 use types::*;
 
@@ -53,7 +53,8 @@ impl TrafficGovernor {
         let config = self.read_traffic_config(ctx);
 
         // 2. 检查并发容量
-        self.concurrency.check_available(ctx, &config, &self.store)?;
+        self.concurrency
+            .check_available(ctx, &config, &self.store)?;
 
         // 3. 检查 RPM
         self.rpm.check_available(ctx, &config, &self.store)?;
@@ -75,7 +76,9 @@ impl TrafficGovernor {
         let released = self.store.release_lease(permit)?;
         Ok(ReleaseResult {
             released,
-            active_in_flight: self.concurrency.active_count_for_keys(&[permit.runtime_key.as_str()]),
+            active_in_flight: self
+                .concurrency
+                .active_count_for_keys(&[permit.runtime_key.as_str()]),
         })
     }
 
@@ -86,8 +89,7 @@ impl TrafficGovernor {
 
     /// 同步检查是否达到并发容量
     pub fn is_at_capacity(&self, runtime_key: &str) -> bool {
-        self.store.active_lease_count(runtime_key)
-            >= self.read_effective_max_in_flight(runtime_key)
+        self.store.active_lease_count(runtime_key) >= self.read_effective_max_in_flight(runtime_key)
     }
 
     /// 从 MetadataCenter runtime_control 读取配置

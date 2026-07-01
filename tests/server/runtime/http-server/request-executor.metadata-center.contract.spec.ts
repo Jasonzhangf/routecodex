@@ -63,6 +63,9 @@ const RESPONSES_HANDLER_PATH = path.join(ROOT, 'src/server/handlers/responses-ha
 let MetadataCenter: any;
 let writeProviderProtocolRuntimeControl: any;
 let resolveResponsesConversationRequestCaptureArgsForChatProcessEntry: any;
+let decorateMetadataForAttempt: any;
+let resolveRequestExecutorPipelineAttempt: any;
+let __requestExecutorTestables: any;
 
 beforeAll(async () => {
   ({ MetadataCenter } = await import(
@@ -70,8 +73,13 @@ beforeAll(async () => {
   ));
   ({
     writeProviderProtocolRuntimeControl,
-    resolveResponsesConversationRequestCaptureArgsForChatProcessEntry
+    resolveResponsesConversationRequestCaptureArgsForChatProcessEntry,
+    __requestExecutorTestables
   } = await import('../../../../src/server/runtime/http-server/request-executor.ts'));
+  ({ resolveRequestExecutorPipelineAttempt } = __requestExecutorTestables);
+  ({ decorateMetadataForAttempt } = await import(
+    '../../../../src/server/runtime/http-server/executor-metadata.ts'
+  ));
 });
 
 describe('request-executor metadata center contract', () => {
@@ -122,6 +130,134 @@ describe('request-executor metadata center contract', () => {
     expect(() => writeProviderProtocolRuntimeControl(metadata, 'anthropic-messages')).toThrow(
       'MetadataCenter runtime_control.providerProtocol conflict: existing=openai-chat selected=anthropic-messages'
     );
+  });
+
+  it('allows providerProtocol rebinding after retry attempt release', () => {
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRuntimeControl(
+      'providerProtocol',
+      'openai-responses',
+      {
+        module: 'test',
+        symbol: 'allows providerProtocol rebinding after retry attempt release',
+        stage: 'previous_attempt_route_owner'
+      },
+      'seed previous attempt provider protocol'
+    );
+
+    const retryMetadata = decorateMetadataForAttempt(metadata, 2, new Set(['provider.previous']));
+
+    expect(() => writeProviderProtocolRuntimeControl(retryMetadata, 'openai-chat')).not.toThrow();
+    expect(center.readRuntimeControl().providerProtocol).toBe('openai-chat');
+  });
+
+  it('commits selected target observation and providerProtocol atomically for the current attempt', () => {
+    const metadataForAttempt: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadataForAttempt);
+    center.writeRuntimeControl(
+      'providerProtocol',
+      'openai-responses',
+      {
+        module: 'test',
+        symbol: 'commits selected target observation and providerProtocol atomically for the current attempt',
+        stage: 'previous_attempt_route_owner'
+      },
+      'seed previous attempt provider protocol'
+    );
+    const retryMetadata = decorateMetadataForAttempt(
+      metadataForAttempt,
+      2,
+      new Set(['previous.key.gpt-5.5'])
+    );
+
+    const resolved = resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-selection-atomic-1',
+      providerRequestId: 'req-selection-atomic-1',
+      attempt: 2,
+      metadataForAttempt: retryMetadata,
+      pipelineResult: {
+        routingDecision: {
+          routeName: 'longcontext',
+          routeId: 'gateway-priority-5555-priority-longcontext',
+          providerProtocol: 'openai-chat',
+          routePool: ['orangeai.key1.glm-5.2']
+        },
+        providerPayload: { model: 'glm-5.2', messages: [] },
+        target: {
+          providerKey: 'orangeai.key1.glm-5.2',
+          runtimeKey: 'orangeai.key1',
+          outboundProfile: 'openai-chat',
+          providerType: 'openai',
+          modelId: 'glm-5.2',
+          clientModelId: 'gpt-5.5'
+        },
+        metadata: retryMetadata
+      },
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-selection-atomic-1',
+      clientAbortSignal: undefined,
+      initialRoutePool: ['previous.key.gpt-5.5', 'orangeai.key1.glm-5.2'],
+      excludedProviderKeys: new Set(['previous.key.gpt-5.5']),
+      lastError: Object.assign(new Error('HTTP 502'), { status: 502, code: 'HTTP_502' }),
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: () => ({ code: 'HTTP_502', status: 502 }),
+      hubStartedAtMs: Date.now() - 1,
+      pipelineLabel: 'hub'
+    });
+
+    expect(resolved.kind).toBe('resolved');
+    expect(center.readProviderObservation()).toMatchObject({
+      providerKey: 'orangeai.key1.glm-5.2',
+      modelId: 'glm-5.2',
+      clientModelId: 'gpt-5.5'
+    });
+    expect(center.readRuntimeControl()).toMatchObject({
+      providerProtocol: 'openai-chat',
+      routeName: 'longcontext',
+      routeId: 'gateway-priority-5555-priority-longcontext'
+    });
+  });
+
+  it('rejects non-atomic selection when decision providerProtocol is missing', () => {
+    const metadataForAttempt: Record<string, unknown> = {};
+    MetadataCenter.attach(metadataForAttempt);
+
+    expect(() => resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-selection-missing-protocol',
+      providerRequestId: 'req-selection-missing-protocol',
+      attempt: 1,
+      metadataForAttempt,
+      pipelineResult: {
+        routingDecision: {
+          routeName: 'thinking',
+          routeId: 'gateway-priority-5555-priority-thinking',
+          routePool: ['ykk.ykk.gpt-5.4-mini']
+        },
+        providerPayload: { model: 'gpt-5.4-mini', messages: [] },
+        target: {
+          providerKey: 'ykk.ykk.gpt-5.4-mini',
+          runtimeKey: 'ykk.ykk',
+          outboundProfile: 'openai-responses',
+          providerType: 'responses',
+          modelId: 'gpt-5.4-mini',
+          clientModelId: 'gpt-5.5'
+        },
+        metadata: metadataForAttempt
+      },
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-selection-missing-protocol',
+      clientAbortSignal: undefined,
+      initialRoutePool: null,
+      excludedProviderKeys: new Set(),
+      lastError: undefined,
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: () => ({}),
+      hubStartedAtMs: Date.now() - 1,
+      pipelineLabel: 'hub'
+    })).toThrow('Virtual router selection missing providerProtocol');
   });
 
   it('captures Responses request context from Chat Process snapshot instead of handler-owned capture', () => {

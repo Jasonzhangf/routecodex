@@ -34,6 +34,7 @@
 6. **错误模式**：禁止从 `metadata.context` 补 provider payload；禁止从 `metadata.user_id/session_id/conversation_id` 生成上游 body/options；禁止跨端口或跨 session 复用 metadata 对象；禁止把 debug/snapshot metadata 当作 live runtime metadata。
 7. **Responses continuation 隔离模式**：禁止把 `/v1/responses` continuation state 当作普通 chat/messages 会话历史复用；禁止只靠 `sessionId` / `conversationId` 命中旧 continuation；恢复必须同时校验入口协议、continuation owner、port/group scope 与会话 scope。
 8. **Responses continuation 不可变区**：Chat Process 保存后的 continuation 真相到下一轮 Chat Process 恢复前不得被任何 handler/SSE/outbound/inbound/adapter/store transport 改写。这个区间只能传输、投影、释放和做非破坏性 scope/协议校验；不得用 metadata、entryOriginRequest、capturedChatRequest、requestSemantics、session scope 或 response body 去补 history/context/tool 状态。
+9. **请求协议数据与 MetadataCenter 分流**：HTTP headers、请求 body 的标准协议字段、`metadata`、`client_metadata`、`x-*` / `x-codex-*` 等客户端协议字段都属于请求数据面，默认按入口协议语义透传；不得搬入 MetadataCenter 当控制信号，也不得用 MetadataCenter 重建这些协议字段。MetadataCenter 只承载 RouteCodex 自己生成的内部控制信号（route/runtime/stopless/servertool/error/scope 等），且不得混入 provider/client normal payload。
 
 ## 标准接口契约流水线图（醒目）
 

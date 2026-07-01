@@ -86,7 +86,7 @@ describe('direct passthrough route-level', () => {
     } finally {
       await server.stop();
     }
-  }, 15000);
+  });
 
   it('HTTP BLACKBOX: provider-mode chat direct does not synthesize stream=true when stream_options is present', async () => {
     jest.resetModules();
@@ -245,7 +245,7 @@ describe('direct passthrough route-level', () => {
     });
     expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
-  });
+  }, 15000);
 
   it('router same-protocol direct does not enter HubPipeline and keeps ingress payload transparent', async () => {
     jest.resetModules();
@@ -1805,6 +1805,7 @@ describe('direct passthrough route-level', () => {
 
   it('router-direct applies Rust default route plan after current route pool is exhausted by provider errors', async () => {
     jest.resetModules();
+    jest.useFakeTimers();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
     const server = new RouteCodexHttpServer({
@@ -1815,23 +1816,30 @@ describe('direct passthrough route-level', () => {
       providers: {},
     } as any);
 
-    const firstProviderKey = 'ykk.ykk.gpt-5.4-mini';
-    const secondProviderKey = 'asxs.crsa.gpt-5.4-mini';
+    const primaryProviderKeys = [
+      'ykk.ykk.gpt-5.4-mini',
+      'asxs.crsa.gpt-5.4-mini',
+      'asxs.crsb.gpt-5.4-mini',
+      'XL.key1.gpt-5.4-mini',
+      '1token.key1.gpt-5.4-mini',
+    ];
     const defaultProviderKey = 'ykk.ykk.gpt-5.3-codex-spark';
-    const direct502 = () => Object.assign(new Error('HTTP 502: upstream provider error'), {
-      statusCode: 502,
-      status: 502,
-      code: 'HTTP_502',
-      upstreamCode: 'HTTP_502',
+    const primaryFailures = [
+      { status: 502, message: 'HTTP 502: upstream provider error' },
+      { status: 403, message: 'HTTP 403: upstream provider error' },
+      { status: 401, message: 'HTTP 401: upstream provider error' },
+      { status: 502, message: 'HTTP 502: internal provider response error' },
+      { status: 502, message: 'HTTP 502: upstream provider error' },
+    ];
+    const directError = (failure: { status: number; message: string }) => Object.assign(new Error(failure.message), {
+      statusCode: failure.status,
+      status: failure.status,
+      code: `HTTP_${failure.status}`,
+      upstreamCode: `HTTP_${failure.status}`,
     });
-    const direct403 = () => Object.assign(new Error('HTTP 403: upstream provider error'), {
-      statusCode: 403,
-      status: 403,
-      code: 'HTTP_403',
-      upstreamCode: 'HTTP_403',
-    });
-    const firstDirectSend = jest.fn(async () => { throw direct502(); });
-    const secondDirectSend = jest.fn(async () => { throw direct403(); });
+    const primaryDirectSends = primaryFailures.map((failure) =>
+      jest.fn(async () => { throw directError(failure); })
+    );
     const defaultDirectSend = jest.fn(async () => ({
       status: 200,
       data: {
@@ -1844,10 +1852,9 @@ describe('direct passthrough route-level', () => {
     const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
       const allowedProviders = Array.isArray(metadata.allowedProviders) ? metadata.allowedProviders : [];
       const excluded = Array.isArray(metadata.excludedProviderKeys) ? metadata.excludedProviderKeys : [];
-      const providerKey =
-        allowedProviders.includes(defaultProviderKey)
-          ? defaultProviderKey
-          : (excluded.includes(firstProviderKey) ? secondProviderKey : firstProviderKey);
+      const providerKey = allowedProviders.includes(defaultProviderKey)
+        ? defaultProviderKey
+        : primaryProviderKeys.find((candidate) => !excluded.includes(candidate)) ?? primaryProviderKeys[primaryProviderKeys.length - 1];
       return {
         target: {
           providerKey,
@@ -1860,10 +1867,10 @@ describe('direct passthrough route-level', () => {
           routeName: providerKey === defaultProviderKey ? 'default' : 'thinking',
           pool: providerKey === defaultProviderKey
             ? [defaultProviderKey]
-            : [firstProviderKey, secondProviderKey],
+            : primaryProviderKeys,
           routePool: providerKey === defaultProviderKey
             ? [defaultProviderKey]
-            : [firstProviderKey, secondProviderKey],
+            : primaryProviderKeys,
           reason: providerKey === defaultProviderKey ? 'default:route-contract' : 'thinking:user-input',
         },
         diagnostics: {},
@@ -1876,7 +1883,7 @@ describe('direct passthrough route-level', () => {
           gateway_glm_4444: {
             routing: {
               thinking: [
-                { id: 'thinking-primary', targets: [firstProviderKey, secondProviderKey], priority: 200 },
+                { id: 'thinking-primary', targets: primaryProviderKeys, priority: 200 },
               ],
               default: [
                 { id: 'default-primary', targets: [defaultProviderKey], priority: 100 },
@@ -1904,9 +1911,9 @@ describe('direct passthrough route-level', () => {
       ['gateway_glm_4444', (server as any).hubPipeline],
     ]);
     (server as any).providerHandles = new Map([
-      [firstProviderKey, {
-        runtimeKey: firstProviderKey,
-        providerId: 'ykk',
+      ...primaryProviderKeys.map((providerKey, index) => [providerKey, {
+        runtimeKey: providerKey,
+        providerId: providerKey.split('.')[0],
         providerType: 'openai',
         providerFamily: 'openai',
         providerProtocol: 'openai-responses',
@@ -1915,23 +1922,9 @@ describe('direct passthrough route-level', () => {
           initialize: async () => {},
           cleanup: async () => {},
           processIncoming: jest.fn(),
-          processIncomingDirect: firstDirectSend,
+          processIncomingDirect: primaryDirectSends[index],
         },
-      }],
-      [secondProviderKey, {
-        runtimeKey: secondProviderKey,
-        providerId: 'asxs',
-        providerType: 'openai',
-        providerFamily: 'openai',
-        providerProtocol: 'openai-responses',
-        runtime: { modelId: 'gpt-5.4-mini' },
-        instance: {
-          initialize: async () => {},
-          cleanup: async () => {},
-          processIncoming: jest.fn(),
-          processIncomingDirect: secondDirectSend,
-        },
-      }],
+      }]),
       [defaultProviderKey, {
         runtimeKey: defaultProviderKey,
         providerId: 'ykk',
@@ -1948,7 +1941,7 @@ describe('direct passthrough route-level', () => {
       }],
     ]);
 
-    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+    const outcomePromise = (server as any).executeRouterDirectPipelineForPort(
       {
         port: 4444,
         host: '127.0.0.1',
@@ -1970,19 +1963,26 @@ describe('direct passthrough route-level', () => {
         metadata: {},
       },
     );
+    for (let i = 0; i < 8; i += 1) {
+      await Promise.resolve();
+      await jest.runOnlyPendingTimersAsync();
+    }
+    const outcome = await outcomePromise;
 
     expect(outcome.used).toBe(true);
     expect(outcome.auditContext.providerKey).toBe(defaultProviderKey);
     expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_default_route_after_exhausted' });
-    expect(firstDirectSend).toHaveBeenCalledTimes(1);
-    expect(secondDirectSend).toHaveBeenCalledTimes(1);
+    for (const directSend of primaryDirectSends) {
+      expect(directSend).toHaveBeenCalledTimes(1);
+    }
     expect(defaultDirectSend).toHaveBeenCalledTimes(1);
-    expect(route).toHaveBeenCalledTimes(3);
-    expect(route.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
+    expect(route).toHaveBeenCalledTimes(6);
+    expect(route.mock.calls[5]?.[1]).toEqual(expect.objectContaining({
       allowedProviders: [defaultProviderKey],
       routecodexRoutingPolicyGroup: 'gateway_glm_4444',
     }));
     expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    jest.useRealTimers();
   });
 
   it('HTTP BLACKBOX: router-direct provider HTTP 401 never enters standard executor', async () => {

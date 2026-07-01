@@ -262,6 +262,25 @@ fn inspect_responses(
     required_action: Option<serde_json::Value>,
 ) -> StopGatewayContext {
     let status_str = status.as_deref().unwrap_or("").to_lowercase();
+    let has_internal_stop_tool = output
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .any(is_internal_stop_output_item)
+        || required_action
+            .as_ref()
+            .is_some_and(has_internal_stop_required_action);
+
+    if has_internal_stop_tool {
+        return StopGatewayContext {
+            observed: true,
+            eligible: true,
+            source: "responses".to_string(),
+            reason: "responses_required_action_internal_stop_tool".to_string(),
+            choice_index: None,
+            has_tool_calls: Some(true),
+        };
+    }
 
     // Non-completed status
     if !status_str.is_empty() && status_str != "completed" {
@@ -476,6 +495,61 @@ fn has_tool_like_output(value: &serde_json::Value) -> bool {
         || type_str.contains("tool")
 }
 
+fn is_internal_stop_output_item(value: &serde_json::Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    let item_type = obj
+        .get("type")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    if !matches!(
+        item_type,
+        "function_call" | "custom_tool_call" | "tool_call" | "tool_use"
+    ) {
+        return false;
+    }
+    let name = obj
+        .get("name")
+        .or_else(|| obj.get("toolName"))
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            obj.get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(|value| value.as_str())
+        })
+        .map(str::trim)
+        .map(str::to_ascii_lowercase);
+    matches!(
+        name.as_deref(),
+        Some(name) if INTERNAL_STOP_TOOL_NAMES.contains(&name)
+    )
+}
+
+fn has_internal_stop_required_action(value: &serde_json::Value) -> bool {
+    let Some(tool_calls) = value
+        .get("submit_tool_outputs")
+        .and_then(|submit| submit.get("tool_calls"))
+        .and_then(|tool_calls| tool_calls.as_array())
+    else {
+        return false;
+    };
+    tool_calls.iter().any(|tool_call| {
+        let name = tool_call
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(|value| value.as_str())
+            .or_else(|| tool_call.get("name").and_then(|value| value.as_str()))
+            .map(str::trim)
+            .map(str::to_ascii_lowercase);
+        matches!(
+            name.as_deref(),
+            Some(name) if INTERNAL_STOP_TOOL_NAMES.contains(&name)
+        )
+    })
+}
+
 fn normalize_source(value: Option<&serde_json::Value>) -> String {
     match value
         .and_then(|value| value.as_str())
@@ -659,6 +733,34 @@ mod tests {
         let result = inspect(&payload);
         assert!(!result.observed);
         assert!(!result.eligible);
+    }
+
+    #[test]
+    fn responses_required_action_reasoning_stop_is_eligible() {
+        let payload = json!({
+            "id": "resp_reasoning_stop_required_action",
+            "status": "requires_action",
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [{
+                        "id": "call_reasoning_stop",
+                        "type": "function",
+                        "function": {
+                            "name": "reasoningStop",
+                            "arguments": "{\"stopreason\":2,\"reason\":\"continue\"}"
+                        }
+                    }]
+                }
+            }
+        });
+        let result = inspect(&payload);
+        assert!(result.observed);
+        assert!(result.eligible);
+        assert_eq!(
+            result.reason,
+            "responses_required_action_internal_stop_tool"
+        );
     }
 
     #[test]

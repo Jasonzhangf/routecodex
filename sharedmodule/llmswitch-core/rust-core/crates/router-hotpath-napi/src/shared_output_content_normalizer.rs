@@ -474,8 +474,12 @@ pub fn normalize_responses_message_item_json(
     item_json: String,
     options_json: Option<String>,
 ) -> NapiResult<String> {
-    let item: Value = serde_json::from_str(&item_json)
-        .map_err(|error| napi::Error::from_reason(format!("Failed to parse Responses message item JSON: {}", error)))?;
+    let item: Value = serde_json::from_str(&item_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "Failed to parse Responses message item JSON: {}",
+            error
+        ))
+    })?;
     let options = match options_json {
         Some(raw) => Some(serde_json::from_str::<Value>(&raw).map_err(|error| {
             napi::Error::from_reason(format!(
@@ -494,8 +498,12 @@ pub fn expand_responses_message_item_json(
     item_json: String,
     options_json: Option<String>,
 ) -> NapiResult<String> {
-    let item: Value = serde_json::from_str(&item_json)
-        .map_err(|error| napi::Error::from_reason(format!("Failed to parse Responses message item JSON: {}", error)))?;
+    let item: Value = serde_json::from_str(&item_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "Failed to parse Responses message item JSON: {}",
+            error
+        ))
+    })?;
     let options = match options_json {
         Some(raw) => Some(serde_json::from_str::<Value>(&raw).map_err(|error| {
             napi::Error::from_reason(format!(
@@ -507,13 +515,12 @@ pub fn expand_responses_message_item_json(
     };
     let normalized = normalize_responses_message_item_value(&item, options.as_ref())
         .map_err(napi::Error::from_reason)?;
-    let source = normalized
-        .as_object()
-        .ok_or_else(|| napi::Error::from_reason("Invalid Responses message normalization result"))?;
-    let message = source
-        .get("message")
-        .cloned()
-        .ok_or_else(|| napi::Error::from_reason("Invalid Responses message normalization result: missing message"))?;
+    let source = normalized.as_object().ok_or_else(|| {
+        napi::Error::from_reason("Invalid Responses message normalization result")
+    })?;
+    let message = source.get("message").cloned().ok_or_else(|| {
+        napi::Error::from_reason("Invalid Responses message normalization result: missing message")
+    })?;
     let output = if let Some(reasoning) = source.get("reasoning").cloned() {
         Value::Array(vec![reasoning, message])
     } else {
@@ -523,8 +530,9 @@ pub fn expand_responses_message_item_json(
 }
 
 pub fn normalize_responses_output_items_json(output_json: String) -> NapiResult<String> {
-    let output: Value = serde_json::from_str(&output_json)
-        .map_err(|error| napi::Error::from_reason(format!("Failed to parse Responses output JSON: {}", error)))?;
+    let output: Value = serde_json::from_str(&output_json).map_err(|error| {
+        napi::Error::from_reason(format!("Failed to parse Responses output JSON: {}", error))
+    })?;
     let Some(items) = output.as_array() else {
         return serde_json::to_string(&Vec::<Value>::new())
             .map_err(|error| napi::Error::from_reason(error.to_string()));
@@ -555,7 +563,9 @@ pub fn normalize_responses_output_items_json(output_json: String) -> NapiResult<
                 normalized_items.push(reasoning);
             }
             let message = source.get("message").cloned().ok_or_else(|| {
-                napi::Error::from_reason("Invalid Responses message normalization result: missing message")
+                napi::Error::from_reason(
+                    "Invalid Responses message normalization result: missing message",
+                )
             })?;
             normalized_items.push(message);
         } else {

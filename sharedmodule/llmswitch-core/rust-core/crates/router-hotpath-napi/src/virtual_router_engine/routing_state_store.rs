@@ -424,8 +424,10 @@ fn resolve_override_session_dir() -> Option<PathBuf> {
 }
 
 fn resolve_session_dir() -> Option<PathBuf> {
-    if let Some(explicit) = resolve_override_session_dir() {
-        return Some(explicit);
+    match read_override_session_dir() {
+        SessionDirOverride::Path(explicit) => return Some(explicit),
+        SessionDirOverride::Disabled => return None,
+        SessionDirOverride::Inherit => {}
     }
     resolve_rcc_user_dir().map(|base| base.join("sessions"))
 }

@@ -2066,8 +2066,60 @@ fn materialize_responses_continuation_payload(
     }
     let pending_call_ids = collect_pending_bridge_function_call_ids(&prefix);
 
-    if find_exact_prefix_delta(&prefix, &input_items).is_some() || input_items == prefix {
+    if input_items == prefix {
         return Value::Null;
+    }
+
+    if let Some(prefix_delta) = find_exact_prefix_delta(&prefix, &input_items) {
+        let prefix_delta =
+            raw_suffix_for_normalized_delta(&input_items_raw, &input_items, &prefix_delta);
+        if prefix_delta.is_empty() {
+            return Value::Null;
+        }
+
+        let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
+        let submitted_details = collect_submitted_tool_output_details(&prefix_delta);
+        let mut full_input = prefix_raw.clone();
+        full_input.extend(prefix_delta.clone());
+
+        let mut payload = pick_responses_persisted_fields(&Value::Object(incoming_obj.clone()))
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+
+        for (key, value) in incoming_obj {
+            if key == "input" || key == "response_id" || key == "tool_outputs" {
+                continue;
+            }
+            if key == "previous_response_id" {
+                continue;
+            }
+            payload.insert(key, value);
+        }
+
+        let provider_key = read_trimmed_string(entry_obj.get("providerKey"));
+
+        payload.insert("input".to_string(), Value::Array(full_input.clone()));
+        payload.remove("previous_response_id");
+
+        return serde_json::json!({
+            "payload": Value::Object(payload),
+            "meta": {
+                "restoredFromResponseId": last_response_id.map(Value::String).unwrap_or(Value::Null),
+                "previousRequestId": entry_obj.get("requestId").cloned().unwrap_or(Value::Null),
+                "providerKey": provider_key.map(Value::String).unwrap_or(Value::Null),
+                "requestId": request_id.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+                "scopeKey": scope_key.map(|value| Value::String(value.to_string())).unwrap_or(Value::Null),
+                "materialized": true,
+                "materializedMode": "local_full_input",
+                "incomingInputItems": input_items.len(),
+                "continuationDeltaItems": prefix_delta.len(),
+                "fullInputItems": full_input.len(),
+                "fullInput": full_input,
+                "restoredTools": read_entry_tools_value(&entry_obj),
+                "toolOutputsDetailed": submitted_details,
+            }
+        });
     }
 
     if let Some(suffix_delta) =
@@ -2505,6 +2557,90 @@ mod tests {
         assert_eq!(full_input.len(), 3);
         assert_eq!(full_input[1]["call_id"], json!("call_resume_released_1"));
         assert_eq!(full_input[2]["call_id"], json!("call_resume_released_1"));
+    }
+
+    #[test]
+    fn materialize_does_not_duplicate_released_prefix_when_incoming_contains_full_history() {
+        let prefix = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "start" }]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"pwd\"}"
+            },
+            {
+                "type": "function_call_output",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "output": "ok"
+            }
+        ]);
+        let incoming = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "start" }]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"pwd\"}"
+            },
+            {
+                "type": "function_call_output",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "output": "ok"
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "continue" }]
+            }
+        ]);
+
+        let materialized = materialize_responses_continuation_payload(
+            &json!({
+                "requestId": "req_materialize_released_1",
+                "basePayload": {
+                    "model": "gpt-5.5",
+                    "store": true
+                },
+                "input": [],
+                "releasedInputPrefix": prefix,
+                "lastResponseId": "resp_materialize_released_1",
+                "tools": Value::Null
+            }),
+            &json!({
+                "model": "gpt-5.5",
+                "input": incoming,
+                "stream": true
+            }),
+            Some("req_materialize_released_2"),
+            Some("port:4444|entry:responses|owner:relay|session:s1"),
+        );
+
+        let payload = materialized.get("payload").and_then(Value::as_object).unwrap();
+        let input = payload.get("input").and_then(Value::as_array).unwrap();
+        assert_eq!(input.len(), 4);
+        assert_eq!(input[0]["content"][0]["text"], json!("start"));
+        assert_eq!(input[3]["content"][0]["text"], json!("continue"));
+
+        let meta = materialized.get("meta").and_then(Value::as_object).unwrap();
+        assert_eq!(meta.get("incomingInputItems").and_then(Value::as_u64), Some(4));
+        assert_eq!(
+            meta.get("continuationDeltaItems").and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(meta.get("fullInputItems").and_then(Value::as_u64), Some(4));
     }
 
     #[test]

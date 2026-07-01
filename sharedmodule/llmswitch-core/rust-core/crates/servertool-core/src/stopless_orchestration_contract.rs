@@ -103,20 +103,12 @@ fn is_stop_message_budget_exhausted(stopless_control: Option<&Value>) -> bool {
     let repeat_count = stopless
         .get("repeatCount")
         .and_then(Value::as_u64)
-        .or_else(|| {
-            stopless
-                .get("repeat_count")
-                .and_then(Value::as_u64)
-        })
+        .or_else(|| stopless.get("repeat_count").and_then(Value::as_u64))
         .unwrap_or(0);
     let max_repeats = stopless
         .get("maxRepeats")
         .and_then(Value::as_u64)
-        .or_else(|| {
-            stopless
-                .get("max_repeats")
-                .and_then(Value::as_u64)
-        })
+        .or_else(|| stopless.get("max_repeats").and_then(Value::as_u64))
         .unwrap_or(0);
     max_repeats > 0 && repeat_count >= max_repeats
 }

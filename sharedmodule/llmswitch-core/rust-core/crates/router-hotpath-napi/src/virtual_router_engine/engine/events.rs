@@ -576,9 +576,16 @@ mod tests {
                 .get("providerCooldowns")
                 .and_then(|v| v.as_array())
                 .expect("providerCooldowns array");
-            assert!(
-                persisted_entries.is_empty(),
-                "persisted export must stay empty under simple cooldown truth"
+            assert_eq!(persisted_entries.len(), 1);
+            assert_eq!(
+                persisted_entries[0]
+                    .get("providerKey")
+                    .and_then(|v| v.as_str()),
+                Some("sdfv.1.gpt-5.4")
+            );
+            assert_eq!(
+                persisted_entries[0].get("state").and_then(|v| v.as_str()),
+                Some("tripped")
             );
         });
 

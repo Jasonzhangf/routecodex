@@ -108,9 +108,9 @@ fn ensure_response_created_at(payload: &mut Value, source: &Map<String, Value>) 
     let Some(row) = payload.as_object_mut() else {
         return;
     };
-    let has_valid_created_at = row
-        .get("created_at")
-        .is_some_and(|value| value.as_i64().is_some_and(|raw| raw > 0) || value.as_u64().is_some_and(|raw| raw > 0));
+    let has_valid_created_at = row.get("created_at").is_some_and(|value| {
+        value.as_i64().is_some_and(|raw| raw > 0) || value.as_u64().is_some_and(|raw| raw > 0)
+    });
     if !has_valid_created_at {
         row.insert("created_at".to_string(), read_created_at(source));
     }

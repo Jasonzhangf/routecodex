@@ -737,6 +737,11 @@ export function decorateMetadataForAttempt(
       ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
       'preselected route is single-use and must not pin provider retry attempts'
     );
+    MetadataCenter.read(clone)?.releaseRuntimeControl(
+      'providerProtocol',
+      ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
+      'provider protocol is attempt-scoped and must be rebound after provider retry selection'
+    );
   }
   return clone;
 }

@@ -862,6 +862,7 @@ fn run_servertool_resp_stopless_hook_skeleton(
         stop_gateway_reason,
         "finish_reason_stop"
             | "finish_reason_tool_calls_internal_stop_tool"
+            | "responses_required_action_internal_stop_tool"
             | "status_completed"
             | "responses_output_completed"
     ) {

@@ -42,7 +42,9 @@ description: RouteCodex 调试与架构路由入口
 - 合同没锁清楚时，禁止直接 grep 后改实现。
 - 1-2 次查询内找不到唯一 owner 或唯一主线边，先补 map/contract。
 - 数据/控制分流先验：如果数据字段能从原始请求/响应负载直接拿到，就不要从 `MetadataCenter`、上下文 carrier、日志投影、matchedPort/localPort 之类中间语义里再取一遍；`MetadataCenter` 只用于控制语义，不能当数据面第二真源。
+- 请求协议字段先验：HTTP headers、body 标准字段、`metadata`、`client_metadata`、`x-*` / `x-codex-*` 都是请求协议数据面，默认透传；不要搬进 `MetadataCenter`，不要因为名字含 metadata 就判成 RouteCodex 控制信号。`MetadataCenter` 只写 RouteCodex 内部控制信号。
 - 反模式：同一字段多次派生、多处 fallback、先从 payload 再从 metadata 回读、用上下文零散字段拼接原始数据。
+- 直通路径特例：provider-direct / same-protocol direct 若绕过 request-executor，必须在实际送给 provider 前把 `clientConnectionState` 生成的 `abortSignal` 写进 provider runtime metadata；只保留 state 不够，direct provider 会继续跑到自然结束。
 
 ### Virtual Router 在线诊查优先
 

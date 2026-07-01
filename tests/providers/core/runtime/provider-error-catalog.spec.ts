@@ -24,4 +24,14 @@ describe('provider error catalog normalization', () => {
     expect(normalized?.code).toBe('429.2000');
     expect(normalized?.class).toBe('unrecoverable');
   });
+
+  it('normalizes unknown HTTP 5xx provider status as recoverable', () => {
+    const normalized = normalizeKnownProviderError({
+      statusCode: 524,
+      code: 'HTTP_524',
+      message: 'HTTP 524: upstream timed out',
+    });
+    expect(normalized?.key).toBe('HTTP_5XX');
+    expect(normalized?.class).toBe('recoverable');
+  });
 });

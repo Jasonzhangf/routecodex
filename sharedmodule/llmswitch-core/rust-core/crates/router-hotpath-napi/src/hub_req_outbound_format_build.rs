@@ -41,7 +41,7 @@ fn strip_private_fields(value: &Value) -> Value {
             let mut new_map = serde_json::Map::new();
             for (key, val) in map {
                 // Strip private/internal control fields from provider outbound payloads.
-                if key != "metadata" && !key.starts_with('_') {
+                if !is_provider_outbound_metadata_key(key) && !key.starts_with('_') {
                     new_map.insert(key.clone(), strip_private_fields(val));
                 }
             }
@@ -50,6 +50,10 @@ fn strip_private_fields(value: &Value) -> Value {
         Value::Array(arr) => Value::Array(arr.iter().map(|v| strip_private_fields(v)).collect()),
         _ => value.clone(),
     }
+}
+
+fn is_provider_outbound_metadata_key(key: &str) -> bool {
+    key.to_ascii_lowercase().contains("metadata")
 }
 
 fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Value {
@@ -1161,6 +1165,35 @@ mod tests {
 
         let result = build_format_request(input).unwrap();
         assert!(result.payload.get("metadata").is_none());
+    }
+
+    #[test]
+    fn test_provider_outbound_strips_client_metadata_fields() {
+        let input = FormatBuildInput {
+            format_envelope: serde_json::json!({
+                "format": "openai-responses",
+                "version": "v1",
+                "payload": {
+                    "model": "gpt-5.3-codex-spark",
+                    "input": [{
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "hello",
+                            "metadata": {"nested": "must-not-leak"}
+                        }]
+                    }],
+                    "client_metadata": {"session_id": "must-not-leak"},
+                    "metadata": {"request": "must-not-leak"}
+                }
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = build_format_request(input).unwrap();
+        let serialized = serde_json::to_string(&result.payload).unwrap();
+        assert!(!serialized.contains("metadata"));
+        assert!(!serialized.contains("must-not-leak"));
     }
 
     #[test]

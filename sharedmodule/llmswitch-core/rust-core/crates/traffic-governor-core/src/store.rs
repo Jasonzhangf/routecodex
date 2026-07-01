@@ -59,7 +59,11 @@ impl FileStateStore {
     }
 
     /// 创建 lease — 记录到文件
-    pub fn create_lease(&self, ctx: &AcquireContext, config: &TrafficPolicy) -> Result<Permit, GovernorError> {
+    pub fn create_lease(
+        &self,
+        ctx: &AcquireContext,
+        config: &TrafficPolicy,
+    ) -> Result<Permit, GovernorError> {
         let now = now_ms();
         let lease_id = format!("lease-{}", uuid::Uuid::new_v4());
         let pid = std::process::id();
@@ -165,7 +169,10 @@ mod tests {
     #[test]
     fn multiple_leases_counted() {
         let store = FileStateStore::new("/tmp/traffic-test");
-        let policy = TrafficPolicy { max_in_flight: 5, ..TrafficPolicy::default_multi() };
+        let policy = TrafficPolicy {
+            max_in_flight: 5,
+            ..TrafficPolicy::default_multi()
+        };
         for i in 0..3 {
             let ctx = make_ctx("openai", &format!("req-{}", i));
             store.create_lease(&ctx, &policy).unwrap();
@@ -186,7 +193,9 @@ mod tests {
     #[test]
     fn different_keys_isolated() {
         let store = FileStateStore::new("/tmp/traffic-test");
-        store.create_lease(&make_ctx("openai", "r1"), &TrafficPolicy::default_multi()).unwrap();
+        store
+            .create_lease(&make_ctx("openai", "r1"), &TrafficPolicy::default_multi())
+            .unwrap();
         assert_eq!(store.active_lease_count("openai"), 1);
         assert_eq!(store.active_lease_count("deepseek"), 0);
     }

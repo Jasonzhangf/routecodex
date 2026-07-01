@@ -29,6 +29,26 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.providerProtocol).toBeUndefined();
   });
 
+  it('releases attempt-scoped providerProtocol before retry provider rebinding', () => {
+    const initialMetadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(initialMetadata);
+    center.writeRuntimeControl(
+      'providerProtocol',
+      'openai-responses',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'releases attempt-scoped providerProtocol before retry provider rebinding',
+        stage: 'test_setup'
+      },
+      'seed previous attempt provider protocol'
+    );
+
+    const retryMetadata = decorateMetadataForAttempt(initialMetadata, 2, new Set(['provider.first']));
+
+    expect(MetadataCenter.read(retryMetadata)).toBe(center);
+    expect(center.readRuntimeControl().providerProtocol).toBeUndefined();
+  });
+
   it('extracts sessionDaemonId from apikey bearer suffix', () => {
     const apiKey = encodeSessionClientApiKey('sk-base', 'sessiond_meta_1');
     const metadata = buildRequestMetadata({

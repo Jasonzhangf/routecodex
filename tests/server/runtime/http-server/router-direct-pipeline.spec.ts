@@ -172,6 +172,7 @@ describe('router-direct-pipeline', () => {
 
       expect(result.used).toBe(true);
       const sentPayload = (openaiHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(result.auditContext.payload).toBe(sentPayload);
       expect(sentPayload).not.toBe(requestPayload);
       expect(sentPayload.model).toBe('gpt-5.5');
       expect(sentPayload.reasoning_effort).toBe('medium');
@@ -475,6 +476,99 @@ describe('router-direct-pipeline', () => {
       expect(sentPayload.model).toBe('gpt-5.3-codex-spark');
       expect(sentPayload.reasoning).toEqual({ effort: 'high' });
       expect(requestPayload.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
+    });
+
+    it('preserves protocol metadata fields before direct provider send', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'openai',
+        providerFamily: 'openai',
+      } as ProviderHandle;
+      const requestPayload = {
+        model: 'gpt-5.5',
+        input: [{
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: 'raw',
+            metadata: { nested: 'must-not-leak' },
+          }],
+        }],
+        client_metadata: {
+          session_id: 'must-not-leak',
+          'x-codex-turn-metadata': 'must-not-leak',
+        },
+        metadata: { request: 'must-not-leak' },
+      };
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-5.3-codex-spark' },
+        requestPayload,
+        target: {
+          providerKey: 'openai.key.gpt-5.3-codex-spark',
+          providerType: 'openai',
+          runtimeKey: handle.runtimeKey,
+          modelId: 'gpt-5.3-codex-spark',
+        },
+        routingDecision: { routeName: 'tools' },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      const sentPayload = (handle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload).not.toBe(requestPayload);
+      expect(sentPayload.model).toBe('gpt-5.3-codex-spark');
+      expect(sentPayload.input).toEqual(requestPayload.input);
+      expect(sentPayload.client_metadata).toEqual(requestPayload.client_metadata);
+      expect(sentPayload.metadata).toEqual(requestPayload.metadata);
+      expect(requestPayload.client_metadata.session_id).toBe('must-not-leak');
+    });
+
+    it('routes provider HTTP 403 response objects into direct provider error handling', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'openai',
+        providerFamily: 'openai',
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: jest.fn(async () => ({
+            status: 403,
+            body: { error: { message: 'upstream denied' } },
+          })),
+        },
+      } as ProviderHandle;
+      const onProviderError = jest.fn(async () => {});
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-5.4-mini' },
+        requestPayload: {
+          model: 'gpt-5.5',
+          stream: true,
+          input: 'ping',
+        },
+        target: {
+          providerKey: 'openai.key.gpt-5.4-mini',
+          providerType: 'openai',
+          runtimeKey: handle.runtimeKey,
+          modelId: 'gpt-5.4-mini',
+        },
+        routingDecision: { routeName: 'thinking', pool: ['openai.key.gpt-5.4-mini'] },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+        onProviderError,
+      };
+
+      await expect(executeRouterDirectPipeline(input)).rejects.toMatchObject({
+        status: 403,
+        statusCode: 403,
+        code: 'HTTP_403',
+      });
+      expect(onProviderError).toHaveBeenCalledTimes(1);
     });
 
     it('keeps reasoning.summary by default for direct responses target models', async () => {

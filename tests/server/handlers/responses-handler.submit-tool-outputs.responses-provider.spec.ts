@@ -8,110 +8,105 @@ const mockCaptureResponsesRequestContextForRequest = jest.fn();
 const mockClearResponsesConversationByRequestId = jest.fn(async () => undefined);
 const mockFinalizeResponsesConversationRequestRetention = jest.fn(async () => undefined);
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn(async () => null);
+const mockResumeLatestResponsesContinuationByScope = jest.fn(async () => null);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
+const createNativeExportsMock = () => ({
+  getRouterHotpathJsonBindingSync: jest.fn(() => ({})),
+  getNetworkErrorCodes: jest.fn(() => []),
+  mapChatToolsToBridgeJson: jest.fn(async (rawTools: unknown) => Array.isArray(rawTools) ? rawTools : []),
+  injectMcpToolsForChatJson: jest.fn(async (input: unknown) => input),
+  injectMcpToolsForResponsesJson: jest.fn(async (input: unknown) => input),
+  normalizeAssistantTextToToolCallsJson: jest.fn(async (input: unknown) => input),
+  captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
+    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
+  })),
+  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
+    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
+    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
+  })),
+  planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, entryEndpoint: string, responseIdFromPath?: string) => ({
+    mode: entryEndpoint === '/v1/responses.submit_tool_outputs' ? 'submit_tool_outputs' : 'none',
+    payload: {
+      ...payload,
+      ...(responseIdFromPath ? { response_id: responseIdFromPath } : {}),
+    },
+    responseId: responseIdFromPath,
+  })),
+  buildAnthropicResponseFromChatJson: jest.fn(async (input: unknown) => input),
+  sanitizeProviderOutboundPayload: jest.fn(async (input: unknown) => input),
+  hasDeclaredApplyPatchToolNative: jest.fn(() => false),
+  evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
+  planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'unmatched', defaultPoolTargets: [] })),
+  convertResponsesRequestToChatNative: jest.fn((input: unknown) => input),
+  evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ providerWireValid: true, requiresHubRelay: false })),
+  buildResponsesPayloadFromChatNative: jest.fn((input: unknown) => input),
+  projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
+  projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string }) => ({
+    emit: true,
+    frame: args.frame ?? '',
+    state: undefined,
+  })),
+  projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
+  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
+  describeHubPipelineContractsNative: jest.fn(() => ({})),
+  describeVirtualRouterContractsNative: jest.fn(() => ({})),
+  describeMetaCarrierContractsNative: jest.fn(() => ({})),
+  describePipelineContractNative: jest.fn(() => ({})),
+  validatePipelineNodeContractBoundaryNative: jest.fn(() => ({ valid: true })),
+  classifyProviderFailure: jest.fn(() => ({ classification: 'unknown' })),
+  deriveFinishReasonNative: jest.fn(() => undefined),
+  isToolCallContinuationResponseNative: jest.fn(() => false),
+  isEmptyClientResponsePayloadNative: jest.fn(() => false),
+  classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false, reason: undefined })),
+  detectToolExecutionFailuresNative: jest.fn(() => []),
+  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: {
+    request?: Record<string, unknown>;
+  }) => {
+    const request = input.request ?? {};
+    const toolOutputs = Array.isArray(request.tool_outputs) ? request.tool_outputs : [];
+    const first = toolOutputs[0];
+    if (!first || typeof first !== 'object' || Array.isArray(first)) {
+      return undefined;
+    }
+    const output = (first as Record<string, unknown>).output;
+    if (typeof output !== 'string' || !output.trim()) {
+      return undefined;
+    }
+    try {
+      const parsed = JSON.parse(output) as Record<string, unknown>;
+      return typeof parsed.routeHint === 'string' ? parsed.routeHint : undefined;
+    } catch {
+      return undefined;
+    }
+  }),
+  resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
+});
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContextForRequest,
+  clearAllResponsesConversationState: jest.fn(async () => undefined),
   clearResponsesConversationByRequestId: mockClearResponsesConversationByRequestId,
+  clearUnresolvedResponsesConversationRequests: jest.fn(async () => undefined),
+  createResponsesJsonToSseConverter: jest.fn(async () => ({ convertResponseToJsonToSse: async () => ({}) })),
+  createResponsesSseToJsonConverter: jest.fn(async () => ({ convertSseToJson: async () => ({}) })),
   finalizeResponsesConversationRequestRetention: mockFinalizeResponsesConversationRequestRetention,
   lookupResponsesContinuationByResponseId: mockLookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
+  preloadCriticalBridgeRuntimeModules: jest.fn(async () => undefined),
   recordResponsesResponseForRequest: mockRecordResponsesResponseForRequest,
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
+  reportProviderErrorToRouterPolicy: jest.fn(async () => undefined),
+  reportProviderSuccessToRouterPolicy: jest.fn(async () => undefined),
+  resetResponsesConversationStateForRestartSimulation: jest.fn(async () => undefined),
   resumeResponsesConversation: mockResumeResponsesConversation,
+  resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
+  writeSnapshotViaHooks: jest.fn(async () => undefined),
 }));
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
-  captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
-    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
-    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
-  })),
-  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
-    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
-    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
-  })),
-  planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, entryEndpoint: string, responseIdFromPath?: string) => ({
-    mode: entryEndpoint === '/v1/responses.submit_tool_outputs' ? 'submit_tool_outputs' : 'none',
-    payload: {
-      ...payload,
-      ...(responseIdFromPath ? { response_id: responseIdFromPath } : {}),
-    },
-    responseId: responseIdFromPath,
-  })),
-  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
-  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
-  projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string }) => ({
-    emit: true,
-    frame: args.frame ?? '',
-    state: undefined,
-  })),
-  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: {
-    request?: Record<string, unknown>;
-  }) => {
-    const request = input.request ?? {};
-    const toolOutputs = Array.isArray(request.tool_outputs) ? request.tool_outputs : [];
-    const first = toolOutputs[0];
-    if (!first || typeof first !== 'object' || Array.isArray(first)) {
-      return undefined;
-    }
-    const output = (first as Record<string, unknown>).output;
-    if (typeof output !== 'string' || !output.trim()) {
-      return undefined;
-    }
-    try {
-      const parsed = JSON.parse(output) as Record<string, unknown>;
-      return typeof parsed.routeHint === 'string' ? parsed.routeHint : undefined;
-    } catch {
-      return undefined;
-    }
-  }),
-  resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
-}));
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', () => ({
-  captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
-    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
-    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
-  })),
-  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
-    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
-    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
-  })),
-  planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, entryEndpoint: string, responseIdFromPath?: string) => ({
-    mode: entryEndpoint === '/v1/responses.submit_tool_outputs' ? 'submit_tool_outputs' : 'none',
-    payload: {
-      ...payload,
-      ...(responseIdFromPath ? { response_id: responseIdFromPath } : {}),
-    },
-    responseId: responseIdFromPath,
-  })),
-  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
-  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
-  projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string }) => ({
-    emit: true,
-    frame: args.frame ?? '',
-    state: undefined,
-  })),
-  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: {
-    request?: Record<string, unknown>;
-  }) => {
-    const request = input.request ?? {};
-    const toolOutputs = Array.isArray(request.tool_outputs) ? request.tool_outputs : [];
-    const first = toolOutputs[0];
-    if (!first || typeof first !== 'object' || Array.isArray(first)) {
-      return undefined;
-    }
-    const output = (first as Record<string, unknown>).output;
-    if (typeof output !== 'string' || !output.trim()) {
-      return undefined;
-    }
-    try {
-      const parsed = JSON.parse(output) as Record<string, unknown>;
-      return typeof parsed.routeHint === 'string' ? parsed.routeHint : undefined;
-    } catch {
-      return undefined;
-    }
-  }),
-  resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
-}));
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', createNativeExportsMock);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', createNativeExportsMock);
 
 jest.unstable_mockModule('../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -181,6 +176,7 @@ const createResponsesBridgeMock = () => ({
     sanitizedBody: args.body,
     finishReason: undefined,
   })),
+  rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn(() => undefined),
   resolveResponsesRequestContextForHttp: jest.fn((args: { fallback?: unknown }) => args.fallback),
   resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => undefined),
@@ -209,11 +205,13 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     mockClearResponsesConversationByRequestId.mockReset();
     mockFinalizeResponsesConversationRequestRetention.mockReset();
     mockMaterializeLatestResponsesContinuationByScope.mockReset();
+    mockResumeLatestResponsesContinuationByScope.mockReset();
     mockRecordResponsesResponseForRequest.mockReset();
     mockCaptureResponsesRequestContextForRequest.mockResolvedValue(undefined);
     mockClearResponsesConversationByRequestId.mockResolvedValue(undefined);
     mockFinalizeResponsesConversationRequestRetention.mockResolvedValue(undefined);
     mockMaterializeLatestResponsesContinuationByScope.mockResolvedValue(null);
+    mockResumeLatestResponsesContinuationByScope.mockResolvedValue(null);
     mockRecordResponsesResponseForRequest.mockResolvedValue(undefined);
     mockLookupResponsesContinuationByResponseId.mockResolvedValue(null);
   });
@@ -410,7 +408,6 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     expect(executePipeline).toHaveBeenCalledTimes(1);
     const pipelineInput = executePipeline.mock.calls[0]?.[0];
     expect(pipelineInput.entryEndpoint).toBe('/v1/responses');
-    expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
     expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).toMatchObject({
       routeHint: 'thinking',
       continuationOwner: 'relay',
@@ -556,7 +553,10 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
       providerKey: 'dibittai.crsa.gpt-5.4',
     });
     const center = MetadataCenter.read(pipelineInput.metadata);
-    expect(center?.readRequestTruth()).toEqual({});
+    expect(center?.readRequestTruth()).toEqual(expect.objectContaining({
+      requestId: expect.any(String),
+      clientRequestId: expect.any(String),
+    }));
     expect(center?.readRuntimeControl()).toMatchObject({
       routeHint: 'thinking',
       retryProviderKey: 'dibittai.crsa.gpt-5.4',
@@ -788,7 +788,10 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
 
     const pipelineInput = executePipeline.mock.calls[0]?.[0];
     const center = MetadataCenter.read(pipelineInput.metadata);
-    expect(center?.readRequestTruth()).toEqual({});
+    expect(center?.readRequestTruth()).toEqual(expect.objectContaining({
+      requestId: expect.any(String),
+      clientRequestId: expect.any(String),
+    }));
     expect(center?.readContinuationContext().responsesResume).toMatchObject({
       providerKey: 'minimonth.key1.MiniMax-M2.7',
       routeHint: 'search/gateway-priority-5555-priority-search',

@@ -28,6 +28,7 @@ const ENTRIES: ProviderErrorCatalogEntry[] = [
   { code: '502.1000', key: 'HTTP_502', class: 'recoverable', aliases: ['HTTP_502'], status: 502, description: 'Bad gateway' },
   { code: '503.1000', key: 'HTTP_503', class: 'recoverable', aliases: ['HTTP_503'], status: 503, description: 'Service unavailable' },
   { code: '504.1000', key: 'HTTP_504', class: 'recoverable', aliases: ['HTTP_504'], status: 504, description: 'Gateway timeout' },
+  { code: '500.1999', key: 'HTTP_5XX', class: 'recoverable', aliases: ['HTTP_5XX'], description: 'Unknown upstream 5xx gateway/server error' },
   { code: '502.1200', key: 'UPSTREAM_EMPTY_OUTPUT', class: 'recoverable', aliases: ['UPSTREAM_EMPTY_OUTPUT'], status: 502, description: 'Upstream empty output' },
 
   // recoverable/sse-protocol
@@ -108,6 +109,7 @@ export function normalizeKnownProviderError(input: {
   if (status === 502) return ALIAS_INDEX.get('HTTP_502');
   if (status === 503) return ALIAS_INDEX.get('HTTP_503');
   if (status === 504) return ALIAS_INDEX.get('HTTP_504');
+  if (typeof status === 'number' && status >= 500 && status <= 599) return ALIAS_INDEX.get('HTTP_5XX');
 
   if (message.includes('fetch failed') || message.includes('network error') || message.includes('socket hang up')) {
     return ALIAS_INDEX.get('ECONNRESET');
@@ -145,6 +147,7 @@ export const PROVIDER_BLOCKING_RECOVERABLE_CODES: ReadonlySet<string> = new Set<
     e.key === 'HTTP_502' ||
     e.key === 'HTTP_503' ||
     e.key === 'HTTP_504' ||
+    e.key === 'HTTP_5XX' ||
     e.key === 'PROVIDER_TRAFFIC_SATURATED' ||
     e.key === 'SSE_DECODE_ERROR' ||
     e.key === 'SSE_TO_JSON_ERROR' ||
