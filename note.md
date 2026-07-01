@@ -1,3 +1,9 @@
+# 2026-07-01: http-server stats-manager generated source residue removed
+- Slice: physically deleted tracked generated artifacts from `src/server/runtime/http-server`: `stats-manager.js`, `stats-manager.d.ts`, `stats-manager-internals.js`, `stats-manager-internals.d.ts`, `stats-manager-table.js`, and `stats-manager-table.d.ts`. TS source remains the only source truth for this family.
+- Gate: added `source-generated-residue.spec.ts` to forbid the deleted stats-manager `.js/.d.ts` artifacts from returning to the source tree.
+- Evidence: Jest focused stats/source-residue suite PASS 6/6 suites and 14/14 tests; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
+- Remaining source-residue candidates: `executor/usage-aggregator.{js,d.ts}` and `metadata-center/*.{js,d.ts}` still need separate owner/audit slices; do not batch with this stats-manager commit.
+
 # 2026-07-01: port config legacy single-port and providerFailureExemption removed
 - Slice: `normalizePortsConfig()` now requires explicit non-empty `httpserver.ports[]`; `RouteCodexHttpServer.getPortConfigs()` no longer synthesizes a default router port from top-level `httpserver.port/host`; v2 config materialization rejects configs without `httpserver.ports[]`.
 - Slice: removed the `ProviderFailureExemption` type surface and deleted the old positive `port-config-validator-provider-failure-exemption.spec.ts`; validator now only rejects raw `providerFailureExemption` as a removed field.
