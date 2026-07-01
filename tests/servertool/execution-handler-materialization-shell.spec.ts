@@ -164,6 +164,8 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain('const outcomePlanInput =');
     expect(source).toContain('throw createServertoolProviderProtocolErrorFromPlan(');
     expect(source).toContain('planServertoolExecutionOutcomeMaterializationWithNative({');
+    expect(source).not.toContain('Boolean(args.executionState.lastExecution)');
+    expect(source).toContain('hasLastExecution: args.executionState.lastExecution != null');
     expect(source).not.toContain('planServertoolExecutionDispatchErrorWithNative({');
     expect(source).toContain('planServertoolHandlerMaterializationForPlannedWithNative(');
     expect(source).not.toContain('planServertoolHandlerContractErrorWithNative(');
@@ -304,6 +306,39 @@ describe('execution-handler-materialization-shell', () => {
       flowId: 'servertool_multi'
     });
     expect(result.execution).toMatchObject({
+      flowId: 'servertool_multi'
+    });
+  });
+
+  test('treats null last execution as absent without truthiness coercion', () => {
+    planServertoolOutcomeWithNative.mockReturnValue({
+      outcomeMode: 'servertool_only',
+      requiresPendingInjection: false,
+      remainingToolCallIds: [],
+      flowId: 'servertool_multi'
+    });
+
+    expect(() =>
+      materializeNativeToolCallExecutionOutcome({
+        baseForExecution: { id: 'base-4' } as any,
+        options: { requestId: 'req-null-last-execution-1', adapterContext: {} } as any,
+        toolCalls: [],
+        executionState: {
+          executedToolCalls: [],
+          executedIds: [],
+          executedFlowIds: [],
+          lastExecution: null as any
+        }
+      })
+    ).toThrow('[native-dispatch-contract] missing_servertool_execution_contract');
+
+    expect(planServertoolExecutionOutcomeMaterializationWithNative).toHaveBeenCalledWith({
+      requestId: 'req-null-last-execution-1',
+      outcomeMode: 'servertool_only',
+      requiresPendingInjection: false,
+      hasLastExecution: false,
+      executedToolCallsLen: 0,
+      lastExecution: null,
       flowId: 'servertool_multi'
     });
   });

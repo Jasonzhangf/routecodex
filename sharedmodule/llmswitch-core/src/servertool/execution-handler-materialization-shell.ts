@@ -36,7 +36,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
     requestId: args.options.requestId,
     outcomeMode: outcomePlan.outcomeMode,
     requiresPendingInjection: outcomePlan.requiresPendingInjection,
-    hasLastExecution: Boolean(args.executionState.lastExecution),
+    hasLastExecution: args.executionState.lastExecution != null,
     executedToolCallsLen: args.executionState.executedToolCalls.length,
     lastExecution: args.executionState.lastExecution,
     flowId: outcomePlan.flowId
