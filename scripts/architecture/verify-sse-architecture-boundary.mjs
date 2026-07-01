@@ -212,6 +212,12 @@ for (const forbidden of [
   'this.config.defaultDelayMs',
   'context.options.chunkSize ||',
   'context.options.delayMs ||',
+  'messageEventsCount',
+  'outputItemsCount',
+  'contentPartsCount',
+  'deltaEventsCount',
+  'reasoningEventsCount',
+  'functionCallEventsCount',
 ]) {
   if (responsesJsonToSseConverter.includes(forbidden)) {
     failures.push(`Responses JSON->SSE converter must not keep dead context state: ${forbidden}`);
@@ -223,6 +229,12 @@ for (const forbidden of [
   'interface ResponsesConversionConfig',
   'DEFAULT_RESPONSES_CONVERSION_CONFIG',
   'resumeToolOutputs?:',
+  'outputItemsCount: number',
+  'contentPartsCount: number',
+  'deltaEventsCount: number',
+  'reasoningEventsCount: number',
+  'functionCallEventsCount: number',
+  'messageEventsCount: number',
 ]) {
   if (responsesSseTypes.includes(forbidden)) {
     failures.push(`Responses SSE types must not keep dead conversion config surface: ${forbidden}`);
@@ -249,6 +261,12 @@ for (const forbidden of [
   "normalized.includes('stream incomplete')",
   "normalized.includes('terminated')",
   "return { upstreamCode: errorCode || 'SSE_TO_JSON_ERROR', statusCode: 502, retryable: true };",
+  'messageEventsCount',
+  'outputItemsCount',
+  'contentPartsCount',
+  'deltaEventsCount',
+  'reasoningEventsCount',
+  'functionCallEventsCount',
 ]) {
   if (responsesSseToJsonConverter.includes(forbidden)) {
     failures.push(`Responses SSE decode must not synthesize wire frames in TS: ${forbidden}`);

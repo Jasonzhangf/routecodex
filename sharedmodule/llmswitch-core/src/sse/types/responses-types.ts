@@ -309,12 +309,6 @@ export interface ResponsesEventStats {
   startTime: number;
   endTime?: number;
   duration?: number;
-  outputItemsCount: number;
-  contentPartsCount: number;
-  deltaEventsCount: number;
-  reasoningEventsCount: number;
-  functionCallEventsCount: number;
-  messageEventsCount: number;
   errorCount: number;
   lastEventTime?: number;
   // wall clock ms of first semantic content / activity observed in stream

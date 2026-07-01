@@ -130,38 +130,8 @@ export class ResponsesJsonToSseConverterRefactored {
     context.eventStats.totalEvents++;
     context.eventStats.eventTypes[event.type] = (context.eventStats.eventTypes[event.type] || 0) + 1;
 
-    // 根据事件类型更新特定统计
-    switch (event.type) {
-      case 'response.created':
-      case 'response.in_progress':
-      case 'response.completed':
-      case 'response.required_action':
-      case 'response.done':
-        context.eventStats.messageEventsCount++;
-        break;
-      case 'response.output_item.added':
-      case 'response.output_item.done':
-        context.eventStats.outputItemsCount++;
-        break;
-      case 'response.content_part.added':
-      case 'response.content_part.done':
-        context.eventStats.contentPartsCount++;
-        break;
-      case 'response.output_text.delta':
-      case 'response.output_text.done':
-        context.eventStats.deltaEventsCount++;
-        break;
-      case 'response.reasoning_text.delta':
-      case 'response.reasoning_text.done':
-        context.eventStats.reasoningEventsCount++;
-        break;
-      case 'response.function_call_arguments.delta':
-      case 'response.function_call_arguments.done':
-        context.eventStats.functionCallEventsCount++;
-        break;
-      case 'response.error':
-        context.eventStats.errorCount++;
-        break;
+    if (event.type === 'response.error') {
+      context.eventStats.errorCount++;
     }
 
     // 更新时间戳
@@ -228,12 +198,6 @@ export class ResponsesJsonToSseConverterRefactored {
       totalEvents: 0,
       eventTypes: {},
       startTime: Date.now(),
-      outputItemsCount: 0,
-      contentPartsCount: 0,
-      deltaEventsCount: 0,
-      reasoningEventsCount: 0,
-      functionCallEventsCount: 0,
-      messageEventsCount: 0,
       errorCount: 0
     };
 
