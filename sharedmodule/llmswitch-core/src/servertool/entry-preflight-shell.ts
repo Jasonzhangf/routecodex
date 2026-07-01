@@ -26,7 +26,7 @@ export function runServertoolEntryPreflight(args: {
     case 'return_passthrough_non_object_chat':
       return {
         action: 'return_result',
-        result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }
+        result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }
       };
     case 'throw_client_disconnected':
       throw createServertoolProviderProtocolErrorFromPlan(
@@ -40,6 +40,8 @@ export function runServertoolEntryPreflight(args: {
         baseObject: base as JsonObject
       };
     default:
-      throw new Error(`[servertool] invalid entry preflight action: ${String(entryPreflightPlan.action)}`);
+      throw new Error(
+        `[servertool] invalid entry preflight action: ${String((entryPreflightPlan as { action: unknown }).action)}`
+      );
   }
 }

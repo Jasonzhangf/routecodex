@@ -354,7 +354,8 @@ describe('servertool CLI native bridge', () => {
         adapterClientDisconnected: false
       })
     ).toEqual({
-      action: 'return_passthrough_non_object_chat'
+      action: 'return_passthrough_non_object_chat',
+      resultMode: 'passthrough'
     });
 
     expect(

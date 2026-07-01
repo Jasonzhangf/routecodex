@@ -21,6 +21,8 @@ pub enum ServertoolEntryPreflightAction {
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolEntryPreflightPlan {
     pub action: ServertoolEntryPreflightAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_mode: Option<String>,
 }
 
 pub fn plan_servertool_entry_preflight(
@@ -29,15 +31,18 @@ pub fn plan_servertool_entry_preflight(
     if !input.has_base_object {
         return ServertoolEntryPreflightPlan {
             action: ServertoolEntryPreflightAction::ReturnPassthroughNonObjectChat,
+            result_mode: Some("passthrough".to_string()),
         };
     }
     if input.adapter_client_disconnected {
         return ServertoolEntryPreflightPlan {
             action: ServertoolEntryPreflightAction::ThrowClientDisconnected,
+            result_mode: None,
         };
     }
     ServertoolEntryPreflightPlan {
         action: ServertoolEntryPreflightAction::ContinueToToolFlow,
+        result_mode: None,
     }
 }
 
@@ -106,6 +111,7 @@ mod tests {
             plan.action,
             ServertoolEntryPreflightAction::ReturnPassthroughNonObjectChat
         );
+        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
     }
 
     #[test]
@@ -118,6 +124,7 @@ mod tests {
             plan.action,
             ServertoolEntryPreflightAction::ThrowClientDisconnected
         );
+        assert_eq!(plan.result_mode, None);
     }
 
     #[test]
@@ -130,6 +137,7 @@ mod tests {
             plan.action,
             ServertoolEntryPreflightAction::ContinueToToolFlow
         );
+        assert_eq!(plan.result_mode, None);
     }
 
     #[test]

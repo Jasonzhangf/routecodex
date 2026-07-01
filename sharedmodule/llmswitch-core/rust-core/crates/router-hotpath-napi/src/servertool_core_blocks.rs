@@ -2325,6 +2325,10 @@ fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
         passthrough_parsed["action"],
         serde_json::Value::String("return_passthrough_non_object_chat".to_string())
     );
+    assert_eq!(
+        passthrough_parsed["resultMode"],
+        serde_json::Value::String("passthrough".to_string())
+    );
 
     let disconnected = plan_servertool_entry_preflight_json(
         &serde_json::json!({
@@ -2340,6 +2344,7 @@ fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
         disconnected_parsed["action"],
         serde_json::Value::String("throw_client_disconnected".to_string())
     );
+    assert_eq!(disconnected_parsed.get("resultMode"), None);
 }
 
 #[test]

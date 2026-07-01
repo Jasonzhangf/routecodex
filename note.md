@@ -8,6 +8,11 @@
 - Slice: `ServertoolResponseStageRuntimeActionPlan` now carries Rust-owned `resultMode=passthrough` for passthrough finalize actions; `response-stage-finalize-shell.ts` consumes `finalizeRuntimeAction.resultMode` instead of hardcoding passthrough mode in TS.
 - Gate: Rust core/NAPI bridge tests, native hotpath rebuild, focused servertool Jest suites, sharedmodule `tsc`, `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and `git diff --check` are required before commit.
 
+# 2026-07-02: servertool entry-preflight passthrough mode moved to Rust plan
+- Slice: `ServertoolEntryPreflightPlan` now carries Rust-owned `resultMode=passthrough` for non-object chat passthrough; `entry-preflight-shell.ts` consumes `entryPreflightPlan.resultMode` instead of hardcoding passthrough mode in TS.
+- Evidence: Rust `servertool-core server_side_tool_entry_contract` PASS 4/4; Rust `router-hotpath-napi plans_servertool_entry_preflight_via_servertool_core_bridge` PASS 1/1; sharedmodule `tsc` PASS; native hotpath rebuild PASS; focused Jest PASS 4 suites / 79 tests after serial rebuild; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+- Note: initial Jest run failed because native build and Jest were run in parallel, leaving the test on the old `.node`; serial rebuild then focused Jest passed without product-code changes.
+
 # 2026-07-02: servertool engine orchestration preflight action moved to Rust plan
 - Slice: `engine-orchestration-shell.ts` no longer switches on local `preflightKind`; Rust `plan_servertool_engine_orchestration_preflight_action` maps preflight result kind to `return_preflight_chat` / `continue_engine`, and TS only dispatches `preflightOrchestrationAction.action`.
 - Gate: Rust core/NAPI bridge tests, native hotpath rebuild, focused Jest 4 suites / 88 tests, sharedmodule `tsc`, `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and `git diff --check` passed for this slice.

@@ -329,6 +329,7 @@ const TARGETS = [
       "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')",
       "if (entryPreflightPlan.action === 'throw_client_disconnected')",
       "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
+      "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }",
     ],
     required: [
       'planServertoolEntryPreflightWithNative',
@@ -336,7 +337,7 @@ const TARGETS = [
       'createServertoolProviderProtocolErrorFromPlan',
       "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'",
       'switch (entryPreflightPlan.action)',
-      "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }",
+      'result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }',
     ],
   },
   {

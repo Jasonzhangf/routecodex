@@ -404,12 +404,14 @@ export interface ServertoolResponseStageOrchestrationOutputPlan {
   recordFlowId?: string;
 }
 
-export interface ServertoolEntryPreflightPlan {
-  action:
-  | 'return_passthrough_non_object_chat'
-  | 'throw_client_disconnected'
-  | 'continue_to_tool_flow';
-}
+export type ServertoolEntryPreflightPlan =
+  | {
+      action: 'return_passthrough_non_object_chat';
+      resultMode: 'passthrough';
+    }
+  | {
+      action: 'throw_client_disconnected' | 'continue_to_tool_flow';
+    };
 
 export type ServertoolHandlerMaterializationPlan =
   | {
@@ -2791,6 +2793,18 @@ export function planServertoolEntryPreflightWithNative(input: {
     record.action !== 'continue_to_tool_flow'
   ) {
     throw new Error('planServertoolEntryPreflightJson native returned invalid action');
+  }
+  if (record.action === 'return_passthrough_non_object_chat') {
+    if (record.resultMode !== 'passthrough') {
+      throw new Error('planServertoolEntryPreflightJson native returned passthrough action without passthrough resultMode');
+    }
+    return {
+      action: 'return_passthrough_non_object_chat',
+      resultMode: 'passthrough'
+    };
+  }
+  if (record.resultMode !== undefined) {
+    throw new Error('planServertoolEntryPreflightJson native returned resultMode for non-passthrough action');
   }
   return {
     action: record.action

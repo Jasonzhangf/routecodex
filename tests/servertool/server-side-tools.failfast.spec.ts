@@ -62,7 +62,7 @@ const planServertoolExecutionBranchWithNativeMock = jest.fn((input: any) => {
 });
 const planServertoolEntryPreflightWithNativeMock = jest.fn((input: any) => {
   if (input?.hasBaseObject !== true) {
-    return { action: 'return_passthrough_non_object_chat' };
+    return { action: 'return_passthrough_non_object_chat', resultMode: 'passthrough' };
   }
   if (input?.adapterClientDisconnected === true) {
     return { action: 'throw_client_disconnected' };

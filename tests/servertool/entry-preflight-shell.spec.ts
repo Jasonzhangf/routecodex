@@ -62,13 +62,15 @@ describe('entry-preflight-shell', () => {
     expect(source).not.toContain("if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')");
     expect(source).not.toContain("if (entryPreflightPlan.action === 'throw_client_disconnected')");
     expect(source).toContain('switch (entryPreflightPlan.action)');
-    expect(source).toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
+    expect(source).toContain('result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }');
+    expect(source).not.toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
     expect(source).not.toContain('const passthroughResult =');
   });
 
   test('returns passthrough result when native preflight says non-object chat', () => {
     planServertoolEntryPreflightWithNativeMock.mockReturnValue({
-      action: 'return_passthrough_non_object_chat'
+      action: 'return_passthrough_non_object_chat',
+      resultMode: 'passthrough'
     });
 
     const result = runServertoolEntryPreflight({
