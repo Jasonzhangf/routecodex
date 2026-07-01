@@ -361,6 +361,8 @@ const TARGETS = [
       'function planExecutionBranchRuntimeAction(',
       'const preExecutionBranchPlan = planExecutionBranchRuntimeAction({',
       'const postExecutionBranchPlan = planExecutionBranchRuntimeAction({',
+      "if (preExecutionBranchPlan.action === 'client_exec_cli_projection')",
+      "if (postExecutionBranchPlan.action === 'resolve_execution_outcome')",
       'if (!projectedToolCall)',
       'native execution-branch projected missing tool call',
     ],

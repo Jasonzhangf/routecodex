@@ -36,23 +36,25 @@ export async function runServertoolExecutionStage(args: {
     executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: 0
   });
-  if (preExecutionBranchPlan.action === 'client_exec_cli_projection') {
-    const projectedToolCall = preExecutionBranchPlan.projectedToolCall;
-    const branch = buildServertoolCliProjectionRuntimeBranchWithNative({
-      requestId: args.options.requestId,
-      toolName: projectedToolCall.name,
-      toolArguments: projectedToolCall.arguments,
-      projectedToolCallId: projectedToolCall.id,
-      base: args.baseObject
-    });
-    return {
-      mode: 'tool_flow',
-      finalChatResponse: branch.chatResponse as JsonObject,
-      execution: branch.execution as {
-        flowId: string;
-        context?: JsonObject;
-      }
-    };
+  switch (preExecutionBranchPlan.action) {
+    case 'client_exec_cli_projection': {
+      const projectedToolCall = preExecutionBranchPlan.projectedToolCall;
+      const branch = buildServertoolCliProjectionRuntimeBranchWithNative({
+        requestId: args.options.requestId,
+        toolName: projectedToolCall.name,
+        toolArguments: projectedToolCall.arguments,
+        projectedToolCallId: projectedToolCall.id,
+        base: args.baseObject
+      });
+      return {
+        mode: 'tool_flow',
+        finalChatResponse: branch.chatResponse as JsonObject,
+        execution: branch.execution as {
+          flowId: string;
+          context?: JsonObject;
+        }
+      };
+    }
   }
 
   const executionState = await runServertoolIoExecutionQueue({
@@ -66,13 +68,14 @@ export async function runServertoolExecutionStage(args: {
     executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: executionState.executedToolCalls.length
   });
-  if (postExecutionBranchPlan.action === 'resolve_execution_outcome') {
-    return materializeNativeToolCallExecutionOutcome({
-      baseForExecution: args.baseObject,
-      options: args.options,
-      toolCalls: args.toolCalls,
-      executionState
-    });
+  switch (postExecutionBranchPlan.action) {
+    case 'resolve_execution_outcome':
+      return materializeNativeToolCallExecutionOutcome({
+        baseForExecution: args.baseObject,
+        options: args.options,
+        toolCalls: args.toolCalls,
+        executionState
+      });
   }
 
   return finalizeServertoolResponseStage({
