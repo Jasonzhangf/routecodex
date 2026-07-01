@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageGateWithNative = jest.fn();
+const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
 const detectProviderResponseShapeWithNative = jest.fn(() => 'chat_completion');
 const readRuntimeControlFromAnyBoundMetadataCenter = jest.fn(() => ({}));
 const runServerToolOrchestrationShell = jest.fn();
@@ -10,6 +11,13 @@ jest.unstable_mockModule(
   () => ({
     planServertoolResponseStageGateWithNative,
     detectProviderResponseShapeWithNative
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    planServertoolResponseStageRuntimeActionWithNative
   })
 );
 
@@ -40,6 +48,9 @@ describe('response-stage-orchestration-shell', () => {
       responseHookMatched: false,
       responseHookRequired: false
     });
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'run_auto_hooks'
+    });
     runServerToolOrchestrationShell.mockResolvedValue({
       chat: { id: 'resp_1' },
       executed: false
@@ -69,6 +80,9 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain("throw new Error('[servertool] native response-stage gate bypass missing skipReason')");
     expect(source).not.toContain('typeof gatePlan.skipReason');
     expect(source).not.toContain('gatePlan.skipReason.trim()');
+    expect(source).not.toContain("gatePlan.nextAction === 'bypass'");
+    expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
+    expect(source).toContain("gateRuntimeAction.action === 'return_passthrough_bypass'");
   });
 
   test('returns native skipReason without TS fallback or whitelist filtering', async () => {
@@ -79,6 +93,9 @@ describe('response-stage-orchestration-shell', () => {
       responseHookMatched: false,
       responseHookRequired: false,
       skipReason: 'empty_assistant_payload'
+    });
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'return_passthrough_bypass'
     });
 
     await expect(
@@ -103,5 +120,16 @@ describe('response-stage-orchestration-shell', () => {
       })
     );
     expect(runServerToolOrchestrationShell).not.toHaveBeenCalled();
+    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledWith({
+      responseStageGatePlan: {
+        nextAction: 'bypass',
+        shouldBypass: true,
+        responseHookMatched: false,
+        responseHookRequired: false,
+        skipReason: 'empty_assistant_payload'
+      },
+      autoHookEvaluated: false,
+      hasAutoHookResult: false
+    });
   });
 });

@@ -8,6 +8,7 @@ import {
   planServertoolResponseStageGateWithNative,
   detectProviderResponseShapeWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import { planServertoolResponseStageRuntimeActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 type ChatCompletionLike = JsonObject;
@@ -39,8 +40,13 @@ export async function runServertoolResponseStageOrchestrationShell(
     runtimeControl,
     allowFollowup: options.allowFollowup === true
   });
+  const gateRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: gatePlan,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  });
 
-  if (gatePlan.nextAction === 'bypass') {
+  if (gateRuntimeAction.action === 'return_passthrough_bypass') {
     const skipReason = gatePlan.skipReason as string;
     recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: false,

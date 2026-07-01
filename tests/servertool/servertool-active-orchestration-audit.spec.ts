@@ -383,9 +383,12 @@ const TARGETS = [
       "throw new Error('[servertool] native response-stage gate bypass missing skipReason')",
       'typeof gatePlan.skipReason',
       'gatePlan.skipReason.trim()',
+      "gatePlan.nextAction === 'bypass'",
     ],
     required: [
       'const gatePlan = planServertoolResponseStageGateWithNative({',
+      'planServertoolResponseStageRuntimeActionWithNative',
+      "gateRuntimeAction.action === 'return_passthrough_bypass'",
       'detectProviderResponseShapeWithNative',
       'const orchestration = await runServerToolOrchestrationShell(',
       'runServerToolOrchestrationShell',
