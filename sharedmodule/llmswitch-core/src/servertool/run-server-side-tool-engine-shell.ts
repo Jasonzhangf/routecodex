@@ -32,16 +32,6 @@ export async function orchestrateServertoolEngine(
     toolCalls,
     base: entryPreflight.baseObject
   });
-  switch (entryContext.action) {
-    case 'continue':
-      break;
-    case 'return_non_object_base':
-      return { mode: 'passthrough', finalChatResponse: options.chatResponse };
-    default:
-      throw new Error(
-        `[servertool] invalid entry context action: ${String((entryContext as { action: unknown }).action)}`
-      );
-  }
   const responseStagePrePass = await runServertoolResponseStagePrePass({
     options,
     baseObject: entryContext.baseObject,

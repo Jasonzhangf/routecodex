@@ -5417,6 +5417,8 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     'function normalizeFilterTokenSet(',
+    "action: 'return_non_object_base'",
+    'if (!args.base)',
     'entryContextPlan.includeToolCallNames.length > 0',
     'entryContextPlan.excludeToolCallNames.length > 0',
     'entryContextPlan.includeAutoHookIds.length > 0',
@@ -5442,10 +5444,7 @@ function checkServertoolRustOutcomeCloseout() {
     'runServertoolResponseStagePrePass',
     'runServertoolExecutionStage',
     'switch (entryPreflight.action)',
-    'switch (entryContext.action)',
     'switch (responseStagePrePass.action)',
-    "case 'return_non_object_base':",
-    'invalid entry context action'
   ]) {
     if (!runServerSideToolEngineShell.includes(marker)) {
       fail(
@@ -5461,6 +5460,8 @@ function checkServertoolRustOutcomeCloseout() {
     "typeof options.chatResponse === 'object'",
     "if (entryPreflight.action === 'return_result')",
     "if (entryContext.action !== 'continue')",
+    "case 'return_non_object_base':",
+    'invalid entry context action',
     "if (responseStagePrePass.action === 'return_result')",
     'const entryPreflightAction = entryPreflight.action',
     'const entryContextAction = entryContext.action',

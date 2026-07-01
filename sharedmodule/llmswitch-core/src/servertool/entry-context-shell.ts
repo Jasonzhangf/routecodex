@@ -16,21 +16,16 @@ function nativeEntryTokenSet(tokens: readonly string[] | undefined): Set<string>
 export function resolveServertoolEntryContext(args: {
   options: ServerSideToolEngineOptions;
   toolCalls: ToolCall[];
-  base: JsonObject | null;
-}):
-  | { action: 'return_non_object_base' }
-  | {
-      action: 'continue';
-      baseObject: JsonObject;
-      contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
-      includeToolCallNames: Set<string> | null;
-      excludeToolCallNames: Set<string> | null;
-      includeAutoHookIds: Set<string> | null;
-      excludeAutoHookIds: Set<string> | null;
-    } {
-  if (!args.base) {
-    return { action: 'return_non_object_base' };
-  }
+  base: JsonObject;
+}): {
+  action: 'continue';
+  baseObject: JsonObject;
+  contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
+  includeToolCallNames: Set<string> | null;
+  excludeToolCallNames: Set<string> | null;
+  includeAutoHookIds: Set<string> | null;
+  excludeAutoHookIds: Set<string> | null;
+} {
   const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
     args.options.adapterContext as Record<string, unknown>
   );

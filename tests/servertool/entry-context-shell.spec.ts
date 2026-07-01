@@ -43,6 +43,8 @@ describe('entry-context-shell', () => {
     expect(source).not.toContain('entryContextPlan.excludeAutoHookIds.length > 0');
     expect(source).not.toContain('.trim().toLowerCase()');
     expect(source).not.toContain('return tokens ? new Set(tokens) : null;');
+    expect(source).not.toContain("action: 'return_non_object_base'");
+    expect(source).not.toContain('if (!args.base)');
     expect(source).toContain('return tokens != null ? new Set(tokens) : null;');
     expect(typesSource).not.toMatch(/export interface ServerSideToolEngineOptions\s*\{[\s\S]{0,260}providerProtocol:\s*string;/);
   });

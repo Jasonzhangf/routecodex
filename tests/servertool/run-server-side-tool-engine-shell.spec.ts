@@ -67,13 +67,14 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain("if (entryContext.action !== 'continue')");
     expect(source).not.toContain("if (responseStagePrePass.action === 'return_result')");
     expect(source).toContain('switch (entryPreflight.action)');
-    expect(source).toContain('switch (entryContext.action)');
     expect(source).toContain('switch (responseStagePrePass.action)');
     expect(source).not.toContain('const entryPreflightAction = entryPreflight.action');
     expect(source).not.toContain('const entryContextAction = entryContext.action');
     expect(source).not.toContain('const responseStagePrePassAction = responseStagePrePass.action');
     expect(source).not.toContain('const base =');
     expect(source).not.toContain("typeof options.chatResponse === 'object'");
+    expect(source).not.toContain("case 'return_non_object_base':");
+    expect(source).not.toContain('invalid entry context action');
   });
 
   test('returns preflight early result when preflight short-circuits', async () => {
@@ -92,49 +93,6 @@ describe('run-server-side-tool-engine-shell', () => {
       } as any)
     ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { ok: 'short' } });
     expect(extractToolCallsFromResponseStage).not.toHaveBeenCalled();
-  });
-
-  test('returns passthrough when entry context rejects non-object base', async () => {
-    runServertoolEntryPreflight.mockReturnValue({
-      action: 'continue',
-      baseObject: { ok: true }
-    });
-    extractToolCallsFromResponseStage.mockReturnValue([]);
-    resolveServertoolEntryContext.mockReturnValue({ action: 'return_non_object_base' });
-
-    await expect(
-      orchestrateServertoolEngine({
-        chatResponse: { ok: true },
-        adapterContext: {},
-        entryEndpoint: '/v1/responses',
-        requestId: 'req-non-object',
-        providerProtocol: 'openai-responses'
-      } as any)
-    ).resolves.toEqual({
-      mode: 'passthrough',
-      finalChatResponse: { ok: true }
-    });
-    expect(runServertoolResponseStagePrePass).not.toHaveBeenCalled();
-  });
-
-  test('fails fast for unknown entry context action', async () => {
-    runServertoolEntryPreflight.mockReturnValue({
-      action: 'continue',
-      baseObject: { ok: true }
-    });
-    extractToolCallsFromResponseStage.mockReturnValue([]);
-    resolveServertoolEntryContext.mockReturnValue({ action: 'unknown_entry_context_action' });
-
-    await expect(
-      orchestrateServertoolEngine({
-        chatResponse: { ok: true },
-        adapterContext: {},
-        entryEndpoint: '/v1/responses',
-        requestId: 'req-entry-context-unknown',
-        providerProtocol: 'openai-responses'
-      } as any)
-    ).rejects.toThrow('[servertool] invalid entry context action: unknown_entry_context_action');
-    expect(runServertoolResponseStagePrePass).not.toHaveBeenCalled();
   });
 
   test('forwards pre-pass early result without entering execution stage', async () => {
