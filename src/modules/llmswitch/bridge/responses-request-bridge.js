@@ -292,19 +292,19 @@ async function buildCapturedRelayResumeRequestContextForHttp(args) {
         toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
     });
     const capturedInput = Array.isArray(captured.input) ? captured.input : [];
-    const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : undefined;
+    const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : [];
     const normalizedPayload = {
         ...args.payload,
         input: capturedInput,
     };
-    if (capturedToolsRaw?.length) {
+    if (capturedToolsRaw.length) {
         normalizedPayload.tools = capturedToolsRaw;
     }
     return {
         payload: normalizedPayload,
         context: {
             input: capturedInput,
-            ...(capturedToolsRaw?.length ? { toolsRaw: capturedToolsRaw } : {}),
+            toolsRaw: capturedToolsRaw,
         },
         sessionId: readResponsesSessionIdFromHttp(args.metadata),
         conversationId: readResponsesConversationIdFromHttp(args.metadata),
@@ -410,12 +410,12 @@ export async function buildResponsesRequestContextForHttp(args) {
         toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
     });
     const capturedInput = Array.isArray(captured.input) ? captured.input : [];
-    const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : undefined;
+    const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : [];
     const normalizedPayload = {
         ...payloadForPersistence,
         input: capturedInput,
     };
-    if (capturedToolsRaw?.length) {
+    if (capturedToolsRaw.length) {
         normalizedPayload.tools = capturedToolsRaw;
     }
     return {

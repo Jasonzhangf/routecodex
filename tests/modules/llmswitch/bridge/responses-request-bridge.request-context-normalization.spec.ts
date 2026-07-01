@@ -514,6 +514,24 @@ describe('responses-request-bridge relay request-context normalization', () => {
     expect(JSON.stringify(context.payload)).not.toContain('persisted-context-must-not-leak');
   });
 
+  it('keeps relay request context toolsRaw as an empty array when no tools are captured', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+    });
+
+    const context = await buildResponsesRequestContextForHttp({
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: 'hi' }],
+      },
+      requestId: 'req_relay_context_without_tools_1',
+      metadata: { session_id: 'sess_no_tools_1', conversation_id: 'conv_no_tools_1' },
+    });
+
+    expect(context.context.toolsRaw).toEqual([]);
+    expect(context.payload.tools).toBeUndefined();
+  });
+
   it('does not materialize stopless runtime control into instructions at request bridge stage', () => {
     const payload: Record<string, unknown> = {
       model: 'gpt-5.4',
