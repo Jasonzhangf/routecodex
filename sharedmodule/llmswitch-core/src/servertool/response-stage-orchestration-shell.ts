@@ -63,6 +63,10 @@ export async function runServertoolResponseStageOrchestrationShell(
         skipReason
       };
     }
+    case 'run_auto_hooks':
+      break;
+    default:
+      throw new Error(`[servertool] invalid response-stage orchestration action: ${String(gateRuntimeAction.action)}`);
   }
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
 
@@ -104,6 +108,10 @@ export async function runServertoolResponseStageOrchestrationShell(
         flowId: outputPlan.recordFlowId
       };
     }
+    case 'return_original_payload':
+      break;
+    default:
+      throw new Error(`[servertool] invalid response-stage orchestration output action: ${String(outputPlan.returnAction)}`);
   }
 
   recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {

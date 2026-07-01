@@ -99,6 +99,9 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain('if (orchestration.executed)');
     expect(source).toContain('switch (gateRuntimeAction.action)');
     expect(source).toContain("case 'return_passthrough_bypass'");
+    expect(source).toContain("case 'run_auto_hooks'");
+    expect(source).toContain('invalid response-stage orchestration action');
+    expect(source).toContain('invalid response-stage orchestration output action');
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
     expect(source).toContain('planServertoolResponseStageOrchestrationOutputWithNative({');
   });
@@ -191,5 +194,41 @@ describe('response-stage-orchestration-shell', () => {
         outputShape: 'chat_completion'
       })
     );
+  });
+
+  test('fails fast for unknown response-stage runtime action', async () => {
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'unknown_response_stage_action'
+    });
+
+    await expect(
+      runServertoolResponseStageOrchestrationShell({
+        payload: { id: 'resp_unknown_runtime_action' },
+        adapterContext: {} as any,
+        requestId: 'req-unknown-response-stage-action',
+        entryEndpoint: '/v1/responses'
+      })
+    ).rejects.toThrow('[servertool] invalid response-stage orchestration action: unknown_response_stage_action');
+    expect(runServerToolOrchestrationShell).not.toHaveBeenCalled();
+  });
+
+  test('fails fast for unknown response-stage output action', async () => {
+    runServerToolOrchestrationShell.mockResolvedValue({
+      chat: { id: 'resp_unknown_output_action' },
+      executed: false
+    });
+    planServertoolResponseStageOrchestrationOutputWithNative.mockReturnValue({
+      returnAction: 'unknown_response_stage_output',
+      recordExecuted: false
+    });
+
+    await expect(
+      runServertoolResponseStageOrchestrationShell({
+        payload: { id: 'resp_input_unknown_output' },
+        adapterContext: {} as any,
+        requestId: 'req-unknown-response-stage-output-action',
+        entryEndpoint: '/v1/responses'
+      })
+    ).rejects.toThrow('[servertool] invalid response-stage orchestration output action: unknown_response_stage_output');
   });
 });

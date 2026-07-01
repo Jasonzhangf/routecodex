@@ -1,3 +1,8 @@
+# 2026-07-02: servertool response-stage orchestration unknown action fail-fast
+- Slice: `response-stage-orchestration-shell.ts` now fails fast for unknown native response-stage runtime actions and unknown native output return actions instead of implicitly continuing or returning the original payload.
+- Gate: `response-stage-orchestration-shell.spec.ts` covers unknown runtime/output actions and `verify-servertool-rust-only` now requires the fail-fast markers.
+- Evidence: focused Jest `response-stage-orchestration-shell.spec.ts` PASS 6/6; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool postflight synthetic metadataCenterSnapshot fallback removed
 - Slice: `engine-postflight-shell.ts` no longer builds `metadataCenterSnapshot` from `runtimeControl` when the real MetadataCenter snapshot is absent; TS now passes only the bound snapshot or `null` into Rust `buildStoplessAutoCliProjectionFromEngineWithNative`.
 - Gate: `engine-observation-shell.spec.ts` and `verify-servertool-rust-only` now forbid the inline fallback markers `const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (` and `runtimeControl ? { runtimeControl } : null`.
