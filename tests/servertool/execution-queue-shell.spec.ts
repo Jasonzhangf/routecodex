@@ -140,7 +140,11 @@ describe('execution-queue-shell', () => {
       },
       execution: {
         flowId: `${String(input?.toolCall?.name ?? '').trim()}_effect`
-      }
+      },
+      handlerErrorMessage:
+        typeof input?.handlerErrorMessage === 'string'
+          ? input.handlerErrorMessage.trim() || 'unknown'
+          : 'unknown'
     }));
     materializeServertoolPlannedResult.mockResolvedValue({
       chatResponse: { ok: true },
@@ -171,6 +175,9 @@ describe('execution-queue-shell', () => {
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('planServertoolExecutionLoopRuntimeActionWithNative');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
+    expect(source).toContain('message: errorEffectPlan.handlerErrorMessage as string');
+    expect(source).not.toContain("String(lastErr ?? 'unknown')");
+    expect(source).not.toContain("lastErr instanceof Error ? lastErr.message : String");
     expect(source).not.toContain('buildServertoolDispatchPlanInputWithNative');
   });
 

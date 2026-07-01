@@ -158,6 +158,8 @@ describe('execution queue dispatch runtime', () => {
     expect(source).not.toContain('planServertoolOutcomeWithNative(');
     expect(source).not.toContain('planServertoolExecutionOutcomeRuntimeActionWithNative(');
     expect(source).not.toContain('function assertDispatchExecutionMode(');
+    expect(source).not.toContain("String(lastErr ?? 'unknown')");
+    expect(source).toContain('message: errorEffectPlan.handlerErrorMessage as string');
   });
 
   beforeEach(() => {
@@ -217,7 +219,11 @@ describe('execution queue dispatch runtime', () => {
           toolCall: input.toolCall,
           execution: {
             flowId: `${String(input?.toolCall?.name ?? '').trim()}_error`
-          }
+          },
+          handlerErrorMessage:
+            typeof input?.handlerErrorMessage === 'string'
+              ? input.handlerErrorMessage.trim() || 'unknown'
+              : 'unknown'
         };
       }
       return {
@@ -336,7 +342,8 @@ describe('execution queue dispatch runtime', () => {
         arguments: '{}',
         executionMode: 'guarded',
         stripAfterExecute: true
-      }
+      },
+      handlerErrorMessage: 'boom-from-execution-shell'
     });
     expect(result.executedFlowIds).toEqual(['failfast_test_tool_error']);
     expect(planServertoolExecutionLoopRuntimeActionWithNative).toHaveBeenNthCalledWith(1, {

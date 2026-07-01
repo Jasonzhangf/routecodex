@@ -2762,6 +2762,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     'runServertoolHandler',
     'if (result) {',
     'if (lastErr) {',
+    "String(lastErr ?? 'unknown')",
+    "lastErr instanceof Error ? lastErr.message : String",
     'executedToolCalls: [],',
     'executedIds: new Set<string>()',
     'executedFlowIds: []',
@@ -2782,6 +2784,12 @@ function checkServertoolExecutionDispatchRustOwner() {
   pass(
     'servertool-execution-dispatch-rust-owner',
     'execution-queue-shell.ts builds dispatch-plan handler truth from Rust skeleton config without dispatch facade shell'
+  );
+  assertContains(
+    'servertool-execution-dispatch-rust-owner',
+    TS_EXECUTION_QUEUE_SHELL,
+    executionQueueShell,
+    'message: errorEffectPlan.handlerErrorMessage as string'
   );
 
   assertMissingFile(

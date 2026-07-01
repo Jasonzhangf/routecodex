@@ -90,14 +90,6 @@ export async function runServertoolIoExecutionQueue(args: {
       continue;
     }
     if (resultLoopActionPlan.action === 'apply_handler_error_tool_output') {
-      const message = lastErr instanceof Error ? lastErr.message : String(lastErr ?? 'unknown');
-      const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({
-        base: args.baseForExecution as Record<string, unknown>,
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        message
-      }) as JsonObject;
-      replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
       const errorEffectPlan = planServertoolExecutionLoopEffectWithNative({
         mode: 'handler_error',
         toolCall: {
@@ -106,8 +98,16 @@ export async function runServertoolIoExecutionQueue(args: {
           arguments: toolCall.arguments,
           executionMode: toolCall.executionMode,
           stripAfterExecute: toolCall.stripAfterExecute
-        }
+        },
+        handlerErrorMessage: lastErr instanceof Error ? lastErr.message : lastErr
       });
+      const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({
+        base: args.baseForExecution as Record<string, unknown>,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        message: errorEffectPlan.handlerErrorMessage as string
+      }) as JsonObject;
+      replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
       executionState = appendServertoolExecutedRecordWithNative({
         state: executionState,
         toolCall: errorEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall'],

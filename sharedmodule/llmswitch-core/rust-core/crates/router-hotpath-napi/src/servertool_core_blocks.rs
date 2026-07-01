@@ -2751,7 +2751,8 @@ fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
                 "arguments": "{}",
                 "executionMode": "guarded",
                 "stripAfterExecute": true
-            }
+            },
+            "handlerErrorMessage": " boom "
         })
         .to_string(),
     )
@@ -2765,6 +2766,10 @@ fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
     assert_eq!(
         handler_error_value["toolCall"]["executionMode"],
         serde_json::json!("guarded")
+    );
+    assert_eq!(
+        handler_error_value["handlerErrorMessage"],
+        serde_json::json!("boom")
     );
 
     let noop = plan_servertool_execution_loop_effect_json(

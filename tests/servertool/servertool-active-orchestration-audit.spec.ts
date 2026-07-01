@@ -77,6 +77,8 @@ const TARGETS = [
     file: 'sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts',
     forbidden: [
       '  ToolCall\n} from \'./types.js\';',
+      "String(lastErr ?? 'unknown')",
+      "lastErr instanceof Error ? lastErr.message : String",
     ],
     required: [
       'runServertoolIoExecutionQueue',
@@ -84,6 +86,7 @@ const TARGETS = [
       'createServertoolExecutionLoopStateWithNative',
       'appendServertoolExecutedRecordWithNative',
       'createServertoolProviderProtocolErrorFromPlan',
+      'message: errorEffectPlan.handlerErrorMessage as string',
     ],
   },
   {

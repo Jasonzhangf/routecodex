@@ -311,6 +311,7 @@ export interface ServertoolExecutionLoopEffectPlan {
     flowId: string;
     followup?: unknown;
   };
+  handlerErrorMessage?: string;
 }
 
 export interface ServertoolResponseStageRuntimeActionPlan {
@@ -2204,6 +2205,7 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     stripAfterExecute?: boolean;
   };
   noopFlowId?: string;
+  handlerErrorMessage?: unknown;
 }): ServertoolExecutionLoopEffectPlan {
   const capability = 'planServertoolExecutionLoopEffectJson';
   const fn = readNativeFunction(capability);
@@ -2243,7 +2245,8 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     },
     execution: {
       flowId: execution.flowId
-    }
+    },
+    ...(typeof record.handlerErrorMessage === 'string' ? { handlerErrorMessage: record.handlerErrorMessage } : {})
   };
 }
 
