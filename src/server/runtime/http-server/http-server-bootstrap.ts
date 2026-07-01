@@ -87,7 +87,6 @@ export function getModuleDependencies(server: any): ModuleDependencies {
 
 export function registerDaemonAdminUiRoute(server: any): void {
   const packagedBuiltIndex = resolveRuntimePathFromModuleUrl(import.meta.url, 'dist', 'daemon-admin-ui', 'index.html');
-  const packagedLegacyFile = resolveRuntimePathFromModuleUrl(import.meta.url, 'docs', 'daemon-admin-ui.html');
   const packagedBuiltRoot = resolveRuntimePathFromModuleUrl(import.meta.url, 'dist', 'daemon-admin-ui');
 
   server.app.get('/', (_req: unknown, res: any) => {
@@ -97,23 +96,7 @@ export function registerDaemonAdminUiRoute(server: any): void {
   server.app.get(['/daemon/admin', '/daemon/admin/'], async (_req: unknown, res: any) => {
     try {
       const fs = await import('node:fs/promises');
-      let html = '';
-      try {
-        html = await fs.readFile(packagedBuiltIndex, 'utf8');
-      } catch (error) {
-        logBootstrapNonBlockingError('registerDaemonAdminUiRoute.readBuiltIndex', error, {
-          builtIndex: packagedBuiltIndex
-        });
-        try {
-          html = await fs.readFile(packagedLegacyFile, 'utf8');
-        } catch (innerError) {
-          logBootstrapNonBlockingError('registerDaemonAdminUiRoute.readPackagedIndex', innerError, {
-            builtIndex: packagedBuiltIndex,
-            fallback: packagedLegacyFile
-          });
-          throw innerError;
-        }
-      }
+      const html = await fs.readFile(packagedBuiltIndex, 'utf8');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       res.setHeader('Pragma', 'no-cache');

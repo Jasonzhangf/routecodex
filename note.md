@@ -1,3 +1,9 @@
+# 2026-07-01: daemon admin packaged legacy UI fallback removed
+- Slice: `http-server-bootstrap.ts` no longer reads `docs/daemon-admin-ui.html` when built `dist/daemon-admin-ui/index.html` is missing; daemon admin UI now has a single packaged built artifact path and fails visibly through the existing 500 response if absent.
+- Gate: new `http-server-bootstrap-ui.spec.ts` source test forbids `packagedLegacyFile`, `daemon-admin-ui.html`, `registerDaemonAdminUiRoute.readPackagedIndex`, and `fallback: packagedLegacyFile`.
+- Verification: focused Jest `http-server-bootstrap-ui` PASS 1/1; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS.
+- Commit scope note: unrelated dirty SSE tests and servertool files remain excluded from this slice.
+
 # 2026-07-01: server colored logger dummy fallback removed
 - Slice: `colored-logger.ts` now statically imports `ColoredLogger` and constructs the real logger in all runtimes; removed `createRequire`, Jest-only dummy logger, warning-only no-op logger, and require-failure fallback.
 - Gate: new `colored-logger.spec.ts` source test forbids `createRequire`, `localRequire`, fallback wording, dummy/no-op markers, and verifies the test runtime receives real logger methods including `logVirtualRouterHit`.
