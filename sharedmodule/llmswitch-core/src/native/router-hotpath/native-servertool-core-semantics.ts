@@ -331,6 +331,7 @@ export type ServertoolExecutionOutcomeMaterializationPlan =
     }
   | {
       action: 'return_tool_flow';
+      resultMode: 'tool_flow';
       executionFlowId: string;
     };
 
@@ -2466,8 +2467,12 @@ export function planServertoolExecutionOutcomeMaterializationWithNative(input: {
   if (typeof record.executionFlowId !== 'string') {
     throw new Error('planServertoolExecutionOutcomeMaterializationJson native returned invalid executionFlowId');
   }
+  if (record.resultMode !== 'tool_flow') {
+    throw new Error('planServertoolExecutionOutcomeMaterializationJson native returned invalid resultMode');
+  }
   return {
     action: 'return_tool_flow',
+    resultMode: record.resultMode,
     executionFlowId: record.executionFlowId
   };
 }

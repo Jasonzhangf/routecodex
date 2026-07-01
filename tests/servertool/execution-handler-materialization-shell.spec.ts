@@ -127,6 +127,7 @@ describe('execution-handler-materialization-shell', () => {
       if (input?.hasLastExecution === true || Number(input?.executedToolCallsLen ?? 0) > 0) {
         return {
           action: 'return_tool_flow',
+          resultMode: 'tool_flow',
           executionFlowId: input?.flowId ?? 'servertool_multi'
         };
       }
@@ -182,6 +183,8 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain('record.executionFlowId.trim()');
     expect(source).not.toContain("input.outcomeMode === 'mixed_client_tools'");
     expect(source).not.toContain('function throwServertoolExecutionDispatchError(');
+    expect(source).toContain('mode: materializationPlan.resultMode');
+    expect(source).not.toContain("mode: 'tool_flow'");
     expect(source).toContain('finalChatResponse: args.baseForExecution');
     expect(source).not.toContain('export const buildServertoolOutcomePlanInput =');
     expect(source).not.toContain('structuredClone(args.base)');
@@ -192,6 +195,13 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===');
     expect(source).not.toContain('Array.isArray((args.baseForExecution as any).tool_outputs)');
     expect(source).not.toContain('JSON.parse(JSON.stringify(');
+    const nativeSource = await import('node:fs/promises').then((fs) =>
+      fs.readFile(
+        'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
+        'utf8'
+      )
+    );
+    expect(nativeSource).toContain('planServertoolExecutionOutcomeMaterializationJson native returned invalid resultMode');
   });
 
   test('uses native dispatch contract error for invalid mixed-client-tools outcome contract', () => {

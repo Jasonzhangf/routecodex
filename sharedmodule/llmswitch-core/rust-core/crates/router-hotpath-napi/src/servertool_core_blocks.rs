@@ -2887,6 +2887,10 @@ fn plans_servertool_execution_outcome_materialization_via_servertool_core_bridge
         serde_json::json!("return_tool_flow")
     );
     assert_eq!(
+        tool_flow_value["resultMode"],
+        serde_json::json!("tool_flow")
+    );
+    assert_eq!(
         tool_flow_value["executionFlowId"],
         serde_json::json!("flow-native")
     );

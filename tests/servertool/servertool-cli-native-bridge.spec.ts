@@ -13,6 +13,7 @@ import {
   planServertoolExecutionBranchWithNative,
   planServertoolExecutionLoopEffectWithNative,
   planServertoolExecutionLoopRuntimeActionWithNative,
+  planServertoolExecutionOutcomeMaterializationWithNative,
   planServertoolExecutionOutcomeRuntimeActionWithNative,
   planServertoolEntryPreflightWithNative,
   planServertoolResponseStageRuntimeActionWithNative,
@@ -449,6 +450,38 @@ describe('servertool CLI native bridge', () => {
       action: 'return_execution_contract',
       reuseLastExecutionEnvelope: false,
       executionFlowId: 'servertool_multi'
+    });
+  });
+
+  it('uses Rust-owned execution outcome materialization result mode planning', () => {
+    expect(
+      planServertoolExecutionOutcomeMaterializationWithNative({
+        requestId: 'req-tool-flow',
+        outcomeMode: 'servertool_only',
+        requiresPendingInjection: false,
+        hasLastExecution: true,
+        executedToolCallsLen: 1,
+        flowId: 'flow-native'
+      })
+    ).toEqual({
+      action: 'return_tool_flow',
+      resultMode: 'tool_flow',
+      executionFlowId: 'flow-native'
+    });
+
+    expect(
+      planServertoolExecutionOutcomeMaterializationWithNative({
+        requestId: 'req-missing',
+        outcomeMode: 'servertool_only',
+        requiresPendingInjection: false,
+        hasLastExecution: false,
+        executedToolCallsLen: 0
+      })
+    ).toMatchObject({
+      action: 'throw_dispatch_error',
+      errorPlan: {
+        message: '[servertool] missing native execution contract for servertool-only outcome'
+      }
     });
   });
 

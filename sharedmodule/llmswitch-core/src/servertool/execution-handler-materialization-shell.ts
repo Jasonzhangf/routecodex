@@ -47,7 +47,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
       throw createServertoolProviderProtocolErrorFromPlan(materializationPlan.errorPlan);
     case 'return_tool_flow':
       return {
-        mode: 'tool_flow',
+        mode: materializationPlan.resultMode,
         finalChatResponse: args.baseForExecution,
         execution: {
           flowId: materializationPlan.executionFlowId

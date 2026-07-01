@@ -1,3 +1,8 @@
+# 2026-07-02: servertool execution outcome result mode moved to Rust plan
+- Slice: `ServertoolExecutionOutcomeMaterializationPlan` now carries Rust-owned `resultMode=tool_flow`; `execution-handler-materialization-shell.ts` uses `materializationPlan.resultMode` instead of hardcoding `mode: 'tool_flow'`.
+- Gate: `execution-handler-materialization-shell.spec.ts`, `servertool-cli-native-bridge.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` require the Rust result mode and forbid the execution-handler shell from restoring local `mode: 'tool_flow'`.
+- Evidence: Rust `servertool-core execution_outcome` PASS 11/11; NAPI bridge focused PASS 1/1; native hotpath rebuild PASS; focused Jest PASS 4 suites / 83 tests; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool auto-hook attempt action moved to Rust plan
 - Slice: `AutoHookRuntimeAttemptPlan` now exposes Rust-owned `action` (`return_result` / `continue_queue` / `rethrow_error`), and `auto-hook-caller.ts` switches on `attemptPlan.action` instead of interpreting `returnResult` as the branch owner.
 - Gate: `execution-shell.auto-hook-failfast.spec.ts`, `servertool-auto-hook-trace.spec.ts`, `servertool-cli-native-bridge.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` require the native action path and forbid `switch (attemptPlan.returnResult)`.

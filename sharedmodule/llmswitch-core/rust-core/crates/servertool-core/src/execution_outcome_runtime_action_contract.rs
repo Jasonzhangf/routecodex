@@ -66,6 +66,8 @@ pub struct ServertoolExecutionOutcomeMaterializationPlan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_plan: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_flow_id: Option<String>,
 }
 
@@ -135,6 +137,7 @@ pub fn plan_servertool_execution_outcome_materialization(
                         requires_pending_injection: input.requires_pending_injection,
                     },
                 )),
+                result_mode: None,
                 execution_flow_id: None,
             }
         }
@@ -147,6 +150,7 @@ pub fn plan_servertool_execution_outcome_materialization(
                         outcome_mode: input.outcome_mode,
                     },
                 )),
+                result_mode: None,
                 execution_flow_id: None,
             }
         }
@@ -154,6 +158,7 @@ pub fn plan_servertool_execution_outcome_materialization(
             ServertoolExecutionOutcomeMaterializationPlan {
                 action: ServertoolExecutionOutcomeMaterializationAction::ReturnToolFlow,
                 error_plan: None,
+                result_mode: Some("tool_flow".to_string()),
                 execution_flow_id: Some(runtime_plan.execution_flow_id),
             }
         }
@@ -329,6 +334,7 @@ mod tests {
             plan.error_plan.unwrap()["details"]["requiresPendingInjection"],
             true
         );
+        assert_eq!(plan.result_mode, None);
         assert_eq!(plan.execution_flow_id, None);
     }
 
@@ -353,6 +359,7 @@ mod tests {
             plan.error_plan.unwrap()["message"],
             "[servertool] missing native execution contract for servertool-only outcome"
         );
+        assert_eq!(plan.result_mode, None);
         assert_eq!(plan.execution_flow_id, None);
     }
 
@@ -374,6 +381,7 @@ mod tests {
             ServertoolExecutionOutcomeMaterializationAction::ReturnToolFlow
         );
         assert_eq!(plan.error_plan, None);
+        assert_eq!(plan.result_mode.as_deref(), Some("tool_flow"));
         assert_eq!(plan.execution_flow_id, Some("flow-return".to_string()));
     }
 }

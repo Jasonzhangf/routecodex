@@ -100,6 +100,7 @@ jest.unstable_mockModule(
     }),
     planServertoolExecutionOutcomeMaterializationWithNative: jest.fn(() => ({
       action: 'return_tool_flow',
+      resultMode: 'tool_flow',
       executionFlowId: 'flow-test'
     }))
   })
