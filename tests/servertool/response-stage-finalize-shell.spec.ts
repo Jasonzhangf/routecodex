@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const runServertoolResponseStageAutoHookPass = jest.fn();
+const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.js',
   () => ({
     runServertoolResponseStageAutoHookPass
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  () => ({
+    planServertoolResponseStageRuntimeActionWithNative
   })
 );
 
@@ -18,6 +26,9 @@ describe('response-stage-finalize-shell', () => {
     jest.clearAllMocks();
     runServertoolResponseStageAutoHookPass.mockResolvedValue({
       action: 'continue_without_result'
+    });
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'return_passthrough_no_auto_hook_result'
     });
   });
 
@@ -41,6 +52,11 @@ describe('response-stage-finalize-shell', () => {
         responseStageGatePlan
       })
     );
+    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledWith({
+      responseStageGatePlan,
+      autoHookEvaluated: true,
+      hasAutoHookResult: false
+    });
     expect(result).toEqual({
       mode: 'passthrough',
       finalChatResponse: { ok: true }
@@ -53,6 +69,9 @@ describe('response-stage-finalize-shell', () => {
       responseHookRequired: false
     };
     runServertoolResponseStageAutoHookPass.mockResolvedValue({
+      action: 'return_passthrough_bypass'
+    });
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
       action: 'return_passthrough_bypass'
     });
 
@@ -70,6 +89,11 @@ describe('response-stage-finalize-shell', () => {
         responseStageGatePlan
       })
     );
+    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledWith({
+      responseStageGatePlan,
+      autoHookEvaluated: true,
+      hasAutoHookResult: false
+    });
     expect(result).toEqual({
       mode: 'passthrough',
       finalChatResponse: { ok: true }
@@ -84,6 +108,9 @@ describe('response-stage-finalize-shell', () => {
         finalChatResponse: { done: true },
         execution: { flowId: 'flow_1' }
       }
+    });
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'return_auto_hook_result'
     });
 
     await expect(
@@ -115,5 +142,8 @@ describe('response-stage-finalize-shell', () => {
     expect(source).not.toContain('planServertoolResponseStageGateWithNative');
     expect(source).not.toContain('readRuntimeControlFromAnyBoundMetadataCenter');
     expect(source).not.toContain('responseHookMatched === true');
+    expect(source).not.toContain("responseStageAutoHook.action === 'return_passthrough_bypass'");
+    expect(source).not.toContain("responseStageAutoHook.action === 'return_auto_hook_result'");
+    expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
   });
 });
