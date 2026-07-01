@@ -218,6 +218,30 @@ fn normalize_responses_usage_projects_responses_only_fields_from_chat_shape() {
 }
 
 #[test]
+fn normalize_responses_usage_drops_invalid_provider_detail_fields_before_sse_projection() {
+    let usage = json!({
+        "input_tokens": 146536,
+        "output_tokens": 0,
+        "total_tokens": 146536,
+        "input_tokens_details": {
+            "cached_tokens": null,
+            "provider_cache_hit_tokens": null
+        },
+        "output_tokens_details": {
+            "reasoning_tokens": null
+        }
+    });
+
+    let output = normalize_responses_usage(&usage);
+
+    assert_eq!(output["input_tokens"], json!(146536.0));
+    assert_eq!(output["output_tokens"], json!(0.0));
+    assert_eq!(output["total_tokens"], json!(146536.0));
+    assert!(output.get("input_tokens_details").is_none());
+    assert!(output.get("output_tokens_details").is_none());
+}
+
+#[test]
 fn normalize_chat_usage_projects_chat_shape_from_responses_style_fields() {
     let usage = json!({
         "input_tokens": 12,

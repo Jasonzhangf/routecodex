@@ -69,7 +69,12 @@ pub(crate) fn normalize_chat_usage(usage_raw: &Value) -> Result<Value, String> {
 
     let prompt_tokens = read_non_negative_integer_field(
         row,
-        &["prompt_tokens", "input_tokens", "promptTokens", "inputTokens"],
+        &[
+            "prompt_tokens",
+            "input_tokens",
+            "promptTokens",
+            "inputTokens",
+        ],
         "prompt_tokens",
     )?;
     let completion_tokens = read_non_negative_integer_field(
@@ -82,19 +87,16 @@ pub(crate) fn normalize_chat_usage(usage_raw: &Value) -> Result<Value, String> {
         ],
         "completion_tokens",
     )?;
-    let total_tokens = read_non_negative_integer_field(
-        row,
-        &["total_tokens", "totalTokens"],
-        "total_tokens",
-    )?
-    .or_else(|| {
-        let total = prompt_tokens.unwrap_or(0) + completion_tokens.unwrap_or(0);
-        if total > 0 {
-            Some(total)
-        } else {
-            None
-        }
-    });
+    let total_tokens =
+        read_non_negative_integer_field(row, &["total_tokens", "totalTokens"], "total_tokens")?
+            .or_else(|| {
+                let total = prompt_tokens.unwrap_or(0) + completion_tokens.unwrap_or(0);
+                if total > 0 {
+                    Some(total)
+                } else {
+                    None
+                }
+            });
 
     let (Some(prompt_tokens), Some(completion_tokens), Some(total_tokens)) =
         (prompt_tokens, completion_tokens, total_tokens)
@@ -131,10 +133,7 @@ pub(crate) fn normalize_chat_usage(usage_raw: &Value) -> Result<Value, String> {
     if let Some(cached_tokens) = cached_tokens.filter(|value| *value > 0) {
         let mut details = Map::new();
         details.insert("cached_tokens".to_string(), Value::from(cached_tokens));
-        out.insert(
-            "prompt_tokens_details".to_string(),
-            Value::Object(details),
-        );
+        out.insert("prompt_tokens_details".to_string(), Value::Object(details));
     }
 
     Ok(Value::Object(out))
@@ -179,6 +178,8 @@ pub(crate) fn normalize_responses_usage(usage_raw: &Value) -> Value {
 
     usage.remove("prompt_tokens");
     usage.remove("completion_tokens");
+    usage.remove("input_tokens_details");
+    usage.remove("output_tokens_details");
     usage.remove("prompt_tokens_details");
     usage.remove("completion_tokens_details");
     usage.remove("cache_read_input_tokens");
