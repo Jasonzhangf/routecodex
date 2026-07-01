@@ -33,6 +33,8 @@ describe('provider-response-converter contract', () => {
     expect(source).not.toContain('adapterContext?: Record<string, unknown>');
     expect(source).not.toContain('args.metadata ?? args.adapterContext');
     expect(source).not.toContain('adapterContext\n    });');
+    expect(source).not.toContain('typeof (adapterContext as Record<string, unknown>).entryEndpoint');
+    expect(source).not.toContain('((adapterContext as Record<string, unknown>).entryEndpoint as string)');
     expect(source).not.toContain('restoreDirectChatVisibleContentFromSse');
     expect(source).not.toContain('recoverVisibleAssistantContentFromChatSseText');
     expect(source).not.toContain('isImagePathLike');

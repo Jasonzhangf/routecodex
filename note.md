@@ -1,3 +1,10 @@
+# 2026-07-01: provider response snapshot recorder adapterContext read removed
+- Slice: `provider-response-converter.ts` no longer reads `entryEndpoint` back from `adapterContext` for the snapshot recorder; it passes the known `options.entryEndpoint || entry` value directly.
+- Gate: `provider-response-converter.contract.spec.ts` now forbids `typeof (adapterContext as Record<string, unknown>).entryEndpoint` and the casted adapterContext endpoint read.
+- Red/green: focused contract first failed on the existing adapterContext endpoint read, then passed after removing the readback.
+- Evidence: focused provider-response converter Jest PASS 3 suites / 4 tests; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
+- Commit scope note: unrelated dirty SSE/package/build-info and prior uncommitted note entries remain excluded.
+
 # 2026-07-01: provider response adapterContext protocol fallback removed
 - Slice: `provider-response-converter.ts` no longer reads `runtime_control.providerProtocol` from `adapterContext`; provider protocol is resolved once from response metadata/MetadataCenter and reused for bridge conversion.
 - Gate: `provider-response-converter.contract.spec.ts` now forbids `adapterContext?: Record<string, unknown>`, `args.metadata ?? args.adapterContext`, and provider-protocol reads that pass `adapterContext`.

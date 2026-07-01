@@ -382,9 +382,7 @@ export async function convertProviderResponseIfNeeded(
       const snapshotRecorderStartMs = Date.now();
       stageRecorder = await bridgeCreateSnapshotRecorder(
         adapterContext,
-        typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
-          ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
-          : options.entryEndpoint || entry
+        options.entryEndpoint || entry
       );
       logPipelineStage('convert.snapshot_recorder.completed', options.requestId, {
         entryEndpoint: options.entryEndpoint || entry,
