@@ -54,6 +54,7 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain('switch (preflightKind)');
     expect(source).toContain('planServertoolEngineOrchestrationPreflightActionWithNative({');
     expect(source).toContain('switch (preflightOrchestrationAction.action)');
+    expect(source).not.toContain('String(preflightOrchestrationAction.action)');
     expect(source).not.toContain("if (stoplessPlan.action === 'terminal_final')");
     expect(source).not.toContain("if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow)");
     expect(source).not.toContain('!stoplessPlan.isStopMessageFlow &&');

@@ -156,9 +156,7 @@ export async function runServerToolOrchestrationShell(
       stopSignal = preflightStopSignal as typeof stopSignal;
       break;
     default:
-      throw new Error(
-        `[servertool] invalid engine preflight orchestration action: ${String(preflightOrchestrationAction.action)}`
-      );
+      throw new Error('[servertool] invalid engine preflight orchestration action');
   }
 
   const serverToolTimeoutMs = resolveServerToolTimeoutMs();

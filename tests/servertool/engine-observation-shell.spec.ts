@@ -297,6 +297,7 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('switch (preflightKind)');
     expect(source).toContain('planServertoolEngineOrchestrationPreflightActionWithNative({');
     expect(source).toContain('switch (preflightOrchestrationAction.action)');
+    expect(source).not.toContain('String(preflightOrchestrationAction.action)');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
     expect(source).toContain('switch (engineSkipPlan.action)');
     expect(source).not.toContain('hasServertoolCliProjectionContext:');

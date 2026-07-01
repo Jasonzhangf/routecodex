@@ -651,6 +651,7 @@ const TARGETS = [
       'const preflightKind = preflight.kind',
       'switch (preflightKind)',
       'invalid engine preflight result kind',
+      'String(preflightOrchestrationAction.action)',
       'hasServertoolCliProjectionContext:',
       'const engineSkipAction = engineSkipPlan.action as',
       'engineSkipPlan.skipReason as string',

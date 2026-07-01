@@ -6327,6 +6327,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'const preflightKind = preflight.kind',
     'switch (preflightKind)',
     'invalid engine preflight result kind',
+    'String(preflightOrchestrationAction.action)',
     'hasServertoolCliProjectionContext:',
   ]) {
     if (engineSource.includes(marker)) {
