@@ -18,8 +18,8 @@ import {
   DEFAULT_RESPONSES_SEQUENCER_CONFIG,
   sequenceResponse
 } from './sequencers/responses-sequencer.js';
-import type { ResponsesSequencerConfig } from './sequencers/responses-sequencer.js';
 import { createDefaultResponsesContext } from './event-generators/responses.js';
+import type { ResponsesEventGeneratorConfig } from './event-generators/responses.js';
 import { createResponsesStreamWriter } from '../shared/writer.js';
 
 /**
@@ -83,7 +83,7 @@ export class ResponsesJsonToSseConverterRefactored {
       });
 
       // 3. 直接调用 sequencer 函数，避免长期保留第二套配置 facade。
-      const sequencerConfig: ResponsesSequencerConfig = {
+      const sequencerConfig: ResponsesEventGeneratorConfig = {
         ...DEFAULT_RESPONSES_SEQUENCER_CONFIG
       };
       if (typeof context.options.chunkSize === 'number') {

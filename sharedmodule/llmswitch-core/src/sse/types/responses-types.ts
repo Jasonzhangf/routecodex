@@ -281,7 +281,6 @@ export interface ResponsesJsonToSseOptions {
   onEvent?: (event: ResponsesSseEvent) => void;
   onError?: (error: Error) => void;
   onComplete?: () => void;
-  resumeToolOutputs?: ResponsesFunctionCallOutputItem[];
 }
 
 export interface SseToResponsesJsonOptions {

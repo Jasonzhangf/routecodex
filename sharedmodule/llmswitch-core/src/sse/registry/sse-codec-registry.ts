@@ -4,7 +4,6 @@ import type {
   ChatCompletionResponse,
   ResponsesResponse,
   AnthropicMessageResponse,
-  ResponsesFunctionCallOutputItem,
   GeminiResponse
 } from '../types/index.js';
 import type { ChatSseEventStream } from '../types/chat-types.js';
@@ -27,7 +26,6 @@ export interface JsonToSseContext {
   requestId: string;
   model?: string;
   direction?: 'request' | 'response';
-  resumeToolOutputs?: ResponsesFunctionCallOutputItem[];
 }
 
 export interface SseToJsonContext {
@@ -138,8 +136,7 @@ function createResponsesCodec(): SseCodec {
       const model = resolveModelId(payload, context.model);
       return await jsonToSse.convertResponseToJsonToSse(payload as ResponsesResponse, {
         requestId: context.requestId,
-        model,
-        resumeToolOutputs: context.resumeToolOutputs
+        model
       });
     },
     async convertSseToJson(stream: SseStreamInput, context: SseToJsonContext): Promise<unknown> {

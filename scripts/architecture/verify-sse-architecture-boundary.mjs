@@ -115,6 +115,17 @@ for (const forbidden of [
   }
 }
 
+const registrySurface = read('sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts');
+for (const forbidden of [
+  'resumeToolOutputs?:',
+  'resumeToolOutputs: context.resumeToolOutputs',
+  'ResponsesFunctionCallOutputItem',
+]) {
+  if (registrySurface.includes(forbidden)) {
+    failures.push(`SSE registry must not own continuation/tool-output replay semantics: ${forbidden}`);
+  }
+}
+
 const retiredResponsesSerializerPath =
   'sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts';
 if (fs.existsSync(path.join(root, retiredResponsesSerializerPath))) {
@@ -211,6 +222,7 @@ const responsesSseTypes = read('sharedmodule/llmswitch-core/src/sse/types/respon
 for (const forbidden of [
   'interface ResponsesConversionConfig',
   'DEFAULT_RESPONSES_CONVERSION_CONFIG',
+  'resumeToolOutputs?:',
 ]) {
   if (responsesSseTypes.includes(forbidden)) {
     failures.push(`Responses SSE types must not keep dead conversion config surface: ${forbidden}`);
@@ -292,6 +304,10 @@ for (const forbidden of [
   'maxContentParts: number',
   'Too many output items:',
   'Too many content parts:',
+  'submittedToolOutputs?:',
+  'submittedToolOutputs: undefined',
+  'config.submittedToolOutputs',
+  'const submittedOutputs =',
   'planResponsesSseErrorRecoveryWithNative',
   'shouldEmitResponseError',
   'responseError = error instanceof Error',

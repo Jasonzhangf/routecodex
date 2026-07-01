@@ -10,7 +10,6 @@ import type {
   ResponsesMessageItem,
   ResponsesFunctionCallItem,
   ResponsesReasoningItem,
-  ResponsesFunctionCallOutputItem,
   ResponsesSseEvent
 } from '../../types/index.js';
 import {
@@ -34,21 +33,15 @@ import type { ResponsesEventGeneratorContext, ResponsesEventGeneratorConfig } fr
 import { normalizeResponsesOutputItems } from '../../shared/responses-output-normalizer.js';
 import { canonicalizeResponsesSseEventPayloadWithNative } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
 
-// 排列器配置
-export interface ResponsesSequencerConfig extends ResponsesEventGeneratorConfig {
-  submittedToolOutputs?: ResponsesFunctionCallOutputItem[];
-}
-
 // 默认配置
-export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesSequencerConfig = {
-  ...DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG,
-  submittedToolOutputs: undefined
+export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesEventGeneratorConfig = {
+  ...DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 };
 
 /**
  * 验证响应格式
  */
-function validateResponse(response: ResponsesResponse, config: ResponsesSequencerConfig): void {
+function validateResponse(response: ResponsesResponse, config: ResponsesEventGeneratorConfig): void {
   if (!response.id || !response.model) {
     throw new Error('Invalid response: missing required fields');
   }
@@ -68,7 +61,7 @@ function validateResponse(response: ResponsesResponse, config: ResponsesSequence
 async function* sequenceMessageItem(
   item: ResponsesMessageItem,
   context: ResponsesEventGeneratorContext,
-  config: ResponsesSequencerConfig
+  config: ResponsesEventGeneratorConfig
 ): AsyncGenerator<ResponsesSseEvent> {
   // 1. 发送output_item.start事件
   yield buildOutputItemStartEvent(item, context, config);
@@ -105,7 +98,7 @@ async function* sequenceMessageItem(
 async function* sequenceFunctionCallItem(
   item: ResponsesFunctionCallItem,
   context: ResponsesEventGeneratorContext,
-  config: ResponsesSequencerConfig
+  config: ResponsesEventGeneratorConfig
 ): AsyncGenerator<ResponsesSseEvent> {
   // 1. 发送output_item.start事件
   yield buildOutputItemStartEvent(item, context, config);
@@ -124,9 +117,9 @@ async function* sequenceFunctionCallItem(
  * 序列化函数调用输出项
  */
 async function* sequenceFunctionCallOutputItem(
-  item: ResponsesFunctionCallOutputItem,
+  item: Extract<ResponsesOutputItem, { type: 'function_call_output' }>,
   context: ResponsesEventGeneratorContext,
-  config: ResponsesSequencerConfig
+  config: ResponsesEventGeneratorConfig
 ): AsyncGenerator<ResponsesSseEvent> {
   yield buildOutputItemStartEvent(item as ResponsesOutputItem, context, config);
   yield buildOutputItemDoneEvent(item as ResponsesOutputItem, context, config);
@@ -138,7 +131,7 @@ async function* sequenceFunctionCallOutputItem(
 async function* sequenceReasoningItem(
   item: ResponsesReasoningItem,
   context: ResponsesEventGeneratorContext,
-  config: ResponsesSequencerConfig
+  config: ResponsesEventGeneratorConfig
 ): AsyncGenerator<ResponsesSseEvent> {
   // 1. 发送output_item.start事件
   yield buildOutputItemStartEvent(item, context, config);
@@ -159,7 +152,7 @@ async function* sequenceReasoningItem(
 async function* sequenceOutputItem(
   item: ResponsesOutputItem,
   context: ResponsesEventGeneratorContext,
-  config: ResponsesSequencerConfig
+  config: ResponsesEventGeneratorConfig
 ): AsyncGenerator<ResponsesSseEvent> {
   switch (item.type) {
     case 'message':
@@ -171,7 +164,7 @@ async function* sequenceOutputItem(
       break;
 
     case 'function_call_output':
-      yield* sequenceFunctionCallOutputItem(item as ResponsesFunctionCallOutputItem, context, config);
+      yield* sequenceFunctionCallOutputItem(item as Extract<ResponsesOutputItem, { type: 'function_call_output' }>, context, config);
       break;
 
     case 'reasoning':
@@ -189,7 +182,7 @@ async function* sequenceOutputItem(
 async function* sequenceResponseCore(
   response: ResponsesResponse,
   context: ResponsesEventGeneratorContext,
-  config: ResponsesSequencerConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
+  config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
 ): AsyncGenerator<ResponsesSseEvent> {
   // 1. 验证响应格式
   validateResponse(response, config);
@@ -197,22 +190,12 @@ async function* sequenceResponseCore(
   // 2. 发送response.start事件
   yield* buildResponseStartEvents(response, context, config);
 
-  const submittedOutputs = Array.isArray(config.submittedToolOutputs)
-    ? config.submittedToolOutputs
-    : [];
-
-  for (let i = 0; i < submittedOutputs.length; i++) {
-    context.outputIndexCounter = i;
-    yield* sequenceFunctionCallOutputItem(submittedOutputs[i], context, config);
-  }
-
   const normalizedOutput = normalizeResponsesOutputItems(response.output);
-  const outputOffset = submittedOutputs.length;
 
   // 3. 序列化所有输出项
   for (let outputIndex = 0; outputIndex < normalizedOutput.length; outputIndex++) {
     const item = normalizedOutput[outputIndex];
-    context.outputIndexCounter = outputOffset + outputIndex;
+    context.outputIndexCounter = outputIndex;
 
     yield* sequenceOutputItem(item, context, config);
   }
@@ -225,7 +208,7 @@ async function* sequenceResponseCore(
 export async function* sequenceResponse(
   response: ResponsesResponse,
   context: ResponsesEventGeneratorContext,
-  config: ResponsesSequencerConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
+  config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
 ): AsyncGenerator<ResponsesSseEvent> {
   for await (const event of sequenceResponseCore(response, context, config)) {
     yield canonicalizeResponsesSseEventPayloadWithNative(event) as unknown as ResponsesSseEvent;
