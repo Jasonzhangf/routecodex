@@ -1847,6 +1847,7 @@ export class RouteCodexHttpServer {
         providerType,
         providerProtocol: inboundProtocol,
         routeName: routingDecisionRouteName,
+        routecodexRoutingPolicyGroup: readTrimmedString(metadataForHub.routecodexRoutingPolicyGroup),
         runtimeKey,
         target: {
           providerKey,
@@ -2066,6 +2067,7 @@ export class RouteCodexHttpServer {
           providerModel: typeof target.modelId === 'string' ? target.modelId : undefined,
           providerLabel: buildProviderLabel(ctx.providerKey, typeof target.modelId === 'string' ? target.modelId : undefined),
           routeName: ctx.routingDecision?.routeName,
+          routecodexRoutingPolicyGroup: readTrimmedString(metadataForHub.routecodexRoutingPolicyGroup),
           runtimeKey,
           target: {
             providerKey,
@@ -2557,6 +2559,7 @@ export class RouteCodexHttpServer {
             providerFamily: handle?.providerFamily,
             providerProtocol: context.providerProtocol,
             routeName: 'port.provider-direct',
+            routecodexRoutingPolicyGroup: readTrimmedString(metadata?.routecodexRoutingPolicyGroup),
             runtimeKey: directRuntimeKey,
             target: {
               providerKey: context.providerKey,

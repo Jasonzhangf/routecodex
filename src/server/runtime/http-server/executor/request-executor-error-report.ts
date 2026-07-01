@@ -10,6 +10,7 @@ import { normalizeKnownProviderError } from '../../../../providers/core/runtime/
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
+const PROVIDER_ERROR_REPORTED_MARKER = Symbol.for('routecodex.provider.errorReported');
 
 export function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
@@ -32,7 +33,9 @@ export function cloneErrorForReporting(error: unknown): unknown {
     if (typeof error.stack === 'string') {
       cloned.stack = error.stack;
     }
-    return Object.assign(cloned, error);
+    Object.assign(cloned, error);
+    delete (cloned as { [PROVIDER_ERROR_REPORTED_MARKER]?: unknown })[PROVIDER_ERROR_REPORTED_MARKER];
+    return cloned;
   }
   if (Array.isArray(error)) {
     return [...error];

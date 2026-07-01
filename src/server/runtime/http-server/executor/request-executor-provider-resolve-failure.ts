@@ -24,6 +24,7 @@ type RequestExecutorProviderResolveFailureArgs = {
   providerType?: string;
   providerProtocol: ProviderProtocol;
   routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
   runtimeKey?: string;
   target: Record<string, unknown>;
   dependencies: ModuleDependencies;
@@ -87,6 +88,7 @@ export async function processProviderResolveFailure(
     providerType: args.providerType,
     providerProtocol: args.providerProtocol,
     routeName: args.routeName,
+    routecodexRoutingPolicyGroup: args.routecodexRoutingPolicyGroup,
     runtimeKey: args.runtimeKey,
     target: args.target,
     dependencies: args.dependencies,

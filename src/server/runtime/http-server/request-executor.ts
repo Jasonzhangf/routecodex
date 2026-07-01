@@ -746,6 +746,7 @@ export class HubRequestExecutor implements RequestExecutor {
       readString(metadataRecord?.routecodexRoutingPolicyGroup)
       || readString(metadataRecord?.routecodexPort)
       || 'unknown-port';
+    const routecodexRoutingPolicyGroup = readString(metadataRecord?.routecodexRoutingPolicyGroup);
     try {
       const hubPipeline = ensureHubPipeline(() => this.deps.getHubPipeline(readString(metadataRecord?.routecodexRoutingPolicyGroup)));
       const {
@@ -970,6 +971,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 : undefined,
             providerProtocol: target.outboundProfile as ProviderProtocol,
             routeName: pipelineResult.routingDecision?.routeName,
+            routecodexRoutingPolicyGroup,
             runtimeKey,
             target: target as unknown as Record<string, unknown>,
             dependencies: this.deps.getModuleDependencies(),
@@ -1079,6 +1081,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerType: handle.providerType,
             providerFamily: handle.providerFamily,
             providerProtocol,
+            routecodexRoutingPolicyGroup,
             pipelineId: target.providerKey,
             routeName: pipelineResult.routingDecision?.routeName,
             runtimeKey,
@@ -1103,6 +1106,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 : undefined,
             providerProtocol: target.outboundProfile as ProviderProtocol,
             routeName: pipelineResult.routingDecision?.routeName,
+            routecodexRoutingPolicyGroup,
             runtimeKey,
             target: target as unknown as Record<string, unknown>,
             dependencies: this.deps.getModuleDependencies(),
@@ -1551,6 +1555,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerModel,
             providerLabel,
             routeName: pipelineResult.routingDecision?.routeName,
+            routecodexRoutingPolicyGroup,
             runtimeKey,
             target: target as unknown as Record<string, unknown>,
             dependencies: this.deps.getModuleDependencies(),

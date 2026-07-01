@@ -9,6 +9,9 @@ jest.unstable_mockModule('../../../../../src/providers/core/utils/provider-error
 const { resolveRequestExecutorProviderFailurePlan } = await import(
   '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan.js'
 );
+const { reportRequestExecutorProviderError } = await import(
+  '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure.js'
+);
 
 describe('request-executor provider health impact', () => {
   beforeEach(() => {
@@ -147,6 +150,51 @@ describe('request-executor provider health impact', () => {
     expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         stage: 'provider.send',
+        runtime: expect.objectContaining({
+          providerKey: 'primary.key1.gpt-test',
+          routecodexRoutingPolicyGroup: 'gateway_priority_5555'
+        })
+      })
+    );
+  });
+
+  test('executor provider error report ignores prior provider-runtime reported marker', async () => {
+    const providerErrorReportedMarker = Symbol.for('routecodex.provider.errorReported');
+    const error = Object.assign(new Error('upstream unavailable'), {
+      code: 'HTTP_503',
+      statusCode: 503,
+      [providerErrorReportedMarker]: true
+    });
+
+    await reportRequestExecutorProviderError({
+      error,
+      retryError: {
+        statusCode: 503,
+        errorCode: 'HTTP_503',
+        reason: 'upstream unavailable'
+      },
+      requestId: 'req-executor-reports-after-provider-runtime',
+      providerKey: 'primary.key1.gpt-test',
+      providerId: 'primary',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      routeName: 'thinking',
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      runtimeKey: 'primary.key1',
+      target: { providerKey: 'primary.key1.gpt-test', runtimeKey: 'primary.key1' },
+      dependencies: {} as any,
+      attempt: 1,
+      logStage: () => undefined,
+      stageHint: 'provider.send',
+      routePool: ['primary.key1.gpt-test', 'backup.key1.gpt-test'],
+      excludedProviderKeys: new Set<string>()
+    });
+
+    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'provider.send',
+        affectsHealth: true,
         runtime: expect.objectContaining({
           providerKey: 'primary.key1.gpt-test',
           routecodexRoutingPolicyGroup: 'gateway_priority_5555'
