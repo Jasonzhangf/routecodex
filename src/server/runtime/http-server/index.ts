@@ -79,7 +79,6 @@ import { decideDirectProviderRetry } from './direct-decision.js';
 import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
 import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
 import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
-import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
 import { resolveSessionLogColorKey } from '../../../utils/session-log-color.js';
@@ -374,7 +373,6 @@ export class RouteCodexHttpServer {
   private managerDaemon: ManagerDaemon | null = null;
   private readonly stats = new StatsManager();
   private restartChain: Promise<void> = Promise.resolve();
-  private readonly hubShadowCompareConfig = resolveHubShadowCompareConfig();
   private readonly llmsEngineShadowConfig = resolveLlmsEngineShadowConfig();
   private hubPolicyMode: string | null = null;
   private hubPipelineEngineShadow: HubPipeline | null = null;

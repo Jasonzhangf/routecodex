@@ -1,3 +1,10 @@
+# 2026-07-01: http-server hub shadow compare dead surface removed
+- Slice: physically deleted `src/server/runtime/http-server/hub-shadow-compare.ts`, its two direct tests, the unused server constructor config field, CI test list entry, and stale no-fallback exemptions. Runtime never called `shouldRunHubShadowCompare` / `recordHubShadowCompareDiff`; only config construction and direct tests remained.
+- Gate: `verify-architecture-deleted-path.mjs` now forbids the deleted module and tests from returning.
+- Red/green: `verify:architecture-deleted-path` first failed on all three new deleted paths, then passed after physical deletion.
+- Evidence: `verify:architecture-deleted-path` PASS; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS; `build:base` PASS.
+- Commit scope note: unrelated dirty SSE/servertool/package/build-info/MEMORY work remains excluded.
+
 # 2026-07-01: provider response snapshot recorder adapterContext read removed
 - Slice: `provider-response-converter.ts` no longer reads `entryEndpoint` back from `adapterContext` for the snapshot recorder; it passes the known `options.entryEndpoint || entry` value directly.
 - Gate: `provider-response-converter.contract.spec.ts` now forbids `typeof (adapterContext as Record<string, unknown>).entryEndpoint` and the casted adapterContext endpoint read.

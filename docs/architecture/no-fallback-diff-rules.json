@@ -332,11 +332,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/server/runtime/http-server/hub-shadow-compare.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/server/runtime/http-server/port-log-context.ts",
       "textContains": ""
     },
@@ -2008,10 +2003,6 @@
     {
       "ruleId": "fallback-keyword",
       "pathContains": "src/server/runtime/http-server/stats-manager.ts"
-    },
-    {
-      "ruleId": "fallback-keyword",
-      "pathContains": "src/server/runtime/http-server/hub-shadow-compare.ts"
     },
     {
       "ruleId": "fallback-keyword",

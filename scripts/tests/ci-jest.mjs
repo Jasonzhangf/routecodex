@@ -75,8 +75,7 @@ const routingInstructionTests = [
   'tests/unified-hub/hub-v1-single-path-imports.spec.ts',
   'tests/unified-hub/policy-errorsample-write.spec.ts',
   'tests/unified-hub/runtime-error-errorsample-write.spec.ts',
-  'tests/unified-hub/policy-observe-shadow.spec.ts',
-  'tests/unified-hub/shadow-runtime-compare.errorsamples.spec.ts'
+  'tests/unified-hub/policy-observe-shadow.spec.ts'
 ];
 
 const cliTests = [
