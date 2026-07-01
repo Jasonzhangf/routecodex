@@ -765,3 +765,13 @@ Focused tests to use as slice gates:
 - Error boundary: this slice does not add SSE business semantics; it deletes decoder-local second truth so decode remains codec-only. Anthropic terminated-stream projection is limited to preserving the existing explicit transport error contract.
 - Positive tests: valid Anthropic/Gemini wire replay still materializes expected JSON output.
 - Reverse tests/gates: the focused context spec and `verify:sse-architecture-boundary` forbid the retired decoder config/default markers from returning; malformed paths remain covered by existing no-salvage / no-recovery specs.
+
+### 2026-07-01 Responses SSE decoder config/cache dead-state removed
+
+- Boundary: `responses-sse-to-json-converter.ts` must stay a per-call IO/codec shell. It must not keep converter-level config truth, cross-request context cache, or local sequence-governance semantics as a second owner beside the native Responses materializer.
+- Red evidence: source audit showed `responses-sse-to-json-converter.ts` still carried `private config`, constructor config injection, `this.config.enableEventValidation`, `this.config.enableSequenceValidation`, `private contexts = new Map`, `getContext/clearContext/getActiveContexts`, and local `validateSequenceNumber()` sequence semantics.
+- Fix: physically removed converter-level config/default truth, cross-request context cache/public context APIs, and local sequence validation from `ResponsesSseToJsonConverterRefactored`. Decoder now hard-locks parser strict validation at the boundary, keeps only per-call state, and leaves final semantic materialization to the native owner.
+- Positive tests: valid Responses wire text still materializes completed JSON output and native custom_tool_call output items.
+- Reverse tests/gates: new `responses-sse-to-json-context-no-dead-state` plus `verify:sse-architecture-boundary` forbid the retired config/cache/sequence markers from returning; existing decode-no-wire-synthesis / native-materialize / parser-no-recovery tests still lock malformed-path failure.
+- Verification: focused Jest `responses-sse-to-json-context-no-dead-state + responses-sse-decode-no-ts-wire-synthesis + responses-sse-native-materialize + sse-parser-no-recovery` PASS 17/17; `npm run verify:sse-architecture-boundary` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS.
+- Real-sample gap: current `4444` sample store contains provider-response snapshots but no success SSE wire payload field such as `bodyText` / `rawBody` / `sseText`, so this slice cannot complete a real success decode replay from the local sample cache. Focused tests remain the available proof for the success path in this slice.

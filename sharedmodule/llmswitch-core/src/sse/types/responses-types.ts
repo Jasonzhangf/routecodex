@@ -91,7 +91,6 @@ export interface SseToResponsesJsonContext {
   isCompleted: boolean;
   isResponseCreated: boolean;
   isInProgress: boolean;
-  lastSequenceNumber: number;
 }
 
 // Responses请求类型

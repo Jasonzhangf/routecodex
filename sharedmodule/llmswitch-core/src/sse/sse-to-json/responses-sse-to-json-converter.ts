@@ -35,34 +35,11 @@ const hasExplicitToolWrapperProgress = (text: string): boolean => {
 };
 
 export class ResponsesSseToJsonConverterRefactored {
-  private config: {
-    timeoutMs: number;
-    enableEventValidation: boolean;
-    enableSequenceValidation: boolean;
-    strictMode: boolean;
-    validateOutputItems: boolean;
-  } = {
-    timeoutMs: 900_000,
-    enableEventValidation: true,
-    enableSequenceValidation: false,
-    strictMode: false,
-    validateOutputItems: true
-  };
-
-  private contexts = new Map<string, SseToResponsesJsonContext>();
-
-  constructor(config?: Partial<ResponsesSseToJsonConverterRefactored['config']>) {
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
-  }
-
   async convertSseToJson(
     sseStream: ResponsesSseEventStream | Readable | AsyncIterable<string | Buffer>,
     options: Partial<SseToResponsesJsonOptions> = {}
   ): Promise<ResponsesResponse> {
     const context = this.createContext(options);
-    this.contexts.set(context.requestId, context);
 
     const abortSignal = options.abortSignal;
     let abortHandler: (() => void) | null = null;
@@ -71,7 +48,7 @@ export class ResponsesSseToJsonConverterRefactored {
 
     try {
       const parser = createSseParser({
-        enableStrictValidation: this.config.enableEventValidation,
+        enableStrictValidation: true,
         enableEventRecovery: false
       });
 
@@ -94,9 +71,6 @@ export class ResponsesSseToJsonConverterRefactored {
 
         if (parseResult.success && parseResult.event) {
           const event = parseResult.event as ResponsesSseEvent;
-          if (this.config.enableSequenceValidation && !this.validateSequenceNumber(event, context)) {
-            throw new Error(`Invalid sequence number: ${event.sequenceNumber}`);
-          }
           this.updateStats(context, event);
           options.onEvent?.(event);
 
@@ -139,7 +113,6 @@ export class ResponsesSseToJsonConverterRefactored {
       throw this.wrapError('SSE_TO_JSON_ERROR', error as Error, context.requestId);
     } finally {
       abortHandler?.();
-      this.clearContext(context.requestId);
     }
   }
 
@@ -325,19 +298,6 @@ export class ResponsesSseToJsonConverterRefactored {
     context.eventStats.lastContentAtMs = now;
   }
 
-  private validateSequenceNumber(event: ResponsesSseEvent, context: SseToResponsesJsonContext): boolean {
-    if (typeof event.sequenceNumber !== 'number') {
-      context.lastSequenceNumber += 1;
-      event.sequenceNumber = context.lastSequenceNumber;
-      return true;
-    }
-    if (event.sequenceNumber <= context.lastSequenceNumber) {
-      return false;
-    }
-    context.lastSequenceNumber = event.sequenceNumber;
-    return true;
-  }
-
   private updateStats(context: SseToResponsesJsonContext, event: ResponsesSseEvent): void {
     context.eventStats.totalEvents++;
     context.eventStats.eventTypes[event.type] = (context.eventStats.eventTypes[event.type] || 0) + 1;
@@ -491,21 +451,8 @@ export class ResponsesSseToJsonConverterRefactored {
       eventStats,
       isCompleted: false,
       isResponseCreated: false,
-      isInProgress: false,
-      lastSequenceNumber: -1
+      isInProgress: false
     };
-  }
-
-  getContext(requestId: string): SseToResponsesJsonContext | undefined {
-    return this.contexts.get(requestId);
-  }
-
-  clearContext(requestId: string): void {
-    this.contexts.delete(requestId);
-  }
-
-  getActiveContexts(): Map<string, SseToResponsesJsonContext> {
-    return new Map(this.contexts);
   }
 
   private attachDecodeStats(response: ResponsesResponse, context: SseToResponsesJsonContext): void {
