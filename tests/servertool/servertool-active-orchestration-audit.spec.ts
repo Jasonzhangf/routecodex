@@ -366,6 +366,7 @@ const TARGETS = [
       "if (preflightAction.action === 'return_original_chat_direct_passthrough')",
       'preflightAction.logStopEntry.stage',
       'preflightAction.logStopEntry.result',
+      'String(preflightAction.action)',
     ],
     required: [
       'runEnginePreflight',

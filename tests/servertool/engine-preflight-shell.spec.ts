@@ -78,8 +78,39 @@ describe('engine-preflight-shell', () => {
     expect(source).toContain('preflightAction.logStopCompare');
     expect(source).not.toContain('preflightAction.logStopEntry.stage');
     expect(source).not.toContain('preflightAction.logStopEntry.result');
+    expect(source).not.toContain('String(preflightAction.action)');
     expect(source).not.toContain('./stop-gateway-context.js');
     expect(source).not.toContain('./orchestration-policy-block.js');
+  });
+
+  test('fails fast on unknown native preflight action without reading action payload in TS', () => {
+    const logStopEntry = jest.fn();
+    const logStopCompare = jest.fn();
+    planServertoolEnginePreflightWithNativeMock.mockReturnValue({
+      action: 'unknown_preflight_action',
+      attachStopGatewayContext: true,
+      logStopEntry: {
+        stage: 'entry',
+        result: 'observed',
+        includeChoiceFacts: true
+      },
+      logStopCompare: {
+        stage: 'entry'
+      }
+    });
+
+    expect(() =>
+      runEnginePreflight({
+        chat: { id: 'chat-invalid-action' } as any,
+        adapterContext: {} as any,
+        logStopEntry,
+        logStopCompare,
+      })
+    ).toThrow('[servertool] invalid engine preflight action');
+
+    expect(attachStopGatewayContextMock).not.toHaveBeenCalled();
+    expect(logStopEntry).not.toHaveBeenCalled();
+    expect(logStopCompare).not.toHaveBeenCalled();
   });
 
   test('returns original chat when native preflight says so', () => {

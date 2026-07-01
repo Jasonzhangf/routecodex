@@ -98,6 +98,6 @@ export function runEnginePreflight(args: {
       });
       return { kind: 'continue', stopSignal };
     default:
-      throw new Error(`[servertool] invalid engine preflight action: ${String(preflightAction.action)}`);
+      throw new Error('[servertool] invalid engine preflight action');
   }
 }
