@@ -12,7 +12,7 @@ import {
   runStoplessBuiltinHandlerForRuntimeWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  planServertoolAutoHookQueuesWithNative,
+  planServertoolAutoHookQueueItemsWithNative,
   planServertoolSkeletonDerivedConfigWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { materializeServertoolPlannedResult } from './execution-handler-materialization-shell.js';
@@ -40,33 +40,23 @@ function buildAutoHookQueuesFromNativePlan(args: {
     optionalPrimaryOrder: string[];
     mandatoryOrder: string[];
   };
-  const nativePlan = planServertoolAutoHookQueuesWithNative({
-    hooks: args.hooks.map((hook, sourceIndex) => ({
+  const nativePlan = planServertoolAutoHookQueueItemsWithNative({
+    hooks: args.hooks.map((hook) => ({
       id: hook.id,
       phase: hook.phase,
       priority: hook.priority,
       order: hook.order,
-      sourceIndex
+      execution: hook.execution
     })),
     ...(args.includeAutoHookIds ? { includeAutoHookIds: [...args.includeAutoHookIds] } : {}),
     ...(args.excludeAutoHookIds ? { excludeAutoHookIds: [...args.excludeAutoHookIds] } : {}),
     optionalPrimaryHookOrder: queueConfig.optionalPrimaryOrder,
     mandatoryHookOrder: queueConfig.mandatoryOrder
   });
-  const mapQueue = (entries: Array<{ sourceIndex: number }>): AutoHookExecutionItem[] =>
-    entries.map((entry) => {
-      const hook = args.hooks[entry.sourceIndex];
-      if (!hook) {
-        throw new Error(
-          `[servertool] native auto-hook queue returned invalid sourceIndex: ${entry.sourceIndex}`
-        );
-      }
-      return hook;
-    });
   return {
     queueOrder: nativePlan.queueOrder.map((queue) => ({
       queueName: queue.queue,
-      hooks: mapQueue(queue.entries)
+      hooks: queue.entries
     }))
   };
 }

@@ -104,6 +104,21 @@ jest.unstable_mockModule(
           }))
         : []
     ),
+    planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn((input: any) =>
+      Array.isArray(input?.hooks)
+        ? input.hooks.map((hook: any) => ({
+            id: String(hook?.id ?? '').trim().toLowerCase(),
+            phase:
+              hook?.phase === 'pre' || hook?.phase === 'post'
+                ? hook.phase
+                : 'default',
+            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
+            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
+            registration: hook?.registration,
+            execution: hook?.execution
+          }))
+        : []
+    ),
     planServertoolRegistryProjectionWithNative: jest.fn((input: any) => {
       const registeredNames = [...new Set(
         Array.isArray(input?.registeredNames)
@@ -474,6 +489,18 @@ jest.unstable_mockModule(
     planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => ({
       optionalQueue: Array.isArray(input?.hooks) ? [...input.hooks] : [],
       mandatoryQueue: [],
+      queueOrder: [
+        {
+          queue: 'A_optional',
+          entries: Array.isArray(input?.hooks) ? [...input.hooks] : []
+        },
+        {
+          queue: 'B_mandatory',
+          entries: []
+        }
+      ]
+    })),
+    planServertoolAutoHookQueueItemsWithNative: jest.fn((input: any) => ({
       queueOrder: [
         {
           queue: 'A_optional',

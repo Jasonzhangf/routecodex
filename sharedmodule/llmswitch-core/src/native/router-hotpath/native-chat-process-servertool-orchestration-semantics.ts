@@ -58,6 +58,12 @@ export type NativeServertoolHandlerContractPlan = ReturnType<typeof parseServert
 export type NativeServertoolAutoHookQueues = ReturnType<typeof parseServertoolAutoHookQueuesPayload> extends infer T
   ? Exclude<T, null>
   : never;
+export type NativeServertoolAutoHookQueueItems<T> = {
+  queueOrder: Array<{
+    queue: 'A_optional' | 'B_mandatory';
+    entries: T[];
+  }>;
+};
 
 export type NativeServertoolFollowupRuntimePlan = ReturnType<typeof parseServertoolFollowupRuntimePlanPayload> extends infer T
   ? Exclude<T, null>
@@ -948,6 +954,48 @@ export function planServertoolAutoHookQueuesWithNative(input: {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
+}
+
+export function planServertoolAutoHookQueueItemsWithNative<T extends {
+  id: string;
+  phase: string;
+  priority: number;
+  order: number;
+}>(input: {
+  hooks: T[];
+  includeAutoHookIds?: string[];
+  excludeAutoHookIds?: string[];
+  optionalPrimaryHookOrder: string[];
+  mandatoryHookOrder: string[];
+}): NativeServertoolAutoHookQueueItems<T> {
+  const nativePlan = planServertoolAutoHookQueuesWithNative({
+    hooks: input.hooks.map((hook, sourceIndex) => ({
+      id: hook.id,
+      phase: hook.phase,
+      priority: hook.priority,
+      order: hook.order,
+      sourceIndex
+    })),
+    ...(input.includeAutoHookIds ? { includeAutoHookIds: input.includeAutoHookIds } : {}),
+    ...(input.excludeAutoHookIds ? { excludeAutoHookIds: input.excludeAutoHookIds } : {}),
+    optionalPrimaryHookOrder: input.optionalPrimaryHookOrder,
+    mandatoryHookOrder: input.mandatoryHookOrder
+  });
+  return {
+    queueOrder: nativePlan.queueOrder.map((queue) => ({
+      queue: queue.queue,
+      entries: queue.entries.map((entry) => {
+        const hook = input.hooks[entry.sourceIndex];
+        if (!hook) {
+          return failNativeRequired<T>(
+            'planServertoolAutoHookQueuesJson',
+            `native auto-hook queue returned invalid sourceIndex: ${entry.sourceIndex}`
+          );
+        }
+        return hook;
+      })
+    }))
+  };
 }
 
 export function runServertoolOrchestrationMutationWithNative(input: Record<string, unknown>): unknown {

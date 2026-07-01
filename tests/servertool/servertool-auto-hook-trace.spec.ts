@@ -137,6 +137,16 @@ jest.unstable_mockModule(
           { queue: 'B_mandatory', entries: mandatoryQueue }
         ]
       };
+    }),
+    planServertoolAutoHookQueueItemsWithNative: jest.fn((input: any) => {
+      const optionalQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority < 100);
+      const mandatoryQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority >= 100);
+      return {
+        queueOrder: [
+          { queue: 'A_optional', entries: optionalQueue },
+          { queue: 'B_mandatory', entries: mandatoryQueue }
+        ]
+      };
     })
   })
 );

@@ -92,6 +92,12 @@ const planServertoolAutoHookQueuesWithNative = jest.fn((input: any) => ({
     }
   ]
 }));
+const planServertoolAutoHookQueueItemsWithNative = jest.fn((input: any) => ({
+  queueOrder: planServertoolAutoHookQueuesWithNative(input).queueOrder.map((queue: any) => ({
+    queue: queue.queue,
+    entries: queue.entries
+  }))
+}));
 
 function mockToolSpec(name: unknown): any | null {
   const key = String(name ?? '').trim().toLowerCase();
@@ -366,6 +372,7 @@ jest.unstable_mockModule(
     visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
     visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
     planServertoolAutoHookQueuesWithNative,
+    planServertoolAutoHookQueueItemsWithNative,
     runServertoolOrchestrationMutationWithNative
   })
 );
@@ -588,6 +595,7 @@ jest.unstable_mockModule(
     visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
     visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
     planServertoolAutoHookQueuesWithNative,
+    planServertoolAutoHookQueueItemsWithNative,
     runServertoolOrchestrationMutationWithNative
   })
 );
@@ -629,6 +637,21 @@ jest.unstable_mockModule(
             priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
             order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
             sourceIndex
+          }))
+        : []
+    ),
+    planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn((input: any) =>
+      Array.isArray(input?.hooks)
+        ? input.hooks.map((hook: any) => ({
+            id: String(hook?.id ?? '').trim().toLowerCase(),
+            phase:
+              hook?.phase === 'pre' || hook?.phase === 'post'
+                ? hook.phase
+                : 'default',
+            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
+            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
+            registration: hook?.registration,
+            execution: hook?.execution
           }))
         : []
     ),
@@ -693,6 +716,21 @@ jest.unstable_mockModule(
             priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
             order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
             sourceIndex
+          }))
+        : []
+    ),
+    planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn((input: any) =>
+      Array.isArray(input?.hooks)
+        ? input.hooks.map((hook: any) => ({
+            id: String(hook?.id ?? '').trim().toLowerCase(),
+            phase:
+              hook?.phase === 'pre' || hook?.phase === 'post'
+                ? hook.phase
+                : 'default',
+            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
+            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
+            registration: hook?.registration,
+            execution: hook?.execution
           }))
         : []
     ),
@@ -854,9 +892,10 @@ describe('servertool skeleton config', () => {
       fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8')
     );
 
-    expect(source).toContain('planServertoolAutoHookQueuesWithNative({');
-    expect(source).toContain('sourceIndex');
-    expect(source).toContain('args.hooks[entry.sourceIndex]');
+    expect(source).toContain('planServertoolAutoHookQueueItemsWithNative({');
+    expect(source).not.toContain('planServertoolAutoHookQueuesWithNative({');
+    expect(source).not.toContain('args.hooks[entry.sourceIndex]');
+    expect(source).not.toContain('native auto-hook queue returned invalid sourceIndex');
     expect(planServertoolHookScheduleWithNative).not.toHaveBeenCalled();
   });
 

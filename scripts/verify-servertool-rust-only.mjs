@@ -5719,15 +5719,25 @@ function checkServertoolAutoHookCallerThinShell() {
     }
   }
   for (const marker of [
-    'planServertoolAutoHookQueuesWithNative({',
-    'sourceIndex',
-    'args.hooks[entry.sourceIndex]',
+    'planServertoolAutoHookQueueItemsWithNative({',
     'queueOrder: nativePlan.queueOrder.map(',
   ]) {
     if (!autoHookCallerShell.includes(marker)) {
       fail(
         'servertool-auto-hook-queue-single-rust-plan',
-        `auto-hook-caller.ts must consume Rust-planned auto-hook queues by sourceIndex marker ${marker}`
+        `auto-hook-caller.ts must consume Rust-planned auto-hook queues through native queue item bridge marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'planServertoolAutoHookQueuesWithNative({',
+    'args.hooks[entry.sourceIndex]',
+    'native auto-hook queue returned invalid sourceIndex',
+  ]) {
+    if (autoHookCallerShell.includes(marker)) {
+      fail(
+        'servertool-auto-hook-queue-single-rust-plan',
+        `auto-hook-caller.ts must not rematch Rust auto-hook queue entries in TS via marker ${marker}`
       );
     }
   }
