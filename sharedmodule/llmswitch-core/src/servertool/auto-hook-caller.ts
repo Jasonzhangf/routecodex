@@ -104,8 +104,8 @@ async function runAutoHookExecutionQueue(args: {
 
     const attemptPlan = planAutoHookRuntimeAttemptWithNative({
       ...traceBase,
-      hasPlannedResult: Boolean(planned),
-      hasMaterializedResult: Boolean(result),
+      hasPlannedResult: planned != null,
+      hasMaterializedResult: result != null,
       ...(result?.execution && typeof result.execution.flowId === 'string'
         ? { materializedFlowId: result.execution.flowId }
         : {})
@@ -143,7 +143,7 @@ export async function runServertoolAutoHookCaller(args: {
       contextBase: args.contextBase
     });
     const finalizationPlan = planAutoHookCallerFinalizationWithNative({
-      resultPresent: Boolean(queueResult),
+      resultPresent: queueResult != null,
       queueIndex: queueIndex + 1,
       queueTotal: queueOrder.length
     });

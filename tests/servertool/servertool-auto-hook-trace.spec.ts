@@ -443,6 +443,12 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).not.toContain('native auto-hook execution returned no materialized disposition');
     expect(callerSource).not.toContain('if (!result)');
     expect(callerSource).not.toContain('if (!queueResult)');
+    expect(callerSource).not.toContain('Boolean(planned)');
+    expect(callerSource).not.toContain('Boolean(result)');
+    expect(callerSource).not.toContain('Boolean(queueResult)');
+    expect(callerSource).toContain('hasPlannedResult: planned != null');
+    expect(callerSource).toContain('hasMaterializedResult: result != null');
+    expect(callerSource).toContain('resultPresent: queueResult != null');
     expect(callerSource).not.toContain('error instanceof Error ? error.message');
     expect(callerSource).not.toContain("typeof error === 'string' ? error");
     expect(callerSource).toContain('error');
