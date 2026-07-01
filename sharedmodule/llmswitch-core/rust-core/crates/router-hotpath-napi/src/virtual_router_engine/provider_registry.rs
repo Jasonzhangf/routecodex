@@ -158,9 +158,15 @@ impl ProviderRegistry {
             "providerType".to_string(),
             Value::String(profile.provider_type.clone()),
         );
-        if let Some(outbound) = profile.outbound_profile.clone() {
-            target.insert("outboundProfile".to_string(), Value::String(outbound));
-        }
+        target.insert(
+            "outboundProfile".to_string(),
+            Value::String(
+                profile
+                    .outbound_profile
+                    .clone()
+                    .unwrap_or_else(|| profile.provider_protocol.clone()),
+            ),
+        );
         if let Some(comp) = profile.compatibility_profile.clone() {
             target.insert("compatibilityProfile".to_string(), Value::String(comp));
         }

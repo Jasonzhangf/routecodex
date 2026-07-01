@@ -5,6 +5,7 @@ export interface ProviderErrorRuntimeMetadata {
   providerType?: string;
   providerProtocol?: string;
   routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
   pipelineId?: string;
   target?: Record<string, unknown> | null;
   runtimeKey?: string;
@@ -31,6 +32,7 @@ export interface ProviderErrorEvent {
 export interface ProviderSuccessRuntimeMetadata {
   requestId: string;
   routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
   providerKey?: string;
   providerId?: string;
   providerType?: string;

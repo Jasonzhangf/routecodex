@@ -15,6 +15,7 @@ type ExtendedRuntimeMetadata = ProviderErrorRuntimeMetadata & {
   providerFamily?: string;
   runtimeKey?: string;
   consecutiveErrors?: number;
+  routecodexRoutingPolicyGroup?: string;
 };
 
 type ProviderErrorEventExtended = ProviderErrorEvent & {
@@ -49,6 +50,7 @@ type CompatContext = {
   providerFamily?: string;
   providerProtocol?: string;
   routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
   pipelineId?: string;
   target?: TargetMetadata;
 };
@@ -70,6 +72,10 @@ export type ErrorErr01SourceRaised = EmitOptions;
 export type ErrorErr02HostCaptured = ProviderErrorEventExtended;
 
 const PROVIDER_ERROR_REPORTED_MARKER = Symbol.for('routecodex.provider.errorReported');
+
+function readTrimmedString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
 
 function buildProviderErrorEvent(options: EmitOptions): ProviderErrorEventExtended {
   const err = normalizeError(options.error);
@@ -220,6 +226,10 @@ export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedR
   const rccUserDir = typeof rtHints?.rccUserDir === 'string' && rtHints.rccUserDir.trim()
     ? rtHints.rccUserDir.trim()
     : undefined;
+  const routecodexRoutingPolicyGroup =
+    readTrimmedString(runtimeMetadataRecord?.routecodexRoutingPolicyGroup)
+    ?? readTrimmedString(contextMetadataRecord?.routecodexRoutingPolicyGroup)
+    ?? readTrimmedString(runtimeMetadataCarrier?.routecodexRoutingPolicyGroup);
   const runtime: ExtendedRuntimeMetadata = {
     requestId: ctx.requestId,
     providerKey: ctx.providerKey,
@@ -227,6 +237,7 @@ export function buildRuntimeFromProviderContext(ctx: ProviderContext): ExtendedR
     providerType: ctx.providerType,
     providerProtocol: ctx.providerProtocol,
     routeName: ctx.routeName,
+    routecodexRoutingPolicyGroup,
     pipelineId: ctx.pipelineId,
     target: ctx.target,
     providerFamily: ctx.providerFamily,
@@ -245,6 +256,7 @@ export function buildRuntimeFromCompatContext(ctx: CompatContext): ExtendedRunti
     providerType: ctx.providerType,
     providerProtocol: ctx.providerProtocol,
     routeName: ctx.routeName,
+    routecodexRoutingPolicyGroup: ctx.routecodexRoutingPolicyGroup,
     pipelineId: ctx.pipelineId,
     target: ctx.target,
     providerFamily: ctx.providerFamily ?? ctx.providerType,

@@ -692,6 +692,7 @@ export interface ProviderFailureEvent {
 export interface ProviderErrorRuntimeMetadata {
   requestId: string;
   routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
   providerKey?: string;
   providerId?: string;
   providerType?: string;
@@ -721,6 +722,7 @@ export interface ProviderErrorEvent {
 export interface ProviderSuccessRuntimeMetadata {
   requestId: string;
   routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
   providerKey?: string;
   providerId?: string;
   providerType?: string;

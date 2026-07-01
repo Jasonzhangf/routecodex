@@ -3,11 +3,12 @@ export interface ProviderErrorRuntimeMetadata {
     providerKey?: string;
     providerId?: string;
     providerType?: string;
-    providerProtocol?: string;
-    routeName?: string;
-    pipelineId?: string;
-    target?: Record<string, unknown> | null;
-    runtimeKey?: string;
+  providerProtocol?: string;
+  routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
+  pipelineId?: string;
+  target?: Record<string, unknown> | null;
+  runtimeKey?: string;
     sessionDir?: string;
     rccUserDir?: string;
 }
@@ -27,10 +28,11 @@ export interface ProviderErrorEvent {
     details?: Record<string, unknown>;
 }
 export interface ProviderSuccessRuntimeMetadata {
-    requestId: string;
-    routeName?: string;
-    providerKey?: string;
-    providerId?: string;
+  requestId: string;
+  routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
+  providerKey?: string;
+  providerId?: string;
     providerType?: string;
     providerProtocol?: string;
     pipelineId?: string;

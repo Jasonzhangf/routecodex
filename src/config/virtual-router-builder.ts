@@ -282,9 +282,14 @@ export async function buildVirtualRouterInputV2(
   }
 
   const applyPatch = extractApplyPatchConfigFromUserConfig(userConfig);
+  const requestedRoutingPolicyGroup =
+    typeof options?.routingPolicyGroup === 'string' && options.routingPolicyGroup.trim()
+      ? options.routingPolicyGroup.trim()
+      : undefined;
   const input: VirtualRouterInput = {
     providers,
     routing,
+    ...(requestedRoutingPolicyGroup ? { routingPolicyGroup: requestedRoutingPolicyGroup } : {}),
     ...(forwardersSource && Object.keys(forwardersSource).length
       ? { forwarders: normalizeForwardersForNative(forwardersSource, providerConfigs) }
       : {}),

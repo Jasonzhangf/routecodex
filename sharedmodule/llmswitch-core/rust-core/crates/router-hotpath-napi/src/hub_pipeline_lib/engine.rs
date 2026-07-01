@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
+use crate::hub_pipeline_blocks::protocol::resolve_hub_client_protocol;
 use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_request_from_payload;
 use crate::hub_pipeline_types::{
     run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
@@ -40,6 +41,7 @@ use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::stopless_auto_handler_bridge::{
     build_stopless_auto_cli_projection_from_engine_json, run_stopless_auto_handler_runtime_json,
 };
+use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
 use crate::virtual_router_engine::VirtualRouterEngineCore;
 use crate::vr_route_04_selection_boundary::apply_vr_route_04_selection;
 
@@ -71,19 +73,14 @@ fn read_entry_provider_protocol(
         })
 }
 
-fn has_explicit_provider_retry_exclusions(metadata: &Value) -> bool {
+fn resolve_request_entry_protocol(entry_endpoint: &str, metadata: &Value) -> String {
     metadata
-        .get("excludedProviderKeys")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items.iter().any(|item| {
-                item.as_str()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .is_some()
-            })
-        })
-        .unwrap_or(false)
+        .get("clientProtocol")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| resolve_hub_client_protocol(entry_endpoint))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -138,69 +135,125 @@ impl HubPipelineEngine {
             }));
         }
         if let Some(route) = read_preselected_route(metadata_center_snapshot, metadata) {
+            if !self.preselected_route_target_available(&route, metadata_center_snapshot)? {
+                return self.select_virtual_router_route(
+                    request,
+                    metadata,
+                    metadata_center_snapshot,
+                );
+            }
             return Ok(route);
         }
-        if has_explicit_provider_retry_exclusions(metadata) {
-            return self.select_explicit_provider_retry_route(
-                request,
-                metadata,
-                metadata_center_snapshot,
-            );
-        }
-        Err(HubPipelineError::new(
-            "hub_pipeline_missing_preselected_route",
-            "Rust HubPipeline req route stage requires metadata.runtime_control.preselectedRoute for bootstrapped virtual router config",
-        ))
+        self.select_virtual_router_route(request, metadata, metadata_center_snapshot)
     }
 
-    fn select_explicit_provider_retry_route(
+    fn select_virtual_router_route(
         &self,
         request: &Value,
         metadata: &Value,
         metadata_center_snapshot: &Value,
     ) -> HubPipelineResult<Value> {
+        let mut retry_metadata_center_snapshot = metadata_center_snapshot.clone();
         let mut metadata_for_router = serde_json::json!({
-            "metadataCenterSnapshot": metadata_center_snapshot,
+            "metadataCenterSnapshot": retry_metadata_center_snapshot,
         });
         if let Some(excluded_provider_keys) = metadata
             .get("excludedProviderKeys")
             .and_then(|value| value.as_array())
             .cloned()
         {
+            if let Some(snapshot) = retry_metadata_center_snapshot.as_object_mut() {
+                snapshot.insert(
+                    "excludedProviderKeys".to_string(),
+                    Value::Array(excluded_provider_keys.clone()),
+                );
+            }
             if let Some(row) = metadata_for_router.as_object_mut() {
+                row.insert(
+                    "metadataCenterSnapshot".to_string(),
+                    retry_metadata_center_snapshot,
+                );
                 row.insert(
                     "excludedProviderKeys".to_string(),
                     Value::Array(excluded_provider_keys),
                 );
             }
         }
-        let mut router = VirtualRouterEngineCore::new();
-        router
-            .initialize(&self.config.virtual_router)
-            .map_err(|message| {
+        self.with_virtual_router_session_dir(metadata_center_snapshot, || {
+            let mut router = VirtualRouterEngineCore::new();
+            router
+                .initialize(&self.config.virtual_router)
+                .map_err(|message| {
+                    HubPipelineError::new(
+                        "hub_pipeline_virtual_router_retry_init_failed",
+                        format!(
+                            "Rust HubPipeline explicit provider retry VR init failed: {}",
+                            message
+                        ),
+                    )
+                })?;
+            router
+                .route(
+                    unsafe { Env::from_raw(std::ptr::null_mut()) },
+                    request,
+                    &metadata_for_router,
+                )
+                .map_err(|message| {
+                    HubPipelineError::new(
+                        "hub_pipeline_virtual_router_route_failed",
+                        format!("Rust HubPipeline virtual router route failed: {}", message),
+                    )
+                })
+        })
+    }
+
+    fn preselected_route_target_available(
+        &self,
+        route: &Value,
+        metadata_center_snapshot: &Value,
+    ) -> HubPipelineResult<bool> {
+        let provider_key = route
+            .pointer("/target/providerKey")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
                 HubPipelineError::new(
-                    "hub_pipeline_virtual_router_retry_init_failed",
-                    format!(
-                        "Rust HubPipeline explicit provider retry VR init failed: {}",
-                        message
-                    ),
+                    "hub_pipeline_invalid_preselected_route",
+                    "Rust HubPipeline preselectedRoute requires target.providerKey",
                 )
             })?;
-        router
-            .route(
+        self.with_virtual_router_session_dir(metadata_center_snapshot, || {
+            let mut router = VirtualRouterEngineCore::new();
+            router
+                .initialize(&self.config.virtual_router)
+                .map_err(|message| {
+                    HubPipelineError::new(
+                        "hub_pipeline_virtual_router_preselected_init_failed",
+                        format!(
+                            "Rust HubPipeline preselected route availability VR init failed: {}",
+                            message
+                        ),
+                    )
+                })?;
+            Ok(router.is_provider_available(
                 unsafe { Env::from_raw(std::ptr::null_mut()) },
-                request,
-                &metadata_for_router,
-            )
-            .map_err(|message| {
-                HubPipelineError::new(
-                    "hub_pipeline_virtual_router_retry_route_failed",
-                    format!(
-                        "Rust HubPipeline explicit provider retry VR route failed: {}",
-                        message
-                    ),
-                )
-            })
+                provider_key,
+            ))
+        })
+    }
+
+    fn with_virtual_router_session_dir<T>(
+        &self,
+        metadata_center_snapshot: &Value,
+        callback: impl FnOnce() -> HubPipelineResult<T>,
+    ) -> HubPipelineResult<T> {
+        let session_dir = read_runtime_control_string(metadata_center_snapshot, "sessionDir")
+            .or_else(|| read_runtime_control_string(metadata_center_snapshot, "session_dir"));
+        match session_dir.as_deref() {
+            Some(value) => with_session_dir_override(Some(value), callback),
+            None => callback(),
+        }
     }
 
     pub fn execute(
@@ -215,13 +268,19 @@ impl HubPipelineEngine {
         let entry_endpoint = request.entry_endpoint.clone();
         let direction = request.direction.clone();
         let metadata_center_snapshot = request.metadata_center_snapshot.clone();
-        let initial_provider_protocol = if request.provider_protocol.trim().is_empty() {
-            read_entry_provider_protocol(&request.metadata, &metadata_center_snapshot).ok_or_else(|| {
-                HubPipelineError::new(
-                    "hub_pipeline_missing_provider_protocol",
-                    "Rust HubPipeline requires providerProtocol in metadataCenterSnapshot.runtimeControl, request.providerProtocol, or metadata.providerProtocol",
-                )
-            })?
+        let initial_provider_protocol = if direction == "response" {
+            if request.provider_protocol.trim().is_empty() {
+                read_entry_provider_protocol(&request.metadata, &metadata_center_snapshot).ok_or_else(|| {
+                    HubPipelineError::new(
+                        "hub_pipeline_missing_provider_protocol",
+                        "Rust HubPipeline requires providerProtocol in metadataCenterSnapshot.runtimeControl, request.providerProtocol, or metadata.providerProtocol",
+                    )
+                })?
+            } else {
+                request.provider_protocol.clone()
+            }
+        } else if request.provider_protocol.trim().is_empty() {
+            resolve_request_entry_protocol(&entry_endpoint, &request.metadata)
         } else {
             request.provider_protocol.clone()
         };
@@ -256,17 +315,17 @@ impl HubPipelineEngine {
             )
         })?;
         let normalized_metadata = output.metadata.clone().unwrap_or(Value::Null);
-        let entry_provider_protocol = read_entry_provider_protocol(
-            &normalized_metadata,
-            &metadata_center_snapshot,
-        )
-            .ok_or_else(|| {
-                HubPipelineError::new(
-                    "hub_pipeline_missing_provider_protocol",
-                    "Rust HubPipeline requires providerProtocol in metadataCenterSnapshot.runtimeControl or metadata.providerProtocol",
-                )
-            })?;
         if direction == "response" {
+            let entry_provider_protocol = read_entry_provider_protocol(
+                &normalized_metadata,
+                &metadata_center_snapshot,
+            )
+                .ok_or_else(|| {
+                    HubPipelineError::new(
+                        "hub_pipeline_missing_provider_protocol",
+                        "Rust HubPipeline requires providerProtocol in metadataCenterSnapshot.runtimeControl or metadata.providerProtocol",
+                    )
+                })?;
             return self.execute_response_path(
                 output,
                 normalized_payload,
@@ -276,6 +335,8 @@ impl HubPipelineEngine {
                 diagnostics,
             );
         }
+        let entry_provider_protocol =
+            resolve_request_entry_protocol(&entry_endpoint, &normalized_metadata);
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqInboundFormatParse,
             HubPipelineDiagnosticStatus::Started,
@@ -445,7 +506,12 @@ impl HubPipelineEngine {
         })
         .map_err(HubPipelineError::from)?;
         let provider_protocol = resolve_outbound_provider_protocol(&routed.normalized_metadata)
-            .unwrap_or(entry_provider_protocol.clone());
+            .ok_or_else(|| {
+                HubPipelineError::new(
+                    "hub_pipeline_missing_selected_provider_protocol",
+                    "Rust HubPipeline request route selection must provide target.outboundProfile",
+                )
+            })?;
         let outbound_context_snapshot = capture_context_snapshot(
             &entry_provider_protocol,
             &governed_processed_request,
@@ -1474,6 +1540,16 @@ fn read_preselected_route(metadata_center_snapshot: &Value, metadata: &Value) ->
         "decision": decision,
         "diagnostics": route.get("diagnostics").cloned().unwrap_or_else(|| serde_json::json!({}))
     }))
+}
+
+fn read_runtime_control_string(metadata_center_snapshot: &Value, key: &str) -> Option<String> {
+    metadata_center_snapshot
+        .get("runtimeControl")
+        .and_then(|runtime| runtime.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn resolve_outbound_provider_protocol(metadata: &Value) -> Option<String> {

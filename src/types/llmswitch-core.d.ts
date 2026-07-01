@@ -19,6 +19,7 @@ declare module 'rcc-llmswitch-core/dist/native/router-hotpath/native-provider-ru
     providerType?: string;
     providerProtocol?: string;
     routeName?: string;
+    routecodexRoutingPolicyGroup?: string;
     pipelineId?: string;
     target?: Record<string, unknown> | null;
     runtimeKey?: string;
@@ -26,6 +27,7 @@ declare module 'rcc-llmswitch-core/dist/native/router-hotpath/native-provider-ru
   export interface ProviderSuccessRuntimeMetadata {
     requestId: string;
     routeName?: string;
+    routecodexRoutingPolicyGroup?: string;
     providerKey?: string;
     providerId?: string;
     providerType?: string;
@@ -53,6 +55,7 @@ declare module 'rcc-llmswitch-core/dist/native/router-hotpath/virtual-router-con
     providerType?: string;
     providerProtocol?: string;
     routeName?: string;
+    routecodexRoutingPolicyGroup?: string;
     pipelineId?: string;
     target?: Record<string, unknown> | null;
     runtimeKey?: string;
@@ -71,6 +74,7 @@ declare module 'rcc-llmswitch-core/dist/native/router-hotpath/virtual-router-con
   export interface ProviderSuccessRuntimeMetadata {
     requestId: string;
     routeName?: string;
+    routecodexRoutingPolicyGroup?: string;
     providerKey?: string;
     providerId?: string;
     providerType?: string;

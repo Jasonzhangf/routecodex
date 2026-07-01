@@ -9,7 +9,8 @@ use crate::virtual_router_engine::routing_state_store::with_session_dir_persiste
 use crate::virtual_router_engine::time_utils::now_ms;
 
 impl VirtualRouterEngineCore {
-    pub(crate) fn get_status(&self) -> Value {
+    pub(crate) fn get_status(&mut self) -> Value {
+        self.refresh_provider_health_from_store();
         let mut routes = serde_json::Map::new();
         for (route, pools) in &self.routing.pools {
             let expanded_pools = pools
@@ -33,7 +34,7 @@ impl VirtualRouterEngineCore {
         })
     }
 
-    pub(crate) fn diagnose_route(&self, env: Env, request: &Value, metadata: &Value) -> Value {
+    pub(crate) fn diagnose_route(&mut self, env: Env, request: &Value, metadata: &Value) -> Value {
         let mut dry_run_core = self.clone();
         let result =
             with_session_dir_persistence_disabled(|| dry_run_core.route(env, request, metadata));

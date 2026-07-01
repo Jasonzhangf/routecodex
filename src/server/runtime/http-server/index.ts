@@ -245,10 +245,10 @@ function createRouterDirectRetryState(input: PipelineExecutionInput): RouterDire
   };
 }
 
-function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'routeHint' | 'routecodexRoutingPolicyGroup' | 'providerProtocol' | 'stopMessageEnabled' | 'stopMessageExcludeDirect'>(
+function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retryProviderKey' | 'routeHint' | 'routecodexRoutingPolicyGroup' | 'providerProtocol' | 'stopMessageEnabled' | 'stopMessageExcludeDirect' | 'sessionDir'>(
   metadata: Record<string, unknown>,
   key: K,
-  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' | 'routeHint' | 'routecodexRoutingPolicyGroup' | 'providerProtocol' ? string : boolean,
+  value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' | 'routeHint' | 'routecodexRoutingPolicyGroup' | 'providerProtocol' | 'sessionDir' ? string : boolean,
   reason: string
 ): void {
   MetadataCenter.attach(metadata);
@@ -1335,6 +1335,12 @@ export class RouteCodexHttpServer {
         ...existingRt,
         sessionDir: portSessionDir,
       };
+      writeMetadataCenterRuntimeControl(
+        metadata,
+        'sessionDir',
+        portSessionDir,
+        'port-scoped provider health session directory'
+      );
     }
     const resumeProviderKey = (() => {
       const resume = metadata.responsesResume;

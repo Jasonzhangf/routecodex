@@ -40,6 +40,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   providerFamily?: string;
   providerProtocol?: string;
   routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
   runtimeKey?: string;
   target?: Record<string, unknown>;
   dependencies: ModuleDependencies;
@@ -143,6 +144,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
       providerFamily: args.providerFamily,
       providerProtocol: args.providerProtocol,
       routeName: args.routeName,
+      routecodexRoutingPolicyGroup: args.routecodexRoutingPolicyGroup,
       runtimeKey: args.runtimeKey,
       target: args.target,
       dependencies: args.dependencies,

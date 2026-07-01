@@ -108,4 +108,50 @@ describe('request-executor provider health impact', () => {
       })
     );
   });
+
+  test('provider error report forwards explicit routing policy group without metadata fallback', async () => {
+    const excludedProviderKeys = new Set<string>();
+
+    await resolveRequestExecutorProviderFailurePlan({
+      error: Object.assign(new Error('upstream unavailable'), {
+        code: 'HTTP_503',
+        statusCode: 503
+      }),
+      retryError: {
+        statusCode: 503,
+        errorCode: 'HTTP_503',
+        reason: 'upstream unavailable'
+      },
+      requestId: 'req-routing-policy-group-health-impact',
+      providerKey: 'primary.key1.gpt-test',
+      providerId: 'primary',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      routeName: 'thinking',
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      runtimeKey: 'primary.key1',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 3,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'logical-routing-policy-group-health-impact',
+      logicalChainRetryLimitStageRequestId: 'logical-routing-policy-group-health-impact',
+      routePool: ['primary.key1.gpt-test', 'backup.key1.gpt-test'],
+      excludedProviderKeys,
+      recordAttempt: () => undefined,
+      logStage: () => undefined,
+      logNonBlockingError: () => undefined
+    });
+
+    expect(mockEmitProviderErrorAndWait).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'provider.send',
+        runtime: expect.objectContaining({
+          providerKey: 'primary.key1.gpt-test',
+          routecodexRoutingPolicyGroup: 'gateway_priority_5555'
+        })
+      })
+    );
+  });
 });

@@ -105,6 +105,7 @@ describe('provider-error-reporter', () => {
           rccUserDir: '/tmp/routecodex-rcc-home'
         },
         metadata: {
+          routecodexRoutingPolicyGroup: 'gateway_priority_5555',
           __rt: {
             sessionDir: '/tmp/wrong-nested-session',
             rccUserDir: '/tmp/wrong-nested-rcc'
@@ -116,6 +117,7 @@ describe('provider-error-reporter', () => {
     expect(runtime).toEqual(expect.objectContaining({
       requestId: 'req-runtime-scope',
       providerKey: 'primary.key1.gpt-5.3-codex',
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
       sessionDir: '/tmp/routecodex-session-port-scope',
       rccUserDir: '/tmp/routecodex-rcc-home'
     }));

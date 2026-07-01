@@ -106,6 +106,12 @@ export async function reportRequestExecutorProviderError(
   const rccUserDir = typeof rtHints?.rccUserDir === 'string' && rtHints.rccUserDir.trim()
     ? rtHints.rccUserDir.trim()
     : undefined;
+  const routecodexRoutingPolicyGroup =
+    typeof args.routecodexRoutingPolicyGroup === 'string' && args.routecodexRoutingPolicyGroup.trim()
+      ? args.routecodexRoutingPolicyGroup.trim()
+      : typeof args.metadata?.routecodexRoutingPolicyGroup === 'string' && args.metadata.routecodexRoutingPolicyGroup.trim()
+      ? args.metadata.routecodexRoutingPolicyGroup.trim()
+      : undefined;
   await emitProviderErrorAndWait({
     error: cloneErrorForReporting(args.error),
     stage: reportPlan.stageHint,
@@ -117,6 +123,7 @@ export async function reportRequestExecutorProviderError(
       providerFamily: args.providerFamily,
       providerProtocol: args.providerProtocol,
       routeName: args.routeName,
+      ...(routecodexRoutingPolicyGroup ? { routecodexRoutingPolicyGroup } : {}),
       pipelineId: args.providerKey,
       target: args.target,
       runtimeKey: args.runtimeKey,

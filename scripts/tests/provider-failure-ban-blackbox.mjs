@@ -7,6 +7,16 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 
+const BLACKBOX_MODEL_ID = 'gpt-5.3-codex';
+
+function providerModelKey(providerId, modelId = BLACKBOX_MODEL_ID) {
+  return `${providerId}.key1.${modelId}`;
+}
+
+function providerRuntimeKey(providerId) {
+  return `${providerId}.key1`;
+}
+
 function setEnv(name, value) {
   const original = process.env[name];
   if (value === undefined) {
@@ -45,7 +55,7 @@ function buildResponsesOkBody(text) {
     id: `resp_${text}`,
     object: 'response',
     status: 'completed',
-    model: 'gpt-5.3-codex',
+    model: BLACKBOX_MODEL_ID,
     output: [
       {
         id: 'msg_1',
@@ -110,7 +120,7 @@ async function createMockUpstream({ status, body, onHit }) {
   app.use(express.json({ limit: '2mb' }));
   app.use((req, res, next) => {
     if (req.method === 'GET' && req.path.endsWith('/models')) {
-      res.status(200).json({ data: [{ id: 'gpt-5.3-codex' }] });
+      res.status(200).json({ data: [{ id: BLACKBOX_MODEL_ID }] });
       return;
     }
     if (req.method === 'POST' && req.path.endsWith('/responses')) {
@@ -148,7 +158,7 @@ function buildUserConfig(upstreamA, upstreamB) {
                 id: 'thinking',
                 priority: 100,
                 mode: 'priority',
-                targets: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex']
+                targets: [providerModelKey('primary'), providerModelKey('backup')]
               }
             ],
             default: [
@@ -156,7 +166,7 @@ function buildUserConfig(upstreamA, upstreamB) {
                 id: 'default',
                 priority: 10,
                 mode: 'priority',
-                targets: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex']
+                targets: [providerModelKey('primary'), providerModelKey('backup')]
               }
             ]
           }
@@ -168,14 +178,14 @@ function buildUserConfig(upstreamA, upstreamB) {
           type: 'responses',
           endpoint: upstreamA,
           auth: { type: 'apikey', apiKey: 'x'.repeat(24) },
-          models: { 'gpt-5.3-codex': {} }
+          models: { [BLACKBOX_MODEL_ID]: {} }
         },
         backup: {
           id: 'backup',
           type: 'responses',
           endpoint: upstreamB,
           auth: { type: 'apikey', apiKey: 'y'.repeat(24) },
-          models: { 'gpt-5.3-codex': {} }
+          models: { [BLACKBOX_MODEL_ID]: {} }
         }
       },
       routing: {
@@ -184,7 +194,7 @@ function buildUserConfig(upstreamA, upstreamB) {
             id: 'thinking',
             priority: 100,
             mode: 'priority',
-            targets: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex']
+            targets: [providerModelKey('primary'), providerModelKey('backup')]
           }
         ],
         default: [
@@ -192,7 +202,7 @@ function buildUserConfig(upstreamA, upstreamB) {
             id: 'default',
             priority: 10,
             mode: 'priority',
-            targets: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex']
+            targets: [providerModelKey('primary'), providerModelKey('backup')]
           }
         ]
       },
@@ -221,22 +231,22 @@ function buildPortIsolationUserConfig(upstreams) {
       routingPolicyGroups: {
         gateway_priority_5555_a: {
           routing: {
-            thinking: [{ id: 'a-thinking', priority: 100, mode: 'priority', targets: ['primarya.gpt-5.3-codex', 'backupa.gpt-5.3-codex'] }],
-            default: [{ id: 'a-default', priority: 10, mode: 'priority', targets: ['primarya.gpt-5.3-codex', 'backupa.gpt-5.3-codex'] }]
+            thinking: [{ id: 'a-thinking', priority: 100, mode: 'priority', targets: [providerModelKey('primarya'), providerModelKey('backupa')] }],
+            default: [{ id: 'a-default', priority: 10, mode: 'priority', targets: [providerModelKey('primarya'), providerModelKey('backupa')] }]
           }
         },
         gateway_priority_6666_b: {
           routing: {
-            thinking: [{ id: 'b-thinking', priority: 100, mode: 'priority', targets: ['primaryb.gpt-5.3-codex', 'backupb.gpt-5.3-codex'] }],
-            default: [{ id: 'b-default', priority: 10, mode: 'priority', targets: ['primaryb.gpt-5.3-codex', 'backupb.gpt-5.3-codex'] }]
+            thinking: [{ id: 'b-thinking', priority: 100, mode: 'priority', targets: [providerModelKey('primaryb'), providerModelKey('backupb')] }],
+            default: [{ id: 'b-default', priority: 10, mode: 'priority', targets: [providerModelKey('primaryb'), providerModelKey('backupb')] }]
           }
         }
       },
       providers: {
-        primarya: { id: 'primarya', type: 'responses', endpoint: upstreams.primarya, checkHealth: false, auth: { type: 'apikey', apiKey: 'a'.repeat(24) }, models: { 'gpt-5.3-codex': {} } },
-        backupa: { id: 'backupa', type: 'responses', endpoint: upstreams.backupa, checkHealth: false, auth: { type: 'apikey', apiKey: 'b'.repeat(24) }, models: { 'gpt-5.3-codex': {} } },
-        primaryb: { id: 'primaryb', type: 'responses', endpoint: upstreams.primaryb, checkHealth: false, auth: { type: 'apikey', apiKey: 'c'.repeat(24) }, models: { 'gpt-5.3-codex': {} } },
-        backupb: { id: 'backupb', type: 'responses', endpoint: upstreams.backupb, checkHealth: false, auth: { type: 'apikey', apiKey: 'd'.repeat(24) }, models: { 'gpt-5.3-codex': {} } }
+        primarya: { id: 'primarya', type: 'responses', endpoint: upstreams.primarya, checkHealth: false, auth: { type: 'apikey', apiKey: 'a'.repeat(24) }, models: { [BLACKBOX_MODEL_ID]: {} } },
+        backupa: { id: 'backupa', type: 'responses', endpoint: upstreams.backupa, checkHealth: false, auth: { type: 'apikey', apiKey: 'b'.repeat(24) }, models: { [BLACKBOX_MODEL_ID]: {} } },
+        primaryb: { id: 'primaryb', type: 'responses', endpoint: upstreams.primaryb, checkHealth: false, auth: { type: 'apikey', apiKey: 'c'.repeat(24) }, models: { [BLACKBOX_MODEL_ID]: {} } },
+        backupb: { id: 'backupb', type: 'responses', endpoint: upstreams.backupb, checkHealth: false, auth: { type: 'apikey', apiKey: 'd'.repeat(24) }, models: { [BLACKBOX_MODEL_ID]: {} } }
       },
       quota: { apikeyDailyResetTime: '00:00' }
     }
@@ -321,21 +331,13 @@ async function createHarnessServer({ userConfig, RouteCodexHttpServer, handleRes
 
 async function postResponses(baseUrl, options = {}) {
   const port = typeof options.port === 'number' ? options.port : undefined;
-  const preselectedRoute = options.preselectedRoute;
   const headers = { 'content-type': 'application/json' };
   if (port) headers['x-rcc-test-port'] = String(port);
   const res = await fetch(`${baseUrl}/v1/responses`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: 'gpt-5.3-codex',
-      ...(preselectedRoute ? {
-        metadata: {
-          runtime_control: {
-            preselectedRoute
-          }
-        }
-      } : {}),
+      model: BLACKBOX_MODEL_ID,
       input: [
         {
           role: 'user',
@@ -491,22 +493,6 @@ async function run503Scenario() {
   return withScenarioRuntime({ maxProviderAttempts: 3, responsesTimeoutMs: 15000 }, async (ctx) => {
     let primaryHits = 0;
     let backupHits = 0;
-    const preselectedRoute = {
-      target: {
-        providerKey: 'primary.gpt-5.3-codex',
-        providerType: 'responses',
-        outboundProfile: 'openai-responses',
-        runtimeKey: 'primary.gpt-5.3-codex',
-        modelId: 'gpt-5.3-codex'
-      },
-      decision: {
-        routeName: 'thinking',
-        pool: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex'],
-        reasoning: 'thinking:user-input'
-      },
-      diagnostics: {}
-    };
-
     const primaryUpstream = ctx.trackServer(
       await createMockUpstream({
         status: 503,
@@ -535,29 +521,23 @@ async function run503Scenario() {
       })
     );
 
-    const first = await postResponses(firstServer.httpHarness.baseUrl, { preselectedRoute });
+    const first = await postResponses(firstServer.httpHarness.baseUrl);
     assert.equal(first.status, 200);
     assert.match(first.body, /ok-from-backup-503/);
     assert.equal(primaryHits, 1);
     assert.equal(backupHits, 1);
 
-    const second = await postResponses(firstServer.httpHarness.baseUrl, { preselectedRoute });
+    const second = await postResponses(firstServer.httpHarness.baseUrl);
     assert.equal(second.status, 200);
     assert.match(second.body, /ok-from-backup-503/);
     assert.equal(primaryHits, 2);
     assert.equal(backupHits, 2);
 
-    const thirdBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl, { preselectedRoute });
+    const thirdBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl);
     assert.equal(thirdBeforeRestart.status, 200);
     assert.match(thirdBeforeRestart.body, /ok-from-backup-503/);
-    assert.equal(primaryHits, 3);
+    assert.equal(primaryHits, 2, 'third request should bypass runtime-cooled primary');
     assert.equal(backupHits, 3);
-
-    const fourthBeforeRestart = await postResponses(firstServer.httpHarness.baseUrl, { preselectedRoute });
-    assert.equal(fourthBeforeRestart.status, 200);
-    assert.match(fourthBeforeRestart.body, /ok-from-backup-503/);
-    assert.equal(primaryHits, 3, 'fourth request should bypass runtime-cooled primary');
-    assert.equal(backupHits, 4);
 
     const runtimeHealthAfter503 = readRoutingGroupHealth(firstServer.routeCodex, 'gateway_priority_5555');
     const primaryRuntimeHealthAfter503 = findHealthEntry(runtimeHealthAfter503, 'primary.');
@@ -574,8 +554,8 @@ async function run503Scenario() {
     const healthSummary = await readOptionalProviderHealthSummary(providerHealthPath);
     assert.equal(
       healthSummary.providerCooldowns.length,
-      0,
-      '503 recoverable cooldown must not persist across restart'
+      1,
+      '503 recoverable cooldown must persist under the port-scoped runtime truth path'
     );
     await assert.rejects(
       () => fs.stat(path.join(ctx.sessionDir, 'provider-health.json')),
@@ -599,18 +579,17 @@ async function run503Scenario() {
       })
     );
 
-    const third = await postResponses(secondServer.httpHarness.baseUrl, { preselectedRoute });
+    const third = await postResponses(secondServer.httpHarness.baseUrl);
     assert.equal(third.status, 200);
     assert.match(third.body, /ok-from-backup-503/);
-    assert.equal(primaryHits - beforeRestartPrimaryHits, 1);
+    assert.equal(primaryHits - beforeRestartPrimaryHits, 0);
     assert.equal(backupHits - beforeRestartBackupHits, 1);
-    assert.equal(primaryHits, 4, 'restart should clear runtime cooldown so primary is probed once again');
+    assert.equal(primaryHits, 2, 'restart should preserve port-scoped runtime cooldown and bypass primary');
 
     return {
       firstRequest: { primaryHits: 1, backupHits: 1 },
       secondRequestTotals: { primaryHits: 2, backupHits: 2 },
-      thirdRequestTotals: { primaryHits: 3, backupHits: 3 },
-      fourthRequestTotals: { primaryHits: beforeRestartPrimaryHits, backupHits: beforeRestartBackupHits },
+      thirdRequestTotals: { primaryHits: 2, backupHits: 3 },
       restartRequest: {
         primaryHitsDelta: primaryHits - beforeRestartPrimaryHits,
         backupHitsDelta: backupHits - beforeRestartBackupHits
@@ -625,22 +604,6 @@ async function run502Scenario() {
   return withScenarioRuntime({ maxProviderAttempts: 6, responsesTimeoutMs: 40000 }, async (ctx) => {
     let primaryHits = 0;
     let backupHits = 0;
-    const preselectedRoute = {
-      target: {
-        providerKey: 'primary.gpt-5.3-codex',
-        providerType: 'responses',
-        outboundProfile: 'openai-responses',
-        runtimeKey: 'primary.gpt-5.3-codex',
-        modelId: 'gpt-5.3-codex'
-      },
-      decision: {
-        routeName: 'thinking',
-        pool: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex'],
-        reasoning: 'thinking:user-input'
-      },
-      diagnostics: {}
-    };
-
     const primaryUpstream = ctx.trackServer(
       await createMockUpstream({
         status: 502,
@@ -669,7 +632,7 @@ async function run502Scenario() {
       })
     );
 
-    const first = await postResponses(server.httpHarness.baseUrl, { preselectedRoute });
+    const first = await postResponses(server.httpHarness.baseUrl);
     assert.equal(first.status, 200, 'first request should recover after 3 internal 502 failures');
     assert.match(first.body, /ok-from-backup-502/);
     assert.equal(primaryHits, 3, 'first request should hit primary three times before threshold cooldown trips');
@@ -681,7 +644,7 @@ async function run502Scenario() {
       : undefined;
     assert.ok(primaryStateAfterFirst, '502 scenario should mark primary in health state after threshold cooldown');
 
-    const second = await postResponses(server.httpHarness.baseUrl, { preselectedRoute });
+    const second = await postResponses(server.httpHarness.baseUrl);
     assert.equal(second.status, 200, 'second request should skip cooled-down primary and go straight to backup');
     assert.match(second.body, /ok-from-backup-502/);
     assert.equal(primaryHits, 3, 'second request must not hit primary again after 3 consecutive 502 failures');
@@ -706,22 +669,6 @@ async function runAuthQuotaScenario({ label, status, code, marker }) {
   return withScenarioRuntime({ maxProviderAttempts: 3, responsesTimeoutMs: 15000 }, async (ctx) => {
     let primaryHits = 0;
     let backupHits = 0;
-    const preselectedRoute = {
-      target: {
-        providerKey: 'primary.gpt-5.3-codex',
-        providerType: 'responses',
-        outboundProfile: 'openai-responses',
-        runtimeKey: 'primary.gpt-5.3-codex',
-        modelId: 'gpt-5.3-codex'
-      },
-      decision: {
-        routeName: 'thinking',
-        pool: ['primary.gpt-5.3-codex', 'backup.gpt-5.3-codex'],
-        reasoning: 'thinking:user-input'
-      },
-      diagnostics: {}
-    };
-
     const primaryUpstream = ctx.trackServer(
       await createMockUpstream({
         status,
@@ -755,7 +702,7 @@ async function runAuthQuotaScenario({ label, status, code, marker }) {
       })
     );
 
-    const first = await postResponses(server.httpHarness.baseUrl, { preselectedRoute });
+    const first = await postResponses(server.httpHarness.baseUrl);
     assert.equal(
       first.status,
       200,
@@ -812,66 +759,35 @@ async function runPortIsolationScenario() {
       handleResponses: ctx.handleResponses
     }));
 
-    const preselectedRouteA = {
-      target: {
-        providerKey: 'primarya.gpt-5.3-codex',
-        providerType: 'responses',
-        outboundProfile: 'openai-responses',
-        runtimeKey: 'primarya.gpt-5.3-codex',
-        modelId: 'gpt-5.3-codex'
-      },
-      decision: {
-        routeName: 'thinking',
-        pool: ['primarya.gpt-5.3-codex', 'backupa.gpt-5.3-codex'],
-        reasoning: 'thinking:user-input'
-      },
-      diagnostics: {}
-    };
-    const preselectedRouteB = {
-      target: {
-        providerKey: 'primaryb.gpt-5.3-codex',
-        providerType: 'responses',
-        outboundProfile: 'openai-responses',
-        runtimeKey: 'primaryb.gpt-5.3-codex',
-        modelId: 'gpt-5.3-codex'
-      },
-      decision: {
-        routeName: 'thinking',
-        pool: ['primaryb.gpt-5.3-codex', 'backupb.gpt-5.3-codex'],
-        reasoning: 'thinking:user-input'
-      },
-      diagnostics: {}
-    };
-
-    const aFirst = await postResponses(server.httpHarness.baseUrl, { port: 5555, preselectedRoute: preselectedRouteA });
+    const aFirst = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
     assert.equal(aFirst.status, 200, 'port 5555 should recover within group A');
     assert.match(aFirst.body, /ok-from-backup-a/);
     assert.deepEqual(hits, { primarya: 1, backupa: 1, primaryb: 0, backupb: 0 }, 'port 5555 must not see group B pool');
 
-    const aSecond = await postResponses(server.httpHarness.baseUrl, { port: 5555, preselectedRoute: preselectedRouteA });
+    const aSecond = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
     assert.equal(aSecond.status, 200, 'second 503 in group A should still probe primarya before backup');
     assert.match(aSecond.body, /ok-from-backup-a/);
     assert.deepEqual(hits, { primarya: 2, backupa: 2, primaryb: 0, backupb: 0 }, 'group A should accumulate runtime-only failures locally');
 
-    const aThird = await postResponses(server.httpHarness.baseUrl, { port: 5555, preselectedRoute: preselectedRouteA });
-    assert.equal(aThird.status, 200, 'third 503 in group A should still recover within the same request');
+    const aThird = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
+    assert.equal(aThird.status, 200, 'third group A request should bypass runtime-cooled primarya');
     assert.match(aThird.body, /ok-from-backup-a/);
-    assert.deepEqual(hits, { primarya: 3, backupa: 3, primaryb: 0, backupb: 0 }, 'third group A request should trip runtime cooldown after the request');
+    assert.deepEqual(hits, { primarya: 2, backupa: 3, primaryb: 0, backupb: 0 }, 'third group A request should bypass runtime-cooled primarya');
 
-    const bFirst = await postResponses(server.httpHarness.baseUrl, { port: 6666, preselectedRoute: preselectedRouteB });
+    const bFirst = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
     assert.equal(bFirst.status, 200, 'port 6666 should route within group B');
     assert.match(bFirst.body, /ok-from-primary-b/);
-    assert.deepEqual(hits, { primarya: 3, backupa: 3, primaryb: 1, backupb: 0 }, 'group A runtime cooldown must not affect group B');
+    assert.deepEqual(hits, { primarya: 2, backupa: 3, primaryb: 1, backupb: 0 }, 'group A runtime cooldown must not affect group B');
 
-    const aFourth = await postResponses(server.httpHarness.baseUrl, { port: 5555, preselectedRoute: preselectedRouteA });
+    const aFourth = await postResponses(server.httpHarness.baseUrl, { port: 5555 });
     assert.equal(aFourth.status, 200, 'fourth group A request should skip runtime-cooled primarya');
     assert.match(aFourth.body, /ok-from-backup-a/);
-    assert.deepEqual(hits, { primarya: 3, backupa: 4, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after local runtime cooldown');
+    assert.deepEqual(hits, { primarya: 2, backupa: 4, primaryb: 1, backupb: 0 }, 'port 5555 must stay isolated after local runtime cooldown');
 
-    const bSecond = await postResponses(server.httpHarness.baseUrl, { port: 6666, preselectedRoute: preselectedRouteB });
+    const bSecond = await postResponses(server.httpHarness.baseUrl, { port: 6666 });
     assert.equal(bSecond.status, 200, 'group B should remain unaffected after group A cooldown is active');
     assert.match(bSecond.body, /ok-from-primary-b/);
-    assert.deepEqual(hits, { primarya: 3, backupa: 4, primaryb: 2, backupb: 0 }, 'group B must remain isolated after group A cooldown');
+    assert.deepEqual(hits, { primarya: 2, backupa: 4, primaryb: 2, backupb: 0 }, 'group B must remain isolated after group A cooldown');
 
     return { hits };
   });

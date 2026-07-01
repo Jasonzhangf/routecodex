@@ -19,6 +19,7 @@ export type VirtualRouterProvidersConfig = Record<string, UnknownRecord>;
 export interface VirtualRouterInput extends UnknownRecord {
   providers: VirtualRouterProvidersConfig;
   routing: VirtualRouterRoutingConfig;
+  routingPolicyGroup?: string;
   /**
    * ProviderForwarder 节点（顶层 key = forwarder id，如 `fwd.openai.gpt-4o`）。
    * 每个 entry 形如 { protocol, model, resolutionMode, strategy, targets, stickyKey, ... }

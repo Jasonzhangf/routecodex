@@ -158,7 +158,7 @@ impl VirtualRouterEngineProxy {
 
     #[napi]
     pub fn get_status(&self, _env: Env) -> NapiResult<String> {
-        let core = self.core.read().expect("core read lock");
+        let mut core = self.core.write().expect("core write lock");
         serde_json::to_string(&core.get_status())
             .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
@@ -175,7 +175,7 @@ impl VirtualRouterEngineProxy {
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let overrides = resolve_runtime_path_overrides(&metadata_value);
-        let core = self.core.read().expect("core read lock");
+        let mut core = self.core.write().expect("core write lock");
         let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
             with_session_dir_override(overrides.session_dir.as_deref(), || {
                 core.diagnose_route(env, &request_value, &metadata_value)

@@ -1,6 +1,16 @@
 use serde_json::json;
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{execute_hub_pipeline_json, HubPipelineConfig, HubPipelineEngine, HubPipelineRequest};
+use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
+
+fn test_now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}
 
 #[test]
 fn engine_execute_normalizes_request_and_returns_empty_effect_plan() {
@@ -9,7 +19,8 @@ fn engine_execute_normalizes_request_and_returns_empty_effect_plan() {
             "target": {
                 "providerKey": "openai.m",
                 "runtimeKey": "openai",
-                "modelId": "m"
+                "modelId": "m",
+                "outboundProfile": "openai-chat"
             },
             "routeName": "default"
         }),
@@ -50,7 +61,8 @@ fn request_live_path_keeps_inline_metadata_out_of_typed_normal_payload() {
             "target": {
                 "providerKey": "openai.m",
                 "runtimeKey": "openai",
-                "modelId": "m"
+                "modelId": "m",
+                "outboundProfile": "openai-responses"
             },
             "routeName": "default"
         }),
@@ -100,7 +112,8 @@ fn execute_hub_pipeline_json_uses_total_entry_contract() {
                 "target": {
                     "providerKey": "openai.m",
                     "runtimeKey": "openai",
-                    "modelId": "m"
+                    "modelId": "m",
+                    "outboundProfile": "openai-chat"
                 },
                 "routeName": "default"
             }
@@ -133,7 +146,7 @@ fn execute_hub_pipeline_json_uses_total_entry_contract() {
 }
 
 #[test]
-fn execute_hub_pipeline_json_fails_without_preselected_route_and_retry_exclusions() {
+fn execute_hub_pipeline_json_selects_virtual_router_without_preselected_route() {
     let input = json!({
         "config": {
             "virtualRouter": {
@@ -143,6 +156,7 @@ fn execute_hub_pipeline_json_fails_without_preselected_route_and_retry_exclusion
                         "providerType": "openai",
                         "runtimeKey": "openai.key1",
                         "modelId": "gpt-5.5",
+                        "outboundProfile": "openai-responses",
                         "endpoint": "mock://openai-1",
                         "auth": { "type": "apikey", "apiKey": "openai-key-1" }
                     }
@@ -150,6 +164,7 @@ fn execute_hub_pipeline_json_fails_without_preselected_route_and_retry_exclusion
                 "routing": {
                     "default": [{
                         "id": "default-priority",
+                        "priority": 100,
                         "mode": "priority",
                         "targets": ["openai.key1.gpt-5.5"]
                     }]
@@ -166,14 +181,38 @@ fn execute_hub_pipeline_json_fails_without_preselected_route_and_retry_exclusion
                 "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "ping" }] }]
             },
             "metadata": {},
+            "metadataCenterSnapshot": {
+                "requestTruth": {
+                    "requestId": "req-missing-preselected-route"
+                },
+                "runtimeControl": {}
+            },
             "processMode": "chat",
             "direction": "request",
             "stage": "inbound"
         }
     });
 
-    let error = execute_hub_pipeline_json(input.to_string()).unwrap_err();
-    assert_eq!(error.code, "hub_pipeline_missing_preselected_route");
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+    assert_eq!(
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true),
+        "unexpected no-preselected route output: {}",
+        output
+    );
+    assert_eq!(
+        output
+            .pointer("/metadata/target/providerKey")
+            .and_then(|value| value.as_str()),
+        Some("openai.key1.gpt-5.5")
+    );
+    assert_eq!(
+        output
+            .pointer("/metadata/target/outboundProfile")
+            .and_then(|value| value.as_str()),
+        Some("openai-responses")
+    );
 }
 
 #[test]
@@ -187,6 +226,7 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
                         "providerType": "openai",
                         "runtimeKey": "openai.key1",
                         "modelId": "gpt-5.5",
+                        "outboundProfile": "openai-responses",
                         "endpoint": "mock://openai-1",
                         "auth": { "type": "apikey", "apiKey": "openai-key-1" }
                     },
@@ -195,13 +235,24 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
                         "providerType": "openai",
                         "runtimeKey": "openai.key2",
                         "modelId": "gpt-5.5",
+                        "outboundProfile": "openai-responses",
                         "endpoint": "mock://openai-2",
                         "auth": { "type": "apikey", "apiKey": "openai-key-2" }
                     }
                 },
                 "routing": {
+                    "thinking": [{
+                        "id": "thinking-priority",
+                        "priority": 100,
+                        "mode": "priority",
+                        "targets": [
+                            "openai.key1.gpt-5.5",
+                            "openai.key2.gpt-5.5"
+                        ]
+                    }],
                     "default": [{
                         "id": "default-priority",
+                        "priority": 100,
                         "mode": "priority",
                         "targets": [
                             "openai.key1.gpt-5.5",
@@ -225,6 +276,12 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
                     "openai.key1.gpt-5.5"
                 ]
             },
+            "metadataCenterSnapshot": {
+                "requestTruth": {
+                    "requestId": "req-explicit-retry-route"
+                },
+                "runtimeControl": {}
+            },
             "processMode": "chat",
             "direction": "request",
             "stage": "inbound"
@@ -235,7 +292,9 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
     assert_eq!(
         output.get("success").and_then(|value| value.as_bool()),
-        Some(true)
+        Some(true),
+        "unexpected retry output: {}",
+        output
     );
     assert_eq!(
         output
@@ -243,6 +302,138 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
             .and_then(|value| value.as_str()),
         Some("openai.key2.gpt-5.5")
     );
+}
+
+#[test]
+fn execute_hub_pipeline_json_reselects_when_preselected_route_target_is_health_cooled() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir =
+        std::env::temp_dir().join(format!("rcc-hub-preselected-health-cooldown-{unique}"));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let session_dir = temp_dir.to_string_lossy().to_string();
+
+    with_session_dir_override(Some(&session_dir), || {
+        fs::write(
+            temp_dir.join("provider-health.json"),
+            serde_json::to_string(&json!({
+                "version": 1,
+                "providerCooldowns": [{
+                    "providerKey": "openai.key1.gpt-5.5",
+                    "state": "tripped",
+                    "failureCount": 3,
+                    "reason": "__http_503_daily_cooldown__",
+                    "cooldownExpiresAt": test_now_ms() + 86_400_000
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let input = json!({
+            "config": {
+                "virtualRouter": {
+                    "providers": {
+                        "openai.key1.gpt-5.5": {
+                            "providerKey": "openai.key1.gpt-5.5",
+                            "providerType": "openai",
+                            "runtimeKey": "openai.key1",
+                            "modelId": "gpt-5.5",
+                            "outboundProfile": "openai-responses",
+                            "endpoint": "mock://openai-1",
+                            "auth": { "type": "apikey", "apiKey": "openai-key-1" }
+                        },
+                        "openai.key2.gpt-5.5": {
+                            "providerKey": "openai.key2.gpt-5.5",
+                            "providerType": "openai",
+                            "runtimeKey": "openai.key2",
+                            "modelId": "gpt-5.5",
+                            "outboundProfile": "openai-responses",
+                            "endpoint": "mock://openai-2",
+                            "auth": { "type": "apikey", "apiKey": "openai-key-2" }
+                        }
+                    },
+                    "routing": {
+                        "thinking": [{
+                            "id": "thinking-priority",
+                            "priority": 100,
+                            "mode": "priority",
+                            "targets": [
+                                "openai.key1.gpt-5.5",
+                                "openai.key2.gpt-5.5"
+                            ]
+                        }],
+                        "default": [{
+                            "id": "default-priority",
+                            "priority": 100,
+                            "mode": "priority",
+                            "targets": [
+                                "openai.key1.gpt-5.5",
+                                "openai.key2.gpt-5.5"
+                            ]
+                        }]
+                    }
+                }
+            },
+            "request": {
+                "requestId": "req-preselected-health-cooled-reselect",
+                "endpoint": "/v1/responses",
+                "entryEndpoint": "/v1/responses",
+                "providerProtocol": "openai-responses",
+                "payload": {
+                    "model": "gpt-5.5",
+                    "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "ping" }] }]
+                },
+                "metadata": {},
+                "metadataCenterSnapshot": {
+                    "requestTruth": {
+                        "requestId": "req-preselected-health-cooled-reselect"
+                    },
+                    "runtimeControl": {
+                        "sessionDir": session_dir,
+                        "preselectedRoute": {
+                            "target": {
+                                "providerKey": "openai.key1.gpt-5.5",
+                                "providerType": "openai",
+                                "runtimeKey": "openai.key1",
+                                "modelId": "gpt-5.5",
+                                "outboundProfile": "openai-responses"
+                            },
+                            "decision": {
+                                "routeName": "thinking",
+                                "providerProtocol": "openai-responses"
+                            },
+                            "diagnostics": {}
+                        }
+                    }
+                },
+                "processMode": "chat",
+                "direction": "request",
+                "stage": "inbound"
+            }
+        });
+
+        let output: serde_json::Value =
+            serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+        assert_eq!(
+            output.get("success").and_then(|value| value.as_bool()),
+            Some(true),
+            "unexpected health-cooled preselected output: {}",
+            output
+        );
+        assert_eq!(
+            output
+                .pointer("/metadata/target/providerKey")
+                .and_then(|value| value.as_str()),
+            Some("openai.key2.gpt-5.5"),
+            "health-cooled preselected provider must not bypass VR availability: {}",
+            output
+        );
+    });
+
+    let _ = fs::remove_dir_all(temp_dir);
 }
 
 #[test]
@@ -863,7 +1054,8 @@ fn execute_request_path_preserves_client_tool_surface() {
                 "target": {
                     "providerKey": "openai.m",
                     "runtimeKey": "openai",
-                    "modelId": "m"
+                    "modelId": "m",
+                    "outboundProfile": "openai-chat"
                 },
                 "routeName": "tools"
             }

@@ -29,6 +29,7 @@ pub(crate) struct VirtualRouterEngineCore {
     pub context_warn_ratio: f64,
     pub context_hard_limit: bool,
     pub forwarder_registry: crate::virtual_router_engine::forwarder::ForwarderRegistry,
+    pub(crate) routing_policy_group: Option<String>,
     pub(crate) concurrency_busy_keys: HashMap<String, i64>, // key -> expires_at_ms
 }
 
@@ -45,6 +46,7 @@ impl VirtualRouterEngineCore {
             web_search_force: false,
             context_warn_ratio: DEFAULT_CONTEXT_WARN_RATIO,
             context_hard_limit: false,
+            routing_policy_group: None,
             concurrency_busy_keys: HashMap::new(),
         }
     }
@@ -59,6 +61,12 @@ impl VirtualRouterEngineCore {
             .and_then(|v| v.as_object())
             .ok_or("providers configuration missing")?;
         let routing = parse_routing(routing_value);
+        self.routing_policy_group = config
+            .get("routingPolicyGroup")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
         self.provider_registry.load(providers_value);
         self.routing = routing;
         // Load forwarder config (must come after provider_registry)

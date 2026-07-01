@@ -105,6 +105,7 @@ export type ReportRequestExecutorProviderErrorArgs = {
   providerFamily?: string;
   providerProtocol?: string;
   routeName?: string;
+  routecodexRoutingPolicyGroup?: string;
   runtimeKey?: string;
   target?: Record<string, unknown>;
   dependencies: ModuleDependencies;
