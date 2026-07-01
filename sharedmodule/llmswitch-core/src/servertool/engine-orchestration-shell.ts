@@ -154,10 +154,7 @@ export async function runServerToolOrchestrationShell(
     engineSkipPlan.action === 'return_skipped_passthrough' ||
     engineSkipPlan.action === 'return_skipped_no_execution'
   ) {
-    if (typeof engineSkipPlan.skipReason !== 'string') {
-      throw new Error('[servertool] native engine skip plan missing skipReason');
-    }
-    const skipReason = engineSkipPlan.skipReason;
+    const skipReason = engineSkipPlan.skipReason as string;
     if (stopSignal.observed) {
       logStopEntry('trigger', `skipped_${skipReason}`, {
         reason: stopSignal.reason,

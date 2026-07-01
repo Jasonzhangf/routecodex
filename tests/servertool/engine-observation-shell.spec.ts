@@ -123,7 +123,8 @@ describe('engine-observation-shell', () => {
     expect(orchestrationSource).not.toContain("engineSkipPlan.skipReason ?? 'no_execution'");
     expect(source).not.toContain('args.skipReason.trim()');
     expect(orchestrationSource).not.toContain('engineSkipPlan.skipReason.trim()');
-    expect(orchestrationSource).toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
+    expect(orchestrationSource).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
+    expect(orchestrationSource).toContain('const skipReason = engineSkipPlan.skipReason as string;');
     mod.recordServertoolEngineMatchSkipped({
       requestId: 'req-match-skip-native-reason',
       entryEndpoint: '/v1/chat/completions',
@@ -275,7 +276,8 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('createProgressObservation({');
     expect(source).toContain('runEnginePreflight({');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
-    expect(source).toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
+    expect(source).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
+    expect(source).toContain('const skipReason = engineSkipPlan.skipReason as string;');
     expect(source).toContain('planServertoolTimeoutErrorWithNative({');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan(');
     expect(source).toContain('recordServertoolEngineMatchSkipped({');

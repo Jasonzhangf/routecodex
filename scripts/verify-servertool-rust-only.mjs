@@ -6254,6 +6254,12 @@ function checkServertoolMatchLoggingFailFast() {
       'engine-orchestration-shell.ts must not normalize native skipReason in TS'
     );
   }
+  if (engineOrchestrationSource.includes("throw new Error('[servertool] native engine skip plan missing skipReason')")) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'engine-orchestration-shell.ts must not retain local missing skipReason contract throw'
+    );
+  }
   assertContains(
     'servertool-match-log-fail-fast',
     `${ROOT}/tests/servertool/engine-observation-shell.spec.ts`,

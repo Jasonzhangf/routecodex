@@ -2180,10 +2180,21 @@ export function planServertoolEngineSkipWithNative(input: {
   if (record.skipReason !== undefined && typeof record.skipReason !== 'string') {
     throw new Error('planServertoolEngineSkipJson native returned invalid skipReason');
   }
+  const rawSkipReason =
+    typeof record.skipReason === 'string' ? record.skipReason : undefined;
+  const hasNonBlankSkipReason =
+    rawSkipReason !== undefined && /\S/.test(rawSkipReason);
+  const skipReason = hasNonBlankSkipReason ? rawSkipReason : undefined;
+  if (
+    (record.action === 'return_skipped_passthrough' || record.action === 'return_skipped_no_execution') &&
+    !hasNonBlankSkipReason
+  ) {
+    throw new Error('planServertoolEngineSkipJson native returned skipped action without skipReason');
+  }
   return {
     action: record.action,
-    ...(typeof record.skipReason === 'string'
-      ? { skipReason: record.skipReason }
+    ...(skipReason !== undefined
+      ? { skipReason }
       : {})
   };
 }
