@@ -29,6 +29,14 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   switch (preAutoHookRuntimeAction.action) {
     case 'return_passthrough_bypass':
       return { action: 'return_passthrough_bypass' };
+    case 'run_auto_hooks':
+      break;
+    default:
+      throw new Error(
+        `[servertool] invalid response-stage pre auto-hook action: ${String(
+          (preAutoHookRuntimeAction as { action: string }).action
+        )}`
+      );
   }
 
   const autoHookResult = await runServertoolAutoHookCaller({
@@ -55,6 +63,14 @@ export async function runServertoolResponseStageAutoHookPass(args: {
         action: 'return_auto_hook_result',
         result: autoHookResult as ServerSideToolEngineResult
       };
+    case 'return_passthrough_no_auto_hook_result':
+      break;
+    default:
+      throw new Error(
+        `[servertool] invalid response-stage post auto-hook action: ${String(
+          (postAutoHookRuntimeAction as { action: string }).action
+        )}`
+      );
   }
 
   return { action: 'continue_without_result' };

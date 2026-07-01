@@ -6011,6 +6011,18 @@ function checkServertoolResponseStageGateThinShell() {
     responseStagePrePassShell,
     'runServertoolResponseStageAutoHookPass'
   );
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
+    'invalid response-stage prepass action'
+  );
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
+    'invalid response-stage auto-hook action'
+  );
   for (const marker of [
     'responseHookMatched !== true',
     'responseStageGatePlan.responseHookMatched !== true',
@@ -6065,6 +6077,18 @@ function checkServertoolResponseStageGateThinShell() {
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
     'result: autoHookResult as ServerSideToolEngineResult'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'invalid response-stage pre auto-hook action'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'invalid response-stage post auto-hook action'
   );
 }
 

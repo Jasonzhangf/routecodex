@@ -145,4 +145,21 @@ describe('response-stage-prepass-shell', () => {
     expect(source).not.toContain('responseStageGatePlan.responseHookMatched !== true');
     expect(source).not.toContain('responseHookMatched !== true');
   });
+
+  test('fails fast for unknown prepass native runtime action', async () => {
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'unknown_prepass_action'
+    });
+
+    await expect(
+      runServertoolResponseStagePrePass({
+        options: { adapterContext: {}, requestId: 'req-unknown-prepass' } as any,
+        baseObject: { ok: true },
+        contextBase: {} as any,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null
+      })
+    ).rejects.toThrow('[servertool] invalid response-stage prepass action: unknown_prepass_action');
+    expect(runServertoolResponseStageAutoHookPass).not.toHaveBeenCalled();
+  });
 });

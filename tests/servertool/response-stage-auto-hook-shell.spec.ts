@@ -135,4 +135,41 @@ describe('response-stage-auto-hook-shell', () => {
       })
     ).rejects.toThrow('required hook empty: stop_message_auto');
   });
+
+  test('fails fast for unknown pre auto-hook native action', async () => {
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValueOnce({
+      action: 'unknown_pre_auto_hook_action'
+    });
+
+    await expect(
+      runServertoolResponseStageAutoHookPass({
+        options: { requestId: 'req-unknown-pre' } as any,
+        contextBase: {} as any,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null,
+        responseStageGatePlan: { responseHookRequired: false }
+      })
+    ).rejects.toThrow('[servertool] invalid response-stage pre auto-hook action: unknown_pre_auto_hook_action');
+    expect(runServertoolAutoHookCaller).not.toHaveBeenCalled();
+  });
+
+  test('fails fast for unknown post auto-hook native action', async () => {
+    planServertoolResponseStageRuntimeActionWithNative.mockImplementation((input: any) => {
+      if (input?.autoHookEvaluated === false) {
+        return { action: 'run_auto_hooks' };
+      }
+      return { action: 'unknown_post_auto_hook_action' };
+    });
+
+    await expect(
+      runServertoolResponseStageAutoHookPass({
+        options: { requestId: 'req-unknown-post' } as any,
+        contextBase: {} as any,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null,
+        responseStageGatePlan: { responseHookRequired: false }
+      })
+    ).rejects.toThrow('[servertool] invalid response-stage post auto-hook action: unknown_post_auto_hook_action');
+    expect(runServertoolAutoHookCaller).toHaveBeenCalledTimes(1);
+  });
 });

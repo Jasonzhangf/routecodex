@@ -40,11 +40,15 @@ export async function runServertoolResponseStagePrePass(args: {
   switch (prepassRuntimeAction.action) {
     case 'run_auto_hooks':
       break;
-    default:
+    case 'return_passthrough_no_auto_hook_result':
       return {
         action: 'continue_to_execution' as const,
         responseStageGatePlan
       };
+    default:
+      throw new Error(
+        `[servertool] invalid response-stage prepass action: ${String((prepassRuntimeAction as { action: string }).action)}`
+      );
   }
 
   const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
@@ -61,6 +65,17 @@ export async function runServertoolResponseStagePrePass(args: {
         responseStageGatePlan,
         result: responseStageAutoHook.result
       };
+    case 'continue_without_result':
+      break;
+    case 'return_passthrough_bypass':
+      return {
+        action: 'continue_to_execution' as const,
+        responseStageGatePlan
+      };
+    default:
+      throw new Error(
+        `[servertool] invalid response-stage auto-hook action: ${String((responseStageAutoHook as { action: string }).action)}`
+      );
   }
 
   return {

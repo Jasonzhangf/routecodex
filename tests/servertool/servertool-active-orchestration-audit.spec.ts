@@ -247,6 +247,8 @@ const TARGETS = [
       'switch (postAutoHookRuntimeAction.action)',
       'result: autoHookResult as ServerSideToolEngineResult',
       'responseHookName: postAutoHookRuntimeAction.responseHookName as string',
+      'invalid response-stage pre auto-hook action',
+      'invalid response-stage post auto-hook action',
     ],
   },
   {
@@ -265,6 +267,8 @@ const TARGETS = [
       'runServertoolResponseStageAutoHookPass',
       "action: 'continue_to_execution' as const",
       'responseStageGatePlan',
+      'invalid response-stage prepass action',
+      'invalid response-stage auto-hook action',
     ],
   },
   {
