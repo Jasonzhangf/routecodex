@@ -19,6 +19,7 @@ pub enum ServertoolResponseStageRuntimeAction {
     ReturnPassthroughBypass,
     RunAutoHooks,
     ReturnAutoHookResult,
+    ReturnRequiredResponseHookEmpty,
     ReturnPassthroughNoAutoHookResult,
 }
 
@@ -26,6 +27,8 @@ pub enum ServertoolResponseStageRuntimeAction {
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolResponseStageRuntimeActionPlan {
     pub action: ServertoolResponseStageRuntimeAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_hook_name: Option<String>,
 }
 
 fn resolve_response_stage_next_action(input: &ServertoolResponseStageRuntimeActionInput) -> &str {
@@ -42,6 +45,27 @@ fn resolve_response_stage_next_action(input: &ServertoolResponseStageRuntimeActi
         .trim()
 }
 
+fn resolve_response_hook_required(input: &ServertoolResponseStageRuntimeActionInput) -> bool {
+    if let Some(Value::Object(plan)) = input.response_stage_gate_plan.as_ref() {
+        if let Some(Value::Bool(required)) = plan.get("responseHookRequired") {
+            return *required;
+        }
+    }
+    false
+}
+
+fn resolve_response_hook_name(input: &ServertoolResponseStageRuntimeActionInput) -> Option<String> {
+    if let Some(Value::Object(plan)) = input.response_stage_gate_plan.as_ref() {
+        if let Some(Value::String(name)) = plan.get("responseHookName") {
+            let trimmed = name.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
 pub fn plan_servertool_response_stage_runtime_action(
     input: ServertoolResponseStageRuntimeActionInput,
 ) -> ServertoolResponseStageRuntimeActionPlan {
@@ -50,23 +74,34 @@ pub fn plan_servertool_response_stage_runtime_action(
     if next_action == "bypass" {
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass,
+            response_hook_name: None,
         };
     }
 
     if !input.auto_hook_evaluated {
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::RunAutoHooks,
+            response_hook_name: None,
         };
     }
 
     if input.has_auto_hook_result && (next_action == "run_auto_hooks" || next_action.is_empty()) {
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::ReturnAutoHookResult,
+            response_hook_name: None,
+        };
+    }
+
+    if resolve_response_hook_required(&input) {
+        return ServertoolResponseStageRuntimeActionPlan {
+            action: ServertoolResponseStageRuntimeAction::ReturnRequiredResponseHookEmpty,
+            response_hook_name: resolve_response_hook_name(&input),
         };
     }
 
     ServertoolResponseStageRuntimeActionPlan {
         action: ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult,
+        response_hook_name: None,
     }
 }
 
@@ -151,6 +186,30 @@ mod tests {
         assert_eq!(
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult
+        );
+    }
+
+    #[test]
+    fn returns_required_hook_empty_from_gate_plan() {
+        let plan = plan_servertool_response_stage_runtime_action(
+            ServertoolResponseStageRuntimeActionInput {
+                response_stage_gate_plan: Some(serde_json::json!({
+                    "nextAction": "run_auto_hooks",
+                    "responseHookRequired": true,
+                    "responseHookName": " stop_message_auto "
+                })),
+                response_stage_next_action: None,
+                auto_hook_evaluated: true,
+                has_auto_hook_result: false,
+            },
+        );
+        assert_eq!(
+            plan.action,
+            ServertoolResponseStageRuntimeAction::ReturnRequiredResponseHookEmpty
+        );
+        assert_eq!(
+            plan.response_hook_name.as_deref(),
+            Some("stop_message_auto")
         );
     }
 

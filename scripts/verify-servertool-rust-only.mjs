@@ -5704,13 +5704,19 @@ function checkServertoolResponseStageGateThinShell() {
     'responseHookRequired: args.responseStageGatePlan.responseHookRequired === true',
     "responseHookName: String(args.responseStageGatePlan.responseHookName ?? 'unknown')",
   ]) {
-    assertContains(
+    if (responseStageAutoHookShell.includes(marker)) {
+      fail(
       'servertool-response-stage-auto-hook-shell-owner',
-      `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
-      responseStageAutoHookShell,
-      marker
-    );
+        `response-stage-auto-hook-shell.ts must not derive Rust-owned required hook fields via TS marker ${marker}`
+      );
+    }
   }
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'responseHookName: postAutoHookRuntimeAction.responseHookName as string'
+  );
 }
 
 function checkServertoolEngineStoplessSessionThinShell() {

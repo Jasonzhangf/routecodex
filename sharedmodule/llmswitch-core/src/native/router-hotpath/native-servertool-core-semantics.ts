@@ -320,6 +320,7 @@ export interface ServertoolResponseStageRuntimeActionPlan {
     | 'return_auto_hook_result'
     | 'return_required_response_hook_empty'
     | 'return_passthrough_no_auto_hook_result';
+  responseHookName?: string;
 }
 
 export interface ServertoolEntryPreflightPlan {
@@ -2251,7 +2252,6 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
   responseStageNextAction?: string;
   autoHookEvaluated: boolean;
   hasAutoHookResult: boolean;
-  responseHookRequired: boolean;
 }): ServertoolResponseStageRuntimeActionPlan {
   const capability = 'planServertoolResponseStageRuntimeActionJson';
   const fn = readNativeFunction(capability);
@@ -2277,7 +2277,10 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid action');
   }
   return {
-    action: record.action
+    action: record.action,
+    ...(typeof record.responseHookName === 'string' && record.responseHookName.trim()
+      ? { responseHookName: record.responseHookName.trim() }
+      : {})
   };
 }
 

@@ -24,8 +24,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: false,
-    hasAutoHookResult: false,
-    responseHookRequired: args.responseStageGatePlan.responseHookRequired === true
+    hasAutoHookResult: false
   });
   if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass') {
     return { action: 'return_passthrough_bypass' };
@@ -40,14 +39,13 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: true,
-    hasAutoHookResult: Boolean(autoHookResult),
-    responseHookRequired: args.responseStageGatePlan.responseHookRequired === true
+    hasAutoHookResult: Boolean(autoHookResult)
   });
   if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty') {
     throw createServertoolProviderProtocolErrorFromPlan(
       planServertoolRequiredResponseHookEmptyErrorWithNative({
         requestId: args.options.requestId,
-        responseHookName: String(args.responseStageGatePlan.responseHookName ?? 'unknown')
+        responseHookName: postAutoHookRuntimeAction.responseHookName as string
       })
     );
   }

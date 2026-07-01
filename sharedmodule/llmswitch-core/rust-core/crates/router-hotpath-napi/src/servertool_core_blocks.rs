@@ -2851,10 +2851,13 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
 
     let required_empty = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
-            "responseStageNextAction": "run_auto_hooks",
+            "responseStageGatePlan": {
+                "nextAction": "run_auto_hooks",
+                "responseHookRequired": true,
+                "responseHookName": "stop_message_auto"
+            },
             "autoHookEvaluated": true,
-            "hasAutoHookResult": false,
-            "responseHookRequired": true
+            "hasAutoHookResult": false
         })
         .to_string(),
     )
@@ -2863,7 +2866,11 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         serde_json::from_str(&required_empty).expect("parse required hook empty plan");
     assert_eq!(
         required_empty_value["action"],
-        serde_json::json!("return_passthrough_no_auto_hook_result")
+        serde_json::json!("return_required_response_hook_empty")
+    );
+    assert_eq!(
+        required_empty_value["responseHookName"],
+        serde_json::json!("stop_message_auto")
     );
 }
 

@@ -41,8 +41,11 @@ describe('response-stage-auto-hook-shell', () => {
       if (input?.hasAutoHookResult === true) {
         return { action: 'return_auto_hook_result' };
       }
-      if (input?.responseHookRequired === true) {
-        return { action: 'return_required_response_hook_empty' };
+      if (input?.responseStageGatePlan?.responseHookRequired === true) {
+        return {
+          action: 'return_required_response_hook_empty',
+          responseHookName: String(input?.responseStageGatePlan?.responseHookName ?? '').trim()
+        };
       }
       return { action: 'return_passthrough_no_auto_hook_result' };
     });
