@@ -418,8 +418,7 @@ export function resolveOriginalRequestForResponseConversion(seed: RetryPayloadSe
 }
 
 export function restoreRequestPayloadFromRetrySnapshot(
-  serializedPayload?: string,
-  fallbackPayload?: Record<string, unknown>
+  serializedPayload?: string
 ): Record<string, unknown> | undefined {
   if (serializedPayload && typeof serializedPayload === 'string') {
     if (serializedPayload.length > RETRY_SNAPSHOT_RESTORE_MAX_CHARS) {
@@ -441,14 +440,7 @@ export function restoreRequestPayloadFromRetrySnapshot(
     }
     }
   }
-  if (!fallbackPayload || typeof fallbackPayload !== 'object') {
-    return undefined;
-  }
-  const clonedFallback = cloneRequestPayloadForRetry(fallbackPayload);
-  if (clonedFallback && typeof clonedFallback === 'object') {
-    return clonedFallback;
-  }
-  return { ...fallbackPayload };
+  return undefined;
 }
 
 export function resetRetrySnapshotStateForTests(): void {

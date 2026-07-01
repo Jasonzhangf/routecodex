@@ -1,3 +1,8 @@
+# 2026-07-01: retry payload restore fallback parameter removed
+- Slice: `restoreRequestPayloadFromRetrySnapshot()` no longer accepts or restores from unused `fallbackPayload`; all live callers already restore from `RetryPayloadSeed`, so the second-argument fallback path was dead code.
+- Gate: new `retry-payload-snapshot.spec.ts` source test forbids `fallbackPayload` from returning outside the test marker.
+- Verification: focused Jest `retry-payload-snapshot` PASS 1/1; grep confirmed no production/caller `fallbackPayload` or two-arg restore usage remains; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS.
+
 # 2026-07-01: provider response diagnostics fallbackTools counter removed
 - Slice: `describeRequestSemanticsResolution()` no longer computes or emits `fallbackToolsCount`; this was diagnostic-only fallback wording in server runtime response utilities, not a semantic owner for request tools.
 - Gate: `provider-response-utils.spec.ts` source test forbids `fallbackTools` / `fallbackToolsCount` from returning.
