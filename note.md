@@ -1,3 +1,8 @@
+# 2026-07-01: SSE handler stale repair coverage removed and build version generated
+- Slice already committed in two steps: `4bbb94552 fix(sse): drop handler terminal repair spec` deletes the stale handler terminal repair regression and locks it with `verify:responses-handler-single-bridge-surface`; `a00bf68f6 test(sse): trim stale handler repair coverage` trims `handler-response-sse-write-after-end.regression.spec.ts` to transport-only late-write/no-uncaught coverage.
+- Block resolved: stale tests expected handler-side terminal repair and chat JSON->SSE fallback; production code was not changed to satisfy those obsolete expectations.
+- Verification: focused write-after-end Jest PASS 2/2; `verify:responses-handler-single-bridge-surface`, `verify:responses-sse-business-module`, `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, sharedmodule/root `tsc`, `git diff --check`, and `npm run build:base` PASS. `build:base` generated version `0.90.3410`.
+
 # 2026-07-01: servertool timeout env priority moved to Rust
 - Slice: `engine-orchestration-shell.ts` no longer maps timeout env names and finds the first truthy value in TS; it now passes env candidates to native `resolveServertoolTimeoutMsFromEnvCandidatesWithNative()`, where Rust `orchestration_policy_contract.rs` owns candidate priority, empty-value skip, numeric parse, and invalid-value fail-fast.
 - Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` require the new native resolver and forbid the old `parseServertoolTimeoutMsWithNative({ raw: raw || undefined })` / `.map(...).find(...)` TS shape in the engine shell.
