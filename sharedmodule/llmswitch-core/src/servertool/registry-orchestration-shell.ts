@@ -24,8 +24,11 @@ export const getServerToolHandler = (
       });
       return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
     }
+    case 'return_none':
+      return undefined;
+    default:
+      throw new Error(`[servertool] invalid registry lookup action: ${String(actionPlan.action)}`);
   }
-  return undefined;
 };
 
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {

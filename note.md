@@ -1,3 +1,8 @@
+# 2026-07-02: servertool registry lookup action fail-fast added
+- Slice: `registry-orchestration-shell.ts` now explicitly handles native `return_none` and fails fast on unknown registry lookup actions instead of implicitly falling through to `undefined`.
+- Gate: `tests/servertool/registry-orchestration-shell.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` require `case 'return_none':` plus `invalid registry lookup action`.
+- Evidence: focused Jest `registry-orchestration-shell` PASS 8/8; focused `servertool-active-orchestration-audit` PASS 44/44 on registry slice. Remaining commit gates: sharedmodule `tsc`, `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `git diff --check`.
+
 # 2026-07-02: servertool execution-stage pre-execution branch fail-fast added
 - Slice: `execution-stage-shell.ts` now explicitly switches on `preExecutionBranchPlan.action` and fails fast on unknown native pre-execution actions instead of silently falling through to the execution queue. Normal `continue_response_stage` still proceeds to IO queue; `client_exec_cli_projection` still short-circuits to the native CLI projection branch.
 - Gate: `tests/servertool/execution-stage-shell.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` now require `switch (preExecutionBranchPlan.action)` plus `invalid pre-execution branch action`.

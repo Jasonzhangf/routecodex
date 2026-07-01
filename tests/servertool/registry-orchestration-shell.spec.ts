@@ -51,6 +51,17 @@ describe('registry-orchestration-shell', () => {
     expect(getServerToolHandler('adhoc')).toBeUndefined();
   });
 
+  test('fails fast when native registry lookup returns an unknown action', () => {
+    planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
+      action: 'unknown_registry_action',
+    });
+
+    expect(() => getServerToolHandler('unknown')).toThrow(
+      '[servertool] invalid registry lookup action: unknown_registry_action'
+    );
+    expect(getBuiltinHandlerEntryMock).not.toHaveBeenCalled();
+  });
+
   test('projects auto-hook descriptors directly through native descriptor planner', () => {
     const execution = { kind: 'builtin', builtinName: 'alpha' };
     const entry = {
@@ -118,6 +129,8 @@ describe('registry-orchestration-shell', () => {
     expect(source).not.toContain('.trim().toLowerCase()');
     expect(source).not.toContain("if (actionPlan.action === 'return_builtin')");
     expect(source).toContain('switch (actionPlan.action)');
+    expect(source).toContain("case 'return_none':");
+    expect(source).toContain('invalid registry lookup action');
     expect(source).toContain("planServertoolRegistryLookupFromSkeletonWithNative({");
     expect(source).toContain('planServertoolRegistryBuiltinAutoHookEntriesWithNative({');
     expect(source).not.toContain("from './registry-projection-shell.js'");

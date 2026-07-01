@@ -3636,6 +3636,8 @@ function checkServertoolRegistryRustOwner() {
   for (const needle of [
     'planServertoolRegistryLookupFromSkeletonWithNative({',
     'switch (actionPlan.action)',
+    "case 'return_none':",
+    'invalid registry lookup action',
     'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
   ]) {
     assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);

@@ -655,6 +655,8 @@ const TARGETS = [
     required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
       'switch (actionPlan.action)',
+      "case 'return_none':",
+      'invalid registry lookup action',
       'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
     ],
   },
