@@ -83,7 +83,7 @@ async function runAutoHookExecutionQueue(args: {
     }
 
     const result = planned != null
-      ? await materializeServertoolPlannedResult(planned as any, args.options)
+      ? await materializeServertoolPlannedResult(planned, args.options)
       : null;
 
     const attemptPlan = planAutoHookRuntimeAttemptWithNative({

@@ -59,7 +59,7 @@ export function materializeNativeToolCallExecutionOutcome(args: {
 }
 
 export const materializeServertoolPlannedResult = async (
-  planned: ServerToolHandlerPlan | ServerToolHandlerResult,
+  planned: unknown,
   options: ServerSideToolEngineOptions
 ): Promise<ServerToolHandlerResult | null> => {
   const actionPlan = planServertoolHandlerMaterializationForPlannedWithNative(

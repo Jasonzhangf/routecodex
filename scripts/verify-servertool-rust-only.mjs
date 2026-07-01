@@ -3431,6 +3431,7 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, 'planAutoHookCallerFinalizationWithNative');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const attemptPlan = planAutoHookRuntimeAttemptWithNative({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const result = planned != null');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'await materializeServertoolPlannedResult(planned, args.options)');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'result?.execution != null && typeof result.execution.flowId');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'switch (attemptPlan.action)');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationPlan = planAutoHookCallerFinalizationWithNative({');
@@ -3456,6 +3457,7 @@ function checkAutoHookExecutionRustOwner() {
     'function planAutoHookCallerFinalization(',
     'const finalizationPlan = planAutoHookCallerFinalization({',
     'finalizationPlan as { action: string }',
+    'planned as any',
     'const queueResultForReturn = queueResult as ServerToolHandlerResult',
     'const toolFlowResult: ServerSideToolEngineResult = {',
     'return toolFlowResult;',
@@ -5752,6 +5754,7 @@ function checkServertoolRustOutcomeCloseout() {
     'getBuiltinHandlerEntry(args.builtinName)',
     'builtin handler missing execution descriptor',
     'structuredClone(args.base)',
+    'planned as any',
   ]) {
     if (executionMaterializationShell.includes(marker)) {
       fail(
@@ -5765,6 +5768,12 @@ function checkServertoolRustOutcomeCloseout() {
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
     'planServertoolHandlerMaterializationForPlannedWithNative'
+  );
+  assertContains(
+    'servertool-execution-shell-ts-orchestration-guard',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    executionMaterializationShell,
+    'planned: unknown'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',

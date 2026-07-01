@@ -173,6 +173,7 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).toContain('hasLastExecution: args.executionState.lastExecution != null');
     expect(source).not.toContain('planServertoolExecutionDispatchErrorWithNative({');
     expect(source).toContain('planServertoolHandlerMaterializationForPlannedWithNative(');
+    expect(source).toContain('planned: unknown');
     expect(source).not.toContain('planServertoolHandlerContractErrorWithNative(');
     expect(source).not.toContain("actionPlan.action === 'invalid_plan_missing_finalize'");
     expect(source).not.toContain("actionPlan.action === 'invalid_plan_result'");

@@ -565,3 +565,7 @@
 - `ResponsesReasoningItem.content` may be absent, but if present it must be an array; non-array content now fails fast in the Rust SSE event payload descriptor owner with `Invalid Responses reasoning content: expected array`.
 - The old TS generator fallback `Array.isArray(reasoning.content) ? reasoning.content : []` is forbidden by `verify:sse-architecture-boundary`.
 - Verification: focused Rust/Jest, SSE gates, typechecks, native hotpath build, source replay, and `build:base` passed; current 4444 provider-response samples still lack SSE wire payload fields for real wire replay.
+# 2026-07-02: servertool auto-hook planned any cast removed
+- Verified slice: `auto-hook-caller.ts` no longer casts `planned as any`; `execution-handler-materialization-shell.ts` now accepts `planned: unknown` and forwards the value to the Rust-owned materialization planner.
+- Verification: focused Jest 65/65 passed, sharedmodule `tsc` passed, `verify:servertool-rust-only` passed, `verify:function-map-compile-gate` passed, `verify:architecture-mainline-call-map` passed, `git diff --check` passed.
+- Reusable rule: when a TS shell only forwards a planned materialization input into native ownership, keep the shell narrow and forbid cast-based trust expansion at the call site.
