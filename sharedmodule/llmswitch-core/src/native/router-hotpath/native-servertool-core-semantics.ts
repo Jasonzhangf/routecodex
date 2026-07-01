@@ -311,6 +311,8 @@ export interface ServertoolEngineRuntimeActionPlan {
     | 'return_servertool_cli_projection_final'
     | 'return_stop_message_terminal_final'
     | 'build_stop_message_cli_projection';
+  executed: true;
+  flowIdSource: 'engine_execution' | 'current_flow';
 }
 
 export interface ServertoolEngineTriggerObservationPlan {
@@ -2314,8 +2316,16 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   ) {
     throw new Error('planServertoolEngineRuntimeActionJson native returned invalid action');
   }
+  if (record.executed !== true) {
+    throw new Error('planServertoolEngineRuntimeActionJson native returned invalid executed flag');
+  }
+  if (record.flowIdSource !== 'engine_execution' && record.flowIdSource !== 'current_flow') {
+    throw new Error('planServertoolEngineRuntimeActionJson native returned invalid flowIdSource');
+  }
   return {
-    action: record.action
+    action: record.action,
+    executed: true,
+    flowIdSource: record.flowIdSource
   };
 }
 

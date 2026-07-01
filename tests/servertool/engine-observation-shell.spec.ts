@@ -187,7 +187,9 @@ describe('engine-observation-shell', () => {
           }
         } as any,
         runtimeAction: {
-          action: 'return_servertool_cli_projection_final'
+          action: 'return_servertool_cli_projection_final',
+          executed: true,
+          flowIdSource: 'engine_execution'
         },
         flowId: 'flow-postflight-failfast',
         totalSteps: 5,
@@ -210,6 +212,9 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("if (runtimeAction.action === 'return_stop_message_terminal_final')");
     expect(source).not.toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
     expect(source).toContain('switch (runtimeAction.action)');
+    expect(source).toContain('resolvePostflightFlowId({');
+    expect(source).toContain('executed: runtimeAction.executed');
+    expect(source).not.toContain('executed: true');
     expect(source).not.toContain('const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (');
     expect(source).not.toContain('runtimeControl ? { runtimeControl } : null');
     expect(source).not.toContain("engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'");
@@ -246,7 +251,9 @@ describe('engine-observation-shell', () => {
         }
       } as any,
       runtimeAction: {
-        action: 'return_servertool_cli_projection_final'
+        action: 'return_servertool_cli_projection_final',
+        executed: true,
+        flowIdSource: 'engine_execution'
       },
       flowId: 'flow-postflight-summary',
       totalSteps: 5,

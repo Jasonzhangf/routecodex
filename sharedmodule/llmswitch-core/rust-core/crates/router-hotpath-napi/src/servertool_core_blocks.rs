@@ -3291,6 +3291,11 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
         terminal_value["action"],
         serde_json::json!("return_stop_message_terminal_final")
     );
+    assert_eq!(terminal_value["executed"], serde_json::json!(true));
+    assert_eq!(
+        terminal_value["flowIdSource"],
+        serde_json::json!("engine_execution")
+    );
 
     let cli_projection = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
@@ -3307,6 +3312,11 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
         cli_projection_value["action"],
         serde_json::json!("return_servertool_cli_projection_final")
     );
+    assert_eq!(cli_projection_value["executed"], serde_json::json!(true));
+    assert_eq!(
+        cli_projection_value["flowIdSource"],
+        serde_json::json!("engine_execution")
+    );
 
     let stopless_cli = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
@@ -3322,6 +3332,11 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
     assert_eq!(
         stopless_cli_value["action"],
         serde_json::json!("build_stop_message_cli_projection")
+    );
+    assert_eq!(stopless_cli_value["executed"], serde_json::json!(true));
+    assert_eq!(
+        stopless_cli_value["flowIdSource"],
+        serde_json::json!("current_flow")
     );
 }
 

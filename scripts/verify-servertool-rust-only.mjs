@@ -6797,6 +6797,7 @@ function checkServertoolPostflightLoggingFailFast() {
     'const engineFinalResult = {',
     'return engineFinalResult;',
     "engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'",
+    'executed: true',
   ]) {
     if (postflightSource.includes(marker)) {
       fail(
@@ -6810,7 +6811,8 @@ function checkServertoolPostflightLoggingFailFast() {
     "args.stageRecorder.record('servertool.execution', summary);",
     "engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'",
     'chat: engineResult.finalChatResponse',
-    'executed: true',
+    'executed: runtimeAction.executed',
+    'resolvePostflightFlowId({',
   ]) {
     if (!postflightSource.includes(marker)) {
       fail(

@@ -19,9 +19,18 @@ pub enum ServertoolEngineRuntimeAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServertoolEngineRuntimeFlowIdSource {
+    EngineExecution,
+    CurrentFlow,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolEngineRuntimeActionPlan {
     pub action: ServertoolEngineRuntimeAction,
+    pub executed: bool,
+    pub flow_id_source: ServertoolEngineRuntimeFlowIdSource,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -72,16 +81,22 @@ pub fn plan_servertool_engine_runtime_action(
     if !input.is_stop_message_flow && has_servertool_cli_projection_context {
         return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal,
+            executed: true,
+            flow_id_source: ServertoolEngineRuntimeFlowIdSource::EngineExecution,
         });
     }
     if input.stopless_action.trim() == "terminal_final" {
         return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::ReturnStopMessageTerminalFinal,
+            executed: true,
+            flow_id_source: ServertoolEngineRuntimeFlowIdSource::EngineExecution,
         });
     }
     if input.is_stop_message_flow && input.stopless_action.trim() == "cli_projection" {
         return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::BuildStopMessageCliProjection,
+            executed: true,
+            flow_id_source: ServertoolEngineRuntimeFlowIdSource::CurrentFlow,
         });
     }
     Err(format!(
@@ -137,6 +152,11 @@ mod tests {
             plan.action,
             ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal
         );
+        assert_eq!(plan.executed, true);
+        assert_eq!(
+            plan.flow_id_source,
+            ServertoolEngineRuntimeFlowIdSource::EngineExecution
+        );
     }
 
     #[test]
@@ -151,6 +171,11 @@ mod tests {
             plan.action,
             ServertoolEngineRuntimeAction::ReturnStopMessageTerminalFinal
         );
+        assert_eq!(plan.executed, true);
+        assert_eq!(
+            plan.flow_id_source,
+            ServertoolEngineRuntimeFlowIdSource::EngineExecution
+        );
     }
 
     #[test]
@@ -164,6 +189,11 @@ mod tests {
         assert_eq!(
             plan.action,
             ServertoolEngineRuntimeAction::BuildStopMessageCliProjection
+        );
+        assert_eq!(plan.executed, true);
+        assert_eq!(
+            plan.flow_id_source,
+            ServertoolEngineRuntimeFlowIdSource::CurrentFlow
         );
     }
 

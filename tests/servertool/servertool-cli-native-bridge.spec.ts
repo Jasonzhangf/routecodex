@@ -196,7 +196,9 @@ describe('servertool CLI native bridge', () => {
         stoplessAction: 'terminal_final'
       })
     ).toEqual({
-      action: 'return_stop_message_terminal_final'
+      action: 'return_stop_message_terminal_final',
+      executed: true,
+      flowIdSource: 'engine_execution'
     });
 
     expect(
@@ -206,7 +208,9 @@ describe('servertool CLI native bridge', () => {
         stoplessAction: 'cli_projection'
       })
     ).toEqual({
-      action: 'return_servertool_cli_projection_final'
+      action: 'return_servertool_cli_projection_final',
+      executed: true,
+      flowIdSource: 'engine_execution'
     });
 
     expect(
@@ -216,7 +220,9 @@ describe('servertool CLI native bridge', () => {
         stoplessAction: 'cli_projection'
       })
     ).toEqual({
-      action: 'build_stop_message_cli_projection'
+      action: 'build_stop_message_cli_projection',
+      executed: true,
+      flowIdSource: 'current_flow'
     });
   });
 

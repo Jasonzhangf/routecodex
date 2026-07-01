@@ -5,6 +5,7 @@ import type {
   ServerSideToolEngineResult
 } from './types.js';
 import {
+  type ServertoolEngineRuntimeActionPlan,
   buildServertoolPostflightObservationSummaryWithNative,
   buildStoplessAutoCliProjectionFromEngineWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -16,15 +17,28 @@ import {
   projectNativeMetadataWritePlanToRuntimeControl
 } from '../conversion/hub/metadata-center-runtime-control-writer.js';
 
-type EnginePostflightAction = {
-  action: string;
-};
-
 const SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER = {
   module: 'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
   symbol: 'runServertoolEnginePostflight',
   stage: 'HubRespChatProcess03Governed',
 } as const;
+
+function resolvePostflightFlowId(args: {
+  runtimeAction: ServertoolEngineRuntimeActionPlan;
+  engineResult: ServerSideToolEngineResult;
+  flowId: string;
+}): string | undefined {
+  switch (args.runtimeAction.flowIdSource) {
+    case 'engine_execution':
+      return args.engineResult.execution?.flowId;
+    case 'current_flow':
+      return args.flowId;
+    default:
+      throw new Error(
+        `[servertool] invalid postflight flowIdSource: ${String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)}`
+      );
+  }
+}
 
 export async function runServertoolEnginePostflight(args: {
   options: {
@@ -32,7 +46,7 @@ export async function runServertoolEnginePostflight(args: {
     adapterContext: AdapterContext;
   };
   engineResult: ServerSideToolEngineResult;
-  runtimeAction: EnginePostflightAction;
+  runtimeAction: ServertoolEngineRuntimeActionPlan;
   flowId: string;
   totalSteps: number;
   stageRecorder?: StageRecorder;
@@ -46,6 +60,11 @@ export async function runServertoolEnginePostflight(args: {
   | undefined
 > {
   const { engineResult, runtimeAction, options, flowId, totalSteps } = args;
+  const projectedFlowId = resolvePostflightFlowId({
+    runtimeAction,
+    engineResult,
+    flowId
+  });
   if (engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object') {
     const runtimeControl = projectNativeMetadataWritePlanToRuntimeControl(engineResult.metadataWritePlan);
     if (Object.keys(runtimeControl).length > 0) {
@@ -69,15 +88,15 @@ export async function runServertoolEnginePostflight(args: {
       args.logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
       return {
         chat: engineResult.finalChatResponse,
-        executed: true,
-        flowId: engineResult.execution?.flowId
+        executed: runtimeAction.executed,
+        flowId: projectedFlowId
       };
     case 'return_stop_message_terminal_final':
       args.logProgress(5, totalSteps, 'completed (stop_message terminal)', { flowId });
       return {
         chat: engineResult.finalChatResponse,
-        executed: true,
-        flowId: engineResult.execution?.flowId
+        executed: runtimeAction.executed,
+        flowId: projectedFlowId
       };
     case 'build_stop_message_cli_projection': {
       const adapterRecord = options.adapterContext as unknown as Record<string, unknown>;
@@ -92,8 +111,8 @@ export async function runServertoolEnginePostflight(args: {
       args.logProgress(5, totalSteps, 'completed (stop_message cli projection; no reenter)', { flowId });
       return {
         chat: projection.chatResponse,
-        executed: true,
-        flowId
+        executed: runtimeAction.executed,
+        flowId: projectedFlowId
       };
     }
     default:
