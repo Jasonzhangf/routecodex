@@ -440,6 +440,7 @@ describe('servertool auto hook trace', () => {
 
     expect(callerSource).not.toContain('native auto-hook execution requested result but materialization was empty');
     expect(callerSource).not.toContain('native auto-hook queue progress requested result but queue result was empty');
+    expect(callerSource).not.toContain('native auto-hook execution returned no materialized disposition');
     expect(callerSource).not.toContain('if (!result)');
     expect(callerSource).not.toContain('if (!queueResult)');
     expect(callerSource).not.toContain('error instanceof Error ? error.message');
@@ -447,6 +448,9 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('error');
     expect(nativeWrapperSource).toContain(
       'planAutoHookRuntimeAttemptJson native returned result disposition without materialized result'
+    );
+    expect(nativeWrapperSource).toContain(
+      'planAutoHookRuntimeAttemptJson native returned rethrow disposition without error input'
     );
     expect(nativeWrapperSource).toContain(
       'planAutoHookCallerFinalizationJson native returned result disposition without queue result'

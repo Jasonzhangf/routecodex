@@ -3412,6 +3412,7 @@ function checkAutoHookExecutionRustOwner() {
     'if (!queueResult)',
     'native auto-hook execution requested result but materialization was empty',
     'native auto-hook queue progress requested result but queue result was empty',
+    'native auto-hook execution returned no materialized disposition',
     'if (optionalResult) {',
     'if (mandatoryResult) {',
     'result.execution.flowId.trim()',

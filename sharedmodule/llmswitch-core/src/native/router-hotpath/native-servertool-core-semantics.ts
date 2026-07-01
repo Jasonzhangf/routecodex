@@ -1912,6 +1912,9 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
   if (record.returnResult === true && input.hasMaterializedResult !== true) {
     throw new Error('planAutoHookRuntimeAttemptJson native returned result disposition without materialized result');
   }
+  if (record.rethrowError === true && input.error === undefined) {
+    throw new Error('planAutoHookRuntimeAttemptJson native returned rethrow disposition without error input');
+  }
   return {
     traceEvent: {
       hookId: traceRecord.hookId,

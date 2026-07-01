@@ -115,12 +115,7 @@ async function runAutoHookExecutionQueue(args: {
     if (attemptPlan.returnResult) {
       return result as ServerToolHandlerResult;
     }
-    if (attemptPlan.continueQueue) {
-      continue;
-    }
-    throw new Error(
-      '[servertool] native auto-hook execution returned no materialized disposition',
-    );
+    continue;
   }
 
   return null;
