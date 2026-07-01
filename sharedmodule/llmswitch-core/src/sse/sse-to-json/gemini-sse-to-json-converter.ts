@@ -1,5 +1,4 @@
 // feature_id: sse.anthropic_gemini_stream_projection
-import { DEFAULT_GEMINI_CONVERSION_CONFIG } from '../types/index.js';
 import type {
   GeminiResponse,
   GeminiCandidate,
@@ -18,14 +17,7 @@ type CandidateAccumulator = {
 };
 
 export class GeminiSseToJsonConverter {
-  private config = DEFAULT_GEMINI_CONVERSION_CONFIG;
   private contexts = new Map<string, SseToGeminiJsonContext>();
-
-  constructor(config?: Partial<typeof DEFAULT_GEMINI_CONVERSION_CONFIG>) {
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
-  }
 
   async convertSseToJson(
     sseStream: AsyncIterable<string | Buffer>,
@@ -183,8 +175,8 @@ export class GeminiSseToJsonConverter {
       requestId: options.requestId,
       model: options.model,
       options: {
-        reasoningMode: options.reasoningMode ?? this.config.reasoningMode,
-        reasoningTextPrefix: options.reasoningTextPrefix ?? this.config.reasoningTextPrefix
+        reasoningMode: options.reasoningMode,
+        reasoningTextPrefix: options.reasoningTextPrefix
       },
       startTime: Date.now(),
       eventStats: {
@@ -215,8 +207,8 @@ export class GeminiSseToJsonConverter {
       return [part];
     }
     const decision = dispatchReasoning(reasoning, {
-      mode: context.options.reasoningMode ?? this.config.reasoningMode,
-      prefix: context.options.reasoningTextPrefix ?? this.config.reasoningTextPrefix
+      mode: context.options.reasoningMode,
+      prefix: context.options.reasoningTextPrefix
     });
     const normalized: GeminiContentPart[] = [];
     if (decision.appendToContent) {

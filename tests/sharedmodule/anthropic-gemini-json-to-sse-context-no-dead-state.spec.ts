@@ -83,7 +83,9 @@ describe('Anthropic/Gemini JSON-to-SSE context dead-state boundary', () => {
   it('does not keep Anthropic/Gemini converter-level config defaults or constructor config injection', () => {
     const files = [
       'sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts',
-      'sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts'
+      'sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts',
+      'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
+      'sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts'
     ];
 
     for (const file of files) {
@@ -96,6 +98,9 @@ describe('Anthropic/Gemini JSON-to-SSE context dead-state boundary', () => {
       expect(source).not.toContain('this.config.chunkDelayMs');
       expect(source).not.toContain('this.config.reasoningMode');
       expect(source).not.toContain('this.config.reasoningTextPrefix');
+      expect(source).not.toContain('enableEventValidation: true');
+      expect(source).not.toContain('strictMode: false');
+      expect(source).not.toContain('enableStrictValidation: this.config.enableEventValidation');
       expect(source).not.toContain('DEFAULT_ANTHROPIC_CONVERSION_CONFIG');
       expect(source).not.toContain('DEFAULT_GEMINI_CONVERSION_CONFIG');
     }

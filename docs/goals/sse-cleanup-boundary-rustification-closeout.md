@@ -756,3 +756,12 @@ Focused tests to use as slice gates:
 - Fix: `AnthropicJsonToSseConverter` and `GeminiJsonToSseConverter` now pass only explicit per-call options into their sequencers; converter-level default config storage and constructor config injection were physically removed.
 - Positive tests: focused Anthropic/Gemini JSON->SSE tests still project `message_start/message_stop` and `gemini.data/gemini.done` frames.
 - Reverse tests/gates: the focused context spec and `verify:sse-architecture-boundary` forbid the retired Anthropic/Gemini converter config markers from returning.
+
+### 2026-07-01 Anthropic/Gemini SSE decoder config surface removed
+
+- Boundary: Anthropic/Gemini SSE->JSON decoders must stay per-call codec shells; they must not hold converter-level default config, parser config truth, or reasoning fallback truth as a second owner.
+- Red evidence: `anthropic-gemini-json-to-sse-context-no-dead-state` and `verify:sse-architecture-boundary` first failed on decoder `private config`, constructor config injection, `this.config.reasoningMode`, `this.config.reasoningTextPrefix`, `enableStrictValidation: this.config.enableEventValidation`, and `DEFAULT_ANTHROPIC_CONVERSION_CONFIG` / `DEFAULT_GEMINI_CONVERSION_CONFIG`.
+- Fix: `AnthropicSseToJsonConverter` and `GeminiSseToJsonConverter` now consume only explicit per-call options. Converter-level default config storage and constructor config injection were physically removed. Anthropic decode now hard-locks parser strict validation at the decoder boundary instead of reading converter-held config.
+- Error boundary: this slice does not add SSE business semantics; it deletes decoder-local second truth so decode remains codec-only. Anthropic terminated-stream projection is limited to preserving the existing explicit transport error contract.
+- Positive tests: valid Anthropic/Gemini wire replay still materializes expected JSON output.
+- Reverse tests/gates: the focused context spec and `verify:sse-architecture-boundary` forbid the retired decoder config/default markers from returning; malformed paths remain covered by existing no-salvage / no-recovery specs.

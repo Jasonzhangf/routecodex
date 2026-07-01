@@ -1,5 +1,4 @@
 // feature_id: sse.anthropic_gemini_stream_projection
-import { DEFAULT_ANTHROPIC_CONVERSION_CONFIG } from '../types/index.js';
 import type {
   AnthropicMessageResponse,
   AnthropicSseEvent,
@@ -9,11 +8,6 @@ import type {
 import { ErrorUtils } from '../shared/utils.js';
 import { createSseParser } from './parsers/sse-parser.js';
 import { createAnthropicResponseBuilder } from './builders/anthropic-response-builder.js';
-
-type AnthropicSseToJsonConverterConfig = {
-  enableEventValidation: boolean;
-  strictMode: boolean;
-} & typeof DEFAULT_ANTHROPIC_CONVERSION_CONFIG;
 
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
 const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
@@ -33,18 +27,7 @@ const hasExplicitToolWrapperProgress = (text: string): boolean => {
 };
 
 export class AnthropicSseToJsonConverter {
-  private config: AnthropicSseToJsonConverterConfig = {
-    enableEventValidation: true,
-    strictMode: false,
-    ...DEFAULT_ANTHROPIC_CONVERSION_CONFIG
-  };
   private contexts = new Map<string, SseToAnthropicJsonContext>();
-
-  constructor(config?: Partial<AnthropicSseToJsonConverterConfig>) {
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
-  }
 
   async convertSseToJson(
     sseStream: AsyncIterable<string | Buffer>,
@@ -54,7 +37,7 @@ export class AnthropicSseToJsonConverter {
     this.contexts.set(options.requestId, context);
 
     const parser = createSseParser({
-      enableStrictValidation: this.config.enableEventValidation,
+      enableStrictValidation: true,
       enableEventRecovery: false,
       allowedEventTypes: new Set([
         'message_start',
@@ -67,8 +50,8 @@ export class AnthropicSseToJsonConverter {
       ])
     });
     const builder = createAnthropicResponseBuilder({
-      reasoningMode: options.reasoningMode ?? this.config.reasoningMode,
-      reasoningTextPrefix: options.reasoningTextPrefix ?? this.config.reasoningTextPrefix
+      reasoningMode: options.reasoningMode,
+      reasoningTextPrefix: options.reasoningTextPrefix
     });
 
     try {
@@ -366,6 +349,10 @@ export class AnthropicSseToJsonConverter {
   }
 
   private wrapError(code: string, error: Error, requestId: string): Error {
+    const explicitCode =
+      typeof (error as { code?: unknown }).code === 'string'
+        ? String((error as { code?: string }).code).trim()
+        : '';
     const explicitUpstreamCode =
       typeof (error as { upstreamCode?: unknown }).upstreamCode === 'string'
         ? String((error as { upstreamCode?: string }).upstreamCode).trim()
@@ -400,9 +387,19 @@ export class AnthropicSseToJsonConverter {
       wrapped.retryable = explicitRetryable;
       (wrapped.context as Record<string, unknown>).retryable = explicitRetryable;
     }
-    if (explicitUpstreamCode) {
-      wrapped.upstreamCode = explicitUpstreamCode;
-      (wrapped.context as Record<string, unknown>).upstreamCode = explicitUpstreamCode;
+    const upstreamCode = explicitUpstreamCode || explicitCode;
+    if (upstreamCode) {
+      wrapped.upstreamCode = upstreamCode === 'TERMINATED' ? 'UPSTREAM_STREAM_TERMINATED' : upstreamCode;
+      (wrapped.context as Record<string, unknown>).upstreamCode = wrapped.upstreamCode;
+    }
+    if (explicitCode === 'TERMINATED' && explicitStatusCode === undefined) {
+      wrapped.status = 502;
+      wrapped.statusCode = 502;
+      (wrapped.context as Record<string, unknown>).statusCode = 502;
+    }
+    if (explicitCode === 'TERMINATED' && explicitRetryable === undefined) {
+      wrapped.retryable = true;
+      (wrapped.context as Record<string, unknown>).retryable = true;
     }
     wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
     return wrapped;

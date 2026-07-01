@@ -418,6 +418,37 @@ for (const forbidden of [
   }
 }
 
+for (const [relPath, source] of [
+  [
+    'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
+    read('sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts')
+  ],
+  [
+    'sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts',
+    read('sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts')
+  ],
+]) {
+  for (const forbidden of [
+    'private config =',
+    'constructor(config?',
+    'this.config = { ...this.config, ...config }',
+    'this.config.defaultChunkSize',
+    'this.config.defaultDelayMs',
+    'this.config.chunkDelayMs',
+    'this.config.reasoningMode',
+    'this.config.reasoningTextPrefix',
+    'enableEventValidation: true',
+    'strictMode: false',
+    'enableStrictValidation: this.config.enableEventValidation',
+    'DEFAULT_ANTHROPIC_CONVERSION_CONFIG',
+    'DEFAULT_GEMINI_CONVERSION_CONFIG',
+  ]) {
+    if (source.includes(forbidden)) {
+      failures.push(`${relPath}: protocol SSE->JSON converter must not keep converter-level config truth: ${forbidden}`);
+    }
+  }
+}
+
 const anthropicEventSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/anthropic-event-serializer.ts');
 for (const forbidden of [
   ": 'message')",
