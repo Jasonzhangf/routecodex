@@ -1,3 +1,8 @@
+# 2026-07-01: 4444 custom/freeform tool request no longer routes to spark
+- Root cause locked from live sample `openai-responses-router-gpt-5.5-20260701T135312980-440086-1123`: provider request shape had `hasMetadata=false`, but included Responses `tools[].type=custom` / freeform `apply_patch`; VR selected `gpt-5.3-codex-spark`, which does not support that custom tool shape.
+- Fix slice: Rust VR now detects custom tool declarations/payload and filters pools/forwarder targets by `custom_tool`; provider bootstrap derives `custom_tool` from `tools` but explicitly strips it from `gpt-5.3-codex-spark`. Direct path removed the old Responses input normalization helper and only applies target media capability hook when visual input is sent to non-visual target.
+- Verification: router-direct Jest 27/27 PASS; Rust `custom_tool_payload`, `provider_bootstrap_derives_custom_tool_capability_from_tools`, `provider_bootstrap_strips_visual_capabilities_from_known_non_visual_model` PASS; `verify:responses-direct-tool-shape-no-ts-fallback` PASS; `npx tsc --noEmit --pretty false` PASS; 4444 live dry-run replay selected `minimax.key1.MiniMax-M3` and excluded spark for the same sample.
+
 # 2026-07-01: Provider response registry owner import tightened
 - Slice: `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` no longer imports `defaultSseCodecRegistry` / `SseProtocol` from `sse/index.js`; it now binds directly to `sse/registry/sse-codec-registry.js`, matching `HubPipeline`.
 - Boundary: runtime response modules must not use the public SSE barrel as registry indirection. `sse/index.ts` remains a barrel-only public export surface.

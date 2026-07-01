@@ -11,6 +11,8 @@ function read(relPath) {
 const directPayload = read('src/server/runtime/http-server/direct-passthrough-payload.ts');
 const responsesProvider = read('src/providers/core/runtime/responses-provider.ts');
 const serverIndex = read('src/server/runtime/http-server/index.ts');
+const routerDirectPipeline = read('src/server/runtime/http-server/router-direct-pipeline.ts');
+const nativeExports = read('src/modules/llmswitch/bridge/native-exports.ts');
 
 for (const forbidden of [
   'validateOpenAIResponsesDirectToolPresence',
@@ -81,6 +83,20 @@ for (const forbidden of [
   if (serverIndex.includes(forbidden)) {
     failures.push(`server index must not retain local apply_patch direct eligibility truth: ${forbidden}`);
   }
+}
+
+for (const forbidden of [
+  'normalizeResponsesInputItemsForProviderWireNative',
+  'applyDirectResponsesProviderWireNormalization',
+  'captureReqInboundResponsesContextSnapshotJson',
+]) {
+  if (routerDirectPipeline.includes(forbidden)) {
+    failures.push(`router direct must not normalize or clean request payload before provider send: ${forbidden}`);
+  }
+}
+
+if (nativeExports.includes('normalizeResponsesInputItemsForProviderWireNative')) {
+  failures.push('native bridge must not expose a provider-wire Responses input normalizer for direct send');
 }
 
 if (failures.length > 0) {

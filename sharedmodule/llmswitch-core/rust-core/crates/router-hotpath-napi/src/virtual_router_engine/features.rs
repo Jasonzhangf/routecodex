@@ -6,9 +6,9 @@ use serde_json::{json, Value};
 use crate::virtual_router_engine::message_utils::{extract_message_text, get_latest_message_role};
 use media::analyze_media_attachments;
 use tools::{
-    classify_tool_call_for_report, detect_coding_tool, detect_last_assistant_tool_category,
-    detect_vision_tool, detect_web_search_tool_declared, detect_web_tool,
-    extract_meaningful_declared_tool_names,
+    classify_tool_call_for_report, detect_coding_tool, detect_custom_tool_declared,
+    detect_last_assistant_tool_category, detect_vision_tool, detect_web_search_tool_declared,
+    detect_web_tool, extract_meaningful_declared_tool_names,
 };
 
 fn get_message_role(message: &Value) -> Option<String> {
@@ -333,11 +333,13 @@ pub(crate) struct RoutingFeatures {
     pub has_tool_call_responses: bool,
     pub has_vision_tool: bool,
     pub has_image_attachment: bool,
+    pub has_provider_wire_media_attachment: bool,
     pub has_video_attachment: bool,
     pub has_remote_video_attachment: bool,
     pub has_local_video_attachment: bool,
     pub has_web_tool: bool,
     pub has_web_search_tool_declared: bool,
+    pub has_custom_tool_declared: bool,
     pub has_coding_tool: bool,
     pub has_thinking_keyword: bool,
     pub estimated_tokens: i64,
@@ -434,6 +436,7 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
         analyze_media_attachments(None)
     };
     let has_image_attachment = media_signals.has_any_media;
+    let has_provider_wire_media_attachment = contains_provider_wire_media_attachment(request);
     let has_coding_tool = detect_coding_tool(request.get("tools"));
     let has_web_tool = detect_web_tool(request.get("tools"));
     let has_thinking_keyword =
@@ -466,11 +469,14 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
         has_tool_call_responses: turn_state.has_tool_call_responses,
         has_vision_tool,
         has_image_attachment,
+        has_provider_wire_media_attachment,
         has_video_attachment: media_signals.has_video,
         has_remote_video_attachment: media_signals.has_remote_video,
         has_local_video_attachment: media_signals.has_local_video,
         has_web_tool,
         has_web_search_tool_declared: detect_web_search_tool_declared(request.get("tools")),
+        has_custom_tool_declared: detect_custom_tool_declared(request.get("tools"))
+            || contains_responses_custom_tool_payload(request),
         has_coding_tool,
         has_thinking_keyword,
         estimated_tokens,
@@ -485,6 +491,24 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
         last_assistant_tool_label,
         latest_message_from_user: latest_message_role == "user",
         metadata: metadata_copy,
+    }
+}
+
+fn contains_responses_custom_tool_payload(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(contains_responses_custom_tool_payload),
+        Value::Object(record) => {
+            let entry_type = record
+                .get("type")
+                .and_then(Value::as_str)
+                .map(|raw| raw.trim().to_ascii_lowercase())
+                .unwrap_or_default();
+            if entry_type == "custom_tool_call" || entry_type == "custom_tool_call_output" {
+                return true;
+            }
+            record.values().any(contains_responses_custom_tool_payload)
+        }
+        _ => false,
     }
 }
 
@@ -703,6 +727,19 @@ fn detect_media_kind(map: &serde_json::Map<String, Value>) -> Option<&'static st
         return Some("image");
     }
     None
+}
+
+fn contains_provider_wire_media_attachment(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(contains_provider_wire_media_attachment),
+        Value::Object(map) => {
+            if detect_media_kind(map).is_some() {
+                return true;
+            }
+            map.values().any(contains_provider_wire_media_attachment)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -1266,6 +1303,47 @@ mod tests {
         let features = build_routing_features(&request, &json!({}));
         assert!(features.latest_message_from_user);
         assert!(features.has_image_attachment);
+    }
+
+    #[test]
+    fn provider_wire_media_attachment_detects_real_image_payload() {
+        let request = json!({
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "describe" },
+                        { "type": "input_image", "image_url": "data:image/png;base64,AAAA" }
+                    ]
+                }
+            ]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+
+        assert!(features.has_image_attachment);
+        assert!(features.has_provider_wire_media_attachment);
+    }
+
+    #[test]
+    fn provider_wire_media_attachment_ignores_image_placeholder_text() {
+        let request = json!({
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "[Image omitted]" }
+                    ]
+                }
+            ]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+
+        assert!(features.has_image_attachment);
+        assert!(!features.has_provider_wire_media_attachment);
     }
 
     #[test]

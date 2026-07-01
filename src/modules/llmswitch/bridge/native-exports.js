@@ -381,24 +381,13 @@ export function captureReqInboundResponsesContextSnapshotJson(input) {
     }
     return fn(input);
 }
-export function normalizeResponsesInputItemsForProviderWireNative(input) {
-    const context = assertNativeObject('normalizeResponsesInputItemsForProviderWireNative', invokeRouterHotpathJsonCapability('captureReqInboundResponsesContextSnapshotJson', [
-        {
-            rawRequest: input.rawRequest,
-            requestId: input.requestId,
-            toolCallIdStyle: input.toolCallIdStyle,
-        }
-    ]));
-    const normalizedInput = context.input;
-    if (!Array.isArray(normalizedInput)) {
-        throw new Error('[llmswitch-bridge] normalizeResponsesInputItemsForProviderWireNative returned invalid input');
+export function stripResponsesStoredContextInputMediaNative(inputEntries, placeholderText = '[Image omitted]') {
+    const mod = getSharedConversionSemanticsSync();
+    const fn = mod.stripResponsesStoredContextInputMediaWithNative;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] stripResponsesStoredContextInputMediaNative not available');
     }
-    return normalizedInput.map((entry) => {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-            throw new Error('[llmswitch-bridge] normalizeResponsesInputItemsForProviderWireNative returned invalid input item');
-        }
-        return entry;
-    });
+    return fn(inputEntries, placeholderText);
 }
 export async function captureReqInboundResponsesContextSnapshot(input) {
     await assertSharedBindings();

@@ -54,6 +54,10 @@ type NativeSharedConversionSemantics = {
     entryEndpoint?: string,
     responseIdFromPath?: string
   ) => { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: Record<string, unknown> };
+  stripResponsesStoredContextInputMediaWithNative?: (
+    inputEntries: unknown,
+    placeholderText?: string
+  ) => { changed: boolean; messages: unknown[] };
 };
 
 type NativeChatProcessNodeResultSemantics = {
@@ -637,31 +641,16 @@ export function captureReqInboundResponsesContextSnapshotJson(input: {
   return fn(input) as AnyRecord;
 }
 
-export function normalizeResponsesInputItemsForProviderWireNative(input: {
-  rawRequest: Record<string, unknown>;
-  requestId?: string;
-  toolCallIdStyle?: unknown;
-}): AnyRecord[] {
-  const context = assertNativeObject(
-    'normalizeResponsesInputItemsForProviderWireNative',
-    invokeRouterHotpathJsonCapability('captureReqInboundResponsesContextSnapshotJson', [
-      {
-        rawRequest: input.rawRequest,
-        requestId: input.requestId,
-        toolCallIdStyle: input.toolCallIdStyle,
-      }
-    ])
-  );
-  const normalizedInput = context.input;
-  if (!Array.isArray(normalizedInput)) {
-    throw new Error('[llmswitch-bridge] normalizeResponsesInputItemsForProviderWireNative returned invalid input');
+export function stripResponsesStoredContextInputMediaNative(
+  inputEntries: unknown,
+  placeholderText = '[Image omitted]'
+): { changed: boolean; messages: unknown[] } {
+  const mod = getSharedConversionSemanticsSync();
+  const fn = mod.stripResponsesStoredContextInputMediaWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] stripResponsesStoredContextInputMediaNative not available');
   }
-  return normalizedInput.map((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new Error('[llmswitch-bridge] normalizeResponsesInputItemsForProviderWireNative returned invalid input item');
-    }
-    return entry as AnyRecord;
-  });
+  return fn(inputEntries, placeholderText);
 }
 
 export async function captureReqInboundResponsesContextSnapshot(input: {

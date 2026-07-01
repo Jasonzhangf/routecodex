@@ -14,6 +14,7 @@ const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
 const MODEL_CAPABILITY_ALLOWLIST: &[&str] = &[
     "text",
     "reasoning",
+    "tools",
     "no_reasoning_summary",
     "multimodal",
     "vision",
@@ -21,7 +22,11 @@ const MODEL_CAPABILITY_ALLOWLIST: &[&str] = &[
     "thinking",
     "web_search",
     "web_search_direct",
+    "custom_tool",
 ];
+const VISUAL_CAPABILITIES: &[&str] = &["multimodal", "vision", "video"];
+const VISUAL_CAPABILITY_UNSUPPORTED_MODELS: &[&str] = &["gpt-5.3-codex-spark"];
+const CUSTOM_TOOL_CAPABILITY_UNSUPPORTED_MODELS: &[&str] = &["gpt-5.3-codex-spark"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1142,6 +1147,81 @@ mod alias_tests {
     }
 
     #[test]
+    fn provider_bootstrap_strips_visual_capabilities_from_known_non_visual_model() {
+        let providers = json!({
+            "YKK": {
+                "id": "YKK",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://example.invalid/v1",
+                "auth": {
+                    "type": "apikey",
+                    "entries": [{ "alias": "key1", "apiKey": "test" }]
+                },
+                "models": {
+                    "gpt-5.3-codex-spark": {
+                        "capabilities": [
+                            "tools",
+                            "thinking",
+                            "multimodal",
+                            "vision",
+                            "video",
+                            "no_reasoning_summary"
+                        ]
+                    }
+                }
+            }
+        });
+
+        let providers_bootstrap =
+            bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
+        let output: Value = serde_json::from_str(&providers_bootstrap).unwrap();
+        let capabilities = output["runtimeEntries"]["YKK.key1"]["modelCapabilities"]
+            ["gpt-5.3-codex-spark"]
+            .as_array()
+            .expect("model capabilities");
+
+        assert!(capabilities.contains(&json!("thinking")));
+        assert!(capabilities.contains(&json!("no_reasoning_summary")));
+        assert!(!capabilities.contains(&json!("multimodal")));
+        assert!(!capabilities.contains(&json!("vision")));
+        assert!(!capabilities.contains(&json!("video")));
+        assert!(!capabilities.contains(&json!("custom_tool")));
+    }
+
+    #[test]
+    fn provider_bootstrap_derives_custom_tool_capability_from_tools() {
+        let providers = json!({
+            "YKK": {
+                "id": "YKK",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://example.invalid/v1",
+                "auth": {
+                    "type": "apikey",
+                    "entries": [{ "alias": "key1", "apiKey": "test" }]
+                },
+                "models": {
+                    "gpt-5.4-mini": {
+                        "capabilities": ["text", "tools"]
+                    }
+                }
+            }
+        });
+
+        let providers_bootstrap =
+            bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
+        let output: Value = serde_json::from_str(&providers_bootstrap).unwrap();
+        let capabilities = output["runtimeEntries"]["YKK.key1"]["modelCapabilities"]
+            ["gpt-5.4-mini"]
+            .as_array()
+            .expect("model capabilities");
+
+        assert!(capabilities.contains(&json!("tools")));
+        assert!(capabilities.contains(&json!("custom_tool")));
+    }
+
+    #[test]
     fn provider_bootstrap_preserves_canonical_model_ids_when_alias_is_used() {
         let providers = json!({
             "DF": {
@@ -1600,10 +1680,22 @@ fn normalize_provider_model_capabilities(
         let Some(capabilities) = model.get("capabilities").and_then(Value::as_array) else {
             return;
         };
-        let valid = normalize_capability_list(
+        let mut valid = normalize_capability_list(
             &Value::Array(capabilities.clone()),
             Some(MODEL_CAPABILITY_ALLOWLIST),
         );
+        if model_disallows_visual_capability(&model_id) {
+            valid.retain(|capability| !VISUAL_CAPABILITIES.contains(&capability.as_str()));
+        }
+        if valid.iter().any(|capability| capability == "tools")
+            && !model_disallows_custom_tool_capability(&model_id)
+            && !valid.iter().any(|capability| capability == "custom_tool")
+        {
+            valid.push("custom_tool".to_string());
+        }
+        if model_disallows_custom_tool_capability(&model_id) {
+            valid.retain(|capability| capability != "custom_tool");
+        }
         if !valid.is_empty() {
             result.insert(model_id, valid);
         }
@@ -1637,6 +1729,20 @@ fn normalize_provider_model_capabilities(
     } else {
         Some(result)
     }
+}
+
+fn model_disallows_visual_capability(model_id: &str) -> bool {
+    let normalized = model_id.trim().to_ascii_lowercase();
+    VISUAL_CAPABILITY_UNSUPPORTED_MODELS
+        .iter()
+        .any(|model| normalized == *model)
+}
+
+fn model_disallows_custom_tool_capability(model_id: &str) -> bool {
+    let normalized = model_id.trim().to_ascii_lowercase();
+    CUSTOM_TOOL_CAPABILITY_UNSUPPORTED_MODELS
+        .iter()
+        .any(|model| normalized == *model)
 }
 
 fn normalize_model_compatibility_profiles(

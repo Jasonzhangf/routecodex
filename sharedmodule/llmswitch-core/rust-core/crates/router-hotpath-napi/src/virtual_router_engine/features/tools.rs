@@ -245,6 +245,22 @@ pub(super) fn detect_web_search_tool_declared(tools: Option<&Value>) -> bool {
     })
 }
 
+pub(super) fn detect_custom_tool_declared(tools: Option<&Value>) -> bool {
+    let tools = match tools.and_then(|v| v.as_array()) {
+        Some(list) => list,
+        None => return false,
+    };
+    tools.iter().any(|tool| {
+        let raw_type = tool
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        raw_type == "custom" || tool.get("format").is_some()
+    })
+}
+
 pub(super) fn extract_meaningful_declared_tool_names(tools: Option<&Value>) -> Vec<String> {
     let tools = match tools.and_then(|v| v.as_array()) {
         Some(list) => list,

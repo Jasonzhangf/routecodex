@@ -467,6 +467,9 @@ impl VirtualRouterEngineCore {
             && route_has_targets(&self.routing, "video");
         let web_search_route_requested = classification.route_name == "web_search";
         let multimodal_route_requested = features.has_image_attachment;
+        let provider_wire_media_required =
+            multimodal_route_requested || features.has_provider_wire_media_attachment;
+        let custom_tool_required = features.has_custom_tool_declared;
         let has_explicit_web_search_route = route_has_targets(&self.routing, "web_search");
         let default_pool_supports_web_search =
             default_pool_supports_capability(&self.routing, &self.provider_registry, "web_search");
@@ -572,6 +575,28 @@ impl VirtualRouterEngineCore {
                     continue;
                 }
             }
+            if provider_wire_media_required {
+                let capability_filtered = filter_pools_by_visual_capability_with_forwarders(
+                    &pools,
+                    &self.provider_registry,
+                    Some(&self.forwarder_registry),
+                );
+                if !capability_filtered.is_empty() {
+                    pools = capability_filtered;
+                }
+            }
+            if custom_tool_required {
+                let capability_filtered = filter_pools_by_capability_with_forwarders(
+                    &pools,
+                    &self.provider_registry,
+                    Some(&self.forwarder_registry),
+                    "custom_tool",
+                );
+                if capability_filtered.is_empty() {
+                    continue;
+                }
+                pools = capability_filtered;
+            }
             for pool in pools {
                 if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref())
                 {
@@ -597,7 +622,8 @@ impl VirtualRouterEngineCore {
                         &pool.id,
                         &pool.targets,
                         features,
-                        multimodal_route_requested,
+                        provider_wire_media_required,
+                        custom_tool_required,
                     ) {
                         if !pool_candidate_targets.contains(&resolved_key) {
                             pool_candidate_targets.push(resolved_key);
@@ -852,7 +878,8 @@ impl VirtualRouterEngineCore {
         pool_id: &str,
         pool_targets: &[String],
         features: &RoutingFeatures,
-        multimodal_route_requested: bool,
+        provider_wire_media_required: bool,
+        custom_tool_required: bool,
     ) -> Option<String> {
         if !crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(key) {
             return Some(key.to_string());
@@ -880,7 +907,14 @@ impl VirtualRouterEngineCore {
             &mut self.load_balancer,
             |provider_key: &str| selectable_real_keys.contains(provider_key),
             |provider_key: &str| {
-                if !multimodal_route_requested {
+                if custom_tool_required
+                    && !self
+                        .provider_registry
+                        .has_capability(provider_key, "custom_tool")
+                {
+                    return false;
+                }
+                if !provider_wire_media_required {
                     return true;
                 }
                 if features.has_video_attachment && features.has_remote_video_attachment {
@@ -1915,6 +1949,180 @@ mod tests {
 
         assert_eq!(selected.provider_key, "media.key1.gpt-5.4-mini");
         assert_eq!(selected.route_used, "multimodal");
+    }
+
+    #[test]
+    fn provider_wire_media_payload_skips_text_only_forwarder_target_on_tools_route() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "text.key1.gpt-5.3-codex-spark".to_string(),
+            json!({
+                "providerKey": "text.key1.gpt-5.3-codex-spark",
+                "providerType": "openai",
+                "modelId": "gpt-5.3-codex-spark",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.3-codex-spark": ["text", "tools"]
+                }
+            }),
+        );
+        providers.insert(
+            "media.key1.gpt-5.4-mini".to_string(),
+            json!({
+                "providerKey": "media.key1.gpt-5.4-mini",
+                "providerType": "openai",
+                "modelId": "gpt-5.4-mini",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.4-mini": ["text", "tools", "multimodal"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.gpt.gpt-5.4-mini".to_string(),
+            json!({
+                "forwarderId": "fwd.gpt.gpt-5.4-mini",
+                "protocol": "openai",
+                "modelId": "gpt-5.4-mini",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "stickyKey": "none",
+                "targets": [
+                    { "providerKey": "text.key1.gpt-5.3-codex-spark", "priority": 1, "disabled": false },
+                    { "providerKey": "media.key1.gpt-5.4-mini", "priority": 2, "disabled": false }
+                ]
+            }),
+        );
+        let provider_keys = core
+            .provider_registry
+            .list_keys()
+            .into_iter()
+            .collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+        let routing = Map::from_iter([(
+            "tools".to_string(),
+            Value::Array(vec![json!({
+                "id": "tools-forwarder",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["fwd.gpt.gpt-5.4-mini"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "tools".to_string(),
+            confidence: 1.0,
+            reasoning: "tools:last-tool-other".to_string(),
+            candidates: vec!["tools".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_image_attachment: false,
+            has_provider_wire_media_attachment: true,
+            has_tools: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "tools",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("provider wire image payload should select media-capable forwarder target");
+
+        assert_eq!(selected.provider_key, "media.key1.gpt-5.4-mini");
+        assert_eq!(selected.route_used, "tools");
+    }
+
+    #[test]
+    fn custom_tool_payload_skips_non_custom_tool_route_and_uses_default() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "spark.key1.gpt-5.3-codex-spark".to_string(),
+            json!({
+                "providerKey": "spark.key1.gpt-5.3-codex-spark",
+                "providerType": "openai",
+                "modelId": "gpt-5.3-codex-spark",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.3-codex-spark": ["text", "tools", "no_reasoning_summary"]
+                }
+            }),
+        );
+        providers.insert(
+            "mini.key1.gpt-5.4-mini".to_string(),
+            json!({
+                "providerKey": "mini.key1.gpt-5.4-mini",
+                "providerType": "openai",
+                "modelId": "gpt-5.4-mini",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.4-mini": ["text", "tools", "custom_tool"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "tools".to_string(),
+                Value::Array(vec![json!({
+                    "id": "tools-spark",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["spark.key1.gpt-5.3-codex-spark"]
+                })]),
+            ),
+            (
+                DEFAULT_ROUTE.to_string(),
+                Value::Array(vec![json!({
+                    "id": "default-mini",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["mini.key1.gpt-5.4-mini"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "tools".to_string(),
+            confidence: 1.0,
+            reasoning: "tools:last-tool-other".to_string(),
+            candidates: vec!["tools".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_tools: true,
+            has_custom_tool_declared: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "tools",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("custom tool payload should skip spark and use default custom-tool target");
+
+        assert_eq!(selected.provider_key, "mini.key1.gpt-5.4-mini");
+        assert_eq!(selected.route_used, DEFAULT_ROUTE);
     }
 
     #[test]

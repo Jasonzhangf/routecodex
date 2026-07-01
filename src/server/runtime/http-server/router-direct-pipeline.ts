@@ -29,7 +29,7 @@ import { resolveInboundProtocolFromEntryPath } from './provider-direct-pipeline.
 import { extractResponseStatus } from './executor/provider-response-utils.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
-import { normalizeResponsesInputItemsForProviderWireNative } from '../../../modules/llmswitch/bridge/native-exports.js';
+import { stripDirectTargetUnsupportedMedia } from './router-direct-media-capability.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -319,26 +319,8 @@ function applyDirectRouteHooks(
   }
 
   result = applyTargetModelRequestCapabilityHook(result, effectiveModelId, providerRuntime);
-  result = applyDirectResponsesProviderWireNormalization(result);
 
   return { payload: result, originalClientModel };
-}
-
-function applyDirectResponsesProviderWireNormalization(payload: Record<string, unknown>): Record<string, unknown> {
-  const input = payload.input;
-  if (!Array.isArray(input)) {
-    return payload;
-  }
-  const normalizedInput = normalizeResponsesInputItemsForProviderWireNative({
-    rawRequest: payload,
-  });
-  if (normalizedInput.length === input.length && normalizedInput.every((entry, index) => entry === input[index])) {
-    return payload;
-  }
-  return {
-    ...payload,
-    input: normalizedInput,
-  };
 }
 
 function applyTargetModelRequestCapabilityHook(
@@ -350,6 +332,9 @@ function applyTargetModelRequestCapabilityHook(
     return payload;
   }
   const capabilities = providerRuntime?.modelCapabilities?.[targetModelId];
+  if (Array.isArray(capabilities) && !hasVisualModelCapability(capabilities)) {
+    payload = applyTargetModelMediaCapabilityHook(payload);
+  }
   if (!Array.isArray(capabilities) || !capabilities.includes('no_reasoning_summary')) {
     return payload;
   }
@@ -366,6 +351,51 @@ function applyTargetModelRequestCapabilityHook(
     ...payload,
     reasoning: nextReasoning,
   };
+}
+
+function hasVisualModelCapability(capabilities: string[]): boolean {
+  return capabilities.some((capability) =>
+    capability === 'multimodal' || capability === 'vision' || capability === 'video'
+  );
+}
+
+function applyTargetModelMediaCapabilityHook(payload: Record<string, unknown>): Record<string, unknown> {
+  const input = payload.input;
+  if (!Array.isArray(input)) {
+    return payload;
+  }
+  if (!containsResponsesInputMedia(input)) {
+    return payload;
+  }
+  const stripped = stripDirectTargetUnsupportedMedia(input, '[Image omitted]');
+  if (!stripped.changed) {
+    return payload;
+  }
+  return {
+    ...payload,
+    input: stripped.messages,
+  };
+}
+
+function containsResponsesInputMedia(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(containsResponsesInputMedia);
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const type = typeof record.type === 'string' ? record.type.toLowerCase() : '';
+  if (type.includes('image') || type.includes('video')) {
+    return true;
+  }
+  if (Object.prototype.hasOwnProperty.call(record, 'image_url')) {
+    return true;
+  }
+  if (Object.prototype.hasOwnProperty.call(record, 'video_url')) {
+    return true;
+  }
+  return Object.values(record).some(containsResponsesInputMedia);
 }
 
 // ---------------------------------------------------------------------------
