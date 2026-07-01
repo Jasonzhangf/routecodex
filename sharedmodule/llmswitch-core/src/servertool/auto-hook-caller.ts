@@ -96,11 +96,9 @@ async function runAutoHookExecutionQueue(args: {
       throw error;
     }
 
-    let result: ServerToolHandlerResult | null = null;
-
-    if (planned) {
-      result = await materializeServertoolPlannedResult(planned as any, args.options);
-    }
+    const result = planned != null
+      ? await materializeServertoolPlannedResult(planned as any, args.options)
+      : null;
 
     const attemptPlan = planAutoHookRuntimeAttemptWithNative({
       ...traceBase,
@@ -112,10 +110,12 @@ async function runAutoHookExecutionQueue(args: {
     });
     args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
 
-    if (attemptPlan.returnResult) {
-      return result as ServerToolHandlerResult;
+    switch (attemptPlan.returnResult) {
+      case true:
+        return result as ServerToolHandlerResult;
+      case false:
+        continue;
     }
-    continue;
   }
 
   return null;
