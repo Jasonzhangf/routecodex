@@ -1,3 +1,8 @@
+# 2026-07-02: servertool engine skip action cast alias removed
+- Slice: `engine-orchestration-shell.ts` no longer creates a TS `engineSkipAction` union-cast alias; the shell now switches directly on native `engineSkipPlan.action` and keeps Rust/native as the action discriminant owner.
+- Gate: `engine.stopless-session-thin-shell.spec.ts`, `engine-observation-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` now forbid `const engineSkipAction = engineSkipPlan.action as` and require `switch (engineSkipPlan.action)`.
+- Evidence before commit: focused Jest `engine.stopless-session-thin-shell + engine-observation-shell + servertool-active-orchestration-audit` PASS 47/47 with 12 skipped; `verify:servertool-rust-only` PASS. Remaining commit gates: sharedmodule `tsc`, function-map gate, mainline gate, `git diff --check`.
+
 # 2026-07-02: servertool response-stage orchestration unknown action fail-fast
 - Slice: `response-stage-orchestration-shell.ts` now fails fast for unknown native response-stage runtime actions and unknown native output return actions instead of implicitly continuing or returning the original payload.
 - Gate: `response-stage-orchestration-shell.spec.ts` covers unknown runtime/output actions and `verify-servertool-rust-only` now requires the fail-fast markers.

@@ -186,11 +186,7 @@ export async function runServerToolOrchestrationShell(
     engineMode: engineResult.mode,
     hasExecution: engineResult.execution != null
   });
-  const engineSkipAction = engineSkipPlan.action as
-    | 'return_skipped_passthrough'
-    | 'return_skipped_no_execution'
-    | 'continue_matched_flow';
-  switch (engineSkipAction) {
+  switch (engineSkipPlan.action) {
     case 'return_skipped_passthrough':
     case 'return_skipped_no_execution': {
       const skipReason = engineSkipPlan.skipReason as string;
@@ -216,7 +212,7 @@ export async function runServerToolOrchestrationShell(
     case 'continue_matched_flow':
       break;
     default:
-      throw new Error(`[servertool] invalid engine skip action: ${String(engineSkipAction)}`);
+      throw new Error(`[servertool] invalid engine skip action: ${String(engineSkipPlan.action)}`);
   }
 
   const flowId = recordServertoolEngineMatchHit({

@@ -6165,6 +6165,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     );
   }
   for (const marker of [
+    'const engineSkipAction = engineSkipPlan.action as',
     "engineSkipPlan.action === 'return_skipped_passthrough' ||",
     "engineSkipPlan.action === 'return_skipped_no_execution'",
   ]) {
@@ -6175,7 +6176,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
       );
     }
   }
-  if (!engineSource.includes('switch (engineSkipAction)')) {
+  if (!engineSource.includes('switch (engineSkipPlan.action)')) {
     fail(
       'servertool-engine-stopless-session-thin-shell',
       'engine-orchestration-shell.ts must keep engine skip dispatch as a thin switch over native-planned result'
