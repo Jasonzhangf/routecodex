@@ -4013,6 +4013,7 @@ function checkEngineSelectionRustOwner() {
     'Array.isArray(overrides.includeAutoHookIds)',
     'Array.isArray(overrides.excludeAutoHookIds)',
     "if (afterRunPlan.action === 'rerun_excluding_primary_hooks')",
+    'String(afterRunPlan.action)',
   ]) {
     if (engineSelectionShell.includes(keyword)) {
       fail(

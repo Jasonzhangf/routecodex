@@ -31,6 +31,8 @@ describe('servertool engine selection block', () => {
     expect(source).not.toContain('optionalPrimaryOrder: string[]');
     expect(source).not.toContain("if (afterRunPlan.action === 'rerun_excluding_primary_hooks')");
     expect(source).toContain('switch (afterRunPlan.action)');
+    expect(source).not.toContain('String(afterRunPlan.action)');
+    expect(source).toContain("[servertool] invalid engine selection action");
   });
 
   test('runs primary hooks first and returns current result when execution exists', async () => {

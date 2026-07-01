@@ -27,6 +27,6 @@ export async function runPrimaryServerToolEngineSelection(args: {
     case 'return_current':
       return engineResult;
     default:
-      throw new Error(`[servertool] invalid engine selection action: ${String(afterRunPlan.action)}`);
+      throw new Error('[servertool] invalid engine selection action');
   }
 }
