@@ -6,7 +6,6 @@
 import type { ChatSseEvent, ChatCompletionResponse, ChatToolCall } from '../../types/index.js';
 import {
   buildChatSseContentDeltaPayloadWithNative,
-  buildChatSseErrorPayloadWithNative,
   buildChatSseEventEnvelopeWithNative,
   buildChatSseFinishPayloadWithNative,
   buildChatSseReasoningDeltaPayloadWithNative,
@@ -308,26 +307,6 @@ export function buildDoneEvent(
     type: 'chat.done',
     timestamp: envelope.timestamp,
     data: '[DONE]',
-    sequenceNumber: envelope.sequenceNumber,
-    protocol: envelope.protocol,
-    direction: envelope.direction
-  };
-}
-
-/**
- * 构建error事件
- */
-export function buildErrorEvent(
-  error: Error,
-  context: ChatEventGeneratorContext,
-  config: ChatEventGeneratorConfig = DEFAULT_CHAT_EVENT_GENERATOR_CONFIG
-): ChatSseEvent {
-  const envelope = nextChatEventEnvelope(context, config);
-  return {
-    event: 'error',
-    type: 'error',
-    timestamp: envelope.timestamp,
-    data: JSON.stringify(buildChatSseErrorPayloadWithNative(error.message)),
     sequenceNumber: envelope.sequenceNumber,
     protocol: envelope.protocol,
     direction: envelope.direction

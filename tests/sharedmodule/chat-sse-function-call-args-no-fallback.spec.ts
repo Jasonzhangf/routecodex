@@ -11,6 +11,13 @@ async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
   return chunks.join('');
 }
 
+async function expectStreamToReject(
+  stream: AsyncIterable<unknown>,
+  message: string
+): Promise<void> {
+  await expect(collectText(stream)).rejects.toThrow(message);
+}
+
 describe('chat SSE function_call arguments no-fallback boundary', () => {
   it('fails missing response id instead of using requestId as chunk id', async () => {
     const response: ChatCompletionResponse = {
@@ -84,11 +91,8 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
       requestId: 'req_chat_function_call_args_no_fallback',
       model: response.model
     });
-    const text = await collectText(stream);
 
-    expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Invalid legacy function_call: missing arguments');
-    expect(text).not.toContain('"arguments":"{}"');
+    await expectStreamToReject(stream, 'Invalid legacy function_call: missing arguments');
   });
 
   it('fails legacy function_call without an id instead of generating one', async () => {
@@ -116,10 +120,8 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
       requestId: 'req_chat_function_call_missing_id',
       model: response.model
     });
-    const text = await collectText(stream);
 
-    expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Invalid legacy function_call: missing id');
+    await expectStreamToReject(stream, 'Invalid legacy function_call: missing id');
   });
 
   it('fails tool_calls without function arguments instead of emitting tool_call start and terminal frames', async () => {
@@ -150,12 +152,8 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
       requestId: 'req_chat_tool_calls_missing_args',
       model: response.model
     });
-    const text = await collectText(stream);
 
-    expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Chat SSE tool call args delta payload missing arguments');
-    expect(text).not.toContain('"finish_reason":"tool_calls"');
-    expect(text).not.toContain('data: [DONE]');
+    await expectStreamToReject(stream, 'Chat SSE tool call args delta payload missing arguments');
   });
 
   it('fails chunk delta without role instead of defaulting to assistant', async () => {
@@ -178,10 +176,7 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
       requestId: 'req_chat_delta_missing_role',
       model: response.model
     });
-    const text = await collectText(stream);
 
-    expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Invalid ChatCompletionChunk delta: missing role');
-    expect(text).not.toContain('"role":"assistant"');
+    await expectStreamToReject(stream, 'Invalid ChatCompletionChunk delta: missing role');
   });
 });

@@ -65,11 +65,8 @@ describe('chat SSE usage no-fallback boundary', () => {
       requestId: 'req_chat_invalid_usage',
       model: response.model
     });
-    const text = await collectText(stream);
 
-    expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Invalid Chat usage.prompt_tokens');
-    expect(text).not.toContain('data: [DONE]');
+    await expect(collectText(stream)).rejects.toThrow('Invalid Chat usage.prompt_tokens');
   });
 
   it('rejects Responses-style usage aliases instead of normalizing them', async () => {
@@ -98,11 +95,8 @@ describe('chat SSE usage no-fallback boundary', () => {
       requestId: 'req_chat_response_usage_alias',
       model: response.model
     });
-    const text = await collectText(stream);
 
-    expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Invalid Chat usage: missing token fields');
-    expect(text).not.toContain('data: [DONE]');
+    await expect(collectText(stream)).rejects.toThrow('Invalid Chat usage: missing token fields');
   });
 
   it('requires explicit total_tokens instead of deriving it from prompt and completion', async () => {
@@ -130,11 +124,8 @@ describe('chat SSE usage no-fallback boundary', () => {
       requestId: 'req_chat_missing_total_usage',
       model: response.model
     });
-    const text = await collectText(stream);
 
-    expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Invalid Chat usage: missing token fields');
-    expect(text).not.toContain('data: [DONE]');
+    await expect(collectText(stream)).rejects.toThrow('Invalid Chat usage: missing token fields');
   });
 
   it('requires explicit finish_reason instead of inferring stop from message content', async () => {
@@ -157,11 +148,7 @@ describe('chat SSE usage no-fallback boundary', () => {
       requestId: 'req_chat_missing_finish_reason',
       model: response.model
     });
-    const text = await collectText(stream);
 
-    expect(text).toContain('"code":"generation_error"');
-    expect(text).toContain('Invalid ChatCompletionResponse choice: missing finish_reason');
-    expect(text).not.toContain('"finish_reason":"stop"');
-    expect(text).not.toContain('data: [DONE]');
+    await expect(collectText(stream)).rejects.toThrow('Invalid ChatCompletionResponse choice: missing finish_reason');
   });
 });

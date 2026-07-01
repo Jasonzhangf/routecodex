@@ -314,6 +314,9 @@ for (const forbidden of [
 
 const chatSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts');
 for (const forbidden of [
+  'yield buildErrorEvent(error as Error, context, config);',
+  'buildErrorEvent,',
+  'buildErrorEvent(',
   'if (toolCall.function?.arguments) {',
   "if (!('finish_reason' in choice)) {",
   "message.tool_calls ? 'tool_calls' : 'stop'",

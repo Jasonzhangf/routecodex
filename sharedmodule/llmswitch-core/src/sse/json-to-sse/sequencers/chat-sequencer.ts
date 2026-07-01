@@ -12,7 +12,6 @@ import {
   buildToolCallArgsDeltas,
   buildFinishEvent,
   buildDoneEvent,
-  buildErrorEvent,
   DEFAULT_CHAT_EVENT_GENERATOR_CONFIG,
   createDefaultContext
 } from '../event-generators/chat.js';
@@ -196,61 +195,55 @@ export async function* sequenceChatResponse(
   context: ChatEventGeneratorContext,
   config: ChatSequencerConfig = DEFAULT_CHAT_SEQUENCER_CONFIG
 ): AsyncGenerator<ChatSseEvent> {
-  try {
-    // 验证响应格式
-    if (!response.choices || response.choices.length === 0) {
-      throw new Error('Invalid ChatCompletionResponse: missing choices');
-    }
-
-    const choice = response.choices[0] as any;
-    let message = choice?.message;
-    // 兼容上游给到的 chunk 形态（choices[0].delta）
-    if (!message && choice && typeof choice === 'object' && choice.delta) {
-      const d = choice.delta;
-      if (typeof d.role !== 'string' || !d.role.trim()) {
-        throw new Error('Invalid ChatCompletionChunk delta: missing role');
-      }
-      message = {
-        role: d.role,
-        content: typeof d.content !== 'undefined' ? d.content : null,
-        tool_calls: Array.isArray(d.tool_calls) ? d.tool_calls : undefined
-      };
-    }
-
-    message = normalizeFunctionCall(message);
-
-    // 验证消息顺序（如果启用）
-    if (config.validateOrder) {
-      // 这里可以添加更多的顺序验证逻辑
-      if (!validateMessageSequence(message)) {
-        const roleSafe = message && typeof (message as any).role === 'string' ? (message as any).role : 'unknown';
-        throw new Error(`Invalid message sequence for role: ${roleSafe}`);
-      }
-    }
-
-    // 序列化消息内容
-    yield* sequenceMessageContent(message, context, config);
-
-    const finishReason = (choice as any).finish_reason;
-    if (typeof finishReason !== 'string' || !finishReason.trim()) {
-      throw new Error('Invalid ChatCompletionResponse choice: missing finish_reason');
-    }
-
-    // 发送显式finish_reason事件
-    yield buildFinishEvent(
-      finishReason as 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call',
-      context,
-      config,
-      response.usage
-    );
-
-    // 发送done事件
-    yield buildDoneEvent(context, config);
-
-  } catch (error) {
-    // 发送错误事件
-    yield buildErrorEvent(error as Error, context, config);
+  // 验证响应格式
+  if (!response.choices || response.choices.length === 0) {
+    throw new Error('Invalid ChatCompletionResponse: missing choices');
   }
+
+  const choice = response.choices[0] as any;
+  let message = choice?.message;
+  // 兼容上游给到的 chunk 形态（choices[0].delta）
+  if (!message && choice && typeof choice === 'object' && choice.delta) {
+    const d = choice.delta;
+    if (typeof d.role !== 'string' || !d.role.trim()) {
+      throw new Error('Invalid ChatCompletionChunk delta: missing role');
+    }
+    message = {
+      role: d.role,
+      content: typeof d.content !== 'undefined' ? d.content : null,
+      tool_calls: Array.isArray(d.tool_calls) ? d.tool_calls : undefined
+    };
+  }
+
+  message = normalizeFunctionCall(message);
+
+  // 验证消息顺序（如果启用）
+  if (config.validateOrder) {
+    // 这里可以添加更多的顺序验证逻辑
+    if (!validateMessageSequence(message)) {
+      const roleSafe = message && typeof (message as any).role === 'string' ? (message as any).role : 'unknown';
+      throw new Error(`Invalid message sequence for role: ${roleSafe}`);
+    }
+  }
+
+  // 序列化消息内容
+  yield* sequenceMessageContent(message, context, config);
+
+  const finishReason = (choice as any).finish_reason;
+  if (typeof finishReason !== 'string' || !finishReason.trim()) {
+    throw new Error('Invalid ChatCompletionResponse choice: missing finish_reason');
+  }
+
+  // 发送显式finish_reason事件
+  yield buildFinishEvent(
+    finishReason as 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call',
+    context,
+    config,
+    response.usage
+  );
+
+  // 发送done事件
+  yield buildDoneEvent(context, config);
 }
 
 function normalizeFunctionCall(message: any): any {
