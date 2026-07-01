@@ -2879,6 +2879,12 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-engine-preflight-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEnginePreflightJson'],
     ['servertool-engine-preflight-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEnginePreflightWithNative'],
     ['servertool-engine-preflight-ts-thin-shell', TS_ENGINE_PREFLIGHT_SHELL, readRequired(TS_ENGINE_PREFLIGHT_SHELL), 'planServertoolEnginePreflightWithNative'],
+    ['servertool-engine-orchestration-preflight-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_orchestration_preflight_action_contract.rs`, readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_orchestration_preflight_action_contract.rs`), 'pub fn plan_servertool_engine_orchestration_preflight_action'],
+    ['servertool-engine-orchestration-preflight-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_orchestration_preflight_action_contract'],
+    ['servertool-engine-orchestration-preflight-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_engine_orchestration_preflight_action_json'],
+    ['servertool-engine-orchestration-preflight-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_orchestration_preflight_action_json'],
+    ['servertool-engine-orchestration-preflight-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEngineOrchestrationPreflightActionJson'],
+    ['servertool-engine-orchestration-preflight-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEngineOrchestrationPreflightActionWithNative'],
     ['servertool-engine-skip-rust-owner', RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT), 'feature_id: hub.servertool_engine_skip_contract'],
     ['servertool-engine-skip-rust-owner', RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_SKIP_CONTRACT), 'pub fn plan_servertool_engine_skip'],
     ['servertool-engine-skip-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_skip_contract'],
@@ -6276,10 +6282,28 @@ function checkServertoolEngineStoplessSessionThinShell() {
       'engine-orchestration-shell.ts must not restore direct preflight kind if-dispatch; keep native-planned preflight dispatch as a switch'
     );
   }
-  if (!engineSource.includes('switch (preflightKind)')) {
+  for (const marker of [
+    'const preflightKind = preflight.kind',
+    'switch (preflightKind)',
+    'invalid engine preflight result kind',
+  ]) {
+    if (engineSource.includes(marker)) {
+      fail(
+        'servertool-engine-stopless-session-thin-shell',
+        `engine-orchestration-shell.ts must not restore local preflight kind dispatch marker ${marker}`
+      );
+    }
+  }
+  if (!engineSource.includes('planServertoolEngineOrchestrationPreflightActionWithNative({')) {
     fail(
       'servertool-engine-stopless-session-thin-shell',
-      'engine-orchestration-shell.ts must keep preflight kind dispatch as a thin switch over native-planned result'
+      'engine-orchestration-shell.ts must keep preflight orchestration dispatch on Rust action plan'
+    );
+  }
+  if (!engineSource.includes('switch (preflightOrchestrationAction.action)')) {
+    fail(
+      'servertool-engine-stopless-session-thin-shell',
+      'engine-orchestration-shell.ts must dispatch preflight orchestration action as a thin switch over native plan'
     );
   }
   for (const marker of [

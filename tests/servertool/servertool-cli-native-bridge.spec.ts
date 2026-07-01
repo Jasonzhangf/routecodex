@@ -5,6 +5,7 @@ import {
   buildServertoolCliProjectionRuntimeBranchWithNative,
   parseServertoolCliProjectionToolArgumentsWithNative,
   planServertoolEnginePreflightWithNative,
+  planServertoolEngineOrchestrationPreflightActionWithNative,
   planServertoolEngineSkipWithNative,
   planServertoolEnginePrepassActionWithNative,
   planServertoolEngineRuntimeActionWithNative,
@@ -316,6 +317,32 @@ describe('servertool CLI native bridge', () => {
       logStopCompare: {
         stage: 'trigger'
       }
+    });
+  });
+
+  it('uses Rust-owned engine orchestration preflight action planning', () => {
+    expect(
+      planServertoolEngineOrchestrationPreflightActionWithNative({
+        preflightKind: 'return_original_chat'
+      })
+    ).toEqual({
+      action: 'return_preflight_chat'
+    });
+
+    expect(
+      planServertoolEngineOrchestrationPreflightActionWithNative({
+        preflightKind: 'return_original_chat_direct_passthrough'
+      })
+    ).toEqual({
+      action: 'return_preflight_chat'
+    });
+
+    expect(
+      planServertoolEngineOrchestrationPreflightActionWithNative({
+        preflightKind: 'continue'
+      })
+    ).toEqual({
+      action: 'continue_engine'
     });
   });
 

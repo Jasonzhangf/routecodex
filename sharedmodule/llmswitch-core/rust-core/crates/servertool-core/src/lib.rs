@@ -12,6 +12,7 @@ pub mod blocked_report_contract;
 pub mod cli_contract;
 pub mod cli_result_guard;
 pub mod engine_preflight_contract;
+pub mod engine_orchestration_preflight_action_contract;
 pub mod engine_prepass_action_contract;
 pub mod engine_runtime_action_contract;
 pub mod engine_selection_contract;

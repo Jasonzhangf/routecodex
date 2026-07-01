@@ -7,6 +7,7 @@ use servertool_core::blocked_report_contract;
 use servertool_core::cli_contract;
 use servertool_core::cli_contract::ServertoolClientVisibleProjectionShellInput;
 use servertool_core::cli_result_guard;
+use servertool_core::engine_orchestration_preflight_action_contract;
 use servertool_core::engine_preflight_contract;
 use servertool_core::engine_prepass_action_contract;
 use servertool_core::engine_runtime_action_contract;
@@ -385,6 +386,19 @@ pub fn plan_servertool_engine_preflight_json(input_json: &str) -> Result<String,
             .map_err(|e| format!("deserialize servertool engine preflight input: {e}"))?;
     serde_json::to_string(&engine_preflight_contract::plan_servertool_engine_preflight(input))
         .map_err(|e| format!("serialize servertool engine preflight plan: {e}"))
+}
+
+pub fn plan_servertool_engine_orchestration_preflight_action_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: engine_orchestration_preflight_action_contract::ServertoolEngineOrchestrationPreflightActionInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool engine orchestration preflight action input: {e}")
+        })?;
+    serde_json::to_string(
+        &engine_orchestration_preflight_action_contract::plan_servertool_engine_orchestration_preflight_action(input),
+    )
+    .map_err(|e| format!("serialize servertool engine orchestration preflight action plan: {e}"))
 }
 
 pub fn plan_servertool_engine_runtime_action_json(input_json: &str) -> Result<String, String> {
@@ -2693,6 +2707,37 @@ fn plans_servertool_engine_preflight_via_servertool_core_bridge() {
     assert_eq!(
         direct_value["action"],
         serde_json::json!("return_original_chat_direct_passthrough")
+    );
+}
+
+#[test]
+fn plans_servertool_engine_orchestration_preflight_action_via_servertool_core_bridge() {
+    let early_return = plan_servertool_engine_orchestration_preflight_action_json(
+        &serde_json::json!({
+            "preflightKind": "return_original_chat_direct_passthrough"
+        })
+        .to_string(),
+    )
+    .expect("engine orchestration preflight early return plan");
+    let early_return_value: serde_json::Value =
+        serde_json::from_str(&early_return).expect("parse early return plan");
+    assert_eq!(
+        early_return_value["action"],
+        serde_json::json!("return_preflight_chat")
+    );
+
+    let continue_engine = plan_servertool_engine_orchestration_preflight_action_json(
+        &serde_json::json!({
+            "preflightKind": "continue"
+        })
+        .to_string(),
+    )
+    .expect("engine orchestration preflight continue plan");
+    let continue_engine_value: serde_json::Value =
+        serde_json::from_str(&continue_engine).expect("parse continue plan");
+    assert_eq!(
+        continue_engine_value["action"],
+        serde_json::json!("continue_engine")
     );
 }
 

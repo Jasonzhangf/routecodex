@@ -302,6 +302,10 @@ export interface ServertoolEnginePreflightPlan {
   };
 }
 
+export interface ServertoolEngineOrchestrationPreflightActionPlan {
+  action: 'return_preflight_chat' | 'continue_engine';
+}
+
 export interface ServertoolEngineRuntimeActionPlan {
   action:
     | 'return_servertool_cli_projection_final'
@@ -2206,6 +2210,31 @@ export function planServertoolEnginePreflightWithNative(input: {
     attachStopGatewayContext: record.attachStopGatewayContext,
     ...(logStopEntry ? { logStopEntry } : {}),
     ...(logStopCompare ? { logStopCompare } : {})
+  };
+}
+
+export function planServertoolEngineOrchestrationPreflightActionWithNative(input: {
+  preflightKind: 'return_original_chat' | 'return_original_chat_direct_passthrough' | 'continue';
+}): ServertoolEngineOrchestrationPreflightActionPlan {
+  const capability = 'planServertoolEngineOrchestrationPreflightActionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEngineOrchestrationPreflightActionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEngineOrchestrationPreflightActionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEngineOrchestrationPreflightActionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.action !== 'return_preflight_chat' && record.action !== 'continue_engine') {
+    throw new Error('planServertoolEngineOrchestrationPreflightActionJson native returned invalid action');
+  }
+  return {
+    action: record.action
   };
 }
 
