@@ -25,6 +25,7 @@ use servertool_core::outcome_contract;
 use servertool_core::persisted_lookup;
 use servertool_core::postflight_observation_contract;
 use servertool_core::registry_contract;
+use servertool_core::response_stage_orchestration_contract;
 use servertool_core::response_stage_runtime_action_contract;
 use servertool_core::server_side_tool_entry_contract;
 use servertool_core::stop_gateway_context;
@@ -469,6 +470,21 @@ pub fn plan_servertool_response_stage_runtime_action_json(
         ),
     )
     .map_err(|e| format!("serialize servertool response stage runtime action plan: {e}"))
+}
+
+pub fn plan_servertool_response_stage_orchestration_output_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: response_stage_orchestration_contract::ServertoolResponseStageOrchestrationOutputInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool response stage orchestration output input: {e}")
+        })?;
+    serde_json::to_string(
+        &response_stage_orchestration_contract::plan_servertool_response_stage_orchestration_output(
+            input,
+        ),
+    )
+    .map_err(|e| format!("serialize servertool response stage orchestration output plan: {e}"))
 }
 
 pub fn plan_servertool_entry_preflight_json(input_json: &str) -> Result<String, String> {
@@ -2988,6 +3004,43 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         required_empty_value["responseHookName"],
         serde_json::json!("stop_message_auto")
     );
+}
+
+#[test]
+fn plans_servertool_response_stage_orchestration_output_via_servertool_core_bridge() {
+    let executed = plan_servertool_response_stage_orchestration_output_json(
+        &serde_json::json!({
+            "orchestrationExecuted": true,
+            "orchestrationFlowId": " flow_1 "
+        })
+        .to_string(),
+    )
+    .expect("response-stage orchestration output executed plan");
+    let executed_value: serde_json::Value =
+        serde_json::from_str(&executed).expect("parse executed output plan");
+    assert_eq!(
+        executed_value["returnAction"],
+        serde_json::json!("return_executed_payload")
+    );
+    assert_eq!(executed_value["recordExecuted"], serde_json::json!(true));
+    assert_eq!(executed_value["recordFlowId"], serde_json::json!("flow_1"));
+
+    let passthrough = plan_servertool_response_stage_orchestration_output_json(
+        &serde_json::json!({
+            "orchestrationExecuted": false,
+            "orchestrationFlowId": "ignored"
+        })
+        .to_string(),
+    )
+    .expect("response-stage orchestration output passthrough plan");
+    let passthrough_value: serde_json::Value =
+        serde_json::from_str(&passthrough).expect("parse passthrough output plan");
+    assert_eq!(
+        passthrough_value["returnAction"],
+        serde_json::json!("return_original_payload")
+    );
+    assert_eq!(passthrough_value["recordExecuted"], serde_json::json!(false));
+    assert!(passthrough_value.get("recordFlowId").is_none());
 }
 
 #[test]

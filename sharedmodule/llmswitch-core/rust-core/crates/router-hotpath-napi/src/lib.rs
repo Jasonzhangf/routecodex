@@ -1453,6 +1453,14 @@ pub fn plan_servertool_response_stage_runtime_action_json(
 }
 
 #[napi]
+pub fn plan_servertool_response_stage_orchestration_output_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_response_stage_orchestration_output_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_entry_preflight_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_entry_preflight_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

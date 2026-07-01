@@ -356,6 +356,18 @@ jest.unstable_mockModule(
     })),
     planServertoolExecutionBranchWithNative: planServertoolExecutionBranchWithNativeMock,
     planServertoolResponseStageRuntimeActionWithNative: planServertoolResponseStageRuntimeActionWithNativeMock,
+    planServertoolResponseStageOrchestrationOutputWithNative: jest.fn((input: any) =>
+      input?.orchestrationExecuted === true
+        ? {
+            returnAction: 'return_executed_payload',
+            recordExecuted: true,
+            ...(typeof input?.orchestrationFlowId === 'string' ? { recordFlowId: input.orchestrationFlowId.trim() } : {})
+          }
+        : {
+            returnAction: 'return_original_payload',
+            recordExecuted: false
+          }
+    ),
     planServertoolHookScheduleWithNative: jest.fn((input: any) => ({
       events: (input?.hooks ?? []).map((hook: any) => ({
         hookId: hook.id,

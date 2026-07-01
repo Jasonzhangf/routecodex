@@ -361,6 +361,12 @@ export interface ServertoolResponseStageRuntimeActionPlan {
   responseHookName?: string;
 }
 
+export interface ServertoolResponseStageOrchestrationOutputPlan {
+  returnAction: 'return_executed_payload' | 'return_original_payload';
+  recordExecuted: boolean;
+  recordFlowId?: string;
+}
+
 export interface ServertoolEntryPreflightPlan {
   action:
   | 'return_passthrough_non_object_chat'
@@ -2490,6 +2496,48 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     action: record.action,
     ...(typeof record.responseHookName === 'string' && record.responseHookName.trim()
       ? { responseHookName: record.responseHookName.trim() }
+      : {})
+  };
+}
+
+export function planServertoolResponseStageOrchestrationOutputWithNative(input: {
+  orchestrationExecuted: boolean;
+  orchestrationFlowId?: string;
+}): ServertoolResponseStageOrchestrationOutputPlan {
+  const capability = 'planServertoolResponseStageOrchestrationOutputJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolResponseStageOrchestrationOutputJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolResponseStageOrchestrationOutputJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.returnAction !== 'return_executed_payload' &&
+    record.returnAction !== 'return_original_payload'
+  ) {
+    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned invalid returnAction');
+  }
+  if (typeof record.recordExecuted !== 'boolean') {
+    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned invalid recordExecuted');
+  }
+  if (record.recordFlowId !== undefined && typeof record.recordFlowId !== 'string') {
+    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned invalid recordFlowId');
+  }
+  if (record.returnAction === 'return_executed_payload' && record.recordExecuted !== true) {
+    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned executed payload without executed record');
+  }
+  return {
+    returnAction: record.returnAction,
+    recordExecuted: record.recordExecuted,
+    ...(typeof record.recordFlowId === 'string' && record.recordFlowId.trim()
+      ? { recordFlowId: record.recordFlowId.trim() }
       : {})
   };
 }

@@ -29,6 +29,7 @@ pub mod outcome_contract;
 pub mod persisted_lookup;
 pub mod postflight_observation_contract;
 pub mod registry_contract;
+pub mod response_stage_orchestration_contract;
 pub mod response_stage_runtime_action_contract;
 pub mod server_side_tool_entry_contract;
 pub mod stop_gateway_context;

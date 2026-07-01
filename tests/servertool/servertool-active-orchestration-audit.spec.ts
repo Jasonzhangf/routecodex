@@ -397,6 +397,7 @@ const TARGETS = [
       'typeof gatePlan.skipReason',
       'gatePlan.skipReason.trim()',
       "gatePlan.nextAction === 'bypass'",
+      'if (orchestration.executed)',
     ],
     required: [
       'const gatePlan = planServertoolResponseStageGateWithNative({',
