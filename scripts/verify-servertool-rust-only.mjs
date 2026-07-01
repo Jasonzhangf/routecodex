@@ -6089,6 +6089,23 @@ function checkServertoolEngineStoplessSessionThinShell() {
     );
   }
   for (const marker of [
+    "engineSkipPlan.action === 'return_skipped_passthrough' ||",
+    "engineSkipPlan.action === 'return_skipped_no_execution'",
+  ]) {
+    if (engineSource.includes(marker)) {
+      fail(
+        'servertool-engine-stopless-session-thin-shell',
+        `engine-orchestration-shell.ts must not restore direct engine skip if-dispatch marker ${marker}`
+      );
+    }
+  }
+  if (!engineSource.includes('switch (engineSkipAction)')) {
+    fail(
+      'servertool-engine-stopless-session-thin-shell',
+      'engine-orchestration-shell.ts must keep engine skip dispatch as a thin switch over native-planned result'
+    );
+  }
+  for (const marker of [
     'switch (runtimeAction.action)',
     "case 'build_stop_message_cli_projection'",
     'buildStoplessAutoCliProjectionFromEngineWithNative({',

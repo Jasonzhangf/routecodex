@@ -91,6 +91,9 @@ describe('engine stopless session thin-shell guard', () => {
     );
 
     expect(source).toContain('planServertoolEngineSkipWithNative');
+    expect(source).toContain('switch (engineSkipAction)');
+    expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_passthrough' ||");
+    expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_no_execution'");
     expect(source).not.toContain('Boolean(engineResult.execution)');
     expect(source).not.toContain("if (engineResult.mode === 'passthrough' || !engineResult.execution)");
   });

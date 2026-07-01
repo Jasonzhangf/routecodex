@@ -282,6 +282,9 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("if (preflight.kind === 'return_original_chat' || preflight.kind === 'return_original_chat_direct_passthrough')");
     expect(source).toContain('switch (preflightKind)');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
+    expect(source).toContain('switch (engineSkipAction)');
+    expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_passthrough' ||");
+    expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_no_execution'");
     expect(source).not.toContain('Boolean(engineResult.execution)');
     expect(source).toContain('hasExecution: engineResult.execution != null');
     expect(source).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");

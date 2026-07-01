@@ -157,31 +157,36 @@ export async function runServerToolOrchestrationShell(
     engineMode: engineResult.mode,
     hasExecution: engineResult.execution != null
   });
-  if (
-    engineSkipPlan.action === 'return_skipped_passthrough' ||
-    engineSkipPlan.action === 'return_skipped_no_execution'
-  ) {
-    const skipReason = engineSkipPlan.skipReason as string;
-    if (stopSignal.observed) {
-      logStopEntry('trigger', `skipped_${skipReason}`, {
-        reason: stopSignal.reason,
-        source: stopSignal.source,
-        eligible: stopSignal.eligible
+  const engineSkipAction = engineSkipPlan.action;
+  switch (engineSkipAction) {
+    case 'return_skipped_passthrough':
+    case 'return_skipped_no_execution': {
+      const skipReason = engineSkipPlan.skipReason as string;
+      if (stopSignal.observed) {
+        logStopEntry('trigger', `skipped_${skipReason}`, {
+          reason: stopSignal.reason,
+          source: stopSignal.source,
+          eligible: stopSignal.eligible
+        });
+        logStopCompare('trigger');
+      }
+      recordServertoolEngineMatchSkipped({
+        requestId: options.requestId,
+        entryEndpoint: options.entryEndpoint,
+        engineMode: engineResult.mode,
+        skipReason,
+        stageRecorder: options.stageRecorder,
+        adapterContext: options.adapterContext
       });
-      logStopCompare('trigger');
+      return {
+        chat: engineResult.finalChatResponse,
+        executed: false
+      };
     }
-    recordServertoolEngineMatchSkipped({
-      requestId: options.requestId,
-      entryEndpoint: options.entryEndpoint,
-      engineMode: engineResult.mode,
-      skipReason,
-      stageRecorder: options.stageRecorder,
-      adapterContext: options.adapterContext
-    });
-    return {
-      chat: engineResult.finalChatResponse,
-      executed: false
-    };
+    case 'continue_matched_flow':
+      break;
+    default:
+      throw new Error(`[servertool] invalid engine skip action: ${String(engineSkipAction)}`);
   }
 
   const flowId = recordServertoolEngineMatchHit({
