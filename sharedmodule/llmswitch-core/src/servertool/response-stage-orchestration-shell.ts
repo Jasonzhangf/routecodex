@@ -25,7 +25,7 @@ export interface ServertoolResponseStageShellResult {
   payload: ChatCompletionLike;
   executed: boolean;
   flowId?: string;
-  skipReason?: 'no_servertool_support' | 'followup_bypass';
+  skipReason?: string;
 }
 
 export async function runServertoolResponseStageOrchestrationShell(
@@ -41,17 +41,19 @@ export async function runServertoolResponseStageOrchestrationShell(
   });
 
   if (gatePlan.nextAction === 'bypass') {
+    if (typeof gatePlan.skipReason !== 'string' || !gatePlan.skipReason.trim()) {
+      throw new Error('[servertool] native response-stage gate bypass missing skipReason');
+    }
+    const skipReason = gatePlan.skipReason;
     recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: false,
-      skipReason: gatePlan.skipReason || 'followup_bypass',
+      skipReason,
       inputShape: detectProviderResponseShapeWithNative(options.payload)
     });
     return {
       payload: options.payload,
       executed: false,
-      ...(gatePlan.skipReason === 'no_servertool_support' || gatePlan.skipReason === 'followup_bypass'
-        ? { skipReason: gatePlan.skipReason }
-        : {})
+      skipReason
     };
   }
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
