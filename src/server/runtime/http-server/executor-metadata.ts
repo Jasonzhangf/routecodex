@@ -7,6 +7,7 @@ import {
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import {
   bindMetadataCenterRustMirror,
+  releaseMetadataCenterSlot,
   writeMetadataCenterSlot
 } from './metadata-center/dualwrite-api.js';
 import { extractSessionClientDaemonIdFromApiKey } from '../../../utils/session-client-token.js';
@@ -727,16 +728,13 @@ export function decorateMetadataForAttempt(
       delete rt.preselectedRoute;
       clone.__rt = rt;
     }
-    MetadataCenter.read(clone)?.releaseRuntimeControl(
-      'preselectedRoute',
-      ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
-      'preselected route is single-use and must not pin provider retry attempts'
-    );
-    MetadataCenter.read(clone)?.releaseRuntimeControl(
-      'providerProtocol',
-      ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
-      'provider protocol is attempt-scoped and must be rebound after provider retry selection'
-    );
+    releaseMetadataCenterSlot({
+      target: clone,
+      family: 'runtime_control',
+      key: 'preselectedRoute',
+      writer: ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
+      reason: 'preselected route is single-use and must not pin provider retry attempts'
+    });
   }
   return clone;
 }
@@ -823,5 +821,5 @@ function requestMayContainToolOutput(value: unknown): boolean {
 }
 
 function cloneMetadata(source: Record<string, unknown>): Record<string, unknown> {
-  return source;
+  return { ...source };
 }

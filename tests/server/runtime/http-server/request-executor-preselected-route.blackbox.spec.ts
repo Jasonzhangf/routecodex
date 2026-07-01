@@ -149,6 +149,7 @@ describe('request executor preselectedRoute retry boundary', () => {
             routeName: 'thinking',
             pool: [providerKey],
             routePool,
+            providerProtocol: 'openai-chat',
             reason: 'thinking:user-input'
           },
           processMode: 'standard',
@@ -173,6 +174,7 @@ describe('request executor preselectedRoute retry boundary', () => {
           routeName: 'thinking',
           pool: [providerA],
           routePool,
+          providerProtocol: 'openai-chat',
           reason: 'thinking:user-input'
         },
         diagnostics: {}

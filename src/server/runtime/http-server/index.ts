@@ -95,6 +95,7 @@ import {
 } from './metadata-center/request-truth-readers.js';
 import {
   buildMetadataCenterRustSnapshot,
+  releaseMetadataCenterSlot,
   writeMetadataCenterSlot
 } from './metadata-center/dualwrite-api.js';
 import {
@@ -217,6 +218,12 @@ const HTTP_RUNTIME_ENTRY_RUNTIME_CONTROL_WRITER = {
   stage: 'ServerReqInbound01ClientRaw'
 } as const;
 
+const HTTP_ROUTER_DIRECT_RETRY_RELEASE_WRITER = {
+  module: 'src/server/runtime/http-server/index.ts',
+  symbol: 'executeRouterDirectPipelineForPort',
+  stage: 'router_direct_retry_metadata'
+} as const;
+
 type RouterDirectRetryState = {
   maxAttempts: number;
   excludedProviderKeys: Set<string>;
@@ -298,6 +305,31 @@ function buildMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<
     ...(hasDebugSnapshot ? { debugSnapshot } : {}),
     ...(excludedProviderKeys.length > 0 ? { excludedProviderKeys } : {})
   };
+}
+
+function releaseRouterDirectRetryRouteControl(metadata: Record<string, unknown>): void {
+  delete metadata.__routecodexPreselectedRoute;
+  const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+    ? { ...(metadata.__rt as Record<string, unknown>) }
+    : undefined;
+  if (rt && Object.prototype.hasOwnProperty.call(rt, 'preselectedRoute')) {
+    delete rt.preselectedRoute;
+    metadata.__rt = rt;
+  }
+  releaseMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
+    key: 'preselectedRoute',
+    writer: HTTP_ROUTER_DIRECT_RETRY_RELEASE_WRITER,
+    reason: 'router-direct retry must not reuse a single-use preselected route'
+  });
+  releaseMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
+    key: 'providerProtocol',
+    writer: HTTP_ROUTER_DIRECT_RETRY_RELEASE_WRITER,
+    reason: 'router-direct retry provider protocol must be rebound after route selection'
+  });
 }
 
 function readRoutingDecisionProviderPool(
@@ -1475,6 +1507,9 @@ export class RouteCodexHttpServer {
         : undefined,
       metadataForHub
     );
+    if (directAttempt > 1) {
+      releaseRouterDirectRetryRouteControl(metadataForHub);
+    }
     if (!metadataCenter.readRequestTruth().portScope) {
       writeMetadataCenterSlot({
         target: metadataForHub,
@@ -1653,7 +1688,6 @@ export class RouteCodexHttpServer {
     const target = routeResult.target;
     const routingDecision = routeResult.decision;
     const providerPayload = {} as Record<string, unknown>;
-
     if (!target || typeof target.providerKey !== 'string' || !target.providerKey.trim()) {
       this.logStage('router-direct.skipped', input.requestId, { reason: 'no-target-from-router' });
       return { used: false, reason: 'no-target-from-router' };

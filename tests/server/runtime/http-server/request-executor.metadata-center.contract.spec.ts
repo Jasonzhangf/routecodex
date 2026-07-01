@@ -132,7 +132,7 @@ describe('request-executor metadata center contract', () => {
     );
   });
 
-  it('allows providerProtocol rebinding after retry attempt release', () => {
+  it('keeps providerProtocol available for retry Hub entry after preselectedRoute release', () => {
     const metadata: Record<string, unknown> = {};
     const center = MetadataCenter.attach(metadata);
     center.writeRuntimeControl(
@@ -140,7 +140,7 @@ describe('request-executor metadata center contract', () => {
       'openai-responses',
       {
         module: 'test',
-        symbol: 'allows providerProtocol rebinding after retry attempt release',
+        symbol: 'keeps providerProtocol available for retry Hub entry after preselectedRoute release',
         stage: 'previous_attempt_route_owner'
       },
       'seed previous attempt provider protocol'
@@ -148,8 +148,10 @@ describe('request-executor metadata center contract', () => {
 
     const retryMetadata = decorateMetadataForAttempt(metadata, 2, new Set(['provider.previous']));
 
-    expect(() => writeProviderProtocolRuntimeControl(retryMetadata, 'openai-chat')).not.toThrow();
-    expect(center.readRuntimeControl().providerProtocol).toBe('openai-chat');
+    expect(center.readRuntimeControl().providerProtocol).toBe('openai-responses');
+    expect(() => writeProviderProtocolRuntimeControl(retryMetadata, 'openai-chat')).toThrow(
+      'MetadataCenter runtime_control.providerProtocol conflict: existing=openai-responses selected=openai-chat'
+    );
   });
 
   it('commits selected target observation and providerProtocol atomically for the current attempt', () => {

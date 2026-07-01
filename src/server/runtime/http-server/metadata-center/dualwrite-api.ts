@@ -52,6 +52,15 @@ export type MetadataCenterDualWriteInput = {
   expectedScope?: MetadataCenterScope;
 };
 
+export type MetadataCenterReleaseInput = {
+  target: Record<string, unknown>;
+  family: MetadataCenterFamily;
+  key: string;
+  writer: MetadataCenterWriter;
+  reason?: string;
+  expectedScope?: MetadataCenterScope;
+};
+
 export type MetadataCenterScope = {
   requestId?: string;
   sessionId?: string;
@@ -207,6 +216,41 @@ function writeRustMirror(input: MetadataCenterDualWriteInput): void {
   writeRustSnapshot(input.target, snapshot);
 }
 
+function releaseJsMirror(input: MetadataCenterReleaseInput): void {
+  const center = MetadataCenter.read(input.target);
+  if (!center) {
+    return;
+  }
+  switch (input.family) {
+    case 'runtime_control':
+      center.releaseRuntimeControl(
+        input.key as keyof MetadataCenterRuntimeControl,
+        input.writer,
+        input.reason
+      );
+      return;
+    case 'request_truth':
+    case 'continuation_context':
+    case 'provider_observation':
+    case 'response_observation':
+    case 'closeout_status':
+    case 'debug_snapshot':
+      throw new Error(`MetadataCenter release ${input.family}.${input.key} is not supported`);
+  }
+}
+
+function releaseRustMirror(input: MetadataCenterReleaseInput): void {
+  const snapshot = readMetadataCenterRustMirror(input.target);
+  const family = CAMEL_FAMILY[input.family];
+  const row = asRecord(snapshot[family]);
+  if (!row || !Object.prototype.hasOwnProperty.call(row, input.key)) {
+    return;
+  }
+  delete row[input.key];
+  (snapshot as Record<string, unknown>)[family] = row;
+  writeRustSnapshot(input.target, snapshot);
+}
+
 export function writeMetadataCenterSlot(input: MetadataCenterDualWriteInput): void {
   if (input.family !== 'request_truth') {
     assertMetadataCenterScope({
@@ -217,6 +261,18 @@ export function writeMetadataCenterSlot(input: MetadataCenterDualWriteInput): vo
   }
   writeJsMirror(input);
   writeRustMirror(input);
+}
+
+export function releaseMetadataCenterSlot(input: MetadataCenterReleaseInput): void {
+  if (input.family !== 'request_truth') {
+    assertMetadataCenterScope({
+      source: input.target,
+      expectedScope: input.expectedScope,
+      operation: `release ${input.family}.${input.key}`
+    });
+  }
+  releaseJsMirror(input);
+  releaseRustMirror(input);
 }
 
 export function readMetadataCenterSlot(_input: {

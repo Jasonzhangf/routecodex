@@ -1,3 +1,8 @@
+# 2026-07-02: router-direct retry preselected route release
+- Slice: retry attempts must not reuse single-use `runtime_control.preselectedRoute`; `providerProtocol` remains runtime-control truth and is rebound by route selection instead of acting as VR hit eligibility.
+- Verification: focused `executor-metadata` providerProtocol/preselectedRoute tests PASS 3/3; `metadata-center-dualwrite` release test PASS 1/1; `request-executor-preselected-route.blackbox` PASS 1/1; `request-executor.metadata-center.contract` PASS 10/10; sharedmodule `tsc` PASS; `git diff --check` PASS.
+- Known gap: full `tests/server/http-server/executor-metadata.spec.ts` still has unrelated historical session/tmux/request-truth assertion failures, so this slice only claims the focused retry/preselected-route contract.
+
 # 2026-07-01: servertool engine preflight action dispatch thin-shell slice
 - Current residual TS semantic face: `sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts` still used two direct `if` branches on `preflightAction.action` (`return_original_chat` / `return_original_chat_direct_passthrough`).
 - Red test confirmed the old action-if markers are still present and the active orchestration audit can lock them.

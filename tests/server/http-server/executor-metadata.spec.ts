@@ -8,6 +8,10 @@ import {
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { finalizeRequestExecutorAttemptMetadata } from '../../../src/server/runtime/http-server/executor/request-executor-attempt-state.js';
 import {
+  buildMetadataCenterRustSnapshot,
+  writeMetadataCenterSlot
+} from '../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js';
+import {
   getClientConnectionAbortSignal,
   trackClientConnectionState
 } from '../../../src/server/utils/client-connection-state.js';
@@ -29,7 +33,7 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.providerProtocol).toBeUndefined();
   });
 
-  it('releases attempt-scoped providerProtocol before retry provider rebinding', () => {
+  it('preserves providerProtocol across retry attempts while releasing provider pins', () => {
     const initialMetadata: Record<string, unknown> = {};
     const center = MetadataCenter.attach(initialMetadata);
     center.writeRuntimeControl(
@@ -37,7 +41,7 @@ describe('executor metadata session daemon extraction', () => {
       'openai-responses',
       {
         module: 'tests/server/http-server/executor-metadata.spec.ts',
-        symbol: 'releases attempt-scoped providerProtocol before retry provider rebinding',
+        symbol: 'preserves providerProtocol across retry attempts while releasing provider pins',
         stage: 'test_setup'
       },
       'seed previous attempt provider protocol'
@@ -46,7 +50,8 @@ describe('executor metadata session daemon extraction', () => {
     const retryMetadata = decorateMetadataForAttempt(initialMetadata, 2, new Set(['provider.first']));
 
     expect(MetadataCenter.read(retryMetadata)).toBe(center);
-    expect(center.readRuntimeControl().providerProtocol).toBeUndefined();
+    expect(center.readRuntimeControl().providerProtocol).toBe('openai-responses');
+    expect(buildMetadataCenterRustSnapshot(retryMetadata).runtimeControl?.providerProtocol).toBe('openai-responses');
   });
 
   it('extracts sessionDaemonId from apikey bearer suffix', () => {
@@ -1153,16 +1158,30 @@ describe('client connection timeout hint', () => {
         preselectedRoute
       }
     };
-    MetadataCenter.attach(baseMetadata).writeRuntimeControl(
-      'preselectedRoute',
-      preselectedRoute,
-      {
+    writeMetadataCenterSlot({
+      target: baseMetadata,
+      family: 'runtime_control',
+      key: 'preselectedRoute',
+      value: preselectedRoute,
+      writer: {
         module: 'tests/server/http-server/executor-metadata.spec.ts',
         symbol: 'drops stale preselected route carriers on retry attempts with provider exclusions',
         stage: 'test'
       },
-      'simulate router-direct relay handoff'
-    );
+      reason: 'simulate router-direct relay handoff'
+    });
+    writeMetadataCenterSlot({
+      target: baseMetadata,
+      family: 'runtime_control',
+      key: 'providerProtocol',
+      value: 'openai-responses',
+      writer: {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'drops stale preselected route carriers on retry attempts with provider exclusions',
+        stage: 'test'
+      },
+      reason: 'simulate router-direct relay handoff'
+    });
 
     const firstAttempt = decorateMetadataForAttempt(baseMetadata, 1, new Set<string>());
     expect(firstAttempt.__routecodexPreselectedRoute).toEqual(preselectedRoute);
@@ -1179,6 +1198,9 @@ describe('client connection timeout hint', () => {
     expect(retryAttempt.__routecodexPreselectedRoute).toBeUndefined();
     expect((retryAttempt.__rt as { preselectedRoute?: unknown }).preselectedRoute).toBeUndefined();
     expect(MetadataCenter.read(retryAttempt)?.readRuntimeControl().preselectedRoute).toBeUndefined();
+    expect(MetadataCenter.read(retryAttempt)?.readRuntimeControl().providerProtocol).toBe('openai-responses');
+    expect(buildMetadataCenterRustSnapshot(retryAttempt).runtimeControl?.preselectedRoute).toBeUndefined();
+    expect(buildMetadataCenterRustSnapshot(retryAttempt).runtimeControl?.providerProtocol).toBe('openai-responses');
     expect(baseMetadata.__routecodexPreselectedRoute).toBe(preselectedRoute);
     expect((baseMetadata.__rt as { preselectedRoute?: unknown }).preselectedRoute).toBe(preselectedRoute);
   });

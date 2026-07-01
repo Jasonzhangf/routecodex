@@ -4,6 +4,7 @@ import {
   applyMetadataCenterRustWriteResult,
   buildMetadataCenterRustSnapshot,
   readMetadataCenterSlot,
+  releaseMetadataCenterSlot,
   writeMetadataCenterSlot
 } from '../../../../../src/server/runtime/http-server/metadata-center/dualwrite-api.ts';
 import {
@@ -97,6 +98,52 @@ describe('metadata center dual-write API', () => {
       family: 'runtime_control',
       key: 'stopless'
     })).toEqual(expect.objectContaining({ repeatCount: 1 }));
+  });
+
+  it('releases runtime_control slots from both JS mirror and Rust-readable snapshot', () => {
+    const target: Record<string, unknown> = {};
+
+    writeMetadataCenterSlot({
+      target,
+      family: 'runtime_control',
+      key: 'preselectedRoute',
+      value: {
+        target: {
+          providerKey: 'primary.key1.gpt-5.3-codex'
+        },
+        decision: {
+          providerProtocol: 'openai-responses'
+        }
+      },
+      writer: TEST_WRITER
+    });
+    writeMetadataCenterSlot({
+      target,
+      family: 'runtime_control',
+      key: 'providerProtocol',
+      value: 'openai-responses',
+      writer: TEST_WRITER
+    });
+
+    releaseMetadataCenterSlot({
+      target,
+      family: 'runtime_control',
+      key: 'preselectedRoute',
+      writer: TEST_WRITER,
+      reason: 'retry must release preselected route truth'
+    });
+    releaseMetadataCenterSlot({
+      target,
+      family: 'runtime_control',
+      key: 'providerProtocol',
+      writer: TEST_WRITER,
+      reason: 'retry must release provider protocol truth'
+    });
+
+    expect(MetadataCenter.read(target)?.readRuntimeControl().preselectedRoute).toBeUndefined();
+    expect(MetadataCenter.read(target)?.readRuntimeControl().providerProtocol).toBeUndefined();
+    expect(buildMetadataCenterRustSnapshot(target).runtimeControl?.preselectedRoute).toBeUndefined();
+    expect(buildMetadataCenterRustSnapshot(target).runtimeControl?.providerProtocol).toBeUndefined();
   });
 
   it('applies Rust write result into both JS mirror and Rust-readable snapshot', () => {

@@ -50,21 +50,26 @@ function normalizeMinimalSuccessResponse(result: unknown): unknown {
   };
 }
 
-function buildHandle(providerKey: string, processFn: () => Promise<unknown>): ProviderHandle {
+function buildHandle(
+  providerKey: string,
+  processFn: () => Promise<unknown>,
+  protocol: 'gemini-chat' | 'openai-chat' = 'gemini-chat'
+): ProviderHandle {
+  const isOpenAI = protocol === 'openai-chat';
   return {
     runtimeKey: providerKey,
     providerId: providerKey,
-    providerType: 'gemini',
-    providerFamily: 'gemini',
-    providerProtocol: 'gemini-chat',
+    providerType: isOpenAI ? 'openai' : 'gemini',
+    providerFamily: isOpenAI ? 'openai' : 'gemini',
+    providerProtocol: protocol,
     runtime: {
       runtimeKey: providerKey,
       providerId: providerKey,
       keyAlias: providerKey,
-      providerType: 'gemini',
+      providerType: isOpenAI ? 'openai' : 'gemini',
       endpoint: 'https://example.invalid',
       auth: { type: 'oauth' },
-      outboundProfile: 'gemini-chat'
+      outboundProfile: protocol
     },
     instance: {
       async initialize() { },
@@ -119,8 +124,8 @@ describe('HubRequestExecutor failover', () => {
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess)],
-      [providerB, buildHandle(providerB, successProcess)]
+      [providerA, buildHandle(providerA, failingProcess, 'openai-chat')],
+      [providerB, buildHandle(providerB, successProcess, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -489,8 +494,8 @@ describe('HubRequestExecutor failover', () => {
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess)],
-      [providerB, buildHandle(providerB, successProcess)]
+      [providerA, buildHandle(providerA, failingProcess, 'openai-chat')],
+      [providerB, buildHandle(providerB, successProcess, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -575,8 +580,8 @@ describe('HubRequestExecutor failover', () => {
     }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess)],
-      [providerB, buildHandle(providerB, successProcess)]
+      [providerA, buildHandle(providerA, failingProcess, 'openai-chat')],
+      [providerB, buildHandle(providerB, successProcess, 'openai-chat')]
     ]);
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
@@ -621,6 +626,7 @@ describe('HubRequestExecutor failover', () => {
             routeName: 'thinking',
             pool: [providerKey],
             routePool,
+            providerProtocol: 'openai-chat',
             reason: 'thinking:user-input'
           },
           processMode: 'standard',
@@ -645,6 +651,7 @@ describe('HubRequestExecutor failover', () => {
           routeName: 'thinking',
           pool: [providerA],
           routePool,
+          providerProtocol: 'openai-chat',
           reason: 'thinking:user-input'
         },
         diagnostics: {}
