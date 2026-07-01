@@ -438,6 +438,20 @@ export function projectSseErrorEventPayload(args: {
   }) as SseErrorEventPayload;
 }
 
+export function buildSseErrorEventFrame(args: {
+  requestId: string;
+  status: number;
+  message: string;
+  code: string;
+  error?: Record<string, unknown>;
+}): { payload: SseErrorEventPayload; frame: string } {
+  const payload = projectSseErrorEventPayload(args);
+  return {
+    payload,
+    frame: `event: error\ndata: ${JSON.stringify(payload)}\n\n`,
+  };
+}
+
 
 export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): string {
   let projected: HttpErrorPayload;

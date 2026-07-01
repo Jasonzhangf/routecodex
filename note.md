@@ -26,6 +26,11 @@
 - Fix: removed TS failure metadata classifier; Responses SSE decode now only preserves explicit `upstreamCode` / `statusCode` / `retryable` fields already present on the source error, while malformed generic decode errors no longer get synthesized provider failure metadata.
 - Verification: focused Responses SSE decode/materialize/parser Jest PASS 14/14; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:hub-response-provider-sse-materialization`, sharedmodule/root `tsc`, real 4444 sample replay, `build:base`, and `git diff --check` PASS.
 
+# 2026-07-01: Handler SSE error frame projection moved to ErrorErr06 owner
+- Red evidence: `verify:responses-handler-single-bridge-surface` first failed after adding a marker forbidding `projectSseErrorEventPayload` in `handler-response-sse.ts`.
+- Fix: `handler-response-sse.ts` now imports `buildSseErrorEventFrame()` from `http-error-mapper.ts`; handler writes the prebuilt frame and only uses the returned payload for diagnostics, while the ErrorErr06 mapper owns payload/frame projection.
+- Verification: focused handler/error Jest PASS 21/21; `verify:responses-handler-single-bridge-surface`, `verify:responses-sse-business-module`, `verify:sse-architecture-boundary`, `verify:hub-response-provider-sse-materialization`, sharedmodule/root `tsc`, and real 4444 sample replay PASS. `build:base` log reached final `fix:cli-permission` step and bumped version to `0.90.3408`, but the wrapper did not capture an explicit `EXIT_STATUS`.
+
 # 2026-07-01: servertool postflight session truth removed from TS
 - Slice: `engine-postflight-shell.ts` no longer reads/trims `metadataCenterSnapshot.requestTruth.sessionId`; it passes the metadata-center snapshot carrier to native `buildStoplessAutoCliProjectionFromEngineWithNative()`, where Rust `stopless_auto_handler_bridge.rs` owns session truth extraction.
 - Gate: `servertool-active-orchestration-audit` and `verify-servertool-rust-only` now forbid `const requestTruth = metadataCenterSnapshot?.requestTruth`, `const rawSessionId = requestTruth?.sessionId`, and `rawSessionId.trim()` in postflight.

@@ -21,7 +21,7 @@ import { logPipelineStage } from '../utils/stage-logger.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
-import { projectSseErrorEventPayload } from '../utils/http-error-mapper.js';
+import { buildSseErrorEventFrame } from '../utils/http-error-mapper.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildClientSseKeepaliveFrameForHttp,
@@ -134,7 +134,7 @@ function createSseClientResponseClosedError(): Error & { code: string; name: str
 function sendSseBridgeError(
   res: Response,
   requestLabel: string,
-  payload: Record<string, unknown>,
+  frame: string,
   metadata?: Record<string, unknown>,
   releaseReason = 'sse_bridge_error_closeout'
 ): void {
@@ -145,7 +145,7 @@ function sendSseBridgeError(
     res.setHeader('Connection', 'keep-alive');
   }
   try {
-    res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+    res.write(frame);
   } catch (error) {
     logResponseNonBlockingError(`sendSseBridgeError:write:${requestLabel}`, error);
   }
@@ -163,12 +163,13 @@ function sendSseBridgeError(
 export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs): Promise<boolean | Error> {
   const { res, result, requestLabel, status, forceSSE, expectsStream, entryEndpoint } = args;
   if (forceSSE && result.sseStream === undefined) {
-    const missingSsePayload = projectSseErrorEventPayload({
+    const missingSseError = buildSseErrorEventFrame({
       requestId: requestLabel,
       status: 502,
       message: 'SSE stream missing from pipeline result',
       code: 'sse_bridge_error',
     });
+    const missingSsePayload = missingSseError.payload;
     logPipelineStage('response.sse.missing', requestLabel, { status });
     finalizeSseTransportCloseout({
       releaseReason: 'force_sse_missing_stream_observed',
@@ -199,7 +200,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     sendSseBridgeError(
       res,
       requestLabel,
-      missingSsePayload,
+      missingSseError.frame,
       result.metadata as Record<string, unknown> | undefined,
       'force_sse_missing_stream_closeout'
     );
@@ -225,12 +226,13 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       ? resultMetadata.clientConnectionState as { disconnected?: unknown }
       : undefined;
   if (!stream) {
-    const missingSsePayload = projectSseErrorEventPayload({
+    const missingSseError = buildSseErrorEventFrame({
       requestId: requestLabel,
       status: 502,
       message: 'SSE stream missing from pipeline result',
       code: 'sse_bridge_error',
     });
+    const missingSsePayload = missingSseError.payload;
     logPipelineStage('response.sse.missing', requestLabel, {});
     finalizeSseTransportCloseout({
       metadata: resultMetadata,
@@ -257,7 +259,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     sendSseBridgeError(
       res,
       requestLabel,
-      missingSsePayload,
+      missingSseError.frame,
       resultMetadata,
       'missing_stream_closeout'
     );
@@ -532,13 +534,13 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       message,
       streamEnded,
     });
-    const payload = projectSseErrorEventPayload({
+    const { frame } = buildSseErrorEventFrame({
       requestId: requestLabel,
       status: statusCode,
       message,
       code,
     });
-    writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.error.write_error_event');
+    writeClientSseFrame(frame, 'response.sse.error.write_error_event');
     ended = true;
     try {
       res.end();
@@ -688,13 +690,13 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       },
     });
     try {
-      const payload = projectSseErrorEventPayload({
+      const { frame } = buildSseErrorEventFrame({
         requestId: requestLabel,
         status: 500,
         message: error.message,
         code: readErrorCode(error) ?? 'sse_stream_error',
       });
-      writeClientSseFrame(`event: error\ndata: ${JSON.stringify(payload)}\n\n`, 'response.sse.stream_error.write_error_event');
+      writeClientSseFrame(frame, 'response.sse.stream_error.write_error_event');
     } catch (writeError) {
       logResponseNonBlockingError(`response.sse.stream_error.write_error_event:${requestLabel}`, writeError);
     }

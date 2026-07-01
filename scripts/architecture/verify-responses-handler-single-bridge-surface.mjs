@@ -218,6 +218,7 @@ const checks = [
     requiredImports: [],
     forbiddenLocalTokens: [
       "from '../utils/finish-reason.js'",
+      "projectSseErrorEventPayload",
       "from '../runtime/http-server/session-execution-state.js'",
       'getSessionExecutionStateTracker(',
       'shouldDropClientSseFrameForHttp(frame, entryEndpoint)',
