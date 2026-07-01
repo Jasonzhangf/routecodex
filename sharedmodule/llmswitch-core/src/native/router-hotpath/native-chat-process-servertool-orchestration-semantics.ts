@@ -938,8 +938,8 @@ export function planServertoolNoopOutcomeWithNative(input: {
 
 export function planServertoolAutoHookQueuesWithNative(input: {
   hooks: Array<{ id: string; phase: string; priority: number; order: number; sourceIndex: number }>;
-  includeAutoHookIds?: string[];
-  excludeAutoHookIds?: string[];
+  includeAutoHookIds?: string[] | null;
+  excludeAutoHookIds?: string[] | null;
   optionalPrimaryHookOrder: string[];
   mandatoryHookOrder: string[];
 }): NativeServertoolAutoHookQueues {
@@ -963,8 +963,8 @@ export function planServertoolAutoHookQueueItemsWithNative<T extends {
   order: number;
 }>(input: {
   hooks: T[];
-  includeAutoHookIds?: string[];
-  excludeAutoHookIds?: string[];
+  includeAutoHookIds?: string[] | null;
+  excludeAutoHookIds?: string[] | null;
   optionalPrimaryHookOrder: string[];
   mandatoryHookOrder: string[];
 }): NativeServertoolAutoHookQueueItems<T> {
@@ -976,8 +976,8 @@ export function planServertoolAutoHookQueueItemsWithNative<T extends {
       order: hook.order,
       sourceIndex
     })),
-    ...(input.includeAutoHookIds ? { includeAutoHookIds: input.includeAutoHookIds } : {}),
-    ...(input.excludeAutoHookIds ? { excludeAutoHookIds: input.excludeAutoHookIds } : {}),
+    includeAutoHookIds: input.includeAutoHookIds ?? null,
+    excludeAutoHookIds: input.excludeAutoHookIds ?? null,
     optionalPrimaryHookOrder: input.optionalPrimaryHookOrder,
     mandatoryHookOrder: input.mandatoryHookOrder
   });

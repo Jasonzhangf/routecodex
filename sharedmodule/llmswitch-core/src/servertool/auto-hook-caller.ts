@@ -48,8 +48,8 @@ function buildAutoHookQueuesFromNativePlan(args: {
       order: hook.order,
       execution: hook.execution
     })),
-    ...(args.includeAutoHookIds ? { includeAutoHookIds: [...args.includeAutoHookIds] } : {}),
-    ...(args.excludeAutoHookIds ? { excludeAutoHookIds: [...args.excludeAutoHookIds] } : {}),
+    includeAutoHookIds: args.includeAutoHookIds != null ? [...args.includeAutoHookIds] : null,
+    excludeAutoHookIds: args.excludeAutoHookIds != null ? [...args.excludeAutoHookIds] : null,
     optionalPrimaryHookOrder: queueConfig.optionalPrimaryOrder,
     mandatoryHookOrder: queueConfig.mandatoryOrder
   });
