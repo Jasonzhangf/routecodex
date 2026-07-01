@@ -231,12 +231,12 @@ export async function runServerToolOrchestrationShell(
   const stoplessExecutionPlan = planStoplessExecutionWithNative({
     flowId,
     execution:
-      engineResult.execution && typeof engineResult.execution === 'object'
+      engineResult.execution != null && typeof engineResult.execution === 'object'
         ? (engineResult.execution as unknown as Record<string, unknown>)
         : {},
     metadataCenterSnapshot: metadataCenterSnapshot ?? null,
     runtimeControl:
-      runtimeControl && typeof runtimeControl === 'object'
+      runtimeControl != null && typeof runtimeControl === 'object'
         ? (runtimeControl as Record<string, unknown>)
         : null
   });

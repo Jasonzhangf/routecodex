@@ -5195,6 +5195,8 @@ function checkServertoolRustOutcomeCloseout() {
     'providerProtocol: args.providerProtocol',
     'Servertool engine orchestration requires metadata center runtime_control.providerProtocol',
     'Boolean(engineResult.execution)',
+    "engineResult.execution && typeof engineResult.execution === 'object'",
+    "runtimeControl && typeof runtimeControl === 'object'",
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(
@@ -5208,6 +5210,17 @@ function checkServertoolRustOutcomeCloseout() {
       'servertool-engine-orchestration-metadata-center-only',
       'ServerToolOrchestrationOptions must not accept providerProtocol as a second protocol truth'
     );
+  }
+  for (const marker of [
+    "engineResult.execution != null && typeof engineResult.execution === 'object'",
+    "runtimeControl != null && typeof runtimeControl === 'object'",
+  ]) {
+    if (!engineOrchestrationShell.includes(marker)) {
+      fail(
+        'servertool-engine-orchestration-no-dead-timeout-carrier',
+        `engine-orchestration-shell.ts must keep explicit nullish presence marker ${marker}`
+      );
+    }
   }
   const servertoolOptionsTypes = readRequired(TS_SERVERTOOL_TYPES);
   if (/export interface ServerSideToolEngineOptions\s*\{[\s\S]{0,260}providerProtocol:\s*string;/.test(servertoolOptionsTypes)) {

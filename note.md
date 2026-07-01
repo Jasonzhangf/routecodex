@@ -1,3 +1,8 @@
+# 2026-07-02: servertool orchestration input truthiness removed
+- Slice: `engine-orchestration-shell.ts` no longer uses truthiness to decide whether `engineResult.execution` or MetadataCenter `runtimeControl` should be passed into native stopless execution planning; it now uses explicit `!= null` plus object validation.
+- Gate: `engine-observation-shell.spec.ts`, `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid the old truthiness markers and require nullish presence checks.
+- Evidence: focused engine observation Jest PASS 1/1; focused stopless-session Jest PASS 7/7; focused active audit PASS 44/44; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool postflight metadata write truthiness removed
 - Slice: `engine-postflight-shell.ts` no longer uses truthiness to decide whether a native `metadataWritePlan` exists; it now uses explicit `!= null` plus object validation before projecting runtime control.
 - Gate: `engine-observation-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid the old `engineResult.metadataWritePlan && typeof ...` marker and require the nullish presence check.

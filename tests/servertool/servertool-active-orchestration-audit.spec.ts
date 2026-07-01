@@ -610,6 +610,8 @@ const TARGETS = [
       "engineSkipPlan.action === 'return_skipped_passthrough' ||",
       "engineSkipPlan.action === 'return_skipped_no_execution'",
       'if (stopSignal.observed) {',
+      "engineResult.execution && typeof engineResult.execution === 'object'",
+      "runtimeControl && typeof runtimeControl === 'object'",
     ],
     required: [
       'resolveServertoolTimeoutMsFromEnvCandidatesWithNative({',
@@ -619,6 +621,8 @@ const TARGETS = [
       'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
       'const runtimeAction = planServertoolEngineRuntimeActionWithNative({',
       'planServertoolEngineTriggerObservationWithNative({',
+      "engineResult.execution != null && typeof engineResult.execution === 'object'",
+      "runtimeControl != null && typeof runtimeControl === 'object'",
       'engineResult: {',
     ],
   },

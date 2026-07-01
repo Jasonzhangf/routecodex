@@ -101,6 +101,10 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_passthrough' ||");
     expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_no_execution'");
     expect(source).not.toContain('Boolean(engineResult.execution)');
+    expect(source).not.toContain("engineResult.execution && typeof engineResult.execution === 'object'");
+    expect(source).toContain("engineResult.execution != null && typeof engineResult.execution === 'object'");
+    expect(source).not.toContain("runtimeControl && typeof runtimeControl === 'object'");
+    expect(source).toContain("runtimeControl != null && typeof runtimeControl === 'object'");
     expect(source).not.toContain("if (engineResult.mode === 'passthrough' || !engineResult.execution)");
   });
 
