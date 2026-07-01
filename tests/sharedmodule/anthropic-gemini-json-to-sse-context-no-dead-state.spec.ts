@@ -79,4 +79,25 @@ describe('Anthropic/Gemini JSON-to-SSE context dead-state boundary', () => {
       expect(source).not.toContain('this.contexts.delete(');
     }
   });
+
+  it('does not keep Anthropic/Gemini converter-level config defaults or constructor config injection', () => {
+    const files = [
+      'sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts',
+      'sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts'
+    ];
+
+    for (const file of files) {
+      const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
+      expect(source).not.toContain('private config =');
+      expect(source).not.toContain('constructor(config?');
+      expect(source).not.toContain('this.config = { ...this.config, ...config }');
+      expect(source).not.toContain('this.config.defaultChunkSize');
+      expect(source).not.toContain('this.config.defaultDelayMs');
+      expect(source).not.toContain('this.config.chunkDelayMs');
+      expect(source).not.toContain('this.config.reasoningMode');
+      expect(source).not.toContain('this.config.reasoningTextPrefix');
+      expect(source).not.toContain('DEFAULT_ANTHROPIC_CONVERSION_CONFIG');
+      expect(source).not.toContain('DEFAULT_GEMINI_CONVERSION_CONFIG');
+    }
+  });
 });

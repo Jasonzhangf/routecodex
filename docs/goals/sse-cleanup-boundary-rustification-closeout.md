@@ -748,3 +748,11 @@ Focused tests to use as slice gates:
 - Fix: `ChatJsonToSseConverterRefactored` and `ChatSseToJsonConverter` now pass only explicit per-call options to their sequencer/dispatcher; `ChatConversionConfig`, `DEFAULT_CHAT_CONVERSION_CONFIG`, and `ChatSseEventStream.getConfig()` were physically removed from the public type surface.
 - Positive tests: focused Chat JSON/SSE tests still project completed responses, usage, function-call arguments, and no-salvage boundaries.
 - Reverse tests/gates: the focused context spec and `verify:sse-architecture-boundary` forbid the retired Chat converter config markers from returning.
+
+### 2026-07-01 Anthropic/Gemini SSE converter config surface removed
+
+- Boundary: Anthropic/Gemini JSON->SSE converters must stay per-call IO/codec shells; they must not hold converter-level default config or constructor config injection as a second semantic/config truth.
+- Red evidence: `anthropic-gemini-json-to-sse-context-no-dead-state` and `verify:sse-architecture-boundary` first failed on converter `private config`, constructor config injection, `this.config.*`, and `DEFAULT_ANTHROPIC_CONVERSION_CONFIG` / `DEFAULT_GEMINI_CONVERSION_CONFIG`.
+- Fix: `AnthropicJsonToSseConverter` and `GeminiJsonToSseConverter` now pass only explicit per-call options into their sequencers; converter-level default config storage and constructor config injection were physically removed.
+- Positive tests: focused Anthropic/Gemini JSON->SSE tests still project `message_start/message_stop` and `gemini.data/gemini.done` frames.
+- Reverse tests/gates: the focused context spec and `verify:sse-architecture-boundary` forbid the retired Anthropic/Gemini converter config markers from returning.

@@ -1,6 +1,5 @@
 // feature_id: sse.anthropic_gemini_stream_projection
 import { PassThrough } from 'node:stream';
-import { DEFAULT_ANTHROPIC_CONVERSION_CONFIG } from '../types/index.js';
 import type {
   AnthropicMessageResponse,
   AnthropicJsonToSseOptions,
@@ -12,14 +11,6 @@ import { createAnthropicSequencer } from './sequencers/anthropic-sequencer.js';
 import { createAnthropicStreamWriter } from '../shared/writer.js';
 
 export class AnthropicJsonToSseConverter {
-  private config = DEFAULT_ANTHROPIC_CONVERSION_CONFIG;
-
-  constructor(config?: Partial<typeof DEFAULT_ANTHROPIC_CONVERSION_CONFIG>) {
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
-  }
-
   async convertResponseToJsonToSse(
     response: AnthropicMessageResponse,
     options: AnthropicJsonToSseOptions
@@ -77,11 +68,11 @@ export class AnthropicJsonToSseConverter {
     try {
       this.validateResponse(response);
       const sequencer = createAnthropicSequencer({
-        chunkSize: context.options.chunkSize ?? this.config.defaultChunkSize,
-        chunkDelayMs: context.options.chunkDelayMs ?? this.config.defaultDelayMs,
+        chunkSize: context.options.chunkSize,
+        chunkDelayMs: context.options.chunkDelayMs,
         enableDelay: Boolean(context.options.chunkDelayMs),
-        reasoningMode: context.options.reasoningMode ?? this.config.reasoningMode,
-        reasoningTextPrefix: context.options.reasoningTextPrefix ?? this.config.reasoningTextPrefix
+        reasoningMode: context.options.reasoningMode,
+        reasoningTextPrefix: context.options.reasoningTextPrefix
       });
       const events = sequencer.sequenceResponse(response, context.requestId);
       await writer.writeAnthropicEvents(events);

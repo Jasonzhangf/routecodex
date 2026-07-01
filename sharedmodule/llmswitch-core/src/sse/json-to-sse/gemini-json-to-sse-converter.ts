@@ -1,6 +1,5 @@
 // feature_id: sse.anthropic_gemini_stream_projection
 import { PassThrough } from 'node:stream';
-import { DEFAULT_GEMINI_CONVERSION_CONFIG } from '../types/index.js';
 import type {
   GeminiResponse,
   GeminiJsonToSseOptions,
@@ -12,14 +11,6 @@ import { createGeminiSequencer } from './sequencers/gemini-sequencer.js';
 import { createGeminiStreamWriter } from '../shared/writer.js';
 
 export class GeminiJsonToSseConverter {
-  private config = DEFAULT_GEMINI_CONVERSION_CONFIG;
-
-  constructor(config?: Partial<typeof DEFAULT_GEMINI_CONVERSION_CONFIG>) {
-    if (config) {
-      this.config = { ...this.config, ...config };
-    }
-  }
-
   async convertResponseToJsonToSse(
     response: GeminiResponse,
     options: GeminiJsonToSseOptions
@@ -76,9 +67,9 @@ export class GeminiJsonToSseConverter {
     try {
       this.validateResponse(response);
       const sequencer = createGeminiSequencer({
-        chunkDelayMs: context.options.chunkDelayMs ?? this.config.chunkDelayMs,
-        reasoningMode: context.options.reasoningMode ?? this.config.reasoningMode,
-        reasoningTextPrefix: context.options.reasoningTextPrefix ?? this.config.reasoningTextPrefix
+        chunkDelayMs: context.options.chunkDelayMs,
+        reasoningMode: context.options.reasoningMode,
+        reasoningTextPrefix: context.options.reasoningTextPrefix
       });
       const events = sequencer.sequenceResponse(response);
       await writer.writeGeminiEvents(events);

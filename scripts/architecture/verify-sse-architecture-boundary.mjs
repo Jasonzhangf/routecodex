@@ -463,6 +463,16 @@ for (const [relPath, source] of [
     'private contexts = new Map',
     'this.contexts.set(',
     'this.contexts.delete(',
+    'private config =',
+    'constructor(config?',
+    'this.config = { ...this.config, ...config }',
+    'this.config.defaultChunkSize',
+    'this.config.defaultDelayMs',
+    'this.config.chunkDelayMs',
+    'this.config.reasoningMode',
+    'this.config.reasoningTextPrefix',
+    'DEFAULT_ANTHROPIC_CONVERSION_CONFIG',
+    'DEFAULT_GEMINI_CONVERSION_CONFIG',
   ]) {
     if (source.includes(forbidden)) {
       failures.push(`${relPath}: protocol JSON->SSE converter must not keep dead context state: ${forbidden}`);
