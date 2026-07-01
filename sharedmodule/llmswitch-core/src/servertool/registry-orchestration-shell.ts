@@ -9,12 +9,12 @@ import {
 import type {
   ServerToolAutoHookDescriptor,
   ServerToolHandlerEntry
-} from './registry-types.js';
+} from './types.js';
 
 export {
   type ServerToolAutoHookDescriptor,
   type ServerToolHandlerEntry
-} from './registry-types.js';
+} from './types.js';
 
 export const getServerToolHandler = (
   name: string

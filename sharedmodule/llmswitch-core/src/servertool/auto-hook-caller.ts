@@ -16,7 +16,7 @@ import {
   planServertoolSkeletonDerivedConfigWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { materializeServertoolPlannedResult } from './execution-handler-materialization-shell.js';
-import type { ServerToolExecutionDescriptor } from './registry-types.js';
+import type { ServerToolExecutionDescriptor } from './types.js';
 
 type AutoHookExecutionItem = {
   id: string;

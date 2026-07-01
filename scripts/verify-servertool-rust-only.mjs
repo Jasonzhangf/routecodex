@@ -113,7 +113,6 @@ const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
 const TS_SERVERTOOL_TYPES = `${SERVERTOOL_TS_DIR}/types.ts`;
 const TS_REGISTRY_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`;
-const TS_REGISTRY_TYPES = `${SERVERTOOL_TS_DIR}/registry-types.ts`;
 const TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL = `${SERVERTOOL_TS_DIR}/run-server-side-tool-engine-shell.ts`;
 const NATIVE_FOLLOWUP_MAINLINE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`;
 const STOP_MESSAGE_AUTO_HANDLER = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto.ts`;
@@ -176,6 +175,7 @@ const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-types.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts`,
 ];
 const DELETED_BACKEND_ROUTE_POLICY_FILES = [
@@ -3408,11 +3408,11 @@ function checkServertoolRegistryRustOwner() {
     assertMissingFile(
       'servertool-registry-facades-deleted',
       file,
-      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import registry-orchestration-shell.ts directly`
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import types/registry-orchestration-shell.ts directly`
     );
   }
+  const servertoolTypes = readRequired(TS_SERVERTOOL_TYPES);
   const registryOrchestrationShell = readRequired(TS_REGISTRY_ORCHESTRATION_SHELL);
-  const registryTypes = readRequired(TS_REGISTRY_TYPES);
 
   for (const needle of [
     'feature_id: hub.servertool_registry_contract',
@@ -3538,10 +3538,10 @@ function checkServertoolRegistryRustOwner() {
     'handler: ServerToolHandler',
     '| ServerToolAdHocExecutionDescriptor',
   ]) {
-    if (registryTypes.includes(marker)) {
+    if (servertoolTypes.includes(marker)) {
       fail(
-        'servertool-registry-types-no-adhoc-execution',
-        `registry-types.ts must not retain retired ad-hoc execution marker ${marker}`
+        'servertool-types-no-adhoc-execution',
+        `types.ts must not retain retired ad-hoc execution marker ${marker}`
       );
     }
   }

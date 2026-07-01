@@ -5,7 +5,7 @@ import type {
   ServerToolHandlerContext,
 } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
-import type { ServerToolExecutionDescriptor } from '../../sharedmodule/llmswitch-core/src/servertool/registry-types.js';
+import type { ServerToolExecutionDescriptor } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const registryHooks: Array<{

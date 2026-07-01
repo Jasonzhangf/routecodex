@@ -52,6 +52,38 @@ export interface ServerToolExecution {
   };
 }
 
+type TriggerMode = 'tool_call' | 'auto';
+type AutoHookPhase = 'pre' | 'default' | 'post';
+
+type ServerToolBuiltinExecutionDescriptor = {
+  kind: 'builtin';
+  builtinName: string;
+};
+
+export type ServerToolExecutionDescriptor = ServerToolBuiltinExecutionDescriptor;
+
+export interface ServerToolHandlerEntry {
+  name: string;
+  trigger: TriggerMode;
+  execution: ServerToolExecutionDescriptor;
+  registration: import('../native/router-hotpath/native-followup-mainline-semantics.js').ServerToolHandlerRegistrationSpec;
+  autoHook?: {
+    id: string;
+    phase: AutoHookPhase;
+    priority: number;
+    order: number;
+  };
+}
+
+export interface ServerToolAutoHookDescriptor {
+  id: string;
+  phase: AutoHookPhase;
+  priority: number;
+  order: number;
+  registration: import('../native/router-hotpath/native-followup-mainline-semantics.js').ServerToolHandlerRegistrationSpec;
+  execution: ServerToolExecutionDescriptor;
+}
+
 /**
  * ServerSideToolEngineResult：ServerTool 引擎出参。
  */

@@ -9,6 +9,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts',
   'sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/registry-types.ts',
   'sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts',
   'sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts',
   'sharedmodule/llmswitch-core/src/servertool/pre-command-runtime-state-shell.ts',
