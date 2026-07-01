@@ -15,12 +15,6 @@ export type ServertoolResponseStageAutoHookPassResult =
   | { action: 'continue_without_result'; result?: never }
   | { action: 'return_auto_hook_result'; result: ServerSideToolEngineResult };
 
-function hasServerSideToolEngineResult(
-  value: ServerSideToolEngineResult | null
-): value is ServerSideToolEngineResult {
-  return value !== null;
-}
-
 export async function runServertoolResponseStageAutoHookPass(args: {
   options: ServerSideToolEngineOptions;
   contextBase: ServerToolHandlerContext;
@@ -51,7 +45,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: true,
-    hasAutoHookResult: hasServerSideToolEngineResult(autoHookResult)
+    hasAutoHookResult: autoHookResult != null
   });
   switch (postAutoHookRuntimeAction.action) {
     case 'return_required_response_hook_empty':
@@ -62,7 +56,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
         })
       );
     case 'return_auto_hook_result':
-      if (!hasServerSideToolEngineResult(autoHookResult)) {
+      if (autoHookResult == null) {
         throw new Error('[servertool] invalid response-stage auto-hook result action without result');
       }
       return {

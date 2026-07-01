@@ -6225,6 +6225,8 @@ function checkServertoolResponseStageGateThinShell() {
     "if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass')",
     "if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty')",
     "if (postAutoHookRuntimeAction.action === 'return_auto_hook_result')",
+    'function hasServerSideToolEngineResult(',
+    'hasServerSideToolEngineResult(autoHookResult)',
   ]) {
     if (responseStageAutoHookShell.includes(marker)) {
       fail(
@@ -6261,7 +6263,13 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'hasServerSideToolEngineResult(autoHookResult)'
+    'hasAutoHookResult: autoHookResult != null'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'if (autoHookResult == null)'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',

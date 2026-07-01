@@ -1,3 +1,8 @@
+# 2026-07-02: servertool response-stage auto-hook presence helper removed
+- Slice: `response-stage-auto-hook-shell.ts` no longer keeps a local `hasServerSideToolEngineResult()` type-guard helper; it now uses `autoHookResult != null` as the only presence check and `autoHookResult == null` as the fail-fast guard.
+- Gate: `response-stage-auto-hook-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the helper marker and require the nullish presence check.
+- Evidence: focused Jest `response-stage-auto-hook-shell + servertool-active-orchestration-audit` PASS 50/50; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool engine postflight flowIdSource payload read removed
 - Slice: `engine-postflight-shell.ts` no longer reads `String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)` in TS; unknown native `flowIdSource` now fails fast with a fixed error message.
 - Gate: `engine-observation-shell.spec.ts` adds a behavior test for unknown `flowIdSource`, `servertool-active-orchestration-audit.spec.ts` and `verify-servertool-rust-only.mjs` forbid the TS payload-read marker.
