@@ -3759,6 +3759,18 @@ function checkServertoolEntryPreflightRustOwner() {
     readRequired(TS_ENTRY_PREFLIGHT_SHELL),
     'isAdapterClientDisconnectedWithNative(args.options.adapterContext)'
   );
+  assertContains(
+    'servertool-entry-preflight-ts-thin-shell',
+    TS_ENTRY_PREFLIGHT_SHELL,
+    readRequired(TS_ENTRY_PREFLIGHT_SHELL),
+    'hasBaseObject: base != null'
+  );
+  if (readRequired(TS_ENTRY_PREFLIGHT_SHELL).includes('Boolean(base)')) {
+    fail(
+      'servertool-entry-preflight-ts-thin-shell',
+      'entry-preflight-shell.ts must not use TS truthiness Boolean(base) for native presence facts'
+    );
+  }
   pass('servertool-entry-preflight-no-ts-owner', 'entry preflight TS semantics stay out of deleted server-side-tools facade');
 }
 
@@ -5203,6 +5215,7 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEntryPreflightWithNative',
     'planServertoolClientDisconnectedErrorWithNative',
     'createServertoolProviderProtocolErrorFromPlan',
+    'hasBaseObject: base != null',
     "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }"
   ]) {
     if (!entryPreflightShell.includes(marker)) {
@@ -5211,6 +5224,12 @@ function checkServertoolRustOutcomeCloseout() {
         `entry-preflight-shell.ts must keep entry preflight owner marker ${marker}`
       );
     }
+  }
+  if (entryPreflightShell.includes('Boolean(base)')) {
+    fail(
+      'servertool-entry-preflight-shell-owner',
+      'entry-preflight-shell.ts must not restore Boolean(base) presence semantics'
+    );
   }
   const entryContextShell = readRequired(TS_ENTRY_CONTEXT_SHELL);
   for (const marker of [
