@@ -1,3 +1,8 @@
+# 2026-07-02: servertool postflight synthetic metadataCenterSnapshot fallback removed
+- Slice: `engine-postflight-shell.ts` no longer builds `metadataCenterSnapshot` from `runtimeControl` when the real MetadataCenter snapshot is absent; TS now passes only the bound snapshot or `null` into Rust `buildStoplessAutoCliProjectionFromEngineWithNative`.
+- Gate: `engine-observation-shell.spec.ts` and `verify-servertool-rust-only` now forbid the inline fallback markers `const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (` and `runtimeControl ? { runtimeControl } : null`.
+- Evidence: focused Jest `engine-observation-shell.spec.ts` PASS 8/8; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: router-direct retry preselected route release
 - Slice: retry attempts must not reuse single-use `runtime_control.preselectedRoute`; `providerProtocol` remains runtime-control truth and is rebound by route selection instead of acting as VR hit eligibility.
 - Verification: focused `executor-metadata` providerProtocol/preselectedRoute tests PASS 3/3; `metadata-center-dualwrite` release test PASS 1/1; `request-executor-preselected-route.blackbox` PASS 1/1; `request-executor.metadata-center.contract` PASS 10/10; sharedmodule `tsc` PASS; `git diff --check` PASS.

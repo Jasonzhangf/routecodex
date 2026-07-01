@@ -210,6 +210,9 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("if (runtimeAction.action === 'return_stop_message_terminal_final')");
     expect(source).not.toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
     expect(source).toContain('switch (runtimeAction.action)');
+    expect(source).not.toContain('const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (');
+    expect(source).not.toContain('runtimeControl ? { runtimeControl } : null');
+    expect(source).toContain('metadataCenterSnapshot: metadataCenterSnapshot ?? null');
 
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
     const stageRecorder = {

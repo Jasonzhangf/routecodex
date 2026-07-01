@@ -9,8 +9,7 @@ import {
   buildStoplessAutoCliProjectionFromEngineWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter,
-  readRuntimeControlFromAnyBoundMetadataCenter
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
 import {
   applyNativeRuntimeControlWritePlan,
@@ -82,14 +81,10 @@ export async function runServertoolEnginePostflight(args: {
       };
     case 'build_stop_message_cli_projection': {
       const adapterRecord = options.adapterContext as unknown as Record<string, unknown>;
-      const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterRecord);
       const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(adapterRecord);
       const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
-      const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (
-        runtimeControl ? { runtimeControl } : null
-      );
       const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
-        metadataCenterSnapshot: nativeMetadataCenterSnapshot,
+        metadataCenterSnapshot: metadataCenterSnapshot ?? null,
         execution: engineResult.execution ?? null,
         metadataWritePlan: engineResult.metadataWritePlan ?? null,
         requestId: options.requestId ?? null

@@ -6202,6 +6202,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'const requestTruth = metadataCenterSnapshot?.requestTruth',
     'const rawSessionId = requestTruth?.sessionId',
     'rawSessionId.trim()',
+    'const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (',
+    'runtimeControl ? { runtimeControl } : null',
     'executionContext?.stopless',
     'executionContext?.assistantStopText',
     'executionContext?.stoplessRuntimeState',

@@ -177,6 +177,10 @@
 - `stopless` 的 loop identity 只能来自 `requestTruth.sessionId`；禁止在 runtime control、NAPI stopless plan、CLI projection 或 MetadataCenter side-channel 再复制第二份 `sessionId`。
 - 发现 `metadata.sessionId`、`runtime.sessionId`、adapter 本地字段回退拼装 stopless session，直接按错误实现处理并物理删除。
 
+8.1 postflight 禁止合成 MetadataCenter snapshot
+- `engine-postflight-shell.ts` 只能把真实绑定的 `metadataCenterSnapshot` 或 `null` 传给 Rust projection owner；禁止在 TS 用 `runtimeControl` 现场拼 `{ runtimeControl }` 作为 snapshot fallback。
+- 触发信号：看到 `metadataCenterSnapshot ?? ({ runtimeControl })`、`nativeMetadataCenterSnapshot` 或 postflight 从 runtime control 重建 snapshot，直接按 TS carrier fallback 处理并删除。
+
 ## 单轮开发/调试执行模板
 1. 锁目标
 - 先确认 wiki/mainline/manifest 仍表达当前目标；若目标变了，先改文档再改 runtime。
