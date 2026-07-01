@@ -141,13 +141,15 @@ export async function runServertoolAutoHookCaller(args: {
     });
     switch (finalizationPlan.action) {
       case 'return_result': {
-        const queueResultForReturn = queueResult as ServerToolHandlerResult;
+        if (queueResult == null) {
+          throw new Error('[servertool] invalid auto-hook caller finalization result action without queue result');
+        }
         return {
           mode: finalizationPlan.resultMode,
-          finalChatResponse: queueResultForReturn.chatResponse,
-          execution: queueResultForReturn.execution,
-          ...(queueResultForReturn.metadataWritePlan != null
-            ? { metadataWritePlan: queueResultForReturn.metadataWritePlan }
+          finalChatResponse: queueResult.chatResponse,
+          execution: queueResult.execution,
+          ...(queueResult.metadataWritePlan != null
+            ? { metadataWritePlan: queueResult.metadataWritePlan }
             : {})
         };
       }

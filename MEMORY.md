@@ -1,3 +1,8 @@
+# 2026-07-02: servertool auto-hook caller queue-result cast removed
+- `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts` no longer casts `queueResult as ServerToolHandlerResult` after native finalization; `return_result` now uses an explicit `queueResult == null` fail-fast guard and then reads the narrowed result directly.
+- `tests/servertool/servertool-auto-hook-trace.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` forbid the cast marker and require direct `queueResult.*` reads plus null guard.
+- Verified slice: focused Jest `servertool-auto-hook-trace + execution-shell.auto-hook-failfast + servertool-active-orchestration-audit` PASS 53/53; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool engine selection rerun overrides fallback removed
 - `sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts` no longer calls `args.runEngine(afterRunPlan.overrides ?? {})`; Rust/native wrapper now requires `rerun_excluding_primary_hooks` to carry explicit overrides and rejects `return_current` with overrides.
 - `tests/servertool/engine-selection-block.spec.ts`, `tests/servertool/servertool-cli-native-bridge.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` forbid the TS empty-object fallback and require direct native overrides.

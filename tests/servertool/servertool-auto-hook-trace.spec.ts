@@ -450,6 +450,7 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).not.toContain('Boolean(planned)');
     expect(callerSource).not.toContain('Boolean(result)');
     expect(callerSource).not.toContain('Boolean(queueResult)');
+    expect(callerSource).not.toContain('const queueResultForReturn = queueResult as ServerToolHandlerResult');
     expect(callerSource).not.toContain('result?.execution && typeof result.execution.flowId');
     expect(callerSource).not.toContain('queueResultForReturn.metadataWritePlan ?');
     expect(callerSource).toContain('hasPlannedResult: planned != null');
@@ -462,7 +463,8 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).not.toContain('if (attemptPlan.returnResult)');
     expect(callerSource).toContain('hasMaterializedResult: result != null');
     expect(callerSource).toContain('resultPresent: queueResult != null');
-    expect(callerSource).toContain('queueResultForReturn.metadataWritePlan != null');
+    expect(callerSource).toContain('if (queueResult == null)');
+    expect(callerSource).toContain('queueResult.metadataWritePlan != null');
     expect(callerSource).toContain('switch (finalizationPlan.action)');
     expect(callerSource).toContain('mode: finalizationPlan.resultMode');
     expect(callerSource).not.toContain('finalizationPlan as { action: string }');
