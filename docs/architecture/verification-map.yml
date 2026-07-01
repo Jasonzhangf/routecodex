@@ -422,7 +422,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
       - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
-      - sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -444,7 +443,6 @@ verification:
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/stop-message-auto.goal-default.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate

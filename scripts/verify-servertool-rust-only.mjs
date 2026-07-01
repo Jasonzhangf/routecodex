@@ -1124,7 +1124,6 @@ function checkLegacyStopMessageRuntimeMirrorsRemoved() {
   ]);
   const metadataCenterServerToolLoopStateAllowlist = new Set([
     `${ROOT}/src/server/runtime/http-server/metadata-center/metadata-center-types.ts`,
-    `${ROOT}/src/server/runtime/http-server/metadata-center/metadata-center.js`,
     `${ROOT}/src/server/runtime/http-server/metadata-center/metadata-center.ts`,
   ]);
   const files = listFiles(`${ROOT}/src/server/runtime/http-server`);

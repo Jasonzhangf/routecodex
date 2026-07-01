@@ -205,7 +205,6 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
-- `tests/servertool/stop-message-auto.goal-default.spec.ts`
 - `tests/servertool/stopless-cli-continuation.spec.ts`
 - `docs`
 
@@ -888,7 +887,6 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts`
-- `sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts`
 - `tests/servertool/servertool-progress-logging.spec.ts`
 - `docs`
 

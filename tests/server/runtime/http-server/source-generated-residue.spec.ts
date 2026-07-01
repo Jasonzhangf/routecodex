@@ -36,4 +36,21 @@ describe('http-server source generated residue cleanup', () => {
       expect(fs.existsSync(path.join(httpServerSourceDir, artifact))).toBe(false);
     }
   });
+
+  it('does not keep tracked metadata-center JS or declaration artifacts in the source tree', () => {
+    const forbiddenArtifacts = [
+      'metadata-center/dualwrite-api.js',
+      'metadata-center/dualwrite-api.d.ts',
+      'metadata-center/metadata-center.js',
+      'metadata-center/metadata-center.d.ts',
+      'metadata-center/metadata-center-types.js',
+      'metadata-center/metadata-center-types.d.ts',
+      'metadata-center/request-truth-readers.js',
+      'metadata-center/request-truth-readers.d.ts'
+    ];
+
+    for (const artifact of forbiddenArtifacts) {
+      expect(fs.existsSync(path.join(httpServerSourceDir, artifact))).toBe(false);
+    }
+  });
 });

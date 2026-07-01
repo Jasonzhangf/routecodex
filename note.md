@@ -1,3 +1,10 @@
+# 2026-07-01: metadata-center generated source residue removed
+- Slice: physically deleted tracked generated artifacts from `src/server/runtime/http-server/metadata-center`: `dualwrite-api.{js,d.ts}`, `metadata-center.{js,d.ts}`, `metadata-center-types.{js,d.ts}`, and `request-truth-readers.{js,d.ts}`. TS source is now the only source truth for the metadata-center family.
+- Gate: extended `source-generated-residue.spec.ts` and `verify-architecture-deleted-path.mjs` to forbid all deleted metadata-center artifacts from returning; removed stale `.js` allowlist from `verify-servertool-rust-only` and removed stale no-fallback rule targeting deleted `metadata-center.js`.
+- Map/wiki cleanup: removed dead function/verification map references to already-deleted servertool/backoff files, then regenerated architecture wiki markdown/html.
+- Test contract cleanup: `hub-pipeline-preselected-route.spec.ts` now expects the unified MetadataCenter runtime-control writer error and locks stopless control under `runtime_control.stopless` without reviving a top-level `metadata.stopless` mirror.
+- Evidence: focused metadata/source-residue suite PASS 7/7 suites and 58/58 tests; `verify:architecture-deleted-path`, `verify:architecture-metadata-center-manifest-code-sync`, `verify:metadata-center-dualwrite-api`, `verify:architecture-metadata-center-write-boundaries`, `verify:servertool-rust-only`, `npx tsc --noEmit --pretty false`, `verify:function-map-compile-gate`, `verify:architecture-fallback-denylist`, `git diff --check`, and `build:base` PASS.
+
 # 2026-07-01: http-server usage-aggregator generated source residue removed
 - Slice: physically deleted tracked generated artifacts `src/server/runtime/http-server/executor/usage-aggregator.js` and `usage-aggregator.d.ts`; `usage-aggregator.ts` remains the only source truth.
 - Gate: extended `source-generated-residue.spec.ts` to forbid the usage-aggregator `.js/.d.ts` artifacts from returning.

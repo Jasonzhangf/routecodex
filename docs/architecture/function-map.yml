@@ -148,7 +148,6 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
       - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
-      - tests/servertool/stop-message-auto.goal-default.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
       - docs
     forbidden_paths:
@@ -719,7 +718,6 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
-      - sharedmodule/llmswitch-core/tests/servertool/followup-flow-policy.test.ts
       - tests/servertool/servertool-progress-logging.spec.ts
       - docs
     forbidden_paths:
@@ -940,11 +938,9 @@ owners:
       - waitErrorActionBackoffWithGate
     allowed_paths:
       - src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
-      - src/server/runtime/http-server/executor/request-executor-global-error-backoff.ts
       - src/server/runtime/http-server/executor/request-executor-retry-state.ts
       - src/server/runtime/http-server/executor/retry-engine.ts
       - src/server/runtime/http-server/executor-provider.ts
-      - src/server/runtime/http-server/executor/servertool-followup-dispatch.ts
       - src/modules/traffic-governor/index.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts

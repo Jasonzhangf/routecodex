@@ -231,7 +231,7 @@ describe('HubPipeline preselected route ownership', () => {
       }),
       routerEngine: routerEngine as never,
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
-    })).rejects.toThrow('Rust request ChatProcess returned stopless runtime_control but MetadataCenter is not bound');
+    })).rejects.toThrow('MetadataCenter runtime_control write failed: bound MetadataCenter missing');
   });
 
   it('builds metadataCenterSnapshot only from MetadataCenter families before native request dispatch', async () => {
@@ -336,7 +336,7 @@ describe('HubPipeline preselected route ownership', () => {
       .toBe('preselected.key1.gpt-5.5');
   });
 
-  it('projects stopless runtime control into native top-level metadata for relay request owners', async () => {
+  it('projects stopless runtime control through runtime_control without reviving top-level mirror', async () => {
     const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
 
     await executeRequestStagePipeline({
@@ -369,26 +369,15 @@ describe('HubPipeline preselected route ownership', () => {
       config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as never,
     });
 
-    expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
-      request: expect.objectContaining({
-        metadata: expect.objectContaining({
-          stopless: expect.objectContaining({
-            sessionId: 'sess-stopless-1',
-            flowId: 'stop_message_flow',
-            repeatCount: 2,
-            maxRepeats: 3,
-          }),
-          runtime_control: expect.objectContaining({
-            preselectedRoute,
-            stopless: expect.objectContaining({
-              sessionId: 'sess-stopless-1',
-              flowId: 'stop_message_flow',
-              repeatCount: 2,
-              maxRepeats: 3,
-            }),
-          }),
-        }),
-      }),
+    const nativeMetadata = mockRunHubPipelineLibWithNative.mock.calls[0]?.[0]?.request?.metadata as Record<string, unknown>;
+    const runtimeControl = nativeMetadata.runtime_control as Record<string, unknown>;
+    expect(nativeMetadata.stopless).toBeUndefined();
+    expect(runtimeControl.preselectedRoute).toEqual(preselectedRoute);
+    expect(runtimeControl.stopless).toEqual(expect.objectContaining({
+      sessionId: 'sess-stopless-1',
+      flowId: 'stop_message_flow',
+      repeatCount: 2,
+      maxRepeats: 3,
     }));
   });
 
