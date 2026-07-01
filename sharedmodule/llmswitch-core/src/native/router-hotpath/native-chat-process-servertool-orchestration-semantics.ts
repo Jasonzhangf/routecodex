@@ -82,10 +82,14 @@ export type NativeServertoolBuiltinHandlerNamesPlan = {
 export type NativeServertoolBuiltinHandlerEntriesPlan = {
   entries: Record<string, unknown>[];
 };
-export type NativeServertoolRegistryLookupActionPlan = {
-  action: 'return_builtin' | 'return_none';
-  canonicalName?: string;
-};
+export type NativeServertoolRegistryLookupActionPlan =
+  | {
+      action: 'return_builtin';
+      canonicalName: string;
+    }
+  | {
+      action: 'return_none';
+    };
 
 export type NativeServertoolNoopOutcome = {
   chatResponse: Record<string, unknown>;
@@ -703,9 +707,14 @@ export function planServertoolRegistryLookupFromSkeletonWithNative(input: {
     if (record.action === 'return_builtin' && !canonicalName) {
       return fail('missing canonicalName');
     }
+    if (record.action === 'return_builtin') {
+      return {
+        action: 'return_builtin',
+        canonicalName
+      };
+    }
     return {
-      action: record.action,
-      ...(canonicalName ? { canonicalName } : {})
+      action: 'return_none'
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

@@ -3752,7 +3752,7 @@ function checkServertoolRegistryRustOwner() {
     'servertool-registry-no-ts-owner',
     TS_REGISTRY_ORCHESTRATION_SHELL,
     registryOrchestrationShell,
-    'name: actionPlan.canonicalName as string'
+    'name: actionPlan.canonicalName'
   );
 }
 

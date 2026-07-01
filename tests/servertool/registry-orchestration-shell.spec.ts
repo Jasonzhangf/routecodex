@@ -57,7 +57,7 @@ describe('registry-orchestration-shell', () => {
     });
 
     expect(() => getServerToolHandler('unknown')).toThrow(
-      '[servertool] invalid registry lookup action: unknown_registry_action'
+      '[servertool] invalid registry lookup action'
     );
     expect(getBuiltinHandlerEntryMock).not.toHaveBeenCalled();
   });
@@ -144,7 +144,8 @@ describe('registry-orchestration-shell', () => {
 
     expect(source).not.toContain('native registry lookup returned builtin without canonicalName');
     expect(source).not.toContain('if (!actionPlan.canonicalName)');
-    expect(source).toContain('name: actionPlan.canonicalName as string');
+    expect(source).not.toContain('actionPlan.canonicalName as string');
+    expect(source).toContain('name: actionPlan.canonicalName');
   });
 
   test('does not keep a registered-name wrapper around skeleton config', async () => {

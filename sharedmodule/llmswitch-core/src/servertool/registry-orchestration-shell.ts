@@ -20,14 +20,14 @@ export const getServerToolHandler = (
   switch (actionPlan.action) {
     case 'return_builtin': {
       const entry = resolveServertoolBuiltinHandlerEntryWithNative({
-        name: actionPlan.canonicalName as string
+        name: actionPlan.canonicalName
       });
       return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
     }
     case 'return_none':
       return undefined;
     default:
-      throw new Error(`[servertool] invalid registry lookup action: ${String(actionPlan.action)}`);
+      throw new Error('[servertool] invalid registry lookup action');
   }
 };
 
