@@ -460,7 +460,9 @@ export class ResponsesProvider extends HttpTransportProvider {
     if (model) {
       builtBody.model = model;
     }
-    const overriddenBody = builtBody;
+    const overriddenBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context, {
+      enforceLayout: false
+    });
     const submitPayload =
       typeof entryEndpoint === 'string' && entryEndpoint.trim().toLowerCase() === '/v1/responses.submit_tool_outputs'
         ? extractSubmitToolOutputsPayload(overriddenBody)
@@ -480,7 +482,6 @@ export class ResponsesProvider extends HttpTransportProvider {
           entryEndpoint,
           providerStream,
           httpClient: this.httpClient,
-          skipSanitize: true,
         }) as UnknownObject;
       } catch (error) {
         const normalizedError = this.normalizeConfiguredUpstreamError(error, context);
@@ -860,10 +861,12 @@ export class ResponsesProvider extends HttpTransportProvider {
   private async sanitizeResponsesProviderOutboundBody(
     body: Record<string, unknown>,
     context: ProviderContext,
+    options?: { enforceLayout?: boolean },
   ): Promise<Record<string, unknown>> {
     return await sanitizeProviderOutboundPayload({
       protocol: 'openai-responses',
       compatibilityProfile: this.resolveCompatibilityProfile(context),
+      enforceLayout: options?.enforceLayout,
       payload: body,
     });
   }

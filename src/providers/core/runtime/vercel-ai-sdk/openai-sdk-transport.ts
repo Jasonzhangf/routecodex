@@ -617,7 +617,9 @@ export class VercelAiSdkOpenAiTransport {
     context: ProviderContext
   ): Promise<unknown> {
     const providerBody = applyOpenCodeZenThinkingDefaults(asRecord(requestInfo.body), context);
-    normalizeResponsesToChatBody(providerBody);
+    if (!Array.isArray(providerBody.messages)) {
+      normalizeResponsesToChatBody(providerBody);
+    }
     const modelId = pickString(providerBody.model);
     if (!modelId) {
       throw new Error('provider-runtime-error: missing model from openai sdk transport');

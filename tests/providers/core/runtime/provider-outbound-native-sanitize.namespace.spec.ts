@@ -2,6 +2,87 @@ import { describe, expect, test } from '@jest/globals';
 import { sanitizeProviderOutboundPayloadWithNative } from '../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 describe('provider outbound native sanitize namespace guard', () => {
+  test('preserves OpenAI Responses protocol metadata fields before provider transport', () => {
+    const output = sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.5',
+        input: [{
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: 'hi',
+            metadata: { nested: 'must-not-leak' }
+          }]
+        }],
+        metadata: { request: 'must-not-leak' },
+        client_metadata: { session_id: 'must-not-leak' },
+        stream: true
+      }
+    });
+
+    expect(output).toEqual({
+      model: 'gpt-5.5',
+      input: [{
+        role: 'user',
+        content: [{
+          type: 'input_text',
+          text: 'hi',
+          metadata: { nested: 'must-not-leak' }
+        }]
+      }],
+      metadata: { request: 'must-not-leak' },
+      client_metadata: { session_id: 'must-not-leak' },
+      stream: true
+    });
+  });
+
+  test('preserves OpenAI Chat protocol metadata fields before provider transport', () => {
+    const output = sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-chat',
+      payload: {
+        model: 'gpt-5.4',
+        messages: [{
+          role: 'user',
+          content: 'hi',
+          metadata: { nested: 'must-not-leak' }
+        }],
+        metadata: { request: 'must-not-leak' },
+        stream: true
+      }
+    });
+
+    expect(output).toEqual({
+      model: 'gpt-5.4',
+      messages: [{
+        role: 'user',
+        content: 'hi',
+        metadata: { nested: 'must-not-leak' }
+      }],
+      metadata: { request: 'must-not-leak' },
+      stream: true
+    });
+  });
+
+  test('rejects nested RouteCodex internal carrier before provider transport', () => {
+    expect(() => sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-responses',
+      enforceLayout: false,
+      payload: {
+        model: 'gpt-5.5',
+        input: [{
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: 'hi',
+            __rt: { route: 'must-not-leak' }
+          }]
+        }],
+        stream: true
+      }
+    })).toThrow('provider outbound payload must not carry RouteCodex internal carrier');
+  });
+
   test('normalizes OpenAI Responses image_url parts into input_image wire parts', () => {
     const output = sanitizeProviderOutboundPayloadWithNative({
       protocol: 'openai-responses',

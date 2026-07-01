@@ -12,7 +12,8 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
     messages: payload.messages ?? [],
     tools: payload.tools
   }),
-  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
+  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) =>
+    JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>,
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
   })
@@ -37,7 +38,7 @@ const emptyDeps: ModuleDependencies = {
 } as ModuleDependencies;
 
 describe('ResponsesProvider direct passthrough', () => {
-  test('sends the original direct request object without provider-side metadata validation', async () => {
+  test('sends direct request as provider wire body with protocol metadata payload fields', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-metadata-boundary',
       type: 'responses-http-provider',
@@ -65,14 +66,22 @@ describe('ResponsesProvider direct passthrough', () => {
       model: 'gpt-5.5',
       input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
       stream: true,
-      metadata: { __responsesDirectPassthrough: true }
+      metadata: { __responsesDirectPassthrough: true, sessionId: 'must-not-leak' },
+      client_metadata: { session_id: 'must-not-leak' }
     } as any;
     attachProviderRuntimeMetadata(inbound, {
       metadata: { __responsesDirectPassthrough: true }
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
-    expect(capturedBody).toBe(inbound);
+    expect(capturedBody).not.toBe(inbound);
+    expect(capturedBody).toEqual({
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      stream: true,
+      metadata: { __responsesDirectPassthrough: true, sessionId: 'must-not-leak' },
+      client_metadata: { session_id: 'must-not-leak' }
+    });
   });
 
   test('preserves reasoning content on direct provider path before sending upstream', async () => {
@@ -119,7 +128,7 @@ describe('ResponsesProvider direct passthrough', () => {
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
-    expect(capturedBody).toBe(inbound);
+    expect(capturedBody).not.toBe(inbound);
     expect(capturedBody.input[1].type).toBe('reasoning');
     expect(capturedBody.input[1].content).toEqual([
       { type: 'reasoning_text', text: 'must not reach provider runtime' },
@@ -189,7 +198,7 @@ describe('ResponsesProvider direct passthrough', () => {
     });
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
     expect(capturedHeaders?.Accept).toBe('text/event-stream');
-    expect(capturedBody).toBe(inbound);
+    expect(capturedBody).not.toBe(inbound);
     expect(capturedBody.model).toBe('gpt-5.4');
     expect(capturedBody.previous_response_id).toBe('resp_prev_turn');
     expect(capturedBody.input).toEqual(inbound.input);
@@ -200,7 +209,7 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody.metadata).toBeUndefined();
   });
 
-  test('keeps request metadata port hints when runtime metadata is attached', () => {
+  test('does not copy request metadata port hints into provider context control metadata', () => {
     const inbound = {
       model: 'gpt-5.4',
       metadata: {
@@ -230,14 +239,10 @@ describe('ResponsesProvider direct passthrough', () => {
       }
     });
 
-    expect(context.metadata).toMatchObject({
-      entryPort: 5520,
-      portContext: {
-        localPort: 5520
-      },
-      existingFlag: true,
-      requestScope: 'keep-me'
-    });
+    expect(context.metadata).toMatchObject({ requestScope: 'keep-me' });
+    expect(context.metadata).not.toHaveProperty('entryPort');
+    expect(context.metadata).not.toHaveProperty('portContext');
+    expect(context.metadata).not.toHaveProperty('existingFlag');
   });
 
   test('direct submit_tool_outputs hits native upstream submit endpoint instead of plain /responses', async () => {
@@ -442,12 +447,9 @@ describe('ResponsesProvider direct passthrough', () => {
       }
     });
 
-    const result = await provider.sendRequestInternal(inbound) as { sseStream: NodeJS.ReadableStream };
-    const passthrough = result.sseStream;
-    passthrough.resume();
-    const [error] = (await once(passthrough, 'error')) as [Error & { code?: string }];
-    expect(error.message).toContain('UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT');
-    expect(error.code).toBe('UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT');
+    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+      code: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
+    });
   });
 
   test('direct passthrough semantic frames reset content-idle timer and allow terminal completion', async () => {

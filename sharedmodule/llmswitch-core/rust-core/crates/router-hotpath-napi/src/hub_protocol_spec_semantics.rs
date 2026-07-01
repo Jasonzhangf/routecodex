@@ -332,6 +332,44 @@ fn strip_responses_reasoning_content(payload: &mut Map<String, Value>) {
     }
 }
 
+fn is_provider_wire_internal_carrier_key(key: &str) -> bool {
+    let normalized = key.trim().to_ascii_lowercase();
+    normalized == "__metadatacenter"
+        || normalized == "__metadata_center"
+        || normalized == "__rt"
+        || normalized.starts_with("__routecodex")
+}
+
+fn assert_no_provider_wire_internal_carrier(value: &Value, path: &str) -> Result<(), String> {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                let child_path = if path == "$" {
+                    format!("$.{key}")
+                } else {
+                    format!("{path}.{key}")
+                };
+                if is_provider_wire_internal_carrier_key(key) {
+                    return Err(format!(
+                        "provider outbound payload must not carry RouteCodex internal carrier at {child_path}"
+                    ));
+                }
+                assert_no_provider_wire_internal_carrier(child, child_path.as_str())?;
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                assert_no_provider_wire_internal_carrier(
+                    child,
+                    format!("{path}[{index}]").as_str(),
+                )?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn assert_no_namespace_tool_aggregate(value: &Value, path: &str) -> Result<(), String> {
     match value {
         Value::Object(object) => {
@@ -646,7 +684,6 @@ fn apply_provider_outbound_policy(
     if protocol == "openai-responses" {
         normalize_openai_responses_input_items(&mut payload);
     }
-
     if !spec.provider_outbound.enforce_enabled {
         return payload;
     }
@@ -736,11 +773,12 @@ fn build_default_allowlists() -> HubProtocolAllowlistsOutput {
             "tool_choice".to_string(),
             "seed".to_string(),
             "user".to_string(),
-            "metadata".to_string(),
             "stop".to_string(),
             "stop_sequences".to_string(),
             "stream".to_string(),
             "stream_options".to_string(),
+            "metadata".to_string(),
+            "client_metadata".to_string(),
             "thinking".to_string(),
             "reasoning".to_string(),
         ],
@@ -777,6 +815,7 @@ fn build_default_allowlists() -> HubProtocolAllowlistsOutput {
             "tool_outputs".to_string(),
             "tools".to_string(),
             "metadata".to_string(),
+            "client_metadata".to_string(),
             "include".to_string(),
             "store".to_string(),
             "user".to_string(),
@@ -893,16 +932,8 @@ pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult
     let protocol = normalize_provider_protocol(input.protocol.as_deref());
     if input.enforce_layout == Some(false) {
         normalize_provider_outbound_tools(&protocol, &mut payload);
-        if protocol == "openai-responses"
-            && !input
-                .compatibility_profile
-                .as_deref()
-                .unwrap_or("")
-                .to_ascii_lowercase()
-                .contains("deepseek")
-        {
-            strip_responses_reasoning_content(&mut payload);
-        }
+        assert_no_provider_wire_internal_carrier(&Value::Object(payload.clone()), "$")
+            .map_err(napi::Error::from_reason)?;
         assert_no_namespace_tool_aggregate(&Value::Object(payload.clone()), "$")
             .map_err(napi::Error::from_reason)?;
         return serde_json::to_string(&Value::Object(payload))
@@ -910,6 +941,8 @@ pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult
     }
     let output =
         apply_provider_outbound_policy(&protocol, input.compatibility_profile.as_deref(), payload);
+    assert_no_provider_wire_internal_carrier(&Value::Object(output.clone()), "$")
+        .map_err(napi::Error::from_reason)?;
     assert_no_namespace_tool_aggregate(&Value::Object(output.clone()), "$")
         .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&Value::Object(output))
@@ -990,6 +1023,126 @@ mod tests {
         assert!(!reasoning.contains_key("content"));
         assert!(!reasoning.contains_key("encrypted_content"));
         assert!(reasoning.contains_key("summary"));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_preserves_openai_responses_protocol_metadata_fields() {
+        let payload = serde_json::json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "hi",
+                    "metadata": { "nested": "must-not-leak" }
+                }]
+            }],
+            "metadata": { "request": "must-not-leak" },
+            "client_metadata": { "session_id": "must-not-leak" },
+            "stream": true
+        });
+        let Value::Object(payload) = payload else {
+            panic!("object payload expected");
+        };
+        let output = apply_provider_outbound_policy("openai-responses", None, payload);
+        assert_eq!(
+            output.get("metadata"),
+            Some(&serde_json::json!({ "request": "must-not-leak" }))
+        );
+        assert_eq!(
+            output.get("client_metadata"),
+            Some(&serde_json::json!({ "session_id": "must-not-leak" }))
+        );
+        assert_eq!(
+            output["input"][0]["content"][0]["metadata"],
+            serde_json::json!({ "nested": "must-not-leak" })
+        );
+        assert_eq!(output.get("stream"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_preserves_openai_chat_protocol_metadata_fields() {
+        let payload = serde_json::json!({
+            "model": "gpt-5.4",
+            "messages": [{
+                "role": "user",
+                "content": "hi",
+                "metadata": { "nested": "must-not-leak" }
+            }],
+            "metadata": { "request": "must-not-leak" },
+            "stream": true
+        });
+        let Value::Object(payload) = payload else {
+            panic!("object payload expected");
+        };
+        let output = apply_provider_outbound_policy("openai-chat", None, payload);
+        assert_eq!(
+            output.get("metadata"),
+            Some(&serde_json::json!({ "request": "must-not-leak" }))
+        );
+        assert_eq!(
+            output["messages"][0]["metadata"],
+            serde_json::json!({ "nested": "must-not-leak" })
+        );
+        assert_eq!(output.get("stream"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_loose_layout_preserves_direct_reasoning_content() {
+        let raw = serde_json::json!({
+            "protocol": "openai-responses",
+            "enforceLayout": false,
+            "payload": {
+                "model": "gpt-5.5",
+                "input": [{
+                    "type": "reasoning",
+                    "content": [{"type": "reasoning_text", "text": "keep"}],
+                    "encrypted_content": null,
+                    "metadata": {"nested": "must-not-leak"}
+                }],
+                "metadata": {"request": "must-not-leak"},
+                "stream": true
+            }
+        })
+        .to_string();
+        let output_raw = sanitize_provider_outbound_payload_json(raw).unwrap();
+        let output: Value = serde_json::from_str(&output_raw).unwrap();
+        assert_eq!(output["input"][0]["content"][0]["text"], "keep");
+        assert!(output["input"][0].get("encrypted_content").is_some());
+        assert_eq!(
+            output["input"][0]["metadata"],
+            serde_json::json!({"nested": "must-not-leak"})
+        );
+        assert_eq!(
+            output["metadata"],
+            serde_json::json!({"request": "must-not-leak"})
+        );
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_rejects_nested_routecodex_internal_carrier() {
+        let raw = serde_json::json!({
+            "protocol": "openai-responses",
+            "enforceLayout": false,
+            "payload": {
+                "model": "gpt-5.5",
+                "input": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "hi",
+                        "__rt": {"route": "must-not-leak"}
+                    }]
+                }],
+                "stream": true
+            }
+        })
+        .to_string();
+        let error = sanitize_provider_outbound_payload_json(raw).unwrap_err();
+        assert!(error
+            .reason
+            .contains("provider outbound payload must not carry RouteCodex internal carrier"));
+        assert!(error.reason.contains("$"));
     }
 
     #[test]

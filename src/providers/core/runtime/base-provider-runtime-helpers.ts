@@ -69,19 +69,13 @@ export function createProviderContext(options: {
 }): { context: ProviderContext; runtimeMetadata?: ProviderRuntimeMetadata } {
   const runtimeMetadata = extractProviderRuntimeMetadata(options.request);
   const payload = unwrapRequestPayload(options.request);
-  const payloadMetadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
-    ? payload.metadata as Record<string, unknown>
-    : undefined;
   const runtimeMetadataRecord = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
     ? runtimeMetadata.metadata as Record<string, unknown>
     : undefined;
   const mergedMetadata = {
-    ...(payloadMetadata ?? {}),
     ...(runtimeMetadataRecord ?? {})
   };
-  const payloadMetadataCenter = payloadMetadata ? MetadataCenter.read(payloadMetadata) : undefined;
   const runtimeMetadataCenter = runtimeMetadataRecord ? MetadataCenter.read(runtimeMetadataRecord) : undefined;
-  const mergedMetadataCenter = payloadMetadataCenter ?? runtimeMetadataCenter;
   const entryPort = readEntryPortTruth(mergedMetadata);
   if (typeof entryPort === 'number') {
     mergedMetadata.entryPort = entryPort;
@@ -91,8 +85,8 @@ export function createProviderContext(options: {
       runtimeMetadataRecord.matchedPort = entryPort;
     }
   }
-  if (mergedMetadataCenter) {
-    MetadataCenter.bind(mergedMetadata, mergedMetadataCenter);
+  if (runtimeMetadataCenter) {
+    MetadataCenter.bind(mergedMetadata, runtimeMetadataCenter);
   }
   const runtimeModel = typeof runtimeMetadata?.target?.modelId === 'string'
     ? runtimeMetadata.target.modelId
@@ -144,9 +138,7 @@ export function createProviderContext(options: {
         ? (runtimeMetadata.abortSignal as AbortSignal)
         : undefined
   };
-  if (payloadMetadataCenter) {
-    MetadataCenter.bind(context.metadata ?? mergedMetadata, payloadMetadataCenter);
-  } else if (runtimeMetadataCenter) {
+  if (runtimeMetadataCenter) {
     MetadataCenter.bind(context.metadata ?? mergedMetadata, runtimeMetadataCenter);
   }
   return { context, runtimeMetadata };

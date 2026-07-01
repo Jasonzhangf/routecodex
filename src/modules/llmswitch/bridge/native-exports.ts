@@ -697,6 +697,7 @@ export async function buildAnthropicResponseFromChatJson(
 export async function sanitizeProviderOutboundPayload(input: {
   protocol?: string;
   compatibilityProfile?: string;
+  enforceLayout?: boolean;
   payload: Record<string, unknown>;
 }): Promise<AnyRecord> {
   const mod = await getHubBridgePolicySemantics();
