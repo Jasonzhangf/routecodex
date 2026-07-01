@@ -3578,6 +3578,7 @@ owners:
       - ResponsesResponse
     required_tests:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
+      - tests/sharedmodule/responses-sse-decode-no-ts-wire-synthesis.spec.ts
       - tests/sharedmodule/responses-sse-native-materialize.spec.ts
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     required_gates:

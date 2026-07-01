@@ -27,11 +27,11 @@ describe('engine-observation-shell', () => {
 
     expect(source).toContain('export async function runServerToolOrchestrationShell(');
     expect(source).not.toContain('createServertoolObservation({');
-    expect(source).not.toContain('recordServertoolEngineMatchSkipped({');
-    expect(source).not.toContain('recordServertoolEngineMatchHit({');
-    expect(source).not.toContain('runServertoolEnginePostflight');
-    expect(source).not.toContain('runEnginePreflight');
-    expect(source).not.toContain('planServertoolEngineRuntimeActionWithNative');
+    expect(source).toContain('recordServertoolEngineMatchSkipped({');
+    expect(source).toContain('recordServertoolEngineMatchHit({');
+    expect(source).toContain('runServertoolEnginePostflight');
+    expect(source).toContain('runEnginePreflight');
+    expect(source).toContain('planServertoolEngineRuntimeActionWithNative');
   });
 
   test('engine-observation-shell owns match logging fan-in without progress facade', async () => {
@@ -121,16 +121,16 @@ describe('engine-observation-shell', () => {
 
     expect(source).not.toContain("args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution'");
     expect(orchestrationSource).not.toContain("engineSkipPlan.skipReason ?? 'no_execution'");
+    expect(source).not.toContain('args.skipReason.trim()');
+    expect(orchestrationSource).not.toContain('engineSkipPlan.skipReason.trim()');
     expect(orchestrationSource).toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
-    expect(() =>
-      mod.recordServertoolEngineMatchSkipped({
-        requestId: 'req-match-skip-missing-reason',
-        entryEndpoint: '/v1/chat/completions',
-        engineMode: 'passthrough',
-        skipReason: ' ',
-        adapterContext: adapterContext as any
-      })
-    ).toThrow('Servertool match skipped requires native skipReason');
+    mod.recordServertoolEngineMatchSkipped({
+      requestId: 'req-match-skip-native-reason',
+      entryEndpoint: '/v1/chat/completions',
+      engineMode: 'passthrough',
+      skipReason: 'passthrough',
+      adapterContext: adapterContext as any
+    });
   });
 
   test('match hit requires execution flowId instead of falling back to unknown', async () => {

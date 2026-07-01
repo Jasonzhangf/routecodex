@@ -31,6 +31,7 @@ export const DEFAULT_SSE_PARSER_CONFIG: SseParserConfig = {
     'done',
     'error',
     'heartbeat',
+    'message',
 
     'response.created',
     'response.in_progress',

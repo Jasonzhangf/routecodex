@@ -11,20 +11,16 @@ export function recordServertoolEngineMatchSkipped(args: {
   stageRecorder?: StageRecorder;
   adapterContext?: AdapterContext;
 }): void {
-  const skipReason = args.skipReason.trim();
-  if (!skipReason) {
-    throw new Error('Servertool match skipped requires native skipReason');
-  }
   args.stageRecorder?.record('servertool.match', {
     matched: false,
     mode: args.engineMode,
-    reason: skipReason
+    reason: args.skipReason
   });
   appendServertoolMatchSkippedProgressEvent({
     requestId: args.requestId,
     entryEndpoint: args.entryEndpoint,
     adapterContext: args.adapterContext,
-    skipReason
+    skipReason: args.skipReason
   });
 }
 

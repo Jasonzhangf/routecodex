@@ -2881,6 +2881,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     assertContains(check, file, content, needle);
   }
   for (const marker of [
+    'record.skipReason.trim()',
     'createServertoolExecutionLoopStateFromNative',
     'appendExecutedToolRecordFromNative',
     'function hydrateExecutionLoopState(',
@@ -6119,11 +6120,23 @@ function checkServertoolMatchLoggingFailFast() {
       'engine-observation-shell.ts must consume native skipReason instead of deriving it from engineMode'
     );
   }
+  if (observationShellSource.includes('args.skipReason.trim()')) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'engine-observation-shell.ts must not normalize native skipReason in TS'
+    );
+  }
   const engineOrchestrationSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`);
   if (engineOrchestrationSource.includes("engineSkipPlan.skipReason ?? 'no_execution'")) {
     fail(
       'servertool-match-log-fail-fast',
       'engine-orchestration-shell.ts must not fallback missing native skipReason to no_execution'
+    );
+  }
+  if (engineOrchestrationSource.includes('engineSkipPlan.skipReason.trim()')) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'engine-orchestration-shell.ts must not normalize native skipReason in TS'
     );
   }
   assertContains(

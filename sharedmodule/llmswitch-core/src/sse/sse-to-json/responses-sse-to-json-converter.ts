@@ -252,14 +252,12 @@ export class ResponsesSseToJsonConverterRefactored {
         yield chunk;
         continue;
       }
-      yield Buffer.from(this.serializeEventToSSE(chunk as Partial<ResponsesSseEvent> | Record<string, unknown>));
+      if (chunk instanceof Uint8Array) {
+        yield Buffer.from(chunk);
+        continue;
+      }
+      throw new Error('Responses SSE decode requires wire string, Buffer, or Uint8Array chunks');
     }
-  }
-
-  private serializeEventToSSE(event: Partial<ResponsesSseEvent> | Record<string, unknown>): string {
-    const type = typeof event.type === 'string' ? event.type : 'data';
-    const data = event.data ? JSON.stringify(event.data) : '';
-    return `event: ${type}\ndata: ${data}\n\n`;
   }
 
   private async *captureChunkStrings(
@@ -281,7 +279,11 @@ export class ResponsesSseToJsonConverterRefactored {
         ? chunk
         : Buffer.isBuffer(chunk)
           ? chunk.toString()
-          : this.serializeEventToSSE(chunk as Partial<ResponsesSseEvent> | Record<string, unknown>);
+          : chunk instanceof Uint8Array
+            ? Buffer.from(chunk).toString()
+            : (() => {
+                throw new Error('Responses SSE decode requires wire string, Buffer, or Uint8Array chunks');
+              })();
       rawChunks.push(text);
       yield text;
     }

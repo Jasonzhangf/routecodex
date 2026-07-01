@@ -187,6 +187,18 @@ for (const forbidden of [
   }
 }
 
+const responsesSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts');
+for (const forbidden of [
+  'serializeEventToSSE(',
+  "const type = typeof event.type === 'string' ? event.type : 'data';",
+  "const data = event.data ? JSON.stringify(event.data) : '';",
+  'event: ${type}\\ndata: ${data}\\n\\n',
+]) {
+  if (responsesSseToJsonConverter.includes(forbidden)) {
+    failures.push(`Responses SSE decode must not synthesize wire frames in TS: ${forbidden}`);
+  }
+}
+
 const sseTypesIndex = read('sharedmodule/llmswitch-core/src/sse/types/index.ts');
 for (const forbidden of [
   'DEFAULT_RESPONSES_CONVERSION_CONFIG',

@@ -429,7 +429,8 @@ describe('servertool CLI native bridge', () => {
       },
       execution: {
         flowId: 'web_search_error'
-      }
+      },
+      handlerErrorMessage: 'unknown'
     });
 
     expect(

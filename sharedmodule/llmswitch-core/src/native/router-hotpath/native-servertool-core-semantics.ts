@@ -2112,7 +2112,7 @@ export function planServertoolEngineSkipWithNative(input: {
   }
   return {
     action: record.action,
-    ...(typeof record.skipReason === 'string' && record.skipReason.trim()
+    ...(typeof record.skipReason === 'string'
       ? { skipReason: record.skipReason }
       : {})
   };

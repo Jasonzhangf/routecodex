@@ -90,6 +90,14 @@ Focused tests to use as slice gates:
 
 ## Slice Log
 
+### 2026-07-01 Responses SSE decode TS wire synthesis removal slice
+
+- Red evidence: new focused `responses-sse-decode-no-ts-wire-synthesis` first proved object-mode AsyncIterable chunks were serialized by TS into `event/data` wire frames and could materialize as successful `response.done`; `verify:sse-architecture-boundary` also failed on `serializeEventToSSE()` and fallback `event: data` markers.
+- Fix: `responses-sse-to-json-converter.ts` now accepts only wire string, `Buffer`, or `Uint8Array` chunks. Object-mode chunks fail fast with `Responses SSE decode requires wire string, Buffer, or Uint8Array chunks`; the local `serializeEventToSSE()` helper was physically removed.
+- Boundary adjustment: the shared parser allow-list now accepts the SSE spec default `message` event so data-only `[DONE]` transport frames can pass through to the Rust materializer without TS interpreting them.
+- Verification: focused Jest `responses-sse-decode-no-ts-wire-synthesis + responses-sse-native-materialize + responses-sse-custom-tool-call-materialize` PASS 4/4; `npm run verify:sse-architecture-boundary` PASS; `npm run verify:responses-sse-business-module` PASS; `npm run verify:hub-response-provider-sse-materialization` PASS; sharedmodule/root `tsc --noEmit --pretty false` PASS; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; `npm run build:base` PASS; `git diff --check` PASS.
+- Replay evidence: real 4444 provider-response sample `~/.rcc/codex-samples/openai-responses/ports/4444/req_1782794773576_s7okhowx0/provider-response_1.json` replayed through `ResponsesSseToJsonConverter` from wire `bodyText` with `entryPort=4444`, `status=completed`, and `outputCount=2`. Full goal completion still requires broader live replay after handler/bridge/provider-response closeout.
+
 ### 2026-07-01 Responses response bridge toolsRaw fallback removal slice
 
 - Red evidence: focused `responses-response-bridge.request-context-resolution` first failed because `normalizeResponsesClientPayloadForHttp()` accepted `requestContext.context.clientToolsRaw` or `requestContext.payload.tools` when `context.toolsRaw` was missing, and `verify:responses-handler-single-bridge-surface` failed on the old fallback markers.

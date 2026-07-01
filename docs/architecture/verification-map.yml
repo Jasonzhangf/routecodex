@@ -1974,6 +1974,7 @@ verification:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
     contract:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
+      - tests/sharedmodule/responses-sse-decode-no-ts-wire-synthesis.spec.ts
       - tests/sharedmodule/responses-sse-native-materialize.spec.ts
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     integration: []
