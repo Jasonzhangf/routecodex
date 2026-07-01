@@ -154,7 +154,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
     expect(result.decision.routeName).toBe('default');
   });
 
-  it('keeps the last default-pool provider selectable after recoverable provider errors without cooling it down', () => {
+  it('keeps the last default-pool provider selectable when provider errors explicitly do not affect health', () => {
     const providerKey = 'recoverable.key1.gpt-test';
     const engine = new VirtualRouterEngine();
     engine.initialize({
@@ -227,7 +227,7 @@ describe('virtual router native provider unavailable cooldown details', () => {
     expect(result.decision.routeName).toBe('default');
   });
 
-  it('keeps selecting the priority provider after recoverable errors instead of demoting it', () => {
+  it('keeps selecting the priority provider when provider errors explicitly do not affect health', () => {
     const providerA = 'recoverable.key1.gpt-test';
     const providerB = 'recoverable.key2.gpt-test';
     const engine = new VirtualRouterEngine();

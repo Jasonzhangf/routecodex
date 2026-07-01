@@ -118,6 +118,61 @@ pub struct RuntimeControl {
     pub traffic_governor: TrafficGovernorControl,
 }
 
+/// Provider observation — selected target and provider/runtime facts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderObservation {
+    pub target: Option<Value>,
+    pub provider_key: Option<String>,
+    pub assigned_model_id: Option<String>,
+    pub model_id: Option<String>,
+    pub client_model_id: Option<String>,
+    pub compatibility_profile: Option<String>,
+    pub response_semantics: Option<Value>,
+    pub finish_reason: Option<String>,
+}
+
+/// Response observation — response-side closeout facts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponseObservation {
+    pub response_id: Option<String>,
+    pub status: Option<String>,
+    pub finish_reason: Option<String>,
+    pub protocol_kind: Option<String>,
+}
+
+/// Closeout status — finalize/release status only.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseoutStatus {
+    pub finalized: Option<bool>,
+    pub released: Option<bool>,
+    pub released_at: Option<u64>,
+    pub release_reason: Option<String>,
+    pub released_by_stage: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HubStageTopEntry {
+    pub stage: String,
+    pub total_ms: f64,
+    pub count: Option<u32>,
+    pub avg_ms: Option<f64>,
+    pub max_ms: Option<f64>,
+}
+
+/// Debug snapshot — diagnostics only, never routing/runtime truth.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSnapshot {
+    pub snapshot_id: Option<String>,
+    pub bridge_history: Option<Vec<Value>>,
+    pub trace_markers: Option<Vec<Value>>,
+    pub hub_stage_top: Option<Vec<HubStageTopEntry>>,
+}
+
 /// Traffic governor control — 独立基础设施的配置接口
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -148,4 +203,12 @@ pub struct MetadataCenter {
     pub continuation_context: ContinuationContext,
     #[serde(default)]
     pub runtime_control: RuntimeControl,
+    #[serde(default)]
+    pub provider_observation: ProviderObservation,
+    #[serde(default)]
+    pub response_observation: ResponseObservation,
+    #[serde(default)]
+    pub closeout_status: CloseoutStatus,
+    #[serde(default)]
+    pub debug_snapshot: DebugSnapshot,
 }

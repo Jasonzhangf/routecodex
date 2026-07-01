@@ -28,6 +28,7 @@ import {
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
+import { writeMetadataCenterSlot } from './metadata-center/dualwrite-api.js';
 import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
 
 // Import from new executor submodules
@@ -150,12 +151,14 @@ export function writeProviderProtocolRuntimeControl(
       );
     }
   }
-  center.writeRuntimeControl(
-    'providerProtocol',
-    providerProtocol,
-    REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER,
-    'request provider protocol'
-  );
+  writeMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
+    key: 'providerProtocol',
+    value: providerProtocol,
+    writer: REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER,
+    reason: 'request provider protocol'
+  });
 }
 
 function shouldCaptureResponsesConversationForEntry(entryEndpoint?: string): boolean {

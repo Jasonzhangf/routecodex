@@ -116,6 +116,10 @@ function isRetryableProviderResponseProcessingFailure(args: {
   if (!args.error || typeof args.error !== 'object') {
     return false;
   }
+  const errorObject =
+    args.error instanceof Error
+      ? args.error as Error & Record<string, unknown>
+      : args.error as Record<string, unknown>;
   const record = args.error as {
     code?: unknown;
     upstreamCode?: unknown;
@@ -126,7 +130,7 @@ function isRetryableProviderResponseProcessingFailure(args: {
   };
   if (typeof record.requestExecutorProviderErrorStage !== 'string') {
     const message = args.error instanceof Error ? args.error.message : String(args.error ?? '');
-    remapBridgeSseErrorToHttp(record as Record<string, unknown>, message);
+    remapBridgeSseErrorToHttp(errorObject, message);
   }
   const statusCode = typeof record.statusCode === 'number'
     ? record.statusCode
@@ -399,7 +403,11 @@ export async function processProviderSendFailure(
     delayMs: providerSwitchBackoffDelayMs,
     attempt: args.attempt
   });
-  const switchWaitMs = args.consumeProviderTransportBackoffMs?.() ?? providerSwitchBackoffDelayMs;
+  const consumedTransportWaitMs = args.consumeProviderTransportBackoffMs?.();
+  const switchWaitMs =
+    typeof consumedTransportWaitMs === 'number' && Number.isFinite(consumedTransportWaitMs)
+      ? Math.max(0, consumedTransportWaitMs, providerSwitchBackoffDelayMs)
+      : providerSwitchBackoffDelayMs;
   if (switchWaitMs > 0) {
     args.logStage('provider.switch_backoff_wait', args.requestId, {
       providerKey: args.providerKey,

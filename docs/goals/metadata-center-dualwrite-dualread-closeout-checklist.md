@@ -2,13 +2,13 @@
 
 ## Current Contract Gap
 
-Current metadata center state is transitional, not complete dual-write / dual-read.
+Current metadata center state is transitional, with the unified dual-write / dual-read API slice active and the primary runtime-control writer migration complete.
 
-- JS `MetadataCenter` is the primary registry and write surface.
-- Rust receives `metadataCenterSnapshot` and has partial typed readers.
-- Some runtime controls still read from `metadata.runtime_control`, `metadata.__rt`, or top-level projections.
-- `docs/architecture/mainline-call-map.yml` marks `metadata.center.mainline` step `mtc-03` as `partial`.
-- `docs/architecture/function-map.yml` splits metadata center into transitional sub-features, but does not yet define a single dual-write API owner.
+- JS `MetadataCenter` is a migration mirror and write-through shell.
+- Rust receives `metadataCenterSnapshot` and has typed readers/builders for the declared manifest families.
+- Runtime-control writes in live source are gated through `writeMetadataCenterSlot(...)` or explicitly named migration-local shells that update the Rust-readable snapshot in the same operation.
+- `docs/architecture/mainline-call-map.yml` now marks `metadata.center.mainline` step `mtc-03` as `anchored`.
+- `docs/architecture/function-map.yml` defines `hub.metadata_center_dualwrite_api`; remaining work is deleting JS mirror / payload residue after full Rust owner closeout.
 
 Target contract:
 
@@ -26,7 +26,7 @@ all metadata writes
 
 ### Function Map Changes
 
-Add or promote a dedicated feature row:
+Dedicated feature row is now present:
 
 ```yaml
 feature_id: hub.metadata_center_dualwrite_api
@@ -96,7 +96,7 @@ Add the same feature to `docs/architecture/verification-map.yml` with:
 
 ### Gate Changes
 
-Create `scripts/verify-metadata-center-dualwrite-api.mjs`.
+`scripts/architecture/verify-metadata-center-dualwrite-api.mjs` exists and gates the active API slice.
 
 Gate must fail on:
 
@@ -106,12 +106,17 @@ Gate must fail on:
 - new metadata families/slots in TS without matching Rust types.
 - Rust metadata center fields without matching TS types.
 - stopless/servertool control writes outside the unified API.
+- request-stage runtime-control writer bypassing `writeMetadataCenterSlot`.
+- missing dual-write contract tests for Rust write-result application.
 
-Gate allowlist must be explicit and temporary:
+Gate allowlist is explicit and temporary:
 
-- existing migration projection in `hub-pipeline-execute-request-stage.ts`.
-- existing tests that assert legacy residue is ignored or migrated.
-- documented bridge code that only serializes the center snapshot for Rust, not business logic.
+- `src/server/runtime/http-server/metadata-center/dualwrite-api.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts`
+- `sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts`
+
+Any other live source call to `writeRequestTruth` / `writeContinuationContext` / `writeRuntimeControl` / `writeProviderObservation` / `writeResponseObservation` / `writeCloseoutStatus` / `writeDebugSnapshot` fails the gate.
 
 ## Phase 1: Single API Shape
 
@@ -185,7 +190,6 @@ These are in scope for unified API:
 - `stoplessGoalStatus`
 - `stoplessGoal`
 - `stopless`
-- `stopMessageState`
 - `serverToolLoopState`
 - `stopMessageCompareContext`
 - `stopMessageEnabled`
@@ -198,15 +202,14 @@ These are in scope for unified API:
 
 `runtime_control.stopless` is canonical.
 
-Migration mirrors:
+Migration mirror:
 
 - `serverToolLoopState`
-- `stopMessageState`
 
 Required behavior:
 
 - stopless write goes through unified API once.
-- API materializes any required migration mirrors.
+- API materializes only explicitly required migration mirrors.
 - Rust reader consumes canonical `stopless` first.
 - legacy mirrors are read only when canonical stopless is absent.
 - after Rust closeout, mirror writes and reads are physically deleted.
@@ -215,7 +218,7 @@ Required behavior:
 
 1. `retryProviderKey`, `routeHint`, `preselectedRoute`
 2. `stopMessageEnabled`, `stopMessageExcludeDirect`
-3. `stopless`, `serverToolLoopState`, `stopMessageState`, `stopMessageCompareContext`
+3. `stopless`, `serverToolLoopState`, `stopMessageCompareContext`
 4. `serverToolFollowup`, `serverToolFollowupSource`, `stoplessGoalStatus`, `stoplessGoal`
 5. `provider_observation`
 6. `client_attachment_scope`
@@ -296,10 +299,10 @@ Final deletion targets:
 
 ## Completion Criteria
 
-- `metadata.center.mainline` `mtc-03` becomes `anchored`.
+- `metadata.center.mainline` `mtc-03` is `anchored`.
 - `hub.metadata_center_dualwrite_api` exists in function map and verification map.
-- `verify:metadata-center-dualwrite-api` passes.
+- `verify:metadata-center-dualwrite-api` passes and scans live source for direct family writes outside the unified API / migration-local shells.
 - all metadata center families and slots have TS + Rust type/read/write coverage.
-- stopless live sample shows repeatCount progresses `1 -> 2 -> 3` through center state.
+- stopless blackbox samples show repeatCount progresses through MetadataCenter state and terminal stop returns visible text instead of hard empty stop.
 - no new direct payload control writes are accepted by gate.
-- JS mirror removal plan is explicit before the final Rust-only closeout.
+- JS mirror removal plan remains explicit before the final Rust-only closeout.

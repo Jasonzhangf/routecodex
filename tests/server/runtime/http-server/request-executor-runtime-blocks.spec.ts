@@ -1,11 +1,33 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import {
   logProviderRetrySwitchCompact,
+  resolveRequestExecutorTrafficRuntimeProfile,
   shouldBypassProviderResponseConversion
 } from '../../../../src/server/runtime/http-server/executor/request-executor-runtime-blocks.js';
 import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('request-executor-runtime-blocks', () => {
+  test('fails fast instead of synthesizing traffic runtime profile when handle.runtime is missing', () => {
+    const handle = {
+      runtimeKey: 'missing-runtime',
+      providerId: 'mock',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-responses',
+      instance: {
+        initialize: async () => undefined,
+        cleanup: async () => undefined,
+        processIncoming: async () => ({})
+      }
+    };
+
+    expect(() => resolveRequestExecutorTrafficRuntimeProfile(
+      'missing-runtime',
+      handle as never,
+      'mock.key1.gpt-5.5'
+    )).toThrow('RequestExecutor traffic runtime profile requires handle.runtime');
+  });
+
   test('caps attempt counters in provider-switch log when blocking recoverable retries exceed budget', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {

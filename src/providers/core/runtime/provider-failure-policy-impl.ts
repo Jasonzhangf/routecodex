@@ -132,11 +132,26 @@ function isPromptTooLongLike(args: {
     typeof args.reason === 'string' && args.reason.trim()
       ? args.reason
       : (args.error as { message?: unknown } | undefined)?.message;
-  const message = typeof rawMessage === 'string' ? rawMessage.toLowerCase() : '';
+  const details =
+    args.error && typeof args.error === 'object' && !Array.isArray(args.error)
+      ? (args.error as { details?: unknown }).details
+      : undefined;
+  const detailRecord =
+    details && typeof details === 'object' && !Array.isArray(details)
+      ? details as Record<string, unknown>
+      : undefined;
+  const detailReason = typeof detailRecord?.reason === 'string' ? detailRecord.reason : '';
+  const detailUpstreamCode = typeof detailRecord?.upstreamCode === 'string' ? detailRecord.upstreamCode : '';
+  const message = [
+    typeof rawMessage === 'string' ? rawMessage : '',
+    detailReason,
+    detailUpstreamCode
+  ].join(' ').toLowerCase();
   return (
     message.includes('prompt is too long')
     || message.includes('maximum context')
     || message.includes('max context')
+    || message.includes('context_length')
     || message.includes('context length')
     || message.includes('context window')
     || message.includes('input tokens exceeds')
@@ -798,18 +813,19 @@ export function isProviderFailureHealthNeutral(args: {
   if (isProviderFailureClientDisconnect(args.error)) {
     return true;
   }
-  if (args.classification === 'recoverable') {
-    // Recoverable failures must reroute or block the current request chain,
-    // but they must not poison VR health across later requests.
+  if (isPromptTooLongLike({
+    error: args.error,
+    statusCode,
+    errorCode,
+    upstreamCode,
+    reason
+  })) {
     return true;
   }
   if (errorCode === 'CLIENT_TOOL_ARGS_INVALID') {
     return true;
   }
   if (upstreamCode === 'CLIENT_INJECT_FAILED') {
-    return true;
-  }
-  if (isProviderFailureNetworkTransportLike(args.error)) {
     return true;
   }
   return false;

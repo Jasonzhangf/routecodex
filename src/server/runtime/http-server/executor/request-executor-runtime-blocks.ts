@@ -93,35 +93,11 @@ export function resolveRequestExecutorTrafficRuntimeProfile(
   if (runtimeCandidate && typeof runtimeCandidate === 'object') {
     return runtimeCandidate;
   }
-  const providerIdFallback = (() => {
-    if (typeof handle.providerId === 'string' && handle.providerId.trim()) {
-      return handle.providerId.trim();
-    }
-    if (typeof providerKey === 'string' && providerKey.includes('.')) {
-      const [head] = providerKey.split('.');
-      if (head && head.trim()) {
-        return head.trim();
-      }
-    }
-    return 'unknown';
-  })();
-  const providerTypeFallback = (
-    typeof handle.providerType === 'string' && handle.providerType.trim()
-      ? handle.providerType.trim().toLowerCase()
-      : 'openai'
-  ) as ProviderRuntimeProfile['providerType'];
-  return {
-    runtimeKey,
-    providerId: providerIdFallback,
-    providerKey,
-    providerType: providerTypeFallback,
-    providerFamily: handle.providerFamily,
-    endpoint: '',
-    auth: {
-      type: 'apikey',
-      value: ''
-    }
-  };
+  throw new Error(
+    `RequestExecutor traffic runtime profile requires handle.runtime for runtimeKey=${runtimeKey}${
+      providerKey ? ` providerKey=${providerKey}` : ''
+    }`
+  );
 }
 
 function isAlreadyClientFinalResponseBody(body: unknown): boolean {

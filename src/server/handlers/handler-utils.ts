@@ -20,6 +20,7 @@ import {
   resolveEffectiveRequestId
 } from '../utils/request-id-manager.js';
 import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
+import { writeMetadataCenterSlot } from '../runtime/http-server/metadata-center/dualwrite-api.js';
 import { readRuntimeControlProjection } from '../runtime/http-server/metadata-center/request-truth-readers.js';
 export { sendPipelineResponse } from './handler-response-utils.js';
 import { assertClientResponseHasNoInternalCarriers as assertClientErrorBodyHasNoInternalCarriers } from './handler-response-utils.js';
@@ -842,24 +843,28 @@ export function buildHandlerPipelineMetadata(
       ? internalMetadata.requestId.trim()
       : undefined;
   if (requestId && !existingRequestTruth.requestId) {
-    metadataCenter.writeRequestTruth(
-      'requestId',
-      requestId,
-      HANDLER_REQUEST_TRUTH_WRITER,
-      'handler canonical request id'
-    );
+    writeMetadataCenterSlot({
+      target: merged,
+      family: 'request_truth',
+      key: 'requestId',
+      value: requestId,
+      writer: HANDLER_REQUEST_TRUTH_WRITER,
+      reason: 'handler canonical request id'
+    });
   }
   const clientRequestId =
     typeof internalMetadata.clientRequestId === 'string' && internalMetadata.clientRequestId.trim()
       ? internalMetadata.clientRequestId.trim()
       : undefined;
   if (clientRequestId && !existingRequestTruth.clientRequestId) {
-    metadataCenter.writeRequestTruth(
-      'clientRequestId',
-      clientRequestId,
-      HANDLER_REQUEST_TRUTH_WRITER,
-      'handler canonical client request id'
-    );
+    writeMetadataCenterSlot({
+      target: merged,
+      family: 'request_truth',
+      key: 'clientRequestId',
+      value: clientRequestId,
+      writer: HANDLER_REQUEST_TRUTH_WRITER,
+      reason: 'handler canonical client request id'
+    });
   }
   const portContext = internalMetadata.portContext && typeof internalMetadata.portContext === 'object' && !Array.isArray(internalMetadata.portContext)
     ? (internalMetadata.portContext as Record<string, unknown>)
@@ -880,12 +885,14 @@ export function buildHandlerPipelineMetadata(
       || internalMetadata.outboundStream === true
         ? 'stream'
         : 'non_stream';
-    metadataCenter.writeRuntimeControl(
-      'streamIntent',
-      streamIntent,
-      HANDLER_RUNTIME_CONTROL_WRITER,
-      'handler stream intent'
-    );
+    writeMetadataCenterSlot({
+      target: merged,
+      family: 'runtime_control',
+      key: 'streamIntent',
+      value: streamIntent,
+      writer: HANDLER_RUNTIME_CONTROL_WRITER,
+      reason: 'handler stream intent'
+    });
   }
   const clientAbortSignal =
     internalMetadata.clientConnectionState
@@ -893,12 +900,14 @@ export function buildHandlerPipelineMetadata(
     && !Array.isArray(internalMetadata.clientConnectionState)
       ? (internalMetadata.clientConnectionState as { abortSignal?: AbortSignal }).abortSignal
       : undefined;
-  metadataCenter.writeRuntimeControl(
-    'clientAbort',
-    clientAbortSignal?.aborted === true,
-    HANDLER_RUNTIME_CONTROL_WRITER,
-    'handler client abort state'
-  );
+  writeMetadataCenterSlot({
+    target: merged,
+    family: 'runtime_control',
+    key: 'clientAbort',
+    value: clientAbortSignal?.aborted === true,
+    writer: HANDLER_RUNTIME_CONTROL_WRITER,
+    reason: 'handler client abort state'
+  });
   delete merged.stream;
   delete merged.inboundStream;
   delete merged.outboundStream;

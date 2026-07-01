@@ -161,15 +161,15 @@ Current schema gap:
     - current write owners are request/runtime entry shells (`src/server/runtime/http-server/index.ts`) plus the narrow stopless-directive request capture in `src/server/runtime/http-server/executor-metadata.ts`
     - top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` mirrors are stale residues and must not be treated as compatibility projections, authoritative write points, or repair targets
   - `providerProtocol`
-    - current repo still carries this mainly as protocol-shell transport on top-level metadata / normalized request, not as a completed runtime-control-first write path
-    - until that migration lands, docs and gates must not overclaim `runtime_control.providerProtocol` as fully anchored owner truth
+    - current request-executor and request-route owners write this through the unified MetadataCenter API and dual-write Rust snapshot
+    - top-level protocol-shell residue is no longer the owner truth for request-route control
 - this first batch is not speculative. It is directly evidenced by current writers/readers:
   - `src/server/runtime/http-server/executor/request-executor-attempt-state.ts`
   - `src/server/runtime/http-server/index.ts`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
-- the remaining gap is no longer carrier availability. The gap is that production writers/readers still mostly materialize these controls through flat metadata or request-semantics residue instead of writing/reading the new center family first
-- this is why `mtc-03` is still only `partial`: the first-class center contract now exists, but the remaining request-route-control writers have not yet been migrated onto it
+- the remaining gap is no longer carrier availability or primary runtime-control write ownership. The remaining closeout is deleting JS mirror / payload residue after all Rust consumers are promoted.
+- `mtc-03` is anchored: the first-class center contract exists, live runtime-control writers use the unified API / migration-local shells, and the gate rejects new direct family writes outside that surface.
 
 ### `provider_observation`
 

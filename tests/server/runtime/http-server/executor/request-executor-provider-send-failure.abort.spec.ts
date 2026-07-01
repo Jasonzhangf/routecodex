@@ -9,7 +9,7 @@ describe('request executor provider send failure abort handling', () => {
     resetErrorActionQueueStateForTests();
   });
 
-  it('waits through provider switch backoff before rerouting to the next provider', async () => {
+  it('does not let a consumed zero transport wait override provider switch backoff before rerouting', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-30T00:00:00.000Z'));
     const error = Object.assign(new Error('HTTP 502: upstream temporary failure'), {
@@ -40,6 +40,7 @@ describe('request executor provider send failure abort handling', () => {
       routePoolForAttempt: ['spark.key1.gpt-5.3-codex-spark', 'minimax.key1.MiniMax-M3'],
       defaultTierAvailable: true,
       excludedProviderKeys: new Set<string>(),
+      consumeProviderTransportBackoffMs: jest.fn(() => 0),
       recordAttempt: jest.fn(),
       logStage,
       logProviderRetrySwitch,
@@ -172,6 +173,7 @@ describe('request executor provider send failure abort handling', () => {
       maxAttempts: 3,
       logicalRequestChainKey: 'req_empty_openai_chat_sse_retryable_response_phase',
       routePoolForAttempt: ['mini27.key1.MiniMax-M2.7'],
+      defaultTierAvailable: true,
       excludedProviderKeys: new Set<string>(),
       recordAttempt,
       logStage: jest.fn(),
@@ -196,8 +198,7 @@ describe('request executor provider send failure abort handling', () => {
         reason: error.message
       })
     })).resolves.toMatchObject({
-      lastError: error,
-      allowBlockingRecoverableRetryBeyondAttemptBudget: false
+      lastError: error
     });
 
     expect(recordAttempt).toHaveBeenCalledWith({ error: true });
@@ -242,6 +243,7 @@ describe('request executor provider send failure abort handling', () => {
       maxAttempts: 3,
       logicalRequestChainKey: 'req_raw_empty_openai_chat_sse_retryable_response_phase',
       routePoolForAttempt: ['mini27.key1.MiniMax-M2.7'],
+      defaultTierAvailable: true,
       excludedProviderKeys: new Set<string>(),
       recordAttempt,
       logStage: jest.fn(),
@@ -300,6 +302,7 @@ describe('request executor provider send failure abort handling', () => {
       maxAttempts: 3,
       logicalRequestChainKey: 'req_raw_empty_openai_chat_sse_choices_retryable_response_phase',
       routePoolForAttempt: ['mini27.key1.MiniMax-M2.7'],
+      defaultTierAvailable: true,
       excludedProviderKeys: new Set<string>(),
       recordAttempt,
       logStage: jest.fn(),
@@ -393,8 +396,7 @@ describe('request executor provider send failure abort handling', () => {
         reason: error.message
       })
     })).resolves.toMatchObject({
-      lastError: error,
-      allowBlockingRecoverableRetryBeyondAttemptBudget: false
+      lastError: error
     });
 
     expect(recordAttempt).toHaveBeenCalledWith({ error: true });

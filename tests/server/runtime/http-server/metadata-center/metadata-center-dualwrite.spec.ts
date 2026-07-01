@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  applyMetadataCenterRustWriteResult,
   buildMetadataCenterRustSnapshot,
   readMetadataCenterSlot,
   writeMetadataCenterSlot
@@ -98,6 +99,62 @@ describe('metadata center dual-write API', () => {
     })).toEqual(expect.objectContaining({ repeatCount: 1 }));
   });
 
+  it('applies Rust write result into both JS mirror and Rust-readable snapshot', () => {
+    const target: Record<string, unknown> = {};
+    seedRequestTruth(target, 'req-rust-write', 'sess-rust-write');
+
+    applyMetadataCenterRustWriteResult({
+      target,
+      snapshot: {
+        runtimeControl: {
+          stopless: {
+            flowId: 'stop_message_flow',
+            repeatCount: 2,
+            maxRepeats: 3,
+            triggerHint: 'invalid_schema',
+            active: true
+          }
+        },
+        providerObservation: {
+          providerKey: 'provider.key.model'
+        },
+        responseObservation: {
+          finishReason: 'tool_calls'
+        },
+        closeoutStatus: {
+          finalized: true
+        }
+      },
+      writer: TEST_WRITER,
+      reason: 'rust write result contract'
+    });
+
+    expect(MetadataCenter.read(target)?.readRuntimeControl().stopless).toEqual(
+      expect.objectContaining({
+        repeatCount: 2,
+        maxRepeats: 3,
+        triggerHint: 'invalid_schema'
+      })
+    );
+    expect(MetadataCenter.read(target)?.readProviderObservation().providerKey).toBe('provider.key.model');
+    expect(MetadataCenter.read(target)?.readResponseObservation().finishReason).toBe('tool_calls');
+    expect(MetadataCenter.read(target)?.readCloseoutStatus().finalized).toBe(true);
+    expect(buildMetadataCenterRustSnapshot(target)).toEqual(expect.objectContaining({
+      runtimeControl: expect.objectContaining({
+        stopless: expect.objectContaining({ repeatCount: 2 })
+      }),
+      providerObservation: expect.objectContaining({
+        providerKey: 'provider.key.model'
+      }),
+      responseObservation: expect.objectContaining({
+        finishReason: 'tool_calls'
+      }),
+      closeoutStatus: expect.objectContaining({
+        finalized: true
+      })
+    }));
+  });
+
   it('does not materialize legacy stopmessage mirrors from the canonical stopless slot', () => {
     const target: Record<string, unknown> = {};
 
@@ -123,6 +180,43 @@ describe('metadata center dual-write API', () => {
     expect(MetadataCenter.read(target)?.readRuntimeControl().serverToolLoopState).toBeUndefined();
     expect((buildMetadataCenterRustSnapshot(target).runtimeControl as any)?.serverToolLoopState).toBeUndefined();
     expect((buildMetadataCenterRustSnapshot(target).runtimeControl as any)?.stopMessageState).toBeUndefined();
+  });
+
+  it('dual-writes explicit stopless migration mirror and compare context only when the API is asked to write them', () => {
+    const target: Record<string, unknown> = {};
+
+    writeMetadataCenterSlot({
+      target,
+      family: 'runtime_control',
+      key: 'serverToolLoopState',
+      value: {
+        flowId: 'stop_message_flow',
+        repeatCount: 2,
+        maxRepeats: 3
+      },
+      writer: TEST_WRITER
+    });
+    writeMetadataCenterSlot({
+      target,
+      family: 'runtime_control',
+      key: 'stopMessageCompareContext',
+      value: {
+        decision: 'trigger',
+        reason: 'stop_schema_missing',
+        used: 2,
+        remaining: 1
+      },
+      writer: TEST_WRITER
+    });
+
+    expect(MetadataCenter.read(target)?.readRuntimeControl()).toEqual(expect.objectContaining({
+      serverToolLoopState: expect.objectContaining({ repeatCount: 2 }),
+      stopMessageCompareContext: expect.objectContaining({ reason: 'stop_schema_missing' })
+    }));
+    expect(buildMetadataCenterRustSnapshot(target).runtimeControl).toEqual(expect.objectContaining({
+      serverToolLoopState: expect.objectContaining({ maxRepeats: 3 }),
+      stopMessageCompareContext: expect.objectContaining({ used: 2 })
+    }));
   });
 
   it('keeps runtime control isolated by request-local target and explicit request/session scope', () => {

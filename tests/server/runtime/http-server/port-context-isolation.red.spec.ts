@@ -25,7 +25,9 @@ describe('http server port context isolation red tests', () => {
       localPort: 5555,
       matchedPort: 5555,
       routingPolicyGroup: 'gateway_priority_5555',
-      logNamespace: 'server-5555'
+      logNamespace: 'server-5555',
+      stopMessageEnabled: true,
+      stopMessageExcludeDirect: true
     });
   });
 

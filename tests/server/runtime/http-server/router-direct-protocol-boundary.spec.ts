@@ -171,6 +171,64 @@ describe('router direct protocol boundary', () => {
     expect(readRuntimeControlProjection(relayMetadata).preselectedRoute).toEqual(preselectedRoute);
   });
 
+  it('writes preselected provider protocol from provider runtime when target has no outboundProfile', async () => {
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    const server = new RouteCodexHttpServer(createRouterServer());
+    attachRouterPort(server as any);
+    (server as any).providerHandles = new Map([[
+      'minimax.key1.MiniMax-M3',
+      {
+        runtimeKey: 'minimax.key1.MiniMax-M3',
+        providerId: 'minimax',
+        providerType: 'anthropic',
+        providerFamily: 'anthropic',
+        providerProtocol: 'anthropic-messages',
+        runtime: {},
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: async () => ({ status: 200, data: { ok: true } }),
+        },
+      },
+    ]]);
+    const preselectedRoute = {
+      target: {
+        providerKey: 'minimax.key1.MiniMax-M3',
+        providerType: 'anthropic',
+        runtimeKey: 'minimax.key1.MiniMax-M3',
+        modelId: 'MiniMax-M3',
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: ['minimax.key1.MiniMax-M3'],
+        poolId: 'gateway-priority-5555-priority-thinking',
+        reasoning: 'thinking:last-tool-thinking',
+      },
+      diagnostics: { reused: true },
+    };
+    jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: false,
+      reason: 'protocol mismatch: inbound=openai-responses, provider=anthropic-messages',
+      preselectedRoute,
+    } as any);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { id: 'relay_after_protocol_runtime_protocol', object: 'response' },
+      metadata: { relayed: true },
+    } as any);
+
+    await (server as any).executePortAwarePipeline(
+      5555,
+      buildResponsesInput('req_router_direct_mismatch_runtime_protocol'),
+    );
+
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    const relayMetadata = executePipelineSpy.mock.calls[0]?.[0]?.metadata as Record<string, unknown>;
+    const runtimeControl = readRuntimeControlProjection(relayMetadata);
+    expect(runtimeControl.preselectedRoute).toEqual(preselectedRoute);
+    expect(runtimeControl.providerProtocol).toBe('anthropic-messages');
+  });
+
   it('preserves MetadataCenter routeHint when router-direct rebuilds metadata for VR', async () => {
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
     const server = new RouteCodexHttpServer(createRouterServer());

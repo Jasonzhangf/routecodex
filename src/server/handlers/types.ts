@@ -8,6 +8,7 @@ export interface PipelineExecutionInput {
   headers: Record<string, unknown>;
   query: Record<string, unknown>;
   body: unknown;
+  hubBody?: unknown;
   metadata?: Record<string, unknown>;
 }
 

@@ -138,7 +138,8 @@ describe('handler metadata boundary', () => {
       });
       expect(result.status).toBe(200);
       const input = executePipeline.mock.calls[0]?.[0] as any;
-      expect(input.body.metadata).toBeUndefined();
+      expect(input.body.metadata).toEqual({ userAgent: 'responses-sess' });
+      expect(input.hubBody.metadata).toBeUndefined();
       const runtimeControl = MetadataCenter.read(input.metadata)?.readRuntimeControl();
       expect(runtimeControl?.stopMessageEnabled).toBe(true);
       expect(input.metadata.stopMessageEnabled).toBeUndefined();
@@ -171,7 +172,8 @@ describe('handler metadata boundary', () => {
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]
       });
       const input = executePipeline.mock.calls[0]?.[0] as any;
-      expect(input.body.metadata).toBeUndefined();
+      expect(input.body.metadata).toEqual({ userAgent: 'persisted-context-must-not-leak' });
+      expect(input.hubBody.metadata).toBeUndefined();
       expect(input.metadata.responsesRequestContext).toBeUndefined();
       const center = MetadataCenter.read(input.metadata);
       const requestContextPayload = center?.readContinuationContext().responsesRequestContext?.payload;

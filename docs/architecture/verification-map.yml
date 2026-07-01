@@ -928,6 +928,7 @@ verification:
     contract:
       - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
       - tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
     integration:
       - tests/servertool/stopless-cli-continuation.spec.ts

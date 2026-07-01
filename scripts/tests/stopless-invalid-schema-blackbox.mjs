@@ -7,6 +7,7 @@ import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import express from 'express';
 import { MetadataCenter } from '../../dist/server/runtime/http-server/metadata-center/metadata-center.js';
+import { writeMetadataCenterSlot } from '../../dist/server/runtime/http-server/metadata-center/dualwrite-api.js';
 
 const REAL_CODEX_REQUEST_FIXTURE = path.resolve(
   'tests/fixtures/errorsamples/responses-request-standardization/2026-06-13-duplicate-replay-wrapper-noise/request-body.json'
@@ -75,17 +76,31 @@ function withStoplessHarnessRouteControl(input) {
   const metadata = input?.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
     ? input.metadata
     : {};
-  const center = MetadataCenter.read(metadata) ?? MetadataCenter.attach(metadata);
-  center.writeRuntimeControl('providerProtocol', STOPLESS_HARNESS_ROUTE_CONTROL.providerProtocol, {
-    module: 'scripts/tests/stopless-invalid-schema-blackbox.mjs',
-    symbol: 'withStoplessHarnessRouteControl',
-    stage: 'test'
-  }, 'stopless invalid-schema blackbox provider protocol truth');
-  center.writeRuntimeControl('preselectedRoute', STOPLESS_HARNESS_ROUTE_CONTROL.preselectedRoute, {
-    module: 'scripts/tests/stopless-invalid-schema-blackbox.mjs',
-    symbol: 'withStoplessHarnessRouteControl',
-    stage: 'test'
-  }, 'stopless invalid-schema blackbox preselected route');
+  MetadataCenter.attach(metadata);
+  writeMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
+    key: 'providerProtocol',
+    value: STOPLESS_HARNESS_ROUTE_CONTROL.providerProtocol,
+    writer: {
+      module: 'scripts/tests/stopless-invalid-schema-blackbox.mjs',
+      symbol: 'withStoplessHarnessRouteControl',
+      stage: 'test'
+    },
+    reason: 'stopless invalid-schema blackbox provider protocol truth'
+  });
+  writeMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
+    key: 'preselectedRoute',
+    value: STOPLESS_HARNESS_ROUTE_CONTROL.preselectedRoute,
+    writer: {
+      module: 'scripts/tests/stopless-invalid-schema-blackbox.mjs',
+      symbol: 'withStoplessHarnessRouteControl',
+      stage: 'test'
+    },
+    reason: 'stopless invalid-schema blackbox preselected route'
+  });
   return {
     ...input,
     metadata

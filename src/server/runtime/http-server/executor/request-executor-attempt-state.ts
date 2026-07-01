@@ -8,6 +8,7 @@ import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js
 import { resolveClientAbortSignalFromCarrier } from './request-executor-client-abort-block.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
+import { writeMetadataCenterSlot } from '../metadata-center/dualwrite-api.js';
 
 const ATTEMPT_STATE_RUNTIME_CONTROL_WRITER = {
   module: 'src/server/runtime/http-server/executor/request-executor-attempt-state.ts',
@@ -53,12 +54,14 @@ export function prepareRequestExecutorAttemptState(args: {
   args.throwIfClientAbortSignalAborted(clientAbortSignal);
 
   if (args.forcedRouteHint) {
-    metadataCenter.writeRuntimeControl(
-      'routeHint',
-      args.forcedRouteHint,
-      ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
-      'request executor forced route hint'
-    );
+    writeMetadataCenterSlot({
+      target: metadataForAttempt,
+      family: 'runtime_control',
+      key: 'routeHint',
+      value: args.forcedRouteHint,
+      writer: ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
+      reason: 'request executor forced route hint'
+    });
   }
 
   const loggerRecord =

@@ -151,7 +151,11 @@ export async function processProviderResolveFailure(
     delayMs: providerSwitchBackoffDelayMs,
     attempt: args.attempt
   });
-  const switchWaitMs = args.consumeProviderTransportBackoffMs?.() ?? providerSwitchBackoffDelayMs;
+  const consumedTransportWaitMs = args.consumeProviderTransportBackoffMs?.();
+  const switchWaitMs =
+    typeof consumedTransportWaitMs === 'number' && Number.isFinite(consumedTransportWaitMs)
+      ? Math.max(0, consumedTransportWaitMs, providerSwitchBackoffDelayMs)
+      : providerSwitchBackoffDelayMs;
   if (switchWaitMs > 0) {
     args.logStage('provider.switch_backoff_wait', args.requestId, {
       providerKey: args.providerKey,

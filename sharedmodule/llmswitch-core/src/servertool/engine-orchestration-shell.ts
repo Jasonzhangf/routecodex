@@ -111,6 +111,7 @@ export async function runServerToolOrchestrationShell(
     logStopEntry,
     logStopCompare
   });
+  let stopSignal: NonNullable<Extract<typeof preflight, { kind: 'continue' }>['stopSignal']>;
   const preflightKind = preflight.kind;
   switch (preflightKind) {
     case 'return_original_chat':
@@ -120,11 +121,11 @@ export async function runServerToolOrchestrationShell(
         executed: false
       };
     case 'continue':
+      stopSignal = preflight.stopSignal;
       break;
     default:
       throw new Error(`[servertool] invalid engine preflight result kind: ${String(preflightKind)}`);
   }
-  const stopSignal = preflight.stopSignal;
 
   const serverToolTimeoutMs = resolveServerToolTimeoutMs();
   const engineOptions: ServerSideToolEngineOptions = {
@@ -157,7 +158,10 @@ export async function runServerToolOrchestrationShell(
     engineMode: engineResult.mode,
     hasExecution: engineResult.execution != null
   });
-  const engineSkipAction = engineSkipPlan.action;
+  const engineSkipAction = engineSkipPlan.action as
+    | 'return_skipped_passthrough'
+    | 'return_skipped_no_execution'
+    | 'continue_matched_flow';
   switch (engineSkipAction) {
     case 'return_skipped_passthrough':
     case 'return_skipped_no_execution': {

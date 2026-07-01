@@ -5,6 +5,10 @@ import {
   extractSessionIdentifiersFromMetadata
 } from '../../../modules/llmswitch/bridge.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
+import {
+  bindMetadataCenterRustMirror,
+  writeMetadataCenterSlot
+} from './metadata-center/dualwrite-api.js';
 import { extractSessionClientDaemonIdFromApiKey } from '../../../utils/session-client-token.js';
 import {
   shouldTraceSessionScopeByContext
@@ -19,6 +23,18 @@ const ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER = {
   module: 'src/server/runtime/http-server/executor-metadata.ts',
   symbol: 'decorateMetadataForAttempt',
   stage: 'request_executor_attempt_metadata'
+} as const;
+
+const BUILD_REQUEST_METADATA_WRITER = {
+  module: 'src/server/runtime/http-server/executor-metadata.ts',
+  symbol: 'buildRequestMetadata',
+  stage: 'ServerReqInbound01ClientRaw'
+} as const;
+
+const BUILD_REQUEST_METADATA_INBOUND_WRITER = {
+  module: 'src/server/runtime/http-server/executor-metadata.ts',
+  symbol: 'buildRequestMetadata',
+  stage: 'HubReqInbound02Standardized'
 } as const;
 
 function logExecutorMetadataNonBlocking(
@@ -444,40 +460,34 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const center = MetadataCenter.attach(metadata);
   const initialRequestTruth = center.readRequestTruth();
   if (input.requestId && !initialRequestTruth.requestId) {
-    center.writeRequestTruth(
-      'requestId',
-      input.requestId,
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'ServerReqInbound01ClientRaw'
-      },
-      'request entry request id'
-    );
+      writeMetadataCenterSlot({
+        target: metadata,
+        family: 'request_truth',
+        key: 'requestId',
+        value: input.requestId,
+        writer: BUILD_REQUEST_METADATA_WRITER,
+        reason: 'request entry request id'
+      });
   }
   if (input.entryEndpoint && !initialRequestTruth.entryEndpoint) {
-    center.writeRequestTruth(
-      'entryEndpoint',
-      input.entryEndpoint,
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'ServerReqInbound01ClientRaw'
-      },
-      'request entry endpoint'
-    );
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'request_truth',
+      key: 'entryEndpoint',
+      value: input.entryEndpoint,
+      writer: BUILD_REQUEST_METADATA_WRITER,
+      reason: 'request entry endpoint'
+    });
   }
   if (typeof metadata.clientRequestId === 'string' && metadata.clientRequestId.trim() && !initialRequestTruth.clientRequestId) {
-    center.writeRequestTruth(
-      'clientRequestId',
-      metadata.clientRequestId.trim(),
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'ServerReqInbound01ClientRaw'
-      },
-      'request entry client request id'
-    );
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'request_truth',
+      key: 'clientRequestId',
+      value: metadata.clientRequestId.trim(),
+      writer: BUILD_REQUEST_METADATA_WRITER,
+      reason: 'request entry client request id'
+    });
   }
   const entryPortCandidate =
     typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort)
@@ -508,30 +518,26 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       );
     }
     if (!existingPortScope) {
-      center.writeRequestTruth(
-        'portScope',
-        entryPortScope,
-        {
-          module: 'src/server/runtime/http-server/executor-metadata.ts',
-          symbol: 'buildRequestMetadata',
-          stage: 'ServerReqInbound01ClientRaw'
-        },
-        'request entry port scope'
-      );
+      writeMetadataCenterSlot({
+        target: metadata,
+        family: 'request_truth',
+        key: 'portScope',
+        value: entryPortScope,
+        writer: BUILD_REQUEST_METADATA_WRITER,
+        reason: 'request entry port scope'
+      });
     }
     metadata.portScope = entryPortScope;
   }
   if (routeHint) {
-    center.writeRuntimeControl(
-      'routeHint',
-      routeHint,
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'ServerReqInbound01ClientRaw'
-      },
-      'request route hint'
-    );
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'runtime_control',
+      key: 'routeHint',
+      value: routeHint,
+      writer: BUILD_REQUEST_METADATA_WRITER,
+      reason: 'request route hint'
+    });
   }
   const requestTruthSource: Record<string, unknown> = {
     ...bodyMeta,
@@ -555,29 +561,25 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const sessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
   const currentRequestTruth = center.readRequestTruth();
   if (sessionIdentifiers.sessionId && !currentRequestTruth.sessionId) {
-    center.writeRequestTruth(
-      'sessionId',
-      sessionIdentifiers.sessionId,
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'ServerReqInbound01ClientRaw'
-      }
-    );
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'request_truth',
+      key: 'sessionId',
+      value: sessionIdentifiers.sessionId,
+      writer: BUILD_REQUEST_METADATA_WRITER
+    });
   }
   if (sessionIdentifiers.sessionId) {
     metadata.sessionId = sessionIdentifiers.sessionId;
   }
   if (sessionIdentifiers.conversationId && !currentRequestTruth.conversationId) {
-    center.writeRequestTruth(
-      'conversationId',
-      sessionIdentifiers.conversationId,
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'ServerReqInbound01ClientRaw'
-      }
-    );
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'request_truth',
+      key: 'conversationId',
+      value: sessionIdentifiers.conversationId,
+      writer: BUILD_REQUEST_METADATA_WRITER
+    });
   }
   if (sessionIdentifiers.conversationId) {
     metadata.conversationId = sessionIdentifiers.conversationId;
@@ -596,16 +598,14 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       ? center.readContinuationContext().responsesResume as Record<string, unknown>
       : undefined);
   if (responsesResumeSource) {
-    center.writeContinuationContext(
-      'responsesResume',
-      responsesResumeSource,
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'HubReqInbound02Standardized'
-      },
-      'responses resume request truth'
-    );
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'continuation_context',
+      key: 'responsesResume',
+      value: responsesResumeSource,
+      writer: BUILD_REQUEST_METADATA_INBOUND_WRITER,
+      reason: 'responses resume request truth'
+    });
     metadata.responsesResume = responsesResumeSource;
     const runtimeControl = center.readRuntimeControl();
     const responsesResumeContinuationOwner =
@@ -619,16 +619,14 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
           ? responsesResumeSource.routeHint.trim()
           : undefined;
     if (projectedRouteHint && !runtimeControl.routeHint) {
-      center.writeRuntimeControl(
-        'routeHint',
-        projectedRouteHint,
-        {
-          module: 'src/server/runtime/http-server/executor-metadata.ts',
-          symbol: 'buildRequestMetadata',
-          stage: 'HubReqInbound02Standardized'
-        },
-        'responses resume route hint'
-      );
+      writeMetadataCenterSlot({
+        target: metadata,
+        family: 'runtime_control',
+        key: 'routeHint',
+        value: projectedRouteHint,
+        writer: BUILD_REQUEST_METADATA_INBOUND_WRITER,
+        reason: 'responses resume route hint'
+      });
     }
     const projectedRetryProviderKey =
       typeof runtimeControl.retryProviderKey === 'string' && runtimeControl.retryProviderKey.trim()
@@ -638,29 +636,25 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
           ? responsesResumeSource.providerKey.trim()
           : undefined;
     if (projectedRetryProviderKey && !runtimeControl.retryProviderKey) {
-      center.writeRuntimeControl(
-        'retryProviderKey',
-        projectedRetryProviderKey,
-        {
-          module: 'src/server/runtime/http-server/executor-metadata.ts',
-          symbol: 'buildRequestMetadata',
-          stage: 'HubReqInbound02Standardized'
-        },
-        'responses resume retry provider pin'
-      );
+      writeMetadataCenterSlot({
+        target: metadata,
+        family: 'runtime_control',
+        key: 'retryProviderKey',
+        value: projectedRetryProviderKey,
+        writer: BUILD_REQUEST_METADATA_INBOUND_WRITER,
+        reason: 'responses resume retry provider pin'
+      });
     }
   }
   if (hasStoplessDirectiveInRequestPayload(input.body)) {
-    center.writeRuntimeControl(
-      'stopMessageEnabled',
-      true,
-      {
-        module: 'src/server/runtime/http-server/executor-metadata.ts',
-        symbol: 'buildRequestMetadata',
-        stage: 'ServerReqInbound01ClientRaw'
-      },
-      'request stopless directive'
-    );
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'runtime_control',
+      key: 'stopMessageEnabled',
+      value: true,
+      writer: BUILD_REQUEST_METADATA_WRITER,
+      reason: 'request stopless directive'
+    });
   }
 
   if (shouldTraceSessionScopeMetadata({
@@ -714,6 +708,7 @@ export function decorateMetadataForAttempt(
   const metadataCenter = MetadataCenter.read(base);
   if (metadataCenter) {
     MetadataCenter.bind(clone, metadataCenter);
+    bindMetadataCenterRustMirror(base, clone);
   }
   preserveLiveClientAbortCarriers({ source: base, target: clone });
   clone.retryAttempt = attempt;

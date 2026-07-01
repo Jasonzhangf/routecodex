@@ -67,15 +67,33 @@ export type MetadataCenterRustSnapshot = {
   debugSnapshot?: MetadataCenterDebugSnapshot;
 };
 
+export type MetadataCenterDualWriteEnvelope = {
+  snapshot: MetadataCenterRustSnapshot;
+  writtenFamilies: MetadataCenterFamily[];
+};
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
 }
 
-function readRustSnapshot(target: Record<string, unknown>): MetadataCenterRustSnapshot {
+export function readMetadataCenterRustMirror(target: Record<string, unknown>): MetadataCenterRustSnapshot {
   const current = Reflect.get(target, RUST_SNAPSHOT_SYMBOL);
   return asRecord(current) ? structuredClone(current) as MetadataCenterRustSnapshot : {};
+}
+
+export function bindMetadataCenterRustMirror(
+  source: Record<string, unknown> | undefined,
+  target: Record<string, unknown>
+): void {
+  if (!source) {
+    return;
+  }
+  const snapshot = Reflect.get(source, RUST_SNAPSHOT_SYMBOL);
+  if (asRecord(snapshot)) {
+    Reflect.set(target, RUST_SNAPSHOT_SYMBOL, structuredClone(snapshot));
+  }
 }
 
 function writeRustSnapshot(target: Record<string, unknown>, snapshot: MetadataCenterRustSnapshot): void {
@@ -102,7 +120,7 @@ function assertMetadataCenterScope(args: {
   }
 
   const centerTruth = MetadataCenter.read(args.source)?.readRequestTruth() ?? {};
-  const rustTruth = readRustSnapshot(args.source).requestTruth ?? {};
+  const rustTruth = readMetadataCenterRustMirror(args.source).requestTruth ?? {};
   const actualRequestId = readTrimmedString(rustTruth.requestId) ?? readTrimmedString(centerTruth.requestId);
   const actualSessionId = readTrimmedString(rustTruth.sessionId) ?? readTrimmedString(centerTruth.sessionId);
 
@@ -181,7 +199,7 @@ function writeJsMirror(input: MetadataCenterDualWriteInput): void {
 }
 
 function writeRustMirror(input: MetadataCenterDualWriteInput): void {
-  const snapshot = readRustSnapshot(input.target);
+  const snapshot = readMetadataCenterRustMirror(input.target);
   const family = CAMEL_FAMILY[input.family];
   const row = asRecord(snapshot[family]) ?? {};
   row[input.key] = structuredClone(input.value);
@@ -241,7 +259,7 @@ export function readMetadataCenterSlot(_input: {
 }
 
 export function buildMetadataCenterRustSnapshot(source: Record<string, unknown>): MetadataCenterRustSnapshot {
-  const rustSnapshot = readRustSnapshot(source);
+  const rustSnapshot = readMetadataCenterRustMirror(source);
   const center = MetadataCenter.read(source);
   if (!center) {
     return rustSnapshot;
@@ -263,6 +281,14 @@ export function buildMetadataCenterRustSnapshot(source: Record<string, unknown>)
       ...center.readProviderObservation(),
       ...(rustSnapshot.providerObservation ?? {})
     },
+    responseObservation: {
+      ...center.readResponseObservation(),
+      ...(rustSnapshot.responseObservation ?? {})
+    },
+    closeoutStatus: {
+      ...center.readCloseoutStatus(),
+      ...(rustSnapshot.closeoutStatus ?? {})
+    },
     debugSnapshot: {
       ...center.readDebugSnapshot(),
       ...(rustSnapshot.debugSnapshot ?? {})
@@ -273,6 +299,37 @@ export function buildMetadataCenterRustSnapshot(source: Record<string, unknown>)
 export function applyMetadataCenterRustWriteResult(args: {
   target: Record<string, unknown>;
   snapshot: MetadataCenterRustSnapshot;
+  writer?: MetadataCenterWriter;
+  reason?: string;
 }): void {
+  const writer = args.writer ?? {
+    module: 'src/server/runtime/http-server/metadata-center/dualwrite-api.ts',
+    symbol: 'applyMetadataCenterRustWriteResult',
+    stage: 'metadata_center_dualwrite'
+  };
+  for (const [family, camelFamily] of Object.entries(CAMEL_FAMILY) as Array<[MetadataCenterFamily, CamelFamilyName]>) {
+    const row = asRecord(args.snapshot[camelFamily]);
+    if (!row) {
+      continue;
+    }
+    for (const [key, value] of Object.entries(row)) {
+      const currentValue = readMetadataCenterSlot({
+        source: args.target,
+        family,
+        key
+      });
+      if (currentValue !== undefined && JSON.stringify(currentValue) === JSON.stringify(value)) {
+        continue;
+      }
+      writeMetadataCenterSlot({
+        target: args.target,
+        family,
+        key,
+        value,
+        writer,
+        reason: args.reason ?? 'rust metadata center write result'
+      });
+    }
+  }
   writeRustSnapshot(args.target, args.snapshot);
 }

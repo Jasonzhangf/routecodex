@@ -94,6 +94,10 @@ import {
   readRuntimeRequestTruthIdentifiers,
 } from './metadata-center/request-truth-readers.js';
 import {
+  buildMetadataCenterRustSnapshot,
+  writeMetadataCenterSlot
+} from './metadata-center/dualwrite-api.js';
+import {
   buildErrorErr05DefaultAvailabilityTiers,
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
@@ -240,12 +244,15 @@ function writeMetadataCenterRuntimeControl<K extends 'preselectedRoute' | 'retry
   value: K extends 'preselectedRoute' ? Record<string, unknown> : K extends 'retryProviderKey' | 'routeHint' | 'routecodexRoutingPolicyGroup' | 'providerProtocol' ? string : boolean,
   reason: string
 ): void {
-  MetadataCenter.attach(metadata).writeRuntimeControl(
+  MetadataCenter.attach(metadata);
+  writeMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
     key,
-    value as never,
-    HTTP_RUNTIME_ENTRY_RUNTIME_CONTROL_WRITER,
+    value: value as never,
+    writer: HTTP_RUNTIME_ENTRY_RUNTIME_CONTROL_WRITER,
     reason
-  );
+  });
 }
 
 function bindExistingMetadataCenter(
@@ -261,13 +268,14 @@ function bindExistingMetadataCenter(
 }
 
 function buildMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
-  const center = MetadataCenter.read(metadata);
-  if (!center) {
-    return {};
-  }
-  const requestTruth = center.readRequestTruth();
-  const continuationContext = center.readContinuationContext();
-  const runtimeControl = center.readRuntimeControl();
+  const snapshot = buildMetadataCenterRustSnapshot(metadata);
+  const requestTruth = snapshot.requestTruth ?? {};
+  const continuationContext = snapshot.continuationContext ?? {};
+  const runtimeControl = snapshot.runtimeControl ?? {};
+  const providerObservation = snapshot.providerObservation ?? {};
+  const responseObservation = snapshot.responseObservation ?? {};
+  const closeoutStatus = snapshot.closeoutStatus ?? {};
+  const debugSnapshot = snapshot.debugSnapshot ?? {};
   const excludedProviderKeys = Array.isArray(metadata.excludedProviderKeys)
     ? metadata.excludedProviderKeys
         .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
@@ -276,10 +284,18 @@ function buildMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<
   const hasRequestTruth = Object.keys(requestTruth).length > 0;
   const hasContinuationContext = Object.keys(continuationContext).length > 0;
   const hasRuntimeControl = Object.keys(runtimeControl).length > 0;
+  const hasProviderObservation = Object.keys(providerObservation).length > 0;
+  const hasResponseObservation = Object.keys(responseObservation).length > 0;
+  const hasCloseoutStatus = Object.keys(closeoutStatus).length > 0;
+  const hasDebugSnapshot = Object.keys(debugSnapshot).length > 0;
   return {
     ...(hasRequestTruth ? { requestTruth } : {}),
     ...(hasContinuationContext ? { continuationContext } : {}),
     ...(hasRuntimeControl ? { runtimeControl } : {}),
+    ...(hasProviderObservation ? { providerObservation } : {}),
+    ...(hasResponseObservation ? { responseObservation } : {}),
+    ...(hasCloseoutStatus ? { closeoutStatus } : {}),
+    ...(hasDebugSnapshot ? { debugSnapshot } : {}),
     ...(excludedProviderKeys.length > 0 ? { excludedProviderKeys } : {})
   };
 }
@@ -1028,9 +1044,10 @@ export class RouteCodexHttpServer {
     if (input.hubBody === undefined) {
       return input;
     }
+    const { hubBody, ...withoutHubBody } = input;
     return {
-      ...input,
-      body: input.hubBody,
+      ...withoutHubBody,
+      body: hubBody,
     };
   }
 
@@ -1363,7 +1380,23 @@ export class RouteCodexHttpServer {
             && typeof (preselectedTarget as Record<string, unknown>).outboundProfile === 'string'
             && ((preselectedTarget as Record<string, unknown>).outboundProfile as string).trim()
               ? ((preselectedTarget as Record<string, unknown>).outboundProfile as string).trim()
-              : undefined;
+              : (() => {
+                  if (!preselectedTarget || typeof preselectedTarget !== 'object' || Array.isArray(preselectedTarget)) {
+                    return undefined;
+                  }
+                  const targetRecord = preselectedTarget as Record<string, unknown>;
+                  const runtimeKey = typeof targetRecord.runtimeKey === 'string' && targetRecord.runtimeKey.trim()
+                    ? targetRecord.runtimeKey.trim()
+                    : undefined;
+                  const providerKey = typeof targetRecord.providerKey === 'string' && targetRecord.providerKey.trim()
+                    ? targetRecord.providerKey.trim()
+                    : undefined;
+                  const handle = this.resolveProviderHandleForBinding(runtimeKey, relayMetadata)
+                    ?? this.resolveProviderHandleForBinding(providerKey, relayMetadata);
+                  return typeof handle?.providerProtocol === 'string' && handle.providerProtocol.trim()
+                    ? handle.providerProtocol.trim()
+                    : undefined;
+                })();
           if (preselectedProviderProtocol) {
             writeMetadataCenterRuntimeControl(
               relayMetadata,
@@ -1443,16 +1476,18 @@ export class RouteCodexHttpServer {
       metadataForHub
     );
     if (!metadataCenter.readRequestTruth().portScope) {
-      metadataCenter.writeRequestTruth(
-        'portScope',
-        String(portConfig.port),
-        {
+      writeMetadataCenterSlot({
+        target: metadataForHub,
+        family: 'request_truth',
+        key: 'portScope',
+        value: String(portConfig.port),
+        writer: {
           module: 'src/server/runtime/http-server/index.ts',
           symbol: 'executeRouterDirectPipelineForPort',
           stage: 'ServerReqInbound01ClientRaw'
         },
-        'router-direct request entry port scope'
-      );
+        reason: 'router-direct request entry port scope'
+      });
     }
     if (typeof portConfig.routingPolicyGroup === 'string' && portConfig.routingPolicyGroup.trim()) {
       writeMetadataCenterRuntimeControl(

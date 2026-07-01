@@ -8,6 +8,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
 
 type RuntimeControlWriter = {
   module: string;
@@ -25,6 +26,11 @@ type MetadataCenterLike = {
   readRuntimeControl?: () => Record<string, unknown>;
   readRequestTruth?: () => Record<string, unknown> | undefined;
   readProviderObservation?: () => Record<string, unknown> | undefined;
+};
+
+type BoundMetadataCenterTarget = {
+  target: Record<string, unknown>;
+  center: MetadataCenterLike;
 };
 
 const STOP_GATEWAY_CONTEXT_WRITER = {
@@ -48,6 +54,42 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function readBoundMetadataCenterTarget(metadata: Record<string, unknown>): BoundMetadataCenterTarget | undefined {
+  const directCenter = Reflect.get(metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  if (directCenter && typeof directCenter.writeRuntimeControl === 'function') {
+    return { target: metadata, center: directCenter };
+  }
+  const nestedMetadata = asRecord(metadata.metadata);
+  const nestedCenter = nestedMetadata
+    ? (Reflect.get(nestedMetadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined)
+    : undefined;
+  if (nestedMetadata && nestedCenter && typeof nestedCenter.writeRuntimeControl === 'function') {
+    return { target: nestedMetadata, center: nestedCenter };
+  }
+  return undefined;
+}
+
+function writeMetadataCenterSlot(args: {
+  target: Record<string, unknown>;
+  center: MetadataCenterLike;
+  family: 'runtime_control';
+  key: string;
+  value: unknown;
+  writer: RuntimeControlWriter;
+  reason?: string;
+}): void {
+  if (args.family !== 'runtime_control') {
+    throw new Error(`MetadataCenter unsupported family for servertool carrier: ${args.family}`);
+  }
+  args.center.writeRuntimeControl?.(args.key, args.value, args.writer, args.reason);
+  const currentSnapshot = asRecord(Reflect.get(args.target, RUST_SNAPSHOT_SYMBOL));
+  const nextSnapshot = currentSnapshot ? { ...currentSnapshot } : {};
+  const runtimeControl = asRecord(nextSnapshot.runtimeControl) ?? {};
+  runtimeControl[args.key] = structuredClone(args.value);
+  nextSnapshot.runtimeControl = runtimeControl;
+  Reflect.set(args.target, RUST_SNAPSHOT_SYMBOL, nextSnapshot);
+}
+
 export function writeRuntimeControlToBoundMetadataCenter(args: {
   metadata: Record<string, unknown>;
   key: string;
@@ -56,21 +98,22 @@ export function writeRuntimeControlToBoundMetadataCenter(args: {
   reason?: string;
   required?: boolean;
 }): void {
-  const directCenter = Reflect.get(args.metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
-  const nestedMetadata = asRecord(args.metadata.metadata);
-  const nestedCenter = nestedMetadata
-    ? (Reflect.get(nestedMetadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined)
-    : undefined;
-  const center = directCenter && typeof directCenter.writeRuntimeControl === 'function'
-    ? directCenter
-    : nestedCenter;
-  if (!center || typeof center.writeRuntimeControl !== 'function') {
+  const bound = readBoundMetadataCenterTarget(args.metadata);
+  if (!bound) {
     if (args.required) {
       throw new Error(`MetadataCenter runtime_control.${args.key} writer requires a bound MetadataCenter`);
     }
     return;
   }
-  center.writeRuntimeControl(args.key, args.value, args.writer, args.reason);
+  writeMetadataCenterSlot({
+    target: bound.target,
+    center: bound.center,
+    family: 'runtime_control',
+    key: args.key,
+    value: args.value,
+    writer: args.writer,
+    reason: args.reason,
+  });
 }
 
 function readRuntimeControlFromBoundMetadataCenter(

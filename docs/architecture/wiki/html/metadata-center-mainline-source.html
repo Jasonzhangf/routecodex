@@ -276,15 +276,15 @@
           <li>current write owners are request/runtime entry shells (<code>src/server/runtime/http-server/index.ts</code>) plus the narrow stopless-directive request capture in <code>src/server/runtime/http-server/executor-metadata.ts</code></li>
           <li>top-level <code>metadata.stopMessageEnabled</code> / <code>routecodexPortStopMessageEnabled</code> mirrors are stale residues and must not be treated as compatibility projections, authoritative write points, or repair targets</li>
           <li><code>providerProtocol</code></li>
-          <li>current repo still carries this mainly as protocol-shell transport on top-level metadata / normalized request, not as a completed runtime-control-first write path</li>
-          <li>until that migration lands, docs and gates must not overclaim <code>runtime_control.providerProtocol</code> as fully anchored owner truth</li>
+          <li>current request-executor and request-route owners write this through the unified MetadataCenter API and dual-write Rust snapshot</li>
+          <li>top-level protocol-shell residue is no longer the owner truth for request-route control</li>
           <li>this first batch is not speculative. It is directly evidenced by current writers/readers:</li>
           <li><code>src/server/runtime/http-server/executor/request-executor-attempt-state.ts</code></li>
           <li><code>src/server/runtime/http-server/index.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs</code></li>
-          <li>the remaining gap is no longer carrier availability. The gap is that production writers/readers still mostly materialize these controls through flat metadata or request-semantics residue instead of writing/reading the new center family first</li>
-          <li>this is why <code>mtc-03</code> is still only <code>partial</code>: the first-class center contract now exists, but the remaining request-route-control writers have not yet been migrated onto it</li>
+          <li>the remaining gap is no longer carrier availability or primary runtime-control write ownership. The remaining closeout is deleting JS mirror / payload residue after all Rust consumers are promoted.</li>
+          <li><code>mtc-03</code> is anchored: the first-class center contract exists, live runtime-control writers use the unified API / migration-local shells, and the gate rejects new direct family writes outside that surface.</li>
         </ul>
         <h3><code>provider_observation</code></h3>
         <p>These are routing/provider-side observations and must not write back into request truth:</p>

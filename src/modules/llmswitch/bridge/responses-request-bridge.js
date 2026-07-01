@@ -10,6 +10,17 @@ import { captureReqInboundResponsesContextSnapshot, planResponsesHandlerEntry, }
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
+import { writeMetadataCenterSlot } from '../../../server/runtime/http-server/metadata-center/dualwrite-api.js';
+const RESPONSES_PIPELINE_METADATA_WRITER = {
+    module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+    symbol: 'buildResponsesPipelineMetadataForHttp',
+    stage: 'MetaReq04RuntimeControlBound'
+};
+const RESPONSES_PIPELINE_CONTINUATION_WRITER = {
+    module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+    symbol: 'buildResponsesPipelineMetadataForHttp',
+    stage: 'MetaReq03ContinuationAttached'
+};
 export function prepareResponsesRequestBodyForHttp(payload, _runtimeMetadata) {
     const requestBodyMetadata = readRequestBodyMetadataForHttp(payload);
     const pipelineBody = stripRequestBodyMetadataForPipelineForHttp(payload);
@@ -20,7 +31,7 @@ export function prepareResponsesRequestBodyForHttp(payload, _runtimeMetadata) {
 }
 export function buildResponsesPipelineMetadataForHttp(args) {
     const responsesResume = args.resumeMeta
-        ? sanitizeResponsesResumeForContinuationContextForHttp(args.resumeMeta)
+        ? buildResponsesResumeControlForContinuationContextForHttp(args.resumeMeta)
         : undefined;
     const metadata = {
         clientRequestId: args.clientRequestId,
@@ -29,50 +40,78 @@ export function buildResponsesPipelineMetadataForHttp(args) {
         clientConnectionState: args.clientConnectionState,
         ...(responsesResume ? { responsesResume } : {}),
     };
-    const center = MetadataCenter.attach(metadata);
-    if (typeof args.requestContext.sessionId === 'string' && args.requestContext.sessionId.trim()) {
-        center.writeRequestTruth('sessionId', args.requestContext.sessionId.trim(), {
-            module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-            symbol: 'buildResponsesPipelineMetadataForHttp',
-            stage: 'MetaReq02TruthMaterialized'
-        }, 'responses handler request-context session truth');
-    }
-    if (typeof args.requestContext.conversationId === 'string'
-        && args.requestContext.conversationId.trim()) {
-        center.writeRequestTruth('conversationId', args.requestContext.conversationId.trim(), {
-            module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-            symbol: 'buildResponsesPipelineMetadataForHttp',
-            stage: 'MetaReq02TruthMaterialized'
-        }, 'responses handler request-context conversation truth');
-    }
-    center.writeRuntimeControl('streamIntent', args.streamPlan.inboundStream || args.streamPlan.outboundStream ? 'stream' : 'non_stream', {
-        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-        symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'MetaReq04RuntimeControlBound'
-    }, 'responses handler stream intent');
-    center.writeRuntimeControl('clientAbort', readClientAbortSignalForHttp(args.clientConnectionState)?.aborted === true, {
-        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-        symbol: 'buildResponsesPipelineMetadataForHttp',
-        stage: 'MetaReq04RuntimeControlBound'
-    }, 'responses handler client abort state');
+    MetadataCenter.attach(metadata);
+    writeMetadataCenterSlot({
+        target: metadata,
+        family: 'runtime_control',
+        key: 'streamIntent',
+        value: args.streamPlan.inboundStream || args.streamPlan.outboundStream ? 'stream' : 'non_stream',
+        writer: RESPONSES_PIPELINE_METADATA_WRITER,
+        reason: 'responses handler stream intent'
+    });
+    writeMetadataCenterSlot({
+        target: metadata,
+        family: 'runtime_control',
+        key: 'providerProtocol',
+        value: 'openai-responses',
+        writer: RESPONSES_PIPELINE_METADATA_WRITER,
+        reason: 'responses handler provider protocol'
+    });
+    writeMetadataCenterSlot({
+        target: metadata,
+        family: 'runtime_control',
+        key: 'clientAbort',
+        value: readClientAbortSignalForHttp(args.clientConnectionState)?.aborted === true,
+        writer: RESPONSES_PIPELINE_METADATA_WRITER,
+        reason: 'responses handler client abort state'
+    });
     if (args.resumeMeta) {
         if (responsesResume) {
-            center.writeContinuationContext('responsesResume', responsesResume, {
-                module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-                symbol: 'buildResponsesPipelineMetadataForHttp',
-                stage: 'MetaReq03ContinuationAttached'
+            writeMetadataCenterSlot({
+                target: metadata,
+                family: 'continuation_context',
+                key: 'responsesResume',
+                value: responsesResume,
+                writer: RESPONSES_PIPELINE_CONTINUATION_WRITER
             });
         }
     }
     return metadata;
 }
-function sanitizeResponsesResumeForContinuationContextForHttp(resumeMeta) {
-    const sanitized = { ...resumeMeta };
-    delete sanitized.sessionId;
-    delete sanitized.session_id;
-    delete sanitized.conversationId;
-    delete sanitized.conversation_id;
-    return sanitized;
+function buildResponsesResumeControlForContinuationContextForHttp(resumeMeta) {
+    const out = {};
+    const copyString = (from, to = from) => {
+        const value = resumeMeta[from];
+        if (typeof value === 'string' && value.trim()) {
+            out[to] = value.trim();
+        }
+    };
+    const copyBoolean = (key) => {
+        if (typeof resumeMeta[key] === 'boolean') {
+            out[key] = resumeMeta[key];
+        }
+    };
+    const copyNumber = (key) => {
+        if (typeof resumeMeta[key] === 'number' && Number.isFinite(resumeMeta[key])) {
+            out[key] = resumeMeta[key];
+        }
+    };
+    copyString('responseId');
+    copyString('restoredFromResponseId');
+    copyString('previousRequestId');
+    copyString('requestId');
+    copyString('scopeKey');
+    copyString('entryKind');
+    copyString('continuationOwner');
+    copyString('materializedMode');
+    copyBoolean('restored');
+    copyBoolean('materialized');
+    copyNumber('deltaInputItems');
+    copyNumber('toolOutputs');
+    copyNumber('incomingInputItems');
+    copyNumber('continuationDeltaItems');
+    copyNumber('fullInputItems');
+    return out;
 }
 export function buildResponsesConversationPortScopeForHttp(portContext) {
     const matchedPort = typeof portContext?.matchedPort === 'number'

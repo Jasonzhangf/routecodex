@@ -48,35 +48,47 @@ export function runEnginePreflight(args: {
   switch (preflightAction.action) {
     case 'return_original_chat':
       return { kind: 'return_original_chat', chat: args.chat };
-    case 'continue_to_engine':
     case 'return_original_chat_direct_passthrough':
-      break;
-    default:
-      throw new Error(`[servertool] invalid engine preflight action: ${String(preflightAction.action)}`);
-  }
-  if (preflightAction.attachStopGatewayContext === true) {
-    attachStopGatewayContext(args.adapterContext, stopSignal);
-  }
-  if (preflightAction.logStopEntry) {
-    args.logStopEntry(preflightAction.logStopEntry.stage, preflightAction.logStopEntry.result, {
-      reason: stopSignal.reason,
-      source: stopSignal.source,
-      eligible: stopSignal.eligible,
-      ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.choiceIndex === 'number'
-        ? { choiceIndex: stopSignal.choiceIndex }
-        : {}),
-      ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.hasToolCalls === 'boolean'
-        ? { hasToolCalls: stopSignal.hasToolCalls }
-        : {})
-    });
-  }
-  if (preflightAction.logStopCompare) {
-    args.logStopCompare(preflightAction.logStopCompare.stage);
-  }
-  switch (preflightAction.action) {
-    case 'return_original_chat_direct_passthrough':
+      if (preflightAction.attachStopGatewayContext === true) {
+        attachStopGatewayContext(args.adapterContext, stopSignal);
+      }
+      if (preflightAction.logStopEntry) {
+        args.logStopEntry(preflightAction.logStopEntry.stage, preflightAction.logStopEntry.result, {
+          reason: stopSignal.reason,
+          source: stopSignal.source,
+          eligible: stopSignal.eligible,
+          ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.choiceIndex === 'number'
+            ? { choiceIndex: stopSignal.choiceIndex }
+            : {}),
+          ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.hasToolCalls === 'boolean'
+            ? { hasToolCalls: stopSignal.hasToolCalls }
+            : {})
+        });
+      }
+      if (preflightAction.logStopCompare) {
+        args.logStopCompare(preflightAction.logStopCompare.stage);
+      }
       return { kind: 'return_original_chat_direct_passthrough', chat: args.chat };
     case 'continue_to_engine':
+      if (preflightAction.attachStopGatewayContext === true) {
+        attachStopGatewayContext(args.adapterContext, stopSignal);
+      }
+      if (preflightAction.logStopEntry) {
+        args.logStopEntry(preflightAction.logStopEntry.stage, preflightAction.logStopEntry.result, {
+          reason: stopSignal.reason,
+          source: stopSignal.source,
+          eligible: stopSignal.eligible,
+          ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.choiceIndex === 'number'
+            ? { choiceIndex: stopSignal.choiceIndex }
+            : {}),
+          ...(preflightAction.logStopEntry.includeChoiceFacts && typeof stopSignal.hasToolCalls === 'boolean'
+            ? { hasToolCalls: stopSignal.hasToolCalls }
+            : {})
+        });
+      }
+      if (preflightAction.logStopCompare) {
+        args.logStopCompare(preflightAction.logStopCompare.stage);
+      }
       return { kind: 'continue', stopSignal };
     default:
       throw new Error(`[servertool] invalid engine preflight action: ${String(preflightAction.action)}`);

@@ -11,6 +11,11 @@ pub(crate) trait MetadataCenterReader {
     fn stopless_max_repeats(&self) -> Option<u32>;
     fn server_tool_loop_repeat_count(&self) -> Option<u32>;
     fn stop_message_used(&self) -> Option<u32>;
+    fn provider_key(&self) -> Option<&str>;
+    fn assigned_model_id(&self) -> Option<&str>;
+    fn response_finish_reason(&self) -> Option<&str>;
+    fn closeout_finalized(&self) -> Option<bool>;
+    fn debug_snapshot_id(&self) -> Option<&str>;
 }
 
 impl MetadataCenterReader for MetadataCenter {
@@ -56,6 +61,26 @@ impl MetadataCenterReader for MetadataCenter {
 
     fn stop_message_used(&self) -> Option<u32> {
         self.runtime_control.stop_message_state.stop_message_used
+    }
+
+    fn provider_key(&self) -> Option<&str> {
+        self.provider_observation.provider_key.as_deref()
+    }
+
+    fn assigned_model_id(&self) -> Option<&str> {
+        self.provider_observation.assigned_model_id.as_deref()
+    }
+
+    fn response_finish_reason(&self) -> Option<&str> {
+        self.response_observation.finish_reason.as_deref()
+    }
+
+    fn closeout_finalized(&self) -> Option<bool> {
+        self.closeout_status.finalized
+    }
+
+    fn debug_snapshot_id(&self) -> Option<&str> {
+        self.debug_snapshot.snapshot_id.as_deref()
     }
 }
 
@@ -119,5 +144,44 @@ mod tests {
         assert_eq!(center.stopless_max_repeats(), Some(3));
         assert_eq!(center.server_tool_loop_repeat_count(), Some(2));
         assert_eq!(center.stop_message_used(), Some(2));
+    }
+
+    #[test]
+    fn reads_provider_response_closeout_and_debug_families_from_snapshot_center() {
+        let center = build_metadata_center_from_snapshot(&json!({
+            "providerObservation": {
+                "providerKey": "provider.key.model",
+                "assignedModelId": "gpt-5.5-assigned"
+            },
+            "responseObservation": {
+                "finishReason": "tool_calls",
+                "protocolKind": "openai-chat"
+            },
+            "closeoutStatus": {
+                "finalized": true,
+                "released": false
+            },
+            "debugSnapshot": {
+                "snapshotId": "debug-1",
+                "hubStageTop": [
+                    { "stage": "req_chatprocess", "totalMs": 12.5, "count": 1 }
+                ]
+            }
+        }));
+
+        assert_eq!(center.provider_key(), Some("provider.key.model"));
+        assert_eq!(center.assigned_model_id(), Some("gpt-5.5-assigned"));
+        assert_eq!(center.response_finish_reason(), Some("tool_calls"));
+        assert_eq!(center.closeout_finalized(), Some(true));
+        assert_eq!(center.debug_snapshot_id(), Some("debug-1"));
+        assert_eq!(
+            center
+                .debug_snapshot
+                .hub_stage_top
+                .as_ref()
+                .and_then(|rows| rows.first())
+                .map(|row| row.stage.as_str()),
+            Some("req_chatprocess")
+        );
     }
 }

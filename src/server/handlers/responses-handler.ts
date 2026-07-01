@@ -26,6 +26,7 @@ import {
   prepareResponsesHandlerRuntimeForHttp,
 } from '../../modules/llmswitch/bridge/responses-request-bridge.js';
 import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
+import { writeMetadataCenterSlot } from '../runtime/http-server/metadata-center/dualwrite-api.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 import { markClientConnectionDisconnected, trackClientConnectionState } from '../utils/client-connection-state.js';
@@ -201,18 +202,18 @@ export async function handleResponses(
     const responsesConversationPortScope = buildResponsesConversationPortScopeForHttp(ctx.portContext);
     const rawInputItems = countResponsesInputItems(payload);
     const preparedRuntime = await prepareResponsesHandlerRuntimeForHttp({
-      payload: payload as Record<string, unknown>,
-      entryEndpoint,
-      responseIdFromPath: options.responseIdFromPath,
-      requestId,
-      requestMetadata: {
-        clientHeaders,
-      },
-      portScope: responsesConversationPortScope,
-      forceStream: options.forceStream,
-      acceptsSse,
-      requestTimeoutMs,
-    });
+        payload: payload as Record<string, unknown>,
+        entryEndpoint,
+        responseIdFromPath: options.responseIdFromPath,
+        requestId,
+        requestMetadata: {
+          clientHeaders,
+        },
+        portScope: responsesConversationPortScope,
+        forceStream: options.forceStream,
+        acceptsSse,
+        requestTimeoutMs,
+      });
     emitRequestStart({
       clientRequestId,
       ...preparedRuntime.streamPlan.requestStartMeta,
@@ -257,32 +258,36 @@ export async function handleResponses(
       resumeMeta,
       requestContext,
     });
-    const responsesPipelineCenter = MetadataCenter.attach(responsesPipelineMetadata);
+    MetadataCenter.attach(responsesPipelineMetadata);
     responsesPipelineMetadata.requestId = requestId;
     responsesPipelineMetadata.clientRequestId = clientRequestId;
     if (typeof ctx.portContext?.stopMessageEnabled === 'boolean') {
-      responsesPipelineCenter.writeRuntimeControl(
-        'stopMessageEnabled',
-        ctx.portContext.stopMessageEnabled,
-        {
+      writeMetadataCenterSlot({
+        target: responsesPipelineMetadata,
+        family: 'runtime_control',
+        key: 'stopMessageEnabled',
+        value: ctx.portContext.stopMessageEnabled,
+        writer: {
           module: 'src/server/handlers/responses-handler.ts',
           symbol: 'handleResponses',
           stage: 'HubReqInbound02Standardized'
         },
-        'responses port stop-message enablement'
-      );
+        reason: 'responses port stop-message enablement'
+      });
     }
     if (typeof ctx.portContext?.stopMessageExcludeDirect === 'boolean') {
-      responsesPipelineCenter.writeRuntimeControl(
-        'stopMessageExcludeDirect',
-        ctx.portContext.stopMessageExcludeDirect,
-        {
+      writeMetadataCenterSlot({
+        target: responsesPipelineMetadata,
+        family: 'runtime_control',
+        key: 'stopMessageExcludeDirect',
+        value: ctx.portContext.stopMessageExcludeDirect,
+        writer: {
           module: 'src/server/handlers/responses-handler.ts',
           symbol: 'handleResponses',
           stage: 'HubReqInbound02Standardized'
         },
-        'responses port stop-message direct exclusion'
-      );
+        reason: 'responses port stop-message direct exclusion'
+      });
     }
     const preparedPipelineBody = prepareResponsesRequestBodyForHttp(
       payload as Record<string, unknown>,
@@ -312,7 +317,8 @@ export async function handleResponses(
 	      requestId,
 	      headers: req.headers as Record<string, unknown>,
 	      query: req.query as Record<string, unknown>,
-	      body: pipelineBody,
+	      body: req.body,
+      hubBody: pipelineBody,
       metadata: buildHandlerPipelineMetadata(preparedPipelineBody.requestBodyMetadata, responsesPipelineMetadata)
 	    };
     const activeRequestTimeoutMs =

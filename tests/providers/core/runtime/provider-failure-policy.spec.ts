@@ -98,7 +98,7 @@ describe('provider failure policy ssot', () => {
     })).toBe('recoverable');
   });
 
-  it('classifies DeepSeek file upload failure as recoverable blocking reroute', () => {
+  it('classifies DeepSeek file upload failure as recoverable health-impacting blocking reroute', () => {
     const error = Object.assign(new Error('DeepSeek file upload returned non-JSON payload'), {
       code: 'DEEPSEEK_FILE_UPLOAD_FAILED',
       upstreamCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
@@ -120,7 +120,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'DEEPSEEK_FILE_UPLOAD_FAILED',
       statusCode: 502,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -132,7 +132,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -441,7 +441,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies unknown bare HTTP_400 payload errors as recoverable provider failures', () => {
+  it('classifies unknown bare HTTP_400 payload errors as recoverable health-impacting provider failures', () => {
     const error = Object.assign(new Error('HTTP 400: upstream rejected request for unknown reason'), {
       statusCode: 400,
       code: 'HTTP_400'
@@ -465,7 +465,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -528,6 +528,7 @@ describe('provider failure policy ssot', () => {
     expect(classification).toBe('recoverable');
     expect(isProviderFailureHealthNeutral({
       stage: 'provider.send',
+      error,
       errorCode: 'MALFORMED_RESPONSE',
       statusCode: 400,
       classification
@@ -549,7 +550,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies HTTP_429_2013 as recoverable and health-neutral', () => {
+  it('classifies HTTP_429_2013 as recoverable and health-impacting', () => {
     const error = Object.assign(new Error('provider business error 2013'), {
       code: 'HTTP_429_2013',
       upstreamCode: 'HTTP_429_2013',
@@ -571,7 +572,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'HTTP_429_2013',
       statusCode: 429,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -583,14 +584,14 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
     }));
   });
 
-  it('RED: classifies non-malformed PROVIDER_STATUS_2013 traffic saturation as recoverable and health-neutral', () => {
+  it('classifies non-malformed PROVIDER_STATUS_2013 traffic saturation as recoverable and health-impacting', () => {
     const error = Object.assign(new Error('Token Plan 当前请求量较高，请稍后重试'), {
       code: 'PROVIDER_STATUS_2013',
       upstreamCode: 'PROVIDER_STATUS_2013',
@@ -613,7 +614,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'PROVIDER_STATUS_2013',
       statusCode: 200,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -625,7 +626,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -662,7 +663,7 @@ describe('provider failure policy ssot', () => {
     expect(classification).toBe('recoverable');
   });
 
-  it('RED: classifies provider business error 2013 traffic saturation as recoverable and health-neutral', () => {
+  it('classifies provider business error 2013 traffic saturation as recoverable and health-impacting', () => {
     const error = Object.assign(
       new Error('Token Plan 当前请求量较高，请稍后重试'),
       {
@@ -694,7 +695,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'PROVIDER_STATUS_2013',
       statusCode: 200,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -706,7 +707,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true
     }));
   });
@@ -792,7 +793,7 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
-  it('classifies sqlite busy 500 as recoverable and health-neutral', () => {
+  it('classifies sqlite busy 500 as recoverable and health-impacting', () => {
     const error = Object.assign(new Error('database is locked (5) (SQLITE_BUSY)'), {
       code: 'new_api_error',
       upstreamCode: 'new_api_error',
@@ -814,7 +815,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'new_api_error',
       statusCode: 500,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -826,14 +827,14 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
     }));
   });
 
-  it('classifies short-lived 429 as recoverable and health-neutral', () => {
+  it('classifies short-lived 429 as recoverable and health-impacting', () => {
     const error = Object.assign(new Error('HTTP 429: transient limit'), {
       statusCode: 429
     });
@@ -849,7 +850,7 @@ describe('provider failure policy ssot', () => {
       stage: 'provider.http',
       statusCode: 429,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.http',
@@ -859,7 +860,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
@@ -882,14 +883,14 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
     }));
   });
 
-  it('treats transport fetch failed as recoverable blocking reroute', () => {
+  it('treats transport fetch failed as recoverable health-impacting blocking reroute', () => {
     const error = Object.assign(new Error('fetch failed'), {
       code: 'HTTP_502',
       statusCode: 502
@@ -906,14 +907,14 @@ describe('provider failure policy ssot', () => {
 
     expect(plan).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
     }));
   });
 
-  it('marks upstream headers timeout as recoverable and health-neutral', () => {
+  it('marks upstream headers timeout as recoverable and health-impacting', () => {
     const error = Object.assign(new Error('upstream headers timeout'), {
       code: 'UPSTREAM_HEADERS_TIMEOUT',
       statusCode: 504
@@ -930,13 +931,13 @@ describe('provider failure policy ssot', () => {
 
     expect(plan).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative'
     }));
   });
 
-  it('treats provider_status_1000 520 malformed-response wrapper as recoverable and health-neutral', () => {
+  it('treats provider_status_1000 520 malformed-response wrapper as recoverable and health-impacting', () => {
     const error = Object.assign(new Error('[hub_response] upstream returned unknown error, 520'), {
       code: 'MALFORMED_RESPONSE',
       upstreamCode: 'provider_status_1000',
@@ -959,7 +960,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'provider_status_1000',
       statusCode: 520,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -971,14 +972,14 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative',
       decisionLabel: 'exclude_and_reroute'
     }));
   });
 
-  it('treats OpenAI-compatible SSE server_error payload as recoverable and health-neutral', () => {
+  it('treats OpenAI-compatible SSE server_error payload as recoverable and health-impacting', () => {
     const error = Object.assign(new Error('[provider] Upstream provider returned business error: server_error'), {
       code: 'MALFORMED_RESPONSE',
       upstreamCode: 'server_error',
@@ -1001,7 +1002,7 @@ describe('provider failure policy ssot', () => {
       upstreamCode: 'server_error',
       statusCode: 200,
       classification
-    })).toBe(true);
+    })).toBe(false);
     expect(resolveProviderFailureActionPlan({
       error,
       stage: 'provider.send',
@@ -1013,7 +1014,7 @@ describe('provider failure policy ssot', () => {
       maxAttempts: 6
     })).toEqual(expect.objectContaining({
       classification: 'recoverable',
-      affectsHealth: false,
+      affectsHealth: true,
       shouldRetry: true,
       action: 'reroute_explicit_alternative'
     }));

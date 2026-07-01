@@ -68,6 +68,25 @@ mod tests {
                     "used": 2,
                     "remaining": 1
                 }
+            },
+            "providerObservation": {
+                "providerKey": "provider.key.model",
+                "assignedModelId": "gpt-5.5-assigned",
+                "compatibilityProfile": "openai-responses"
+            },
+            "responseObservation": {
+                "responseId": "resp-1",
+                "finishReason": "tool_calls",
+                "protocolKind": "openai-chat"
+            },
+            "closeoutStatus": {
+                "finalized": true,
+                "released": false,
+                "releasedAt": 1234
+            },
+            "debugSnapshot": {
+                "snapshotId": "debug-1",
+                "traceMarkers": ["marker-a"]
             }
         });
         let center = build_metadata_center_from_snapshot(&snapshot);
@@ -116,6 +135,23 @@ mod tests {
         assert_eq!(
             center.continuation_context.continuation_owner.as_deref(),
             Some("direct")
+        );
+        assert_eq!(
+            center.provider_observation.provider_key.as_deref(),
+            Some("provider.key.model")
+        );
+        assert_eq!(
+            center.provider_observation.assigned_model_id.as_deref(),
+            Some("gpt-5.5-assigned")
+        );
+        assert_eq!(
+            center.response_observation.finish_reason.as_deref(),
+            Some("tool_calls")
+        );
+        assert_eq!(center.closeout_status.finalized, Some(true));
+        assert_eq!(
+            center.debug_snapshot.snapshot_id.as_deref(),
+            Some("debug-1")
         );
     }
 

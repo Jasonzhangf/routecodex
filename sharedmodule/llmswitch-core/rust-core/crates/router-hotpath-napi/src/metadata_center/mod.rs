@@ -16,7 +16,8 @@ pub(crate) mod write_plan;
 pub(crate) use builder::build_metadata_center_from_snapshot;
 pub(crate) use reader::MetadataCenterReader;
 pub(crate) use types::{
-    ContinuationContext, MetadataCenter, RequestTruth, RuntimeControl, StopMessageControl,
+    CloseoutStatus, ContinuationContext, DebugSnapshot, HubStageTopEntry, MetadataCenter,
+    ProviderObservation, RequestTruth, ResponseObservation, RuntimeControl, StopMessageControl,
     StoplessControl, TrafficGovernorControl,
 };
 pub(crate) use write_plan::{

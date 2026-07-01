@@ -27,6 +27,19 @@ import {
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
+import { writeMetadataCenterSlot } from '../../../server/runtime/http-server/metadata-center/dualwrite-api.js';
+
+const RESPONSES_PIPELINE_METADATA_WRITER = {
+  module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+  symbol: 'buildResponsesPipelineMetadataForHttp',
+  stage: 'MetaReq04RuntimeControlBound'
+} as const;
+
+const RESPONSES_PIPELINE_CONTINUATION_WRITER = {
+  module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+  symbol: 'buildResponsesPipelineMetadataForHttp',
+  stage: 'MetaReq03ContinuationAttached'
+} as const;
 
 export type ResponsesRequestContextForHttp = {
   payload: AnyRecord;
@@ -129,48 +142,40 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     clientConnectionState: args.clientConnectionState,
     ...(responsesResume ? { responsesResume } : {}),
   };
-  const center = MetadataCenter.attach(metadata);
-  center.writeRuntimeControl(
-    'streamIntent',
-    args.streamPlan.inboundStream || args.streamPlan.outboundStream ? 'stream' : 'non_stream',
-    {
-      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-      symbol: 'buildResponsesPipelineMetadataForHttp',
-      stage: 'MetaReq04RuntimeControlBound'
-    },
-    'responses handler stream intent'
-  );
-  center.writeRuntimeControl(
-    'providerProtocol',
-    'openai-responses',
-    {
-      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-      symbol: 'buildResponsesPipelineMetadataForHttp',
-      stage: 'MetaReq04RuntimeControlBound'
-    },
-    'responses handler provider protocol'
-  );
-  center.writeRuntimeControl(
-    'clientAbort',
-    readClientAbortSignalForHttp(args.clientConnectionState)?.aborted === true,
-    {
-      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-      symbol: 'buildResponsesPipelineMetadataForHttp',
-      stage: 'MetaReq04RuntimeControlBound'
-    },
-    'responses handler client abort state'
-  );
+  MetadataCenter.attach(metadata);
+  writeMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
+    key: 'streamIntent',
+    value: args.streamPlan.inboundStream || args.streamPlan.outboundStream ? 'stream' : 'non_stream',
+    writer: RESPONSES_PIPELINE_METADATA_WRITER,
+    reason: 'responses handler stream intent'
+  });
+  writeMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
+    key: 'providerProtocol',
+    value: 'openai-responses',
+    writer: RESPONSES_PIPELINE_METADATA_WRITER,
+    reason: 'responses handler provider protocol'
+  });
+  writeMetadataCenterSlot({
+    target: metadata,
+    family: 'runtime_control',
+    key: 'clientAbort',
+    value: readClientAbortSignalForHttp(args.clientConnectionState)?.aborted === true,
+    writer: RESPONSES_PIPELINE_METADATA_WRITER,
+    reason: 'responses handler client abort state'
+  });
   if (args.resumeMeta) {
     if (responsesResume) {
-      center.writeContinuationContext(
-        'responsesResume',
-        responsesResume,
-        {
-          module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-          symbol: 'buildResponsesPipelineMetadataForHttp',
-          stage: 'MetaReq03ContinuationAttached'
-        }
-      );
+      writeMetadataCenterSlot({
+        target: metadata,
+        family: 'continuation_context',
+        key: 'responsesResume',
+        value: responsesResume,
+        writer: RESPONSES_PIPELINE_CONTINUATION_WRITER
+      });
     }
   }
   return metadata;

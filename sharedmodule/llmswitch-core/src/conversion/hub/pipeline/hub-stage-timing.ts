@@ -18,6 +18,7 @@ import {
 // feature_id: hub.stage_timing_observation
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
 
 type MetadataCenterLike = {
   writeDebugSnapshot?: (
@@ -27,6 +28,33 @@ type MetadataCenterLike = {
     reason?: string,
   ) => void;
 };
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function writeMetadataCenterSlot(args: {
+  target: Record<string, unknown>;
+  center: MetadataCenterLike;
+  family: 'debug_snapshot';
+  key: string;
+  value: unknown;
+  writer: { module: string; symbol: string; stage: string };
+  reason: string;
+}): void {
+  if (args.family !== 'debug_snapshot') {
+    throw new Error(`MetadataCenter unsupported family for hub-stage timing: ${args.family}`);
+  }
+  args.center.writeDebugSnapshot?.(args.key, args.value, args.writer, args.reason);
+  const currentSnapshot = asRecord(Reflect.get(args.target, RUST_SNAPSHOT_SYMBOL));
+  const nextSnapshot = currentSnapshot ? { ...currentSnapshot } : {};
+  const debugSnapshot = asRecord(nextSnapshot.debugSnapshot) ?? {};
+  debugSnapshot[args.key] = structuredClone(args.value);
+  nextSnapshot.debugSnapshot = debugSnapshot;
+  Reflect.set(args.target, RUST_SNAPSHOT_SYMBOL, nextSnapshot);
+}
 
 export { isHubStageTimingDetailEnabled, type HubStageTopSummaryEntry } from "./hub-stage-timing-blocks.js";
 
@@ -54,16 +82,19 @@ export function attachHubStageTopSummary(args: {
   if (!center || typeof center.writeDebugSnapshot !== 'function') {
     return;
   }
-  center.writeDebugSnapshot(
-    'hubStageTop',
-    hubStageTop,
-    {
+  writeMetadataCenterSlot({
+    target: args.metadata,
+    center,
+    family: 'debug_snapshot',
+    key: 'hubStageTop',
+    value: hubStageTop,
+    writer: {
       module: 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts',
       symbol: 'attachHubStageTopSummary',
       stage: 'hub_stage_timing_summary'
     },
-    'hub stage timing top summary'
-  );
+    reason: 'hub stage timing top summary'
+  });
 }
 
 export function logHubStageTiming(

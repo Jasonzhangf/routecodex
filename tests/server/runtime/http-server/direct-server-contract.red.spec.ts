@@ -146,7 +146,7 @@ describe('direct server contract', () => {
     expect(abortSignal?.aborted).toBe(false);
   });
 
-  it('RED-GREEN: router-direct forwards current client model/tools unchanged and does not enter Hub execute', async () => {
+  it('RED-GREEN: router-direct forwards current tools, applies target model hook, and does not enter Hub execute', async () => {
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
     const providerKey = 'DF.key1.deepseek-v4-pro';
@@ -247,9 +247,192 @@ describe('direct server contract', () => {
     );
 
     expect(outcome.used).toBe(true);
-    expect(sentPayload?.model).toBe('deepseek-v4-pro');
+    expect(sentPayload?.model).toBe('DeepSeek-V4-Pro');
     expect(sentPayload?.tools).toBe(tools);
-    expect((outcome.response as any)?.data?.model).toBe('deepseek-v4-pro');
+    expect((outcome.response as any)?.data?.model).toBe('DeepSeek-V4-Pro');
     expect(executeSpy).not.toHaveBeenCalled();
+  });
+
+  it('RED-GREEN: router-direct sends current raw responses body instead of prepared local continuation body', async () => {
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const providerKey = 'openai.key1.gpt-5.5';
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    let sentPayload: Record<string, unknown> | undefined;
+    const rawInputItem = { role: 'user', content: [{ type: 'input_text', text: 'current raw request' }] };
+    const preparedLocalContinuationItem = { content: [{ type: 'input_text', text: 'local continuation object without type' }] };
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_direct_5520',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => {
+        throw new Error('router-direct must not enter hub execute');
+      }),
+      getVirtualRouter: jest.fn(() => ({
+        route: jest.fn(() => ({
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-responses',
+            runtimeKey: providerKey,
+            modelId: 'gpt-5.5',
+          },
+          decision: { routeName: 'longcontext', pool: [providerKey], reason: 'longcontext:token-threshold' },
+          diagnostics: {},
+        })),
+      })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_direct_5520', (server as any).hubPipeline],
+    ]);
+    (server as any).providerHandles = new Map([
+      [providerKey, {
+        runtimeKey: providerKey,
+        providerId: 'openai',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: {},
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: jest.fn(async (payload: Record<string, unknown>) => {
+            sentPayload = payload;
+            return {
+              status: 200,
+              body: {
+                id: 'resp_router_direct_raw_body',
+                object: 'response',
+                model: String(payload.model || ''),
+                output: [],
+              },
+            };
+          }),
+        },
+      }],
+    ]);
+
+    const rawBody = {
+      model: 'gpt-5.4',
+      stream: true,
+      input: [rawInputItem],
+    };
+    const preparedBody = {
+      model: 'gpt-5.4',
+      stream: true,
+      input: [preparedLocalContinuationItem],
+    };
+
+    const outcome = await (server as any).executePortAwarePipeline(5520, {
+      requestId: 'req_router_direct_uses_raw_responses_body',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: rawBody,
+      hubBody: preparedBody,
+      metadata: {},
+    });
+
+    expect(outcome.status).toBe(200);
+    expect(sentPayload).not.toBe(preparedBody);
+    expect(sentPayload?.input).toEqual([rawInputItem]);
+    expect(sentPayload?.input).not.toEqual([preparedLocalContinuationItem]);
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+  });
+
+  it('RED-GREEN: router-direct relay sends prepared hub body to Hub instead of current raw body', async () => {
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_direct_5520',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_direct_5520', (server as any).hubPipeline],
+    ]);
+    jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+      used: false,
+      reason: 'target_outbound_profile_requires_hub_relay',
+      preselectedRoute: {
+        target: {
+          providerKey: 'anthropic.key1.claude-test',
+          providerType: 'anthropic',
+          outboundProfile: 'anthropic-messages',
+          runtimeKey: 'anthropic.key1.claude-test',
+        },
+        decision: { routeName: 'default', pool: ['anthropic.key1.claude-test'] },
+        diagnostics: {},
+      },
+    } as any);
+    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
+      status: 200,
+      body: { id: 'resp_relay_uses_hub_body', object: 'response', output: [] },
+    } as any);
+
+    const rawBody = {
+      model: 'gpt-5.4',
+      stream: true,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'current raw request' }] }],
+    };
+    const preparedHubBody = {
+      model: 'gpt-5.4',
+      stream: true,
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'prepared hub request' }] }],
+    };
+
+    await (server as any).executePortAwarePipeline(5520, {
+      requestId: 'req_router_direct_relay_uses_hub_body',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: rawBody,
+      hubBody: preparedHubBody,
+      metadata: {},
+    });
+
+    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
+    const relayInput = executePipelineSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(relayInput.body).toBe(preparedHubBody);
+    expect(relayInput.body).not.toBe(rawBody);
+    expect(relayInput).not.toHaveProperty('hubBody');
   });
 });
