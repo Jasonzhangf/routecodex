@@ -6070,6 +6070,18 @@ function checkServertoolEngineStoplessSessionThinShell() {
     engineSource,
     'export async function runServerToolOrchestrationShell('
   );
+  if (engineSource.includes("if (preflight.kind === 'return_original_chat' || preflight.kind === 'return_original_chat_direct_passthrough')")) {
+    fail(
+      'servertool-engine-stopless-session-thin-shell',
+      'engine-orchestration-shell.ts must not restore direct preflight kind if-dispatch; keep native-planned preflight dispatch as a switch'
+    );
+  }
+  if (!engineSource.includes('switch (preflightKind)')) {
+    fail(
+      'servertool-engine-stopless-session-thin-shell',
+      'engine-orchestration-shell.ts must keep preflight kind dispatch as a thin switch over native-planned result'
+    );
+  }
   for (const marker of [
     'switch (runtimeAction.action)',
     "case 'build_stop_message_cli_projection'",

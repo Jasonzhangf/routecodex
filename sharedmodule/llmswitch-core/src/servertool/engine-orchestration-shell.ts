@@ -111,11 +111,18 @@ export async function runServerToolOrchestrationShell(
     logStopEntry,
     logStopCompare
   });
-  if (preflight.kind === 'return_original_chat' || preflight.kind === 'return_original_chat_direct_passthrough') {
-    return {
-      chat: preflight.chat,
-      executed: false
-    };
+  const preflightKind = preflight.kind;
+  switch (preflightKind) {
+    case 'return_original_chat':
+    case 'return_original_chat_direct_passthrough':
+      return {
+        chat: preflight.chat,
+        executed: false
+      };
+    case 'continue':
+      break;
+    default:
+      throw new Error(`[servertool] invalid engine preflight result kind: ${String(preflightKind)}`);
   }
   const stopSignal = preflight.stopSignal;
 

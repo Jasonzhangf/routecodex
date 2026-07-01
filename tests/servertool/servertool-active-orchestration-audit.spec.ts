@@ -562,10 +562,12 @@ const TARGETS = [
       'Servertool engine orchestration requires metadata center runtime_control.providerProtocol',
       'parseServertoolTimeoutMsWithNative({ raw: raw || undefined })',
       '.map((key) => process.env[key]).find((value) => Boolean(value))',
+      "if (preflight.kind === 'return_original_chat' || preflight.kind === 'return_original_chat_direct_passthrough')",
     ],
     required: [
       'resolveServertoolTimeoutMsFromEnvCandidatesWithNative({',
       'function resolveServerToolTimeoutMs()',
+      'switch (preflightKind)',
       'const stoplessExecutionPlan = planStoplessExecutionWithNative({',
       'const runtimeAction = planServertoolEngineRuntimeActionWithNative({',
       'engineResult: {',

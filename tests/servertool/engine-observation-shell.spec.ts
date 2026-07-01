@@ -279,6 +279,8 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('providerProtocol: args.providerProtocol');
     expect(source).toContain('createProgressObservation({');
     expect(source).toContain('runEnginePreflight({');
+    expect(source).not.toContain("if (preflight.kind === 'return_original_chat' || preflight.kind === 'return_original_chat_direct_passthrough')");
+    expect(source).toContain('switch (preflightKind)');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
     expect(source).not.toContain('Boolean(engineResult.execution)');
     expect(source).toContain('hasExecution: engineResult.execution != null');
