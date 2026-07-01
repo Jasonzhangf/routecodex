@@ -31,6 +31,8 @@ pub struct ServertoolResponseStageRuntimeActionPlan {
     pub response_hook_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
 }
 
 fn resolve_response_stage_next_action(input: &ServertoolResponseStageRuntimeActionInput) -> &str {
@@ -68,6 +70,18 @@ fn resolve_response_hook_name(input: &ServertoolResponseStageRuntimeActionInput)
     None
 }
 
+fn resolve_skip_reason(input: &ServertoolResponseStageRuntimeActionInput) -> Option<String> {
+    if let Some(Value::Object(plan)) = input.response_stage_gate_plan.as_ref() {
+        if let Some(Value::String(skip_reason)) = plan.get("skipReason") {
+            let trimmed = skip_reason.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
 pub fn plan_servertool_response_stage_runtime_action(
     input: ServertoolResponseStageRuntimeActionInput,
 ) -> ServertoolResponseStageRuntimeActionPlan {
@@ -78,6 +92,7 @@ pub fn plan_servertool_response_stage_runtime_action(
             action: ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass,
             response_hook_name: None,
             result_mode: Some("passthrough".to_string()),
+            skip_reason: resolve_skip_reason(&input),
         };
     }
 
@@ -86,6 +101,7 @@ pub fn plan_servertool_response_stage_runtime_action(
             action: ServertoolResponseStageRuntimeAction::RunAutoHooks,
             response_hook_name: None,
             result_mode: None,
+            skip_reason: None,
         };
     }
 
@@ -94,6 +110,7 @@ pub fn plan_servertool_response_stage_runtime_action(
             action: ServertoolResponseStageRuntimeAction::ReturnAutoHookResult,
             response_hook_name: None,
             result_mode: None,
+            skip_reason: None,
         };
     }
 
@@ -102,6 +119,7 @@ pub fn plan_servertool_response_stage_runtime_action(
             action: ServertoolResponseStageRuntimeAction::ReturnRequiredResponseHookEmpty,
             response_hook_name: resolve_response_hook_name(&input),
             result_mode: None,
+            skip_reason: None,
         };
     }
 
@@ -109,6 +127,7 @@ pub fn plan_servertool_response_stage_runtime_action(
         action: ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult,
         response_hook_name: None,
         result_mode: Some("passthrough".to_string()),
+        skip_reason: None,
     }
 }
 
@@ -131,6 +150,28 @@ mod tests {
             ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass
         );
         assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
+        assert_eq!(plan.skip_reason, None);
+    }
+
+    #[test]
+    fn returns_bypass_skip_reason_from_gate_plan() {
+        let plan = plan_servertool_response_stage_runtime_action(
+            ServertoolResponseStageRuntimeActionInput {
+                response_stage_gate_plan: Some(serde_json::json!({
+                    "nextAction": "bypass",
+                    "skipReason": " empty_assistant_payload "
+                })),
+                response_stage_next_action: None,
+                auto_hook_evaluated: false,
+                has_auto_hook_result: false,
+            },
+        );
+        assert_eq!(
+            plan.action,
+            ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass
+        );
+        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
+        assert_eq!(plan.skip_reason.as_deref(), Some("empty_assistant_payload"));
     }
 
     #[test]
@@ -148,6 +189,7 @@ mod tests {
             ServertoolResponseStageRuntimeAction::RunAutoHooks
         );
         assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.skip_reason, None);
     }
 
     #[test]
@@ -165,6 +207,7 @@ mod tests {
             ServertoolResponseStageRuntimeAction::ReturnAutoHookResult
         );
         assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.skip_reason, None);
     }
 
     #[test]

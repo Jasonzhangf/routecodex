@@ -667,6 +667,21 @@ describe('servertool CLI native bridge', () => {
 
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
+        responseStageGatePlan: {
+          nextAction: 'bypass',
+          skipReason: ' empty_assistant_payload '
+        },
+        autoHookEvaluated: false,
+        hasAutoHookResult: false
+      })
+    ).toEqual({
+      action: 'return_passthrough_bypass',
+      resultMode: 'passthrough',
+      skipReason: 'empty_assistant_payload'
+    });
+
+    expect(
+      planServertoolResponseStageRuntimeActionWithNative({
         responseStageNextAction: 'run_auto_hooks',
         autoHookEvaluated: false,
         hasAutoHookResult: false,

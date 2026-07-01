@@ -391,6 +391,7 @@ export type ServertoolResponseStageRuntimeActionPlan =
   | {
       action: 'return_passthrough_bypass' | 'return_passthrough_no_auto_hook_result';
       resultMode: 'passthrough';
+      skipReason?: string;
     }
   | {
       action: 'return_required_response_hook_empty';
@@ -2712,13 +2713,21 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
   if (isPassthroughAction && record.resultMode !== 'passthrough') {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned passthrough action without passthrough resultMode');
   }
+  const skipReason =
+    typeof record.skipReason === 'string' && record.skipReason
+      ? record.skipReason
+      : undefined;
+  if (record.action === 'return_passthrough_bypass' && record.skipReason !== undefined && !skipReason) {
+    throw new Error('planServertoolResponseStageRuntimeActionJson native returned empty bypass skipReason');
+  }
   if (!isPassthroughAction && record.resultMode !== undefined) {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned resultMode for non-passthrough action');
   }
   if (isPassthroughAction) {
     return {
       action: record.action,
-      resultMode: 'passthrough'
+      resultMode: 'passthrough',
+      ...(skipReason ? { skipReason } : {})
     };
   }
   if (record.action === 'return_required_response_hook_empty') {

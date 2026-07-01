@@ -3070,6 +3070,34 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         bypass_value["resultMode"],
         serde_json::json!("passthrough")
     );
+    assert_eq!(bypass_value.get("skipReason"), None);
+
+    let bypass_with_skip_reason = plan_servertool_response_stage_runtime_action_json(
+        &serde_json::json!({
+            "responseStageGatePlan": {
+                "nextAction": "bypass",
+                "skipReason": " empty_assistant_payload "
+            },
+            "autoHookEvaluated": false,
+            "hasAutoHookResult": false
+        })
+        .to_string(),
+    )
+    .expect("response-stage runtime action bypass skip reason plan");
+    let bypass_with_skip_reason_value: serde_json::Value =
+        serde_json::from_str(&bypass_with_skip_reason).expect("parse bypass skip reason plan");
+    assert_eq!(
+        bypass_with_skip_reason_value["action"],
+        serde_json::json!("return_passthrough_bypass")
+    );
+    assert_eq!(
+        bypass_with_skip_reason_value["resultMode"],
+        serde_json::json!("passthrough")
+    );
+    assert_eq!(
+        bypass_with_skip_reason_value["skipReason"],
+        serde_json::json!("empty_assistant_payload")
+    );
 
     let run_auto_hooks = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({

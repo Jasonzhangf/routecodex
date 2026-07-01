@@ -51,7 +51,7 @@ export async function runServertoolResponseStageOrchestrationShell(
 
   switch (gateRuntimeAction.action) {
     case 'return_passthrough_bypass': {
-      const skipReason = gatePlan.skipReason as string;
+      const skipReason = gateRuntimeAction.skipReason;
       recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
         executed: false,
         skipReason,

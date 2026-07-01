@@ -94,6 +94,7 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain("throw new Error('[servertool] native response-stage gate bypass missing skipReason')");
     expect(source).not.toContain('typeof gatePlan.skipReason');
     expect(source).not.toContain('gatePlan.skipReason.trim()');
+    expect(source).not.toContain('gatePlan.skipReason as string');
     expect(source).not.toContain("gatePlan.nextAction === 'bypass'");
     expect(source).not.toContain("if (gateRuntimeAction.action === 'return_passthrough_bypass')");
     expect(source).not.toContain('if (orchestration.executed)');
@@ -116,7 +117,9 @@ describe('response-stage-orchestration-shell', () => {
       skipReason: 'empty_assistant_payload'
     });
     planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
-      action: 'return_passthrough_bypass'
+      action: 'return_passthrough_bypass',
+      resultMode: 'passthrough',
+      skipReason: 'empty_assistant_payload'
     });
 
     await expect(
