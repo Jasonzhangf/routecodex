@@ -343,7 +343,7 @@ jest.unstable_mockModule(
     })),
     planAutoHookCallerFinalizationWithNative: jest.fn((input: any) => {
       if (input?.resultPresent) {
-        return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false };
+        return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false, resultMode: 'tool_flow' };
       }
       if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
         return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };

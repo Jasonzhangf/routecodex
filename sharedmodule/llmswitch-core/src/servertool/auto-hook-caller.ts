@@ -159,7 +159,7 @@ export async function runServertoolAutoHookCaller(args: {
       case 'return_result': {
         const queueResultForReturn = queueResult as ServerToolHandlerResult;
         return {
-          mode: 'tool_flow',
+          mode: finalizationPlan.resultMode,
           finalChatResponse: queueResultForReturn.chatResponse,
           execution: queueResultForReturn.execution,
           ...(queueResultForReturn.metadataWritePlan != null

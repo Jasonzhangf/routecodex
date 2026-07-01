@@ -83,7 +83,7 @@ const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
 
 const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
   if (input?.resultPresent) {
-    return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false };
+    return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false, resultMode: 'tool_flow' };
   }
   if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
     return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };
@@ -245,7 +245,7 @@ beforeEach(() => {
   });
   planAutoHookCallerFinalizationWithNativeMock.mockImplementation((input: any) => {
     if (input?.resultPresent) {
-      return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false };
+      return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false, resultMode: 'tool_flow' };
     }
     if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
       return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };
@@ -463,6 +463,8 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('resultPresent: queueResult != null');
     expect(callerSource).toContain('queueResultForReturn.metadataWritePlan != null');
     expect(callerSource).toContain('switch (finalizationPlan.action)');
+    expect(callerSource).toContain('mode: finalizationPlan.resultMode');
+    expect(callerSource).not.toContain("mode: 'tool_flow'");
     expect(callerSource).not.toContain('if (finalizationPlan.returnResult)');
     expect(callerSource).not.toContain('if (finalizationPlan.continueNextQueue)');
     expect(callerSource).not.toContain('if (finalizationPlan.returnNull)');

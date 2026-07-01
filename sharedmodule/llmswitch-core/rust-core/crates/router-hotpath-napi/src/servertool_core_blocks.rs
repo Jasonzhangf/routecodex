@@ -2453,6 +2453,7 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     assert_eq!(parsed["returnResult"], true);
     assert_eq!(parsed["continueNextQueue"], false);
     assert_eq!(parsed["returnNull"], false);
+    assert_eq!(parsed["resultMode"], serde_json::json!("tool_flow"));
 
     let next = plan_auto_hook_caller_finalization_json(
         &serde_json::json!({
@@ -2471,6 +2472,7 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     assert_eq!(next_parsed["returnResult"], false);
     assert_eq!(next_parsed["continueNextQueue"], true);
     assert_eq!(next_parsed["returnNull"], false);
+    assert_eq!(next_parsed.get("resultMode"), None);
 
     let done = plan_auto_hook_caller_finalization_json(
         &serde_json::json!({
@@ -2487,6 +2489,7 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     assert_eq!(done_parsed["returnResult"], false);
     assert_eq!(done_parsed["continueNextQueue"], false);
     assert_eq!(done_parsed["returnNull"], true);
+    assert_eq!(done_parsed.get("resultMode"), None);
 }
 
 #[test]

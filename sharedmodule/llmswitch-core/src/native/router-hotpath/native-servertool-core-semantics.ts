@@ -128,12 +128,26 @@ export interface AutoHookRuntimeAttemptPlan {
   errorMessage?: string;
 }
 
-export interface AutoHookCallerFinalizationPlan {
-  action: 'return_result' | 'continue_next_queue' | 'return_null';
-  returnResult: boolean;
-  continueNextQueue: boolean;
-  returnNull: boolean;
-}
+export type AutoHookCallerFinalizationPlan =
+  | {
+      action: 'return_result';
+      returnResult: true;
+      continueNextQueue: false;
+      returnNull: false;
+      resultMode: 'tool_flow';
+    }
+  | {
+      action: 'continue_next_queue';
+      returnResult: false;
+      continueNextQueue: true;
+      returnNull: false;
+    }
+  | {
+      action: 'return_null';
+      returnResult: false;
+      continueNextQueue: false;
+      returnNull: true;
+    };
 
 export interface EngineSelectionOverridesPlan {
   disableToolCallHandlers?: boolean;
@@ -2046,6 +2060,12 @@ export function planAutoHookCallerFinalizationWithNative(input: {
   if (record.returnResult === true && input.resultPresent !== true) {
     throw new Error('planAutoHookCallerFinalizationJson native returned result disposition without queue result');
   }
+  if (record.action === 'return_result' && record.resultMode !== 'tool_flow') {
+    throw new Error('planAutoHookCallerFinalizationJson native returned invalid resultMode');
+  }
+  if (record.action !== 'return_result' && record.resultMode !== undefined) {
+    throw new Error('planAutoHookCallerFinalizationJson native returned resultMode for non-result action');
+  }
   if (
     (record.action === 'return_result' && record.returnResult !== true) ||
     (record.action === 'continue_next_queue' && record.continueNextQueue !== true) ||
@@ -2053,11 +2073,28 @@ export function planAutoHookCallerFinalizationWithNative(input: {
   ) {
     throw new Error('planAutoHookCallerFinalizationJson native returned action/disposition mismatch');
   }
+  if (record.action === 'return_result') {
+    return {
+      action: 'return_result',
+      returnResult: true,
+      continueNextQueue: false,
+      returnNull: false,
+      resultMode: 'tool_flow'
+    };
+  }
+  if (record.action === 'continue_next_queue') {
+    return {
+      action: 'continue_next_queue',
+      returnResult: false,
+      continueNextQueue: true,
+      returnNull: false
+    };
+  }
   return {
-    action: record.action,
-    returnResult: record.returnResult,
-    continueNextQueue: record.continueNextQueue,
-    returnNull: record.returnNull
+    action: 'return_null',
+    returnResult: false,
+    continueNextQueue: false,
+    returnNull: true
   };
 }
 

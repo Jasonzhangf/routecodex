@@ -9,6 +9,7 @@ import {
   planServertoolEnginePrepassActionWithNative,
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineTriggerObservationWithNative,
+  planAutoHookCallerFinalizationWithNative,
   planAutoHookRuntimeAttemptWithNative,
   planStoplessCliProjectionContextWithNative,
   planServertoolExecutionBranchWithNative,
@@ -799,6 +800,35 @@ describe('servertool CLI native bridge', () => {
         result: 'error',
         reason: 'boom'
       }
+    });
+  });
+
+  it('uses Rust-owned auto-hook caller finalization result mode planning', () => {
+    expect(
+      planAutoHookCallerFinalizationWithNative({
+        resultPresent: true,
+        queueIndex: 1,
+        queueTotal: 2
+      })
+    ).toEqual({
+      action: 'return_result',
+      returnResult: true,
+      continueNextQueue: false,
+      returnNull: false,
+      resultMode: 'tool_flow'
+    });
+
+    expect(
+      planAutoHookCallerFinalizationWithNative({
+        resultPresent: false,
+        queueIndex: 1,
+        queueTotal: 2
+      })
+    ).toEqual({
+      action: 'continue_next_queue',
+      returnResult: false,
+      continueNextQueue: true,
+      returnNull: false
     });
   });
 

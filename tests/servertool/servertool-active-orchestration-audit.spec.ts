@@ -202,6 +202,7 @@ const TARGETS = [
       'planServertoolAutoHookQueuesWithNative({',
       'args.hooks[entry.sourceIndex]',
       'native auto-hook queue returned invalid sourceIndex',
+      "mode: 'tool_flow'",
     ],
     required: [
       'const attemptPlan = planAutoHookRuntimeAttemptWithNative({',
@@ -214,7 +215,7 @@ const TARGETS = [
       'queueResultForReturn.metadataWritePlan != null',
       'queueIndex: queueIndex + 1',
       'queueTotal: queueOrder.length',
-      "mode: 'tool_flow'",
+      'mode: finalizationPlan.resultMode',
       'const queueResultForReturn = queueResult as ServerToolHandlerResult',
       'finalChatResponse: queueResultForReturn.chatResponse',
       'execution: queueResultForReturn.execution',

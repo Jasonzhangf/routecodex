@@ -66,6 +66,8 @@ pub struct AutoHookCallerFinalizationPlan {
     pub return_result: bool,
     pub continue_next_queue: bool,
     pub return_null: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -126,6 +128,7 @@ pub fn plan_auto_hook_caller_finalization(
             return_result: true,
             continue_next_queue: false,
             return_null: false,
+            result_mode: Some("tool_flow".to_string()),
         };
     }
     let final_queue = input.queue_total <= 0 || input.queue_index >= input.queue_total;
@@ -135,6 +138,7 @@ pub fn plan_auto_hook_caller_finalization(
             return_result: false,
             continue_next_queue: false,
             return_null: true,
+            result_mode: None,
         };
     }
     AutoHookCallerFinalizationPlan {
@@ -142,6 +146,7 @@ pub fn plan_auto_hook_caller_finalization(
         return_result: false,
         continue_next_queue: true,
         return_null: false,
+        result_mode: None,
     }
 }
 
@@ -294,6 +299,18 @@ mod tests {
             super::AutoHookCallerFinalizationAction::ContinueNextQueue
         );
         assert!(next.continue_next_queue);
+        assert_eq!(next.result_mode, None);
+
+        let result = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
+            result_present: true,
+            queue_index: 1,
+            queue_total: 2,
+        });
+        assert_eq!(
+            result.action,
+            super::AutoHookCallerFinalizationAction::ReturnResult
+        );
+        assert_eq!(result.result_mode.as_deref(), Some("tool_flow"));
 
         let done = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
             result_present: false,
