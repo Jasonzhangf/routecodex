@@ -1,3 +1,8 @@
+# 2026-07-02: servertool execution-queue action aliases removed
+- Slice: `execution-queue-shell.ts` no longer copies native execution-loop discriminants into `initialLoopAction` / `resultLoopAction`; the shell switches directly on `initialLoopActionPlan.action` and `resultLoopActionPlan.action`.
+- Gate: `tests/servertool/execution-queue-shell.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` now forbid the local action aliases and require direct switches over native plan actions.
+- Evidence: focused Jest `execution-queue-shell` PASS 3/3; focused `servertool-active-orchestration-audit` PASS 44/44 on execution-queue slice. Remaining commit gates: sharedmodule `tsc`, `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `git diff --check`.
+
 # 2026-07-02: servertool registry lookup action fail-fast added
 - Slice: `registry-orchestration-shell.ts` now explicitly handles native `return_none` and fails fast on unknown registry lookup actions instead of implicitly falling through to `undefined`.
 - Gate: `tests/servertool/registry-orchestration-shell.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` require `case 'return_none':` plus `invalid registry lookup action`.

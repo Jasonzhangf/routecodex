@@ -46,8 +46,7 @@ export async function runServertoolIoExecutionQueue(args: {
       hasMaterializedResult: false,
       hasHandlerError: false
     });
-    const initialLoopAction = initialLoopActionPlan.action;
-    switch (initialLoopAction) {
+    switch (initialLoopActionPlan.action) {
       case 'skip_non_tool_call_handler':
         continue;
       case 'throw_dispatch_spec_mismatch':
@@ -63,7 +62,9 @@ export async function runServertoolIoExecutionQueue(args: {
       case 'continue_without_effect':
         break;
       default:
-        throw new Error(`[servertool] invalid execution loop initial action: ${String(initialLoopAction)}`);
+        throw new Error(
+          `[servertool] invalid execution loop initial action: ${String(initialLoopActionPlan.action)}`
+        );
     }
     const ctx = { ...args.contextBase, base: args.baseForExecution, toolCall };
     let planned = null;
@@ -87,8 +88,7 @@ export async function runServertoolIoExecutionQueue(args: {
       hasMaterializedResult: result != null,
       hasHandlerError
     });
-    const resultLoopAction = resultLoopActionPlan.action;
-    switch (resultLoopAction) {
+    switch (resultLoopActionPlan.action) {
       case 'apply_materialized_result':
         replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse as JsonObject);
         executionState = appendServertoolExecutedRecordWithNative({
@@ -126,7 +126,9 @@ export async function runServertoolIoExecutionQueue(args: {
       case 'continue_without_effect':
         break;
       default:
-        throw new Error(`[servertool] invalid execution loop result action: ${String(resultLoopAction)}`);
+        throw new Error(
+          `[servertool] invalid execution loop result action: ${String(resultLoopActionPlan.action)}`
+        );
     }
   }
 

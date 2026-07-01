@@ -2768,6 +2768,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     "if (initialLoopActionPlan.action === 'throw_dispatch_spec_mismatch')",
     "if (resultLoopActionPlan.action === 'apply_materialized_result')",
     "if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')",
+    'const initialLoopAction = initialLoopActionPlan.action',
+    'const resultLoopAction = resultLoopActionPlan.action',
     'Boolean(entry)',
     'Boolean(result)',
     'planned ? await materializeServertoolPlannedResult',
@@ -2807,8 +2809,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     'hasHandlerEntry: entry != null',
     'planned != null ? await materializeServertoolPlannedResult',
     'hasMaterializedResult: result != null',
-    'switch (initialLoopAction)',
-    'switch (resultLoopAction)',
+    'switch (initialLoopActionPlan.action)',
+    'switch (resultLoopActionPlan.action)',
   ]) {
     assertContains(
       'servertool-execution-dispatch-rust-owner',

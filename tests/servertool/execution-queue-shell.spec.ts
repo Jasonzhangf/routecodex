@@ -176,8 +176,10 @@ describe('execution-queue-shell', () => {
 
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('planServertoolExecutionLoopRuntimeActionWithNative');
-    expect(source).toContain('switch (initialLoopAction)');
-    expect(source).toContain('switch (resultLoopAction)');
+    expect(source).toContain('switch (initialLoopActionPlan.action)');
+    expect(source).toContain('switch (resultLoopActionPlan.action)');
+    expect(source).not.toContain('const initialLoopAction = initialLoopActionPlan.action');
+    expect(source).not.toContain('const resultLoopAction = resultLoopActionPlan.action');
     expect(source).not.toContain("if (initialLoopActionPlan.action === 'skip_non_tool_call_handler')");
     expect(source).not.toContain("if (initialLoopActionPlan.action === 'throw_dispatch_spec_mismatch')");
     expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_materialized_result')");
