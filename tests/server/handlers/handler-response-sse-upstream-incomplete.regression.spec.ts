@@ -60,7 +60,7 @@ describe('handler-response Responses SSE upstream incomplete regression', () => 
     }
   });
 
-  it('projects explicit error when upstream Responses SSE ends before terminal event', async () => {
+  it('does not synthesize incomplete errors when upstream Responses SSE ends before terminal event', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -139,8 +139,10 @@ describe('handler-response Responses SSE upstream incomplete regression', () => 
 
       await finished;
 
-      expect(output).toContain('event: error');
-      expect(output).toContain('upstream_stream_incomplete');
+      expect(output).toContain('event: response.created');
+      expect(output).toContain('event: response.output_item.added');
+      expect(output).not.toContain('event: error');
+      expect(output).not.toContain('upstream_stream_incomplete');
       expect(output).not.toContain('event: response.completed');
       expect(output).not.toContain('event: response.done');
     } finally {

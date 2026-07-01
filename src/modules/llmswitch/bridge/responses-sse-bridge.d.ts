@@ -6,6 +6,4 @@
  * responses-response-bridge.ts.
  */
 import { buildClientSseKeepaliveFrameForHttp as buildClientSseKeepaliveFrameForHttpImpl } from './responses-sse-transport.js';
-import { updateResponsesSseTransportTerminalStateNative } from './native-exports.js';
 export declare const buildClientSseKeepaliveFrameForHttp: typeof buildClientSseKeepaliveFrameForHttpImpl;
-export declare const updateResponsesSseTransportTerminalStateForHttp: typeof updateResponsesSseTransportTerminalStateNative;

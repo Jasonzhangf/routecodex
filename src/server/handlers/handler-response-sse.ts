@@ -25,7 +25,6 @@ import { buildSseErrorEventFrame } from '../utils/http-error-mapper.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildClientSseKeepaliveFrameForHttp,
-  updateResponsesSseTransportTerminalStateForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
 
 type FlushableResponse = Response & {
@@ -417,8 +416,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   let ended = false;
   let cleanupLogged = false;
   let streamEnded = false;
-  let responsesSseObservedTerminal = false;
-  let responsesSseTransportState: Record<string, unknown> = {};
   let totalTimer: NodeJS.Timeout | null = null;
   let keepaliveTimer: NodeJS.Timeout | null = null;
 
@@ -551,21 +548,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     destroySourceStream(Object.assign(new Error(message), { code }));
   };
 
-  const updateResponsesTerminalProbeFromTransportText = (text: string, flushRemainder = false) => {
-    if (!isResponsesSseEndpoint(entryEndpoint) || responsesSseObservedTerminal) {
-      return;
-    }
-    const terminalState = updateResponsesSseTransportTerminalStateForHttp({
-      chunk: text,
-      state: responsesSseTransportState,
-      flushRemainder,
-    });
-    responsesSseTransportState = terminalState.state;
-    if (terminalState.observedTerminal) {
-      responsesSseObservedTerminal = true;
-    }
-  };
-
   if (typeof totalTimeoutMs === 'number' && Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0) {
     totalTimer = setTimeout(() => {
       endWithSseError('HTTP_SSE_TIMEOUT', `SSE timeout after ${totalTimeoutMs}ms`);
@@ -599,8 +581,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     detachOutboundStream();
     const closeBeforeStreamEnd =
       trigger === 'close'
-      && !streamEnded
-      && !(isResponsesSseEndpoint(entryEndpoint) && responsesSseObservedTerminal);
+      && !streamEnded;
     const details = {
       status,
       trigger,
@@ -649,7 +630,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       : chunk instanceof Uint8Array ? Buffer.from(chunk).toString('utf8')
       : '';
     if (!text) return;
-    updateResponsesTerminalProbeFromTransportText(text);
     writeClientSseFrame(text, 'response.sse.stream.write_frame', { recordSnapshot: false });
   });
 
@@ -718,16 +698,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     recordSseTransportStreamEnd(requestLabel, {
       finishReason: undefined,
     });
-    updateResponsesTerminalProbeFromTransportText('', true);
-    if (isResponsesSseEndpoint(entryEndpoint) && !responsesSseObservedTerminal) {
-      endWithSseError(
-        'upstream_stream_incomplete',
-        'SSE stream ended before response.completed',
-        502,
-        'response.sse.stream.incomplete'
-      );
-      return;
-    }
     ended = true;
     if (!res.writableEnded && !res.destroyed) {
       try {
