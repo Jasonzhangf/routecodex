@@ -77,6 +77,14 @@ function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function readProviderResponseRequestId(context: AdapterContext): string {
+  const requestId = readString((context as Record<string, unknown>).requestId);
+  if (!requestId) {
+    throw new Error('Provider response conversion requires context.requestId');
+  }
+  return requestId;
+}
+
 function readMetadataCenterSnapshotForRust(context: AdapterContext): Record<string, unknown> | null {
   const contextRecord = context as unknown as Record<string, unknown>;
   const boundCenter = readBoundMetadataCenter(contextRecord);
@@ -385,7 +393,7 @@ async function readProviderResponseSseStreamText(stream: Readable): Promise<stri
 export async function convertProviderResponse(
   options: ProviderResponseConversionOptions
 ): Promise<ProviderResponseConversionResult> {
-  const requestId = options.context.requestId || 'unknown';
+  const requestId = readProviderResponseRequestId(options.context);
   const providerProtocol = readProviderProtocolWithinCore({
     metadata: options.context as Record<string, unknown> | undefined
   });

@@ -376,6 +376,7 @@ if (!anthropicSequencer.includes('Invalid Anthropic tool_result block: missing t
 
 const providerResponseShell = read('sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
 for (const forbidden of [
+  "options.context.requestId || 'unknown'",
   'effectPlan: { effects: Array.isArray(effects) ? effects : [] }',
   'servertoolRuntimeActions: [], streamPipe: null, runtimeStateWrite: null, stoplessMetadataCenterWrite: null',
   'Array.isArray(args.runtimeEffects.servertoolRuntimeActions)\n    ? args.runtimeEffects.servertoolRuntimeActions\n    : []',
