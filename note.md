@@ -1,3 +1,9 @@
+# 2026-07-01: provider-response shared pure blocks TS fallback removed
+- Slice: `provider-response-shared-pure-blocks.ts` no longer catches native binding load failures or falls back to local TS implementations for migrated shared pure blocks; native-backed exports now require router-hotpath NAPI functions and fail fast on missing/malformed native output.
+- Gate: `provider-response-shared-pure-blocks.spec.ts` now scans the source and forbids `withNativeBinding`, `return fallback()`, `TS fallback`, and `fall through` markers from returning.
+- Verification: focused Jest `provider-response-shared-pure-blocks` PASS 5/5; Rust `router-hotpath-napi provider_response_shared_pure_blocks` PASS 32/32; Rust `failure_policy` PASS 31/31; `npx tsc --noEmit --pretty false` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-fallback-denylist` PASS; `git diff --check` PASS.
+- Commit scope note: unrelated dirty SSE handler/client contract tests remain excluded from this slice.
+
 # 2026-07-01: servertool auto-hook presence truth moved out of TS truthiness
 - Slice 1: `execution-handler-materialization-shell.ts` now passes `hasLastExecution: args.executionState.lastExecution != null` instead of `Boolean(...)`; added a reverse test proving `null` lastExecution is treated as absent without truthiness coercion.
 - Slice 2: `auto-hook-caller.ts` now passes `hasPlannedResult: planned != null`, `hasMaterializedResult: result != null`, and `resultPresent: queueResult != null`; added a trace spec that locks these markers and a rust-only gate that forbids the old `Boolean(...)` markers.
