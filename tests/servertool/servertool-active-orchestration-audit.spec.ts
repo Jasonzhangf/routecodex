@@ -87,6 +87,7 @@ const TARGETS = [
       "String(lastErr ?? 'unknown')",
       "lastErr instanceof Error ? lastErr.message : String",
       'lastErr instanceof Error ? lastErr.message : lastErr',
+      'Boolean(lastErr)',
     ],
     required: [
       'runServertoolIoExecutionQueue',

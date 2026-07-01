@@ -160,6 +160,7 @@ describe('execution queue dispatch runtime', () => {
     expect(source).not.toContain('function assertDispatchExecutionMode(');
     expect(source).not.toContain("String(lastErr ?? 'unknown')");
     expect(source).not.toContain('lastErr instanceof Error ? lastErr.message : lastErr');
+    expect(source).not.toContain('Boolean(lastErr)');
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).toContain('message: errorEffectPlan.handlerErrorMessage as string');
   });

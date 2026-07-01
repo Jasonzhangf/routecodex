@@ -181,6 +181,7 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain("String(lastErr ?? 'unknown')");
     expect(source).not.toContain("lastErr instanceof Error ? lastErr.message : String");
     expect(source).not.toContain('lastErr instanceof Error ? lastErr.message : lastErr');
+    expect(source).not.toContain('Boolean(lastErr)');
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).not.toContain('buildServertoolDispatchPlanInputWithNative');
   });
@@ -213,5 +214,50 @@ describe('execution-queue-shell', () => {
     });
     expect(materializeServertoolPlannedResult).toHaveBeenCalled();
     expect(appendServertoolExecutedRecordWithNative).toHaveBeenCalled();
+  });
+
+  test('passes falsy thrown handler errors as explicit error presence to native runtime plan', async () => {
+    runStoplessBuiltinHandlerForRuntimeWithNative.mockRejectedValue('');
+    materializeServertoolPlannedResult.mockResolvedValue(null);
+    buildServertoolHandlerErrorToolOutputPayloadWithNative.mockImplementation((input: any) => ({
+      ...(input.base ?? {}),
+      tool_outputs: [{ tool_call_id: input.toolCallId, name: input.toolName, content: input.message }]
+    }));
+
+    await runServertoolIoExecutionQueue({
+      dispatchPlan: {
+        executableToolCalls: [
+          {
+            id: 'call-falsy-error',
+            name: 'web_search',
+            arguments: '{}',
+            executionMode: 'guarded',
+            stripAfterExecute: true
+          }
+        ],
+        noopToolCalls: []
+      } as any,
+      options: { requestId: 'req-falsy-error' } as any,
+      contextBase: { base: {}, toolCalls: [], adapterContext: {}, requestId: 'req-falsy-error', entryEndpoint: 'openai', providerProtocol: 'openai-chat' } as any,
+      baseForExecution: {} as any
+    });
+
+    expect(planServertoolExecutionLoopRuntimeActionWithNative).toHaveBeenNthCalledWith(2, {
+      hasHandlerEntry: true,
+      triggerMode: 'tool_call',
+      hasMaterializedResult: false,
+      hasHandlerError: true
+    });
+    expect(planServertoolExecutionLoopEffectWithNative).toHaveBeenCalledWith({
+      mode: 'handler_error',
+      toolCall: {
+        id: 'call-falsy-error',
+        name: 'web_search',
+        arguments: '{}',
+        executionMode: 'guarded',
+        stripAfterExecute: true
+      },
+      handlerErrorMessage: ''
+    });
   });
 });

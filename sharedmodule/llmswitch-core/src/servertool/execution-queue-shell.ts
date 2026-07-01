@@ -63,6 +63,7 @@ export async function runServertoolIoExecutionQueue(args: {
     const ctx = { ...args.contextBase, base: args.baseForExecution, toolCall };
     let planned = null;
     let lastErr: unknown;
+    let hasHandlerError = false;
     try {
       planned = await runStoplessBuiltinHandlerForRuntimeWithNative({
         name: entry.execution.builtinName,
@@ -72,13 +73,14 @@ export async function runServertoolIoExecutionQueue(args: {
       });
     } catch (err) {
       lastErr = err;
+      hasHandlerError = true;
     }
     const result = planned ? await materializeServertoolPlannedResult(planned, args.options) : null;
     const resultLoopActionPlan = planServertoolExecutionLoopRuntimeActionWithNative({
       hasHandlerEntry: true,
       triggerMode: entry.trigger,
       hasMaterializedResult: Boolean(result),
-      hasHandlerError: Boolean(lastErr)
+      hasHandlerError
     });
     if (resultLoopActionPlan.action === 'apply_materialized_result') {
       replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse as JsonObject);

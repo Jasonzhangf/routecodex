@@ -2766,6 +2766,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'runServertoolHandler',
     'if (result) {',
     'if (lastErr) {',
+    'Boolean(lastErr)',
     "String(lastErr ?? 'unknown')",
     "lastErr instanceof Error ? lastErr.message : String",
     'lastErr instanceof Error ? lastErr.message : lastErr',
