@@ -167,7 +167,7 @@ describe('responses-handler SSE terminal contract', () => {
     });
   });
 
-  it('HTTP blackbox: upstream closes without response.done — repair emits response.done', async () => {
+  it('HTTP blackbox: upstream closes without response.done — handler does not synthesize response.done', async () => {
     const executePipeline = jest.fn(async () => ({
       status: 200,
       headers: {},
@@ -216,24 +216,22 @@ describe('responses-handler SSE terminal contract', () => {
       });
       const { events, rawText: text } = await collectSseEvents(response, {
         timeoutMs: 1_500,
-        stopOnEvent: 'response.done'
+        stopOnEvent: 'response.required_action'
       });
 
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type') || '').toContain('text/event-stream');
       expect(events.map((entry) => entry.event)).toEqual(expect.arrayContaining([
-        'response.completed',
-        'response.done'
+        'response.completed'
       ]));
-      // The repair path must emit response.completed and response.done so client SDKs see a normal terminal event.
       expect(text).toContain('event: response.completed');
-      expect(text).toContain('event: response.done');
+      expect(text).not.toContain('event: response.done');
       expect(text).not.toContain('upstream_stream_incomplete');
       expect(text).not.toContain('stream closed before response.completed');
     });
   });
 
-  it('HTTP blackbox: upstream required_action without response.completed is repaired into standard Responses tool SSE before close', async () => {
+  it('HTTP blackbox: upstream required_action without response.completed is passed through without handler repair', async () => {
     const executePipeline = jest.fn(async () => ({
       status: 200,
       headers: {},
@@ -267,36 +265,18 @@ describe('responses-handler SSE terminal contract', () => {
         body: JSON.stringify({ model: 'gpt-5.5', stream: true, input: 'call tool' })
       });
       const { events, rawText: text } = await collectSseEvents(response, {
-        timeoutMs: 1_500,
-        stopOnEvent: 'response.done'
+        timeoutMs: 1_500
       });
       const eventNames = events.map((entry) => entry.event);
-      const outputAddedIndex = eventNames.indexOf('response.output_item.added');
-      const argsDoneIndex = eventNames.indexOf('response.function_call_arguments.done');
-      const outputDoneIndex = eventNames.indexOf('response.output_item.done');
-      const completedIndex = eventNames.indexOf('response.completed');
-      const doneIndex = eventNames.indexOf('response.done');
 
       expect(response.status).toBe(200);
-      expect(outputAddedIndex).toBeGreaterThanOrEqual(0);
-      expect(argsDoneIndex).toBeGreaterThanOrEqual(0);
-      expect(outputDoneIndex).toBeGreaterThanOrEqual(0);
-      expect(completedIndex).toBeGreaterThanOrEqual(0);
-      expect(doneIndex).toBeGreaterThanOrEqual(0);
-      expect(outputAddedIndex).toBeLessThan(argsDoneIndex);
-      expect(argsDoneIndex).toBeLessThan(outputDoneIndex);
-      expect(outputDoneIndex).toBeLessThan(completedIndex);
-      expect(completedIndex).toBeLessThan(doneIndex);
-      expect(text).toContain('event: response.output_item.added');
-      expect(text).toContain('event: response.function_call_arguments.done');
-      expect(text).toContain('event: response.output_item.done');
-      expect(text).toContain('event: response.completed');
-      expect(text).toContain('event: response.done');
-      expect(text).not.toContain('event: response.required_action');
-      expect(text.indexOf('event: response.output_item.added')).toBeLessThan(text.indexOf('event: response.function_call_arguments.done'));
-      expect(text.indexOf('event: response.function_call_arguments.done')).toBeLessThan(text.indexOf('event: response.output_item.done'));
-      expect(text.indexOf('event: response.output_item.done')).toBeLessThan(text.indexOf('event: response.completed'));
-      expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
+      expect(eventNames).toContain('response.required_action');
+      expect(text).toContain('event: response.required_action');
+      expect(text).not.toContain('event: response.output_item.added');
+      expect(text).not.toContain('event: response.function_call_arguments.done');
+      expect(text).not.toContain('event: response.output_item.done');
+      expect(text).not.toContain('event: response.completed');
+      expect(text).not.toContain('event: response.done');
       expect(text).not.toContain('upstream_stream_incomplete');
       expect(text).not.toContain('stream closed before response.completed');
     });

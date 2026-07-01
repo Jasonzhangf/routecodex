@@ -70,6 +70,20 @@ const mockBridgeModule = () => ({
     && !Array.isArray(body)
     && (body as Record<string, unknown>).required_action
   )),
+  projectSseErrorEventPayloadNative: jest.fn((args: {
+    requestId?: string;
+    status?: number;
+    message?: string;
+    code?: string;
+  }) => ({
+    error: {
+      message: args.message,
+      type: 'routecodex_error',
+      code: args.code,
+    },
+    request_id: args.requestId,
+    status: args.status,
+  })),
   recordResponsesResponseForRequest: jest.fn(async () => undefined),
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),
   requireCoreDist: jest.fn(() => ({})),
@@ -321,7 +335,7 @@ describe('Responses SSE client contract blackbox', () => {
     });
   });
 
-  it('rejects direct passthrough provider-specific SSE events instead of passing them to Responses clients', async () => {
+  it('passes direct passthrough provider-specific SSE events without handler protocol filtering', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const app = express();
     app.get('/responses', (_req, res) => {
@@ -344,6 +358,7 @@ describe('Responses SSE client contract blackbox', () => {
       );
       upstream.write('event: codex.rate_limits\n');
       upstream.write('data: {"type":"codex.rate_limits","limit_reached":true}\n\n');
+      upstream.end();
     });
 
     await withServer(app, async (baseUrl) => {
@@ -355,9 +370,10 @@ describe('Responses SSE client contract blackbox', () => {
       });
 
       expect(response.status).toBe(200);
-      expect(rawText).toContain('event: error');
-      expect(rawText).toContain('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');
-      expect(rawText).not.toContain('event: codex.rate_limits');
+      expect(rawText).toContain('event: codex.rate_limits');
+      expect(rawText).toContain('"type":"codex.rate_limits"');
+      expect(rawText).not.toContain('event: error');
+      expect(rawText).not.toContain('RESPONSES_DIRECT_SSE_PROTOCOL_VIOLATION');
     });
   });
 
@@ -409,7 +425,7 @@ describe('Responses SSE client contract blackbox', () => {
     });
   });
 
-  it('drops direct passthrough transport keepalive events but preserves terminal Responses events', async () => {
+  it('passes direct passthrough transport keepalive events and preserves terminal Responses events', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const app = express();
     app.get('/responses', (_req, res) => {
@@ -449,7 +465,7 @@ describe('Responses SSE client contract blackbox', () => {
       });
 
       expect(response.status).toBe(200);
-      expect(rawText).not.toContain('event: keepalive');
+      expect(rawText).toContain('event: keepalive');
       expect(rawText).not.toContain('event: ping');
       expect(rawText).toContain('event: response.completed');
       expect(rawText).toContain('event: response.done');
@@ -672,7 +688,7 @@ describe('Responses SSE client contract blackbox', () => {
     });
   });
 
-  it('turns early upstream close into explicit error instead of client hang', async () => {
+  it('does not synthesize incomplete errors when upstream closes early', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const app = express();
     app.get('/responses', (_req, res) => {
@@ -710,8 +726,8 @@ describe('Responses SSE client contract blackbox', () => {
       expect(response.status).toBe(200);
       expect(rawText).toContain('response.created');
       expect(rawText).toContain('partial');
-      expect(rawText).toContain('event: error');
-      expect(rawText).toContain('"code":"upstream_stream_incomplete"');
+      expect(rawText).not.toContain('event: error');
+      expect(rawText).not.toContain('"code":"upstream_stream_incomplete"');
       expect(rawText).not.toContain('response.done');
     });
   });

@@ -530,3 +530,8 @@
 ## 2026-07-01 usage logger detail slimming
 - Verified that `logUsageSummary()` should keep the second line only for timing diagnostics (`request.internal`, `hub`, `provider.send`, provider decode tag, `hub.top`) and not print request/sample/attempt/retry/day.calls metadata noise.
 - Validation: `tests/server/runtime/http-server/executor/usage-logger.spec.ts` passed 20/20 after the change.
+
+# 2026-07-01: Responses SSE handler/client contracts are transport-only
+- `src/server/handlers/handler-response-sse.ts` does not synthesize `response.done`, `upstream_stream_incomplete`, or `response.sse.stream.incomplete`; the SSE layer only transports frames and closes streams.
+- Handler/client blackboxes now lock direct provider-specific SSE passthrough, keepalive passthrough, no handler-side `required_action` repair, and no early-close incomplete-error synthesis.
+- Verification: `verify:responses-handler-single-bridge-surface`, `verify:responses-sse-business-module`, `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, sharedmodule/root `tsc`, focused SSE Jest, and `build:base` passed.
