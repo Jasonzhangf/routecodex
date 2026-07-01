@@ -464,6 +464,7 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('queueResultForReturn.metadataWritePlan != null');
     expect(callerSource).toContain('switch (finalizationPlan.action)');
     expect(callerSource).toContain('mode: finalizationPlan.resultMode');
+    expect(callerSource).not.toContain('finalizationPlan as { action: string }');
     expect(callerSource).not.toContain("mode: 'tool_flow'");
     expect(callerSource).not.toContain('if (finalizationPlan.returnResult)');
     expect(callerSource).not.toContain('if (finalizationPlan.continueNextQueue)');
@@ -618,6 +619,6 @@ describe('servertool auto hook trace', () => {
         includeAutoHookIds: null,
         excludeAutoHookIds: null
       })
-    ).rejects.toThrow('[servertool] invalid auto-hook caller finalization action: unknown_finalization_action');
+    ).rejects.toThrow('[servertool] invalid auto-hook caller finalization action');
   });
 });

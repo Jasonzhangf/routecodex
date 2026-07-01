@@ -172,11 +172,7 @@ export async function runServertoolAutoHookCaller(args: {
       case 'return_null':
         return null;
       default:
-        throw new Error(
-          `[servertool] invalid auto-hook caller finalization action: ${String(
-            (finalizationPlan as { action: string }).action
-          )}`
-        );
+        throw new Error('[servertool] invalid auto-hook caller finalization action');
     }
   }
 

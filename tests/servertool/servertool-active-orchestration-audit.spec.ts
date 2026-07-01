@@ -204,6 +204,7 @@ const TARGETS = [
       'args.hooks[entry.sourceIndex]',
       'native auto-hook queue returned invalid sourceIndex',
       "mode: 'tool_flow'",
+      'finalizationPlan as { action: string }',
     ],
     required: [
       'const attemptPlan = planAutoHookRuntimeAttemptWithNative({',

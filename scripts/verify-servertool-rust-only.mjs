@@ -3452,6 +3452,7 @@ function checkAutoHookExecutionRustOwner() {
     'const attemptPlan = planAutoHookRuntimeAttempt({',
     'function planAutoHookCallerFinalization(',
     'const finalizationPlan = planAutoHookCallerFinalization({',
+    'finalizationPlan as { action: string }',
     'const toolFlowResult: ServerSideToolEngineResult = {',
     'return toolFlowResult;',
     'auto_hook_queue_contract',
