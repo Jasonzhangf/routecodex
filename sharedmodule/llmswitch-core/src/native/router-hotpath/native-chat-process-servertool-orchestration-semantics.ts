@@ -418,6 +418,30 @@ export function planServertoolSkeletonDerivedConfigWithNative(input: {
   }
 }
 
+export function readServertoolPrimaryAutoHookIdsWithNative(input: {
+  document?: unknown;
+} = {}): string[] {
+  const capability = 'readServertoolPrimaryAutoHookIdsWithNative';
+  const fail = (reason?: string) => failNativeRequired<string[]>(capability, reason);
+  const derivedConfig = planServertoolSkeletonDerivedConfigWithNative(input);
+  const autoHookQueueConfig = derivedConfig.autoHookQueueConfig;
+  if (!autoHookQueueConfig || typeof autoHookQueueConfig !== 'object' || Array.isArray(autoHookQueueConfig)) {
+    return fail('missing autoHookQueueConfig');
+  }
+  const optionalPrimaryOrder = (autoHookQueueConfig as { optionalPrimaryOrder?: unknown }).optionalPrimaryOrder;
+  if (!Array.isArray(optionalPrimaryOrder)) {
+    return fail('missing optionalPrimaryOrder');
+  }
+  const ids: string[] = [];
+  for (const entry of optionalPrimaryOrder) {
+    if (typeof entry !== 'string') {
+      return fail('invalid optionalPrimaryOrder entry');
+    }
+    ids.push(entry);
+  }
+  return ids;
+}
+
 export function buildServertoolDispatchPlanInputWithNative(input: {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   disableToolCallHandlers: boolean;

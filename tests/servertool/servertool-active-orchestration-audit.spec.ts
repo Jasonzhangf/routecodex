@@ -283,6 +283,9 @@ const TARGETS = [
       '!engineResult.execution',
       "mode === 'passthrough'",
       'function toEngineOverrides(',
+      'planServertoolSkeletonDerivedConfigWithNative',
+      'autoHookQueueConfig as',
+      'optionalPrimaryOrder: string[]',
       'primaryAutoHookAttempt:',
       'disableToolCallHandlers: true',
       'includeAutoHookIds: primaryAutoHookIds',
@@ -295,6 +298,7 @@ const TARGETS = [
       'Array.isArray(overrides.excludeAutoHookIds)',
     ],
     required: [
+      'readServertoolPrimaryAutoHookIdsWithNative',
       'planEngineSelectionStartWithNative',
       'planEngineSelectionAfterRunWithNative',
       'const engineResult = await args.runEngine(startPlan.overrides);',

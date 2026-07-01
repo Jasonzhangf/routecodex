@@ -3829,6 +3829,12 @@ function checkEngineSelectionRustOwner() {
       needle
     );
   }
+  assertContains(
+    'servertool-engine-selection-ts-thin-shell',
+    TS_ENGINE_SELECTION,
+    engineSelectionShell,
+    'readServertoolPrimaryAutoHookIdsWithNative'
+  );
   for (const keyword of [
     'SERVERTOOL_ENGINE_SELECTION_FEATURE_ID',
     'primaryAutoHookIds.length',
@@ -3836,6 +3842,9 @@ function checkEngineSelectionRustOwner() {
     '!engineResult.execution',
     "mode === 'passthrough'",
     'function toEngineOverrides(',
+    'planServertoolSkeletonDerivedConfigWithNative',
+    'autoHookQueueConfig as',
+    'optionalPrimaryOrder: string[]',
     'primaryAutoHookAttempt:',
     'disableToolCallHandlers: true',
     'includeAutoHookIds: primaryAutoHookIds',

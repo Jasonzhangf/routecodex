@@ -18,6 +18,19 @@ function makeResult(partial: Partial<ServerSideToolEngineResult> = {}): ServerSi
 }
 
 describe('servertool engine selection block', () => {
+  test('keeps skeleton queue shape reading out of the selection shell', async () => {
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(
+      'sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts',
+      'utf8'
+    );
+
+    expect(source).toContain('readServertoolPrimaryAutoHookIdsWithNative');
+    expect(source).not.toContain('planServertoolSkeletonDerivedConfigWithNative');
+    expect(source).not.toContain('autoHookQueueConfig as');
+    expect(source).not.toContain('optionalPrimaryOrder: string[]');
+  });
+
   test('runs primary hooks first and returns current result when execution exists', async () => {
     const calls: Partial<ServerSideToolEngineOptions>[] = [];
     await runPrimaryServerToolEngineSelection({
