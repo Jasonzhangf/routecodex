@@ -212,6 +212,8 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('switch (runtimeAction.action)');
     expect(source).not.toContain('const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (');
     expect(source).not.toContain('runtimeControl ? { runtimeControl } : null');
+    expect(source).not.toContain("engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'");
+    expect(source).toContain("engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'");
     expect(source).toContain('metadataCenterSnapshot: metadataCenterSnapshot ?? null');
 
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');

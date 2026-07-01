@@ -6653,6 +6653,7 @@ function checkServertoolPostflightLoggingFailFast() {
     'followup.injection?.ops',
     'const engineFinalResult = {',
     'return engineFinalResult;',
+    "engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'",
   ]) {
     if (postflightSource.includes(marker)) {
       fail(
@@ -6664,6 +6665,7 @@ function checkServertoolPostflightLoggingFailFast() {
   for (const marker of [
     'buildServertoolPostflightObservationSummaryWithNative({',
     "args.stageRecorder.record('servertool.execution', summary);",
+    "engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'",
     'chat: engineResult.finalChatResponse',
     'executed: true',
   ]) {

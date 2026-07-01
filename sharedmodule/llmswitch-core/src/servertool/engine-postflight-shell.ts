@@ -46,7 +46,7 @@ export async function runServertoolEnginePostflight(args: {
   | undefined
 > {
   const { engineResult, runtimeAction, options, flowId, totalSteps } = args;
-  if (engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object') {
+  if (engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object') {
     const runtimeControl = projectNativeMetadataWritePlanToRuntimeControl(engineResult.metadataWritePlan);
     if (Object.keys(runtimeControl).length > 0) {
       applyNativeRuntimeControlWritePlan({

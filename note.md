@@ -1,3 +1,8 @@
+# 2026-07-02: servertool postflight metadata write truthiness removed
+- Slice: `engine-postflight-shell.ts` no longer uses truthiness to decide whether a native `metadataWritePlan` exists; it now uses explicit `!= null` plus object validation before projecting runtime control.
+- Gate: `engine-observation-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` forbid the old `engineResult.metadataWritePlan && typeof ...` marker and require the nullish presence check.
+- Evidence: focused engine observation Jest PASS 2/2; focused active audit PASS 44/44; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool materialization action alias removed
 - Slice: `execution-handler-materialization-shell.ts` no longer copies `materializationPlan.action` into local `materializationAction`; the shell switches directly on the native materialization plan action.
 - Gate: `execution-handler-materialization-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only` now require direct `switch (materializationPlan.action)` and forbid `const materializationAction = materializationPlan.action`.

@@ -555,11 +555,13 @@ const TARGETS = [
       "if (runtimeAction.action === 'return_servertool_cli_projection_final')",
       "if (runtimeAction.action === 'return_stop_message_terminal_final')",
       "if (runtimeAction.action === 'build_stop_message_cli_projection')",
+      "engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'",
     ],
     required: [
       'switch (runtimeAction.action)',
       'buildServertoolPostflightObservationSummaryWithNative({',
       "args.stageRecorder.record('servertool.execution', summary);",
+      "engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'",
       'chat: engineResult.finalChatResponse',
       'executed: true',
     ],
