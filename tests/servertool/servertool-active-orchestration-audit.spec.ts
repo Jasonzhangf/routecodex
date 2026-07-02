@@ -449,6 +449,7 @@ const TARGETS = [
       'entryContextPlan.excludeToolCallNames.length > 0',
       'entryContextPlan.includeAutoHookIds.length > 0',
       'entryContextPlan.excludeAutoHookIds.length > 0',
+      'args.options.adapterContext as Record<string, unknown>',
       'return tokens ? new Set(tokens) : null;',
     ],
     required: [

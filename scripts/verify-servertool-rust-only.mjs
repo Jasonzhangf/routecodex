@@ -5538,6 +5538,7 @@ function checkServertoolRustOutcomeCloseout() {
     'asServertoolJsonObject(',
     'readProviderProtocolFromAnyBoundMetadataCenter',
     'Servertool entry context requires metadata center runtime_control.providerProtocol',
+    'args.options.adapterContext as Record<string, unknown>',
   ]) {
     if (entryContextShell.includes(marker)) {
       fail(

@@ -1,3 +1,9 @@
+# 2026-07-02: servertool entry context adapterContext cast removed
+
+- Slice: `entry-context-shell.ts` now passes `args.options.adapterContext` directly into `readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter`; MetadataCenter carrier owns object narrowing.
+- Gate: `entry-context-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `args.options.adapterContext as Record<string, unknown>` marker.
+- Evidence: focused Jest `entry-context-shell + servertool-active-orchestration-audit` PASS 48/48; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool dispatch adapterContext cast removed
 
 - Slice: `dispatch-preparation-shell.ts` now passes `args.options.adapterContext` directly into `readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter`; the carrier reader accepts `unknown` and performs the object narrowing internally.

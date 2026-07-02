@@ -33,6 +33,7 @@ describe('entry-context-shell', () => {
 
     expect(source).toContain('export function resolveServertoolEntryContext(');
     expect(source).toContain('planServertoolEntryContextWithNative');
+    expect(source).not.toContain('args.options.adapterContext as Record<string, unknown>');
     expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
     expect(source).not.toContain('Servertool entry context requires metadata center runtime_control.providerProtocol');
     expect(source).not.toContain('export function asServertoolJsonObject(');

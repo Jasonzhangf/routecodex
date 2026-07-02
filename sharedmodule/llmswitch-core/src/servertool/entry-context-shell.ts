@@ -27,7 +27,7 @@ export function resolveServertoolEntryContext(args: {
   excludeAutoHookIds: Set<string> | null;
 } {
   const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
-    args.options.adapterContext as Record<string, unknown>
+    args.options.adapterContext
   );
   if (!runtimeMetadataSnapshot) {
     throw new Error('Servertool entry context requires MetadataCenter request truth or runtime_control snapshot');
