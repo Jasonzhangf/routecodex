@@ -1,7 +1,6 @@
 import {
   planServertoolBuiltinAutoHandlerEntriesWithNative,
-  planServertoolRegistryLookupFromSkeletonWithNative,
-  resolveServertoolBuiltinHandlerEntryWithNative
+  resolveServertoolRegistryHandlerWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   planServertoolRegistryBuiltinAutoHookEntriesWithNative
@@ -14,21 +13,10 @@ import type {
 export const getServerToolHandler = (
   name: string
 ): ServerToolHandlerEntry | undefined => {
-  const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({
-    name: typeof name === 'string' ? name : ''
+  const entry = resolveServertoolRegistryHandlerWithNative({
+    name: typeof name === 'string' ? name : '',
   });
-  switch (actionPlan.action) {
-    case 'return_builtin': {
-      const entry = resolveServertoolBuiltinHandlerEntryWithNative({
-        name: actionPlan.canonicalName
-      });
-      return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
-    }
-    case 'return_none':
-      return undefined;
-    default:
-      throw new Error('[servertool] invalid registry lookup action');
-  }
+  return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
 };
 
 export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {

@@ -791,12 +791,14 @@ const TARGETS = [
       "if (actionPlan.action === 'return_builtin')",
       'registration: entry.registration as unknown as Record<string, unknown>',
       'execution: entry.execution as Record<string, unknown>',
-    ],
-    required: [
       'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
       'switch (actionPlan.action)',
       "case 'return_none':",
       'invalid registry lookup action',
+      'name: actionPlan.canonicalName',
+    ],
+    required: [
+      'resolveServertoolRegistryHandlerWithNative({',
       'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
     ],
   },

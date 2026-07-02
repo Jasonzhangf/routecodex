@@ -3706,6 +3706,11 @@ function checkServertoolRegistryRustOwner() {
     'resolveServertoolRegisteredNameWithNative',
     'export {\n  type ServerToolAutoHookDescriptor,',
     "if (actionPlan.action === 'return_builtin')",
+    'const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({',
+    'switch (actionPlan.action)',
+    "case 'return_none':",
+    'invalid registry lookup action',
+    'name: actionPlan.canonicalName',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(
@@ -3728,10 +3733,7 @@ function checkServertoolRegistryRustOwner() {
     }
   }
   for (const needle of [
-    'planServertoolRegistryLookupFromSkeletonWithNative({',
-    'switch (actionPlan.action)',
-    "case 'return_none':",
-    'invalid registry lookup action',
+    'resolveServertoolRegistryHandlerWithNative({',
     'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
   ]) {
     assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
@@ -3814,7 +3816,7 @@ function checkServertoolRegistryRustOwner() {
     'servertool-registry-no-ts-owner',
     TS_REGISTRY_ORCHESTRATION_SHELL,
     registryOrchestrationShell,
-    'name: actionPlan.canonicalName'
+    'resolveServertoolRegistryHandlerWithNative({'
   );
 }
 
@@ -6517,6 +6519,9 @@ function checkServertoolEngineStoplessSessionThinShell() {
   const registryOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`);
   const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
   const executionQueueShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`);
+  const nativeChatProcessServertoolOrchestrationSemantics = readRequired(
+    NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER
+  );
   const rustProjectionContextSource = readRequired(
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
   );
@@ -6762,7 +6767,6 @@ function checkServertoolEngineStoplessSessionThinShell() {
   }
   for (const marker of [
     'runStoplessBuiltinHandlerForRuntimeWithNative(',
-    'resolveServertoolBuiltinHandlerEntryWithNative(',
     'planServertoolBuiltinAutoHandlerEntriesWithNative(',
   ]) {
     if (
@@ -6776,6 +6780,12 @@ function checkServertoolEngineStoplessSessionThinShell() {
       );
     }
   }
+  assertContains(
+    'servertool-builtin-handler-stopless-thin-shell',
+    NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
+    nativeChatProcessServertoolOrchestrationSemantics,
+    'resolveServertoolBuiltinHandlerEntryWithNative('
+  );
   pass(
     'servertool-engine-stopless-session-thin-shell',
     'engine orchestration and postflight shells keep stopless session truth through native stopless orchestration plan'

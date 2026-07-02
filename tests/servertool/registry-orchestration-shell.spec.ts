@@ -3,6 +3,19 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const getBuiltinHandlerEntryMock = jest.fn();
 const listBuiltinAutoHandlerEntriesMock = jest.fn();
 const planServertoolRegistryLookupFromSkeletonWithNativeMock = jest.fn();
+const resolveServertoolRegistryHandlerWithNativeMock = jest.fn((input: any) => {
+  const actionPlan = planServertoolRegistryLookupFromSkeletonWithNativeMock({
+    name: typeof input?.name === 'string' ? input.name : ''
+  });
+  switch (actionPlan.action) {
+    case 'return_builtin':
+      return getBuiltinHandlerEntryMock({ name: actionPlan.canonicalName });
+    case 'return_none':
+      return null;
+    default:
+      throw new Error('[servertool] invalid registry lookup action');
+  }
+});
 const planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
@@ -11,6 +24,7 @@ jest.unstable_mockModule(
     planServertoolBuiltinAutoHandlerEntriesWithNative: listBuiltinAutoHandlerEntriesMock,
     planServertoolRegistryLookupFromSkeletonWithNative: planServertoolRegistryLookupFromSkeletonWithNativeMock,
     resolveServertoolBuiltinHandlerEntryWithNative: getBuiltinHandlerEntryMock,
+    resolveServertoolRegistryHandlerWithNative: resolveServertoolRegistryHandlerWithNativeMock,
   })
 );
 
@@ -128,10 +142,11 @@ describe('registry-orchestration-shell', () => {
     expect(source).not.toContain('function resolveBuiltinEntry(');
     expect(source).not.toContain('.trim().toLowerCase()');
     expect(source).not.toContain("if (actionPlan.action === 'return_builtin')");
-    expect(source).toContain('switch (actionPlan.action)');
-    expect(source).toContain("case 'return_none':");
-    expect(source).toContain('invalid registry lookup action');
-    expect(source).toContain("planServertoolRegistryLookupFromSkeletonWithNative({");
+    expect(source).not.toContain('switch (actionPlan.action)');
+    expect(source).not.toContain("case 'return_none':");
+    expect(source).not.toContain('invalid registry lookup action');
+    expect(source).not.toContain("planServertoolRegistryLookupFromSkeletonWithNative({");
+    expect(source).toContain('resolveServertoolRegistryHandlerWithNative({');
     expect(source).toContain('planServertoolRegistryBuiltinAutoHookEntriesWithNative({');
     expect(source).not.toContain("from './registry-projection-shell.js'");
     expect(source).not.toContain('getServerToolHandlerViaNativePlan');
@@ -145,7 +160,7 @@ describe('registry-orchestration-shell', () => {
     expect(source).not.toContain('native registry lookup returned builtin without canonicalName');
     expect(source).not.toContain('if (!actionPlan.canonicalName)');
     expect(source).not.toContain('actionPlan.canonicalName as string');
-    expect(source).toContain('name: actionPlan.canonicalName');
+    expect(source).not.toContain('name: actionPlan.canonicalName');
   });
 
   test('does not keep a registered-name wrapper around skeleton config', async () => {

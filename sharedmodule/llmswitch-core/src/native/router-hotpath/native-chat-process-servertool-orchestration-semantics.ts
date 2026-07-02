@@ -771,6 +771,27 @@ export function planServertoolRegistryLookupFromSkeletonWithNative(input: {
   }
 }
 
+export function resolveServertoolRegistryHandlerWithNative(input: {
+  name: string;
+  document?: unknown;
+}): Record<string, unknown> | null {
+  const actionPlan = planServertoolRegistryLookupFromSkeletonWithNative({
+    name: typeof input.name === 'string' ? input.name : '',
+    ...(input.document === undefined ? {} : { document: input.document })
+  });
+  switch (actionPlan.action) {
+    case 'return_builtin':
+      return resolveServertoolBuiltinHandlerEntryWithNative({
+        name: actionPlan.canonicalName,
+        ...(input.document === undefined ? {} : { document: input.document })
+      });
+    case 'return_none':
+      return null;
+    default:
+      throw new Error('[servertool] invalid registry lookup action');
+  }
+}
+
 export function resolveServertoolRegisteredNameWithNative(input: {
   name: string;
   document?: unknown;
