@@ -74,7 +74,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         runtimeKey,
         processMode: 'chat'
       },
-      routingDecision: { routeName: 'default', providerProtocol: 'openai-chat' },
+      routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool: ['demo-web.1.demo-chat'] },
       processMode: 'chat',
       metadata: {}
     }));
@@ -123,7 +123,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
             runtimeKey: 'runtime:B',
             processMode: 'chat'
           },
-          routingDecision: { routeName: 'coding', providerProtocol: 'gemini-chat' },
+          routingDecision: { routeName: 'coding', providerProtocol: 'gemini-chat', pool: [providerA, providerB] },
           processMode: 'chat',
           metadata: {}
         };
@@ -198,7 +198,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
             runtimeKey: 'runtime:B',
             processMode: 'standard'
           },
-          routingDecision: { routeName: 'coding', providerProtocol: 'openai-responses' },
+          routingDecision: { routeName: 'coding', providerProtocol: 'openai-responses', pool: [providerA, providerB] },
           processMode: 'standard',
           metadata: {}
         };
