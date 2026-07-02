@@ -34,13 +34,17 @@ describe('http-request-executor snapshot entryPort', () => {
       }
     );
 
+    let sentBody: Record<string, unknown> | undefined;
     const executor = new HttpRequestExecutor(
       {
-        post: async () => ({
+        post: async (_url: string, body: Record<string, unknown>) => {
+          sentBody = body;
+          return {
           data: { ok: true },
           status: 200,
           headers: { 'content-type': 'application/json' }
-        })
+          };
+        }
       } as any,
       {
         wantsUpstreamSse: () => false,
@@ -76,7 +80,13 @@ describe('http-request-executor snapshot entryPort', () => {
     );
 
     const calls = writeProviderSnapshot.mock.calls.map((call) => call[0]);
-    expect(calls).not.toContainEqual(expect.objectContaining({ phase: 'provider-request' }));
+    expect(sentBody).toMatchObject({ model: 'gpt-5.4' });
+    expect(calls).toContainEqual(expect.objectContaining({
+      phase: 'provider-request',
+      requestId: 'req-http-executor-entry-port',
+      entryPort: 5520,
+      data: sentBody
+    }));
     expect(calls).toContainEqual(expect.objectContaining({
       phase: 'provider-response',
       requestId: 'req-http-executor-entry-port',

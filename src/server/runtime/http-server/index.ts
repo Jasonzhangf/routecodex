@@ -60,6 +60,7 @@ import {
 } from './router-direct-pipeline.js';
 import {
   captureRouterDirectFailureSnapshots,
+  captureRouterDirectProviderRequestSnapshot,
   captureRouterDirectProviderResponseSnapshot,
 } from './router-direct-failure-snapshot.js';
 import {
@@ -1935,8 +1936,23 @@ export class RouteCodexHttpServer {
           ? this.providerHandles.get(runtimeKey)
           : undefined;
       },
-      onSnapshotBefore: (_payload, ctx) => {
+      onSnapshotBefore: (payload, ctx) => {
         allowSnapshotLocalDiskWrite(input.requestId, metadataForHub?.clientRequestId as string | undefined);
+        void captureRouterDirectProviderRequestSnapshot({
+          requestId: input.requestId,
+          payload,
+          entryEndpoint: input.entryEndpoint,
+          entryPort: routerDirectEntryPort,
+          providerKey: ctx.providerKey,
+          providerId: directProviderHandle.providerId,
+          metadata: metadataForHub,
+        }).catch((error) => {
+          logRouterDirectNonBlockingError('snapshot.provider-request', error, {
+            requestId: input.requestId,
+            providerKey: ctx.providerKey,
+            directAttempt,
+          });
+        });
         this.logStage('router-direct.send.start', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,

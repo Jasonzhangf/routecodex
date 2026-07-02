@@ -581,6 +581,28 @@ export class HttpRequestExecutor {
     context: ProviderContext,
     captureSse: boolean
   ): Promise<unknown> {
+    try {
+      const entryPort = readProviderSnapshotEntryPort(context);
+      await writeProviderSnapshot({
+        phase: 'provider-request',
+        requestId: context.requestId,
+        data: requestInfo.body,
+        headers: requestInfo.headers,
+        url: requestInfo.targetUrl,
+        entryEndpoint: requestInfo.entryEndpoint,
+        entryPort,
+        clientRequestId: requestInfo.clientRequestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId,
+        metadata: readProviderSnapshotMetadata(context)
+      });
+    } catch (snapshotError) {
+      logHttpRequestExecutorNonBlockingError('executeHttpRequestOnce.provider-request', snapshotError, {
+        requestId: context.requestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
+      });
+    }
     const response = this.deps.executePreparedRequest
       ? await this.deps.executePreparedRequest(requestInfo, context, captureSse)
       : requestInfo.wantsSse

@@ -101,7 +101,7 @@ async function drainProviderSnapshotQueue(): Promise<void> {
       continue;
     }
     providerSnapshotQueueBytes = Math.max(0, providerSnapshotQueueBytes - Math.max(1, item.sizeBytes));
-    await persistProviderSnapshot(item.input);
+    await persistProviderSnapshot(item.input, item.input.forceLocalDiskWriteWhenDisabled);
     processed += 1;
   }
   flushProviderSnapshotDropLog();

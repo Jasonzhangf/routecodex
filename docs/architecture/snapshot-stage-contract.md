@@ -13,7 +13,8 @@
 说明：
 
 - 这是最小审计闭环，保证能从 client → provider response → client 还原真实链路。
-- `provider-request body snapshots are disabled`：provider 出站 body 不得被 snapshot 复制；需要排查出站语义时只允许使用 contract/shape 级别的非 payload 观测，禁止记录完整 provider wire body。
+- `provider-request` 不属于默认集：完整 provider 出站 body 只允许在显式 `--snap-stages provider-request` 或失败复现的 force-local debug 捕获中写入；不得由普通 `--snap` 默认记录。
+- Hub/module snapshot hooks 仍必须拒绝 `provider-request` body；provider-request replay artifact 的唯一 owner 是 provider/debug snapshot writer，不得从 Hub、SSE、handler 或 MetadataCenter 重建。
 - `provider-error`、`*.retry`、`*.contract`、`chat_process.*`、`hub_followup.*`、`servertool.*` 不属于默认最小集。
 - `--mode analysis` 可强制 `*`，但普通 `--snap` 不能默认膨胀成全量模块快照。
 

@@ -8,12 +8,29 @@ describe('router-direct failure snapshots', () => {
   });
 
   it('captures provider-response error write on router-direct failure', async () => {
-    const { captureRouterDirectFailureSnapshots } = await import('../../../../src/server/runtime/http-server/router-direct-failure-snapshot.js');
+    const {
+      captureRouterDirectFailureSnapshots,
+      captureRouterDirectProviderRequestSnapshot,
+    } = await import('../../../../src/server/runtime/http-server/router-direct-failure-snapshot.js');
 
     const requestId = 'req_router_direct_failure_snapshot';
     const providerKey = 'XL-deepseek.key1.deepseek-v4-flash';
     const providerId = 'XL-deepseek';
     const entryEndpoint = '/v1/chat/completions';
+
+    await captureRouterDirectProviderRequestSnapshot({
+      requestId,
+      payload: {
+        model: 'gpt-5.4-mini',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+        stream: true,
+      },
+      entryEndpoint,
+      entryPort: 4444,
+      providerKey,
+      providerId,
+      metadata: { sessionId: 'router-direct-failure-snapshot' },
+    }, writeProviderSnapshotMock as never);
 
     await captureRouterDirectFailureSnapshots({
       requestId,
@@ -36,8 +53,24 @@ describe('router-direct failure snapshots', () => {
       metadata: { sessionId: 'router-direct-failure-snapshot' },
     }, writeProviderSnapshotMock as never);
 
-    expect(writeProviderSnapshotMock).toHaveBeenCalledTimes(1);
+    expect(writeProviderSnapshotMock).toHaveBeenCalledTimes(3);
     expect(writeProviderSnapshotMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      phase: 'provider-request',
+      requestId,
+      entryEndpoint,
+      entryPort: 4444,
+      providerKey,
+      providerId,
+      data: expect.objectContaining({
+        model: 'gpt-5.4-mini',
+        stream: true,
+      }),
+    }));
+    expect(writeProviderSnapshotMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      phase: 'provider-request',
+      forceLocalDiskWriteWhenDisabled: true,
+    }));
+    expect(writeProviderSnapshotMock).toHaveBeenNthCalledWith(3, expect.objectContaining({
       phase: 'provider-response',
       requestId,
       entryEndpoint,

@@ -44,7 +44,7 @@ describe('snapshot writer error spill in release mode', () => {
     __resetProviderSnapshotErrorBufferForTests();
 
     try {
-      await expect(writeProviderSnapshot({
+      await writeProviderSnapshot({
         phase: 'provider-request',
         requestId: 'req_err_spill',
         clientRequestId: 'req_err_spill',
@@ -52,7 +52,7 @@ describe('snapshot writer error spill in release mode', () => {
         entryEndpoint: '/v1/responses',
         entryPort: 5555,
         data: { step: 'request' }
-      })).rejects.toThrow('provider-request body snapshots are disabled');
+      });
 
       expect(await listFilesRecursively(tempDir)).toHaveLength(0);
 

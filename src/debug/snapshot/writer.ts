@@ -226,7 +226,13 @@ function buildSnapshotRuntimeMetadata(
   if (!metadata || typeof metadata !== 'object') {
     return undefined;
   }
-  const projected: Record<string, unknown> = { ...metadata };
+  const projected: Record<string, unknown> = {};
+  for (const key of ['stream', 'userAgent', 'entryEndpoint', 'clientRequestId'] as const) {
+    const value = metadata[key];
+    if (value !== undefined) {
+      projected[key] = value;
+    }
+  }
   const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
   const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
   const continuation = MetadataCenter.read(metadata)?.readContinuationContext();
@@ -269,7 +275,7 @@ function buildSnapshotRuntimeMetadata(
     projected.runtime_control = runtimeControlSummary;
   }
 
-  return projected;
+  return Object.keys(projected).length > 0 ? projected : undefined;
 }
 
 function resolveSnapshotDir(folder: string, groupRequestId: string, entryPort?: number): string {

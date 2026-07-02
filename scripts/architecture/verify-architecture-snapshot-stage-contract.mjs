@@ -45,20 +45,24 @@ for (const token of ['client-request', 'provider-response', 'client-response']) 
 if (stagePolicy.includes("'provider-request'")) {
   failures.push('default snapshot selector must not include provider-request body snapshots');
 }
-if (!contractDoc.includes('provider-request body snapshots are disabled')) {
-  failures.push('snapshot contract doc must state provider-request body snapshots are disabled');
+for (const token of [
+  '`provider-request` 不属于默认集',
+  '显式 `--snap-stages provider-request`',
+  'force-local debug 捕获',
+  'provider-request replay artifact 的唯一 owner 是 provider/debug snapshot writer',
+]) {
+  if (!contractDoc.includes(token)) {
+    failures.push(`snapshot contract doc missing provider-request replay boundary: ${token}`);
+  }
 }
-if (!providerWriter.includes('provider-request body snapshots are disabled')) {
-  failures.push('snapshot writer must hard-reject provider-request body snapshots');
+if (!providerWriter.includes('forceLocalDiskWriteWhenDisabled: options.forceLocalDiskWriteWhenDisabled')) {
+  failures.push('snapshot writer must preserve force-local provider-request repro capture through persist input');
 }
 if (!rustHubSnapshotHooks.includes('provider-request body snapshots are disabled')) {
   failures.push('Rust hub snapshot hook must hard-reject provider-request body snapshots');
 }
 for (const [rel, source] of [
-  ['src/providers/core/runtime/http-request-executor.ts', httpRequestExecutor],
   ['src/providers/core/runtime/responses-provider.ts', responsesProvider],
-  ['src/server/runtime/http-server/index.ts', httpServer],
-  ['src/server/runtime/http-server/router-direct-failure-snapshot.ts', routerDirectFailureSnapshot],
 ]) {
   for (const forbidden of [
     "phase: 'provider-request'",
@@ -70,6 +74,15 @@ for (const [rel, source] of [
       failures.push(`${rel} must not write provider-request body snapshots (${forbidden})`);
     }
   }
+}
+if (!httpRequestExecutor.includes("phase: 'provider-request'")) {
+  failures.push('provider runtime must capture provider-request replay snapshots from final PreparedHttpRequest body');
+}
+if (!httpServer.includes('captureRouterDirectProviderRequestSnapshot')) {
+  failures.push('router-direct must capture provider-request replay snapshots before direct provider send');
+}
+if (!routerDirectFailureSnapshot.includes("phase: 'provider-request'")) {
+  failures.push('router-direct failure snapshot helper must be the direct provider-request snapshot owner');
 }
 
 for (const token of [

@@ -12,6 +12,8 @@ describe('provider snapshot writer queue', () => {
   let previousSnapshotFlag = false;
   const previousMaxItems = process.env.ROUTECODEX_PROVIDER_SNAPSHOT_QUEUE_MAX_ITEMS;
   const previousBudget = process.env.ROUTECODEX_PROVIDER_SNAPSHOT_QUEUE_MEMORY_BUDGET_BYTES;
+  const previousSnapshotStages = process.env.ROUTECODEX_SNAPSHOT_STAGES;
+  const previousSnapshotPayloadMaxBytes = process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES;
 
   beforeEach(() => {
     jest.resetModules();
@@ -35,6 +37,16 @@ describe('provider snapshot writer queue', () => {
       delete process.env.ROUTECODEX_PROVIDER_SNAPSHOT_QUEUE_MEMORY_BUDGET_BYTES;
     } else {
       process.env.ROUTECODEX_PROVIDER_SNAPSHOT_QUEUE_MEMORY_BUDGET_BYTES = previousBudget;
+    }
+    if (previousSnapshotStages === undefined) {
+      delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
+    } else {
+      process.env.ROUTECODEX_SNAPSHOT_STAGES = previousSnapshotStages;
+    }
+    if (previousSnapshotPayloadMaxBytes === undefined) {
+      delete process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES;
+    } else {
+      process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES = previousSnapshotPayloadMaxBytes;
     }
   });
 
@@ -97,7 +109,7 @@ describe('provider snapshot writer queue', () => {
     ]);
   });
 
-  it('forbids full oversized provider-request payload snapshots', async () => {
+  it('preserves oversized provider-request payload snapshots for explicit replay capture', async () => {
     const runtimeFlagsModule = await import('../../../../src/runtime/runtime-flags.js');
     previousSnapshotFlag = runtimeFlagsModule.runtimeFlags.snapshotsEnabled;
     runtimeFlagsModule.setRuntimeFlag('snapshotsEnabled', true);
@@ -111,7 +123,9 @@ describe('provider snapshot writer queue', () => {
     __resetProviderSnapshotQueueForTests();
     process.env.ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES = '1024';
 
-    await expect(writeProviderSnapshot({
+    process.env.ROUTECODEX_SNAPSHOT_STAGES = 'provider-request';
+
+    await writeProviderSnapshot({
       phase: 'provider-request',
       requestId: 'req_queue_summary_1',
       clientRequestId: 'req_queue_summary_1',
@@ -138,11 +152,24 @@ describe('provider snapshot writer queue', () => {
           description: 'd'.repeat(256)
         }))
       }
-    })).rejects.toThrow('provider-request body snapshots are disabled');
+    });
 
     await __flushProviderSnapshotQueueForTests();
 
-    expect(writeUnifiedSnapshotMock).not.toHaveBeenCalled();
+    expect(writeUnifiedSnapshotMock).toHaveBeenCalledTimes(1);
+    const payload = writeUnifiedSnapshotMock.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    expect(payload?.__snapshot_truncated).toBeUndefined();
+    expect(payload).toMatchObject({
+      meta: {
+        stage: 'provider-request'
+      },
+      body: {
+        model: 'gpt-5.3-codex',
+        previous_response_id: 'resp_prev_turn'
+      }
+    });
+    expect(((payload.body as Record<string, unknown>)?.instructions as string).length).toBeGreaterThan(1000);
+    expect(Array.isArray((payload.body as Record<string, unknown>)?.tools)).toBe(true);
   });
 
   it('preserves full oversized provider-response payload for replayable protocol samples', async () => {

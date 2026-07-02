@@ -58,7 +58,7 @@ describe('snapshot writer release gating', () => {
     }
   });
 
-  it('forbids provider-request body snapshots and still allows provider-response local mirror', async () => {
+  it('keeps provider-request out of default snapshots and allows forced repro local mirror', async () => {
     const previousSnapshotFlag = runtimeFlags.snapshotsEnabled;
     const previousSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
     const previousCompatSnapshotDir = process.env.RCC_SNAPSHOT_DIR;
@@ -76,7 +76,26 @@ describe('snapshot writer release gating', () => {
       const requestId = 'req-empty-assistant-contract';
       allowSnapshotLocalDiskWrite(requestId);
 
-      await expect(writeProviderSnapshot({
+      await writeProviderSnapshot({
+        phase: 'provider-request',
+        requestId,
+        clientRequestId: requestId,
+        entryEndpoint: '/v1/responses',
+        entryPort: 5555,
+        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        data: { input: [{ role: 'user', content: 'hello' }] }
+      });
+      const requestPath = path.join(
+        tempDir,
+        'openai-responses',
+        'ports',
+        '5555',
+        requestId,
+        'provider-request.json'
+      );
+      await expect(fs.stat(requestPath)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      await writeProviderSnapshot({
         phase: 'provider-request',
         requestId,
         clientRequestId: requestId,
@@ -85,7 +104,7 @@ describe('snapshot writer release gating', () => {
         providerKey: 'mimo.key1.mimo-v2.5-pro',
         data: { input: [{ role: 'user', content: 'hello' }] },
         forceLocalDiskWriteWhenDisabled: true
-      })).rejects.toThrow('provider-request body snapshots are disabled');
+      });
       await writeProviderSnapshot({
         phase: 'provider-response',
         requestId,
@@ -106,7 +125,7 @@ describe('snapshot writer release gating', () => {
         'provider-response.json'
       );
 
-      await expect(fs.readdir(path.dirname(responsePath))).resolves.not.toContain('provider-request.json');
+      await expect(fs.readFile(requestPath, 'utf-8')).resolves.toContain('"stage": "provider-request"');
       await expect(fs.readFile(responsePath, 'utf-8')).resolves.toContain('"stage": "provider-response"');
     } finally {
       __resetProviderSnapshotErrorBufferForTests();

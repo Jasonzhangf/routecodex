@@ -1,3 +1,11 @@
+# 2026-07-02: provider-request replay snapshot capture verified
+
+- Slice: provider-request replay snapshots are no longer a blanket hard error; default snapshots still exclude provider-request, while explicit stage/force-local replay capture can persist final provider wire body through provider snapshot writer.
+- Router-direct now captures provider-request replay artifacts before direct provider send and force-captures request payload on failure snapshots; HttpRequestExecutor captures final PreparedHttpRequest body for provider-request replay snapshots.
+- Gate: `verify:architecture-snapshot-stage-contract` now locks provider-request replay boundary and force-local owner; `verify:architecture-snapshot-stage-owners` stays green.
+- Evidence: focused Jest `snapshot-writer.error-spill + local-mirror + queue + release-gating + router-direct-failure-snapshot + http-request-executor.snapshot-entry-port` PASS 17/17; `tsc -p tsconfig.json` PASS; `verify:architecture-snapshot-stage-contract` PASS; `verify:architecture-snapshot-stage-owners` PASS; `build:base` PASS; `git diff --check` PASS.
+- Known unrelated gap: adding `tests/providers/core/runtime/protocol-http-providers.unit.test.ts` to the focused Jest command currently fails at test-suite load due missing mapped `transport/oauth-recovery-handler.js`, before assertions run; excluded from this verified snapshot slice.
+
 # 2026-07-02: servertool CLI projection branch casts removed
 - Slice: `native-servertool-core-semantics.ts` now types `ServertoolCliProjectionRuntimeBranchOutput.chatResponse` as `JsonObject` and `execution` as `NativeServertoolExecutionSummary`; `execution-stage-shell.ts` no longer casts `branch.chatResponse` / `branch.execution` before returning CLI projection results.
 - Gate: `execution-stage-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old CLI projection branch cast markers and require direct typed branch fields.

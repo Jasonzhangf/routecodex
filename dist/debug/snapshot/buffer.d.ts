@@ -8,6 +8,7 @@ export type ProviderSnapshotPersistInput = {
     payload: unknown;
     entryPort?: number;
     runtimeMetadata?: Record<string, unknown>;
+    forceLocalDiskWriteWhenDisabled?: boolean;
 };
 export declare const SNAPSHOT_PROVIDER_ERROR_BUFFER_FEATURE_ID = "feature_id: snapshot.provider_error_buffer";
 export declare function shouldFlushSnapshotBuffer(stage: string): boolean;

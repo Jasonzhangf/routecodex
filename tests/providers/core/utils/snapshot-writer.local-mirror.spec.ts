@@ -119,7 +119,7 @@ describe('provider snapshot writer local mirror', () => {
     expect(runtimeParsed.matchedPort).toBe(5555);
   });
 
-  it('does not write provider-request snapshots carrying request metadata or internal carriers', async () => {
+  it('writes provider-request repro snapshots without carrying request metadata or internal carriers', async () => {
     const { writeProviderSnapshot, __flushProviderSnapshotQueueForTests } = await import('../../../../src/providers/core/utils/snapshot-writer.js');
     const requestId = 'req_provider_snapshot_metadata_sanitize';
     const providerKey = 'minimax.key1.MiniMax-M3';
@@ -147,15 +147,16 @@ describe('provider snapshot writer local mirror', () => {
 
     allowSnapshotLocalDiskWrite(requestId);
 
-    await expect(writeProviderSnapshot({
+    await writeProviderSnapshot({
       phase: 'provider-request',
       requestId,
       clientRequestId: requestId,
       entryEndpoint: '/v1/responses',
       providerKey,
       metadata,
-      data: { model: 'minimax-m3-free', messages: [{ role: 'user', content: 'ok' }] }
-    })).rejects.toThrow('provider-request body snapshots are disabled');
+      data: { model: 'minimax-m3-free', messages: [{ role: 'user', content: 'ok' }] },
+      forceLocalDiskWriteWhenDisabled: true
+    });
     await __flushProviderSnapshotQueueForTests();
 
     const filePath = path.join(
@@ -166,7 +167,27 @@ describe('provider snapshot writer local mirror', () => {
       requestId,
       'provider-request.json'
     );
-    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(raw) as { meta?: Record<string, unknown>; body?: Record<string, unknown> };
+
+    expect(parsed.meta?.stage).toBe('provider-request');
+    expect(parsed.body).toMatchObject({
+      model: 'minimax-m3-free',
+      messages: [{ role: 'user', content: 'ok' }]
+    });
+    expect(raw).not.toContain('__raw_request_body');
+    expect(raw).not.toContain('responsesRequestContext');
+    expect(raw).not.toContain('responsesContext');
+    expect(raw).not.toContain('contextSnapshot');
+    expect(raw).not.toContain('portContext');
+    expect(raw).not.toContain('multi_agent_v1');
+    expect(writeSnapshotViaHooksMock).toHaveBeenCalledWith(expect.objectContaining({
+      requestId,
+      entryPort: 5555,
+      runtimeMetadata: expect.objectContaining({
+        portScope: '5555'
+      })
+    }));
   });
 
   it('accepts explicit entryPort for provider-error snapshots even when metadata omits port fields', async () => {

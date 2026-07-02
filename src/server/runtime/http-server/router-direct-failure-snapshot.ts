@@ -13,6 +13,11 @@ type RouterDirectResponseSnapshotArgs = RouterDirectSnapshotArgs & {
   response: unknown;
 };
 
+type RouterDirectRequestSnapshotArgs = RouterDirectSnapshotArgs & {
+  payload: Record<string, unknown>;
+  forceLocalDiskWriteWhenDisabled?: boolean;
+};
+
 type RouterDirectFailureSnapshotArgs = RouterDirectSnapshotArgs & {
   error: unknown;
   payload?: Record<string, unknown>;
@@ -129,10 +134,39 @@ export async function captureRouterDirectProviderResponseSnapshot(
   });
 }
 
+export async function captureRouterDirectProviderRequestSnapshot(
+  args: RouterDirectRequestSnapshotArgs,
+  writer: ProviderSnapshotWriter = writeProviderSnapshot,
+): Promise<void> {
+  await writer({
+    phase: 'provider-request',
+    requestId: args.requestId,
+    data: args.payload,
+    entryEndpoint: args.entryEndpoint,
+    entryPort: args.entryPort,
+    providerKey: args.providerKey,
+    providerId: args.providerId,
+    metadata: args.metadata,
+    forceLocalDiskWriteWhenDisabled: args.forceLocalDiskWriteWhenDisabled,
+  });
+}
+
 export async function captureRouterDirectFailureSnapshots(
   args: RouterDirectFailureSnapshotArgs,
   writer: ProviderSnapshotWriter = writeProviderSnapshot,
 ): Promise<void> {
+  if (args.payload) {
+    await captureRouterDirectProviderRequestSnapshot({
+      requestId: args.requestId,
+      payload: args.payload,
+      entryEndpoint: args.entryEndpoint,
+      entryPort: args.entryPort,
+      providerKey: args.providerKey,
+      providerId: args.providerId,
+      metadata: args.metadata,
+      forceLocalDiskWriteWhenDisabled: true,
+    }, writer);
+  }
   await writer({
     phase: 'provider-response',
     requestId: args.requestId,
