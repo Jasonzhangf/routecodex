@@ -5,6 +5,12 @@
 - Evidence: red parity first failed on missing native Gemini bridge; Rust `cargo test -p router-hotpath-napi gemini_sse_event_sequence --lib -- --nocapture` PASS 3/3; native hotpath build PASS; focused Gemini Jest PASS 10/10; sharedmodule/root `tsc` PASS; `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-review-surface-light`, wiki/html/manifest sync, and `git diff --check` PASS.
 - Remaining goal gap: Anthropic JSON->SSE/SSE->JSON and Gemini SSE->JSON still need Rust parity closeout before full SSE Rustification can be claimed complete.
 
+# 2026-07-02: servertool response-stage adapterContext casts removed
+
+- Slice: `response-stage-orchestration-shell.ts` now passes `options.adapterContext` directly into MetadataCenter runtime-control reader and native response-stage gate wrapper; both surfaces already accept `unknown`.
+- Gate: `response-stage-orchestration-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `options.adapterContext as Record<string, unknown>` marker on this shell.
+- Evidence: focused Jest `response-stage-orchestration-shell + servertool-active-orchestration-audit` PASS 50/50; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool engine preflight union casts removed
 
 - Slice: `engine-orchestration-shell.ts` now consumes the typed `runEnginePreflight()` discriminated union directly (`preflight.chat` / `preflight.stopSignal`) instead of local `preflight as ...` casts.
