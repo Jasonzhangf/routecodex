@@ -1,5 +1,5 @@
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
-use crate::shared_json_utils::{read_string_array_command, read_workdir_from_args};
+use crate::shared_json_utils::{read_optional_bool, read_string_array_command, read_trimmed_string, read_workdir_from_args};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -1161,14 +1161,6 @@ fn clone_optional_array(value: Option<&Value>) -> Option<Vec<Value>> {
     value.and_then(Value::as_array).cloned()
 }
 
-fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
-    let raw = value.and_then(Value::as_str)?.trim().to_string();
-    if raw.is_empty() {
-        None
-    } else {
-        Some(raw)
-    }
-}
 
 fn stringify_responses_tool_output(value: Option<&Value>) -> String {
     match value {
@@ -2362,6 +2354,130 @@ pub fn plan_responses_handler_entry_json(
         response_id_from_path.as_deref(),
     )
     .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+fn read_metadata_center_section<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
+    if let Some(center) = context.as_object().and_then(|row| row.get("__metadataCenter")) {
+        if let Some(section) = center.as_object().and_then(|row| row.get(key)) {
+            return Some(section);
+        }
+    }
+    if let Some(section) = context.as_object().and_then(|row| row.get(key)) {
+        if section.is_object() {
+            return Some(section);
+        }
+    }
+    let metadata = context.as_object().and_then(|row| row.get("metadata"))?;
+    if let Some(center) = metadata.as_object().and_then(|row| row.get("__metadataCenter")) {
+        if let Some(section) = center.as_object().and_then(|row| row.get(key)) {
+            return Some(section);
+        }
+    }
+    metadata.as_object().and_then(|row| row.get(key))
+}
+
+fn read_request_truth_field<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
+    read_metadata_center_section(context, "requestTruth")
+        .and_then(|row| row.get(key))
+}
+
+fn read_runtime_control_field<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
+    read_metadata_center_section(context, "runtimeControl")
+        .and_then(|row| row.get(key))
+}
+
+fn read_optional_object<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    value.as_object().and_then(|row| row.get(key))
+}
+
+fn read_optional_u32(value: &Value, key: &str) -> Option<u32> {
+    value.as_object()
+        .and_then(|row| row.get(key))
+        .and_then(Value::as_f64)
+        .and_then(|n| if n.is_finite() && n >= 0.0 { Some(n as u32) } else { None })
+}
+
+#[napi_derive::napi]
+pub fn publish_responses_record_plan_json(
+    request_id: String,
+    response_json: String,
+    context_json: String,
+    runtime_state_write_json: String,
+    entry_endpoint: String,
+) -> NapiResult<String> {
+    let response: Value = serde_json::from_str(&response_json)
+        .map_err(|e| napi::Error::from_reason(format!("invalid response JSON: {e}")))?;
+    let context: Value = serde_json::from_str(&context_json)
+        .map_err(|e| napi::Error::from_reason(format!("invalid context JSON: {e}")))?;
+    let runtime_state_write: Value = serde_json::from_str(&runtime_state_write_json)
+        .unwrap_or(Value::Null);
+
+    let session_id = read_request_truth_field(&context, "sessionId")
+        .and_then(|v| read_trimmed_string(Some(v)));
+    let conversation_id = read_request_truth_field(&context, "conversationId")
+        .and_then(|v| read_trimmed_string(Some(v)));
+    let matched_port = read_request_truth_field(&context, "matchedPort")
+        .and_then(|v| v.as_f64())
+        .and_then(|n| if n.is_finite() && n >= 0.0 { Some(n as u32) } else { None });
+    let routing_policy_group = read_request_truth_field(&context, "routingPolicyGroup")
+        .and_then(|v| read_trimmed_string(Some(v)));
+    let route_hint = read_runtime_control_field(&context, "routeHint")
+        .and_then(|v| read_trimmed_string(Some(v)));
+
+    let usage = read_optional_object(&runtime_state_write, "usage");
+    let provider_key = usage
+        .and_then(|row| row.get("providerKey"))
+        .and_then(|v| read_trimmed_string(Some(v)));
+    let keep_for_submit_tool_outputs = read_optional_bool(read_optional_object(&runtime_state_write, "keepForSubmitToolOutputs"));
+
+    let should_record = entry_endpoint == "/v1/responses"
+        || entry_endpoint == "/v1/responses.submit_tool_outputs";
+    let has_scope = session_id.is_some() || conversation_id.is_some();
+
+    let record_args = if should_record && has_scope {
+        serde_json::json!({
+            "requestId": request_id,
+            "response": response,
+            "sessionId": session_id.clone().unwrap_or_default(),
+            "conversationId": conversation_id.clone().unwrap_or_default(),
+            "providerKey": provider_key.clone().unwrap_or_default(),
+            "entryKind": "responses",
+            "continuationOwner": "relay",
+            "matchedPort": matched_port,
+            "routingPolicyGroup": routing_policy_group.clone().unwrap_or_default(),
+            "allowScopeContinuation": true,
+            "routeHint": route_hint.clone().unwrap_or_default(),
+        })
+    } else {
+        Value::Null
+    };
+
+    let finalize_args = if should_record && has_scope {
+        serde_json::json!({
+            "requestId": request_id,
+            "keepForSubmitToolOutputs": keep_for_submit_tool_outputs.unwrap_or(false),
+        })
+    } else {
+        Value::Null
+    };
+
+    let usage_args = if usage.is_some() {
+        serde_json::json!({
+            "capturedChatRequest": context.get("capturedChatRequest").cloned().unwrap_or(Value::Null),
+            "usage": usage.cloned().unwrap_or(Value::Null),
+        })
+    } else {
+        Value::Null
+    };
+
+    let output = serde_json::json!({
+        "shouldRecord": should_record,
+        "hasScope": has_scope,
+        "recordArgs": record_args,
+        "finalizeArgs": finalize_args,
+        "usageArgs": usage_args,
+    });
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

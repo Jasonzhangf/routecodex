@@ -500,3 +500,74 @@ export function resolveBudgetForModelWithNative(
     return fail(reason);
   }
 }
+
+export type PublishResponsesRecordPlan = {
+  shouldRecord: boolean;
+  hasScope: boolean;
+  recordArgs: {
+    requestId: string;
+    response: Record<string, unknown>;
+    sessionId: string;
+    conversationId: string;
+    providerKey: string;
+    entryKind: 'responses' | 'chat' | 'messages';
+    continuationOwner: 'direct' | 'relay';
+    matchedPort: number;
+    routingPolicyGroup: string;
+    allowScopeContinuation: boolean;
+    routeHint: string;
+  } | null;
+  finalizeArgs: {
+    requestId: string;
+    keepForSubmitToolOutputs: boolean;
+  } | null;
+  usageArgs: {
+    capturedChatRequest: unknown;
+    usage: unknown;
+  } | null;
+};
+
+export function publishResponsesRecordPlanWithNative(args: {
+  requestId: string;
+  response: unknown;
+  context: unknown;
+  runtimeStateWrite: unknown;
+  entryEndpoint: string;
+}): PublishResponsesRecordPlan {
+  const capability = 'publishResponsesRecordPlanJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<PublishResponsesRecordPlan>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const responseJson = safeStringify(args.response ?? null);
+  const contextJson = safeStringify(args.context ?? null);
+  const runtimeStateWriteJson = safeStringify(args.runtimeStateWrite ?? null);
+  if (!responseJson || !contextJson || !runtimeStateWriteJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(
+      String(args.requestId ?? ''),
+      responseJson,
+      contextJson,
+      runtimeStateWriteJson,
+      String(args.entryEndpoint ?? '')
+    );
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed) {
+      return fail('invalid payload');
+    }
+    return parsed as unknown as PublishResponsesRecordPlan;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}

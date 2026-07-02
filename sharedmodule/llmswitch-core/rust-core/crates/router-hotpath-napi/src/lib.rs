@@ -2608,7 +2608,8 @@ pub use responses_reasoning_registry::{
 };
 pub use shared_responses_conversation_utils::{
     materialize_responses_continuation_payload_json, plan_responses_handler_entry_json,
-    prepare_responses_conversation_entry_json, resume_responses_conversation_payload_json,
+    prepare_responses_conversation_entry_json, publish_responses_record_plan_json,
+    resume_responses_conversation_payload_json,
 };
 
 // ---------------------------------------------------------------------------

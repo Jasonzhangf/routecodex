@@ -13,6 +13,10 @@ import {
   planProviderResponseServertoolRuntimeActionsWithNative,
   type ProviderResponseRuntimeEffectPlan,
 } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import {
+  publishResponsesRecordPlanWithNative,
+  type PublishResponsesRecordPlan,
+} from '../../../native/router-hotpath/native-shared-conversion-semantics.js';
 import { logHubStageTiming } from '../pipeline/hub-stage-timing.js';
 import { ensureRuntimeMetadata } from '../../runtime-metadata.js';
 import {
@@ -249,38 +253,43 @@ function executeProviderResponseNativeRuntimeStateEffect(args: {
   }
 
   const runtimeStateWrite = isRecord(args.runtimeEffects.runtimeStateWrite) ? args.runtimeEffects.runtimeStateWrite : null;
-  const usage = isRecord(runtimeStateWrite?.usage) ? runtimeStateWrite.usage : null;
-  if (args.entryEndpoint === '/v1/responses' || args.entryEndpoint === '/v1/responses.submit_tool_outputs') {
-    const requestTruth = readMetadataCenterRequestTruth(args.context as unknown as Record<string, unknown>);
-    const rc = readMetadataCenterRuntimeControl(args.context as unknown as Record<string, unknown>);
-    const matchedPort = typeof requestTruth.matchedPort === 'number' && Number.isFinite(requestTruth.matchedPort) ? Math.floor(requestTruth.matchedPort) : undefined;
-    const routingPolicyGroup = readString(requestTruth.routingPolicyGroup);
-    const sessionId = readString(requestTruth.sessionId);
-    const conversationId = readString(requestTruth.conversationId);
-    if (sessionId || conversationId) {
-      recordResponsesResponse({
-        requestId: args.requestId,
-        response: args.response,
-        ...(sessionId ? { sessionId } : {}),
-        ...(conversationId ? { conversationId } : {}),
-        ...(usage && typeof usage.providerKey === 'string' ? { providerKey: usage.providerKey } : {}),
-        entryKind: 'responses',
-        continuationOwner: 'relay',
-        ...(matchedPort !== undefined ? { matchedPort } : {}),
-        ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
-        allowScopeContinuation: true,
-        ...(typeof rc.routeHint === 'string' && rc.routeHint.trim() ? { routeHint: rc.routeHint.trim() } : {}),
-      });
-      finalizeResponsesConversationRequestRetention(
-        args.requestId,
-        { keepForSubmitToolOutputs: runtimeStateWrite?.keepForSubmitToolOutputs === true }
-      );
-    }
+  const metadataCenterSnapshot = {
+    requestTruth: readRequestTruthFromBoundMetadataCenter(args.context as unknown as Record<string, unknown>),
+    runtimeControl: readRuntimeControlFromBoundMetadataCenter(args.context as unknown as Record<string, unknown>),
+  };
+  const plan: PublishResponsesRecordPlan = publishResponsesRecordPlanWithNative({
+    requestId: args.requestId,
+    response: args.response,
+    context: metadataCenterSnapshot,
+    runtimeStateWrite: runtimeStateWrite ?? null,
+    entryEndpoint: args.entryEndpoint,
+  });
+
+  if (plan.recordArgs) {
+    recordResponsesResponse({
+      requestId: plan.recordArgs.requestId,
+      response: plan.recordArgs.response as Parameters<typeof recordResponsesResponse>[0]['response'],
+      ...(plan.recordArgs.sessionId ? { sessionId: plan.recordArgs.sessionId } : {}),
+      ...(plan.recordArgs.conversationId ? { conversationId: plan.recordArgs.conversationId } : {}),
+      ...(plan.recordArgs.providerKey ? { providerKey: plan.recordArgs.providerKey } : {}),
+      entryKind: 'responses',
+      continuationOwner: 'relay',
+      matchedPort: plan.recordArgs.matchedPort,
+      ...(plan.recordArgs.routingPolicyGroup ? { routingPolicyGroup: plan.recordArgs.routingPolicyGroup } : {}),
+      allowScopeContinuation: true,
+      ...(plan.recordArgs.routeHint ? { routeHint: plan.recordArgs.routeHint } : {}),
+    });
   }
-  if (usage) {
+  if (plan.finalizeArgs) {
+    finalizeResponsesConversationRequestRetention(
+      plan.finalizeArgs.requestId,
+      { keepForSubmitToolOutputs: plan.finalizeArgs.keepForSubmitToolOutputs }
+    );
+  }
+  if (plan.usageArgs) {
     saveChatProcessSessionActualUsage({
       context: args.context,
-      usage
+      usage: plan.usageArgs.usage as Record<string, unknown> | undefined
     });
   }
 }

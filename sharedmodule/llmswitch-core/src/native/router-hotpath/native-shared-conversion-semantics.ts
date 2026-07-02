@@ -29,6 +29,8 @@ export {
   pickResponsesPersistedFieldsWithNative,
   planResponsesHandlerEntryWithNative,
   prepareResponsesConversationEntryWithNative,
+  publishResponsesRecordPlanWithNative,
+  type PublishResponsesRecordPlan,
   resolveBudgetForModelWithNative,
   restoreResponsesContinuationPayloadWithNative,
   resumeResponsesConversationPayloadWithNative,

@@ -126,6 +126,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "pickResponsesPersistedFieldsJson",
   "convertResponsesOutputToInputItemsJson",
   "prepareResponsesConversationEntryJson",
+  "publishResponsesRecordPlanJson",
   "materializeResponsesContinuationPayloadJson",
   "restoreResponsesContinuationPayloadJson",
   "resumeResponsesConversationPayloadJson",
