@@ -1,6 +1,6 @@
 import type { StageRecorder } from './format-adapters/index.js';
 import type { AdapterContext } from './types/chat-envelope.js';
-import { createSnapshotWriter, type SnapshotWriter } from '../snapshot-utils.js';
+import { writeSnapshotViaHooksWithNative, shouldRecordSnapshotsWithNative } from '../../native/router-hotpath/native-snapshot-hooks.js';
 import { normalizeSnapshotStagePayloadWithNative } from '../../native/router-hotpath/native-snapshot-hooks.js';
 
 // feature_id: snapshot.stage_contract
@@ -17,28 +17,16 @@ interface SnapshotStageRecorderOptions {
 }
 
 class SnapshotStageRecorder implements StageRecorder {
-  private readonly writer?: SnapshotWriter;
+  private readonly stageRequestId: string;
 
   constructor(private readonly options: SnapshotStageRecorderOptions) {
-    const contextAny = options.context as unknown as Record<string, unknown>;
-    this.writer = createSnapshotWriter({
-      requestId: options.context.requestId,
-      endpoint: options.endpoint,
-      providerKey: typeof options.context.providerId === 'string' ? options.context.providerId : undefined,
-      entryProtocol: resolveEntryProtocol(options.endpoint),
-      entryPort: resolveEntryPort(options.context),
-      runtimeMetadata: readSnapshotRuntimeMetadata(options.context),
-      groupRequestId:
-        typeof contextAny.clientRequestId === 'string'
-          ? (contextAny.clientRequestId as string)
-          : typeof contextAny.groupRequestId === 'string'
-            ? (contextAny.groupRequestId as string)
-            : undefined
-    });
+    this.stageRequestId = typeof options.context.requestId === 'string' && options.context.requestId.trim()
+      ? options.context.requestId.trim()
+      : 'unknown_req';
   }
 
   record(stage: string, payload: object): void {
-    if (!this.writer) {
+    if (!shouldRecordSnapshotsWithNative()) {
       return;
     }
     const normalized = normalizeSnapshotStagePayloadWithNative(stage, payload);
@@ -46,7 +34,23 @@ class SnapshotStageRecorder implements StageRecorder {
       return;
     }
     try {
-      this.writer(stage, normalized as object);
+      writeSnapshotViaHooksWithNative({
+        endpoint: this.options.endpoint,
+        stage,
+        requestId: this.stageRequestId,
+        data: normalized as Record<string, unknown>,
+        verbosity: 'verbose',
+        providerKey: typeof this.options.context.providerId === 'string' ? this.options.context.providerId : undefined,
+        groupRequestId: (() => {
+          const ctx = this.options.context as unknown as Record<string, unknown>;
+          if (typeof ctx.clientRequestId === 'string') return ctx.clientRequestId;
+          if (typeof ctx.groupRequestId === 'string') return ctx.groupRequestId;
+          return undefined;
+        })(),
+        entryProtocol: resolveEntryProtocol(this.options.endpoint),
+        entryPort: resolveEntryPort(this.options.context),
+        runtimeMetadata: readSnapshotRuntimeMetadata(this.options.context)
+      });
     } catch (err) {
       // Snapshot write failure must not block the pipeline but must be visible.
       console.warn('[snapshot-recorder] write failed (non-blocking):', err instanceof Error ? err.message : String(err));

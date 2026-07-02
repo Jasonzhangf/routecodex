@@ -6476,6 +6476,10 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'switch (preflightKind)',
     'invalid engine preflight result kind',
     'String(preflightOrchestrationAction.action)',
+    'const preflightChat = (preflight as { chat?: JsonObject }).chat',
+    'const preflightStopSignal = (preflight as { stopSignal?: typeof stopSignal }).stopSignal',
+    'chat: preflightChat as JsonObject',
+    'stopSignal = preflightStopSignal as typeof stopSignal',
     'hasServertoolCliProjectionContext:',
   ]) {
     if (engineSource.includes(marker)) {
@@ -6496,6 +6500,17 @@ function checkServertoolEngineStoplessSessionThinShell() {
       'servertool-engine-stopless-session-thin-shell',
       'engine-orchestration-shell.ts must dispatch preflight orchestration action as a thin switch over native plan'
     );
+  }
+  for (const marker of [
+    'chat: preflight.chat',
+    'stopSignal = preflight.stopSignal',
+  ]) {
+    if (!engineSource.includes(marker)) {
+      fail(
+        'servertool-engine-stopless-session-thin-shell',
+        `engine-orchestration-shell.ts must consume typed preflight union marker ${marker}`
+      );
+    }
   }
   for (const marker of [
     'const engineSkipAction = engineSkipPlan.action as',

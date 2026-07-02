@@ -11,6 +11,13 @@
 - Gate: `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `options.adapterContext as unknown as Record<string, unknown>` marker.
 - Evidence: focused Jest `engine.stopless-session-thin-shell + servertool-active-orchestration-audit + engine-observation-shell` PASS 60/60; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
 
+# 2026-07-02: Codex session stop audit correction
+
+- User correction: prior session-stop answer looked at tmux/transcript/artifacts first but did not treat RouteCodex logs/snapshots as primary evidence.
+- Evidence now checked: current `~/.rcc/logs/server-5520.log` mtime is 2026-06-29 and not the active 2026-07-02 evidence stream; current multi-port runtime logs with 5520 request lines are in `~/.rcc/logs/server-4444.log`.
+- Relevant snapshots: `~/.rcc/codex-samples/openai-responses/ports/5520/openai-responses-router-gpt-5.4-20260702T131*` and `...T132*` exist with `__runtime.entryPort=5520`, `matchedPort=5520`, and `routecodex=0.90.3510`; sampled provider-response snapshots show stream opened/status 200, but most router-direct dirs have no client-response artifact and do not prove completion.
+- Freehand pane truth still shows the actionable miss: after “now call browser/tool” prompts, the agent stayed in reasoning/tool-search planning and hit `Goal achieved` without producing WebUI screenshot/DOM artifacts.
+
 # 2026-07-02: servertool engine orchestration adapterContext casts removed
 
 - Slice: `engine-orchestration-shell.ts` now passes `options.adapterContext` directly into MetadataCenter carrier readers; carrier owns object narrowing.

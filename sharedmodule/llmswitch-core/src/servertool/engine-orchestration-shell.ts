@@ -141,19 +141,23 @@ export async function runServerToolOrchestrationShell(
     logStopCompare
   });
   let stopSignal: NonNullable<Extract<typeof preflight, { kind: 'continue' }>['stopSignal']>;
-  const preflightChat = (preflight as { chat?: JsonObject }).chat;
-  const preflightStopSignal = (preflight as { stopSignal?: typeof stopSignal }).stopSignal;
   const preflightOrchestrationAction = planServertoolEngineOrchestrationPreflightActionWithNative({
     preflightKind: preflight.kind
   });
   switch (preflightOrchestrationAction.action) {
     case 'return_preflight_chat':
+      if (preflight.kind === 'continue') {
+        throw new Error('[servertool] invalid engine preflight orchestration action');
+      }
       return {
-        chat: preflightChat as JsonObject,
+        chat: preflight.chat,
         executed: false
       };
     case 'continue_engine':
-      stopSignal = preflightStopSignal as typeof stopSignal;
+      if (preflight.kind !== 'continue') {
+        throw new Error('[servertool] invalid engine preflight orchestration action');
+      }
+      stopSignal = preflight.stopSignal;
       break;
     default:
       throw new Error('[servertool] invalid engine preflight orchestration action');

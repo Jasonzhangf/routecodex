@@ -12,6 +12,10 @@ describe('engine stopless session thin-shell guard', () => {
 
     expect(source).not.toContain('function normalizeStoplessSessionToken(');
     expect(source).not.toContain('function readStoplessSessionId(');
+    expect(source).not.toContain('const preflightChat = (preflight as { chat?: JsonObject }).chat');
+    expect(source).not.toContain('const preflightStopSignal = (preflight as { stopSignal?: typeof stopSignal }).stopSignal');
+    expect(source).not.toContain('chat: preflightChat as JsonObject');
+    expect(source).not.toContain('stopSignal = preflightStopSignal as typeof stopSignal');
     expect(source).not.toContain('const requestTruth = metadataCenterSnapshot?.requestTruth');
     expect(source).not.toContain('const rawSessionId = requestTruth?.sessionId');
     expect(source).not.toContain('requestTruthSessionId,');
@@ -56,6 +60,8 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain('switch (preflightKind)');
     expect(source).toContain('planServertoolEngineOrchestrationPreflightActionWithNative({');
     expect(source).toContain('switch (preflightOrchestrationAction.action)');
+    expect(source).toContain('chat: preflight.chat');
+    expect(source).toContain('stopSignal = preflight.stopSignal');
     expect(source).not.toContain('String(preflightOrchestrationAction.action)');
     expect(source).not.toContain("if (stoplessPlan.action === 'terminal_final')");
     expect(source).not.toContain("if (stoplessPlan.action === 'cli_projection' && stoplessPlan.isStopMessageFlow)");
