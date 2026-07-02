@@ -7,28 +7,29 @@ import { runServertoolEntryPreflight } from './entry-preflight-shell.js';
 import { runServertoolResponseStagePrePass } from './response-stage-prepass-shell.js';
 import { runServertoolExecutionStage } from './execution-stage-shell.js';
 import { resolveServertoolEntryContext } from './entry-context-shell.js';
-import { planServertoolEnginePrepassActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  resolveServertoolRunEngineEntryPreflightDecisionWithNative,
+  resolveServertoolRunEnginePrepassDecisionWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
   const entryPreflight = runServertoolEntryPreflight({ options });
-  switch (entryPreflight.action) {
-    case 'return_result':
-      return entryPreflight.result;
-    case 'continue':
-      break;
-    default:
-      throw new Error('[servertool] invalid entry preflight result action');
+  const entryPreflightDecision = resolveServertoolRunEngineEntryPreflightDecisionWithNative({
+    entryPreflight
+  });
+  if (entryPreflightDecision.action === 'return_result') {
+    return entryPreflightDecision.result;
   }
   const toolCalls = extractToolCallsFromResponseStage(
-    entryPreflight.baseObject,
+    entryPreflightDecision.baseObject,
     options.requestId
   );
   const entryContext = resolveServertoolEntryContext({
     options,
     toolCalls,
-    base: entryPreflight.baseObject
+    base: entryPreflightDecision.baseObject
   });
   const responseStagePrePass = await runServertoolResponseStagePrePass({
     options,
@@ -38,17 +39,12 @@ export async function orchestrateServertoolEngine(
     excludeAutoHookIds: entryContext.excludeAutoHookIds
   });
   const prepassResult = 'result' in responseStagePrePass ? responseStagePrePass.result : null;
-  const enginePrepassAction = planServertoolEnginePrepassActionWithNative({
+  const enginePrepassDecision = resolveServertoolRunEnginePrepassDecisionWithNative({
     hasPrepassResult: prepassResult != null,
     prepassResult
   });
-  switch (enginePrepassAction.action) {
-    case 'return_prepass_result':
-      return enginePrepassAction.result;
-    case 'continue_to_execution':
-      break;
-    default:
-      throw new Error('[servertool] invalid engine prepass action');
+  if (enginePrepassDecision.action === 'return_result') {
+    return enginePrepassDecision.result;
   }
   return runServertoolExecutionStage({
     options,

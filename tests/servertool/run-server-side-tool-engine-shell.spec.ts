@@ -5,7 +5,8 @@ const extractToolCallsFromResponseStage = jest.fn();
 const resolveServertoolEntryContext = jest.fn();
 const runServertoolResponseStagePrePass = jest.fn();
 const runServertoolExecutionStage = jest.fn();
-const planServertoolEnginePrepassActionWithNative = jest.fn();
+const resolveServertoolRunEngineEntryPreflightDecisionWithNative = jest.fn((input: any) => input.entryPreflight);
+const resolveServertoolRunEnginePrepassDecisionWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.js',
@@ -45,7 +46,8 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolEnginePrepassActionWithNative
+    resolveServertoolRunEngineEntryPreflightDecisionWithNative,
+    resolveServertoolRunEnginePrepassDecisionWithNative
   })
 );
 
@@ -56,7 +58,8 @@ const { orchestrateServertoolEngine } = await import(
 describe('run-server-side-tool-engine-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    planServertoolEnginePrepassActionWithNative.mockReturnValue({
+    resolveServertoolRunEngineEntryPreflightDecisionWithNative.mockImplementation((input: any) => input.entryPreflight);
+    resolveServertoolRunEnginePrepassDecisionWithNative.mockReturnValue({
       action: 'continue_to_execution'
     });
   });
@@ -77,11 +80,12 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain("if (entryPreflight.action === 'return_result')");
     expect(source).not.toContain("if (entryContext.action !== 'continue')");
     expect(source).not.toContain("if (responseStagePrePass.action === 'return_result')");
-    expect(source).toContain('planServertoolEnginePrepassActionWithNative');
-    expect(source).toContain('switch (entryPreflight.action)');
-    expect(source).toContain('switch (enginePrepassAction.action)');
+    expect(source).toContain('resolveServertoolRunEngineEntryPreflightDecisionWithNative');
+    expect(source).toContain('resolveServertoolRunEnginePrepassDecisionWithNative');
+    expect(source).not.toContain('switch (entryPreflight.action)');
+    expect(source).not.toContain('switch (enginePrepassAction.action)');
     expect(source).toContain('prepassResult');
-    expect(source).toContain('return enginePrepassAction.result;');
+    expect(source).toContain('return enginePrepassDecision.result;');
     expect(source).not.toContain('return prepassResult;');
     expect(source).not.toContain('native engine prepass requested result but prepass result was empty');
     expect(source).not.toContain('switch (responseStagePrePass.action)');
@@ -99,9 +103,12 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain('invalid entry context action');
   });
 
-  test('fails fast on unknown entry preflight action without reading action payload in TS', async () => {
+  test('fails fast when native entry preflight decision rejects action', async () => {
     runServertoolEntryPreflight.mockReturnValue({
       action: 'unknown_entry_preflight_action'
+    });
+    resolveServertoolRunEngineEntryPreflightDecisionWithNative.mockImplementation(() => {
+      throw new Error('[servertool] invalid entry preflight result action');
     });
 
     await expect(
@@ -120,7 +127,7 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(runServertoolExecutionStage).not.toHaveBeenCalled();
   });
 
-  test('fails fast on unknown engine prepass action without reading action payload in TS', async () => {
+  test('fails fast when native engine prepass decision rejects action', async () => {
     runServertoolEntryPreflight.mockReturnValue({
       action: 'continue',
       baseObject: { ok: true }
@@ -139,8 +146,8 @@ describe('run-server-side-tool-engine-shell', () => {
       action: 'continue_to_execution',
       responseStageGatePlan: { nextAction: 'continue_to_execution' }
     });
-    planServertoolEnginePrepassActionWithNative.mockReturnValue({
-      action: 'unknown_engine_prepass_action'
+    resolveServertoolRunEnginePrepassDecisionWithNative.mockImplementation(() => {
+      throw new Error('[servertool] invalid engine prepass action');
     });
 
     await expect(
@@ -193,8 +200,8 @@ describe('run-server-side-tool-engine-shell', () => {
       action: 'return_result',
       result: { mode: 'passthrough', finalChatResponse: { early: true } }
     });
-    planServertoolEnginePrepassActionWithNative.mockReturnValue({
-      action: 'return_prepass_result',
+    resolveServertoolRunEnginePrepassDecisionWithNative.mockReturnValue({
+      action: 'return_result',
       result: { mode: 'passthrough', finalChatResponse: { early: true } }
     });
 
@@ -207,7 +214,7 @@ describe('run-server-side-tool-engine-shell', () => {
         providerProtocol: 'openai-responses'
       } as any)
     ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { early: true } });
-    expect(planServertoolEnginePrepassActionWithNative).toHaveBeenCalledWith({
+    expect(resolveServertoolRunEnginePrepassDecisionWithNative).toHaveBeenCalledWith({
       hasPrepassResult: true,
       prepassResult: { mode: 'passthrough', finalChatResponse: { early: true } }
     });
@@ -247,7 +254,7 @@ describe('run-server-side-tool-engine-shell', () => {
         providerProtocol: 'openai-responses'
       } as any)
     ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { executed: true } });
-    expect(planServertoolEnginePrepassActionWithNative).toHaveBeenCalledWith({
+    expect(resolveServertoolRunEnginePrepassDecisionWithNative).toHaveBeenCalledWith({
       hasPrepassResult: false,
       prepassResult: null
     });

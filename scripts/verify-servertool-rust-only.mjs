@@ -5685,9 +5685,8 @@ function checkServertoolRustOutcomeCloseout() {
     'resolveServertoolEntryContext',
     'runServertoolResponseStagePrePass',
     'runServertoolExecutionStage',
-    'planServertoolEnginePrepassActionWithNative',
-    'switch (entryPreflight.action)',
-    'switch (enginePrepassAction.action)',
+    'resolveServertoolRunEngineEntryPreflightDecisionWithNative',
+    'resolveServertoolRunEnginePrepassDecisionWithNative',
     'contextBase: entryContext.contextBase',
   ]) {
     if (!runServerSideToolEngineShell.includes(marker)) {
@@ -5704,6 +5703,9 @@ function checkServertoolRustOutcomeCloseout() {
     "typeof options.chatResponse === 'object'",
     "if (entryPreflight.action === 'return_result')",
     "if (entryContext.action !== 'continue')",
+    'planServertoolEnginePrepassActionWithNative',
+    'switch (entryPreflight.action)',
+    'switch (enginePrepassAction.action)',
     "case 'return_non_object_base':",
     'invalid entry context action',
     "if (responseStagePrePass.action === 'return_result')",

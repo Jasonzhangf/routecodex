@@ -614,6 +614,25 @@ export type ServertoolEntryPreflightDecision =
       baseObject: JsonObject;
     };
 
+export type ServertoolRunEngineEntryPreflightDecision =
+  | {
+      action: 'return_result';
+      result: ServerSideToolEngineResult;
+    }
+  | {
+      action: 'continue';
+      baseObject: JsonObject;
+    };
+
+export type ServertoolRunEnginePrepassDecision =
+  | {
+      action: 'return_result';
+      result: ServerSideToolEngineResult;
+    }
+  | {
+      action: 'continue_to_execution';
+    };
+
 export type ServertoolHandlerMaterializationPlan =
   | {
       action: 'finalize_without_backend';
@@ -3741,6 +3760,25 @@ export function resolveServertoolEntryPreflightWithNative(input: {
   }
 }
 
+export function resolveServertoolRunEngineEntryPreflightDecisionWithNative(input: {
+  entryPreflight: ServertoolEntryPreflightDecision;
+}): ServertoolRunEngineEntryPreflightDecision {
+  switch (input.entryPreflight.action) {
+    case 'return_result':
+      return {
+        action: 'return_result',
+        result: input.entryPreflight.result
+      };
+    case 'continue':
+      return {
+        action: 'continue',
+        baseObject: input.entryPreflight.baseObject
+      };
+    default:
+      throw new Error('[servertool] invalid entry preflight result action');
+  }
+}
+
 export interface ServertoolEntryContextPlan {
   includeToolCallNames?: string[];
   excludeToolCallNames?: string[];
@@ -3842,6 +3880,30 @@ export function planServertoolEnginePrepassActionWithNative(input: {
   return {
     action: record.action
   };
+}
+
+export function resolveServertoolRunEnginePrepassDecisionWithNative(input: {
+  hasPrepassResult: boolean;
+  prepassResult?: ServerSideToolEngineResult | null;
+}): ServertoolRunEnginePrepassDecision {
+  const action = planServertoolEnginePrepassActionWithNative({
+    hasPrepassResult: input.hasPrepassResult,
+    prepassResult: input.prepassResult ?? null
+  });
+  switch (action.action) {
+    case 'return_prepass_result':
+      if (!action.result) {
+        throw new Error('[servertool] invalid engine prepass action');
+      }
+      return {
+        action: 'return_result',
+        result: action.result
+      };
+    case 'continue_to_execution':
+      return { action: 'continue_to_execution' };
+    default:
+      throw new Error('[servertool] invalid engine prepass action');
+  }
 }
 
 export type ServertoolRegistryLookupActionPlan = {
