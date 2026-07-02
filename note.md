@@ -5,6 +5,12 @@
 - Evidence: red parity first failed on missing native Gemini bridge; Rust `cargo test -p router-hotpath-napi gemini_sse_event_sequence --lib -- --nocapture` PASS 3/3; native hotpath build PASS; focused Gemini Jest PASS 10/10; sharedmodule/root `tsc` PASS; `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-review-surface-light`, wiki/html/manifest sync, and `git diff --check` PASS.
 - Remaining goal gap: Anthropic JSON->SSE/SSE->JSON and Gemini SSE->JSON still need Rust parity closeout before full SSE Rustification can be claimed complete.
 
+# 2026-07-02: servertool engine preflight union casts removed
+
+- Slice: `engine-orchestration-shell.ts` now consumes the typed `runEnginePreflight()` discriminated union directly (`preflight.chat` / `preflight.stopSignal`) instead of local `preflight as ...` casts.
+- Gate: `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old preflight cast markers.
+- Evidence: focused Jest `engine.stopless-session-thin-shell + servertool-active-orchestration-audit` PASS 51/51; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool engine postflight adapterContext casts removed
 
 - Slice: `engine-postflight-shell.ts` now passes `options.adapterContext` directly into runtime-control writer and MetadataCenter snapshot reader; `applyNativeRuntimeControlWritePlan()` owns unknown-object narrowing and still fail-fasts when bound MetadataCenter is missing.
