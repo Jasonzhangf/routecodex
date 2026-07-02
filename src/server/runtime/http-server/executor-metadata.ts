@@ -735,13 +735,6 @@ export function decorateMetadataForAttempt(
       writer: ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
       reason: 'preselected route is single-use and must not pin provider retry attempts'
     });
-    releaseMetadataCenterSlot({
-      target: clone,
-      family: 'runtime_control',
-      key: 'providerProtocol',
-      writer: ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
-      reason: 'provider retry must bind provider protocol from current route selection'
-    });
   }
   return clone;
 }

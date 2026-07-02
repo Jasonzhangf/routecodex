@@ -205,7 +205,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['relay.key1.gpt-5.5']);
   });
 
-  it('does not synthesize same-provider retry for streaming recoverable pre-response failures', async () => {
+  it('allows bounded same-provider retry for streaming recoverable failure when this is the last provider', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
       statusCode: 525,
@@ -237,13 +237,12 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     });
 
     expect(plan.shouldRetry).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(plan.retrySwitchPlan?.decisionLabel).not.toContain('same_provider');
-    expect(plan.excludedCurrentProvider).toBe(true);
-    expect(Array.from(excludedProviderKeys)).toEqual(['asxs.crsa.gpt-5.5']);
+    expect(plan.retrySwitchPlan).toBeUndefined();
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
-  it('keeps current provider when non-stream recoverable pre-response failure is already the last provider', async () => {
+  it('allows bounded same-provider retry when non-stream recoverable failure is already the last provider', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
       statusCode: 525,
@@ -274,7 +273,40 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       isStreamingRequest: false
     });
 
-    expect(plan.shouldRetry).toBe(false);
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan).toBeUndefined();
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
+  });
+
+  it('allows bounded same-provider retry for provider send SSE/network wrappers when this is the last provider', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const error = Object.assign(new Error('fetch failed'), {
+      code: 'ECONNRESET'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        errorCode: 'ECONNRESET',
+        reason: 'fetch failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.sse_decode',
+      providerKey: 'storm.a.glm-5',
+      runtimeKey: 'storm.a',
+      logicalRequestChainKey: 'req-last-provider-sse-wrapper',
+      logicalChainRetryLimitStageRequestId: 'req-last-provider-sse-wrapper',
+      routePool: ['storm.a.glm-5'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      isStreamingRequest: false
+    });
+
+    expect(plan.shouldRetry).toBe(true);
     expect(plan.retrySwitchPlan).toBeUndefined();
     expect(plan.excludedCurrentProvider).toBe(false);
     expect(Array.from(excludedProviderKeys)).toEqual([]);

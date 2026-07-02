@@ -2121,6 +2121,10 @@ export class RouteCodexHttpServer {
           providerOwnedContinuation: false,
           abortSignal: getClientConnectionAbortSignal(metadataForHub),
           metadata: metadataForHub,
+          extraDetails: {
+            source: 'router-direct',
+            ...(typeof statusCode === 'number' ? { statusCode } : {}),
+          },
           phase: 'provider_send',
           logNonBlockingError: logRouterDirectNonBlockingError,
           extractRetryErrorSnapshot,

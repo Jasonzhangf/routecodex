@@ -22,7 +22,10 @@ import {
 import { isPromptTooLongError } from './retry-engine.js';
 import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normalizer.js';
-import { extractRequestExecutorProviderErrorStage } from './request-executor-error-shared.js';
+import {
+  attachRetryErrorSnapshotToError,
+  extractRequestExecutorProviderErrorStage
+} from './request-executor-error-shared.js';
 import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
@@ -66,6 +69,9 @@ type RequestExecutorProviderSendFailureArgs = {
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
+    upstreamStatus?: number;
+    catalogCode?: string;
+    catalogKey?: string;
     switchAction: 'exclude_and_reroute';
     decisionLabel?: string;
     retryExecutionPolicyReason?: string;
@@ -85,6 +91,7 @@ type RequestExecutorProviderSendFailureArgs = {
   providerOwnedContinuation?: boolean;
   abortSignal?: AbortSignal;
   metadata?: Record<string, unknown>;
+  extraDetails?: Record<string, unknown>;
   phase: 'provider_send' | 'provider_response_processing';
   logNonBlockingError: (stage: string, error: unknown, details?: Record<string, unknown>) => void;
   extractRetryErrorSnapshot: (error: unknown) => RetryErrorSnapshot;
@@ -108,6 +115,7 @@ export type RequestExecutorProviderSendFailureResult = {
   forcedRouteHint?: string;
   contextOverflowRetries: number;
   cumulativeExternalLatencyMs: number;
+  allowRetryBeyondAttemptBudget?: boolean;
 };
 
 function isRetryableProviderResponseProcessingFailure(args: {
@@ -206,6 +214,7 @@ export async function processProviderSendFailure(
     throw args.error;
   }
   const retryError = args.extractRetryErrorSnapshot(args.error);
+  attachRetryErrorSnapshotToError(args.error, retryError);
   const resolvedFailureStage =
     extractRequestExecutorProviderErrorStage(args.error)
     ?? (args.phase === 'provider_response_processing' ? 'provider.send' : 'provider.send');
@@ -267,6 +276,9 @@ export async function processProviderSendFailure(
     ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
     ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
     ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
+    ...(typeof retryError.upstreamStatus === 'number' ? { upstreamStatus: retryError.upstreamStatus } : {}),
+    ...(retryError.catalogCode ? { catalogCode: retryError.catalogCode } : {}),
+    ...(retryError.catalogKey ? { catalogKey: retryError.catalogKey } : {}),
     attempt: args.attempt
   });
 
@@ -279,6 +291,9 @@ export async function processProviderSendFailure(
         status: retryError.statusCode ?? extractStatusCodeFromError(args.error) ?? null,
         code: retryError.errorCode ?? (args.error && typeof args.error === 'object' ? (args.error as { code?: unknown }).code : null) ?? null,
         upstreamCode: retryError.upstreamCode ?? null,
+        upstreamStatus: retryError.upstreamStatus ?? null,
+        catalogCode: retryError.catalogCode ?? null,
+        catalogKey: retryError.catalogKey ?? null,
         requestExecutorProviderErrorStage: resolvedFailureStage,
         reason: retryError.reason,
         providerKey: args.providerKey,
@@ -359,21 +374,24 @@ export async function processProviderSendFailure(
     providerOwnedContinuation: args.providerOwnedContinuation,
     abortSignal: args.abortSignal,
     metadata: args.metadata,
+    extraDetails: args.extraDetails,
     logNonBlockingError: args.logNonBlockingError
   });
   const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;
-  if (!retryExecutionPlan.shouldRetry || !retryExecutionPlan.retrySwitchPlan) {
+  if (!retryExecutionPlan.shouldRetry) {
     throw args.error;
   }
-  if (!providerFailurePlan.retryTelemetryPlan) {
-    throw args.error;
+  if (retryExecutionPlan.retrySwitchPlan) {
+    if (!providerFailurePlan.retryTelemetryPlan) {
+      throw args.error;
+    }
+    emitRequestExecutorProviderRetryTelemetry({
+      requestId: args.requestId,
+      retryTelemetryPlan: providerFailurePlan.retryTelemetryPlan,
+      logStage: args.logStage,
+      logProviderRetrySwitch: args.logProviderRetrySwitch
+    });
   }
-  emitRequestExecutorProviderRetryTelemetry({
-    requestId: args.requestId,
-    retryTelemetryPlan: providerFailurePlan.retryTelemetryPlan,
-    logStage: args.logStage,
-    logProviderRetrySwitch: args.logProviderRetrySwitch
-  });
 
   const providerTransportBackoffScopeKey = resolveProviderTransportBackoffScopeKey({
     providerTransportBackoffKey: args.providerTransportBackoffKey,
@@ -437,6 +455,9 @@ export async function processProviderSendFailure(
     lastError: args.error,
     forcedRouteHint,
     contextOverflowRetries,
-    cumulativeExternalLatencyMs
+    cumulativeExternalLatencyMs,
+    allowRetryBeyondAttemptBudget:
+      retryExecutionPlan.excludedCurrentProvider === true
+      || retryExecutionPlan.defaultPoolAvailable === true
   };
 }

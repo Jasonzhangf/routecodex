@@ -882,15 +882,18 @@ export class HubRequestExecutor implements RequestExecutor {
           target
         } = resolvedPipelineAttempt;
         const routeNameForAttempt = pipelineResult.routingDecision?.routeName;
+        const routingPolicyGroupForAttempt =
+          readString(metadataForAttempt.routecodexRoutingPolicyGroup)
+          ?? routecodexRoutingPolicyGroup;
         const routeTiersForAttempt =
           typeof routeNameForAttempt === 'string'
-          && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
-            ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, routeNameForAttempt) ?? []
+          && typeof routingPolicyGroupForAttempt === 'string'
+            ? this.deps.getRoutingTiers?.(routingPolicyGroupForAttempt, routeNameForAttempt) ?? []
             : [];
         const defaultRouteTiersForAttempt =
           typeof routeNameForAttempt === 'string'
-          && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
-            ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, 'default') ?? []
+          && typeof routingPolicyGroupForAttempt === 'string'
+            ? this.deps.getRoutingTiers?.(routingPolicyGroupForAttempt, 'default') ?? []
             : [];
         await captureResponsesConversationRequestContextAtChatProcessEntry({
           input,
@@ -995,9 +998,11 @@ export class HubRequestExecutor implements RequestExecutor {
             lastError,
             forcedRouteHint,
             contextOverflowRetries,
-            cumulativeExternalLatencyMs
+            cumulativeExternalLatencyMs,
+            allowRetryBeyondAttemptBudget: allowPrimaryExhaustedReplayBeyondAttemptBudget
           } satisfies RequestExecutorFailureState, resolveFailure);
           lastError = failureState.lastError;
+          allowPrimaryExhaustedReplayBeyondAttemptBudget = failureState.allowRetryBeyondAttemptBudget === true;
           continue;
         }
         let providerProtocol: ProviderProtocol;
@@ -1130,9 +1135,11 @@ export class HubRequestExecutor implements RequestExecutor {
           lastError,
           forcedRouteHint,
           contextOverflowRetries,
-          cumulativeExternalLatencyMs
+          cumulativeExternalLatencyMs,
+          allowRetryBeyondAttemptBudget: allowPrimaryExhaustedReplayBeyondAttemptBudget
         } satisfies RequestExecutorFailureState, resolveFailure);
         lastError = failureState.lastError;
+        allowPrimaryExhaustedReplayBeyondAttemptBudget = failureState.allowRetryBeyondAttemptBudget === true;
         continue;
         }
         const emptyProviderRequestSignal = detectEmptyProviderRequestPayload(providerPayload);
@@ -1564,6 +1571,7 @@ export class HubRequestExecutor implements RequestExecutor {
             maxAttempts,
             logicalRequestChainKey,
             routePoolForAttempt,
+            defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
             portScope,
             recordAttempt,
@@ -1600,12 +1608,14 @@ export class HubRequestExecutor implements RequestExecutor {
             lastError,
             forcedRouteHint,
             contextOverflowRetries,
-            cumulativeExternalLatencyMs
+            cumulativeExternalLatencyMs,
+            allowRetryBeyondAttemptBudget: allowPrimaryExhaustedReplayBeyondAttemptBudget
           } satisfies RequestExecutorFailureState, sendFailure);
           lastError = failureState.lastError ?? error;
           forcedRouteHint = failureState.forcedRouteHint;
           contextOverflowRetries = failureState.contextOverflowRetries;
           cumulativeExternalLatencyMs = failureState.cumulativeExternalLatencyMs;
+          allowPrimaryExhaustedReplayBeyondAttemptBudget = failureState.allowRetryBeyondAttemptBudget === true;
           retryAfterProviderFailure = true;
         } finally {
           if (trafficPermit) {
@@ -1709,6 +1719,7 @@ export const __requestExecutorTestables = {
   prepareRequestPayloadRetrySeed,
   resolveOriginalRequestForResponseConversion,
   resolveProviderFailureClassification,
+  resolveRequestExecutorProviderErrorClassification: resolveProviderFailureClassification,
   resolveRequestExecutorProviderErrorReportPlan,
   resolveProviderRetryExclusionPlan,
   resolveProviderRetryExecutionPlan,

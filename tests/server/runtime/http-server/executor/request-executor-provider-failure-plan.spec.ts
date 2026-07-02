@@ -302,7 +302,7 @@ describe('request-executor-provider-failure-plan', () => {
     expect(excludedProviderKeys.has('XLC.key2.deepseek-v4-pro')).toBe(true);
   });
 
-  test('single-provider retry path does not synthesize same-provider retry state', async () => {
+  test('single-provider retry path does not synthesize provider-switch state', async () => {
     const excludedProviderKeys = new Set<string>();
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
@@ -334,7 +334,7 @@ describe('request-executor-provider-failure-plan', () => {
     });
 
     expect(plan.requestLocalProviderRetryState).toBeUndefined();
-    expect(plan.retryExecutionPlan.shouldRetry).toBe(false);
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
     expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
     expect(plan.retryExecutionPlan.retrySwitchPlan).toBeUndefined();
   });

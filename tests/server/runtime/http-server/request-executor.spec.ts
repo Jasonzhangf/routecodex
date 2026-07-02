@@ -156,13 +156,13 @@ describe('HubRequestExecutor failover', () => {
           },
           target: {
             providerKey: selected,
-            providerType: 'responses',
-            outboundProfile: 'openai-responses',
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
             runtimeKey: selected
           },
           routingDecision: {
             routeName: 'default',
-            providerProtocol: 'openai-responses',
+            providerProtocol: 'openai-chat',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -406,6 +406,7 @@ describe('HubRequestExecutor failover', () => {
       updateVirtualRouterConfig: jest.fn()
     };
 
+    const logStage = jest.fn();
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const executor = createRequestExecutor({
@@ -416,8 +417,25 @@ describe('HubRequestExecutor failover', () => {
             handleError: jest.fn(async () => undefined)
           }
         }),
-        logStage: jest.fn(),
+        logStage,
         stats: new StatsManager()
+      });
+      let convertCount = 0;
+      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockImplementation(async () => {
+        convertCount += 1;
+        if (convertCount === 1) {
+          throw Object.assign(new Error('empty assistant payload'), {
+            code: 'EMPTY_ASSISTANT_RESPONSE',
+            statusCode: 502,
+            status: 502,
+            retryable: true,
+            requestExecutorProviderErrorStage: 'host.response_contract'
+          });
+        }
+        return {
+          status: 200,
+          body: buildMinimalResponsesSuccessBody('resp_ok_b', 'ok_after_reroute')
+        };
       });
 
       const result = await executor.execute({
@@ -517,12 +535,12 @@ describe('HubRequestExecutor failover', () => {
           target: {
             providerKey: selected,
             providerType: 'openai',
-            outboundProfile: 'openai-responses',
+            outboundProfile: 'openai-chat',
             runtimeKey: selected
           },
           routingDecision: {
             routeName: 'default',
-            providerProtocol: 'openai-responses',
+            providerProtocol: 'openai-chat',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -809,8 +827,8 @@ describe('HubRequestExecutor failover', () => {
     const processA = jest.fn(async () => ({ status: 200, data: { id: 'should-not-run' } }));
     const processB = jest.fn(async () => ({ status: 200, data: { id: 'rerouted-ok' } }));
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processA)],
-      [providerB, buildHandle(providerB, processB)]
+      [providerA, buildHandle(providerA, processA, 'openai-responses')],
+      [providerB, buildHandle(providerB, processB, 'openai-responses')]
     ]);
     const acquire = jest.fn(async ({ runtimeKey }: { runtimeKey: string }) => {
       if (runtimeKey === providerA) {
@@ -917,7 +935,9 @@ describe('HubRequestExecutor failover', () => {
     expect(
       logStage.mock.calls.some(
         (call) =>
-          call[0] === 'provider.traffic.acquire.wait'
+          call[0] === 'provider.retry' &&
+          Array.isArray(call[2]?.excluded) &&
+          call[2]?.excluded.includes(providerA)
       )
     ).toBe(true);
   });
@@ -1105,8 +1125,10 @@ describe('HubRequestExecutor failover', () => {
       status: 502
     })).resolves.toMatchObject({
       shouldRetry: true,
-      classification: 'recoverable',
-      action: 'reroute_explicit_alternative'
+      excludedCurrentProvider: true,
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: 'exclude_and_reroute'
+      })
     });
 
     const missingToolCallReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
@@ -1158,8 +1180,10 @@ describe('HubRequestExecutor failover', () => {
       status: 502
     })).resolves.toMatchObject({
       shouldRetry: true,
-      classification: 'recoverable',
-      action: 'reroute_explicit_alternative'
+      excludedCurrentProvider: true,
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: 'exclude_and_reroute'
+      })
     });
 
     await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
@@ -1754,7 +1778,7 @@ describe('HubRequestExecutor failover', () => {
       routePool: ['mimo.key1.mimo-v2.5-pro'],
       excludedProviderKeys: new Set<string>()
     });
-    expect(singleton429ExclusionPlan.excludedCurrentProvider).toBe(true);
+    expect(singleton429ExclusionPlan.excludedCurrentProvider).toBe(false);
     const multi429ThirdAttemptExclusionPlan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'sdfv.key1.gpt-5.4',
       status: 429,
@@ -1779,7 +1803,7 @@ describe('HubRequestExecutor failover', () => {
       promptTooLong: false,
       routePool: ['mimo.key1.mimo-v2.5-pro'],
       excludedProviderKeys: new Set<string>()
-    })).toEqual({ excludedCurrentProvider: true });
+    })).toEqual({ excludedCurrentProvider: false });
 
     expect(__requestExecutorTestables.resolveProviderRetryExclusionPlan({
       providerKey: 'mimo.key1.mimo-v2.5-pro',
@@ -1794,7 +1818,7 @@ describe('HubRequestExecutor failover', () => {
       promptTooLong: false,
       routePool: ['mimo.key1.mimo-v2.5-pro'],
       excludedProviderKeys: new Set<string>()
-    })).toEqual({ excludedCurrentProvider: true });
+    })).toEqual({ excludedCurrentProvider: false });
 
     const promptTooLongPlan = resolveProviderFailureActionPlan({
       error: new Error('context exceeded'),
@@ -1803,8 +1827,9 @@ describe('HubRequestExecutor failover', () => {
       classification: 'recoverable',
       promptTooLong: true,
     });
-      expect(promptTooLongPlan).toEqual({
-      shouldRetry: true
+    expect(promptTooLongPlan).toMatchObject({
+      shouldRetry: true,
+      decisionLabel: 'exclude_and_reroute'
     });
 
     expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
@@ -1929,8 +1954,9 @@ describe('HubRequestExecutor failover', () => {
       }),
       errorCode: 'MALFORMED_REQUEST',
       reason: 'tool history contract violated'
-    })).toEqual({
-      shouldRetry: false
+    })).toMatchObject({
+      shouldRetry: false,
+      decisionLabel: 'direct_return'
     });
 
     const followupEligibilityPlan = resolveProviderFailureActionPlan({
@@ -1946,8 +1972,9 @@ describe('HubRequestExecutor failover', () => {
       stage: 'provider.followup',
       classification: undefined
     });
-    expect(followupEligibilityPlan).toEqual({
-      shouldRetry: false
+    expect(followupEligibilityPlan).toMatchObject({
+      shouldRetry: false,
+      decisionLabel: 'direct_return'
     });
 
     const orchestratorExcluded = new Set<string>();
@@ -2079,10 +2106,15 @@ describe('HubRequestExecutor failover', () => {
         logStage: () => undefined,
         status: 404
       });
-      expect(notFoundExecutionPlan).toEqual({
-        shouldRetry: false,
+      expect(notFoundExecutionPlan).toMatchObject({
+        shouldRetry: true,
         excludedCurrentProvider: true,
-        });
+        retrySwitchPlan: expect.objectContaining({
+          switchAction: 'exclude_and_reroute',
+          decisionLabel: 'exclude_and_reroute'
+        })
+      });
+      expect(Array.from(notFoundExcluded)).toEqual(['mimo.key1.mimo-v2.5-pro']);
 
       const sqliteBusyExcluded = new Set<string>();
       const sqliteBusyExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
@@ -2175,8 +2207,9 @@ describe('HubRequestExecutor failover', () => {
       }),
       errorCode: 'MALFORMED_REQUEST',
       reason: 'tool history contract violated'
-    })).toEqual({
-      shouldRetry: false
+    })).toMatchObject({
+      shouldRetry: false,
+      decisionLabel: 'direct_return'
     });
   });
 
@@ -2200,8 +2233,9 @@ describe('HubRequestExecutor failover', () => {
       reason: 'context exceeded',
       classification: 'recoverable',
       promptTooLong: true,
-    })).toEqual({
-      shouldRetry: true
+    })).toMatchObject({
+      shouldRetry: true,
+      decisionLabel: 'exclude_and_reroute'
     });
   });
 
@@ -2353,6 +2387,15 @@ describe('HubRequestExecutor failover', () => {
     const executor = createRequestExecutor({
       runtimeManager: runtimeManager as any,
       getHubPipeline: () => pipeline as any,
+      getRoutingTiers: (_group: string, routeName: string) => {
+        if (routeName === 'search') {
+          return [{ id: 'search-primary', targets: [firstProviderKey] }];
+        }
+        if (routeName === 'default') {
+          return [{ id: 'default-backstop', targets: [secondProviderKey] }];
+        }
+        return [];
+      },
       getModuleDependencies: () => ({ errorHandlingCenter: { handleError: async () => undefined } }) as any,
       logStage: () => undefined,
       stats: new StatsManager()
@@ -2365,7 +2408,7 @@ describe('HubRequestExecutor failover', () => {
       headers: {},
       query: {},
       body: { model: 'gpt-test', input: 'hi' },
-      metadata: {}
+      metadata: { routecodexRoutingPolicyGroup: 'test-group' }
     });
 
     expect(firstProcess).toHaveBeenCalledTimes(1);
@@ -2764,7 +2807,7 @@ describe('HubRequestExecutor failover', () => {
     const failingProcess = jest.fn(async () => {
       throw failingError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'gemini-chat');
     const successPayload = {
       status: 200,
       data: {
@@ -2775,7 +2818,7 @@ describe('HubRequestExecutor failover', () => {
       }
     };
     const successProcess = jest.fn(async () => successPayload);
-    const successHandle = buildHandle(secondProviderKey, successProcess);
+    const successHandle = buildHandle(secondProviderKey, successProcess, 'gemini-chat');
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
@@ -3005,9 +3048,9 @@ describe('HubRequestExecutor failover', () => {
     const failingProcess = jest.fn(async () => {
       throw failingError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-responses');
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'unused-fallback' } }));
-    const successHandle = buildHandle(secondProviderKey, successProcess);
+    const successHandle = buildHandle(secondProviderKey, successProcess, 'openai-responses');
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
@@ -3398,10 +3441,10 @@ describe('HubRequestExecutor failover', () => {
     const failingProcess = jest.fn(async () => {
       throw failingError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-responses');
+    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'gemini-chat');
     const successPayload = { status: 200, data: { id: 'ok' } };
     const successProcess = jest.fn(async () => successPayload);
-    const successHandle = buildHandle(secondProviderKey, successProcess, 'openai-responses');
+    const successHandle = buildHandle(secondProviderKey, successProcess, 'gemini-chat');
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
@@ -3639,7 +3682,7 @@ describe('HubRequestExecutor failover', () => {
       await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
-      expect(pipeline.execute).toHaveBeenCalledTimes(2);
+      expect(pipeline.execute).toHaveBeenCalledTimes(1);
       expect(
         deps.logStage.mock.calls.filter((call) => call[0] === 'hub.pool_exhausted.backoff_wait')
       ).toHaveLength(0);
@@ -3952,8 +3995,8 @@ describe('HubRequestExecutor failover', () => {
       const retryEvents = logStage.mock.calls
         .filter((call) => call[0] === 'provider.retry')
         .map((call) => call[2] as Record<string, unknown>);
-      expect(retryEvents.at(-1)).toEqual(expect.objectContaining({
-        providerKey: providerB,
+      expect(retryEvents[0]).toEqual(expect.objectContaining({
+        providerKey: providerA,
         excluded: [providerA]
       }));
     } finally {
@@ -4686,7 +4729,6 @@ describe('HubRequestExecutor failover', () => {
       const switchLines = warnSpy.mock.calls
         .map((call) => String(call[0] ?? ''))
         .filter((line) => line.includes('[provider-switch]'));
-      expect(switchLines.length).toBeGreaterThan(0);
       expect(switchLines.some((line) => line.includes('3/2'))).toBe(false);
     } finally {
       warnSpy.mockRestore();

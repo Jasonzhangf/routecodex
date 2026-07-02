@@ -13,6 +13,7 @@ import {
   resolveProviderSwitchBackoffScopeKey,
   waitProviderSwitchBackoffWithGate
 } from './request-executor-error-action-queue.js';
+import { attachRetryErrorSnapshotToError } from './request-executor-error-shared.js';
 import type {
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
@@ -49,6 +50,9 @@ type RequestExecutorProviderResolveFailureArgs = {
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
+    upstreamStatus?: number;
+    catalogCode?: string;
+    catalogKey?: string;
     switchAction: 'exclude_and_reroute';
     decisionLabel?: string;
     retryExecutionPolicyReason?: string;
@@ -64,6 +68,7 @@ type RequestExecutorProviderResolveFailureArgs = {
 
 export type RequestExecutorProviderResolveFailureResult = {
   lastError: unknown;
+  allowRetryBeyondAttemptBudget?: boolean;
 };
 
 export async function processProviderResolveFailure(
@@ -71,12 +76,16 @@ export async function processProviderResolveFailure(
 ): Promise<RequestExecutorProviderResolveFailureResult> {
   const errorMessage = args.error instanceof Error ? args.error.message : String(args.error ?? 'Unknown error');
   const retryError = args.extractRetryErrorSnapshot(args.error);
+  attachRetryErrorSnapshotToError(args.error, retryError);
   args.logStage('provider.runtime_resolve.error', args.requestId, {
     providerKey: args.providerKey,
     message: errorMessage,
     ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
     ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
     ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
+    ...(typeof retryError.upstreamStatus === 'number' ? { upstreamStatus: retryError.upstreamStatus } : {}),
+    ...(retryError.catalogCode ? { catalogCode: retryError.catalogCode } : {}),
+    ...(retryError.catalogKey ? { catalogKey: retryError.catalogKey } : {}),
     attempt: args.attempt
   });
 
@@ -183,5 +192,8 @@ export async function processProviderResolveFailure(
 
   return {
     lastError: args.error,
+    allowRetryBeyondAttemptBudget:
+      retryExecutionPlan.excludedCurrentProvider === true
+      || retryExecutionPlan.defaultPoolAvailable === true,
   };
 }
