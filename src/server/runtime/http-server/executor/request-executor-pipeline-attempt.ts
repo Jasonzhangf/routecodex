@@ -7,6 +7,12 @@ import {
   hasAlternativeRouteCandidate
 } from './request-executor-retry-decision.js';
 import {
+  buildErrorErr05DefaultAvailabilityTiers,
+  isReselectedExcludedProviderVerifiedLastProvider,
+  resolveDefaultTierAvailableForErrorErr05,
+  resolveRoutePoolAuthoritativeForRetry
+} from './request-executor-core-utils.js';
+import {
   normalizeExplicitRoutePoolNative,
   mergeObservedRoutePoolChainNative
 } from '../../../../modules/llmswitch/bridge/native-exports.js';
@@ -151,6 +157,8 @@ export function resolveRequestExecutorPipelineAttempt(args: {
   clientRequestId: string;
   clientAbortSignal: AbortSignal | undefined;
   initialRoutePool: string[] | null;
+  routeTiersForAttempt?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
+  defaultRouteTiersForAttempt?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
   excludedProviderKeys: Set<string>;
   lastError: unknown;
   throwIfClientAbortSignalAborted: (abortSignal: AbortSignal | undefined) => void;
@@ -209,27 +217,62 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       routePool: routePoolForAttempt,
       excludedProviderKeys: args.excludedProviderKeys
     });
+    const defaultTierAvailable = resolveDefaultTierAvailableForErrorErr05({
+      tiers: buildErrorErr05DefaultAvailabilityTiers({
+        routeName: readTrimmedString(routingDecision?.routeName),
+        routeTiers: args.routeTiersForAttempt ?? [],
+        defaultRouteTiers: args.defaultRouteTiersForAttempt ?? [],
+      }),
+      routePool: routePoolForAttempt,
+      excludedProviderKeys: args.excludedProviderKeys,
+    });
+    const routePoolIsAuthoritative = resolveRoutePoolAuthoritativeForRetry({
+      routingDecision,
+      routePoolForAttempt,
+      routeTiersForAttempt: args.routeTiersForAttempt ?? [],
+      defaultTierAvailable,
+      excludedProviderKeys: args.excludedProviderKeys,
+    });
+    const isVerifiedLastProvider = isReselectedExcludedProviderVerifiedLastProvider({
+      providerKey: target.providerKey,
+      routingDecision,
+      routePoolForAttempt,
+      routeTiersForAttempt: args.routeTiersForAttempt ?? [],
+      defaultTierAvailable,
+    });
     args.logStage('provider.retry.excluded_target_reselected', args.providerRequestId, {
       providerKey: target.providerKey,
       excluded: Array.from(args.excludedProviderKeys),
       attempt: args.attempt,
-      hasAlternativeCandidate
+      hasAlternativeCandidate,
+      routePoolIsAuthoritative,
+      defaultTierAvailable,
+      isVerifiedLastProvider
     });
-    throw Object.assign(
-      new Error(
-        hasAlternativeCandidate
-          ? `Virtual router reselected excluded provider ${target.providerKey} while alternatives remain`
-          : `Virtual router reselected excluded provider ${target.providerKey} without an alternative`
-      ),
-      {
-        code: 'ERR_EXCLUDED_PROVIDER_RESELECTED',
-        requestId: args.inputRequestId,
+    if (!hasAlternativeCandidate && isVerifiedLastProvider) {
+      args.logStage('provider.retry.excluded_target_reselected_last_provider', args.providerRequestId, {
         providerKey: target.providerKey,
         excluded: Array.from(args.excludedProviderKeys),
-        attempt: args.attempt,
-        hasAlternativeCandidate
-      }
-    );
+        attempt: args.attempt
+      });
+    } else {
+      throw Object.assign(
+        new Error(
+          hasAlternativeCandidate
+            ? `Virtual router reselected excluded provider ${target.providerKey} while alternatives remain`
+            : `Virtual router reselected excluded provider ${target.providerKey} without verified last-provider truth`
+        ),
+        {
+          code: 'ERR_EXCLUDED_PROVIDER_RESELECTED',
+          requestId: args.inputRequestId,
+          providerKey: target.providerKey,
+          excluded: Array.from(args.excludedProviderKeys),
+          attempt: args.attempt,
+          hasAlternativeCandidate,
+          isVerifiedLastProvider
+        }
+      );
+    }
   }
 
   const metadataCenter = MetadataCenter.read(mergedMetadata);

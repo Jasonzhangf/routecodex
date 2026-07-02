@@ -107,6 +107,63 @@ export interface ResolveSingletonRoutePoolExhaustionDecisionOutput {
   candidateProviderCount?: number;
 }
 
+export function resolveRoutePoolAuthoritativeForRetry(args: {
+  routingDecision?: Record<string, unknown>;
+  routePoolForAttempt: string[];
+  routeTiersForAttempt?: Array<{ targets: string[]; backup?: boolean }>;
+  defaultTierAvailable: boolean;
+  excludedProviderKeys: Set<string>;
+}): boolean {
+  const decisionRoutePool = args.routingDecision?.routePool;
+  if (!Array.isArray(decisionRoutePool) || decisionRoutePool.length === 0) {
+    return false;
+  }
+  if (args.routePoolForAttempt.length > 1) {
+    return true;
+  }
+  const configuredCandidateCount =
+    Array.isArray(args.routeTiersForAttempt) && args.routeTiersForAttempt.length > 0
+      ? new Set(
+        args.routeTiersForAttempt
+          .flatMap((tier) => Array.isArray(tier.targets) ? tier.targets : [])
+          .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
+          .map((target) => target.trim())
+      ).size
+      : null;
+  return args.routePoolForAttempt.length === 1
+    && configuredCandidateCount === 1
+    && args.defaultTierAvailable === false
+    && args.excludedProviderKeys.size === 0;
+}
+
+export function isReselectedExcludedProviderVerifiedLastProvider(args: {
+  providerKey: string;
+  routingDecision?: Record<string, unknown>;
+  routePoolForAttempt: string[];
+  routeTiersForAttempt?: Array<{ targets: string[]; backup?: boolean }>;
+  defaultTierAvailable: boolean;
+}): boolean {
+  const decisionRoutePool = args.routingDecision?.routePool;
+  if (!Array.isArray(decisionRoutePool) || decisionRoutePool.length === 0) {
+    return false;
+  }
+  const routePool = args.routePoolForAttempt
+    .map((target) => typeof target === 'string' ? target.trim() : '')
+    .filter((target) => target.length > 0);
+  if (routePool.length !== 1 || routePool[0] !== args.providerKey) {
+    return false;
+  }
+  const configuredCandidates = new Set(
+    (args.routeTiersForAttempt ?? [])
+      .flatMap((tier) => Array.isArray(tier.targets) ? tier.targets : [])
+      .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
+      .map((target) => target.trim())
+  );
+  return configuredCandidates.size === 1
+    && configuredCandidates.has(args.providerKey)
+    && args.defaultTierAvailable === false;
+}
+
 function normalizePrimaryExhaustedRouteName(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;

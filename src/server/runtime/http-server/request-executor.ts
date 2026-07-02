@@ -68,6 +68,7 @@ import {
   resolveDefaultTierAvailableForErrorErr05,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
+  resolveRoutePoolAuthoritativeForRetry,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
 import {
@@ -126,35 +127,6 @@ function isSameMetadataCenterWriter(a: MetadataCenterWriter | undefined, b: Meta
     && a.symbol === b.symbol
     && a.stage === b.stage
   );
-}
-
-export function resolveRoutePoolAuthoritativeForRetry(args: {
-  routingDecision?: Record<string, unknown>;
-  routePoolForAttempt: string[];
-  routeTiersForAttempt?: Array<{ targets: string[]; backup?: boolean }>;
-  defaultTierAvailable: boolean;
-  excludedProviderKeys: Set<string>;
-}): boolean {
-  const decisionRoutePool = args.routingDecision?.routePool;
-  if (!Array.isArray(decisionRoutePool) || decisionRoutePool.length === 0) {
-    return false;
-  }
-  if (args.routePoolForAttempt.length > 1) {
-    return true;
-  }
-  const configuredCandidateCount =
-    Array.isArray(args.routeTiersForAttempt) && args.routeTiersForAttempt.length > 0
-      ? new Set(
-        args.routeTiersForAttempt
-          .flatMap((tier) => Array.isArray(tier.targets) ? tier.targets : [])
-          .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
-          .map((target) => target.trim())
-      ).size
-      : null;
-  return args.routePoolForAttempt.length === 1
-    && configuredCandidateCount === 1
-    && args.defaultTierAvailable === false
-    && args.excludedProviderKeys.size === 0;
 }
 
 export function writeProviderProtocolRuntimeControl(
@@ -884,6 +856,20 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           throw pipelineError;
         }
+        const routeNameForAttempt = pipelineResult.routingDecision?.routeName;
+        const routingPolicyGroupForAttempt =
+          readString(metadataForAttempt.routecodexRoutingPolicyGroup)
+          ?? routecodexRoutingPolicyGroup;
+        const routeTiersForAttempt =
+          typeof routeNameForAttempt === 'string'
+          && typeof routingPolicyGroupForAttempt === 'string'
+            ? this.deps.getRoutingTiers?.(routingPolicyGroupForAttempt, routeNameForAttempt) ?? []
+            : [];
+        const defaultRouteTiersForAttempt =
+          typeof routeNameForAttempt === 'string'
+          && typeof routingPolicyGroupForAttempt === 'string'
+            ? this.deps.getRoutingTiers?.(routingPolicyGroupForAttempt, 'default') ?? []
+            : [];
         const resolvedPipelineAttempt = resolveRequestExecutorPipelineAttempt({
           inputRequestId: input.requestId,
           providerRequestId,
@@ -894,6 +880,8 @@ export class HubRequestExecutor implements RequestExecutor {
           clientRequestId,
           clientAbortSignal,
           initialRoutePool,
+          routeTiersForAttempt,
+          defaultRouteTiersForAttempt,
           excludedProviderKeys,
           lastError,
           throwIfClientAbortSignalAborted,
@@ -913,20 +901,6 @@ export class HubRequestExecutor implements RequestExecutor {
           providerPayload,
           target
         } = resolvedPipelineAttempt;
-        const routeNameForAttempt = pipelineResult.routingDecision?.routeName;
-        const routingPolicyGroupForAttempt =
-          readString(metadataForAttempt.routecodexRoutingPolicyGroup)
-          ?? routecodexRoutingPolicyGroup;
-        const routeTiersForAttempt =
-          typeof routeNameForAttempt === 'string'
-          && typeof routingPolicyGroupForAttempt === 'string'
-            ? this.deps.getRoutingTiers?.(routingPolicyGroupForAttempt, routeNameForAttempt) ?? []
-            : [];
-        const defaultRouteTiersForAttempt =
-          typeof routeNameForAttempt === 'string'
-          && typeof routingPolicyGroupForAttempt === 'string'
-            ? this.deps.getRoutingTiers?.(routingPolicyGroupForAttempt, 'default') ?? []
-            : [];
         await captureResponsesConversationRequestContextAtChatProcessEntry({
           input,
           metadata: mergedMetadata,

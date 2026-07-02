@@ -150,6 +150,59 @@ describe('resolveRequestExecutorPipelineAttempt excluded provider guard', () => 
     expect(Array.from(excludedProviderKeys)).toEqual([providerKey]);
   });
 
+  it('allows reselecting an excluded provider only when config proves it is the last provider', () => {
+    const providerKey = 'primary.key1.gpt-5.5';
+    const excludedProviderKeys = new Set<string>([providerKey]);
+    const resolved = resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-excluded-provider-verified-last-provider',
+      providerRequestId: 'provider-req-excluded-provider-verified-last-provider',
+      attempt: 2,
+      metadataForAttempt: {},
+      pipelineResult: {
+        providerPayload: { model: 'gpt-5.5', messages: [] },
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: providerKey
+        },
+        routingDecision: {
+          routeName: 'default',
+          providerProtocol: 'openai-chat',
+          pool: [providerKey],
+          routePool: [providerKey]
+        },
+        processMode: 'chat',
+        metadata: {}
+      },
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-req-excluded-provider-verified-last-provider',
+      clientAbortSignal: undefined,
+      initialRoutePool: [providerKey],
+      routeTiersForAttempt: [{ targets: [providerKey] }],
+      defaultRouteTiersForAttempt: [],
+      excludedProviderKeys,
+      lastError: Object.assign(new Error('HTTP 502: upstream failed'), {
+        code: 'HTTP_502',
+        statusCode: 502
+      }),
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: () => ({
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: upstream failed'
+      }),
+      hubStartedAtMs: Date.now(),
+      pipelineLabel: 'hub.pipeline'
+    });
+
+    expect(resolved.kind).toBe('resolved');
+    expect(resolved.target?.providerKey).toBe(providerKey);
+    expect(Array.from(excludedProviderKeys)).toEqual([providerKey]);
+  });
+
   it('does not reject VR hits when selected target protocol requires relay conversion', () => {
     const providerKey = 'minimax.key1.MiniMax-M3';
     const metadataForAttempt: Record<string, unknown> = {};

@@ -252,6 +252,23 @@ fn expand_route_pool_targets_for_execution_decision(
     expanded
 }
 
+fn build_route_execution_pool_for_decision(
+    forwarder_registry: &crate::virtual_router_engine::forwarder::ForwarderRegistry,
+    pools: &[crate::virtual_router_engine::routing::RoutePoolTier],
+) -> Vec<String> {
+    let mut expanded = Vec::new();
+    for pool in pools {
+        for key in
+            expand_route_pool_targets_for_execution_decision(forwarder_registry, &pool.targets)
+        {
+            if !expanded.contains(&key) {
+                expanded.push(key);
+            }
+        }
+    }
+    expanded
+}
+
 fn preserve_priority_context_candidates(
     available: &[String],
     safe_context: &[String],
@@ -618,6 +635,19 @@ impl VirtualRouterEngineCore {
                 }
                 pools = capability_filtered;
             }
+            let route_execution_pool = build_route_execution_pool_for_decision(
+                &self.forwarder_registry,
+                &pools
+                    .iter()
+                    .filter(|pool| {
+                        pool_matches_route_policy_group(
+                            pool,
+                            requested_route_policy_group.as_deref(),
+                        )
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            );
             for pool in pools {
                 if !pool_matches_route_policy_group(&pool, requested_route_policy_group.as_deref())
                 {
@@ -658,6 +688,11 @@ impl VirtualRouterEngineCore {
                     &self.forwarder_registry,
                     &pool.targets,
                 );
+                let execution_decision_route_pool = if route_execution_pool.is_empty() {
+                    execution_route_pool.clone()
+                } else {
+                    route_execution_pool.clone()
+                };
                 let mut floor_candidates = apply_non_availability_filters(
                     &self.provider_registry,
                     &pool_candidate_targets,
@@ -777,7 +812,7 @@ impl VirtualRouterEngineCore {
                                     filtered_candidates[0].clone(),
                                     route_name.to_string(),
                                     pool.targets.clone(),
-                                    execution_route_pool.clone(),
+                                    execution_decision_route_pool.clone(),
                                     Some(pool.id.clone()),
                                 )
                                 .with_route_params(pool.route_params.clone()),
@@ -843,7 +878,7 @@ impl VirtualRouterEngineCore {
                         key,
                         route_name.to_string(),
                         pool.targets.clone(),
-                        execution_route_pool.clone(),
+                        execution_decision_route_pool.clone(),
                         Some(pool.id.clone()),
                     )
                     .with_route_params(pool.route_params.clone())
@@ -3562,6 +3597,13 @@ mod tests {
 
         assert_eq!(selected.provider_key, "backup.key1.model");
         assert_eq!(selected.pool_id.as_deref(), Some("thinking-backup"));
+        assert_eq!(
+            selected.route_pool,
+            vec![
+                "primary.key1.model".to_string(),
+                "backup.key1.model".to_string()
+            ]
+        );
     }
 
     #[test]

@@ -83,7 +83,6 @@ import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import {
   createRequestExecutor,
-  resolveRoutePoolAuthoritativeForRetry,
   type RequestExecutor,
 } from './request-executor.js';
 import { resolveSessionLogColorKey } from '../../../utils/session-log-color.js';
@@ -111,6 +110,7 @@ import {
   resolveErrorErr05RoutingPolicyGroup,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
+  resolveRoutePoolAuthoritativeForRetry,
 } from './executor/request-executor-core-utils.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';

@@ -3120,6 +3120,17 @@ describe('HubRequestExecutor failover', () => {
             ? input.metadata.excludedProviderKeys
             : []
         );
+        const routePool = [providerA, providerB];
+        if (routePool.every((providerKey) => excluded.has(providerKey))) {
+          throw Object.assign(new Error('All providers unavailable for model qwen3.6-plus'), {
+            code: 'PROVIDER_NOT_AVAILABLE',
+            details: {
+              routeName: 'longcontext',
+              candidateProviderCount: routePool.length,
+              exhaustedTargets: routePool
+            }
+          });
+        }
         const providerKey = excluded.has(providerA) ? providerB : providerA;
         return {
           requestId: input.id,
@@ -3880,7 +3891,12 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'openai-chat',
             runtimeKey: firstProviderKey
           },
-          routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat', pool: [firstProviderKey] },
+          routingDecision: {
+            routeName: 'direct',
+            providerProtocol: 'openai-chat',
+            pool: [firstProviderKey],
+            routePool: [firstProviderKey]
+          },
           metadata: {}
         })
         .mockImplementation(async () => {
@@ -3895,7 +3911,12 @@ describe('HubRequestExecutor failover', () => {
                 outboundProfile: 'openai-chat',
                 runtimeKey: firstProviderKey
               },
-              routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat', pool: [firstProviderKey] },
+              routingDecision: {
+                routeName: 'direct',
+                providerProtocol: 'openai-chat',
+                pool: [firstProviderKey],
+                routePool: [firstProviderKey]
+              },
               metadata: {}
             };
           }
@@ -3919,7 +3940,12 @@ describe('HubRequestExecutor failover', () => {
               outboundProfile: 'openai-chat',
               runtimeKey: firstProviderKey
             },
-            routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat', pool: [firstProviderKey] },
+            routingDecision: {
+              routeName: 'direct',
+              providerProtocol: 'openai-chat',
+              pool: [firstProviderKey],
+              routePool: [firstProviderKey]
+            },
             metadata: {}
           };
         }),
@@ -3929,6 +3955,9 @@ describe('HubRequestExecutor failover', () => {
     const deps = {
       runtimeManager,
       getHubPipeline: () => pipeline,
+      getRoutingTiers: () => [
+        { id: 'direct-singleton', targets: [firstProviderKey], priority: 100 }
+      ],
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => undefined)
@@ -3946,7 +3975,7 @@ describe('HubRequestExecutor failover', () => {
         entryEndpoint: '/v1/chat/completions',
         body: {},
         headers: {},
-        metadata: {}
+        metadata: { routecodexRoutingPolicyGroup: 'test-group' }
       });
       const expectation = expect(pending).resolves.toEqual(expect.objectContaining({ status: 200 }));
 
@@ -4095,6 +4124,17 @@ describe('HubRequestExecutor failover', () => {
             ? input.metadata.excludedProviderKeys
             : []
         );
+        const routePool = [providerA, providerB];
+        if (routePool.every((providerKey) => excluded.has(providerKey))) {
+          throw Object.assign(new Error('All providers unavailable for model qwen3.6-plus'), {
+            code: 'PROVIDER_NOT_AVAILABLE',
+            details: {
+              routeName: 'longcontext',
+              candidateProviderCount: routePool.length,
+              exhaustedTargets: routePool
+            }
+          });
+        }
         const providerKey = excluded.has(providerA) ? providerB : providerA;
         return {
           requestId: input.id,
@@ -4108,7 +4148,8 @@ describe('HubRequestExecutor failover', () => {
           routingDecision: {
             routeName: 'longcontext',
             providerProtocol: 'openai-chat',
-            pool: [providerA, providerB]
+            pool: routePool,
+            routePool
           },
           metadata: {}
         };
@@ -4145,12 +4186,14 @@ describe('HubRequestExecutor failover', () => {
         metadata: {}
       })).rejects.toThrow(/HTTP 429/);
 
-      expect(pipeline.execute).toHaveBeenCalledTimes(2);
+      expect(pipeline.execute).toHaveBeenCalledTimes(3);
       expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);
 
       const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
       expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA]);
+      const thirdCallMetadata = pipeline.execute.mock.calls[2][0].metadata as Record<string, unknown>;
+      expect(thirdCallMetadata.excludedProviderKeys).toEqual([providerA, providerB]);
       const retryEvents = logStage.mock.calls
         .filter((call) => call[0] === 'provider.retry')
         .map((call) => call[2] as Record<string, unknown>);
@@ -4758,7 +4801,7 @@ describe('HubRequestExecutor failover', () => {
           outboundProfile: 'openai-chat',
           runtimeKey: providerA
         },
-        routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool },
+        routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool, routePool: pool },
         metadata: {}
       })),
       updateVirtualRouterConfig: jest.fn()
@@ -4772,6 +4815,9 @@ describe('HubRequestExecutor failover', () => {
       const executor = createRequestExecutor({
         runtimeManager,
         getHubPipeline: () => pipeline,
+        getRoutingTiers: () => [
+          { id: 'default-singleton', targets: [providerA], priority: 100 }
+        ],
         getModuleDependencies: () => ({
           errorHandlingCenter: {
             handleError: jest.fn(async () => undefined)
@@ -4792,7 +4838,7 @@ describe('HubRequestExecutor failover', () => {
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
-        metadata: {}
+        metadata: { routecodexRoutingPolicyGroup: 'test-group' }
       });
 
       expect(result.status).toBe(200);
@@ -4847,7 +4893,7 @@ describe('HubRequestExecutor failover', () => {
           outboundProfile: 'openai-responses',
           runtimeKey: providerA
         },
-        routingDecision: { routeName: 'tools', providerProtocol: 'openai-responses', pool },
+        routingDecision: { routeName: 'tools', providerProtocol: 'openai-responses', pool, routePool: pool },
         metadata: {}
       })),
       updateVirtualRouterConfig: jest.fn()
@@ -4861,6 +4907,9 @@ describe('HubRequestExecutor failover', () => {
       const executor = createRequestExecutor({
         runtimeManager,
         getHubPipeline: () => pipeline,
+        getRoutingTiers: () => [
+          { id: 'tools-singleton', targets: [providerA], priority: 100 }
+        ],
         getModuleDependencies: () => ({
           errorHandlingCenter: {
             handleError: jest.fn(async () => undefined)
@@ -4881,7 +4930,7 @@ describe('HubRequestExecutor failover', () => {
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
-        metadata: {}
+        metadata: { routecodexRoutingPolicyGroup: 'test-group' }
       })).rejects.toThrow(/fetch failed/);
 
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
