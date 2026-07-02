@@ -4,6 +4,8 @@ const buildServertoolOutcomePlanInputWithNativeMock = jest.fn((input: any) => in
 const planServertoolOutcomeWithNative = jest.fn();
 const planServertoolExecutionOutcomeMaterializationWithNative = jest.fn();
 const planServertoolHandlerMaterializationForPlannedWithNative = jest.fn();
+const finalizeServertoolHandlerPlanWithNative = jest.fn();
+const materializeServertoolHandlerResultWithNative = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/conversion/provider-protocol-error.js',
@@ -62,7 +64,9 @@ jest.unstable_mockModule(
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
     parseServertoolCliProjectionToolArgumentsWithNative: jest.fn(() => ({})),
     planServertoolExecutionOutcomeMaterializationWithNative,
-    planServertoolHandlerMaterializationForPlannedWithNative
+    planServertoolHandlerMaterializationForPlannedWithNative,
+    finalizeServertoolHandlerPlanWithNative,
+    materializeServertoolHandlerResultWithNative
   })
 );
 
@@ -148,6 +152,10 @@ describe('execution-handler-materialization-shell', () => {
     planServertoolHandlerMaterializationForPlannedWithNative.mockReturnValue({
       action: 'return_handler_result'
     });
+    finalizeServertoolHandlerPlanWithNative.mockImplementation(async (planned: any) =>
+      typeof planned?.finalize === 'function' ? planned.finalize() : null
+    );
+    materializeServertoolHandlerResultWithNative.mockImplementation((planned: any) => planned);
   });
 
   test('outcome materialization shell forwards adapter/base context to native outcome-plan builder', async () => {
@@ -175,12 +183,18 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).toContain('planServertoolHandlerMaterializationForPlannedWithNative(');
     expect(source).toContain('planned: unknown');
     expect(source).not.toContain('planServertoolHandlerContractErrorWithNative(');
+    expect(source).toContain('finalizeServertoolHandlerPlanWithNative');
+    expect(source).toContain('materializeServertoolHandlerResultWithNative');
+    expect(source).not.toContain('isServerToolHandlerResultLike');
+    expect(source).not.toContain('isServerToolHandlerPlanLike');
     expect(source).not.toContain("actionPlan.action === 'invalid_plan_missing_finalize'");
     expect(source).not.toContain("actionPlan.action === 'invalid_plan_result'");
     expect(source).not.toContain("if (actionPlan.action === 'finalize_without_backend')");
     expect(source).not.toContain("if (actionPlan.action === 'throw_handler_error')");
     expect(source).toContain('switch (actionPlan.action)');
     expect(source).not.toContain('actionPlan as { action: string }');
+    expect(source).not.toContain('typeof (planned as Record<string, unknown>).finalize');
+    expect(source).not.toContain('record.chatResponse != null');
     expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome'");
     expect(source).not.toContain("outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract'");
     expect(source).not.toContain('record.executionFlowId.trim()');
@@ -199,6 +213,9 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain('args.options.adapterContext && typeof (args.options.adapterContext as any).conversationId ===');
     expect(source).not.toContain('Array.isArray((args.baseForExecution as any).tool_outputs)');
     expect(source).not.toContain('JSON.parse(JSON.stringify(');
+    expect(source).not.toContain('planned as ServerToolHandlerResult');
+    expect(source).not.toContain('const plan = planned as ServerToolHandlerPlan');
+    expect(source).not.toContain('planned as ServerToolHandlerPlan');
     const nativeSource = await import('node:fs/promises').then((fs) =>
       fs.readFile(
         'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
@@ -206,6 +223,8 @@ describe('execution-handler-materialization-shell', () => {
       )
     );
     expect(nativeSource).toContain('planServertoolExecutionOutcomeMaterializationJson native returned invalid resultMode');
+    expect(nativeSource).toContain('finalizeServertoolHandlerPlanWithNative');
+    expect(nativeSource).toContain('materializeServertoolHandlerResultWithNative');
   });
 
   test('uses native dispatch contract error for invalid mixed-client-tools outcome contract', () => {
@@ -466,6 +485,10 @@ describe('execution-handler-materialization-shell', () => {
       planned,
       'req-finalize-plan'
     );
+    expect(finalizeServertoolHandlerPlanWithNative).toHaveBeenCalledWith(
+      planned,
+      'req-finalize-plan'
+    );
     expect(finalize).toHaveBeenCalledTimes(1);
   });
 
@@ -495,7 +518,8 @@ describe('execution-handler-materialization-shell', () => {
   test('planned handler materialization returns handler result when Rust plan accepts it', async () => {
     const planned = {
       chatResponse: { id: 'handler-result-chat' },
-      execution: { flowId: 'flow-handler-result' }
+      execution: { flowId: 'flow-handler-result' },
+      metadataWritePlan: { persist: true }
     };
     planServertoolHandlerMaterializationForPlannedWithNative.mockReturnValue({
       action: 'return_handler_result'
@@ -506,7 +530,27 @@ describe('execution-handler-materialization-shell', () => {
         requestId: 'req-return-result',
         adapterContext: {},
       } as any)
-    ).resolves.toBe(planned);
+    ).resolves.toEqual(planned);
+    expect(materializeServertoolHandlerResultWithNative).toHaveBeenCalledWith(
+      planned,
+      'req-return-result'
+    );
+  });
+
+  test('planned handler materialization fails fast when return_handler_result lacks handler-result shape', async () => {
+    planServertoolHandlerMaterializationForPlannedWithNative.mockReturnValue({
+      action: 'return_handler_result'
+    });
+    materializeServertoolHandlerResultWithNative.mockImplementation(() => {
+      throw new Error('[servertool] invalid handler materialization plan result');
+    });
+
+    await expect(
+      materializeServertoolPlannedResult({ flowId: 'missing-result-shape' } as any, {
+        requestId: 'req-missing-result-shape',
+        adapterContext: {},
+      } as any)
+    ).rejects.toThrow('[servertool] invalid handler materialization plan result');
   });
 
   test('planned handler materialization fails fast for unknown native action', async () => {

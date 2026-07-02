@@ -5773,6 +5773,13 @@ function checkServertoolRustOutcomeCloseout() {
     "if (materializationPlan.action === 'throw_dispatch_error')",
     'materializationPlan as { action: unknown }',
     'const materializationAction = materializationPlan.action',
+    'planned as ServerToolHandlerResult',
+    'const plan = planned as ServerToolHandlerPlan',
+    'planned as ServerToolHandlerPlan',
+    'isServerToolHandlerResultLike',
+    'isServerToolHandlerPlanLike',
+    'typeof (planned as Record<string, unknown>).finalize',
+    'record.chatResponse != null',
     "mode: 'tool_flow'",
     "await import('./builtin-handler-catalog.js')",
     'getBuiltinHandlerEntry(args.builtinName)',
@@ -5816,6 +5823,18 @@ function checkServertoolRustOutcomeCloseout() {
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
     'invalid handler materialization action'
+  );
+  assertContains(
+    'servertool-execution-shell-ts-orchestration-guard',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    executionMaterializationShell,
+    'finalizeServertoolHandlerPlanWithNative'
+  );
+  assertContains(
+    'servertool-execution-shell-ts-orchestration-guard',
+    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
+    executionMaterializationShell,
+    'materializeServertoolHandlerResultWithNative'
   );
   assertContains(
     'servertool-execution-handler-builtin-runtime-thin-shell',

@@ -77,6 +77,20 @@ export interface DefaultBudgetConfig {
   is_non_active_managed_goal: boolean;
 }
 
+type NativeServerToolExecution = {
+  flowId: string;
+  stopMessageReservation?: {
+    stickyKey: string;
+    previousState: Record<string, unknown> | null;
+  };
+};
+
+type NativeServerToolHandlerResult = {
+  chatResponse: JsonObject;
+  execution: NativeServerToolExecution;
+  metadataWritePlan?: JsonObject;
+};
+
 export interface BudgetStateUpdatePlanInput {
   stopSignal: {
     observed: boolean;
@@ -3336,6 +3350,41 @@ export function planServertoolHandlerMaterializationForPlannedWithNative(
     hasExecutionFlowId: typeof execution?.flowId === 'string',
     hasPlanMarkers: typeof record.flowId === 'string' || record.finalize !== undefined
   });
+}
+
+export function materializeServertoolHandlerResultWithNative(
+  planned: unknown,
+  requestId: string
+): NativeServerToolHandlerResult {
+  const plan = planServertoolHandlerMaterializationForPlannedWithNative(planned, requestId);
+  if (plan.action === 'throw_handler_error') {
+    throw new Error(plan.errorPlan.message);
+  }
+  if (plan.action !== 'return_handler_result') {
+    throw new Error('[servertool] invalid handler materialization plan result');
+  }
+  const record = planned as Record<string, unknown>;
+  return {
+    chatResponse: record.chatResponse as JsonObject,
+    execution: record.execution as NativeServerToolExecution,
+    ...(record.metadataWritePlan != null
+      ? { metadataWritePlan: record.metadataWritePlan as JsonObject }
+      : {})
+  };
+}
+
+export async function finalizeServertoolHandlerPlanWithNative(
+  planned: unknown,
+  requestId: string
+): Promise<NativeServerToolHandlerResult | null> {
+  const plan = planServertoolHandlerMaterializationForPlannedWithNative(planned, requestId);
+  if (plan.action === 'throw_handler_error') {
+    throw new Error(plan.errorPlan.message);
+  }
+  if (plan.action !== 'finalize_without_backend') {
+    throw new Error('[servertool] invalid handler materialization plan without finalize');
+  }
+  return await (planned as { finalize: () => Promise<NativeServerToolHandlerResult | null> }).finalize();
 }
 
 export function planEngineSelectionStartWithNative(input: {

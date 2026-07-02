@@ -1,5 +1,7 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
+  finalizeServertoolHandlerPlanWithNative,
+  materializeServertoolHandlerResultWithNative,
   planServertoolExecutionOutcomeMaterializationWithNative,
   planServertoolHandlerMaterializationForPlannedWithNative,
   type NativeServertoolExecutionLoopState
@@ -12,7 +14,6 @@ import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-b
 import type {
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
-  ServerToolHandlerPlan,
   ServerToolHandlerResult,
   ToolCall
 } from './types.js';
@@ -68,13 +69,12 @@ export const materializeServertoolPlannedResult = async (
   );
   switch (actionPlan.action) {
     case 'finalize_without_backend': {
-      const plan = planned as ServerToolHandlerPlan;
-      return await plan.finalize();
+      return await finalizeServertoolHandlerPlanWithNative(planned, options.requestId);
     }
     case 'throw_handler_error':
       throw createServertoolProviderProtocolErrorFromPlan(actionPlan.errorPlan);
     case 'return_handler_result':
-      return planned as ServerToolHandlerResult;
+      return materializeServertoolHandlerResultWithNative(planned, options.requestId);
     default:
       throw new Error('[servertool] invalid handler materialization action');
   }

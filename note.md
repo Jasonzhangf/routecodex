@@ -1,3 +1,9 @@
+# 2026-07-02: servertool handler planned-result casts removed
+
+- Slice: `execution-handler-materialization-shell.ts` no longer casts `planned as ServerToolHandlerResult` or `planned as ServerToolHandlerPlan`; it now delegates finalize/result materialization to native bridge wrappers and only switches on Rust-owned materialization action.
+- Gate: `execution-handler-materialization-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old planned-result cast markers and require `finalizeServertoolHandlerPlanWithNative` / `materializeServertoolHandlerResultWithNative`.
+- Evidence: focused Jest `execution-handler-materialization-shell + servertool-active-orchestration-audit` PASS 57/57; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool auto-hook attempt result cast removed
 
 - Slice: `auto-hook-caller.ts` no longer returns `result as ServerToolHandlerResult` when native `attemptPlan.action` is `return_result`; TS now fail-fast checks `result == null` and returns the already materialized result directly.
