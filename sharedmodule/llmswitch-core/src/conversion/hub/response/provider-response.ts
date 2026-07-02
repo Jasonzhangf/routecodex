@@ -35,38 +35,13 @@ import {
   projectNativeMetadataWritePlanToRuntimeControl
 } from '../metadata-center-runtime-control-writer.js';
 
-import { METADATA_CENTER_SYMBOL } from '../metadata-center-runtime-control-writer.js';
-
-type MetadataCenterLike = {
-  readRequestTruth: () => Record<string, unknown> | undefined;
-  readContinuationContext: () => Record<string, unknown> | undefined;
-  readRuntimeControl: () => Record<string, unknown> | undefined;
-  writeRuntimeControl?: (
-    key: string,
-    value: unknown,
-    writtenBy: { module: string; symbol: string; stage: string },
-    reason?: string
-  ) => void;
-};
-
-function isMetadataCenterLike(value: unknown): value is MetadataCenterLike {
-  return Boolean(
-    value
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && typeof (value as { readRequestTruth?: unknown }).readRequestTruth === 'function'
-    && typeof (value as { readContinuationContext?: unknown }).readContinuationContext === 'function'
-    && typeof (value as { readRuntimeControl?: unknown }).readRuntimeControl === 'function'
-  );
-}
-
-function readBoundMetadataCenter(metadata?: Record<string, unknown>): MetadataCenterLike | undefined {
-  if (!metadata) {
-    return undefined;
-  }
-  const candidate = Reflect.get(metadata, METADATA_CENTER_SYMBOL);
-  return isMetadataCenterLike(candidate) ? candidate : undefined;
-}
+import {
+  type MetadataCenterLike,
+  readBoundMetadataCenter,
+  readContinuationContextFromBoundMetadataCenter,
+  readRequestTruthFromBoundMetadataCenter,
+  readRuntimeControlFromBoundMetadataCenter,
+} from '../metadata-center-runtime-control-writer.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -90,12 +65,11 @@ function readProviderResponseRequestId(context: AdapterContext): string {
 
 function readMetadataCenterSnapshotForRust(context: AdapterContext): Record<string, unknown> | null {
   const contextRecord = context as unknown as Record<string, unknown>;
-  const boundCenter = readBoundMetadataCenter(contextRecord);
-  if (boundCenter) {
+  if (readBoundMetadataCenter(contextRecord)) {
     return {
-      requestTruth: boundCenter.readRequestTruth() ?? {},
-      continuationContext: boundCenter.readContinuationContext() ?? {},
-      runtimeControl: boundCenter.readRuntimeControl() ?? {},
+      requestTruth: readRequestTruthFromBoundMetadataCenter(contextRecord),
+      continuationContext: readContinuationContextFromBoundMetadataCenter(contextRecord),
+      runtimeControl: readRuntimeControlFromBoundMetadataCenter(contextRecord),
     };
   }
   const direct = asRecord(contextRecord.metadataCenterSnapshot);

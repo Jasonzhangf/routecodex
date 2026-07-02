@@ -9,7 +9,7 @@ type RuntimeControlWriter = {
   stage: string;
 };
 
-type MetadataCenterLike = {
+export type MetadataCenterLike = {
   writeRuntimeControl?: (
     key: string,
     value: unknown,
