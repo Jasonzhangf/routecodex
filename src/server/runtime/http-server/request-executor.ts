@@ -131,6 +131,7 @@ function isSameMetadataCenterWriter(a: MetadataCenterWriter | undefined, b: Meta
 export function resolveRoutePoolAuthoritativeForRetry(args: {
   routingDecision?: Record<string, unknown>;
   routePoolForAttempt: string[];
+  routeTiersForAttempt?: Array<{ targets: string[]; backup?: boolean }>;
   defaultTierAvailable: boolean;
   excludedProviderKeys: Set<string>;
 }): boolean {
@@ -141,7 +142,17 @@ export function resolveRoutePoolAuthoritativeForRetry(args: {
   if (args.routePoolForAttempt.length > 1) {
     return true;
   }
+  const configuredCandidateCount =
+    Array.isArray(args.routeTiersForAttempt) && args.routeTiersForAttempt.length > 0
+      ? new Set(
+        args.routeTiersForAttempt
+          .flatMap((tier) => Array.isArray(tier.targets) ? tier.targets : [])
+          .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
+          .map((target) => target.trim())
+      ).size
+      : null;
   return args.routePoolForAttempt.length === 1
+    && configuredCandidateCount === 1
     && args.defaultTierAvailable === false
     && args.excludedProviderKeys.size === 0;
 }
@@ -934,6 +945,7 @@ export class HubRequestExecutor implements RequestExecutor {
         const routePoolIsAuthoritativeForAttempt = resolveRoutePoolAuthoritativeForRetry({
           routingDecision: routingDecisionForAttempt,
           routePoolForAttempt,
+          routeTiersForAttempt,
           defaultTierAvailable: defaultTierAvailableForAttempt,
           excludedProviderKeys,
         });

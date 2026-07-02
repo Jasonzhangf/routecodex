@@ -1,3 +1,11 @@
+# 2026-07-03: priority singleton tier no longer proves last provider
+
+- Symptom: priority routing can select a singleton first tier, and after provider error the executor could treat that singleton `routingDecision.routePool` as authoritative “last provider” evidence, allowing same-provider retry instead of switching to a later tier/provider.
+- Root cause: VR `SelectionResult.routePool` is the selected tier execution pool, not proof of all remaining configured candidates. `resolveRoutePoolAuthoritativeForRetry()` only checked current `routePoolForAttempt.length === 1`, `defaultTierAvailable=false`, and no prior exclusions; it did not check the full configured route tier candidate count.
+- Fix: `resolveRoutePoolAuthoritativeForRetry()` now receives `routeTiersForAttempt` and only marks singleton routePool authoritative when the configured route tiers contain exactly one unique candidate. A singleton priority tier with later configured tiers is no longer last-provider truth, so provider errors force `exclude_and_reroute`.
+- Evidence: focused helper/plan Jest `request-executor-pipeline-attempt.exclusion + retry-execution-plan + request-executor-provider-failure-plan` PASS 32/32; entry Jest `request-executor.spec.ts -t "provider failure does not retry the same provider from an observed singleton routePool"` PASS; entry Jest `request-executor.spec.ts -t "reroutes 429 instead of same-provider retry when route pool still exposes an alternative candidate"` PASS; `tsc -p tsconfig.json --noEmit` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run verify:architecture-mainline-call-map` PASS; `npm run verify:vr-no-ts-runtime` PASS; `git diff --check` PASS.
+- Remaining gap: no live 5555 same-entry replay has been run in this slice; one existing long fake-timer entry test (`excludes each provider on repeated 429 when route pool has another candidate`) did not emit output under isolated run and was not used as completion evidence.
+
 # 2026-07-03: priority failover no same-provider retry after exclusions
 
 - Symptom: priority failover could keep retrying the currently selected provider after earlier provider exclusions narrowed the observed `routePool` to a single key, even though this was not the original last provider.
