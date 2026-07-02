@@ -1,3 +1,9 @@
+# 2026-07-02: servertool dispatch adapterContext cast removed
+
+- Slice: `dispatch-preparation-shell.ts` now passes `args.options.adapterContext` directly into `readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter`; the carrier reader accepts `unknown` and performs the object narrowing internally.
+- Gate: `dispatch-preparation-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `args.options.adapterContext as Record<string, unknown>` marker.
+- Evidence: focused Jest `dispatch-preparation-shell + servertool-active-orchestration-audit` PASS 48/48; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool auto-hook trace cast removed
 
 - Slice: `auto-hook-caller.ts` no longer casts native `attemptPlan.traceEvent as ServerToolAutoHookTraceEvent`; `native-servertool-core-semantics.ts` now types native auto-hook trace queues as `A_optional | B_mandatory` and fail-fast rejects invalid queue strings.

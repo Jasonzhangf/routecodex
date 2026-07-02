@@ -380,6 +380,7 @@ const TARGETS = [
       'baseForExecution: JsonObject;',
       'readProviderProtocolFromAnyBoundMetadataCenter',
       'Servertool dispatch preparation requires metadata center runtime_control.providerProtocol',
+      'args.options.adapterContext as Record<string, unknown>',
     ],
     required: [
       'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',

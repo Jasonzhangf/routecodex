@@ -51,6 +51,7 @@ describe('dispatch-preparation-shell', () => {
     expect(source).not.toContain("from '../conversion/runtime-metadata.js'");
     expect(source).not.toContain('readRuntimeMetadata(');
     expect(source).toContain('readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter');
+    expect(source).not.toContain('args.options.adapterContext as Record<string, unknown>');
     expect(source).not.toContain('resolveServertoolRuntimePreCommandState');
     expect(source).not.toContain('applyPreCommandHooksToToolCalls');
     expect(source).toContain('planServertoolToolCallDispatchWithNative');

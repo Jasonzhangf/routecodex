@@ -216,11 +216,12 @@ function readProviderObservationFromAnyBoundMetadataCenter(
 }
 
 export function readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
-  target: Record<string, unknown> | undefined
+  target: unknown
 ): JsonObject | undefined {
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(target);
-  const requestTruth = readRequestTruthFromAnyBoundMetadataCenter(target);
-  const providerObservation = readProviderObservationFromAnyBoundMetadataCenter(target);
+  const targetRecord = asRecord(target);
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(targetRecord);
+  const requestTruth = readRequestTruthFromAnyBoundMetadataCenter(targetRecord);
+  const providerObservation = readProviderObservationFromAnyBoundMetadataCenter(targetRecord);
   if (!runtimeControl && !requestTruth && !providerObservation) {
     return undefined;
   }

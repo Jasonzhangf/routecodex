@@ -17,7 +17,7 @@ export function prepareServertoolDispatchStage(args: {
   dispatchPlan: ReturnType<typeof planServertoolToolCallDispatchWithNative>;
 } {
   const runtimeMetadata = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
-    args.options.adapterContext as Record<string, unknown>
+    args.options.adapterContext
   );
   return {
     dispatchPlan: planServertoolToolCallDispatchWithNative(
