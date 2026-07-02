@@ -105,6 +105,14 @@ function buildResponsesProvider(upstreamPort: number): Record<string, unknown> {
   };
 }
 
+function buildNamedResponsesProvider(providerId: string, upstreamPort: number): Record<string, unknown> {
+  return {
+    ...buildResponsesProvider(upstreamPort),
+    id: providerId,
+    auth: { type: 'apikey', entries: [{ alias: 'key1', apiKey: `sk-test-${providerId}-router-direct-1234567890` }] }
+  };
+}
+
 async function writeRouterConfig(configPath: string, upstreamPort: number): Promise<Record<string, unknown>> {
   const userConfig = {
     version: '2.0.0',
@@ -123,6 +131,36 @@ async function writeRouterConfig(configPath: string, upstreamPort: number): Prom
           routing: {
             thinking: [{ id: 'blackbox-thinking', mode: 'priority', targets: ['direct.key1.gpt-5.5'] }],
             default: [{ id: 'blackbox-default', mode: 'priority', targets: ['direct.key1.gpt-5.5'] }]
+          }
+        }
+      }
+    }
+  };
+  await fs.writeFile(configPath, JSON.stringify(userConfig, null, 2), 'utf8');
+  return userConfig;
+}
+
+async function writeRouterFailoverConfig(configPath: string, primaryPort: number, backupPort: number): Promise<Record<string, unknown>> {
+  const userConfig = {
+    version: '2.0.0',
+    virtualrouterMode: 'v2',
+    httpserver: {
+      ports: [{ port: 0, host: '127.0.0.1', mode: 'router', routingPolicyGroup: 'blackbox', sameProtocolBehavior: 'direct' }]
+    },
+    virtualrouter: {
+      providers: {
+        primary: buildNamedResponsesProvider('primary', primaryPort),
+        backup: buildNamedResponsesProvider('backup', backupPort)
+      },
+      routing: {
+        thinking: [{ id: 'blackbox-thinking', mode: 'priority', targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'] }],
+        default: [{ id: 'blackbox-default', mode: 'priority', targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'] }]
+      },
+      routingPolicyGroups: {
+        blackbox: {
+          routing: {
+            thinking: [{ id: 'blackbox-thinking', mode: 'priority', targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'] }],
+            default: [{ id: 'blackbox-default', mode: 'priority', targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'] }]
           }
         }
       }
@@ -422,6 +460,85 @@ describe('router-direct passthrough HTTP blackbox', () => {
     } finally {
       await server?.stop().catch(() => undefined);
       await closeServer(upstream);
+      for (const restore of restores.reverse()) restore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('HTTP BLACKBOX: router-direct upstream error switches to backup provider', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-router-direct-failover-'));
+    const configPath = path.join(tmp, 'config.json');
+    let primaryPostCount = 0;
+    let backupPostCount = 0;
+    const primary = http.createServer((req, res) => {
+      if (req.method === 'POST') {
+        primaryPostCount += 1;
+        req.resume();
+        req.on('end', () => {
+          res.writeHead(502, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'primary upstream failed', code: 'HTTP_502' } }));
+        });
+        return;
+      }
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [] }));
+    });
+    const backup = http.createServer((req, res) => {
+      if (req.method === 'POST') {
+        backupPostCount += 1;
+        req.resume();
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({
+            id: 'resp_router_direct_failover_ok',
+            object: 'response',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'backup-ok' }] }],
+            output_text: 'backup-ok'
+          }));
+        });
+        return;
+      }
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [] }));
+    });
+    const primaryPort = await listen(primary);
+    const backupPort = await listen(backup);
+    await writeProviderToml(tmp, 'primary', primaryPort);
+    await writeProviderToml(tmp, 'backup', backupPort);
+    const userConfig = await writeRouterFailoverConfig(configPath, primaryPort, backupPort);
+    const restores = routerEnv(tmp);
+    let server: RouteCodexHttpServer | undefined;
+    try {
+      const started = await startRouteCodex(configPath, userConfig);
+      server = started.server;
+      const response = await fetch(`http://127.0.0.1:${started.port}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-route-hint': 'thinking'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.5',
+          input: 'router direct failover probe',
+          stream: false,
+          metadata: { sessionId: 'router-direct-failover-blackbox' }
+        })
+      });
+      const text = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(text).toContain('backup-ok');
+      expect(text).not.toContain('primary upstream failed');
+      expect(text).not.toContain('Upstream provider error');
+      expect(primaryPostCount).toBe(1);
+      expect(backupPostCount).toBe(1);
+    } finally {
+      await server?.stop().catch(() => undefined);
+      await closeServer(primary);
+      await closeServer(backup);
       for (const restore of restores.reverse()) restore();
       await fs.rm(tmp, { recursive: true, force: true });
     }

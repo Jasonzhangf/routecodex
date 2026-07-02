@@ -178,4 +178,21 @@ describe('router-direct.candidate-exhaustion', () => {
     expect(decision.action).toBe('rethrow');
     expect(decision.shouldRecurse).toBe(false);
   });
+
+  it('[forward] attempt exhausted but ErrorErr05 allows provider switch beyond cap → request reroute', () => {
+    const decision = decideDirectRouterRetry({
+      retryExecutionPlan: plan({
+        allowRetryBeyondAttemptBudget: true,
+      } as Partial<Plan>),
+      excludedProviderKeys: new Set(),
+      directAttempt: 1,
+      maxAttempts: 1,
+      providerKey: 'p1',
+      pool: ['p1', 'p2'],
+      error: { code: 'HTTP_502', statusCode: 502, message: 'upstream 502' },
+    });
+    expect(decision.action).toBe('request_reroute');
+    expect(decision.shouldRecurse).toBe(true);
+    expect(decision.mutatedExcluded).toEqual(new Set(['p1']));
+  });
 });

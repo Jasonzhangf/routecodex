@@ -76,7 +76,7 @@ import { extractStatusCodeFromError } from './executor/utils.js';
 import { processProviderResolveFailure } from './executor/request-executor-provider-resolve-failure.js';
 import { processProviderSendFailure } from './executor/request-executor-provider-send-failure.js';
 import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
-import { decideDirectProviderRetry } from './direct-decision.js';
+import { decideDirectProviderRetry, decideDirectRouterRetry } from './direct-decision.js';
 import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
 import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
 import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
@@ -1913,6 +1913,7 @@ export class RouteCodexHttpServer {
     let capturedUsage: Record<string, unknown> | undefined;
     let directOutcome: RouterDirectOutcome;
     let directRetryRequested = false;
+    let directRetryBeyondAttemptBudget = false;
     const routerDirectEntryPort = portConfig.port;
     try {
       directOutcome = await executeRouterDirectPipeline({
@@ -2074,7 +2075,7 @@ export class RouteCodexHttpServer {
           message: publicErrorMessage,
           directAttempt,
         });
-        await processProviderSendFailure({
+        const providerSendFailureResult = await processProviderSendFailure({
           error,
           requestId: input.requestId,
           providerKey: ctx.providerKey,
@@ -2144,6 +2145,16 @@ export class RouteCodexHttpServer {
             });
           },
         });
+        const directRetryDecision = decideDirectRouterRetry({
+          retryExecutionPlan: providerSendFailureResult.retryExecutionPlan ?? { shouldRetry: false },
+          excludedProviderKeys: retryState.excludedProviderKeys,
+          directAttempt,
+          maxAttempts: retryState.maxAttempts,
+          providerKey: ctx.providerKey,
+          pool: routingDecisionProviderPool,
+          error,
+        });
+        retryState.excludedProviderKeys = directRetryDecision.mutatedExcluded;
         const routePoolRemainingAfterExclusion = routingDecisionProviderPool.filter((candidate) => {
           if (typeof candidate !== 'string' || !candidate.trim()) {
             return false;
@@ -2184,8 +2195,9 @@ export class RouteCodexHttpServer {
             });
           }
         }
-        retryState.lastError = error;
-        directRetryRequested = true;
+        retryState.lastError = directRetryDecision.error;
+        directRetryRequested = directRetryDecision.shouldRecurse;
+        directRetryBeyondAttemptBudget = providerSendFailureResult.allowRetryBeyondAttemptBudget === true;
         retryState.retryProviderKey = undefined;
         this.logStage('router-direct.retry.requested', input.requestId, {
           providerKey: ctx.providerKey,
@@ -2197,10 +2209,16 @@ export class RouteCodexHttpServer {
           ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
           ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
         });
+        if (directRetryDecision.shouldRethrow) {
+          throw directRetryDecision.error;
+        }
       },
       });
     } catch (error) {
-      if (directRetryRequested && directAttempt < retryState.maxAttempts) {
+      if (
+        directRetryRequested
+        && (directAttempt < retryState.maxAttempts || directRetryBeyondAttemptBudget)
+      ) {
         return await this.executeRouterDirectPipelineForPort(portConfig, input, retryState, directAttempt + 1);
       }
       throw error;

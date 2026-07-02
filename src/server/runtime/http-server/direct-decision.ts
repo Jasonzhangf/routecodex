@@ -16,10 +16,12 @@
  *       HTTP 204 + CLIENT_DISCONNECTED code. The "no cooldown" guarantee is
  *       delivered upstream by `isProviderFailureHealthNeutral(args) === true`,
  *       NOT by this consumer.
- *   - `exclude_and_reroute` plan + >=2 candidates left + attempts remaining:
+ *   - `exclude_and_reroute` plan + >=2 candidates left:
  *       decision is `request_reroute` with `mutatedExcluded` containing the
- *       current provider key.
- *   - only 1 candidate left OR no retryable plan OR attempt budget exhausted:
+ *       current provider key. If ErrorErr05 explicitly allows switching
+ *       beyond the numeric attempt budget, that provider switch still wins.
+ *   - only 1 candidate left OR no retryable plan OR attempt budget exhausted
+ *       without ErrorErr05 budget override:
  *       decision is `rethrow` with `mutatedExcluded = new Set()`.
  *   - provider auth/quota failures (401/402/403/INVALID_API_KEY/etc.):
  *       same as any other provider execution failure. If ErrorErr05 says the
@@ -47,6 +49,7 @@ export interface DirectRetryPlanLike {
   shouldRetry?: boolean;
   retrySwitchPlan?: { switchAction?: string } | null | undefined;
   excludedCurrentProvider?: boolean;
+  allowRetryBeyondAttemptBudget?: boolean;
   defaultPoolAvailable?: boolean;
   mayProject?: boolean;
 }
@@ -117,12 +120,7 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     return rethrowDecision(error, excludedProviderKeys);
   }
 
-  // Reverse 2: attempt budget exhausted.
-  if (directAttempt >= maxAttempts) {
-    return rethrowDecision(error, excludedProviderKeys);
-  }
-
-  // Reverse 3: no retryable plan at all.
+  // Reverse 2: no retryable plan at all.
   if (
     !retryExecutionPlan.shouldRetry
     || !retryExecutionPlan.retrySwitchPlan
@@ -130,6 +128,12 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
       retryExecutionPlan.retrySwitchPlan.switchAction !== 'exclude_and_reroute'
     )
   ) {
+    return rethrowDecision(error, excludedProviderKeys);
+  }
+
+  // Reverse 3: attempt budget exhausted unless ErrorErr05 explicitly allows
+  // provider switching beyond the numeric attempt cap.
+  if (directAttempt >= maxAttempts && retryExecutionPlan.allowRetryBeyondAttemptBudget !== true) {
     return rethrowDecision(error, excludedProviderKeys);
   }
 

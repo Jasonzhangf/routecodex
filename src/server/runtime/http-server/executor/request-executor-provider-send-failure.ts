@@ -27,6 +27,7 @@ import {
   extractRequestExecutorProviderErrorStage
 } from './request-executor-error-shared.js';
 import type {
+  ProviderRetryExecutionPlan,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
 
@@ -117,6 +118,7 @@ export type RequestExecutorProviderSendFailureResult = {
   contextOverflowRetries: number;
   cumulativeExternalLatencyMs: number;
   allowRetryBeyondAttemptBudget?: boolean;
+  retryExecutionPlan?: ProviderRetryExecutionPlan;
 };
 
 function isRetryableProviderResponseProcessingFailure(args: {
@@ -458,6 +460,7 @@ export async function processProviderSendFailure(
     forcedRouteHint,
     contextOverflowRetries,
     cumulativeExternalLatencyMs,
-    allowRetryBeyondAttemptBudget: retryExecutionPlan.allowRetryBeyondAttemptBudget === true
+    allowRetryBeyondAttemptBudget: retryExecutionPlan.allowRetryBeyondAttemptBudget === true,
+    retryExecutionPlan
   };
 }
