@@ -11,6 +11,7 @@ import {
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
 import { parseStopMessagePersistedLookupPlanPayload } from './native-router-hotpath-analysis.js';
 import {
+  type NativeServertoolResponseStageGate,
   buildServertoolOutcomePlanInputWithNative,
   planServertoolOutcomeWithNative
 } from './native-chat-process-servertool-orchestration-semantics.js';
@@ -458,6 +459,11 @@ export type ServertoolResponseStageRuntimeActionPlan =
       passResult: {
         action: 'return_passthrough_bypass' | 'continue_without_result';
       };
+      prepassResult: {
+        action: 'continue_to_execution';
+        responseStageGatePlan: NativeServertoolResponseStageGate;
+      };
+      finalizeResult: ServertoolResponseStageAutoHookResult;
       skipReason?: string;
     }
   | {
@@ -473,6 +479,12 @@ export type ServertoolResponseStageRuntimeActionPlan =
         action: 'return_auto_hook_result';
         result: ServertoolResponseStageAutoHookResult;
       };
+      prepassResult: {
+        action: 'return_result';
+        responseStageGatePlan: NativeServertoolResponseStageGate;
+        result: ServertoolResponseStageAutoHookResult;
+      };
+      finalizeResult: ServertoolResponseStageAutoHookResult;
     };
 
 export interface ServertoolResponseStageOrchestrationOutputPlan {
@@ -2978,6 +2990,42 @@ function encodeServertoolHandlerErrorCarrier(error: unknown): unknown {
   return error;
 }
 
+function isServertoolResponseStageAutoHookResult(value: unknown): value is ServertoolResponseStageAutoHookResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.mode !== 'passthrough' && record.mode !== 'tool_flow') {
+    return false;
+  }
+  if (!record.finalChatResponse || typeof record.finalChatResponse !== 'object' || Array.isArray(record.finalChatResponse)) {
+    return false;
+  }
+  if (record.execution != null) {
+    if (typeof record.execution !== 'object' || Array.isArray(record.execution)) {
+      return false;
+    }
+    const execution = record.execution as Record<string, unknown>;
+    if (typeof execution.flowId !== 'string' || !execution.flowId) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isNativeServertoolResponseStageGate(value: unknown): value is NativeServertoolResponseStageGate {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.shouldBypass === 'boolean' &&
+    typeof record.nextAction === 'string' &&
+    typeof record.responseHookMatched === 'boolean' &&
+    typeof record.responseHookRequired === 'boolean'
+  );
+}
+
 export function planServertoolResponseStageRuntimeActionWithNative(input: {
   responseStageGatePlan?: unknown;
   responseStageNextAction?: string;
@@ -3049,6 +3097,20 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     if (passResult.action !== expectedPassAction) {
       throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid passthrough passResult action');
     }
+    let prepassResult: { action: 'continue_to_execution'; responseStageGatePlan: unknown } | undefined;
+    if (!record.prepassResult || typeof record.prepassResult !== 'object' || Array.isArray(record.prepassResult)) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned passthrough action without prepassResult');
+    }
+    const prepassPayload = record.prepassResult as Record<string, unknown>;
+    if (
+      prepassPayload.action !== 'continue_to_execution' ||
+      !isNativeServertoolResponseStageGate(prepassPayload.responseStageGatePlan)
+    ) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid passthrough prepassResult');
+    }
+    if (!isServertoolResponseStageAutoHookResult(record.finalizeResult)) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid passthrough finalizeResult');
+    }
     return {
       action: record.action,
       passthroughResult: {
@@ -3058,6 +3120,11 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
       passResult: {
         action: expectedPassAction
       },
+      prepassResult: {
+        action: 'continue_to_execution',
+        responseStageGatePlan: prepassPayload.responseStageGatePlan
+      },
+      finalizeResult: record.finalizeResult,
       ...(skipReason ? { skipReason } : {})
     };
   }
@@ -3083,32 +3150,35 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     if (passResult.action !== 'return_auto_hook_result' || !passResult.result || typeof passResult.result !== 'object' || Array.isArray(passResult.result)) {
       throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid auto-hook passResult');
     }
-    const passResultPayload = passResult.result as Record<string, unknown>;
-    if (
-      (passResultPayload.mode !== 'passthrough' && passResultPayload.mode !== 'tool_flow') ||
-      !passResultPayload.finalChatResponse ||
-      typeof passResultPayload.finalChatResponse !== 'object' ||
-      Array.isArray(passResultPayload.finalChatResponse)
-    ) {
+    if (!isServertoolResponseStageAutoHookResult(passResult.result)) {
       throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid auto-hook result shape');
     }
+    if (!record.prepassResult || typeof record.prepassResult !== 'object' || Array.isArray(record.prepassResult)) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned auto-hook result without prepassResult');
+    }
+    const prepassResult = record.prepassResult as Record<string, unknown>;
     if (
-      passResultPayload.execution != null &&
-      (
-        typeof passResultPayload.execution !== 'object' ||
-        Array.isArray(passResultPayload.execution) ||
-        typeof (passResultPayload.execution as Record<string, unknown>).flowId !== 'string' ||
-        !(passResultPayload.execution as Record<string, unknown>).flowId
-      )
+      prepassResult.action !== 'return_result' ||
+      !isNativeServertoolResponseStageGate(prepassResult.responseStageGatePlan) ||
+      !isServertoolResponseStageAutoHookResult(prepassResult.result)
     ) {
-      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid auto-hook execution shape');
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid auto-hook prepassResult');
+    }
+    if (!isServertoolResponseStageAutoHookResult(record.finalizeResult)) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid auto-hook finalizeResult');
     }
     return {
       action: 'return_auto_hook_result',
       passResult: {
         action: 'return_auto_hook_result',
-        result: passResult.result as ServertoolResponseStageAutoHookResult
-      }
+        result: passResult.result
+      },
+      prepassResult: {
+        action: 'return_result',
+        responseStageGatePlan: prepassResult.responseStageGatePlan,
+        result: prepassResult.result
+      },
+      finalizeResult: record.finalizeResult
     };
   }
   throw new Error('planServertoolResponseStageRuntimeActionJson native returned unhandled action');

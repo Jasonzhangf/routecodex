@@ -40,7 +40,15 @@ describe('response-stage-prepass-shell', () => {
       nextAction: 'continue_to_execution'
     });
     planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
-      action: 'return_passthrough_no_auto_hook_result'
+      action: 'return_passthrough_no_auto_hook_result',
+      prepassResult: {
+        action: 'continue_to_execution',
+        responseStageGatePlan: {
+          responseHookMatched: false,
+          responseHookRequired: false,
+          nextAction: 'continue_to_execution'
+        }
+      }
     });
     runServertoolResponseStageAutoHookPass.mockResolvedValue({
       action: 'continue_without_result'
@@ -89,6 +97,22 @@ describe('response-stage-prepass-shell', () => {
     planServertoolResponseStageRuntimeActionWithNative
       .mockReturnValueOnce({
         action: 'run_auto_hooks'
+      })
+      .mockReturnValueOnce({
+        action: 'return_auto_hook_result',
+        prepassResult: {
+          action: 'return_result',
+          responseStageGatePlan: {
+            responseHookMatched: true,
+            responseHookRequired: false,
+            nextAction: 'run_auto_hooks'
+          },
+          result: {
+            mode: 'tool_flow',
+            finalChatResponse: { done: true },
+            execution: { flowId: 'flow_1' }
+          }
+        }
       });
     runServertoolResponseStageAutoHookPass.mockResolvedValue({
       action: 'return_auto_hook_result',
@@ -129,15 +153,20 @@ describe('response-stage-prepass-shell', () => {
         }
       })
     );
-    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledTimes(1);
+    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledTimes(2);
     expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenLastCalledWith({
       responseStageGatePlan: {
         responseHookMatched: true,
         responseHookRequired: false,
         nextAction: 'run_auto_hooks'
       },
-      autoHookEvaluated: false,
-      hasAutoHookResult: false
+      autoHookEvaluated: true,
+      hasAutoHookResult: true,
+      autoHookResult: {
+        mode: 'tool_flow',
+        finalChatResponse: { done: true },
+        execution: { flowId: 'flow_1' }
+      }
     });
   });
 
@@ -150,6 +179,17 @@ describe('response-stage-prepass-shell', () => {
     planServertoolResponseStageRuntimeActionWithNative
       .mockReturnValueOnce({
         action: 'run_auto_hooks'
+      })
+      .mockReturnValueOnce({
+        action: 'return_passthrough_no_auto_hook_result',
+        prepassResult: {
+          action: 'continue_to_execution',
+          responseStageGatePlan: {
+            responseHookMatched: true,
+            responseHookRequired: false,
+            nextAction: 'run_auto_hooks'
+          }
+        }
       });
     runServertoolResponseStageAutoHookPass.mockResolvedValue({
       action: 'continue_without_result'
@@ -171,14 +211,14 @@ describe('response-stage-prepass-shell', () => {
         nextAction: 'run_auto_hooks'
       }
     });
-    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledTimes(1);
+    expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledTimes(2);
     expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenLastCalledWith({
       responseStageGatePlan: {
         responseHookMatched: true,
         responseHookRequired: false,
         nextAction: 'run_auto_hooks'
       },
-      autoHookEvaluated: false,
+      autoHookEvaluated: true,
       hasAutoHookResult: false
     });
   });

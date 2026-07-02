@@ -3107,12 +3107,31 @@ fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
 
 #[test]
 fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
+    let bypass_gate_plan = serde_json::json!({
+        "shouldBypass": true,
+        "nextAction": "bypass",
+        "responseHookMatched": false,
+        "responseHookRequired": false
+    });
+    let run_auto_hooks_gate_plan = serde_json::json!({
+        "shouldBypass": false,
+        "nextAction": "run_auto_hooks",
+        "responseHookMatched": true,
+        "responseHookRequired": false
+    });
+    let continue_gate_plan = serde_json::json!({
+        "shouldBypass": false,
+        "nextAction": "run_auto_hooks",
+        "responseHookMatched": false,
+        "responseHookRequired": false
+    });
+
     let bypass = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
-            "responseStageNextAction": "bypass",
+            "responseStageGatePlan": bypass_gate_plan,
+            "baseObject": { "id": "chat_bypass" },
             "autoHookEvaluated": false,
-            "hasAutoHookResult": false,
-            "responseHookRequired": false
+            "hasAutoHookResult": false
         })
         .to_string(),
     )
@@ -3127,7 +3146,7 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         bypass_value["passthroughResult"],
         serde_json::json!({
             "mode": "passthrough",
-            "finalChatResponse": null
+            "finalChatResponse": { "id": "chat_bypass" }
         })
     );
     assert_eq!(
@@ -3136,14 +3155,33 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
             "action": "return_passthrough_bypass"
         })
     );
+    assert_eq!(
+        bypass_value["prepassResult"],
+        serde_json::json!({
+            "action": "continue_to_execution",
+            "responseStageGatePlan": bypass_gate_plan
+        })
+    );
+    assert_eq!(
+        bypass_value["finalizeResult"],
+        serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": { "id": "chat_bypass" }
+        })
+    );
     assert_eq!(bypass_value.get("skipReason"), None);
 
+    let bypass_skip_gate_plan = serde_json::json!({
+        "shouldBypass": true,
+        "nextAction": "bypass",
+        "responseHookMatched": false,
+        "responseHookRequired": false,
+        "skipReason": " empty_assistant_payload "
+    });
     let bypass_with_skip_reason = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
-            "responseStageGatePlan": {
-                "nextAction": "bypass",
-                "skipReason": " empty_assistant_payload "
-            },
+            "responseStageGatePlan": bypass_skip_gate_plan,
+            "baseObject": { "id": "chat_bypass_skip" },
             "autoHookEvaluated": false,
             "hasAutoHookResult": false
         })
@@ -3161,7 +3199,21 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         bypass_with_skip_reason_value["passthroughResult"],
         serde_json::json!({
             "mode": "passthrough",
-            "finalChatResponse": null
+            "finalChatResponse": { "id": "chat_bypass_skip" }
+        })
+    );
+    assert_eq!(
+        bypass_with_skip_reason_value["prepassResult"],
+        serde_json::json!({
+            "action": "continue_to_execution",
+            "responseStageGatePlan": bypass_skip_gate_plan
+        })
+    );
+    assert_eq!(
+        bypass_with_skip_reason_value["finalizeResult"],
+        serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": { "id": "chat_bypass_skip" }
         })
     );
     assert_eq!(
@@ -3171,10 +3223,9 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
 
     let run_auto_hooks = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
-            "responseStageNextAction": "run_auto_hooks",
+            "responseStageGatePlan": run_auto_hooks_gate_plan,
             "autoHookEvaluated": false,
-            "hasAutoHookResult": false,
-            "responseHookRequired": false
+            "hasAutoHookResult": false
         })
         .to_string(),
     )
@@ -3189,10 +3240,10 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
 
     let passthrough = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
-            "responseStageNextAction": "run_auto_hooks",
+            "responseStageGatePlan": continue_gate_plan,
+            "baseObject": { "id": "chat_no_hook" },
             "autoHookEvaluated": true,
-            "hasAutoHookResult": false,
-            "responseHookRequired": false
+            "hasAutoHookResult": false
         })
         .to_string(),
     )
@@ -3208,7 +3259,7 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         passthrough_value["passthroughResult"],
         serde_json::json!({
             "mode": "passthrough",
-            "finalChatResponse": null
+            "finalChatResponse": { "id": "chat_no_hook" }
         })
     );
     assert_eq!(
@@ -3217,10 +3268,24 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
             "action": "continue_without_result"
         })
     );
+    assert_eq!(
+        passthrough_value["prepassResult"],
+        serde_json::json!({
+            "action": "continue_to_execution",
+            "responseStageGatePlan": continue_gate_plan
+        })
+    );
+    assert_eq!(
+        passthrough_value["finalizeResult"],
+        serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": { "id": "chat_no_hook" }
+        })
+    );
 
     let auto_hook_result = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
-            "responseStageNextAction": "run_auto_hooks",
+            "responseStageGatePlan": run_auto_hooks_gate_plan,
             "autoHookEvaluated": true,
             "hasAutoHookResult": true,
             "autoHookResult": {
@@ -3245,11 +3310,33 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
             }
         })
     );
+    assert_eq!(
+        auto_hook_result_value["prepassResult"],
+        serde_json::json!({
+            "action": "return_result",
+            "responseStageGatePlan": run_auto_hooks_gate_plan,
+            "result": {
+                "mode": "tool_flow",
+                "finalChatResponse": { "ok": true },
+                "execution": { "flowId": "flow_1" }
+            }
+        })
+    );
+    assert_eq!(
+        auto_hook_result_value["finalizeResult"],
+        serde_json::json!({
+            "mode": "tool_flow",
+            "finalChatResponse": { "ok": true },
+            "execution": { "flowId": "flow_1" }
+        })
+    );
 
     let required_empty = plan_servertool_response_stage_runtime_action_json(
         &serde_json::json!({
             "responseStageGatePlan": {
+                "shouldBypass": false,
                 "nextAction": "run_auto_hooks",
+                "responseHookMatched": true,
                 "responseHookRequired": true,
                 "responseHookName": "stop_message_auto"
             },

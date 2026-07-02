@@ -44,10 +44,7 @@ export async function runServertoolResponseStagePrePass(args: {
     case 'run_auto_hooks':
       break;
     case 'return_passthrough_no_auto_hook_result':
-      return {
-        action: 'continue_to_execution' as const,
-        responseStageGatePlan
-      };
+      return prepassRuntimeAction.prepassResult;
     default:
       throw new Error('[servertool] invalid response-stage prepass action');
   }
@@ -61,17 +58,34 @@ export async function runServertoolResponseStagePrePass(args: {
   });
   switch (responseStageAutoHook.action) {
     case 'return_auto_hook_result':
-      return {
-        action: 'return_result',
-        responseStageGatePlan,
-        result: responseStageAutoHook.result
-      };
+      {
+        const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+          responseStageGatePlan,
+          autoHookEvaluated: true,
+          hasAutoHookResult: true,
+          autoHookResult: responseStageAutoHook.result
+        });
+        if (postAutoHookRuntimeAction.action !== 'return_auto_hook_result') {
+          throw new Error('[servertool] invalid response-stage prepass auto-hook post action');
+        }
+        return postAutoHookRuntimeAction.prepassResult;
+      }
     case 'continue_without_result':
     case 'return_passthrough_bypass':
-      return {
-        action: 'continue_to_execution' as const,
-        responseStageGatePlan
-      };
+      {
+        const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+          responseStageGatePlan,
+          autoHookEvaluated: true,
+          hasAutoHookResult: false
+        });
+        if (
+          postAutoHookRuntimeAction.action !== 'return_passthrough_bypass' &&
+          postAutoHookRuntimeAction.action !== 'return_passthrough_no_auto_hook_result'
+        ) {
+          throw new Error('[servertool] invalid response-stage prepass post action');
+        }
+        return postAutoHookRuntimeAction.prepassResult;
+      }
     default:
       throw new Error('[servertool] invalid response-stage prepass auto-hook action');
   }

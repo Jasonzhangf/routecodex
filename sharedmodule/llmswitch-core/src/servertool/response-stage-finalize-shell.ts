@@ -27,14 +27,17 @@ export async function finalizeServertoolResponseStage(args: {
     responseStageGatePlan: args.responseStageGatePlan,
     baseObject: args.baseObject,
     autoHookEvaluated: true,
-    hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'
+    hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result',
+    autoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'
+      ? responseStageAutoHook.result
+      : null
   });
   switch (finalizeRuntimeAction.action) {
     case 'return_auto_hook_result':
-      return responseStageAutoHook.result;
+      return finalizeRuntimeAction.finalizeResult;
     case 'return_passthrough_bypass':
     case 'return_passthrough_no_auto_hook_result':
-      return finalizeRuntimeAction.passthroughResult as ServerSideToolEngineResult;
+      return finalizeRuntimeAction.finalizeResult;
     default:
       throw new Error('[servertool] invalid response-stage finalize action');
   }

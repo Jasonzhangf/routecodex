@@ -6259,7 +6259,7 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
-    'return responseStageAutoHook.result'
+    'autoHookResult: responseStageAutoHook.action ==='
   );
   assertContains(
     'servertool-response-stage-finalize-shell-owner',
@@ -6277,7 +6277,7 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
-    'return finalizeRuntimeAction.passthroughResult as ServerSideToolEngineResult'
+    'return finalizeRuntimeAction.finalizeResult'
   );
   assertContains(
     'servertool-response-stage-finalize-shell-owner',
@@ -6296,6 +6296,8 @@ function checkServertoolResponseStageGateThinShell() {
     'responseHookMatched === true',
     "responseStageAutoHook.action === 'return_passthrough_bypass'",
     "if (finalizeRuntimeAction.action === 'return_auto_hook_result')",
+    'return responseStageAutoHook.result',
+    'return finalizeRuntimeAction.passthroughResult as ServerSideToolEngineResult',
     'finalizeRuntimeAction as { action: string }',
     'autoHookResult == null',
     'autoHookResult as ServerSideToolEngineResult',
@@ -6365,12 +6367,12 @@ function checkServertoolResponseStageGateThinShell() {
     "prepassRuntimeAction.action !== 'run_auto_hooks'",
     "if (responseStageAutoHook.action === 'return_auto_hook_result')",
     'autoHookResult as ServerSideToolEngineResult',
-    'postAutoHookRuntimeAction',
     'prepassRuntimeAction as { action: string }',
     'responseStageAutoHook as { action: string }',
     '}) as Record<string, unknown>',
     'args.options.adapterContext as Record<string, unknown>',
     'responseStageGatePlan: Record<string, unknown>',
+    "action: 'continue_to_execution' as const",
   ]) {
     if (responseStagePrePassShell.includes(marker)) {
       fail(
@@ -6379,6 +6381,12 @@ function checkServertoolResponseStageGateThinShell() {
       );
     }
   }
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
+    'postAutoHookRuntimeAction.prepassResult'
+  );
   const responseStageAutoHookShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`);
   for (const marker of [
     'responseHookRequired: args.responseStageGatePlan.responseHookRequired === true',

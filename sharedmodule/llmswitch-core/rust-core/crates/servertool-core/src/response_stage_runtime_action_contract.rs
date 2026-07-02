@@ -40,6 +40,10 @@ pub struct ServertoolResponseStageRuntimeActionPlan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pass_result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub prepass_result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finalize_result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_reason: Option<String>,
 }
 
@@ -47,6 +51,24 @@ fn build_passthrough_result(input: &ServertoolResponseStageRuntimeActionInput) -
     serde_json::json!({
         "mode": "passthrough",
         "finalChatResponse": input.base_object.clone().unwrap_or(Value::Null)
+    })
+}
+
+fn build_prepass_continue_result(input: &ServertoolResponseStageRuntimeActionInput) -> Value {
+    serde_json::json!({
+        "action": "continue_to_execution",
+        "responseStageGatePlan": input.response_stage_gate_plan.clone().unwrap_or(Value::Null)
+    })
+}
+
+fn build_prepass_return_result(
+    input: &ServertoolResponseStageRuntimeActionInput,
+    result: Value,
+) -> Value {
+    serde_json::json!({
+        "action": "return_result",
+        "responseStageGatePlan": input.response_stage_gate_plan.clone().unwrap_or(Value::Null),
+        "result": result
     })
 }
 
@@ -111,6 +133,8 @@ pub fn plan_servertool_response_stage_runtime_action(
             pass_result: Some(serde_json::json!({
                 "action": "return_passthrough_bypass"
             })),
+            prepass_result: Some(build_prepass_continue_result(&input)),
+            finalize_result: Some(build_passthrough_result(&input)),
             skip_reason: resolve_skip_reason(&input),
         };
     }
@@ -122,11 +146,14 @@ pub fn plan_servertool_response_stage_runtime_action(
             result_mode: None,
             passthrough_result: None,
             pass_result: None,
+            prepass_result: None,
+            finalize_result: None,
             skip_reason: None,
         };
     }
 
     if input.has_auto_hook_result && (next_action == "run_auto_hooks" || next_action.is_empty()) {
+        let auto_hook_result = input.auto_hook_result.clone().unwrap_or(Value::Null);
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::ReturnAutoHookResult,
             response_hook_name: None,
@@ -134,8 +161,10 @@ pub fn plan_servertool_response_stage_runtime_action(
             passthrough_result: None,
             pass_result: Some(serde_json::json!({
                 "action": "return_auto_hook_result",
-                "result": input.auto_hook_result.clone().unwrap_or(Value::Null)
+                "result": auto_hook_result.clone()
             })),
+            prepass_result: Some(build_prepass_return_result(&input, auto_hook_result.clone())),
+            finalize_result: Some(auto_hook_result),
             skip_reason: None,
         };
     }
@@ -147,18 +176,23 @@ pub fn plan_servertool_response_stage_runtime_action(
             result_mode: None,
             passthrough_result: None,
             pass_result: None,
+            prepass_result: None,
+            finalize_result: None,
             skip_reason: None,
         };
     }
 
+    let passthrough_result = build_passthrough_result(&input);
     ServertoolResponseStageRuntimeActionPlan {
         action: ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult,
         response_hook_name: None,
         result_mode: None,
-        passthrough_result: Some(build_passthrough_result(&input)),
+        passthrough_result: Some(passthrough_result.clone()),
         pass_result: Some(serde_json::json!({
             "action": "continue_without_result"
         })),
+        prepass_result: Some(build_prepass_continue_result(&input)),
+        finalize_result: Some(passthrough_result),
         skip_reason: None,
     }
 }
@@ -195,6 +229,20 @@ mod tests {
             plan.pass_result,
             Some(serde_json::json!({
                 "action": "return_passthrough_bypass"
+            }))
+        );
+        assert_eq!(
+            plan.prepass_result,
+            Some(serde_json::json!({
+                "action": "continue_to_execution",
+                "responseStageGatePlan": null
+            }))
+        );
+        assert_eq!(
+            plan.finalize_result,
+            Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": {"id": "chat_bypass"}
             }))
         );
         assert_eq!(plan.skip_reason, None);
@@ -277,6 +325,26 @@ mod tests {
                 }
             }))
         );
+        assert_eq!(
+            plan.prepass_result,
+            Some(serde_json::json!({
+                "action": "return_result",
+                "responseStageGatePlan": null,
+                "result": {
+                    "mode": "tool_flow",
+                    "finalChatResponse": { "ok": true },
+                    "execution": { "flowId": "flow_1" }
+                }
+            }))
+        );
+        assert_eq!(
+            plan.finalize_result,
+            Some(serde_json::json!({
+                "mode": "tool_flow",
+                "finalChatResponse": { "ok": true },
+                "execution": { "flowId": "flow_1" }
+            }))
+        );
         assert_eq!(plan.skip_reason, None);
     }
 
@@ -299,6 +367,20 @@ mod tests {
         assert_eq!(plan.result_mode, None);
         assert_eq!(
             plan.passthrough_result,
+            Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": {"id": "chat_other"}
+            }))
+        );
+        assert_eq!(
+            plan.prepass_result,
+            Some(serde_json::json!({
+                "action": "continue_to_execution",
+                "responseStageGatePlan": null
+            }))
+        );
+        assert_eq!(
+            plan.finalize_result,
             Some(serde_json::json!({
                 "mode": "passthrough",
                 "finalChatResponse": {"id": "chat_other"}
@@ -336,6 +418,20 @@ mod tests {
                 "action": "continue_without_result"
             }))
         );
+        assert_eq!(
+            plan.prepass_result,
+            Some(serde_json::json!({
+                "action": "continue_to_execution",
+                "responseStageGatePlan": null
+            }))
+        );
+        assert_eq!(
+            plan.finalize_result,
+            Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": {"id": "chat_no_hook"}
+            }))
+        );
     }
 
     #[test]
@@ -364,6 +460,8 @@ mod tests {
         );
         assert_eq!(plan.result_mode, None);
         assert_eq!(plan.passthrough_result, None);
+        assert_eq!(plan.prepass_result, None);
+        assert_eq!(plan.finalize_result, None);
     }
 
     #[test]

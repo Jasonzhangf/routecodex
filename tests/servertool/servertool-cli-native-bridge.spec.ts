@@ -705,18 +705,44 @@ describe('servertool CLI native bridge', () => {
   });
 
   it('uses Rust-owned response-stage runtime action planning', () => {
+    const bypassGatePlan = {
+      shouldBypass: true,
+      nextAction: 'bypass',
+      responseHookMatched: false,
+      responseHookRequired: false
+    };
+    const runAutoHooksGatePlan = {
+      shouldBypass: false,
+      nextAction: 'run_auto_hooks',
+      responseHookMatched: true,
+      responseHookRequired: false
+    };
+    const continueGatePlan = {
+      shouldBypass: false,
+      nextAction: 'run_auto_hooks',
+      responseHookMatched: false,
+      responseHookRequired: false
+    };
+
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
-        responseStageNextAction: 'bypass',
+        responseStageGatePlan: bypassGatePlan,
         baseObject: { ok: 'bypass' },
         autoHookEvaluated: false,
-        hasAutoHookResult: false,
-        responseHookRequired: false
+        hasAutoHookResult: false
       })
     ).toEqual({
       action: 'return_passthrough_bypass',
       passResult: {
         action: 'return_passthrough_bypass'
+      },
+      prepassResult: {
+        action: 'continue_to_execution',
+        responseStageGatePlan: bypassGatePlan
+      },
+      finalizeResult: {
+        mode: 'passthrough',
+        finalChatResponse: { ok: 'bypass' }
       },
       passthroughResult: {
         mode: 'passthrough',
@@ -727,7 +753,10 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
         responseStageGatePlan: {
+          shouldBypass: true,
           nextAction: 'bypass',
+          responseHookMatched: false,
+          responseHookRequired: false,
           skipReason: ' empty_assistant_payload '
         },
         baseObject: { ok: 'bypass-skip' },
@@ -739,6 +768,20 @@ describe('servertool CLI native bridge', () => {
       passResult: {
         action: 'return_passthrough_bypass'
       },
+      prepassResult: {
+        action: 'continue_to_execution',
+        responseStageGatePlan: {
+          shouldBypass: true,
+          nextAction: 'bypass',
+          responseHookMatched: false,
+          responseHookRequired: false,
+          skipReason: ' empty_assistant_payload '
+        }
+      },
+      finalizeResult: {
+        mode: 'passthrough',
+        finalChatResponse: { ok: 'bypass-skip' }
+      },
       passthroughResult: {
         mode: 'passthrough',
         finalChatResponse: { ok: 'bypass-skip' }
@@ -748,10 +791,9 @@ describe('servertool CLI native bridge', () => {
 
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
-        responseStageNextAction: 'run_auto_hooks',
+        responseStageGatePlan: runAutoHooksGatePlan,
         autoHookEvaluated: false,
-        hasAutoHookResult: false,
-        responseHookRequired: false
+        hasAutoHookResult: false
       })
     ).toEqual({
       action: 'run_auto_hooks'
@@ -759,18 +801,14 @@ describe('servertool CLI native bridge', () => {
 
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
-        responseStageGatePlan: {
-          shouldBypass: false,
-          nextAction: 'run_auto_hooks'
-        },
+        responseStageGatePlan: runAutoHooksGatePlan,
         autoHookEvaluated: true,
         hasAutoHookResult: true,
         autoHookResult: {
           mode: 'tool_flow',
           finalChatResponse: { ok: true },
           execution: { flowId: 'flow_1' }
-        },
-        responseHookRequired: false
+        }
       })
     ).toEqual({
       action: 'return_auto_hook_result',
@@ -781,45 +819,42 @@ describe('servertool CLI native bridge', () => {
           finalChatResponse: { ok: true },
           execution: { flowId: 'flow_1' }
         }
-      }
-    });
-
-    expect(
-      planServertoolResponseStageRuntimeActionWithNative({
-        responseStageNextAction: 'run_auto_hooks',
-        autoHookEvaluated: true,
-        hasAutoHookResult: true,
-        autoHookResult: {
-          mode: 'tool_flow',
-          finalChatResponse: { ok: true },
-          execution: { flowId: 'flow_1' }
-        },
-        responseHookRequired: false
-      })
-    ).toEqual({
-      action: 'return_auto_hook_result',
-      passResult: {
-        action: 'return_auto_hook_result',
+      },
+      prepassResult: {
+        action: 'return_result',
+        responseStageGatePlan: runAutoHooksGatePlan,
         result: {
           mode: 'tool_flow',
           finalChatResponse: { ok: true },
           execution: { flowId: 'flow_1' }
         }
+      },
+      finalizeResult: {
+        mode: 'tool_flow',
+        finalChatResponse: { ok: true },
+        execution: { flowId: 'flow_1' }
       }
     });
 
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
-        responseStageNextAction: 'run_auto_hooks',
+        responseStageGatePlan: continueGatePlan,
         baseObject: { ok: 'no-hook' },
         autoHookEvaluated: true,
-        hasAutoHookResult: false,
-        responseHookRequired: false
+        hasAutoHookResult: false
       })
     ).toEqual({
       action: 'return_passthrough_no_auto_hook_result',
       passResult: {
         action: 'continue_without_result'
+      },
+      prepassResult: {
+        action: 'continue_to_execution',
+        responseStageGatePlan: continueGatePlan
+      },
+      finalizeResult: {
+        mode: 'passthrough',
+        finalChatResponse: { ok: 'no-hook' }
       },
       passthroughResult: {
         mode: 'passthrough',
@@ -830,7 +865,9 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
         responseStageGatePlan: {
+          shouldBypass: false,
           nextAction: 'run_auto_hooks',
+          responseHookMatched: true,
           responseHookRequired: true,
           responseHookName: 'stop_message_auto'
         },

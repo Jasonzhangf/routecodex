@@ -32,6 +32,10 @@ describe('response-stage-finalize-shell', () => {
       passthroughResult: {
         mode: 'passthrough',
         finalChatResponse: { ok: true }
+      },
+      finalizeResult: {
+        mode: 'passthrough',
+        finalChatResponse: { ok: true }
       }
     });
   });
@@ -60,7 +64,8 @@ describe('response-stage-finalize-shell', () => {
       responseStageGatePlan,
       baseObject: { ok: true },
       autoHookEvaluated: true,
-      hasAutoHookResult: false
+      hasAutoHookResult: false,
+      autoHookResult: null
     });
     expect(result).toEqual({
       mode: 'passthrough',
@@ -79,6 +84,10 @@ describe('response-stage-finalize-shell', () => {
     planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
       action: 'return_passthrough_bypass',
       passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: { ok: true }
+      },
+      finalizeResult: {
         mode: 'passthrough',
         finalChatResponse: { ok: true }
       }
@@ -102,7 +111,8 @@ describe('response-stage-finalize-shell', () => {
       responseStageGatePlan,
       baseObject: { ok: true },
       autoHookEvaluated: true,
-      hasAutoHookResult: false
+      hasAutoHookResult: false,
+      autoHookResult: null
     });
     expect(result).toEqual({
       mode: 'passthrough',
@@ -120,7 +130,12 @@ describe('response-stage-finalize-shell', () => {
       }
     });
     planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
-      action: 'return_auto_hook_result'
+      action: 'return_auto_hook_result',
+      finalizeResult: {
+        mode: 'tool_flow',
+        finalChatResponse: { done: true },
+        execution: { flowId: 'flow_1' }
+      }
     });
 
     await expect(
@@ -162,9 +177,11 @@ describe('response-stage-finalize-shell', () => {
     expect(source).not.toContain('native response-stage finalize requested auto-hook result but result was empty');
     expect(source).toContain('switch (finalizeRuntimeAction.action)');
     expect(source).toContain("hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'");
+    expect(source).toContain('autoHookResult: responseStageAutoHook.action ===');
     expect(source).toContain('baseObject: args.baseObject');
-    expect(source).toContain('return responseStageAutoHook.result');
-    expect(source).toContain('return finalizeRuntimeAction.passthroughResult');
+    expect(source).not.toContain('return responseStageAutoHook.result');
+    expect(source).not.toContain('return finalizeRuntimeAction.passthroughResult');
+    expect(source).toContain('return finalizeRuntimeAction.finalizeResult');
     expect(source).not.toContain('mode: finalizeRuntimeAction.resultMode');
     expect(source).not.toContain("return { mode: 'passthrough', finalChatResponse: args.baseObject };");
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
