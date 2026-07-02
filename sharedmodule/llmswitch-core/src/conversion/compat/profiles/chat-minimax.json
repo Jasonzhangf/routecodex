@@ -1,0 +1,14 @@
+{
+  "id": "chat:minimax",
+  "protocol": "",
+  "request": {
+    "mappings": []
+  },
+  "response": {
+    "mappings": [
+      {
+        "action": "harvest_tool_calls_from_text"
+      }
+    ]
+  }
+}

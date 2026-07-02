@@ -188,6 +188,7 @@ fn harvest_responses_output_in_place(root: &mut Map<String, Value>, options_json
 
     if changed {
         root.insert("output".to_string(), Value::Array(next_output));
+        root.remove("output_text");
     }
 }
 

@@ -148,6 +148,118 @@ fn test_resp_profile_chat_lmstudio_harvests_responses_output_tool_tokens() {
 }
 
 #[test]
+fn test_resp_profile_chat_minimax_harvests_responses_function_calls_xml_without_text_leak() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "object": "response",
+            "id": "resp_minimax_tool_text_1",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
+                        }
+                    ],
+                    "output_text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
+                }
+            ],
+            "output_text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:minimax".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_resp_minimax_tool_text_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("MiniMax-M3".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("minimax".to_string()),
+            provider_key: Some("minimax.key1.MiniMax-M3".to_string()),
+            runtime_key: Some("minimax.key1".to_string()),
+            client_request_id: Some("req_resp_minimax_tool_text_1".to_string()),
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:minimax".to_string()));
+    assert_eq!(result.payload["output"][0]["type"], "function_call");
+    assert_eq!(result.payload["output"][0]["name"], "exec_command");
+    assert_eq!(
+        result.payload["output"][0]["arguments"]
+            .as_str()
+            .unwrap_or(""),
+        "{\"cmd\":\"pwd\"}"
+    );
+    let serialized = serde_json::to_string(&result.payload).unwrap();
+    assert!(!serialized.contains("<function_calls>"));
+    assert!(!serialized.contains("</function_calls>"));
+}
+
+#[test]
+fn test_resp_profile_chat_minimax_preserves_plain_function_calls_wrapper_without_valid_tool_call() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "object": "response",
+            "id": "resp_minimax_plain_shell_1",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "<function_calls>```bash\npwd\n```</function_calls>"
+                        }
+                    ]
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:minimax".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_resp_minimax_plain_shell_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: Some("MiniMax-M3".to_string()),
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: Some("minimax".to_string()),
+            provider_key: Some("minimax.key1.MiniMax-M3".to_string()),
+            runtime_key: Some("minimax.key1".to_string()),
+            client_request_id: Some("req_resp_minimax_plain_shell_1".to_string()),
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:minimax".to_string()));
+    assert_eq!(result.payload["output"][0]["type"], "message");
+    let serialized = serde_json::to_string(&result.payload).unwrap();
+    assert!(serialized.contains("```bash"));
+}
+
+#[test]
 fn test_resp_profile_chat_glm_extracts_tool_calls_from_reasoning_markup() {
     let input = ReqOutboundCompatInput {
         payload: json!({

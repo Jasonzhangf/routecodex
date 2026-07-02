@@ -134,6 +134,14 @@ describe('provider-resolver: config-driven resolution', () => {
       expect(resolveDefaultCompatibilityProfileFromConfig(config, 'openai-provider', { type: 'openai' })).toBe('compat:passthrough');
     });
 
+    test('minimax provider ID → chat:minimax', () => {
+      expect(resolveDefaultCompatibilityProfileFromConfig(config, 'minimax', { type: 'anthropic' })).toBe('chat:minimax');
+    });
+
+    test('minimonth provider ID → chat:minimax', () => {
+      expect(resolveDefaultCompatibilityProfileFromConfig(config, 'minimonth', { type: 'anthropic' })).toBe('chat:minimax');
+    });
+
     test('default → compat:passthrough for empty provider', () => {
       expect(resolveDefaultCompatibilityProfileFromConfig(config, 'unknown', {})).toBe('compat:passthrough');
     });

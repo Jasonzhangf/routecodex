@@ -188,6 +188,7 @@ const CODEX_ADVANCED_MODEL_METADATA: Record<string, unknown> = {
   minimal_client_version: '0.98.0',
   supported_in_api: true,
   priority: 0,
+  tool_mode: 'code_mode_only',
   experimental_supported_tools: ['apply_patch', 'web_search'],
   effective_context_window_percent: 95
 };

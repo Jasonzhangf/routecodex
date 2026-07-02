@@ -13,6 +13,9 @@
     "gemini": "gemini-chat"
   },
   "defaultOutboundProfile": "openai-chat",
-  "compatibilityProfileBlocks": [],
+  "compatibilityProfileBlocks": [
+    { "providerId": "minimax", "compatibilityProfile": "chat:minimax" },
+    { "providerId": "minimonth", "compatibilityProfile": "chat:minimax" }
+  ],
   "defaultCompatibilityProfile": "compat:passthrough"
 }

@@ -29,6 +29,7 @@ Required stable fields:
 - `default_reasoning_level = medium`
 - `supported_reasoning_levels = [low, medium, high, xhigh]`
 - `shell_type = shell_command`
+- `tool_mode = code_mode_only`
 - `prefer_websockets = true`
 - `minimal_client_version = 0.124.0`
 - `context_window = 272000`

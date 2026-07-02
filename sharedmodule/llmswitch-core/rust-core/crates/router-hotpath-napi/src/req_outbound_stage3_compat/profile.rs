@@ -47,6 +47,10 @@ pub(super) fn is_lmstudio_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:lmstudio")
 }
 
+pub(super) fn is_minimax_profile(profile: &str) -> bool {
+    profile_matches(profile, "chat:minimax")
+}
+
 pub(super) fn is_gemini_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:gemini")
 }
