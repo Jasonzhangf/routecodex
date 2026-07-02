@@ -1,7 +1,7 @@
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
-  test('protocol boundary conflicts fail fast before provider error reporting', async () => {
+  test('provider protocol boundary conflicts reroute when route pool has alternatives', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(
       new Error('MetadataCenter runtime_control.providerProtocol conflict: existing=openai-responses selected=anthropic-messages'),
@@ -10,7 +10,7 @@ describe('request-executor-provider-failure-plan', () => {
       }
     );
 
-    await expect(resolveRequestExecutorProviderFailurePlan({
+    const plan = await resolveRequestExecutorProviderFailurePlan({
       error,
       retryError: {
         errorCode: 'ERR_PROVIDER_PROTOCOL_MISMATCH',
@@ -32,9 +32,13 @@ describe('request-executor-provider-failure-plan', () => {
       recordAttempt: () => undefined,
       logStage: () => undefined,
       logNonBlockingError: () => undefined
-    })).rejects.toThrow('MetadataCenter runtime_control.providerProtocol conflict');
+    });
 
-    expect(excludedProviderKeys.size).toBe(0);
+    expect(plan.reportPlan.stageHint).toBe('provider.runtime_resolve');
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
+    expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(excludedProviderKeys.has('minimax.key1.MiniMax-M3')).toBe(true);
   });
 
   test('local CLIENT_TOOL_ARGS_INVALID conversion failures remain recoverable only when they affect health', async () => {

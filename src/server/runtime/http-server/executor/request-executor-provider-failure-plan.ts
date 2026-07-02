@@ -127,9 +127,6 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });
-  if (retryExecutionPlan.blockedByProtocolBoundary) {
-    throw args.error;
-  }
   const reportStage = reportPlan.stageHint;
   try {
     await reportRequestExecutorProviderError({

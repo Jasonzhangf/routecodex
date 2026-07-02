@@ -127,6 +127,42 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 
+  it('reroutes provider protocol mismatch instead of blocking provider switching', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const error = Object.assign(
+      new Error('Provider protocol mismatch: handle=openai-responses target=anthropic-messages'),
+      {
+        code: 'ERR_PROVIDER_PROTOCOL_MISMATCH'
+      }
+    );
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        errorCode: 'ERR_PROVIDER_PROTOCOL_MISMATCH',
+        reason: 'Provider protocol mismatch: handle=openai-responses target=anthropic-messages'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.runtime_resolve',
+      providerKey: 'minimax.key1.MiniMax-M3',
+      runtimeKey: 'runtime:minimax',
+      logicalRequestChainKey: 'req-protocol-mismatch-reroute',
+      logicalChainRetryLimitStageRequestId: 'req-protocol-mismatch-reroute',
+      routePool: ['minimax.key1.MiniMax-M3', 'orangeai.key1.glm-5.2'],
+      forceExcludeCurrentProviderOnRetry: true,
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn()
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(Array.from(excludedProviderKeys)).toEqual(['minimax.key1.MiniMax-M3']);
+  });
+
   it('does not reroute provider-owned continuation failures across providers', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 502: SSE_TO_JSON_ERROR'), {

@@ -37,7 +37,6 @@ export type ProviderRetryExclusionPlan = {
 export type ProviderRetryExecutionPlan = {
   shouldRetry: boolean;
   excludedCurrentProvider: boolean;
-  blockedByProtocolBoundary?: boolean;
   retrySwitchPlan?: ProviderRetrySwitchPlan;
   retryExecutionPolicyReason?: string;
   /**

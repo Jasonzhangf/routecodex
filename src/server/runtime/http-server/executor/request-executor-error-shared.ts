@@ -29,21 +29,6 @@ export function normalizeCodeKey(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
-export function isProviderProtocolBoundaryError(
-  error: unknown,
-  retryError?: RetryErrorSnapshot
-): boolean {
-  const errorCode =
-    normalizeCodeKey((error as { code?: unknown } | undefined)?.code)
-    ?? normalizeCodeKey(retryError?.errorCode);
-  if (errorCode === 'ERR_PROVIDER_PROTOCOL_MISMATCH') {
-    return true;
-  }
-  const message = error instanceof Error ? error.message : String(error ?? '');
-  return message.includes('MetadataCenter runtime_control.providerProtocol conflict')
-    || message.includes('Provider protocol mismatch:');
-}
-
 export function isServerToolFollowupErrorCode(value: unknown): boolean {
   const normalized = normalizeCodeKey(value);
   return Boolean(normalized && normalized.startsWith('SERVERTOOL_'));
