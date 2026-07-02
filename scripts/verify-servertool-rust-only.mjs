@@ -4197,6 +4197,8 @@ function checkServertoolFlowPresentationRustOwner() {
   for (const keyword of [
     'extra.flowId.trim()',
     'flowId.trim()',
+    'readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>)',
+    'readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown> | undefined)',
     'const reasonToken = normalizeServertoolProgressTokenWithNative({ value: event.reason })',
     'result: `${event.result}_${reasonToken ||',
     'message: `${event.result} (${event.reason}) queue=',

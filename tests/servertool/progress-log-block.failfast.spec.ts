@@ -107,6 +107,8 @@ describe('progress-log-block fail-fast behavior', () => {
     expect(source).toContain('normalizeServertoolProgressResultWithNative({ message })');
     expect(source).toContain('export function appendServertoolMatchSkippedProgressEvent(');
     expect(source).toContain('readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext');
+    expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>)');
+    expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown> | undefined)');
     expect(source).toContain('buildServertoolAutoHookTraceProgressEventWithNative(event)');
     expect(source).toContain('buildServertoolMatchSkippedProgressEventWithNative({');
     expect(source).toContain('buildServertoolStopEntryProgressEventWithNative({');

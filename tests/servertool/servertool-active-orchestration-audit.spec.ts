@@ -652,6 +652,8 @@ const TARGETS = [
       'compareContext.reason.toLowerCase().replace',
       'extra.flowId.trim()',
       'flowId.trim()',
+      'readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>)',
+      'readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown> | undefined)',
     ],
     required: [
       'normalizeServertoolProgressFlowIdWithNative({ value: extra?.flowId })',

@@ -1,3 +1,10 @@
+# 2026-07-03: servertool progress providerProtocol cast removed
+
+- Slice: `progress-log-block.ts` no longer casts `args.adapterContext` to `Record<string, unknown>` before reading provider protocol. `readProviderProtocolFromAnyBoundMetadataCenter()` now accepts `unknown`, matching the underlying MetadataCenter runtime-control reader, so the progress shell only passes the carrier through.
+- Gate: `progress-log-block.failfast.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>...)` markers while requiring the direct native/MetadataCenter read path.
+- Evidence: focused Jest `progress-log-block.failfast + servertool-active-orchestration-audit` PASS 49/49; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: Phase 1 still has other servertool casts/switches to classify or migrate; full Hub Pipeline/VR closeout remains open.
+
 # 2026-07-03: servertool noop effect flowId input moved to Rust carrier
 
 - Slice: `execution-queue-shell.ts` no longer destructures `noopResult.flowId` or passes `noopFlowId` into the execution-loop effect planner. TS now passes the native `noopOutcome` carrier unchanged; Rust `execution_loop_effect_contract.rs` owns extracting/defaulting the noop execution `flowId` from that carrier.

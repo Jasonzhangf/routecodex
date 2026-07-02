@@ -147,7 +147,7 @@ export function readRuntimeControlFromAnyBoundMetadataCenter(
 }
 
 export function readProviderProtocolFromAnyBoundMetadataCenter(
-  target: Record<string, unknown> | undefined
+  target: unknown
 ): string | undefined {
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(target);
   const providerProtocol = runtimeControl?.providerProtocol;

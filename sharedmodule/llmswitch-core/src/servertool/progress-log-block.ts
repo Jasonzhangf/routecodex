@@ -66,7 +66,7 @@ type CommonArgs = {
 
 export function createServertoolProgressLogger(args: CommonArgs) {
   const providerProtocol =
-    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown>);
+    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext);
   if (!providerProtocol) {
     throw new Error('Servertool progress logger requires metadata center runtime_control.providerProtocol');
   }
@@ -237,7 +237,7 @@ export function appendServertoolMatchSkippedProgressEvent(args: {
   skipReason: string;
 }): void {
   const providerProtocol =
-    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext as Record<string, unknown> | undefined);
+    readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext);
   if (!providerProtocol) {
     throw new Error('Servertool progress logger requires metadata center runtime_control.providerProtocol');
   }
