@@ -10,7 +10,6 @@ import type { ServerToolAutoHookTraceEvent } from './types.js';
 import {
   materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult,
   planAutoHookCallerFinalizationWithNative,
-  planAutoHookCallerResultProjectionWithNative,
   planAutoHookRuntimeAttemptWithNative,
   runStoplessBuiltinHandlerForRuntimeWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -140,22 +139,16 @@ export async function runServertoolAutoHookCaller(args: {
     });
     const finalizationPlan = planAutoHookCallerFinalizationWithNative({
       resultPresent: queueResult != null,
+      metadataWritePlanPresent: queueResult?.metadataWritePlan != null,
+      chatResponse: queueResult?.chatResponse,
+      execution: queueResult?.execution,
+      metadataWritePlan: queueResult?.metadataWritePlan,
       queueIndex: queueIndex + 1,
       queueTotal: queueOrder.length
     });
     switch (finalizationPlan.action) {
       case 'return_result': {
-        if (queueResult == null) {
-          throw new Error('[servertool] invalid auto-hook caller finalization result action without queue result');
-        }
-        const resultProjectionPlan = planAutoHookCallerResultProjectionWithNative({
-          resultPresent: true,
-          metadataWritePlanPresent: queueResult.metadataWritePlan != null,
-          chatResponse: queueResult.chatResponse,
-          execution: queueResult.execution,
-          metadataWritePlan: queueResult.metadataWritePlan
-        });
-        return resultProjectionPlan.result;
+        return finalizationPlan.result;
       }
       case 'continue_next_queue':
         continue;

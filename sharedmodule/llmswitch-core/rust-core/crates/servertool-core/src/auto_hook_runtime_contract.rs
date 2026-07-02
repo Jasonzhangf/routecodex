@@ -57,6 +57,14 @@ pub struct AutoHookCallerFinalizationInput {
     pub queue_index: i64,
     #[serde(default)]
     pub queue_total: i64,
+    #[serde(default)]
+    pub metadata_write_plan_present: bool,
+    #[serde(default)]
+    pub chat_response: Option<serde_json::Value>,
+    #[serde(default)]
+    pub execution: Option<serde_json::Value>,
+    #[serde(default)]
+    pub metadata_write_plan: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -68,6 +76,8 @@ pub struct AutoHookCallerFinalizationPlan {
     pub return_null: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -142,33 +152,45 @@ pub fn plan_auto_hook_runtime_attempt(
 
 pub fn plan_auto_hook_caller_finalization(
     input: AutoHookCallerFinalizationInput,
-) -> AutoHookCallerFinalizationPlan {
+) -> Result<AutoHookCallerFinalizationPlan, String> {
     if input.result_present {
-        return AutoHookCallerFinalizationPlan {
+        let projection = plan_auto_hook_caller_result_projection(
+            AutoHookCallerResultProjectionInput {
+                result_present: input.result_present,
+                metadata_write_plan_present: input.metadata_write_plan_present,
+                chat_response: input.chat_response,
+                execution: input.execution,
+                metadata_write_plan: input.metadata_write_plan,
+            },
+        )?;
+        return Ok(AutoHookCallerFinalizationPlan {
             action: AutoHookCallerFinalizationAction::ReturnResult,
             return_result: true,
             continue_next_queue: false,
             return_null: false,
             result_mode: Some("tool_flow".to_string()),
-        };
+            result: Some(projection.result),
+        });
     }
     let final_queue = input.queue_total <= 0 || input.queue_index >= input.queue_total;
     if final_queue {
-        return AutoHookCallerFinalizationPlan {
+        return Ok(AutoHookCallerFinalizationPlan {
             action: AutoHookCallerFinalizationAction::ReturnNull,
             return_result: false,
             continue_next_queue: false,
             return_null: true,
             result_mode: None,
-        };
+            result: None,
+        });
     }
-    AutoHookCallerFinalizationPlan {
+    Ok(AutoHookCallerFinalizationPlan {
         action: AutoHookCallerFinalizationAction::ContinueNextQueue,
         return_result: false,
         continue_next_queue: true,
         return_null: false,
         result_mode: None,
-    }
+        result: None,
+    })
 }
 
 pub fn plan_auto_hook_caller_result_projection(
@@ -345,30 +367,52 @@ mod tests {
             result_present: false,
             queue_index: 1,
             queue_total: 2,
+            metadata_write_plan_present: false,
+            chat_response: None,
+            execution: None,
+            metadata_write_plan: None,
         });
+        let next = next.expect("next finalization");
         assert_eq!(
             next.action,
             super::AutoHookCallerFinalizationAction::ContinueNextQueue
         );
         assert!(next.continue_next_queue);
         assert_eq!(next.result_mode, None);
+        assert_eq!(next.result, None);
 
         let result = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
             result_present: true,
             queue_index: 1,
             queue_total: 2,
+            metadata_write_plan_present: true,
+            chat_response: Some(serde_json::json!({ "choices": [] })),
+            execution: Some(serde_json::json!({ "flowId": "auto-hook" })),
+            metadata_write_plan: Some(serde_json::json!({
+                "runtimeControl": { "servertool": true }
+            })),
         });
+        let result = result.expect("result finalization");
         assert_eq!(
             result.action,
             super::AutoHookCallerFinalizationAction::ReturnResult
         );
         assert_eq!(result.result_mode.as_deref(), Some("tool_flow"));
+        assert_eq!(
+            result.result.expect("finalization result")["metadataWritePlan"],
+            serde_json::json!({ "runtimeControl": { "servertool": true } })
+        );
 
         let done = plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
             result_present: false,
             queue_index: 2,
             queue_total: 2,
+            metadata_write_plan_present: false,
+            chat_response: None,
+            execution: None,
+            metadata_write_plan: None,
         });
+        let done = done.expect("done finalization");
         assert_eq!(
             done.action,
             super::AutoHookCallerFinalizationAction::ReturnNull
@@ -379,12 +423,33 @@ mod tests {
             result_present: false,
             queue_index: 0,
             queue_total: 0,
+            metadata_write_plan_present: false,
+            chat_response: None,
+            execution: None,
+            metadata_write_plan: None,
         });
+        let malformed = malformed.expect("malformed finalization");
         assert_eq!(
             malformed.action,
             super::AutoHookCallerFinalizationAction::ReturnNull
         );
         assert!(malformed.return_null);
+
+        let missing_chat_response = plan_auto_hook_caller_finalization(
+            AutoHookCallerFinalizationInput {
+                result_present: true,
+                queue_index: 1,
+                queue_total: 1,
+                metadata_write_plan_present: false,
+                chat_response: None,
+                execution: None,
+                metadata_write_plan: None,
+            },
+        );
+        assert_eq!(
+            missing_chat_response.expect_err("missing finalization chat response"),
+            "auto-hook caller result projection requires chatResponse"
+        );
 
         let projection = plan_auto_hook_caller_result_projection(
             AutoHookCallerResultProjectionInput {

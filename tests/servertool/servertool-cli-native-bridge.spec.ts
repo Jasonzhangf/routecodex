@@ -1015,6 +1015,10 @@ describe('servertool CLI native bridge', () => {
     expect(
       planAutoHookCallerFinalizationWithNative({
         resultPresent: true,
+        metadataWritePlanPresent: true,
+        chatResponse: { choices: [] },
+        execution: { flowId: 'auto-hook-finalization' },
+        metadataWritePlan: { runtimeControl: { servertool: true } },
         queueIndex: 1,
         queueTotal: 2
       })
@@ -1023,7 +1027,13 @@ describe('servertool CLI native bridge', () => {
       returnResult: true,
       continueNextQueue: false,
       returnNull: false,
-      resultMode: 'tool_flow'
+      resultMode: 'tool_flow',
+      result: {
+        mode: 'tool_flow',
+        finalChatResponse: { choices: [] },
+        execution: { flowId: 'auto-hook-finalization' },
+        metadataWritePlan: { runtimeControl: { servertool: true } }
+      }
     });
 
     expect(

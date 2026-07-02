@@ -391,21 +391,25 @@ jest.unstable_mockModule(
     })),
     planAutoHookCallerFinalizationWithNative: jest.fn((input: any) => {
       if (input?.resultPresent) {
-        return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false, resultMode: 'tool_flow' };
+        return {
+          action: 'return_result',
+          returnResult: true,
+          continueNextQueue: false,
+          returnNull: false,
+          resultMode: 'tool_flow',
+          result: {
+            mode: 'tool_flow',
+            finalChatResponse: input?.chatResponse ?? {},
+            execution: input?.execution ?? { flowId: 'auto-hook' },
+            ...(input?.metadataWritePlanPresent === true ? { metadataWritePlan: input?.metadataWritePlan ?? {} } : {})
+          }
+        };
       }
       if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
         return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };
       }
       return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
     }),
-    planAutoHookCallerResultProjectionWithNative: jest.fn((input: any) => ({
-      result: {
-        mode: 'tool_flow',
-        finalChatResponse: input?.chatResponse ?? {},
-        execution: input?.execution ?? null,
-        ...(input?.metadataWritePlanPresent === true ? { metadataWritePlan: input?.metadataWritePlan ?? {} } : {})
-      }
-    })),
     extractTextFromChatLikeWithNative: jest.fn(() => ''),
     buildClientExecCliProjectionOutputWithNative: jest.fn(() => ({})),
     buildClientVisibleProjectionShellWithNative: jest.fn((input: any) => input?.base ?? {}),

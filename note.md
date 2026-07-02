@@ -1,3 +1,9 @@
+# 2026-07-03: servertool auto-hook finalization result moved to Rust
+
+- Slice: `auto-hook-caller.ts` no longer calls TS-side `planAutoHookCallerResultProjectionWithNative` after native finalization. Rust `auto_hook_runtime_contract.rs` now makes `plan_auto_hook_caller_finalization` return the final `tool_flow` result when action is `return_result`; TS only passes queue result carrier fields and returns `finalizationPlan.result`.
+- Gate: `servertool-active-orchestration-audit`, `servertool-auto-hook-trace`, and `verify-servertool-rust-only.mjs` forbid the old TS `queueResult == null` / `resultProjectionPlan` / direct `queueResult.*` projection markers.
+- Evidence: Rust focused `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p servertool-core auto_hook --lib -- --nocapture` PASS; focused Jest `servertool-auto-hook-trace + servertool-active-orchestration-audit + server-side-tools.failfast` PASS 56/56; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+
 # 2026-07-03: servertool stop progress event envelope moved to Rust
 
 - Slice: `progress-log-block.ts` no longer builds stop-entry or stop-compare progress file event envelopes (`flowId/tool/stage/result/message/step`) in TS. Rust `servertool_skeleton_config.rs` owns `build_servertool_stop_entry_progress_event_json` and `build_servertool_stop_compare_progress_event_json`; TS now only reads metadata, calls native builders, writes progress-file IO, and does console/stageRecorder presentation.

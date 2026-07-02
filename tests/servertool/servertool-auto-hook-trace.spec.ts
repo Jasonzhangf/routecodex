@@ -83,22 +83,25 @@ const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
 
 const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
   if (input?.resultPresent) {
-    return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false, resultMode: 'tool_flow' };
+    return {
+      action: 'return_result',
+      returnResult: true,
+      continueNextQueue: false,
+      returnNull: false,
+      resultMode: 'tool_flow',
+      result: {
+        mode: 'tool_flow',
+        finalChatResponse: input?.chatResponse ?? {},
+        execution: input?.execution ?? { flowId: 'auto-hook' },
+        ...(input?.metadataWritePlanPresent === true ? { metadataWritePlan: input?.metadataWritePlan ?? {} } : {})
+      }
+    };
   }
   if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
     return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };
   }
   return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
 });
-
-const planAutoHookCallerResultProjectionWithNativeMock = jest.fn((input: any) => ({
-  result: {
-    mode: 'tool_flow',
-    finalChatResponse: input?.chatResponse ?? {},
-    execution: input?.execution ?? null,
-    ...(input?.metadataWritePlanPresent === true ? { metadataWritePlan: input?.metadataWritePlan ?? {} } : {})
-  }
-}));
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
@@ -114,7 +117,6 @@ jest.unstable_mockModule(
     }),
     planAutoHookRuntimeAttemptWithNative: planAutoHookRuntimeAttemptWithNativeMock,
     planAutoHookCallerFinalizationWithNative: planAutoHookCallerFinalizationWithNativeMock,
-    planAutoHookCallerResultProjectionWithNative: planAutoHookCallerResultProjectionWithNativeMock,
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(async (input: any) => {
       const hook = registryHooks.find(
         (entry) => entry.id === input?.name && entry.execution.kind === 'builtin'
@@ -184,7 +186,6 @@ beforeEach(() => {
   registryHooks.length = 0;
   planAutoHookRuntimeAttemptWithNativeMock.mockClear();
   planAutoHookCallerFinalizationWithNativeMock.mockClear();
-  planAutoHookCallerResultProjectionWithNativeMock.mockClear();
   planAutoHookRuntimeAttemptWithNativeMock.mockImplementation((input: any) => {
     const flowId =
       typeof input?.materializedFlowId === 'string' && input.materializedFlowId.trim()
@@ -241,21 +242,25 @@ beforeEach(() => {
   });
   planAutoHookCallerFinalizationWithNativeMock.mockImplementation((input: any) => {
     if (input?.resultPresent) {
-      return { action: 'return_result', returnResult: true, continueNextQueue: false, returnNull: false, resultMode: 'tool_flow' };
+      return {
+        action: 'return_result',
+        returnResult: true,
+        continueNextQueue: false,
+        returnNull: false,
+        resultMode: 'tool_flow',
+        result: {
+          mode: 'tool_flow',
+          finalChatResponse: input?.chatResponse ?? {},
+          execution: input?.execution ?? { flowId: 'auto-hook' },
+          ...(input?.metadataWritePlanPresent === true ? { metadataWritePlan: input?.metadataWritePlan ?? {} } : {})
+        }
+      };
     }
     if (Number(input?.queueIndex ?? 0) >= Number(input?.queueTotal ?? 0)) {
       return { action: 'return_null', returnResult: false, continueNextQueue: false, returnNull: true };
     }
     return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
   });
-  planAutoHookCallerResultProjectionWithNativeMock.mockImplementation((input: any) => ({
-    result: {
-      mode: 'tool_flow',
-      finalChatResponse: input?.chatResponse ?? {},
-      execution: input?.execution ?? null,
-      ...(input?.metadataWritePlanPresent === true ? { metadataWritePlan: input?.metadataWritePlan ?? {} } : {})
-    }
-  }));
 });
 
 function createOptions(traces: ServerToolAutoHookTraceEvent[]): ServerSideToolEngineOptions {
@@ -474,14 +479,14 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).not.toContain('if (attemptPlan.returnResult)');
     expect(callerSource).toContain('hasMaterializedResult: result != null');
     expect(callerSource).toContain('resultPresent: queueResult != null');
-    expect(callerSource).toContain('if (queueResult == null)');
-    expect(callerSource).toContain('const resultProjectionPlan = planAutoHookCallerResultProjectionWithNative({');
-    expect(callerSource).toContain('queueResult.metadataWritePlan != null');
-    expect(callerSource).toContain('chatResponse: queueResult.chatResponse');
-    expect(callerSource).toContain('execution: queueResult.execution');
-    expect(callerSource).toContain('metadataWritePlan: queueResult.metadataWritePlan');
-    expect(callerSource).toContain('return resultProjectionPlan.result;');
+    expect(callerSource).toContain('metadataWritePlanPresent: queueResult?.metadataWritePlan != null');
+    expect(callerSource).toContain('chatResponse: queueResult?.chatResponse');
+    expect(callerSource).toContain('execution: queueResult?.execution');
+    expect(callerSource).toContain('metadataWritePlan: queueResult?.metadataWritePlan');
+    expect(callerSource).toContain('return finalizationPlan.result;');
     expect(callerSource).toContain('switch (finalizationPlan.action)');
+    expect(callerSource).not.toContain('if (queueResult == null)');
+    expect(callerSource).not.toContain('const resultProjectionPlan = planAutoHookCallerResultProjectionWithNative({');
     expect(callerSource).not.toContain('mode: finalizationPlan.resultMode');
     expect(callerSource).not.toContain('mode: resultProjectionPlan.mode');
     expect(callerSource).not.toContain('resultProjectionPlan.includeMetadataWritePlan');

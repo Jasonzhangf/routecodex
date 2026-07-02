@@ -168,6 +168,12 @@ export type AutoHookCallerFinalizationPlan =
       continueNextQueue: false;
       returnNull: false;
       resultMode: 'tool_flow';
+      result: {
+        mode: 'tool_flow';
+        finalChatResponse: JsonObject;
+        execution: NativeServerToolExecution;
+        metadataWritePlan?: JsonObject;
+      };
     }
   | {
       action: 'continue_next_queue';
@@ -2168,6 +2174,10 @@ function encodeAutoHookRuntimeAttemptInput(input: {
 
 export function planAutoHookCallerFinalizationWithNative(input: {
   resultPresent: boolean;
+  metadataWritePlanPresent?: boolean;
+  chatResponse?: JsonObject;
+  execution?: NativeServerToolExecution;
+  metadataWritePlan?: JsonObject;
   queueIndex: number;
   queueTotal: number;
 }): AutoHookCallerFinalizationPlan {
@@ -2177,10 +2187,9 @@ export function planAutoHookCallerFinalizationWithNative(input: {
     throw new Error('planAutoHookCallerFinalizationJson native unavailable');
   }
   const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planAutoHookCallerFinalizationJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
+  const parsed = typeof resultJson === 'string'
+    ? JSON.parse(resultJson) as unknown
+    : resultJson;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('planAutoHookCallerFinalizationJson native returned invalid plan');
   }
@@ -2209,8 +2218,14 @@ export function planAutoHookCallerFinalizationWithNative(input: {
   if (record.action === 'return_result' && record.resultMode !== 'tool_flow') {
     throw new Error('planAutoHookCallerFinalizationJson native returned invalid resultMode');
   }
+  if (record.action === 'return_result' && (!record.result || typeof record.result !== 'object' || Array.isArray(record.result))) {
+    throw new Error('planAutoHookCallerFinalizationJson native returned missing result');
+  }
   if (record.action !== 'return_result' && record.resultMode !== undefined) {
     throw new Error('planAutoHookCallerFinalizationJson native returned resultMode for non-result action');
+  }
+  if (record.action !== 'return_result' && record.result !== undefined) {
+    throw new Error('planAutoHookCallerFinalizationJson native returned result for non-result action');
   }
   if (
     (record.action === 'return_result' && record.returnResult !== true) ||
@@ -2220,12 +2235,31 @@ export function planAutoHookCallerFinalizationWithNative(input: {
     throw new Error('planAutoHookCallerFinalizationJson native returned action/disposition mismatch');
   }
   if (record.action === 'return_result') {
+    const result = record.result as Record<string, unknown>;
+    if (result.mode !== 'tool_flow' || !result.finalChatResponse || typeof result.finalChatResponse !== 'object' || Array.isArray(result.finalChatResponse)) {
+      throw new Error('planAutoHookCallerFinalizationJson native returned malformed result');
+    }
+    if (!result.execution || typeof result.execution !== 'object' || Array.isArray(result.execution) || typeof (result.execution as Record<string, unknown>).flowId !== 'string') {
+      throw new Error('planAutoHookCallerFinalizationJson native returned malformed execution');
+    }
+    if (input.metadataWritePlanPresent !== true && 'metadataWritePlan' in result) {
+      throw new Error('planAutoHookCallerFinalizationJson native returned unexpected metadataWritePlan');
+    }
+    if (input.metadataWritePlanPresent === true && (!('metadataWritePlan' in result) || !result.metadataWritePlan || typeof result.metadataWritePlan !== 'object' || Array.isArray(result.metadataWritePlan))) {
+      throw new Error('planAutoHookCallerFinalizationJson native omitted requested metadataWritePlan');
+    }
     return {
       action: 'return_result',
       returnResult: true,
       continueNextQueue: false,
       returnNull: false,
-      resultMode: 'tool_flow'
+      resultMode: 'tool_flow',
+      result: {
+        mode: 'tool_flow',
+        finalChatResponse: result.finalChatResponse as JsonObject,
+        execution: result.execution as NativeServerToolExecution,
+        ...(input.metadataWritePlanPresent === true ? { metadataWritePlan: result.metadataWritePlan as JsonObject } : {})
+      }
     };
   }
   if (record.action === 'continue_next_queue') {
