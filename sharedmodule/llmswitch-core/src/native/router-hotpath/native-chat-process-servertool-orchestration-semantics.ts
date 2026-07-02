@@ -4,6 +4,7 @@ import {
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
+import type { JsonObject } from '../../conversion/hub/types/json.js';
 import {
   parseServertoolDispatchPlanPayload,
   parseServertoolDispatchPlanInputPayload,
@@ -92,7 +93,7 @@ export type NativeServertoolRegistryLookupActionPlan =
     };
 
 export type NativeServertoolNoopOutcome = {
-  chatResponse: Record<string, unknown>;
+  chatResponse: JsonObject;
   flowId: string;
   toolContent: Record<string, unknown>;
 };
@@ -935,7 +936,7 @@ export function planServertoolNoopOutcomeWithNative(input: {
       return fail('invalid shape');
     }
     return {
-      chatResponse: row.chatResponse as Record<string, unknown>,
+      chatResponse: row.chatResponse as JsonObject,
       flowId: row.flowId,
       toolContent: row.toolContent as Record<string, unknown>
     };

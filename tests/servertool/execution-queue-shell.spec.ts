@@ -201,6 +201,8 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain('execution: noopEffectPlan.execution as ServerToolExecution');
     expect(source).not.toContain('result.chatResponse as JsonObject');
     expect(source).toContain('replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse)');
+    expect(source).not.toContain('noopResult.chatResponse as JsonObject');
+    expect(source).toContain('replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse)');
     expect(source).toContain('hasHandlerEntry: entry != null');
     expect(source).toContain('nativeExecutionMode: entry.registration.executionMode');
     expect(source).toContain('planned != null ? await materializeServertoolPlannedResult');

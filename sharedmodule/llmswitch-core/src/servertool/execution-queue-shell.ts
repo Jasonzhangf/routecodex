@@ -136,7 +136,7 @@ export async function runServertoolIoExecutionQueue(args: {
       flowId: noopFlowId
     } = noopResult;
 
-    replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse as JsonObject);
+    replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse);
 
     const noopEffectPlan = planServertoolExecutionLoopEffectWithNative({
       mode: 'noop',
