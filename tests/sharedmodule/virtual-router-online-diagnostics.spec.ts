@@ -155,4 +155,27 @@ describe('virtual router online diagnostics', () => {
       })
     }));
   });
+
+  it('dry-run merges top-level excludedProviderKeys into an existing metadataCenterSnapshot', () => {
+    const engine = new VirtualRouterEngine();
+    engine.initialize(buildConfig() as any);
+
+    const dryRun = (engine as any).diagnoseRoute(
+      { messages: [{ role: 'user', content: 'hello' }] },
+      {
+        ...buildMetadata('req-diag-top-level-excluded'),
+        excludedProviderKeys: ['sdfv.key1.gpt-test'],
+        metadataCenterSnapshot: {
+          requestId: 'req-diag-top-level-excluded',
+          runtimeControl: {}
+        }
+      }
+    );
+
+    expect(dryRun.ok).toBe(true);
+    expect(dryRun.decision).toEqual(expect.objectContaining({
+      selectedRouteName: 'default',
+      selectedProviderKey: 'one.key1.gpt-test'
+    }));
+  });
 });

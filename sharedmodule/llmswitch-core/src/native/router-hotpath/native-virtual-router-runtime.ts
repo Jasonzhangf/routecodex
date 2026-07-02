@@ -263,14 +263,13 @@ function buildVirtualRouterDryRunMetadata(
   metadata: RouterMetadataInput | Record<string, unknown>
 ): Record<string, unknown> {
   const metadataRecord = isPlainRecord(metadata) ? metadata : {};
-  if (isPlainRecord(metadataRecord.metadataCenterSnapshot)) {
-    return metadataRecord;
-  }
-  const snapshot: Record<string, unknown> = {
-    runtimeControl: isPlainRecord(metadataRecord.runtimeControl)
-      ? metadataRecord.runtimeControl
-      : {}
-  };
+  const snapshot: Record<string, unknown> = isPlainRecord(metadataRecord.metadataCenterSnapshot)
+    ? { ...metadataRecord.metadataCenterSnapshot }
+    : {
+        runtimeControl: isPlainRecord(metadataRecord.runtimeControl)
+          ? metadataRecord.runtimeControl
+          : {}
+      };
   for (const key of ['requestId', 'sessionId', 'conversationId', 'excludedProviderKeys', 'continuation']) {
     const value = metadataRecord[key];
     if (value !== undefined) {
