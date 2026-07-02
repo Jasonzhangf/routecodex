@@ -1860,6 +1860,8 @@ export class RouteCodexHttpServer {
         maxAttempts: retryState.maxAttempts,
         logicalRequestChainKey: input.requestId,
         routePoolForAttempt: routingDecisionProviderPool,
+        routePoolIsAuthoritative: Array.isArray((routingDecision as Record<string, unknown> | undefined)?.routePool)
+          || Array.isArray((routingDecision as Record<string, unknown> | undefined)?.pool),
         defaultTierAvailable: defaultTierAvailableForDecision,
         excludedProviderKeys: retryState.excludedProviderKeys,
         recordAttempt: () => {},
@@ -2099,6 +2101,8 @@ export class RouteCodexHttpServer {
           maxAttempts: retryState.maxAttempts,
           logicalRequestChainKey: input.requestId,
           routePoolForAttempt: routingDecisionProviderPool,
+          routePoolIsAuthoritative: Array.isArray((ctx.routingDecision as Record<string, unknown> | undefined)?.routePool)
+            || Array.isArray((ctx.routingDecision as Record<string, unknown> | undefined)?.pool),
           defaultTierAvailable: defaultTierAvailableForDecision,
           excludedProviderKeys: retryState.excludedProviderKeys,
           recordAttempt: () => {},
@@ -2593,6 +2597,7 @@ export class RouteCodexHttpServer {
             logicalRequestChainKey: input.requestId,
             logicalChainRetryLimitStageRequestId: input.requestId,
             routePool: [context.providerKey],
+            routePoolIsAuthoritative: true,
             defaultTierAvailable: false,
             excludedProviderKeys: new Set<string>(),
             recordAttempt: () => {},

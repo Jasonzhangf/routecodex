@@ -52,6 +52,7 @@ type RequestExecutorProviderSendFailureArgs = {
   maxAttempts: number;
   logicalRequestChainKey: string;
   routePoolForAttempt?: string[];
+  routePoolIsAuthoritative?: boolean;
   defaultTierAvailable?: boolean;
   excludedProviderKeys: Set<string>;
   portScope?: string;
@@ -360,6 +361,7 @@ export async function processProviderSendFailure(
     logicalRequestChainKey: args.logicalRequestChainKey,
     logicalChainRetryLimitStageRequestId: args.requestId,
     routePool: args.routePoolForAttempt,
+    routePoolIsAuthoritative: args.routePoolIsAuthoritative,
     defaultTierAvailable: args.defaultTierAvailable,
     runtimeManager: args.runtimeManager,
     excludedProviderKeys: args.excludedProviderKeys,

@@ -47,6 +47,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   logicalRequestChainKey: string;
   logicalChainRetryLimitStageRequestId: string;
   routePool?: string[];
+  routePoolIsAuthoritative?: boolean;
   runtimeManager?: RuntimeManager;
   excludedProviderKeys: Set<string>;
   recordAttempt: (args: { error: boolean }) => void;
@@ -112,6 +113,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     logicalRequestChainKey: args.logicalRequestChainKey,
     logicalChainRetryLimitStageRequestId: args.logicalChainRetryLimitStageRequestId,
     routePool: args.routePool,
+    routePoolIsAuthoritative: args.routePoolIsAuthoritative,
     runtimeManager: args.runtimeManager,
     excludedProviderKeys: args.excludedProviderKeys,
     recordAttempt: args.recordAttempt,

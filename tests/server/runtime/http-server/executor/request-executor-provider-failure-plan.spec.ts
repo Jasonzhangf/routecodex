@@ -79,7 +79,7 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.reportPlan.stageHint).toBe('provider.send');
   });
 
-  test('does not force-exclude provider when route pool is unknown/empty', async () => {
+  test('excludes current provider when route pool is unknown/empty and last provider is unproven', async () => {
     const excludedProviderKeys = new Set<string>();
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(new Error('provider runtime resolve failed'), {
@@ -109,8 +109,12 @@ describe('request-executor-provider-failure-plan', () => {
       logNonBlockingError: () => undefined
     });
 
-    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
-    expect(excludedProviderKeys.size).toBe(0);
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
+    expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retryExecutionPlan.policyExhausted).toBe(false);
+    expect(plan.retryExecutionPlan.mayProject).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual(['crs.crsa.gpt-5.4']);
   });
 
   test('provider business error 2013 traffic saturation immediately excludes current provider and reroutes', async () => {
@@ -306,7 +310,7 @@ describe('request-executor-provider-failure-plan', () => {
     expect(excludedProviderKeys.has('XLC.key2.deepseek-v4-pro')).toBe(true);
   });
 
-  test('single-provider retry path does not synthesize provider-switch state', async () => {
+  test('single observed provider pool excludes current provider when last provider is unproven', async () => {
     const excludedProviderKeys = new Set<string>();
     const plan = await resolveRequestExecutorProviderFailurePlan({
       error: Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
@@ -339,7 +343,10 @@ describe('request-executor-provider-failure-plan', () => {
 
     expect(plan.requestLocalProviderRetryState).toBeUndefined();
     expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
-    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
-    expect(plan.retryExecutionPlan.retrySwitchPlan).toBeUndefined();
+    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(true);
+    expect(plan.retryExecutionPlan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.retryExecutionPlan.policyExhausted).toBe(false);
+    expect(plan.retryExecutionPlan.mayProject).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual(['asxs.gpt-5.4']);
   });
 });

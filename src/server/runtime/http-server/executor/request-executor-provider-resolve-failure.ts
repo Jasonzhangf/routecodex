@@ -33,6 +33,7 @@ type RequestExecutorProviderResolveFailureArgs = {
   maxAttempts: number;
   logicalRequestChainKey: string;
   routePoolForAttempt?: string[];
+  routePoolIsAuthoritative?: boolean;
   defaultTierAvailable?: boolean;
   excludedProviderKeys: Set<string>;
   portScope?: string;
@@ -107,6 +108,7 @@ export async function processProviderResolveFailure(
     logicalRequestChainKey: args.logicalRequestChainKey,
     logicalChainRetryLimitStageRequestId: args.requestId,
     routePool: args.routePoolForAttempt,
+    routePoolIsAuthoritative: args.routePoolIsAuthoritative,
     defaultTierAvailable: args.defaultTierAvailable,
     excludedProviderKeys: args.excludedProviderKeys,
     recordAttempt: args.recordAttempt,

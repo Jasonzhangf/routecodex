@@ -909,6 +909,7 @@ export class HubRequestExecutor implements RequestExecutor {
           routePool: routePoolForAttempt,
           excludedProviderKeys,
         });
+        const routePoolIsAuthoritativeForAttempt = initialRoutePool !== null;
         const concurrencyScopeKey =
           typeof target.concurrencyScopeKey === 'string' && target.concurrencyScopeKey.trim()
             ? target.concurrencyScopeKey.trim()
@@ -982,6 +983,7 @@ export class HubRequestExecutor implements RequestExecutor {
             maxAttempts,
             logicalRequestChainKey,
             routePoolForAttempt,
+            routePoolIsAuthoritative: routePoolIsAuthoritativeForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
             portScope,
@@ -1119,6 +1121,7 @@ export class HubRequestExecutor implements RequestExecutor {
             maxAttempts,
             logicalRequestChainKey,
             routePoolForAttempt,
+            routePoolIsAuthoritative: routePoolIsAuthoritativeForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
             portScope,
@@ -1571,6 +1574,7 @@ export class HubRequestExecutor implements RequestExecutor {
             maxAttempts,
             logicalRequestChainKey,
             routePoolForAttempt,
+            routePoolIsAuthoritative: routePoolIsAuthoritativeForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
             excludedProviderKeys,
             portScope,

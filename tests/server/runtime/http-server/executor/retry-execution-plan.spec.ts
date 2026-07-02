@@ -265,6 +265,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       logicalRequestChainKey: 'req-stream-no-same-provider',
       logicalChainRetryLimitStageRequestId: 'req-stream-no-same-provider',
       routePool: ['asxs.crsa.gpt-5.5'],
+      routePoolIsAuthoritative: true,
       excludedProviderKeys,
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
@@ -318,6 +319,43 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       'minimax.key1.MiniMax-M3',
       'asxs.crsa.gpt-5.5'
     ]);
+  });
+
+  it('does not infer last provider from an observed current-only routePool', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
+      statusCode: 525,
+      code: 'HTTP_525',
+      upstreamCode: 'HTTP_525'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 525,
+        errorCode: 'HTTP_525',
+        upstreamCode: 'HTTP_525',
+        reason: 'HTTP 525: upstream SSL handshake failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'primary.key1.gpt-5.5',
+      runtimeKey: 'primary.key1',
+      logicalRequestChainKey: 'req-current-only-observed-pool',
+      logicalChainRetryLimitStageRequestId: 'req-current-only-observed-pool',
+      routePool: ['primary.key1.gpt-5.5'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      isStreamingRequest: true
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(Array.from(excludedProviderKeys)).toEqual(['primary.key1.gpt-5.5']);
   });
 
   it('does not treat a singleton observed priority routePool as the last provider when default pool remains available', async () => {
@@ -384,6 +422,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       logicalRequestChainKey: 'req-json-keeps-same-provider',
       logicalChainRetryLimitStageRequestId: 'req-json-keeps-same-provider',
       routePool: ['asxs.crsa.gpt-5.5'],
+      routePoolIsAuthoritative: true,
       excludedProviderKeys,
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
@@ -417,6 +456,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       logicalRequestChainKey: 'req-last-provider-sse-wrapper',
       logicalChainRetryLimitStageRequestId: 'req-last-provider-sse-wrapper',
       routePool: ['storm.a.glm-5'],
+      routePoolIsAuthoritative: true,
       excludedProviderKeys,
       recordAttempt: jest.fn(),
       logStage: jest.fn(),
