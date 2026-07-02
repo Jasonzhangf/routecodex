@@ -47,11 +47,7 @@ export async function runServertoolExecutionStage(args: {
         projectedToolCallId: projectedToolCall.id,
         base: args.baseObject
       });
-      return {
-        mode: branch.resultMode,
-        finalChatResponse: branch.chatResponse,
-        execution: branch.execution
-      };
+      return branch.result;
     }
     case 'continue_response_stage':
       break;

@@ -260,6 +260,11 @@ export interface ServertoolCliProjectionRuntimeBranchOutput {
   resultMode: 'tool_flow';
   chatResponse: JsonObject;
   execution: NativeServertoolExecutionSummary;
+  result: {
+    mode: 'tool_flow';
+    finalChatResponse: JsonObject;
+    execution: NativeServertoolExecutionSummary;
+  };
 }
 
 export interface NativeServertoolExecutionSummary {
@@ -1835,11 +1840,32 @@ export function buildServertoolCliProjectionRuntimeBranchWithNative(
   if (!execution || execution.flowId !== 'servertool_cli_projection') {
     throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid execution');
   }
+  if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid result');
+  }
+  const result = record.result as Record<string, unknown>;
+  if (result.mode !== 'tool_flow') {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid result mode');
+  }
+  if (!result.finalChatResponse || typeof result.finalChatResponse !== 'object' || Array.isArray(result.finalChatResponse)) {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid result finalChatResponse');
+  }
+  const resultExecution = result.execution as Record<string, unknown> | undefined;
+  if (!resultExecution || resultExecution.flowId !== 'servertool_cli_projection') {
+    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid result execution');
+  }
   return {
     resultMode: 'tool_flow',
     chatResponse: record.chatResponse as JsonObject,
     execution: {
       flowId: 'servertool_cli_projection'
+    },
+    result: {
+      mode: 'tool_flow',
+      finalChatResponse: result.finalChatResponse as JsonObject,
+      execution: {
+        flowId: 'servertool_cli_projection'
+      }
     }
   };
 }

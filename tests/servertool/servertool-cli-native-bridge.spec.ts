@@ -138,6 +138,11 @@ describe('servertool CLI native bridge', () => {
     expect(branch.execution).toEqual({
       flowId: 'servertool_cli_projection'
     });
+    expect(branch.result).toEqual({
+      mode: 'tool_flow',
+      finalChatResponse: branch.chatResponse,
+      execution: { flowId: 'servertool_cli_projection' }
+    });
     expect((branch.chatResponse as any).choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 

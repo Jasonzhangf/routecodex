@@ -67,7 +67,12 @@ describe('execution-stage-shell', () => {
     buildServertoolCliProjectionRuntimeBranchWithNative.mockReturnValue({
       resultMode: 'tool_flow',
       chatResponse: { cli: true },
-      execution: { flowId: 'servertool_cli_projection' }
+      execution: { flowId: 'servertool_cli_projection' },
+      result: {
+        mode: 'tool_flow',
+        finalChatResponse: { cli: true },
+        execution: { flowId: 'servertool_cli_projection' }
+      }
     });
   });
 
@@ -82,11 +87,12 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('prepareServertoolDispatchStage');
     expect(source).toContain('planServertoolExecutionBranchWithNative');
     expect(source).toContain('buildServertoolCliProjectionRuntimeBranchWithNative');
-    expect(source).toContain('mode: branch.resultMode');
+    expect(source).not.toContain('mode: branch.resultMode');
     expect(source).not.toContain('finalChatResponse: branch.chatResponse as JsonObject');
     expect(source).not.toContain('execution: branch.execution as {');
-    expect(source).toContain('finalChatResponse: branch.chatResponse');
-    expect(source).toContain('execution: branch.execution');
+    expect(source).not.toContain('finalChatResponse: branch.chatResponse');
+    expect(source).not.toContain('execution: branch.execution');
+    expect(source).toContain('return branch.result');
     expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('switch (preExecutionBranchPlan.action)');

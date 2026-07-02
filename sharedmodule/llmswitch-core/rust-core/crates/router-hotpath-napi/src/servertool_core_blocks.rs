@@ -70,6 +70,7 @@ struct ServertoolCliProjectionRuntimeBranchOutput {
     result_mode: String,
     chat_response: serde_json::Value,
     execution: serde_json::Value,
+    result: serde_json::Value,
 }
 
 /// Inspect a response payload and return the stop gateway context as JSON.
@@ -988,8 +989,13 @@ pub fn build_servertool_cli_projection_runtime_branch_json(
     .map_err(|e| e.to_string())?;
     let output = ServertoolCliProjectionRuntimeBranchOutput {
         result_mode: "tool_flow".to_string(),
-        chat_response,
-        execution,
+        chat_response: chat_response.clone(),
+        execution: execution.clone(),
+        result: serde_json::json!({
+            "mode": "tool_flow",
+            "finalChatResponse": chat_response,
+            "execution": execution,
+        }),
     };
     serde_json::to_string(&output)
         .map_err(|e| format!("serialize cli projection runtime branch: {e}"))

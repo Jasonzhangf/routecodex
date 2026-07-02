@@ -38,6 +38,10 @@ function attachProviderHandle(server: any, input: {
     providerFamily: input.providerFamily,
     providerId: input.providerId,
     providerProtocol: input.providerProtocol,
+    runtime: {
+      concurrency: { maxInFlight: 10 },
+      rpm: { requestsPerMinute: 100, acquireTimeoutMs: 5000 }
+    },
     instance: {
       processIncoming: jest.fn(input.processIncoming),
       initialize: jest.fn(),
@@ -70,7 +74,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         runtimeKey,
         processMode: 'chat'
       },
-      routingDecision: { routeName: 'default' },
+      routingDecision: { routeName: 'default', providerProtocol: 'openai-chat' },
       processMode: 'chat',
       metadata: {}
     }));
@@ -82,7 +86,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'deep',
       providerId: 'demo-web',
       providerProtocol: 'openai-chat',
-      processIncoming: async () => ({ status: 200, data: { ok: true } })
+      processIncoming: async () => ({ status: 200, data: { choices: [{ index: 0, message: { role: 'assistant', content: 'ok' } }], usage: { total_tokens: 0 } } }),
     });
 
     const result = await server['executePipeline']({
@@ -119,7 +123,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
             runtimeKey: 'runtime:B',
             processMode: 'chat'
           },
-          routingDecision: { routeName: 'coding' },
+          routingDecision: { routeName: 'coding', providerProtocol: 'gemini-chat' },
           processMode: 'chat',
           metadata: {}
         };
@@ -133,7 +137,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
           runtimeKey: 'runtime:A',
           processMode: 'chat'
         },
-        routingDecision: { routeName: 'coding' },
+        routingDecision: { routeName: 'coding', providerProtocol: 'gemini-chat' },
         processMode: 'chat',
         metadata: {}
       };
@@ -147,7 +151,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerId: 'antigravity',
       providerProtocol: 'gemini-chat',
       processIncoming: async () => {
-        throw Object.assign(new Error('HTTP 429'), { statusCode: 429 });
+        return { status: 429, data: { error: { message: 'rate limited' } } };
       }
     });
     attachProviderHandle(server, {
@@ -157,7 +161,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'gemini',
       providerId: 'tab',
       providerProtocol: 'gemini-chat',
-      processIncoming: async () => ({ status: 200, data: { ok: true } })
+      processIncoming: async () => ({ status: 200, data: { choices: [{ index: 0, message: { role: 'assistant', content: 'ok' } }], usage: { total_tokens: 0 } } }),
     });
 
     const result = await server['executePipeline']({
@@ -194,7 +198,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
             runtimeKey: 'runtime:B',
             processMode: 'standard'
           },
-          routingDecision: { routeName: 'coding' },
+          routingDecision: { routeName: 'coding', providerProtocol: 'openai-responses' },
           processMode: 'standard',
           metadata: {}
         };
@@ -208,7 +212,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
           runtimeKey: 'runtime:A',
           processMode: 'standard'
         },
-        routingDecision: { routeName: 'coding' },
+        routingDecision: { routeName: 'coding', providerProtocol: 'openai-responses' },
         processMode: 'standard',
         metadata: {}
       };
@@ -221,7 +225,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'openai',
       providerId: 'tab',
       providerProtocol: 'openai-responses',
-      processIncoming: async () => ({ status: 429, data: { error: { message: 'rate limited' } } })
+      processIncoming: async () => { return { status: 429, data: { error: { message: 'rate limited' } } }; }
     });
     attachProviderHandle(server, {
       providerKey: providerB,
@@ -230,7 +234,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'openai',
       providerId: 'tab',
       providerProtocol: 'openai-responses',
-      processIncoming: async () => ({ status: 200, data: { id: 'ok' } })
+      processIncoming: async () => ({ status: 200, data: { id: 'resp_ok', object: 'response', created_at: 1710000000, status: 'completed', model: 'test', output: [], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } } })
     });
 
     const result = await server['executePipeline']({
@@ -267,7 +271,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
             runtimeKey: 'runtime:B',
             processMode: 'standard'
           },
-          routingDecision: { routeName: 'longcontext' },
+          routingDecision: { routeName: 'longcontext', providerProtocol: 'openai-responses' },
           processMode: 'standard',
           metadata: {}
         };
@@ -281,7 +285,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
           runtimeKey: 'demo-web.1',
           processMode: 'standard'
         },
-        routingDecision: { routeName: 'longcontext' },
+        routingDecision: { routeName: 'longcontext', providerProtocol: 'openai-responses' },
         processMode: 'standard',
         metadata: {}
       };
@@ -295,7 +299,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'openai',
       providerId: 'crs',
       providerProtocol: 'openai-responses',
-      processIncoming: async () => ({ status: 200, data: { id: 'ok' } })
+      processIncoming: async () => ({ status: 200, data: { id: 'resp_ok', object: 'response', created_at: 1710000000, status: 'completed', model: 'test', output: [], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } } })
     });
 
     const result = await server['executePipeline']({
@@ -332,7 +336,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
             runtimeKey: 'runtime:B',
             processMode: 'standard'
           },
-          routingDecision: { routeName: 'longcontext' },
+          routingDecision: { routeName: 'longcontext', providerProtocol: 'openai-responses' },
           processMode: 'standard',
           metadata: {}
         };
@@ -346,7 +350,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
           runtimeKey: 'runtime:A',
           processMode: 'standard'
         },
-        routingDecision: { routeName: 'longcontext' },
+        routingDecision: { routeName: 'longcontext', providerProtocol: 'openai-responses' },
         processMode: 'standard',
         metadata: {}
       };
@@ -359,7 +363,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'deep',
       providerId: 'demo-web',
       providerProtocol: 'openai-responses',
-      processIncoming: async () => ({ status: 502, data: { error: { message: 'upstream bad gateway' } } })
+      processIncoming: async () => { return { status: 502, data: { error: { message: 'upstream bad gateway' } } }; }
     });
     attachProviderHandle(server, {
       providerKey: providerB,
@@ -368,7 +372,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'openai',
       providerId: 'crs',
       providerProtocol: 'openai-responses',
-      processIncoming: async () => ({ status: 200, data: { id: 'ok' } })
+      processIncoming: async () => ({ status: 200, data: { id: 'resp_ok', object: 'response', created_at: 1710000000, status: 'completed', model: 'test', output: [], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } } })
     });
 
     const result = await server['executePipeline']({
@@ -389,10 +393,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
     const providerA = 'glm.1-186.kimi-k2.5';
-    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
-      statusCode: 429,
-      code: 'HTTP_429'
-    });
+    const firstErrorResponse = { status: 429, data: { error: { message: 'quota exhausted' } } };
 
     const hubExecute = attachHubPipeline(server, async (input: any) => {
       const excluded = Array.isArray(input?.metadata?.excludedProviderKeys)
@@ -412,7 +413,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
           runtimeKey: 'runtime:A',
           processMode: 'chat'
         },
-        routingDecision: { routeName: 'direct' },
+        routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat' },
         processMode: 'chat',
         metadata: {}
       };
@@ -425,9 +426,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'glm',
       providerId: 'glm',
       providerProtocol: 'openai-chat',
-      processIncoming: async () => {
-        throw firstError;
-      }
+      processIncoming: async () => firstErrorResponse
     });
 
     await expect(server['executePipeline']({
@@ -451,10 +450,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
     const providerA = 'glm.key1.glm-4.7';
-    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
-      statusCode: 429,
-      code: 'HTTP_429'
-    });
+    const firstErrorResponse = { status: 429, data: { error: { message: 'quota exhausted' } } };
     let pipelineCallCount = 0;
 
     const hubExecute = attachHubPipeline(server, async () => {
@@ -473,7 +469,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
           runtimeKey: 'runtime:A',
           processMode: 'chat'
         },
-        routingDecision: { routeName: 'direct', pool: [providerA] },
+        routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat', pool: [providerA] },
         processMode: 'chat',
         metadata: {}
       };
@@ -486,9 +482,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'glm',
       providerId: 'glm',
       providerProtocol: 'openai-chat',
-      processIncoming: async () => {
-        throw firstError;
-      }
+      processIncoming: async () => firstErrorResponse
     });
 
     await expect(server['executePipeline']({

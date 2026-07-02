@@ -1,3 +1,10 @@
+# 2026-07-03: servertool execution-stage CLI projection result moved to Rust
+
+- Slice: `execution-stage-shell.ts` no longer constructs CLI projection engine result from `branch.resultMode`, `branch.chatResponse`, and `branch.execution`; NAPI `build_servertool_cli_projection_runtime_branch_json` now returns full `result`, and TS execution stage only returns `branch.result`.
+- Gate: `execution-stage-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, `servertool-cli-native-bridge.spec.ts`, and `verify-servertool-rust-only.mjs` forbid `mode: branch.resultMode`, `finalChatResponse: branch.chatResponse`, and `execution: branch.execution` in the execution-stage shell; they require `return branch.result`.
+- Evidence: Rust/NAPI focused `cargo test -p router-hotpath-napi servertool_cli_projection_runtime_branch --lib -- --nocapture` ran cleanly with 0 matching tests / 2069 filtered; native rebuild `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; focused Jest `execution-stage-shell + servertool-cli-native-bridge + servertool-active-orchestration-audit` PASS 83/83; `npm run verify:servertool-rust-only` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run verify:architecture-mainline-call-map` PASS; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this closes another Phase 1 servertool TS semantic residue only. Phase 1 still needs remaining servertool action switches classified/migrated before moving to full Hub Pipeline and VR closeout.
+
 # 2026-07-03: servertool response-stage finalize passthrough result moved to Rust
 
 - Slice: `response-stage-finalize-shell.ts` no longer constructs passthrough output with `mode: finalizeRuntimeAction.resultMode`; Rust `plan_servertool_response_stage_runtime_action` now accepts `baseObject` and returns `passthroughResult`, and TS finalize only applies that native result.

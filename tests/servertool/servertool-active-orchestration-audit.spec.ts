@@ -577,14 +577,15 @@ const TARGETS = [
       '继续执行本地 hook',
       "mode: 'tool_flow'",
       'finalChatResponse: branch.chatResponse as JsonObject',
+      'finalChatResponse: branch.chatResponse',
       'execution: branch.execution as {',
+      'execution: branch.execution',
+      'mode: branch.resultMode',
     ],
     required: [
       'buildServertoolCliProjectionRuntimeBranchWithNative({',
-      'mode: branch.resultMode',
       'const projectedToolCall = preExecutionBranchPlan.projectedToolCall',
-      'finalChatResponse: branch.chatResponse',
-      'execution: branch.execution',
+      'return branch.result',
     ],
   },
   {
