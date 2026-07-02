@@ -26,7 +26,7 @@ import {
 import {
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineTriggerObservationWithNative,
-  planServertoolEngineSkipWithNative,
+  resolveServertoolEngineSkipDecisionWithNative,
   resolveServertoolEngineOrchestrationPreflightDecisionWithNative,
   resolveServertoolTimeoutMsFromEnvCandidatesWithNative,
   planServertoolTimeoutErrorWithNative,
@@ -179,35 +179,27 @@ export async function runServerToolOrchestrationShell(
           )
       )
   });
-  const engineSkipPlan = planServertoolEngineSkipWithNative({
+  const engineSkipDecision = resolveServertoolEngineSkipDecisionWithNative({
     engineMode: engineResult.mode,
     hasExecution: engineResult.execution != null,
     finalChatResponse: engineResult.finalChatResponse
   });
-  switch (engineSkipPlan.action) {
-    case 'return_skipped_passthrough':
-    case 'return_skipped_no_execution': {
-      const skipReason = engineSkipPlan.skipReason;
-      runTriggerObservationPlan({
-        stopSignal,
-        result: engineSkipPlan.triggerResult,
-        logStopEntry,
-        logStopCompare
-      });
-      recordServertoolEngineMatchSkipped({
-        requestId: options.requestId,
-        entryEndpoint: options.entryEndpoint,
-        engineMode: engineResult.mode,
-        skipReason,
-        stageRecorder: options.stageRecorder,
-        adapterContext: options.adapterContext
-      });
-      return engineSkipPlan.shellResult;
-    }
-    case 'continue_matched_flow':
-      break;
-    default:
-      throw new Error('[servertool] invalid engine skip action');
+  if (engineSkipDecision.action === 'return_skipped') {
+    runTriggerObservationPlan({
+      stopSignal,
+      result: engineSkipDecision.triggerResult,
+      logStopEntry,
+      logStopCompare
+    });
+    recordServertoolEngineMatchSkipped({
+      requestId: options.requestId,
+      entryEndpoint: options.entryEndpoint,
+      engineMode: engineResult.mode,
+      skipReason: engineSkipDecision.skipReason,
+      stageRecorder: options.stageRecorder,
+      adapterContext: options.adapterContext
+    });
+    return engineSkipDecision.shellResult;
   }
 
   const flowId = recordServertoolEngineMatchHit({

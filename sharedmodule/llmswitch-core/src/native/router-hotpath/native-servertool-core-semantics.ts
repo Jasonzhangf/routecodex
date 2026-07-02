@@ -434,6 +434,20 @@ export type ServertoolEngineSkipPlan =
       action: 'continue_matched_flow';
     };
 
+export type ServertoolEngineSkipDecision =
+  | {
+      action: 'return_skipped';
+      skipReason: string;
+      triggerResult: string;
+      shellResult: {
+        chat: JsonObject;
+        executed: false;
+      };
+    }
+  | {
+      action: 'continue_matched_flow';
+    };
+
 export interface ServertoolExecutionOutcomeRuntimeActionPlan {
   action:
     | 'invalid_mixed_client_tools_outcome'
@@ -2962,6 +2976,30 @@ export function planServertoolEngineSkipWithNative(input: {
   return {
     action: record.action
   };
+}
+
+export function resolveServertoolEngineSkipDecisionWithNative(input: {
+  engineMode: string;
+  hasExecution: boolean;
+  finalChatResponse: JsonObject;
+}): ServertoolEngineSkipDecision {
+  const plan = planServertoolEngineSkipWithNative(input);
+  switch (plan.action) {
+    case 'return_skipped_passthrough':
+    case 'return_skipped_no_execution':
+      return {
+        action: 'return_skipped',
+        skipReason: plan.skipReason,
+        triggerResult: plan.triggerResult,
+        shellResult: plan.shellResult
+      };
+    case 'continue_matched_flow':
+      return {
+        action: 'continue_matched_flow'
+      };
+    default:
+      throw new Error('[servertool] invalid engine skip action');
+  }
 }
 
 export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {

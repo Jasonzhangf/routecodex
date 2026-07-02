@@ -117,8 +117,8 @@ describe('engine stopless session thin-shell guard', () => {
       'utf8'
     );
 
-    expect(source).toContain('planServertoolEngineSkipWithNative');
-    expect(source).toContain('switch (engineSkipPlan.action)');
+    expect(source).toContain('resolveServertoolEngineSkipDecisionWithNative');
+    expect(source).not.toContain('switch (engineSkipPlan.action)');
     expect(source).not.toContain('const engineSkipAction = engineSkipPlan.action as');
     expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_passthrough' ||");
     expect(source).not.toContain("engineSkipPlan.action === 'return_skipped_no_execution'");

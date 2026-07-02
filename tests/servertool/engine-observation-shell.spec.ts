@@ -125,7 +125,7 @@ describe('engine-observation-shell', () => {
     expect(orchestrationSource).not.toContain('engineSkipPlan.skipReason.trim()');
     expect(orchestrationSource).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
     expect(orchestrationSource).not.toContain('engineSkipPlan.skipReason as string');
-    expect(orchestrationSource).toContain('const skipReason = engineSkipPlan.skipReason;');
+    expect(orchestrationSource).toContain('skipReason: engineSkipDecision.skipReason');
     mod.recordServertoolEngineMatchSkipped({
       requestId: 'req-match-skip-native-reason',
       entryEndpoint: '/v1/chat/completions',
@@ -351,8 +351,8 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('resolveServertoolEngineOrchestrationPreflightDecisionWithNative({');
     expect(source).not.toContain('switch (preflightOrchestrationAction.action)');
     expect(source).not.toContain('String(preflightOrchestrationAction.action)');
-    expect(source).toContain('planServertoolEngineSkipWithNative({');
-    expect(source).toContain('switch (engineSkipPlan.action)');
+    expect(source).toContain('resolveServertoolEngineSkipDecisionWithNative({');
+    expect(source).not.toContain('switch (engineSkipPlan.action)');
     expect(source).not.toContain('hasServertoolCliProjectionContext:');
     expect(source).toContain('stoplessExecutionFlowId:');
     expect(source).not.toContain('const engineSkipAction = engineSkipPlan.action as');
@@ -368,9 +368,9 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('finalChatResponse: engineResult.finalChatResponse');
     expect(source).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
     expect(source).not.toContain('engineSkipPlan.skipReason as string');
-    expect(source).toContain('const skipReason = engineSkipPlan.skipReason;');
-    expect(source).toContain('result: engineSkipPlan.triggerResult');
-    expect(source).toContain('return engineSkipPlan.shellResult;');
+    expect(source).toContain('skipReason: engineSkipDecision.skipReason');
+    expect(source).toContain('result: engineSkipDecision.triggerResult');
+    expect(source).toContain('return engineSkipDecision.shellResult;');
     expect(source).not.toContain('result: `skipped_${skipReason}`');
     expect(source).toContain('planServertoolTimeoutErrorWithNative({');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan(');

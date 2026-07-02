@@ -1,3 +1,10 @@
+# 2026-07-03: servertool engine skip action switch moved to native helper
+
+- Slice: `engine-orchestration-shell.ts` no longer switches over `engineSkipPlan.action` or reads `engineSkipPlan.triggerResult/shellResult` directly in the active shell. TS now calls `resolveServertoolEngineSkipDecisionWithNative()` and only applies the returned skip decision by running trigger observation IO, recording match-skipped IO, or continuing the matched-flow path.
+- Gate: `engine-observation-shell.spec.ts`, `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the old `switch (engineSkipPlan.action)` / direct `engineSkipPlan.*` active-shell markers and require the native decision helper path.
+- Evidence: sharedmodule tsc PASS; focused Jest `engine-observation-shell + engine.stopless-session-thin-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 92/92; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS.
+- Remaining gap: this closes one Phase 1 engine skip TS switch slice only. Remaining Phase 1 residues still include auto-hook caller action switches, execution queue/stage action switches, MetadataCenter carrier/object mutation casts, and response-stage shell result application classification; Hub Pipeline/VR/live closeout remain open.
+
 # 2026-07-03: servertool engine orchestration preflight switch moved to native helper
 
 - Slice: `engine-orchestration-shell.ts` no longer switches over `preflightOrchestrationAction.action` or validates the preflight action shape locally. TS now calls `resolveServertoolEngineOrchestrationPreflightDecisionWithNative()` and only applies the native decision by returning the preflight chat or forwarding the native stop signal into the engine path.
