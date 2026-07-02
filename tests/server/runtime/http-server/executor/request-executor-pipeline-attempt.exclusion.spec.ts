@@ -3,7 +3,7 @@ import { __requestExecutorTestables } from '../../../../../src/server/runtime/ht
 const { resolveRequestExecutorPipelineAttempt } = __requestExecutorTestables;
 
 describe('resolveRequestExecutorPipelineAttempt excluded provider guard', () => {
-  it('does not delete an excluded provider when VR reselects it without an alternative', () => {
+  it('fails fast when VR reselects an excluded provider without an alternative', () => {
     const providerKey = 'primary.key1.gpt-5.5';
     const excludedProviderKeys = new Set<string>([providerKey]);
     const lastError = Object.assign(new Error('HTTP 502: upstream failed'), {
@@ -48,7 +48,7 @@ describe('resolveRequestExecutorPipelineAttempt excluded provider guard', () => 
       }),
       hubStartedAtMs: Date.now(),
       pipelineLabel: 'hub.pipeline'
-    })).toThrow(lastError);
+    })).toThrow('Virtual router reselected excluded provider primary.key1.gpt-5.5');
 
     expect(Array.from(excludedProviderKeys)).toEqual([providerKey]);
   });

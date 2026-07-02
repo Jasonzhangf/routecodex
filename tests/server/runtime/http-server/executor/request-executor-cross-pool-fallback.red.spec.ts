@@ -54,7 +54,7 @@ describe('request-executor cross-pool fallback red', () => {
     }));
   });
 
-  it('NEG: fails fast instead of inventing fallback chain when explicit routePool is absent', async () => {
+  it('NEG: fails fast instead of surfacing upstream error when an excluded provider is reselected', async () => {
     const { __requestExecutorTestables } = await import('../../../../../src/server/runtime/http-server/request-executor.js');
 
     expect(() => __requestExecutorTestables.resolveRequestExecutorPipelineAttempt({
@@ -92,6 +92,6 @@ describe('request-executor cross-pool fallback red', () => {
       extractRetryErrorSnapshot: __requestExecutorTestables.extractRetryErrorSnapshot,
       hubStartedAtMs: Date.now() - 10,
       pipelineLabel: 'hub'
-    })).toThrow(/ERR_EXCLUDED_PROVIDER_RESELECTED_MISSING_ROUTE_POOL|without explicit routePool/);
+    })).toThrow(/Virtual router reselected excluded provider minimax\.key1\.MiniMax-M3/);
   });
 });

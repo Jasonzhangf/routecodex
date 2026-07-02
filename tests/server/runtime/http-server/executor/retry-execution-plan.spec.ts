@@ -278,6 +278,48 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
+  it('does not treat a narrowed current-only priority routePool as the last provider after prior exclusions', async () => {
+    const excludedProviderKeys = new Set<string>(['minimax.key1.MiniMax-M3']);
+    const error = Object.assign(new Error('HTTP 502: upstream failed'), {
+      statusCode: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: upstream failed'
+      },
+      attempt: 2,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'asxs.crsa.gpt-5.5',
+      runtimeKey: 'asxs.crsa',
+      logicalRequestChainKey: 'req-priority-narrowed-current-only',
+      logicalChainRetryLimitStageRequestId: 'req-priority-narrowed-current-only',
+      routePool: ['asxs.crsa.gpt-5.5'],
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      isStreamingRequest: true
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(plan.policyExhausted).toBe(false);
+    expect(plan.mayProject).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([
+      'minimax.key1.MiniMax-M3',
+      'asxs.crsa.gpt-5.5'
+    ]);
+  });
+
   it('does not treat a singleton observed priority routePool as the last provider when default pool remains available', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 502: upstream failed'), {

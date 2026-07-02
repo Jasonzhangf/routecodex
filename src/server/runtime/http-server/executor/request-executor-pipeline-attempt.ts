@@ -231,13 +231,11 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       hasAlternativeCandidate
     });
     if (!hasAlternativeCandidate) {
-      if (args.lastError) {
-        throw args.lastError;
-      }
       throw Object.assign(new Error(`Virtual router reselected excluded provider ${target.providerKey}`), {
         code: 'ERR_EXCLUDED_PROVIDER_RESELECTED',
         requestId: args.inputRequestId,
-        providerKey: target.providerKey
+        providerKey: target.providerKey,
+        cause: args.lastError
       });
     }
     return {

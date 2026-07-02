@@ -77,7 +77,7 @@ type RuntimeManager = {
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 
-function isExplicitCurrentOnlyRoutePool(args: {
+function isCurrentOnlyRoutePool(args: {
   providerKey?: string;
   routePool?: string[];
 }): boolean {
@@ -86,6 +86,35 @@ function isExplicitCurrentOnlyRoutePool(args: {
     return false;
   }
   return args.routePool.every((candidate) => readString(candidate) === providerKey);
+}
+
+function isAuthoritativeLastProviderRoutePool(args: {
+  providerKey?: string;
+  routePool?: string[];
+  excludedProviderKeys: Set<string>;
+}): boolean {
+  const providerKey = readString(args.providerKey);
+  if (!providerKey || !Array.isArray(args.routePool) || args.routePool.length === 0) {
+    return false;
+  }
+  let sawCurrentProvider = false;
+  let sawExcludedPeer = false;
+  for (const candidate of args.routePool) {
+    const normalized = readString(candidate);
+    if (!normalized) {
+      continue;
+    }
+    if (normalized === providerKey) {
+      sawCurrentProvider = true;
+      continue;
+    }
+    if (args.excludedProviderKeys.has(normalized)) {
+      sawExcludedPeer = true;
+      continue;
+    }
+    return false;
+  }
+  return sawCurrentProvider && (args.excludedProviderKeys.size === 0 || sawExcludedPeer);
 }
 
 function isLastProviderRetryEligibleStage(stage?: RequestExecutorProviderErrorStage): boolean {
@@ -178,21 +207,39 @@ export async function resolveProviderRetryExecutionPlan(args: {
     promptTooLong: args.promptTooLong === true,
     existingExclusion: baseExclusionPlan.excludedCurrentProvider,
   });
-  const explicitCurrentOnlyRoutePool = isExplicitCurrentOnlyRoutePool({
+  const currentOnlyRoutePool = isCurrentOnlyRoutePool({
     providerKey: args.providerKey,
     routePool: args.routePool
   });
-  const suppressCurrentOnlyExclusion =
-    explicitCurrentOnlyRoutePool
+  const authoritativeLastProviderRoutePool = isAuthoritativeLastProviderRoutePool({
+    providerKey: args.providerKey,
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys
+  });
+  const mayRetryVerifiedLastProvider =
+    authoritativeLastProviderRoutePool
     && args.defaultTierAvailable !== true
     && args.promptTooLong !== true
     && args.providerOwnedContinuation !== true
     && args.attempt < args.maxAttempts
     && isLastProviderRetryEligibleStage(args.stage)
     && retryActionPlan.shouldRetry;
+  const forceSwitchFromNarrowedCurrentOnlyPool =
+    currentOnlyRoutePool
+    && !authoritativeLastProviderRoutePool
+    && args.excludedProviderKeys.size > 0
+    && args.promptTooLong !== true
+    && args.providerOwnedContinuation !== true
+    && args.attempt < args.maxAttempts
+    && isLastProviderRetryEligibleStage(args.stage)
+    && retryActionPlan.shouldRetry;
   const exclusionPlan = (
-    (nativeExecutionPolicy.excludeCurrentProvider || baseExclusionPlan.excludedCurrentProvider)
-    && !suppressCurrentOnlyExclusion
+    (
+      nativeExecutionPolicy.excludeCurrentProvider
+      || baseExclusionPlan.excludedCurrentProvider
+      || forceSwitchFromNarrowedCurrentOnlyPool
+    )
+    && !mayRetryVerifiedLastProvider
   )
       ? {
           excludedCurrentProvider: args.providerKey ? (args.excludedProviderKeys.add(args.providerKey), true) : baseExclusionPlan.excludedCurrentProvider
@@ -222,6 +269,29 @@ export async function resolveProviderRetryExecutionPlan(args: {
   });
   const maySwitchToAlternativeProvider = hasAlternativeCandidate && exclusionPlan.excludedCurrentProvider;
   if (!hasAlternativeCandidate) {
+    if (forceSwitchFromNarrowedCurrentOnlyPool && args.providerKey) {
+      const narrowedPoolGate = resolveProviderRetryExecutionPlanExhaustionGate({
+        routePool: args.routePool,
+        excludedProviderKeys: args.excludedProviderKeys,
+        defaultPoolAvailable: args.defaultTierAvailable === true,
+      });
+      const retrySwitchPlan = {
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'exclude_and_reroute',
+        runtimeScopeExcluded: [],
+        runtimeScopeExcludedCount: 0
+      } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
+      return {
+        shouldRetry: true,
+        excludedCurrentProvider: true,
+        retrySwitchPlan,
+        retryExecutionPolicyReason: nativeExecutionPolicy.reason,
+        routePoolRemainingAfterExclusion: narrowedPoolGate.routePoolRemainingAfterExclusion,
+        defaultPoolAvailable: narrowedPoolGate.defaultPoolAvailable,
+        policyExhausted: false,
+        mayProject: false,
+      };
+    }
     if (
       args.promptTooLong === true
       && retryActionPlan.shouldRetry
@@ -280,7 +350,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
         mayProject: defaultPoolGate.mayProject,
       };
     }
-    if (suppressCurrentOnlyExclusion) {
+    if (mayRetryVerifiedLastProvider) {
       return {
         shouldRetry: true,
         excludedCurrentProvider: false,
