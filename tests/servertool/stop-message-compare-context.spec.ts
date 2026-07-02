@@ -73,6 +73,10 @@ describe('servertool stop-message compare context', () => {
     expect(source).toContain("requestTruth != null && typeof requestTruth === 'object'");
     expect(source).not.toContain("providerObservation && typeof providerObservation === 'object'");
     expect(source).toContain("providerObservation != null && typeof providerObservation === 'object'");
+    expect(source).not.toContain('metadata: adapterContext as Record<string, unknown>');
+    expect(source).not.toContain('readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as Record<string, unknown>)');
+    expect(source).toContain('metadata: adapterContext,');
+    expect(source).toContain('readRuntimeControlFromAnyBoundMetadataCenter(adapterContext)');
   });
 
   test('reads MetadataCenter runtime_control compare context through native normalization', () => {

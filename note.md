@@ -1,3 +1,10 @@
+# 2026-07-03: servertool MetadataCenter carrier external casts removed
+
+- Slice: `metadata-center-carrier.ts` now accepts `unknown` in `writeRuntimeControlToBoundMetadataCenter()` and performs object-carrier narrowing/fail-fast internally. `attachStopGatewayContext()`, `attachStopMessageCompareContext()`, and `readStopMessageCompareContext()` no longer cast `adapterContext` to `Record<string, unknown>` before MetadataCenter read/write; TS only passes the carrier through.
+- Gate: `stop-gateway-context.spec.ts`, `stop-message-compare-context.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old external cast markers (`metadata: adapterContext as ...`, `readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as ...)`) and require direct carrier pass-through.
+- Evidence: focused Jest `stop-gateway-context + stop-message-compare-context + servertool-active-orchestration-audit` PASS 59/59; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this is one Phase 1 servertool MetadataCenter carrier slice only. Phase 1 still requires remaining native action switches/casts classification, and full goal still requires Hub Pipeline, Virtual Router, aggregate build, and live/replay validation.
+
 # 2026-07-03: servertool auto-hook finalization errors surfaced through NAPI
 
 - Slice: `plan_auto_hook_caller_finalization_json` now propagates Rust finalization/projection errors with `?` instead of serializing a `Result`-shaped value as if it were a valid plan. This keeps malformed auto-hook queue result payloads fail-fast across the NAPI bridge.

@@ -93,14 +93,21 @@ function writeMetadataCenterSlot(args: {
 }
 
 export function writeRuntimeControlToBoundMetadataCenter(args: {
-  metadata: Record<string, unknown>;
+  metadata: unknown;
   key: string;
   value: unknown;
   writer: RuntimeControlWriter;
   reason?: string;
   required?: boolean;
 }): void {
-  const bound = readBoundMetadataCenterTarget(args.metadata);
+  const metadata = asRecord(args.metadata);
+  if (!metadata) {
+    if (args.required) {
+      throw new Error(`MetadataCenter runtime_control.${args.key} writer requires object carrier`);
+    }
+    return;
+  }
+  const bound = readBoundMetadataCenterTarget(metadata);
   if (!bound) {
     if (args.required) {
       throw new Error(`MetadataCenter runtime_control.${args.key} writer requires a bound MetadataCenter`);
@@ -241,7 +248,7 @@ export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
 
 export function attachStopGatewayContext(adapterContext: AdapterContext, context: StopGatewayContext): void {
   writeRuntimeControlToBoundMetadataCenter({
-    metadata: adapterContext as unknown as Record<string, unknown>,
+    metadata: adapterContext,
     key: 'stopGatewayContext',
     value: {
       observed: context.observed,
@@ -265,11 +272,8 @@ export function attachStopMessageCompareContext(
   if (!normalized) {
     throw new Error('invalid stop-message compare context');
   }
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    throw new Error('MetadataCenter runtime_control.stopMessageCompareContext writer requires object carrier');
-  }
   writeRuntimeControlToBoundMetadataCenter({
-    metadata: adapterContext as Record<string, unknown>,
+    metadata: adapterContext,
     key: STOP_MESSAGE_COMPARE_KEY,
     value: { ...normalized } as JsonObject,
     writer: STOP_MESSAGE_COMPARE_WRITER,
@@ -279,10 +283,7 @@ export function attachStopMessageCompareContext(
 }
 
 export function readStopMessageCompareContext(adapterContext: unknown): StopMessageCompareContext | undefined {
-  if (!adapterContext || typeof adapterContext !== 'object' || Array.isArray(adapterContext)) {
-    return undefined;
-  }
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as Record<string, unknown>);
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext);
   const raw = runtimeControl?.[STOP_MESSAGE_COMPARE_KEY];
   return normalizeStopMessageCompareContextWithNative(raw);
 }

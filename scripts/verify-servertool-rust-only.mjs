@@ -2238,6 +2238,7 @@ function checkStopGatewayContextRustOwner() {
     "runtimeControl && typeof runtimeControl === 'object'",
     "requestTruth && typeof requestTruth === 'object'",
     "providerObservation && typeof providerObservation === 'object'",
+    'metadata: adapterContext as unknown as Record<string, unknown>',
   ]) {
     if (metadataCenterCarrier.includes(keyword)) {
       fail(
@@ -2360,6 +2361,8 @@ function checkStopMessageCompareContextRustOwner() {
     'ensureRuntimeMetadata',
     'readRuntimeMetadata',
     '.__rt',
+    'metadata: adapterContext as Record<string, unknown>',
+    'readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as Record<string, unknown>)',
   ]) {
     if (metadataCenterCarrier.includes(keyword)) {
       fail(
