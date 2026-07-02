@@ -7,6 +7,7 @@ import {
   isNativeDisabledByEnv
 } from '../../../native/router-hotpath/native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from '../../../native/router-hotpath/native-router-hotpath.js';
+import { isAllowedEventType } from '../shared/sse-event-validator.js';
 
 export interface SseParserConfig {
   enableStrictValidation: boolean;
@@ -23,64 +24,10 @@ export interface SseParseResult {
 }
 
 export const DEFAULT_SSE_PARSER_CONFIG: SseParserConfig = {
-  enableStrictValidation: true,
+  enableStrictValidation: false,
   enableEventRecovery: false,
   maxEventSize: 1024 * 1024,
-  allowedEventTypes: new Set([
-    'chunk',
-    'done',
-    'error',
-    'heartbeat',
-    'message',
-
-    'response.created',
-    'response.in_progress',
-    'response.failed',
-    'response.incomplete',
-    'response.output_item.added',
-    'response.content_part.added',
-    'response.output_text.delta',
-    'response.output_text.done',
-    'response.reasoning_text.delta',
-    'response.reasoning_text.done',
-    'response.reasoning_signature.delta',
-    'response.reasoning_image.delta',
-    'response.reasoning_summary_part.added',
-    'response.reasoning_summary_part.done',
-    'response.reasoning_summary_text.delta',
-    'response.reasoning_summary_text.done',
-    'response.content_part.done',
-    'response.output_item.done',
-    'response.function_call_arguments.delta',
-    'response.function_call_arguments.done',
-    'response.required_action',
-    'response.completed',
-    'response.done',
-    'response.error',
-    'response.cancelled',
-
-    'response.start',
-    'output_item.start',
-    'content_part.start',
-    'content_part.delta',
-    'function_call.start',
-    'function_call.delta',
-    'function_call.done',
-    'reasoning.start',
-    'reasoning.delta',
-    'reasoning.done',
-    'required_action',
-
-    'message_start',
-    'content_block_start',
-    'content_block_delta',
-    'content_block_stop',
-    'message_delta',
-    'message_stop',
-
-    'gemini.data',
-    'gemini.done'
-  ])
+  allowedEventTypes: new Set<string>()
 };
 
 export interface RawSseEvent {
@@ -94,6 +41,24 @@ export interface RawSseEvent {
 interface SseStreamChunkNativeResult {
   events: SseParseResult[];
   remainingBuffer: string;
+}
+
+function applyEventTypeValidation(
+  result: SseParseResult,
+  config: SseParserConfig
+): SseParseResult {
+  const eventType = result.event?.event;
+  if (!result.success || typeof eventType !== 'string') {
+    return result;
+  }
+  if (isAllowedEventType(eventType, Array.from(config.allowedEventTypes), config.enableStrictValidation)) {
+    return result;
+  }
+  return {
+    success: false,
+    rawData: result.rawData,
+    error: `Invalid event type: ${eventType}`
+  };
 }
 
 function formatParserErrorReason(error: unknown): string {
@@ -195,12 +160,12 @@ function parseSseEventWithNative(
       return fail('invalid payload');
     }
     const row = parsed as Record<string, unknown>;
-    return {
+    return applyEventTypeValidation({
       success: row.success === true,
       rawData: typeof row.rawData === 'string' ? row.rawData : sseText,
       event: (row.event as BaseSseEvent | undefined) ?? undefined,
       error: typeof row.error === 'string' ? row.error : undefined
-    };
+    }, config);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
@@ -244,12 +209,12 @@ function parseSseStreamWithNative(
       const row = item && typeof item === 'object' && !Array.isArray(item)
         ? item as Record<string, unknown>
         : {};
-      return {
+      return applyEventTypeValidation({
         success: row.success === true,
         rawData: typeof row.rawData === 'string' ? row.rawData : '',
         event: (row.event as BaseSseEvent | undefined) ?? undefined,
         error: typeof row.error === 'string' ? row.error : undefined
-      };
+      }, config);
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
@@ -297,12 +262,12 @@ function parseSseStreamChunkWithNative(
       const entry = item && typeof item === 'object' && !Array.isArray(item)
         ? item as Record<string, unknown>
         : {};
-      return {
+      return applyEventTypeValidation({
         success: entry.success === true,
         rawData: typeof entry.rawData === 'string' ? entry.rawData : '',
         event: (entry.event as BaseSseEvent | undefined) ?? undefined,
         error: typeof entry.error === 'string' ? entry.error : undefined
-      };
+      }, config);
     });
     return {
       events,

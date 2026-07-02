@@ -194,6 +194,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     return {
       shouldRetry: false,
       excludedCurrentProvider: false,
+      blockedByProtocolBoundary: true,
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
       defaultPoolAvailable: gate.defaultPoolAvailable,
       policyExhausted: gate.policyExhausted,

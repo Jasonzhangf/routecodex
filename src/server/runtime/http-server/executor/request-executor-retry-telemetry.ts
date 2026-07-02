@@ -53,6 +53,8 @@ export function buildProviderRetryTelemetryPlan(args: {
     errorCode: args.retryError.errorCode,
     upstreamCode: args.retryError.upstreamCode,
     upstreamStatus: args.retryError.upstreamStatus,
+    catalogCode: args.retryError.catalogCode,
+    catalogKey: args.retryError.catalogKey,
     switchAction: retrySwitchPlan.switchAction,
     decisionLabel: retrySwitchPlan.decisionLabel,
     retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
@@ -71,6 +73,8 @@ export function buildProviderRetryTelemetryPlan(args: {
     ...(args.retryError.errorCode ? { errorCode: args.retryError.errorCode } : {}),
     ...(args.retryError.upstreamCode ? { upstreamCode: args.retryError.upstreamCode } : {}),
     ...(typeof args.retryError.upstreamStatus === 'number' ? { upstreamStatus: args.retryError.upstreamStatus } : {}),
+    ...(args.retryError.catalogCode ? { catalogCode: args.retryError.catalogCode } : {}),
+    ...(args.retryError.catalogKey ? { catalogKey: args.retryError.catalogKey } : {}),
     decisionLabel: retrySwitchPlan.decisionLabel,
     retryExecutionPolicyReason: args.retryExecutionPlan.retryExecutionPolicyReason,
     ...(retrySwitchPlan.runtimeScopeExcludedCount > 0

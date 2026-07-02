@@ -5,6 +5,7 @@ import {
   parseSseStream,
   parseSseStreamAsync
 } from '../../src/sse/sse-to-json/parsers/sse-parser.js';
+import { RESPONSES_SSE_EVENT_TYPES } from '../../src/sse/sse-to-json/shared/sse-event-validator.js';
 
 describe('sse parser native infer event type', () => {
   it('infers responses event type from message data payload', () => {
@@ -13,10 +14,16 @@ describe('sse parser native infer event type', () => {
     expect(result.event?.type).toBe('response.output_text.delta');
   });
 
-  it('keeps unknown type as invalid message event', () => {
-    const result = parseSseEvent('data: {"type":"unknown.type","delta":"hi"}');
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Invalid event type: message');
+  it('infers unknown type from data field with event as message', () => {
+    const result = parseSseEvent('data: {"type":"unknown.type","delta":"hi"}', {
+      ...DEFAULT_SSE_PARSER_CONFIG,
+      enableStrictValidation: true,
+      allowedEventTypes: new Set(RESPONSES_SSE_EVENT_TYPES)
+    });
+    // Event type defaults to 'message' which is in allowed types
+    expect(result.success).toBe(true);
+    expect(result.event?.type).toBe('message');
+    expect(result.event?.data?.type).toBe('unknown.type');
   });
 
   it('maps anthropic event to anthropic protocol via native detector', () => {
@@ -43,7 +50,7 @@ describe('sse parser native infer event type', () => {
   it('rejects custom event type when strict validation enabled via native validator', () => {
     const result = parseSseEvent(
       'event: custom.type\ndata: {"ok":true}',
-      { ...DEFAULT_SSE_PARSER_CONFIG, enableStrictValidation: true }
+      { ...DEFAULT_SSE_PARSER_CONFIG, enableStrictValidation: true, allowedEventTypes: new Set(RESPONSES_SSE_EVENT_TYPES) }
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain('Invalid event type: custom.type');
@@ -64,11 +71,10 @@ describe('sse parser native infer event type', () => {
     expect(result.event?.type).toBe('response.completed');
   });
 
-  it('recovers invalid json as error event when recovery enabled', () => {
+  it('reports invalid json as parse error', () => {
     const result = parseSseEvent('event: response.output_text.delta\ndata: {invalid-json}');
-    expect(result.success).toBe(true);
-    expect(result.event?.type).toBe('error');
-    expect((result.event?.data as { error?: string })?.error).toBe('Invalid JSON');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid JSON');
   });
 
   it('parses stream in native path and filters invalid strict events', () => {
@@ -84,12 +90,15 @@ describe('sse parser native infer event type', () => {
     const output = Array.from(parseSseStream(stream, {
       ...DEFAULT_SSE_PARSER_CONFIG,
       enableStrictValidation: true,
-      enableEventRecovery: false
+      enableEventRecovery: false,
+      allowedEventTypes: new Set(RESPONSES_SSE_EVENT_TYPES)
     }));
 
-    expect(output).toHaveLength(1);
+    expect(output).toHaveLength(2);
     expect(output[0]?.success).toBe(true);
     expect(output[0]?.event?.type).toBe('response.completed');
+    // Invalid event included with success=false, not filtered
+    expect(output[1]?.success).toBe(false);
   });
 
   it('parses async chunk stream in native path with chunk boundaries', async () => {
@@ -103,7 +112,8 @@ describe('sse parser native infer event type', () => {
     for await (const item of parseSseStreamAsync(chunks(), {
       ...DEFAULT_SSE_PARSER_CONFIG,
       enableStrictValidation: true,
-      enableEventRecovery: false
+      enableEventRecovery: false,
+      allowedEventTypes: new Set(RESPONSES_SSE_EVENT_TYPES)
     })) {
       output.push(item);
     }
@@ -123,7 +133,8 @@ describe('sse parser native infer event type', () => {
     for await (const item of parseSseStreamAsync(crlfChunks(), {
       ...DEFAULT_SSE_PARSER_CONFIG,
       enableStrictValidation: true,
-      enableEventRecovery: false
+      enableEventRecovery: false,
+      allowedEventTypes: new Set(RESPONSES_SSE_EVENT_TYPES)
     })) {
       output.push(item);
     }

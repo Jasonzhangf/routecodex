@@ -87,3 +87,65 @@ export function buildGeminiSseEventSequenceWithNative(input: {
     throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
   }
 }
+
+function parseNativeGeminiDecodeResponse(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    const row = parsed as Record<string, unknown>;
+    if (!Array.isArray(row.candidates)) {
+      return null;
+    }
+    return row;
+  } catch {
+    return null;
+  }
+}
+
+export function buildGeminiJsonFromSseWithNative(input: {
+  bodyText: string;
+  requestId: string;
+  model?: string;
+  config?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const capability = 'buildGeminiJsonFromSseJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      body_text: input.bodyText,
+      request_id: input.requestId,
+      ...(input.model ? { model: input.model } : {}),
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Gemini SSE decode result');
+    }
+    const parsed = parseNativeGeminiDecodeResponse(raw);
+    if (!parsed) {
+      return fail('invalid Gemini SSE decode result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}

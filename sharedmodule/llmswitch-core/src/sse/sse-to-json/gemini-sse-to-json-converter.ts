@@ -1,20 +1,11 @@
 // feature_id: sse.anthropic_gemini_stream_projection
 import type {
   GeminiResponse,
-  GeminiCandidate,
-  GeminiContentPart,
-  GeminiSseEvent,
   SseToGeminiJsonOptions,
   SseToGeminiJsonContext
 } from '../types/index.js';
 import { ErrorUtils } from '../shared/utils.js';
-import { dispatchReasoning } from '../shared/reasoning-dispatcher.js';
-import { createSseParser } from './parsers/sse-parser.js';
-
-type CandidateAccumulator = {
-  role: string;
-  parts: GeminiContentPart[];
-};
+import { buildGeminiJsonFromSseWithNative } from '../../native/router-hotpath/native-gemini-sse-event-payload.js';
 
 export class GeminiSseToJsonConverter {
   private contexts = new Map<string, SseToGeminiJsonContext>();
@@ -26,43 +17,17 @@ export class GeminiSseToJsonConverter {
     const context = this.createContext(options);
     this.contexts.set(options.requestId, context);
 
-    const parser = createSseParser({
-      enableStrictValidation: true,
-      enableEventRecovery: false,
-      allowedEventTypes: new Set([
-        'gemini.data',
-        'gemini.done'
-      ])
-    });
-
-    const accumulator = new Map<number, CandidateAccumulator>();
-    let donePayload: any = null;
-
     try {
-      for await (const result of parser.parseStreamAsync(this.normalizeStream(sseStream))) {
-        if (!result.success || !result.event) {
-          throw new Error(result.error || 'Failed to parse Gemini SSE event');
+      const bodyText = await this.collectBodyText(sseStream, context);
+      const response = buildGeminiJsonFromSseWithNative({
+        bodyText,
+        requestId: options.requestId,
+        model: options.model,
+        config: {
+          reasoningMode: options.reasoningMode,
+          reasoningTextPrefix: options.reasoningTextPrefix
         }
-        const event = result.event as GeminiSseEvent;
-        if (event.protocol !== 'gemini-chat') {
-          throw new Error(`Unexpected Gemini SSE protocol: ${event.protocol}`);
-        }
-
-        if (event.type === 'gemini.data') {
-          this.processChunkEvent(event, accumulator, context);
-          context.eventStats.chunkEvents += 1;
-        } else if (event.type === 'gemini.done') {
-          donePayload = event.data;
-          context.eventStats.doneEvents += 1;
-        }
-        context.eventStats.totalEvents += 1;
-      }
-
-      if (!donePayload) {
-        throw new Error('Gemini SSE stream missing done event');
-      }
-
-      const response = this.buildResponse(accumulator, donePayload);
+      }) as unknown as GeminiResponse;
       context.isCompleted = true;
       context.eventStats.endTime = Date.now();
       return response;
@@ -74,100 +39,18 @@ export class GeminiSseToJsonConverter {
     }
   }
 
-  private processChunkEvent(
-    event: GeminiSseEvent,
-    accumulator: Map<number, CandidateAccumulator>,
+  private async collectBodyText(
+    stream: AsyncIterable<string | Buffer>,
     context: SseToGeminiJsonContext
-  ): void {
-    const payload = event.data as { candidateIndex?: number; role?: string; part?: GeminiContentPart };
-    if (typeof payload?.candidateIndex !== 'number') {
-      throw new Error('Invalid Gemini data event: missing candidateIndex');
-    }
-    const candidateIndex = payload.candidateIndex;
-    const part = payload?.part;
-    if (!part) {
-      throw new Error('Invalid Gemini data event: missing part');
-    }
-    if (typeof payload?.role !== 'string' || payload.role.trim().length === 0) {
-      throw new Error('Invalid Gemini data event: missing role');
-    }
-    const role = payload.role;
-    if (!accumulator.has(candidateIndex)) {
-      accumulator.set(candidateIndex, { role, parts: [] });
-    }
-
-    const candidate = accumulator.get(candidateIndex)!;
-    const normalizedParts = this.normalizeReasoningPart(part, context, candidateIndex);
-
-    for (const normalizedPart of normalizedParts) {
-      // For text parts, accumulate into the last text part instead of creating new ones
-      if ('text' in normalizedPart && typeof normalizedPart.text === 'string') {
-        const lastPart = candidate.parts[candidate.parts.length - 1];
-        if (lastPart && 'text' in lastPart && typeof lastPart.text === 'string') {
-          // Append to existing text part
-          lastPart.text += normalizedPart.text;
-        } else {
-          // Create new text part
-          candidate.parts.push(normalizedPart);
-        }
-      } else if ('reasoning' in normalizedPart && typeof normalizedPart.reasoning === 'string') {
-        // For reasoning parts, also accumulate
-        const lastPart = candidate.parts[candidate.parts.length - 1];
-        if (lastPart && 'reasoning' in lastPart && typeof (lastPart as any).reasoning === 'string') {
-          (lastPart as any).reasoning += (normalizedPart as any).reasoning;
-        } else {
-          candidate.parts.push(normalizedPart);
-        }
-      } else {
-        // For other part types (functionCall, functionResponse, etc.), add as separate parts
-        candidate.parts.push(normalizedPart);
-      }
-    }
-  }
-
-  private buildResponse(
-    accumulator: Map<number, CandidateAccumulator>,
-    donePayload: any
-  ): GeminiResponse {
-    const candidates: GeminiCandidate[] = [];
-    const candidateMeta: Record<number, { finishReason?: string; safetyRatings?: unknown[] }> = {};
-    if (!Array.isArray(donePayload?.candidates)) {
-      throw new Error('Invalid Gemini done event: missing candidates');
-    }
-    for (const [doneIndex, entry] of donePayload.candidates.entries()) {
-      if (!entry || typeof entry.index !== 'number') {
-        throw new Error(`Invalid Gemini done event: invalid candidate at index ${doneIndex}`);
-      }
-      candidateMeta[entry.index] = {
-        finishReason: entry.finishReason,
-        safetyRatings: entry.safetyRatings
-      };
-    }
-    const indices = Array.from(accumulator.keys()).sort((a, b) => a - b);
-    for (const index of indices) {
-      const acc = accumulator.get(index);
-      if (!acc) continue;
-      candidates.push({
-        content: {
-          role: acc.role,
-          parts: acc.parts
-        },
-        finishReason: candidateMeta[index]?.finishReason,
-        safetyRatings: candidateMeta[index]?.safetyRatings
-      });
-    }
-    return {
-      candidates,
-      promptFeedback: donePayload?.promptFeedback,
-      usageMetadata: donePayload?.usageMetadata,
-      modelVersion: donePayload?.modelVersion
-    };
-  }
-
-  private async *normalizeStream(stream: AsyncIterable<string | Buffer>): AsyncGenerator<string> {
+  ): Promise<string> {
+    const chunks: string[] = [];
     for await (const chunk of stream) {
-      yield typeof chunk === 'string' ? chunk : chunk.toString();
+      const text = typeof chunk === 'string' ? chunk : chunk.toString();
+      context.eventStats.chunkEvents += 1;
+      context.eventStats.totalEvents += 1;
+      chunks.push(text);
     }
+    return chunks.join('');
   }
 
   private createContext(options: SseToGeminiJsonOptions): SseToGeminiJsonContext {
@@ -192,31 +75,5 @@ export class GeminiSseToJsonConverter {
 
   private wrapError(code: string, error: Error, requestId: string): Error {
     return ErrorUtils.createError(error.message, code, { requestId });
-  }
-
-  private normalizeReasoningPart(
-    part: GeminiContentPart,
-    context: SseToGeminiJsonContext,
-    candidateIndex: number
-  ): GeminiContentPart[] {
-    if (!part || typeof part !== 'object') {
-      throw new Error(`Invalid Gemini data event: invalid part at index ${candidateIndex}`);
-    }
-    const reasoning = typeof (part as any).reasoning === 'string' ? (part as any).reasoning : undefined;
-    if (!reasoning) {
-      return [part];
-    }
-    const decision = dispatchReasoning(reasoning, {
-      mode: context.options.reasoningMode,
-      prefix: context.options.reasoningTextPrefix
-    });
-    const normalized: GeminiContentPart[] = [];
-    if (decision.appendToContent) {
-      normalized.push({ text: decision.appendToContent });
-    }
-    if (decision.channel) {
-      normalized.push({ reasoning: decision.channel } as Record<string, unknown>);
-    }
-    return normalized;
   }
 }

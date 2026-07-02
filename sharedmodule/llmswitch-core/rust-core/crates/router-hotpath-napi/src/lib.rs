@@ -2251,6 +2251,12 @@ pub fn build_gemini_sse_event_sequence_json(input_json: String) -> NapiResult<St
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildGeminiJsonFromSseJson")]
+pub fn build_gemini_json_from_sse_json(input_json: String) -> NapiResult<String> {
+    gemini_sse_event_payload::build_gemini_json_from_sse_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "hasRequestedToolsInSemanticsJson")]
 pub fn has_requested_tools_in_semantics_json_bridge(
     request_semantics_json: String,

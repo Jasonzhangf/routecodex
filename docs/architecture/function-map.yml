@@ -3622,6 +3622,37 @@ owners:
     notes:
       - "TS parser wrapper may only call native parser helpers and maintain stream buffering; semantic recovery must be explicit contract, not silent success truth."
 
+  - feature_id: sse.event_type_validation
+    status: active
+    summary: "SSE protocol event-type allowlist validation surface"
+    owner_kind: server_projection
+    owner_scope: "Protocol-specific SSE event-type allowlists for strict parser callers; transport parser defaults remain no-recovery and no semantic validation unless a caller supplies an explicit protocol allowlist."
+    owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/shared/sse-event-validator.ts
+    canonical_types:
+      - RESPONSES_SSE_EVENT_TYPES
+      - ANTHROPIC_SSE_EVENT_TYPES
+      - GEMINI_SSE_EVENT_TYPES
+      - CHAT_SSE_EVENT_TYPES
+    canonical_builders:
+      - isAllowedEventType
+    allowed_paths:
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/shared/sse-event-validator.ts
+      - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
+      - docs/goals/sse-function-map-architecture-closeout-plan.md
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/handlers
+      - sharedmodule/llmswitch-core/src/conversion/hub/response
+    required_tests:
+      - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
+      - tests/sharedmodule/sse-parser-no-recovery.spec.ts
+    required_gates:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Event-type allowlists are explicit protocol validation inputs; they must not become fallback recovery, provider policy, or a second SSE semantic parser."
+
   - feature_id: sse.responses_decode_projection
     status: active
     summary: "OpenAI Responses SSE event stream to Responses JSON projection"
@@ -3738,7 +3769,7 @@ owners:
     status: active
     summary: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners"
     owner_kind: rust_ssot
-    owner_scope: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners; Gemini JSON->SSE sequence is Rust-owned and TS remains native wrapper / stream IO shell"
+    owner_scope: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners; Gemini JSON->SSE sequence and SSE->JSON decode are Rust-owned and TS remains native wrapper / stream IO shell"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs
     canonical_types:
       - AnthropicSseEvent
@@ -3747,6 +3778,7 @@ owners:
       - GeminiResponse
     canonical_builders:
       - build_gemini_sse_event_sequence_json
+      - build_gemini_json_from_sse_json
     allowed_paths:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts
@@ -3775,6 +3807,7 @@ owners:
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners; shared registry/writer must not learn provider-specific branches."
       - "Gemini JSON->SSE part/done event ordering and reasoning projection are Rust-owned through `build_gemini_sse_event_sequence_json`; `gemini-sequencer.ts` may only call native and yield events with optional delay."
+      - "Gemini SSE->JSON data/done parse, text/reasoning aggregation, done metadata materialization, and malformed/missing-done fail-fast behavior are Rust-owned through `build_gemini_json_from_sse_json`; `gemini-sse-to-json-converter.ts` may only collect stream bytes and call native."
 
   - feature_id: error.pipeline_contract
     status: active

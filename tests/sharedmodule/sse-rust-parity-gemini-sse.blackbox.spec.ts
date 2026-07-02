@@ -1,7 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { createGeminiSequencer } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.js';
-import { buildGeminiSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.js';
+import {
+  buildGeminiJsonFromSseWithNative,
+  buildGeminiSseEventSequenceWithNative
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.js';
+import { GeminiSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.js';
 import type { GeminiResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectEvents(stream: AsyncIterable<unknown>): Promise<unknown[]> {
@@ -135,5 +139,101 @@ describe('Gemini JSON to SSE Rust parity boundary', () => {
     expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow(
       'Invalid Gemini candidate: missing role'
     );
+  });
+});
+
+describe('Gemini SSE to JSON Rust parity boundary', () => {
+  it('materializes Gemini text and done frames through native decoder', async () => {
+    const bodyText = [
+      'event: gemini.data',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"json_to_sse","data":{"kind":"part","candidateIndex":0,"partIndex":0,"role":"model","part":{"text":"hello"}}}',
+      '',
+      'event: gemini.data',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"json_to_sse","data":{"kind":"part","candidateIndex":0,"partIndex":1,"role":"model","part":{"text":" world"}}}',
+      '',
+      'event: gemini.done',
+      'data: {"type":"gemini.done","protocol":"gemini-chat","direction":"json_to_sse","data":{"kind":"done","usageMetadata":{"totalTokenCount":3},"modelVersion":"gemini-test","candidates":[{"index":0,"finishReason":"STOP"}]}}',
+      '',
+      ''
+    ].join('\n');
+    const converter = new GeminiSseToJsonConverter();
+
+    const tsJson = await converter.convertSseToJson([bodyText], {
+      requestId: 'req_gemini_decode_text',
+      model: 'gemini-test'
+    });
+    const nativeJson = buildGeminiJsonFromSseWithNative({
+      bodyText,
+      requestId: 'req_gemini_decode_text',
+      model: 'gemini-test'
+    });
+
+    expect(tsJson).toEqual(nativeJson);
+    expect(tsJson).toEqual({
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [{ text: 'hello world' }]
+          },
+          finishReason: 'STOP'
+        }
+      ],
+      promptFeedback: undefined,
+      usageMetadata: { totalTokenCount: 3 },
+      modelVersion: 'gemini-test'
+    });
+  });
+
+  it('keeps Gemini SSE reasoning decode native-owned', async () => {
+    const bodyText = [
+      'event: gemini.data',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"json_to_sse","data":{"kind":"part","candidateIndex":0,"partIndex":0,"role":"model","part":{"reasoning":"hidden"}}}',
+      '',
+      'event: gemini.done',
+      'data: {"type":"gemini.done","protocol":"gemini-chat","direction":"json_to_sse","data":{"kind":"done","candidates":[{"index":0,"finishReason":"STOP"}]}}',
+      '',
+      ''
+    ].join('\n');
+    const converter = new GeminiSseToJsonConverter();
+
+    const tsJson = await converter.convertSseToJson([bodyText], {
+      requestId: 'req_gemini_decode_reasoning',
+      model: 'gemini-test',
+      reasoningMode: 'text',
+      reasoningTextPrefix: '[thought]'
+    });
+    const nativeJson = buildGeminiJsonFromSseWithNative({
+      bodyText,
+      requestId: 'req_gemini_decode_reasoning',
+      model: 'gemini-test',
+      config: {
+        reasoningMode: 'text',
+        reasoningTextPrefix: '[thought]'
+      }
+    });
+
+    expect(tsJson).toEqual(nativeJson);
+    expect(tsJson.candidates?.[0]?.content?.parts).toEqual([{ text: '[thought] hidden' }]);
+  });
+
+  it('fails fast through native when Gemini done frame is missing', async () => {
+    const bodyText = [
+      'event: gemini.data',
+      'data: {"type":"gemini.data","protocol":"gemini-chat","direction":"json_to_sse","data":{"kind":"part","candidateIndex":0,"partIndex":0,"role":"model","part":{"text":"hello"}}}',
+      '',
+      ''
+    ].join('\n');
+    const converter = new GeminiSseToJsonConverter();
+
+    await expect(converter.convertSseToJson([bodyText], {
+      requestId: 'req_gemini_decode_missing_done',
+      model: 'gemini-test'
+    })).rejects.toThrow('Gemini SSE stream missing done event');
+    expect(() => buildGeminiJsonFromSseWithNative({
+      bodyText,
+      requestId: 'req_gemini_decode_missing_done',
+      model: 'gemini-test'
+    })).toThrow('Gemini SSE stream missing done event');
   });
 });

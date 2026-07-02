@@ -2010,6 +2010,23 @@ verification:
     notes:
       - "TS parser wrapper may only call native parser helpers and maintain stream buffering."
 
+  - feature_id: sse.event_type_validation
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/shared/sse-event-validator.ts
+      - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
+    contract:
+      - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
+      - tests/sharedmodule/sse-parser-no-recovery.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Strict event-type validation requires explicit protocol allowlists; default parser config must remain no-recovery and must not silently accept malformed protocol semantics as success."
+
   - feature_id: sse.responses_decode_projection
     change_risk: high
     unit:
@@ -2100,6 +2117,7 @@ verification:
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners."
       - "Gemini JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
+      - "Gemini SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned; focused parity must prove TS converter and native decoder output/error behavior match."
 
   - feature_id: error.pipeline_contract
     change_risk: high

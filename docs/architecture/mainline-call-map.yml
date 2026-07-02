@@ -959,6 +959,18 @@ chains:
         semantic_output: "ordered GeminiSseEvent stream for part and done frames"
         status: anchored
         note: "TS `createGeminiSequencer` is a thin wrapper around native `buildGeminiSseEventSequenceWithNative`; Rust `build_gemini_sse_event_sequence_json` owns Gemini JSON->SSE event ordering, reasoning projection, and fail-fast validation."
+      - step_id: gemini-sse-02
+        from_node: ProviderRespInbound01Raw
+        to_node: HubRespInbound02Parsed
+        caller_symbol: convertSseToJson
+        caller_file: sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
+        callee_symbol: buildGeminiJsonFromSseWithNative
+        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
+        owner_feature_id: sse.anthropic_gemini_stream_projection
+        semantic_input: "Gemini provider SSE body text plus request-scoped model/request id and reasoning options"
+        semantic_output: "final GeminiResponse with aggregated text/reasoning parts, candidate done metadata, prompt feedback, usage metadata, model version, and strict done validation"
+        status: anchored
+        note: "TS `GeminiSseToJsonConverter` is a stream IO shell; Rust `build_gemini_json_from_sse_json` owns SSE parse/materialize, data/done validation, reasoning projection, and incomplete stream fail-fast."
 
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture

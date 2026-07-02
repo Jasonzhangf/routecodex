@@ -53,9 +53,9 @@ function normalizeMinimalSuccessResponse(result: unknown): unknown {
 function buildHandle(
   providerKey: string,
   processFn: () => Promise<unknown>,
-  protocol: 'gemini-chat' | 'openai-chat' = 'gemini-chat'
+  protocol: 'gemini-chat' | 'openai-chat' | 'openai-responses' = 'gemini-chat'
 ): ProviderHandle {
-  const isOpenAI = protocol === 'openai-chat';
+  const isOpenAI = protocol === 'openai-chat' || protocol === 'openai-responses';
   return {
     runtimeKey: providerKey,
     providerId: providerKey,
@@ -66,7 +66,7 @@ function buildHandle(
       runtimeKey: providerKey,
       providerId: providerKey,
       keyAlias: providerKey,
-      providerType: isOpenAI ? 'openai' : 'gemini',
+      providerType: protocol === 'openai-responses' ? 'responses' : isOpenAI ? 'openai' : 'gemini',
       endpoint: 'https://example.invalid',
       auth: { type: 'oauth' },
       outboundProfile: protocol
@@ -162,6 +162,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'default',
+            providerProtocol: 'openai-responses',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -396,6 +397,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'longcontext',
+            providerProtocol: 'openai-responses',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -520,6 +522,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'default',
+            providerProtocol: 'openai-responses',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -873,6 +876,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'default',
+            providerProtocol: 'openai-responses',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -2205,7 +2209,7 @@ describe('HubRequestExecutor failover', () => {
     const firstProviderKey = 'runtime-missing.alias.model-a';
     const secondProviderKey = 'runtime-ready.alias.model-b';
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'ok-after-runtime-retry' } }));
-    const successHandle = buildHandle(secondProviderKey, successProcess);
+    const successHandle = buildHandle(secondProviderKey, successProcess, 'gemini-chat');
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey?: string) => (providerKey === secondProviderKey ? secondProviderKey : undefined),
@@ -2227,7 +2231,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'gemini-chat',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: 'default', pool: [firstProviderKey, secondProviderKey] },
+          routingDecision: { routeName: 'default', providerProtocol: 'gemini-chat', pool: [firstProviderKey, secondProviderKey] },
           metadata: {}
         };
       }),
@@ -2307,10 +2311,10 @@ describe('HubRequestExecutor failover', () => {
       resolveRuntimeKey: (providerKey?: string) => providerKey,
       getHandleByRuntimeKey: (runtimeKey?: string) => {
         if (runtimeKey === firstProviderKey) {
-          return buildHandle(firstProviderKey, firstProcess);
+          return buildHandle(firstProviderKey, firstProcess, 'openai-responses');
         }
         if (runtimeKey === secondProviderKey) {
-          return buildHandle(secondProviderKey, secondProcess);
+          return buildHandle(secondProviderKey, secondProcess, 'openai-responses');
         }
         return undefined;
       }
@@ -2336,6 +2340,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: excluded.has(firstProviderKey) ? 'default' : 'search',
+            providerProtocol: 'openai-responses',
             pool,
             poolId: excluded.has(firstProviderKey) ? 'default-backstop' : 'search-primary'
           },
@@ -2402,7 +2407,7 @@ describe('HubRequestExecutor failover', () => {
   test('backs off recoverable pool exhaustion before retrying route selection', async () => {
     jest.useFakeTimers();
     const providerKey = 'deepseek-web.1.deepseek-chat';
-    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-wait' } }));
+    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-wait' } }), 'openai-chat');
 
     const runtimeManager = {
       resolveRuntimeKey: (key: string) => key,
@@ -2430,7 +2435,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'openai-chat',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: 'default' },
+          routingDecision: { routeName: 'default', providerProtocol: 'openai-chat' },
           metadata: {}
         }),
       updateVirtualRouterConfig: jest.fn()
@@ -2477,7 +2482,7 @@ describe('HubRequestExecutor failover', () => {
   test('surfaces singleton concurrency busy immediately when no reroute plan exists', async () => {
     jest.useFakeTimers();
     const providerKey = 'mimo.key1.mimo-v2.5-pro';
-    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-concurrency-wait' } }));
+    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-concurrency-wait' } }), 'openai-chat');
 
     const runtimeManager = {
       resolveRuntimeKey: (key: string) => key,
@@ -2507,7 +2512,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'openai-chat',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: 'thinking', pool: [providerKey] },
+          routingDecision: { routeName: 'thinking', providerProtocol: 'openai-chat', pool: [providerKey] },
           metadata: {}
         }),
       updateVirtualRouterConfig: jest.fn()
@@ -2598,7 +2603,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'anthropic-messages',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: 'coding', pool: [providerKey] },
+          routingDecision: { routeName: 'coding', providerProtocol: 'gemini-chat', pool: [providerKey] },
           metadata: {}
         };
       }),
@@ -2803,6 +2808,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'thinking',
+            providerProtocol: 'gemini-chat',
             pool: [firstProviderKey, secondProviderKey]
           },
           metadata: {}
@@ -2871,7 +2877,7 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('records transport backoff and waits before the same priority provider is hit again', async () => {
+  test('records transport backoff and waits before switching priority providers', async () => {
     jest.useFakeTimers();
     const providerA = 'tab.key1.gpt-5.4';
     const providerB = 'tab.key2.gpt-5.4';
@@ -2924,6 +2930,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'thinking',
+            providerProtocol: 'gemini-chat',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -2962,21 +2969,8 @@ describe('HubRequestExecutor failover', () => {
     });
 
     try {
-      const firstResult = await executor.execute({
+      const firstPending = executor.execute({
         requestId: 'req-backoff-first',
-        entryEndpoint: '/v1/responses',
-        body: {},
-        headers: {},
-        metadata: {}
-      });
-
-      expect(firstResult).toEqual(expect.objectContaining({ status: 200 }));
-      expect(providerAProcess).toHaveBeenCalledTimes(1);
-      expect(providerBProcess).toHaveBeenCalledTimes(1);
-      expect(logStage.mock.calls.some((call) => call[0] === 'provider.transport_backoff.recorded')).toBe(true);
-
-      const secondPending = executor.execute({
-        requestId: 'req-backoff-second',
         entryEndpoint: '/v1/responses',
         body: {},
         headers: {},
@@ -2985,12 +2979,15 @@ describe('HubRequestExecutor failover', () => {
 
       await jest.advanceTimersByTimeAsync(0);
       expect(providerAProcess).toHaveBeenCalledTimes(1);
-      expect(logStage.mock.calls.some((call) => call[0] === 'server.global_error_backoff_wait')).toBe(true);
+      expect(providerBProcess).not.toHaveBeenCalled();
+      expect(logStage.mock.calls.some((call) => call[0] === 'provider.switch_backoff_wait')).toBe(true);
 
       await jest.advanceTimersByTimeAsync(1_000);
-      await expect(secondPending).resolves.toEqual(expect.objectContaining({ status: 200 }));
-      expect(providerAProcess).toHaveBeenCalledTimes(2);
+      const firstResult = await firstPending;
+      expect(firstResult).toEqual(expect.objectContaining({ status: 200 }));
+      expect(providerAProcess).toHaveBeenCalledTimes(1);
       expect(providerBProcess).toHaveBeenCalledTimes(1);
+      expect(logStage.mock.calls.some((call) => call[0] === 'provider.transport_backoff.recorded')).toBe(true);
     } finally {
       jest.useRealTimers();
     }
@@ -3041,6 +3038,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'longcontext',
+            providerProtocol: 'openai-responses',
             pool: [firstProviderKey, secondProviderKey]
           },
           metadata: {}
@@ -3109,7 +3107,7 @@ describe('HubRequestExecutor failover', () => {
 
     const handles = new Map<string, ProviderHandle>([
       [providerA, {
-        ...buildHandle(providerA, processA),
+        ...buildHandle(providerA, processA, 'openai-responses'),
         providerType: 'responses',
         providerFamily: 'responses',
         providerProtocol: 'openai-responses',
@@ -3124,7 +3122,7 @@ describe('HubRequestExecutor failover', () => {
         }
       }],
       [providerB, {
-        ...buildHandle(providerB, processB),
+        ...buildHandle(providerB, processB, 'openai-responses'),
         providerType: 'responses',
         providerFamily: 'responses',
         providerProtocol: 'openai-responses',
@@ -3166,6 +3164,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'longcontext',
+            providerProtocol: 'openai-responses',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -3300,9 +3299,9 @@ describe('HubRequestExecutor failover', () => {
     const failingProcess = jest.fn(async () => {
       throw failingError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-responses');
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'unused-fallback' } }));
-    const successHandle = buildHandle(secondProviderKey, successProcess);
+    const successHandle = buildHandle(secondProviderKey, successProcess, 'openai-responses');
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
@@ -3333,6 +3332,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'thinking',
+            providerProtocol: 'openai-responses',
             pool: [firstProviderKey, secondProviderKey]
           },
           metadata: {}
@@ -3398,10 +3398,10 @@ describe('HubRequestExecutor failover', () => {
     const failingProcess = jest.fn(async () => {
       throw failingError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-responses');
     const successPayload = { status: 200, data: { id: 'ok' } };
     const successProcess = jest.fn(async () => successPayload);
-    const successHandle = buildHandle(secondProviderKey, successProcess);
+    const successHandle = buildHandle(secondProviderKey, successProcess, 'openai-responses');
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
@@ -3429,7 +3429,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'gemini-chat',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: useLongcontext ? 'longcontext' : 'tools' },
+          routingDecision: { routeName: useLongcontext ? 'longcontext' : 'tools', providerProtocol: 'gemini-chat' },
           metadata: {}
         };
       }),
@@ -3528,7 +3528,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'gemini-chat',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: 'default', pool: [firstProviderKey, secondProviderKey] },
+          routingDecision: { routeName: 'default', providerProtocol: 'gemini-chat', pool: [firstProviderKey, secondProviderKey] },
           metadata: {}
         };
       }),
@@ -3573,7 +3573,7 @@ describe('HubRequestExecutor failover', () => {
     const failingProcess = jest.fn(async () => {
       throw firstError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-chat');
 
     const handles = new Map<string, ProviderHandle>([[firstProviderKey, failureHandle]]);
 
@@ -3599,7 +3599,7 @@ describe('HubRequestExecutor failover', () => {
               outboundProfile: 'openai-chat',
               runtimeKey: firstProviderKey
             },
-            routingDecision: { routeName: 'direct' },
+            routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat' },
             metadata: {}
           };
         }
@@ -3657,7 +3657,7 @@ describe('HubRequestExecutor failover', () => {
     const failingProcess = jest.fn()
       .mockRejectedValueOnce(firstError)
       .mockResolvedValueOnce({ status: 200, data: { id: 'ok-after-blocking-hold' } });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-chat');
 
     const handles = new Map<string, ProviderHandle>([[firstProviderKey, failureHandle]]);
 
@@ -3678,7 +3678,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'openai-chat',
             runtimeKey: firstProviderKey
           },
-          routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
+          routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat', pool: [firstProviderKey] },
           metadata: {}
         })
         .mockImplementation(async () => {
@@ -3693,7 +3693,7 @@ describe('HubRequestExecutor failover', () => {
                 outboundProfile: 'openai-chat',
                 runtimeKey: firstProviderKey
               },
-              routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
+              routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat', pool: [firstProviderKey] },
               metadata: {}
             };
           }
@@ -3717,7 +3717,7 @@ describe('HubRequestExecutor failover', () => {
               outboundProfile: 'openai-chat',
               runtimeKey: firstProviderKey
             },
-            routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
+            routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat', pool: [firstProviderKey] },
             metadata: {}
           };
         }),
@@ -3788,8 +3788,8 @@ describe('HubRequestExecutor failover', () => {
     }));
 
     const handles = new Map<string, ProviderHandle>([
-      [primaryProviderKey, buildHandle(primaryProviderKey, primaryProcess)],
-      [fallbackProviderKey, buildHandle(fallbackProviderKey, fallbackProcess)]
+      [primaryProviderKey, buildHandle(primaryProviderKey, primaryProcess, 'openai-chat')],
+      [fallbackProviderKey, buildHandle(fallbackProviderKey, fallbackProcess, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -3818,6 +3818,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'default',
+            providerProtocol: 'openai-chat',
             pool: routePool,
             routePool
           },
@@ -3876,8 +3877,8 @@ describe('HubRequestExecutor failover', () => {
     });
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processA)],
-      [providerB, buildHandle(providerB, processB)]
+      [providerA, buildHandle(providerA, processA, 'openai-chat')],
+      [providerB, buildHandle(providerB, processB, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -3904,6 +3905,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'longcontext',
+            providerProtocol: 'openai-chat',
             pool: [providerA, providerB]
           },
           metadata: {}
@@ -3981,8 +3983,8 @@ describe('HubRequestExecutor failover', () => {
     const processB = jest.fn(async () => ({ status: 200, data: { id: 'raw_b' } }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processA)],
-      [providerB, buildHandle(providerB, processB)]
+      [providerA, buildHandle(providerA, processA, 'openai-responses')],
+      [providerB, buildHandle(providerB, processB, 'openai-responses')]
     ]);
 
     const runtimeManager = {
@@ -4011,6 +4013,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'coding',
+            providerProtocol: 'openai-responses',
             pool: [providerA, providerB]
           },
           processMode: 'standard',
@@ -4087,9 +4090,9 @@ describe('HubRequestExecutor failover', () => {
     const processC = jest.fn(async () => ({ status: 200, data: { id: 'unused_provider_c' } }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processA)],
-      [providerB, buildHandle(providerB, processB)],
-      [providerC, buildHandle(providerC, processC)]
+      [providerA, buildHandle(providerA, processA, 'openai-chat')],
+      [providerB, buildHandle(providerB, processB, 'openai-chat')],
+      [providerC, buildHandle(providerC, processC, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -4120,6 +4123,7 @@ describe('HubRequestExecutor failover', () => {
           },
           routingDecision: {
             routeName: 'thinking',
+            providerProtocol: 'openai-chat',
             pool: [providerA, providerB, providerC]
           },
           metadata: {}
@@ -4194,8 +4198,8 @@ describe('HubRequestExecutor failover', () => {
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
 
     const handles = new Map<string, ProviderHandle>([
-      [firstProviderKey, buildHandle(firstProviderKey, failingProcess)],
-      [secondProviderKey, buildHandle(secondProviderKey, successProcess)]
+      [firstProviderKey, buildHandle(firstProviderKey, failingProcess, 'openai-chat')],
+      [secondProviderKey, buildHandle(secondProviderKey, successProcess, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -4215,6 +4219,7 @@ describe('HubRequestExecutor failover', () => {
         },
         routingDecision: {
           routeName: 'deepseek',
+          providerProtocol: 'openai-chat',
           pool: [firstProviderKey, secondProviderKey]
         },
         metadata: {}
@@ -4263,8 +4268,8 @@ describe('HubRequestExecutor failover', () => {
     const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
 
     const handles = new Map<string, ProviderHandle>([
-      [firstProviderKey, buildHandle(firstProviderKey, unauthorizedProcess)],
-      [secondProviderKey, buildHandle(secondProviderKey, successProcess)]
+      [firstProviderKey, buildHandle(firstProviderKey, unauthorizedProcess, 'openai-chat')],
+      [secondProviderKey, buildHandle(secondProviderKey, successProcess, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -4287,7 +4292,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'openai-chat',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: 'default', pool: [firstProviderKey, secondProviderKey] },
+          routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool: [firstProviderKey, secondProviderKey] },
           metadata: {}
         };
       }),
@@ -4339,7 +4344,7 @@ describe('HubRequestExecutor failover', () => {
       }));
 
       const handles = new Map<string, ProviderHandle>([
-        [providerKey, buildHandle(providerKey, unauthorizedProcess)]
+        [providerKey, buildHandle(providerKey, unauthorizedProcess, 'openai-chat')]
       ]);
 
       const runtimeManager = {
@@ -4357,7 +4362,7 @@ describe('HubRequestExecutor failover', () => {
             outboundProfile: 'openai-chat',
             runtimeKey: providerKey
           },
-          routingDecision: { routeName: 'default', pool: [providerKey] },
+          routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool: [providerKey] },
           metadata: {}
         })),
         updateVirtualRouterConfig: jest.fn()
@@ -4417,7 +4422,7 @@ describe('HubRequestExecutor failover', () => {
     }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerKey, buildHandle(providerKey, failingProcess)]
+      [providerKey, buildHandle(providerKey, failingProcess, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -4435,7 +4440,7 @@ describe('HubRequestExecutor failover', () => {
           outboundProfile: 'openai-chat',
           runtimeKey: providerKey
         },
-        routingDecision: { routeName: 'deepseek' },
+        routingDecision: { routeName: 'deepseek', providerProtocol: 'openai-chat' },
         metadata: {}
       })),
       updateVirtualRouterConfig: jest.fn()
@@ -4532,7 +4537,7 @@ describe('HubRequestExecutor failover', () => {
     });
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processIncoming)]
+      [providerA, buildHandle(providerA, processIncoming, 'openai-chat')]
     ]);
 
     const runtimeManager = {
@@ -4551,7 +4556,7 @@ describe('HubRequestExecutor failover', () => {
           outboundProfile: 'openai-chat',
           runtimeKey: providerA
         },
-        routingDecision: { routeName: 'default', pool },
+        routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool },
         metadata: {}
       })),
       updateVirtualRouterConfig: jest.fn()
@@ -4621,7 +4626,7 @@ describe('HubRequestExecutor failover', () => {
       };
     });
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processIncoming)]
+      [providerA, buildHandle(providerA, processIncoming, 'openai-responses')]
     ]);
 
     const pool = [providerA];
@@ -4640,7 +4645,7 @@ describe('HubRequestExecutor failover', () => {
           outboundProfile: 'openai-responses',
           runtimeKey: providerA
         },
-        routingDecision: { routeName: 'tools', pool },
+        routingDecision: { routeName: 'tools', providerProtocol: 'openai-responses', pool },
         metadata: {}
       })),
       updateVirtualRouterConfig: jest.fn()

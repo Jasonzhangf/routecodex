@@ -1,3 +1,10 @@
+# 2026-07-02: 5520 GPT forwarder routing update
+
+- User request: temporarily remove `ykk` from 5520 GPT routes; make `gpt-5.5` priority `cc -> asxs -> XL -> 1token`; make mini mainly `asxs -> XL`.
+- Config target confirmed: `~/.rcc/config.toml` owns port 5520 via routing policy group `gateway_priority_5520`; 5520 coding/thinking use `fwd.paid.gpt-5.5`, longcontext uses `fwd.gpt.gpt-5.5`, tools/search/web_search/multimodal/default use `fwd.paid.gpt-5.4-mini`.
+- Patch applied: `fwd.paid.gpt-5.5` and `fwd.gpt.gpt-5.5` now use `cc -> asxs -> XL -> 1token`; `fwd.paid.gpt-5.4` now uses `asxs -> XL -> 1token`; `fwd.paid.gpt-5.4-mini` now uses `asxs -> XL`; removed `ykk` from these GPT/mini forwarders while leaving non-5520 Codex Spark ykk entries untouched.
+- Next evidence required before claiming live completion: `routecodex config validate`, `routecodex restart --port 5520`, `/health`, and live VR status/dry-run or same-entry request proof that 5520 no longer selects ykk for GPT/mini.
+
 # 2026-07-02: Gemini JSON->SSE sequence moved to Rust
 
 - Slice: current `HEAD` contains `gemini_sse_event_payload.rs`, `buildGeminiSseEventSequenceJson`, `native-gemini-sse-event-payload.ts`, and a thin `gemini-sequencer.ts`; Gemini JSON->SSE part/done ordering and reasoning projection are Rust-owned through `build_gemini_sse_event_sequence_json`.
@@ -29,6 +36,7 @@
 - Evidence now checked: current `~/.rcc/logs/server-5520.log` mtime is 2026-06-29 and not the active 2026-07-02 evidence stream; current multi-port runtime logs with 5520 request lines are in `~/.rcc/logs/server-4444.log`.
 - Relevant snapshots: `~/.rcc/codex-samples/openai-responses/ports/5520/openai-responses-router-gpt-5.4-20260702T131*` and `...T132*` exist with `__runtime.entryPort=5520`, `matchedPort=5520`, and `routecodex=0.90.3510`; sampled provider-response snapshots show stream opened/status 200, but most router-direct dirs have no client-response artifact and do not prove completion.
 - Freehand pane truth still shows the actionable miss: after “now call browser/tool” prompts, the agent stayed in reasoning/tool-search planning and hit `Goal achieved` without producing WebUI screenshot/DOM artifacts.
+- Follow-up evidence: the Codex session JSONL `rollout-2026-07-02T11-51-54-019f20f4-6144-73a1-a11f-568682990ae3.jsonl` has function_call names only `exec_command` and `write_stdin`; `tool_search` appearances are assistant text or shell command arguments, not actual tool calls. 5520 snapshots around 13:24-13:26 include `tool_search` declarations/text but no `tool_search_call` or `tool_search_output`. Current conclusion: this was not RouteCodex cleaning a generated search call; the session never emitted an executable `tool_search` call and the goal runner accepted a final answer/`task_complete` before WebUI evidence was produced.
 
 # 2026-07-02: servertool engine orchestration adapterContext casts removed
 

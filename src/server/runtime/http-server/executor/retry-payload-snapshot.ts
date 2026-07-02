@@ -11,6 +11,7 @@ import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import { extractStatusCodeFromError, firstFiniteNumber } from './utils.js';
 import { estimateRetryPayloadBytes } from './retry-payload-bytes-estimator.js';
 import { readRuntimeDebugSnapshotProjection } from '../metadata-center/request-truth-readers.js';
+import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 let _logNB: LogNonBlockingError | undefined;
@@ -248,14 +249,24 @@ export function extractRetryErrorSnapshot(error: unknown): RetryErrorSnapshot {
     mergedTextDerived.reason
     ?? describeRetryReason(error)
     ?? fallbackReason;
+  const resolvedStatusCode = typeof statusCode === 'number'
+    ? statusCode
+    : (typeof mergedTextDerived.statusCode === 'number' ? mergedTextDerived.statusCode : undefined);
+  const resolvedErrorCode = errorCode ?? mergedTextDerived.errorCode;
+  const resolvedUpstreamCode = upstreamCode ?? mergedTextDerived.upstreamCode;
+  const catalog = normalizeKnownProviderError({
+    statusCode: resolvedStatusCode,
+    code: resolvedErrorCode,
+    upstreamCode: resolvedUpstreamCode,
+    message: reason,
+  });
 
   return {
-    ...(typeof statusCode === 'number'
-      ? { statusCode }
-      : (typeof mergedTextDerived.statusCode === 'number' ? { statusCode: mergedTextDerived.statusCode } : {})),
-    ...(errorCode ? { errorCode } : (mergedTextDerived.errorCode ? { errorCode: mergedTextDerived.errorCode } : {})),
-    ...(upstreamCode ? { upstreamCode } : (mergedTextDerived.upstreamCode ? { upstreamCode: mergedTextDerived.upstreamCode } : {})),
+    ...(typeof resolvedStatusCode === 'number' ? { statusCode: resolvedStatusCode } : {}),
+    ...(resolvedErrorCode ? { errorCode: resolvedErrorCode } : {}),
+    ...(resolvedUpstreamCode ? { upstreamCode: resolvedUpstreamCode } : {}),
     ...(typeof upstreamStatus === 'number' ? { upstreamStatus } : {}),
+    ...(catalog ? { catalogCode: catalog.code, catalogKey: catalog.key } : {}),
     reason
   };
 }

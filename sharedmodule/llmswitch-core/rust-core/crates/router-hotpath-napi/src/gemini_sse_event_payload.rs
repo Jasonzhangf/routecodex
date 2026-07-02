@@ -71,6 +71,228 @@ fn build_gemini_event(event_type: &str, data: Value) -> Value {
     })
 }
 
+fn parse_gemini_sse_blocks(body_text: &str) -> Result<Vec<(String, Value)>, String> {
+    let mut events = Vec::new();
+    let normalized = body_text.replace("\r\n", "\n");
+    for block in normalized.split("\n\n") {
+        if block.trim().is_empty() {
+            continue;
+        }
+        let mut event_name = String::new();
+        let mut data_lines = Vec::new();
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("event:") {
+                event_name = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                data_lines.push(rest.trim_start().to_string());
+            }
+        }
+        if event_name.is_empty() {
+            return Err("Gemini SSE event missing event type".to_string());
+        }
+        if data_lines.is_empty() {
+            return Err(format!("Gemini SSE event missing data: {}", event_name));
+        }
+        let data_text = data_lines.join("\n");
+        let value: Value = serde_json::from_str(&data_text)
+            .map_err(|error| format!("Failed to parse Gemini SSE event JSON: {}", error))?;
+        events.push((event_name, value));
+    }
+    Ok(events)
+}
+
+fn read_event_protocol(event_obj: &Map<String, Value>) -> Result<(), String> {
+    if let Some(protocol) = event_obj.get("protocol").and_then(Value::as_str) {
+        if protocol != "gemini-chat" {
+            return Err(format!("Unexpected Gemini SSE protocol: {}", protocol));
+        }
+    }
+    Ok(())
+}
+
+fn event_payload<'a>(event_obj: &'a Map<String, Value>) -> &'a Map<String, Value> {
+    event_obj
+        .get("data")
+        .and_then(Value::as_object)
+        .unwrap_or(event_obj)
+}
+
+fn read_required_i64(source: &Map<String, Value>, field: &str, message: &str) -> Result<i64, String> {
+    source
+        .get(field)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| message.to_string())
+}
+
+fn read_required_payload_part<'a>(payload: &'a Map<String, Value>) -> Result<&'a Value, String> {
+    payload
+        .get("part")
+        .ok_or_else(|| "Invalid Gemini data event: missing part".to_string())
+}
+
+fn read_decode_part_index(payload: &Map<String, Value>, candidate_index: i64) -> usize {
+    payload
+        .get("partIndex")
+        .and_then(Value::as_i64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_else(|| usize::try_from(candidate_index).unwrap_or(0))
+}
+
+fn merge_gemini_part(parts: &mut Vec<Value>, part: Value) {
+    if let Some(text) = part.get("text").and_then(Value::as_str) {
+        if let Some(last) = parts.last_mut().and_then(Value::as_object_mut) {
+            if let Some(last_text) = last.get_mut("text").and_then(|value| value.as_str()) {
+                let merged = format!("{}{}", last_text, text);
+                last.insert("text".to_string(), Value::String(merged));
+                return;
+            }
+        }
+    }
+    if let Some(reasoning) = part.get("reasoning").and_then(Value::as_str) {
+        if let Some(last) = parts.last_mut().and_then(Value::as_object_mut) {
+            if let Some(last_reasoning) = last.get_mut("reasoning").and_then(|value| value.as_str()) {
+                let merged = format!("{}{}", last_reasoning, reasoning);
+                last.insert("reasoning".to_string(), Value::String(merged));
+                return;
+            }
+        }
+    }
+    parts.push(part);
+}
+
+#[derive(Default)]
+struct GeminiCandidateAccumulator {
+    role: String,
+    parts: Vec<Value>,
+}
+
+pub fn build_gemini_json_from_sse_json(input_json: String) -> Result<String, String> {
+    let input = read_input_object(input_json, "Gemini SSE decode")?;
+    let body_text = input
+        .get("body_text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Gemini SSE decode missing body_text".to_string())?;
+    let config = input
+        .get("config")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut accumulators: std::collections::BTreeMap<i64, GeminiCandidateAccumulator> =
+        std::collections::BTreeMap::new();
+    let mut done_payload: Option<Map<String, Value>> = None;
+
+    for (event_name, event_value) in parse_gemini_sse_blocks(body_text)? {
+        let event_obj = event_value
+            .as_object()
+            .ok_or_else(|| "Gemini SSE event payload expected object".to_string())?;
+        read_event_protocol(event_obj)?;
+        let event_type = event_obj
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or(event_name.as_str());
+        if event_name != event_type && !event_type.trim().is_empty() {
+            return Err(format!(
+                "Gemini SSE event type mismatch: event={} payload={}",
+                event_name, event_type
+            ));
+        }
+        let payload = event_payload(event_obj);
+        match event_name.as_str() {
+            "gemini.data" => {
+                let candidate_index = read_required_i64(
+                    payload,
+                    "candidateIndex",
+                    "Invalid Gemini data event: missing candidateIndex",
+                )?;
+                let part = read_required_payload_part(payload)?;
+                let part_index = read_decode_part_index(payload, candidate_index);
+                if !part.is_object() {
+                    return Err(format!(
+                        "Invalid Gemini data event: invalid part at index {}",
+                        part_index
+                    ));
+                }
+                let role = payload
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| "Invalid Gemini data event: missing role".to_string())?;
+                let entry = accumulators.entry(candidate_index).or_insert_with(|| {
+                    GeminiCandidateAccumulator {
+                        role: role.to_string(),
+                        parts: Vec::new(),
+                    }
+                });
+                let normalized_parts = normalize_reasoning_part(part, part_index, &config)?;
+                for normalized_part in normalized_parts {
+                    merge_gemini_part(&mut entry.parts, normalized_part);
+                }
+            }
+            "gemini.done" => {
+                done_payload = Some(payload.clone());
+            }
+            other => {
+                return Err(format!("Unsupported Gemini SSE event type: {}", other));
+            }
+        }
+    }
+
+    let done_payload =
+        done_payload.ok_or_else(|| "Gemini SSE stream missing done event".to_string())?;
+    let done_candidates = done_payload
+        .get("candidates")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Invalid Gemini done event: missing candidates".to_string())?;
+    let mut candidate_meta: std::collections::BTreeMap<i64, Map<String, Value>> =
+        std::collections::BTreeMap::new();
+    for (done_index, entry) in done_candidates.iter().enumerate() {
+        let entry_obj = entry
+            .as_object()
+            .ok_or_else(|| format!("Invalid Gemini done event: invalid candidate at index {}", done_index))?;
+        let index = entry_obj
+            .get("index")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| format!("Invalid Gemini done event: invalid candidate at index {}", done_index))?;
+        candidate_meta.insert(index, entry_obj.clone());
+    }
+
+    let mut candidates = Vec::new();
+    for (index, acc) in accumulators {
+        let mut candidate = Map::new();
+        candidate.insert(
+            "content".to_string(),
+            serde_json::json!({
+                "role": acc.role,
+                "parts": acc.parts
+            }),
+        );
+        if let Some(meta) = candidate_meta.get(&index) {
+            if let Some(finish_reason) = meta.get("finishReason") {
+                candidate.insert("finishReason".to_string(), finish_reason.clone());
+            }
+            if let Some(safety_ratings) = meta.get("safetyRatings") {
+                candidate.insert("safetyRatings".to_string(), safety_ratings.clone());
+            }
+        }
+        candidates.push(Value::Object(candidate));
+    }
+
+    let mut response = Map::new();
+    response.insert("candidates".to_string(), Value::Array(candidates));
+    if let Some(prompt_feedback) = done_payload.get("promptFeedback") {
+        response.insert("promptFeedback".to_string(), prompt_feedback.clone());
+    }
+    if let Some(usage_metadata) = done_payload.get("usageMetadata") {
+        response.insert("usageMetadata".to_string(), usage_metadata.clone());
+    }
+    if let Some(model_version) = done_payload.get("modelVersion") {
+        response.insert("modelVersion".to_string(), model_version.clone());
+    }
+    serde_json::to_string(&Value::Object(response))
+        .map_err(|error| format!("Failed to serialize Gemini SSE decode JSON: {}", error))
+}
+
 pub fn build_gemini_sse_event_sequence_json(input_json: String) -> Result<String, String> {
     let input = read_input_object(input_json, "Gemini SSE event sequence")?;
     let response = input
@@ -159,7 +381,7 @@ pub fn build_gemini_sse_event_sequence_json(input_json: String) -> Result<String
 
 #[cfg(test)]
 mod tests {
-    use super::build_gemini_sse_event_sequence_json;
+    use super::{build_gemini_json_from_sse_json, build_gemini_sse_event_sequence_json};
     use serde_json::json;
 
     #[test]
@@ -225,5 +447,39 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("Invalid Gemini candidate: missing role"));
+    }
+
+    #[test]
+    fn build_gemini_json_from_sse_aggregates_text() {
+        let body_text = concat!(
+            "event: gemini.data\n",
+            "data: {\"type\":\"gemini.data\",\"protocol\":\"gemini-chat\",\"data\":{\"candidateIndex\":0,\"role\":\"model\",\"part\":{\"text\":\"hello\"}}}\n\n",
+            "event: gemini.data\n",
+            "data: {\"type\":\"gemini.data\",\"protocol\":\"gemini-chat\",\"data\":{\"candidateIndex\":0,\"role\":\"model\",\"part\":{\"text\":\" world\"}}}\n\n",
+            "event: gemini.done\n",
+            "data: {\"type\":\"gemini.done\",\"protocol\":\"gemini-chat\",\"data\":{\"kind\":\"done\",\"candidates\":[{\"index\":0,\"finishReason\":\"STOP\"}]}}\n\n"
+        );
+        let output = build_gemini_json_from_sse_json(
+            json!({
+                "body_text": body_text
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let response: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(response["candidates"][0]["content"]["parts"][0]["text"], "hello world");
+        assert_eq!(response["candidates"][0]["finishReason"], "STOP");
+    }
+
+    #[test]
+    fn build_gemini_json_from_sse_requires_done() {
+        let err = build_gemini_json_from_sse_json(
+            json!({
+                "body_text": "event: gemini.data\ndata: {\"type\":\"gemini.data\",\"protocol\":\"gemini-chat\",\"data\":{\"candidateIndex\":0,\"role\":\"model\",\"part\":{\"text\":\"hello\"}}}\n\n"
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+        assert!(err.contains("Gemini SSE stream missing done event"));
     }
 }

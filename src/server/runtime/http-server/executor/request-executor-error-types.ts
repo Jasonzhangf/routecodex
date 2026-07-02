@@ -6,6 +6,8 @@ export type RetryErrorSnapshot = {
   errorCode?: string;
   upstreamCode?: string;
   upstreamStatus?: number;
+  catalogCode?: string;
+  catalogKey?: string;
   reason: string;
 };
 
@@ -35,6 +37,7 @@ export type ProviderRetryExclusionPlan = {
 export type ProviderRetryExecutionPlan = {
   shouldRetry: boolean;
   excludedCurrentProvider: boolean;
+  blockedByProtocolBoundary?: boolean;
   retrySwitchPlan?: ProviderRetrySwitchPlan;
   retryExecutionPolicyReason?: string;
   /**
@@ -61,6 +64,8 @@ export type ProviderRetryTelemetryPlan = {
     errorCode?: string;
     upstreamCode?: string;
     upstreamStatus?: number;
+    catalogCode?: string;
+    catalogKey?: string;
     switchAction: ProviderRetrySwitchAction;
     decisionLabel?: string;
     retryExecutionPolicyReason?: string;

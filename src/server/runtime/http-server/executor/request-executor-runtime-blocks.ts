@@ -226,6 +226,8 @@ export function logProviderRetrySwitchCompact(args: {
   errorCode?: string;
   upstreamCode?: string;
   upstreamStatus?: number;
+  catalogCode?: string;
+  catalogKey?: string;
   switchAction: 'exclude_and_reroute';
   decisionLabel?: string;
   retryExecutionPolicyReason?: string;
@@ -271,10 +273,12 @@ export function logProviderRetrySwitchCompact(args: {
       `provider=${providerLabel}`,
       `switch=${args.switchAction}`,
       ...(typeof args.statusCode === 'number' ? [`status=${args.statusCode}`] : []),
-      ...(args.errorCode ? [`code=${args.errorCode}`] : []),
-      ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
-      ...(typeof args.upstreamStatus === 'number' ? [`upstreamStatus=${args.upstreamStatus}`] : []),
-      `suppressed=${prior.suppressed}`,
+    ...(args.errorCode ? [`code=${args.errorCode}`] : []),
+    ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
+    ...(typeof args.upstreamStatus === 'number' ? [`upstreamStatus=${args.upstreamStatus}`] : []),
+    ...(args.catalogCode ? [`catalogCode=${args.catalogCode}`] : []),
+    ...(args.catalogKey ? [`catalogKey=${args.catalogKey}`] : []),
+    `suppressed=${prior.suppressed}`,
       `windowMs=${args.throttleMs}`
     ];
     console.warn(`[provider-switch] aggregated ${aggregateDetails.join(' ')}`);
@@ -298,6 +302,8 @@ export function logProviderRetrySwitchCompact(args: {
     ...(args.errorCode ? [`code=${args.errorCode}`] : []),
     ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
     ...(typeof args.upstreamStatus === 'number' ? [`upstreamStatus=${args.upstreamStatus}`] : []),
+    ...(args.catalogCode ? [`catalogCode=${args.catalogCode}`] : []),
+    ...(args.catalogKey ? [`catalogKey=${args.catalogKey}`] : []),
     ...(externalErrorSource ? [`source=${externalErrorSource}`] : []),
     ...(typeof args.runtimeScopeExcludedCount === 'number' && args.runtimeScopeExcludedCount > 0
       ? [`runtimeScopeExcluded=${args.runtimeScopeExcludedCount}`]
@@ -312,11 +318,15 @@ function hasMeaningfulStructuredReason(args: {
   errorCode?: string;
   upstreamCode?: string;
   upstreamStatus?: number;
+  catalogCode?: string;
+  catalogKey?: string;
 }): boolean {
   return typeof args.statusCode === 'number'
     || Boolean(args.errorCode)
     || Boolean(args.upstreamCode)
-    || typeof args.upstreamStatus === 'number';
+    || typeof args.upstreamStatus === 'number'
+    || Boolean(args.catalogCode)
+    || Boolean(args.catalogKey);
 }
 
 function resolveProviderSwitchExternalErrorSource(args: {

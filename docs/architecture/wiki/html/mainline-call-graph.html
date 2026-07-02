@@ -618,6 +618,7 @@
           HubRespOutbound04ClientSemantic --&gt;|chat-sse-01| ServerRespOutbound05ClientFrame
           ProviderRespInbound01Raw --&gt;|chat-sse-02| HubRespInbound02Parsed
           HubRespOutbound04ClientSemantic --&gt;|gemini-sse-01| ServerRespOutbound05ClientFrame
+          ProviderRespInbound01Raw --&gt;|gemini-sse-02| HubRespInbound02Parsed
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -632,6 +633,7 @@
         <tr><td>chat-sse-01</td><td><code>HubRespOutbound04ClientSemantic -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>processResponseToSseWithFunctions -&gt; buildChatSseEventSequenceWithNative</code></td><td></td><td><code>sse.chat_stream_projection</code>&lt;br/&gt;OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas</td></tr>
         <tr><td>chat-sse-02</td><td><code>ProviderRespInbound01Raw -&gt; HubRespInbound02Parsed</code></td><td>anchored</td><td><code>convertSseToJson -&gt; buildChatJsonFromSseWithNative</code></td><td></td><td><code>sse.chat_stream_projection</code>&lt;br/&gt;OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas</td></tr>
         <tr><td>gemini-sse-01</td><td><code>HubRespOutbound04ClientSemantic -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>sequenceResponse -&gt; buildGeminiSseEventSequenceWithNative</code></td><td></td><td><code>sse.anthropic_gemini_stream_projection</code>&lt;br/&gt;Anthropic Messages and Gemini Chat protocol-specific SSE projection owners</td></tr>
+        <tr><td>gemini-sse-02</td><td><code>ProviderRespInbound01Raw -&gt; HubRespInbound02Parsed</code></td><td>anchored</td><td><code>convertSseToJson -&gt; buildGeminiJsonFromSseWithNative</code></td><td></td><td><code>sse.anthropic_gemini_stream_projection</code>&lt;br/&gt;Anthropic Messages and Gemini Chat protocol-specific SSE projection owners</td></tr>
         </tbody>
         </table>
         <h2>Shared Multi-Reference Functions</h2>

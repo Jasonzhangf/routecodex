@@ -1,20 +1,22 @@
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 
 describe('request-executor-provider-failure-plan', () => {
-  test('protocol boundary conflicts never exclude providers from VR route hits', async () => {
+  test('protocol boundary conflicts fail fast before provider error reporting', async () => {
     const excludedProviderKeys = new Set<string>();
-    const plan = await resolveRequestExecutorProviderFailurePlan({
-      error: Object.assign(
-        new Error('MetadataCenter runtime_control.providerProtocol conflict: existing=openai-responses selected=anthropic-messages'),
-        {
-          code: 'ERR_PROVIDER_PROTOCOL_MISMATCH'
-        }
-      ),
+    const error = Object.assign(
+      new Error('MetadataCenter runtime_control.providerProtocol conflict: existing=openai-responses selected=anthropic-messages'),
+      {
+        code: 'ERR_PROVIDER_PROTOCOL_MISMATCH'
+      }
+    );
+
+    await expect(resolveRequestExecutorProviderFailurePlan({
+      error,
       retryError: {
         errorCode: 'ERR_PROVIDER_PROTOCOL_MISMATCH',
         reason: 'MetadataCenter runtime_control.providerProtocol conflict: existing=openai-responses selected=anthropic-messages'
       },
-      requestId: 'req-provider-protocol-boundary-no-exclusion',
+      requestId: 'req-provider-protocol-boundary-fail-fast',
       providerKey: 'minimax.key1.MiniMax-M3',
       providerProtocol: 'anthropic-messages',
       runtimeKey: 'runtime:minimax',
@@ -30,11 +32,8 @@ describe('request-executor-provider-failure-plan', () => {
       recordAttempt: () => undefined,
       logStage: () => undefined,
       logNonBlockingError: () => undefined
-    });
+    })).rejects.toThrow('MetadataCenter runtime_control.providerProtocol conflict');
 
-    expect(plan.retryExecutionPlan.shouldRetry).toBe(false);
-    expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
-    expect(plan.retryExecutionPlan.retrySwitchPlan).toBeUndefined();
     expect(excludedProviderKeys.size).toBe(0);
   });
 
