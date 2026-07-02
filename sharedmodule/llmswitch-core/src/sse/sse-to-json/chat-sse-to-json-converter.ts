@@ -191,13 +191,17 @@ export class ChatSseToJsonConverter {
     // Try to parse native projected payload from error message (original behavior)
     function parseNativeProjectedError(error: unknown): Record<string, unknown> | null {
       const msg = error instanceof Error ? error.message : String(error ?? '');
+      const trimmed = msg.trim();
+      if (!trimmed.startsWith('{')) {
+        return null;
+      }
       try {
-        const parsed = JSON.parse(msg);
+        const parsed = JSON.parse(trimmed);
         return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
           ? parsed as Record<string, unknown>
           : null;
-      } catch {
-        return null;
+      } catch (parseError) {
+        throw ErrorUtils.wrapError(parseError, 'Invalid native Chat SSE error projection JSON');
       }
     }
 
