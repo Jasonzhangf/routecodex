@@ -2725,7 +2725,9 @@ fn plans_servertool_engine_preflight_via_servertool_core_bridge() {
         &serde_json::json!({
             "hasSyntheticControlText": true,
             "stopSignalObserved": true,
-            "stoplessDisabledOnDirectRoute": true
+            "stoplessDisabledOnDirectRoute": true,
+            "chat": { "id": "chat-synthetic" },
+            "stopSignal": { "observed": true }
         })
         .to_string(),
     )
@@ -2736,12 +2738,21 @@ fn plans_servertool_engine_preflight_via_servertool_core_bridge() {
         synthetic_value["action"],
         serde_json::json!("return_original_chat")
     );
+    assert_eq!(
+        synthetic_value["result"],
+        serde_json::json!({
+            "kind": "return_original_chat",
+            "chat": { "id": "chat-synthetic" }
+        })
+    );
 
     let direct = plan_servertool_engine_preflight_json(
         &serde_json::json!({
             "hasSyntheticControlText": false,
             "stopSignalObserved": true,
-            "stoplessDisabledOnDirectRoute": true
+            "stoplessDisabledOnDirectRoute": true,
+            "chat": { "id": "chat-direct" },
+            "stopSignal": { "observed": true }
         })
         .to_string(),
     )
@@ -2750,6 +2761,13 @@ fn plans_servertool_engine_preflight_via_servertool_core_bridge() {
     assert_eq!(
         direct_value["action"],
         serde_json::json!("return_original_chat_direct_passthrough")
+    );
+    assert_eq!(
+        direct_value["result"],
+        serde_json::json!({
+            "kind": "return_original_chat_direct_passthrough",
+            "chat": { "id": "chat-direct" }
+        })
     );
 }
 

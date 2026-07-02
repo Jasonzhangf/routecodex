@@ -339,6 +339,15 @@ export interface ServertoolEnginePreflightPlan {
     | 'return_original_chat_direct_passthrough'
     | 'continue_to_engine';
   attachStopGatewayContext: boolean;
+  result:
+    | {
+        kind: 'return_original_chat' | 'return_original_chat_direct_passthrough';
+        chat: JsonObject;
+      }
+    | {
+        kind: 'continue';
+        stopSignal: unknown;
+      };
   logStopEntry?: {
     stage: 'entry' | 'trigger';
     result: string;
@@ -2334,6 +2343,8 @@ export function planServertoolExecutionBranchWithNative(input: {
 export function planServertoolEnginePreflightWithNative(input: {
   hasSyntheticControlText: boolean;
   stopSignalObserved: boolean;
+  chat?: JsonObject;
+  stopSignal?: unknown;
   stoplessDisabledOnDirectRoute?: boolean;
   adapterContext?: unknown;
 }): ServertoolEnginePreflightPlan {
@@ -2361,11 +2372,34 @@ export function planServertoolEnginePreflightWithNative(input: {
   if (typeof record.attachStopGatewayContext !== 'boolean') {
     throw new Error('planServertoolEnginePreflightJson native returned invalid attachStopGatewayContext');
   }
+  if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid result');
+  }
+  const result = record.result as Record<string, unknown>;
+  if (
+    (result.kind === 'return_original_chat' || result.kind === 'return_original_chat_direct_passthrough') &&
+    (!result.chat || typeof result.chat !== 'object' || Array.isArray(result.chat))
+  ) {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid chat result');
+  }
+  if (result.kind === 'continue' && result.stopSignal == null) {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid continue result');
+  }
+  if (
+    result.kind !== 'return_original_chat' &&
+    result.kind !== 'return_original_chat_direct_passthrough' &&
+    result.kind !== 'continue'
+  ) {
+    throw new Error('planServertoolEnginePreflightJson native returned invalid result kind');
+  }
   const logStopEntry = parseServertoolEnginePreflightLogStopEntry(record.logStopEntry);
   const logStopCompare = parseServertoolEnginePreflightLogStopCompare(record.logStopCompare);
   return {
     action: record.action,
     attachStopGatewayContext: record.attachStopGatewayContext,
+    result: result.kind === 'continue'
+      ? { kind: 'continue', stopSignal: result.stopSignal }
+      : { kind: result.kind, chat: result.chat as JsonObject },
     ...(logStopEntry ? { logStopEntry } : {}),
     ...(logStopCompare ? { logStopCompare } : {})
   };

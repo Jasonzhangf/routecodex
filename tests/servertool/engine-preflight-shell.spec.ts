@@ -45,6 +45,17 @@ describe('engine-preflight-shell', () => {
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'continue_to_engine',
       attachStopGatewayContext: true,
+      result: {
+        kind: 'continue',
+        stopSignal: {
+          observed: true,
+          eligible: true,
+          source: 'chat',
+          reason: 'stop_schema_missing',
+          choiceIndex: 0,
+          hasToolCalls: false,
+        }
+      },
       logStopEntry: {
         stage: 'entry',
         result: 'observed',
@@ -74,9 +85,15 @@ describe('engine-preflight-shell', () => {
     expect(source).toContain("case 'return_original_chat'");
     expect(source).toContain("case 'return_original_chat_direct_passthrough'");
     expect(source).toContain("case 'continue_to_engine'");
+    expect(source).toContain('chat: args.chat');
+    expect(source).toContain('stopSignal,');
+    expect(source).toContain('return preflightAction.result');
     expect(source).toContain('preflightAction.attachStopGatewayContext === true');
     expect(source).toContain('preflightAction.logStopEntry');
     expect(source).toContain('preflightAction.logStopCompare');
+    expect(source).not.toContain("return { kind: 'return_original_chat'");
+    expect(source).not.toContain("return { kind: 'return_original_chat_direct_passthrough'");
+    expect(source).not.toContain("return { kind: 'continue'");
     expect(source).not.toContain('preflightAction.logStopEntry.stage');
     expect(source).not.toContain('preflightAction.logStopEntry.result');
     expect(source).not.toContain('String(preflightAction.action)');
@@ -90,6 +107,10 @@ describe('engine-preflight-shell', () => {
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'unknown_preflight_action',
       attachStopGatewayContext: true,
+      result: {
+        kind: 'continue',
+        stopSignal: { observed: true }
+      },
       logStopEntry: {
         stage: 'entry',
         result: 'observed',
@@ -117,7 +138,11 @@ describe('engine-preflight-shell', () => {
   test('returns original chat when native preflight says so', () => {
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'return_original_chat',
-      attachStopGatewayContext: false
+      attachStopGatewayContext: false,
+      result: {
+        kind: 'return_original_chat',
+        chat: { id: 'chat-1' }
+      }
     });
 
     const result = runEnginePreflight({
@@ -140,6 +165,10 @@ describe('engine-preflight-shell', () => {
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'return_original_chat_direct_passthrough',
       attachStopGatewayContext: true,
+      result: {
+        kind: 'return_original_chat_direct_passthrough',
+        chat: { id: 'chat-2' }
+      },
       logStopEntry: {
         stage: 'trigger',
         result: 'skipped_direct_passthrough',

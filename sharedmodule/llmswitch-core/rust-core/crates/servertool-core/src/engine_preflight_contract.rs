@@ -8,6 +8,10 @@ pub struct ServertoolEnginePreflightInput {
     pub has_synthetic_control_text: bool,
     pub stop_signal_observed: bool,
     #[serde(default)]
+    pub chat: Option<Value>,
+    #[serde(default)]
+    pub stop_signal: Option<Value>,
+    #[serde(default)]
     pub stopless_disabled_on_direct_route: Option<bool>,
     #[serde(default)]
     pub adapter_context: Option<Value>,
@@ -26,6 +30,7 @@ pub enum ServertoolEnginePreflightAction {
 pub struct ServertoolEnginePreflightPlan {
     pub action: ServertoolEnginePreflightAction,
     pub attach_stop_gateway_context: bool,
+    pub result: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_stop_entry: Option<ServertoolEnginePreflightLogStopEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,6 +62,10 @@ pub fn plan_servertool_engine_preflight(
         return ServertoolEnginePreflightPlan {
             action: ServertoolEnginePreflightAction::ReturnOriginalChat,
             attach_stop_gateway_context: false,
+            result: serde_json::json!({
+                "kind": "return_original_chat",
+                "chat": input.chat.clone().unwrap_or(Value::Null),
+            }),
             log_stop_entry: None,
             log_stop_compare: None,
         };
@@ -65,6 +74,10 @@ pub fn plan_servertool_engine_preflight(
         return ServertoolEnginePreflightPlan {
             action: ServertoolEnginePreflightAction::ReturnOriginalChatDirectPassthrough,
             attach_stop_gateway_context: true,
+            result: serde_json::json!({
+                "kind": "return_original_chat_direct_passthrough",
+                "chat": input.chat.clone().unwrap_or(Value::Null),
+            }),
             log_stop_entry: Some(ServertoolEnginePreflightLogStopEntry {
                 stage: "trigger".to_string(),
                 result: "skipped_direct_passthrough".to_string(),
@@ -87,6 +100,10 @@ pub fn plan_servertool_engine_preflight(
     ServertoolEnginePreflightPlan {
         action: ServertoolEnginePreflightAction::ContinueToEngine,
         attach_stop_gateway_context: true,
+        result: serde_json::json!({
+            "kind": "continue",
+            "stopSignal": input.stop_signal.unwrap_or(Value::Null),
+        }),
         log_stop_entry,
         log_stop_compare: None,
     }
@@ -125,6 +142,8 @@ mod tests {
         let plan = plan_servertool_engine_preflight(ServertoolEnginePreflightInput {
             has_synthetic_control_text: true,
             stop_signal_observed: true,
+            chat: Some(serde_json::json!({ "id": "chat-synthetic" })),
+            stop_signal: Some(serde_json::json!({ "observed": true })),
             stopless_disabled_on_direct_route: Some(true),
             adapter_context: None,
         });
@@ -133,6 +152,13 @@ mod tests {
             ServertoolEnginePreflightAction::ReturnOriginalChat
         );
         assert!(!plan.attach_stop_gateway_context);
+        assert_eq!(
+            plan.result,
+            serde_json::json!({
+                "kind": "return_original_chat",
+                "chat": { "id": "chat-synthetic" }
+            })
+        );
         assert_eq!(plan.log_stop_entry, None);
         assert_eq!(plan.log_stop_compare, None);
     }
@@ -142,6 +168,8 @@ mod tests {
         let plan = plan_servertool_engine_preflight(ServertoolEnginePreflightInput {
             has_synthetic_control_text: false,
             stop_signal_observed: true,
+            chat: Some(serde_json::json!({ "id": "chat-direct" })),
+            stop_signal: Some(serde_json::json!({ "observed": true })),
             stopless_disabled_on_direct_route: Some(true),
             adapter_context: None,
         });
@@ -150,6 +178,13 @@ mod tests {
             ServertoolEnginePreflightAction::ReturnOriginalChatDirectPassthrough
         );
         assert!(plan.attach_stop_gateway_context);
+        assert_eq!(
+            plan.result,
+            serde_json::json!({
+                "kind": "return_original_chat_direct_passthrough",
+                "chat": { "id": "chat-direct" }
+            })
+        );
         assert_eq!(
             plan.log_stop_entry,
             Some(ServertoolEnginePreflightLogStopEntry {
@@ -171,6 +206,8 @@ mod tests {
         let plan = plan_servertool_engine_preflight(ServertoolEnginePreflightInput {
             has_synthetic_control_text: false,
             stop_signal_observed: true,
+            chat: Some(serde_json::json!({ "id": "chat-continue" })),
+            stop_signal: Some(serde_json::json!({ "observed": true, "reason": "stop_schema_missing" })),
             stopless_disabled_on_direct_route: Some(false),
             adapter_context: None,
         });
@@ -179,6 +216,13 @@ mod tests {
             ServertoolEnginePreflightAction::ContinueToEngine
         );
         assert!(plan.attach_stop_gateway_context);
+        assert_eq!(
+            plan.result,
+            serde_json::json!({
+                "kind": "continue",
+                "stopSignal": { "observed": true, "reason": "stop_schema_missing" }
+            })
+        );
         assert_eq!(
             plan.log_stop_entry,
             Some(ServertoolEnginePreflightLogStopEntry {
@@ -195,6 +239,8 @@ mod tests {
         let plan = plan_servertool_engine_preflight(ServertoolEnginePreflightInput {
             has_synthetic_control_text: false,
             stop_signal_observed: true,
+            chat: Some(serde_json::json!({ "id": "chat-context" })),
+            stop_signal: Some(serde_json::json!({ "observed": true })),
             stopless_disabled_on_direct_route: None,
             adapter_context: Some(serde_json::json!({
                 "metadata": {

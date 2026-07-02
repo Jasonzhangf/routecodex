@@ -11,6 +11,9 @@ import { planServertoolEnginePreflightWithNative } from '../native/router-hotpat
 
 type StopGatewayContext = ReturnType<typeof inspectStopGatewaySignal>;
 type EnginePreflightNativePlan = ReturnType<typeof planServertoolEnginePreflightWithNative>;
+type EnginePreflightOriginalChatResult = Extract<EnginePreflightResult, { kind: 'return_original_chat' }>;
+type EnginePreflightDirectPassthroughResult = Extract<EnginePreflightResult, { kind: 'return_original_chat_direct_passthrough' }>;
+type EnginePreflightContinueResult = Extract<EnginePreflightResult, { kind: 'continue' }>;
 
 export type EnginePreflightResult =
   | {
@@ -74,11 +77,13 @@ export function runEnginePreflight(args: {
   const preflightAction = planServertoolEnginePreflightWithNative({
     hasSyntheticControlText: containsSyntheticRouteCodexControlTextWithNative(args.chat),
     stopSignalObserved: stopSignal.observed,
+    chat: args.chat,
+    stopSignal,
     adapterContext: args.adapterContext
   });
   switch (preflightAction.action) {
     case 'return_original_chat':
-      return { kind: 'return_original_chat', chat: args.chat };
+      return preflightAction.result as EnginePreflightOriginalChatResult;
     case 'return_original_chat_direct_passthrough':
       runPreflightSideEffects({
         preflightAction,
@@ -87,7 +92,7 @@ export function runEnginePreflight(args: {
         logStopEntry: args.logStopEntry,
         logStopCompare: args.logStopCompare
       });
-      return { kind: 'return_original_chat_direct_passthrough', chat: args.chat };
+      return preflightAction.result as EnginePreflightDirectPassthroughResult;
     case 'continue_to_engine':
       runPreflightSideEffects({
         preflightAction,
@@ -96,7 +101,7 @@ export function runEnginePreflight(args: {
         logStopEntry: args.logStopEntry,
         logStopCompare: args.logStopCompare
       });
-      return { kind: 'continue', stopSignal };
+      return preflightAction.result as EnginePreflightContinueResult;
     default:
       throw new Error('[servertool] invalid engine preflight action');
   }

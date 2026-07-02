@@ -283,22 +283,34 @@ describe('servertool CLI native bridge', () => {
       planServertoolEnginePreflightWithNative({
         hasSyntheticControlText: true,
         stopSignalObserved: true,
-        stoplessDisabledOnDirectRoute: true
+        stoplessDisabledOnDirectRoute: true,
+        chat: { id: 'chat-synthetic' },
+        stopSignal: { observed: true }
       })
     ).toEqual({
       action: 'return_original_chat',
-      attachStopGatewayContext: false
+      attachStopGatewayContext: false,
+      result: {
+        kind: 'return_original_chat',
+        chat: { id: 'chat-synthetic' }
+      }
     });
 
     expect(
       planServertoolEnginePreflightWithNative({
         hasSyntheticControlText: false,
         stopSignalObserved: true,
-        stoplessDisabledOnDirectRoute: true
+        stoplessDisabledOnDirectRoute: true,
+        chat: { id: 'chat-direct' },
+        stopSignal: { observed: true }
       })
     ).toEqual({
       action: 'return_original_chat_direct_passthrough',
       attachStopGatewayContext: true,
+      result: {
+        kind: 'return_original_chat_direct_passthrough',
+        chat: { id: 'chat-direct' }
+      },
       logStopEntry: {
         stage: 'trigger',
         result: 'skipped_direct_passthrough',
@@ -313,11 +325,17 @@ describe('servertool CLI native bridge', () => {
       planServertoolEnginePreflightWithNative({
         hasSyntheticControlText: false,
         stopSignalObserved: true,
-        stoplessDisabledOnDirectRoute: false
+        stoplessDisabledOnDirectRoute: false,
+        chat: { id: 'chat-continue' },
+        stopSignal: { observed: true, reason: 'stop_schema_missing' }
       })
     ).toEqual({
       action: 'continue_to_engine',
       attachStopGatewayContext: true,
+      result: {
+        kind: 'continue',
+        stopSignal: { observed: true, reason: 'stop_schema_missing' }
+      },
       logStopEntry: {
         stage: 'entry',
         result: 'observed',
@@ -329,6 +347,8 @@ describe('servertool CLI native bridge', () => {
       planServertoolEnginePreflightWithNative({
         hasSyntheticControlText: false,
         stopSignalObserved: true,
+        chat: { id: 'chat-context' },
+        stopSignal: { observed: true },
         adapterContext: {
           metadata: {
             routeName: 'provider-direct/live'
@@ -338,6 +358,10 @@ describe('servertool CLI native bridge', () => {
     ).toEqual({
       action: 'return_original_chat_direct_passthrough',
       attachStopGatewayContext: true,
+      result: {
+        kind: 'return_original_chat_direct_passthrough',
+        chat: { id: 'chat-context' }
+      },
       logStopEntry: {
         stage: 'trigger',
         result: 'skipped_direct_passthrough',
