@@ -94,6 +94,24 @@ function isLastProviderRetryEligibleStage(stage?: RequestExecutorProviderErrorSt
     || stage === 'provider.sse_decode';
 }
 
+function isUnprovenLastProviderProbeEligible(args: {
+  stage?: RequestExecutorProviderErrorStage;
+  errorCode?: string;
+  upstreamCode?: string;
+  routePool?: string[];
+}): boolean {
+  if (Array.isArray(args.routePool) && args.routePool.length > 0) {
+    return true;
+  }
+  if (args.stage === 'provider.runtime_resolve') {
+    return true;
+  }
+  const errorCode = readString(args.errorCode)?.toUpperCase();
+  const upstreamCode = readString(args.upstreamCode)?.toUpperCase();
+  return errorCode === 'ERR_PROVIDER_NOT_FOUND'
+    || upstreamCode === 'ERR_PROVIDER_NOT_FOUND';
+}
+
 export async function resolveProviderRetryExecutionPlan(args: {
   error: unknown;
   retryError: RetryErrorSnapshot;
@@ -154,6 +172,22 @@ export async function resolveProviderRetryExecutionPlan(args: {
   });
   args.recordAttempt({ error: true });
 
+  const preExclusionHasAlternativeCandidate = hasAlternativeRouteCandidate({
+    providerKey: args.providerKey,
+    routePool: args.routePool,
+    excludedProviderKeys: args.excludedProviderKeys
+  });
+  const shouldProbeUnprovenLastProviderByExclusion =
+    args.routePoolIsAuthoritative !== true
+    && args.providerKey
+    && retryActionPlan.shouldRetry
+    && isUnprovenLastProviderProbeEligible({
+      stage: args.stage,
+      errorCode: args.retryError.errorCode,
+      upstreamCode: args.retryError.upstreamCode,
+      routePool: args.routePool
+    })
+    && !preExclusionHasAlternativeCandidate;
   const baseExclusionPlan = hostContractFailure
     ? { excludedCurrentProvider: false }
     : resolveProviderRetryExclusionPlan({
@@ -164,7 +198,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
         attempt: args.attempt,
         promptTooLong: Boolean(args.promptTooLong),
         routePool: args.routePool,
-        excludedProviderKeys: args.excludedProviderKeys,
+        excludedProviderKeys: new Set(args.excludedProviderKeys),
         retryError: args.retryError
       });
   if (!classification) {
@@ -195,7 +229,9 @@ export async function resolveProviderRetryExecutionPlan(args: {
     (
       nativeExecutionPolicy.excludeCurrentProvider
       || baseExclusionPlan.excludedCurrentProvider
+      || shouldProbeUnprovenLastProviderByExclusion
     )
+    && (preExclusionHasAlternativeCandidate || shouldProbeUnprovenLastProviderByExclusion)
     && !mayRetryVerifiedLastProvider
   )
       ? {
@@ -248,6 +284,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       return {
         shouldRetry: true,
         excludedCurrentProvider: true,
+        allowRetryBeyondAttemptBudget: true,
         retrySwitchPlan,
         retryExecutionPolicyReason: 'prompt_too_long_route_hint_retry',
         routePoolRemainingAfterExclusion: promptTooLongGate.routePoolRemainingAfterExclusion,
@@ -276,6 +313,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       return {
         shouldRetry: true,
         excludedCurrentProvider: Boolean(args.providerKey),
+        allowRetryBeyondAttemptBudget: true,
         retrySwitchPlan,
         retryExecutionPolicyReason: nativeExecutionPolicy.reason,
         routePoolRemainingAfterExclusion: defaultPoolGate.routePoolRemainingAfterExclusion,
@@ -284,30 +322,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
         mayProject: defaultPoolGate.mayProject,
       };
     }
-    if (mayRetryVerifiedLastProvider) {
-      return {
-        shouldRetry: true,
-        excludedCurrentProvider: false,
-        retryExecutionPolicyReason: nativeExecutionPolicy.reason,
-        routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
-        defaultPoolAvailable: gate.defaultPoolAvailable,
-        policyExhausted: gate.policyExhausted,
-        mayProject: gate.mayProject,
-      };
-    }
-    if (
-      retryActionPlan.shouldRetry
-      && !hostContractFailure
-      && args.providerKey
-      && args.attempt < args.maxAttempts
-      && args.providerOwnedContinuation !== true
-    ) {
-      args.excludedProviderKeys.add(args.providerKey);
-      const retrySwitchGate = resolveProviderRetryExecutionPlanExhaustionGate({
-        routePool: args.routePool,
-        excludedProviderKeys: args.excludedProviderKeys,
-        defaultPoolAvailable: args.defaultTierAvailable === true,
-      });
+    if (exclusionPlan.excludedCurrentProvider) {
       const retrySwitchPlan = {
         switchAction: 'exclude_and_reroute',
         decisionLabel: 'exclude_and_reroute',
@@ -317,19 +332,33 @@ export async function resolveProviderRetryExecutionPlan(args: {
       return {
         shouldRetry: true,
         excludedCurrentProvider: true,
+        allowRetryBeyondAttemptBudget:
+          gate.defaultPoolAvailable === true
+          || gate.routePoolRemainingAfterExclusion.length > 0,
         retrySwitchPlan,
         retryExecutionPolicyReason: nativeExecutionPolicy.reason,
-        routePoolRemainingAfterExclusion: retrySwitchGate.routePoolRemainingAfterExclusion,
-        defaultPoolAvailable: retrySwitchGate.defaultPoolAvailable,
-        policyExhausted: args.routePoolIsAuthoritative === true
-          ? retrySwitchGate.policyExhausted
-          : false,
+        routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+        defaultPoolAvailable: gate.defaultPoolAvailable,
+        policyExhausted: args.routePoolIsAuthoritative === true ? gate.policyExhausted : false,
         mayProject: false,
+      };
+    }
+    if (mayRetryVerifiedLastProvider) {
+      return {
+        shouldRetry: true,
+        excludedCurrentProvider: false,
+        allowRetryBeyondAttemptBudget: false,
+        retryExecutionPolicyReason: nativeExecutionPolicy.reason,
+        routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
+        defaultPoolAvailable: gate.defaultPoolAvailable,
+        policyExhausted: gate.policyExhausted,
+        mayProject: gate.mayProject,
       };
     }
     return {
       shouldRetry: false,
       excludedCurrentProvider: false,
+      allowRetryBeyondAttemptBudget: false,
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
       defaultPoolAvailable: gate.defaultPoolAvailable,
       policyExhausted: gate.policyExhausted,
@@ -341,6 +370,12 @@ export async function resolveProviderRetryExecutionPlan(args: {
     return {
       shouldRetry: maySwitchToAlternativeProvider,
       excludedCurrentProvider: keepTerminalExclusion,
+      allowRetryBeyondAttemptBudget:
+        maySwitchToAlternativeProvider
+        && (
+          gate.defaultPoolAvailable === true
+          || gate.routePoolRemainingAfterExclusion.length > 0
+        ),
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
       defaultPoolAvailable: gate.defaultPoolAvailable,
       policyExhausted: gate.policyExhausted,
@@ -359,6 +394,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
       return {
         shouldRetry: false,
         excludedCurrentProvider: true,
+        allowRetryBeyondAttemptBudget: false,
         routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
         defaultPoolAvailable: gate.defaultPoolAvailable,
         policyExhausted: gate.policyExhausted,
@@ -368,6 +404,9 @@ export async function resolveProviderRetryExecutionPlan(args: {
     return {
       shouldRetry: true,
       excludedCurrentProvider: true,
+      allowRetryBeyondAttemptBudget:
+        gate.defaultPoolAvailable === true
+        || gate.routePoolRemainingAfterExclusion.length > 0,
       retrySwitchPlan,
       retryExecutionPolicyReason: nativeExecutionPolicy.reason,
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
@@ -387,6 +426,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     return {
       shouldRetry: false,
       excludedCurrentProvider: retryExcludedCurrentProvider,
+      allowRetryBeyondAttemptBudget: false,
       routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
       defaultPoolAvailable: gate.defaultPoolAvailable,
       policyExhausted: gate.policyExhausted,
@@ -396,6 +436,12 @@ export async function resolveProviderRetryExecutionPlan(args: {
   return {
     shouldRetry: true,
     excludedCurrentProvider: retryExcludedCurrentProvider,
+    allowRetryBeyondAttemptBudget:
+      retryExcludedCurrentProvider
+      && (
+        gate.defaultPoolAvailable === true
+        || gate.routePoolRemainingAfterExclusion.length > 0
+      ),
     retrySwitchPlan,
     retryExecutionPolicyReason: nativeExecutionPolicy.reason,
     routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,

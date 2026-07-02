@@ -194,8 +194,6 @@ export async function processProviderResolveFailure(
 
   return {
     lastError: args.error,
-    allowRetryBeyondAttemptBudget:
-      retryExecutionPlan.excludedCurrentProvider === true
-      || retryExecutionPlan.defaultPoolAvailable === true,
+    allowRetryBeyondAttemptBudget: retryExecutionPlan.allowRetryBeyondAttemptBudget === true,
   };
 }

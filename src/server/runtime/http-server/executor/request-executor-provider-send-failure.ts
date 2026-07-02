@@ -458,8 +458,6 @@ export async function processProviderSendFailure(
     forcedRouteHint,
     contextOverflowRetries,
     cumulativeExternalLatencyMs,
-    allowRetryBeyondAttemptBudget:
-      retryExecutionPlan.excludedCurrentProvider === true
-      || retryExecutionPlan.defaultPoolAvailable === true
+    allowRetryBeyondAttemptBudget: retryExecutionPlan.allowRetryBeyondAttemptBudget === true
   };
 }

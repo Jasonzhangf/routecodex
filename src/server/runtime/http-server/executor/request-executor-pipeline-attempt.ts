@@ -231,17 +231,17 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       hasAlternativeCandidate
     });
     if (!hasAlternativeCandidate) {
-      throw Object.assign(new Error(`Virtual router reselected excluded provider ${target.providerKey}`), {
-        code: 'ERR_EXCLUDED_PROVIDER_RESELECTED',
-        requestId: args.inputRequestId,
+      args.excludedProviderKeys.delete(target.providerKey);
+      args.logStage('provider.retry.excluded_target_reselected_singleton_released', args.providerRequestId, {
         providerKey: target.providerKey,
-        cause: args.lastError
+        attempt: args.attempt
       });
+    } else {
+      return {
+        kind: 'retry_next_attempt',
+        initialRoutePool
+      };
     }
-    return {
-      kind: 'retry_next_attempt',
-      initialRoutePool
-    };
   }
 
   const metadataCenter = MetadataCenter.read(mergedMetadata);

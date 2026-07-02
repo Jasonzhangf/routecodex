@@ -848,6 +848,9 @@ export class HubRequestExecutor implements RequestExecutor {
               allowPrimaryExhaustedReplayBeyondAttemptBudget = true;
               continue;
             }
+            if (lastError && excludedProviderKeys.size > 0) {
+              throw lastError;
+            }
             throw pipelineError;
           }
           throw pipelineError;
@@ -909,12 +912,19 @@ export class HubRequestExecutor implements RequestExecutor {
           routePool: routePoolForAttempt,
           excludedProviderKeys,
         });
+        const routingDecisionForAttempt = pipelineResult.routingDecision as Record<string, unknown> | undefined;
+        const hasAuthoritativeVrRoutePool =
+          Array.isArray(routingDecisionForAttempt?.routePool)
+          && routingDecisionForAttempt.routePool.length > 0;
         const routePoolIsAuthoritativeForAttempt =
-          routePoolForAttempt.length > 1
-          || (
-            routePoolForAttempt.length === 1
-            && defaultTierAvailableForAttempt === false
-            && excludedProviderKeys.size > 0
+          hasAuthoritativeVrRoutePool
+          && (
+            routePoolForAttempt.length > 1
+            || (
+              routePoolForAttempt.length === 1
+              && defaultTierAvailableForAttempt === false
+              && excludedProviderKeys.size === 0
+            )
           );
         const concurrencyScopeKey =
           typeof target.concurrencyScopeKey === 'string' && target.concurrencyScopeKey.trim()

@@ -2,6 +2,69 @@ import { jest } from '@jest/globals';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
 // ProviderTrafficGovernorLike: 已迁移到独立 Rust crate (traffic-governor-core)
 
+function hasNonEmptyArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function mockHasRequestedToolsInSemantics(requestSemantics?: Record<string, unknown>): boolean {
+  const semantics = readRecord(requestSemantics);
+  const tools = readRecord(semantics?.tools);
+  return hasNonEmptyArray(tools?.clientToolsRaw);
+}
+
+function mockIsRequiredToolCallTurn(requestSemantics?: Record<string, unknown>): boolean {
+  const semantics = readRecord(requestSemantics);
+  const responses = readRecord(semantics?.responses);
+  return mockHasRequestedToolsInSemantics(requestSemantics)
+    && (responses?.toolChoice === 'required' || responses?.tool_choice === 'required');
+}
+
+function mockIsToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
+  const semantics = readRecord(requestSemantics);
+  const continuation = readRecord(semantics?.continuation);
+  const toolContinuation = readRecord(continuation?.toolContinuation);
+  if (toolContinuation?.mode === 'submit_tool_outputs') {
+    return true;
+  }
+  if (hasNonEmptyArray(semantics?.toolOutputs)) {
+    return true;
+  }
+  const messages = Array.isArray(semantics?.messages) ? semantics.messages : [];
+  return messages.some((message) => readRecord(message)?.role === 'tool');
+}
+
+function mockIsProviderNativeResumeContinuation(requestSemantics?: Record<string, unknown>): boolean {
+  const semantics = readRecord(requestSemantics);
+  const continuation = readRecord(semantics?.continuation);
+  if (continuation?.continuationOwner !== 'direct') {
+    return false;
+  }
+  const resumeFrom = readRecord(continuation?.resumeFrom);
+  return typeof resumeFrom?.previousResponseId === 'string'
+    || typeof continuation?.previousResponseId === 'string'
+    || (continuation?.mode === 'submit_tool_outputs' && typeof continuation?.responseId === 'string');
+}
+
+jest.unstable_mockModule(
+  '../../../../src/server/runtime/http-server/executor/request-executor-request-semantics.js',
+  () => ({
+    hasRequestedToolsInSemantics: jest.fn(async (requestSemantics?: Record<string, unknown>) =>
+      mockHasRequestedToolsInSemantics(requestSemantics)),
+    isRequiredToolCallTurn: jest.fn(async (requestSemantics?: Record<string, unknown>) =>
+      mockIsRequiredToolCallTurn(requestSemantics)),
+    isProviderNativeResumeContinuation: jest.fn(async (requestSemantics?: Record<string, unknown>) =>
+      mockIsProviderNativeResumeContinuation(requestSemantics)),
+    isToolResultFollowupTurn: jest.fn(async (requestSemantics?: Record<string, unknown>) =>
+      mockIsToolResultFollowupTurn(requestSemantics))
+  })
+);
+
 const { __requestExecutorTestables, createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
 const { resolveProviderFailureActionPlan } = await import('../../../../src/providers/core/runtime/provider-failure-policy.js');
 const { getServerToolRuntimeState, setServerToolEnabled } = await import('../../../../src/server/runtime/http-server/servertool-admin-state');
