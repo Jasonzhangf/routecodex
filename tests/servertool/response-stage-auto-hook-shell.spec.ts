@@ -2,6 +2,50 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
 const planServertoolRequiredResponseHookEmptyErrorWithNative = jest.fn();
+const resolveServertoolResponseStageAutoHookPreDecisionWithNative = jest.fn((input: any) => {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  }) as any;
+  if (action.action === 'return_passthrough_bypass') {
+    return {
+      action: 'return_pass_result',
+      result: action.passResult
+    };
+  }
+  if (action.action === 'run_auto_hooks') {
+    return { action: 'run_auto_hooks' };
+  }
+  throw new Error('[servertool] invalid response-stage pre auto-hook action');
+});
+const resolveServertoolResponseStageAutoHookPostDecisionWithNative = jest.fn((input: any) => {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    autoHookEvaluated: true,
+    hasAutoHookResult: input.autoHookResult != null,
+    autoHookResult: input.autoHookResult
+  }) as any;
+  if (action.action === 'return_required_response_hook_empty') {
+    return {
+      action: 'throw_required_response_hook_empty',
+      errorPlan: planServertoolRequiredResponseHookEmptyErrorWithNative({
+        requestId: input.requestId,
+        responseHookName: action.responseHookName
+      })
+    };
+  }
+  if (
+    action.action === 'return_auto_hook_result' ||
+    action.action === 'return_passthrough_no_auto_hook_result'
+  ) {
+    return {
+      action: 'return_pass_result',
+      result: action.passResult
+    };
+  }
+  throw new Error('[servertool] invalid response-stage post auto-hook action');
+});
 const runServertoolAutoHookCaller = jest.fn();
 const createServertoolProviderProtocolErrorFromPlan = jest.fn();
 
@@ -9,7 +53,9 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
     planServertoolResponseStageRuntimeActionWithNative,
-    planServertoolRequiredResponseHookEmptyErrorWithNative
+    planServertoolRequiredResponseHookEmptyErrorWithNative,
+    resolveServertoolResponseStageAutoHookPreDecisionWithNative,
+    resolveServertoolResponseStageAutoHookPostDecisionWithNative
   })
 );
 
@@ -129,13 +175,17 @@ describe('response-stage-auto-hook-shell', () => {
     expect(source).not.toContain("if (postAutoHookRuntimeAction.action === 'return_auto_hook_result')");
     expect(source).not.toContain('function hasServerSideToolEngineResult(');
     expect(source).not.toContain('hasServerSideToolEngineResult(autoHookResult)');
-    expect(source).toContain('switch (preAutoHookRuntimeAction.action)');
-    expect(source).toContain('switch (postAutoHookRuntimeAction.action)');
-    expect(source).toContain('hasAutoHookResult: autoHookResult != null');
+    expect(source).not.toContain('switch (preAutoHookRuntimeAction.action)');
+    expect(source).not.toContain('switch (postAutoHookRuntimeAction.action)');
+    expect(source).not.toContain('hasAutoHookResult: autoHookResult != null');
     expect(source).toContain('autoHookResult');
-    expect(source).toContain('if (autoHookResult == null)');
-    expect(source).toContain('return preAutoHookRuntimeAction.passResult');
-    expect(source).toContain('return postAutoHookRuntimeAction.passResult');
+    expect(source).not.toContain('if (autoHookResult == null)');
+    expect(source).not.toContain('return preAutoHookRuntimeAction.passResult');
+    expect(source).not.toContain('return postAutoHookRuntimeAction.passResult');
+    expect(source).toContain('resolveServertoolResponseStageAutoHookPreDecisionWithNative({');
+    expect(source).toContain('resolveServertoolResponseStageAutoHookPostDecisionWithNative({');
+    expect(source).toContain('return preAutoHookDecision.result');
+    expect(source).toContain('return postAutoHookDecision.result');
     expect(source).not.toContain("return { action: 'return_passthrough_bypass' }");
     expect(source).not.toContain("return { action: 'continue_without_result' }");
     expect(source).not.toContain("action: 'return_auto_hook_result',");

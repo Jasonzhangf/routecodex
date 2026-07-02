@@ -1,3 +1,10 @@
+# 2026-07-03: servertool response-stage auto-hook switches moved to native helpers
+
+- Slice: `response-stage-auto-hook-shell.ts` no longer switches over `preAutoHookRuntimeAction.action` or `postAutoHookRuntimeAction.action`. TS now delegates pre/post response-stage auto-hook decisions to `resolveServertoolResponseStageAutoHookPreDecisionWithNative()` and `resolveServertoolResponseStageAutoHookPostDecisionWithNative()`, leaving TS to execute the auto-hook IO and throw the native-planned required-hook-empty provider protocol error.
+- Gate: `response-stage-auto-hook-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the old TS runtime-action switch/result markers and require the native helper path.
+- Evidence: focused Jest `response-stage-auto-hook-shell + response-stage-prepass-shell + response-stage-finalize-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 92/92; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this closes one Phase 1 response-stage auto-hook TS switch slice only. Other servertool Phase 1 residues still need classification or migration before Phase 1 can be declared closed; Hub Pipeline, Virtual Router, aggregate build, and live/replay closeout remain open.
+
 # 2026-07-03: servertool response-stage prepass/finalize switches moved to native helpers
 
 - Slice: `response-stage-prepass-shell.ts` no longer switches over `prepassRuntimeAction.action` or `responseStageAutoHook.action`; it delegates initial and post-auto-hook prepass decisions to `resolveServertoolResponseStagePrepassInitialDecisionWithNative()` / `resolveServertoolResponseStagePrepassAfterAutoHookWithNative()`. `response-stage-finalize-shell.ts` no longer switches over `finalizeRuntimeAction.action`; it delegates final result projection to `finalizeServertoolResponseStageWithNative()`.

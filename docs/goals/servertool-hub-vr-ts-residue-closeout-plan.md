@@ -272,3 +272,23 @@ The closeout is done only when:
 - Aggregate build/test/gate/live evidence passes in the active worktree.
 - Obsolete TS implementations and tests are physically removed.
 - Final report states what changed, how it was verified, what TS remains by design, and any unresolved risk.
+
+## Resume Prompt Execution Notes
+
+Use this section when launching the closeout through `/goal`.
+
+Execution order is intentionally easiest-to-hardest:
+
+1. Finish Phase 1 servertool thin-shell residue first. Before editing, re-scan `sharedmodule/llmswitch-core/src/servertool/**/*.ts` for native action switches, result-mode projection, `as Record<string, unknown>` / `as unknown as Record`, `handler_error`, `noop`, `triggerResult`, and `shellResult` markers. Classify each hit as allowed IO/native dispatch or migrate the semantic branch to Rust.
+2. Commit each verified Phase 1 slice immediately with only relevant files staged. Do not wait for the whole multi-phase closeout before committing green servertool slices.
+3. Move to Phase 2 only after Phase 1 residue is either migrated or gated as allowed IO/marshal. Phase 2 focuses on Hub response/provider-response effect application and must not change continuation immutable interval semantics outside the Chat Process owner.
+4. Move to Phase 3 after response path is bounded. Phase 3 focuses on HubPipeline class/request-stage shells and must keep TS limited to construction, dependency wiring, timing/debug IO, and native calls.
+5. Move to Phase 4 after Hub request/response shells are bounded. Phase 4 focuses on Virtual Router config/admin/host-effects, preserving the invariant that runtime route selection/fallback semantics are Rust-only.
+6. Run Phase 5 aggregate build/gates and same-entry live/replay validation only after Phases 1-4 are green. Do not claim closeout from local compile, unit tests, or static gates alone.
+
+Current continuation constraints:
+
+- The worktree may contain unrelated dirty files from other slices. Never stage all files; inspect and stage only the verified slice.
+- If an in-progress servertool slice already has uncommitted edits, verify that slice first, run the required gates, append `note.md`, then commit it before starting a new residue family.
+- Do not mark this goal complete until all five phases, aggregate gates, and live/replay evidence are complete.
+- SSE rustification can remain out of scope unless a Hub response/transport closeout step directly depends on it.

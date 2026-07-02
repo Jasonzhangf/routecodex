@@ -498,6 +498,11 @@ export type ServertoolResponseStageRuntimeActionPlan =
       finalizeResult: ServertoolResponseStageAutoHookResult;
     };
 
+type ServertoolResponseStageAutoHookPassResult = Extract<
+  ServertoolResponseStageRuntimeActionPlan,
+  { passResult: unknown }
+>['passResult'];
+
 export type ServertoolResponseStagePrepassShellDecision =
   | {
       action: 'run_auto_hooks';
@@ -523,6 +528,25 @@ export type ServertoolResponseStagePrepassAfterAutoHookDecision =
             responseStageGatePlan: NativeServertoolResponseStageGate;
             result: ServertoolResponseStageAutoHookResult;
           };
+    };
+
+export type ServertoolResponseStageAutoHookPreDecision =
+  | {
+      action: 'return_pass_result';
+      result: ServertoolResponseStageAutoHookPassResult;
+    }
+  | {
+      action: 'run_auto_hooks';
+    };
+
+export type ServertoolResponseStageAutoHookPostDecision =
+  | {
+      action: 'return_pass_result';
+      result: ServertoolResponseStageAutoHookPassResult;
+    }
+  | {
+      action: 'throw_required_response_hook_empty';
+      errorPlan: ReturnType<typeof planServertoolRequiredResponseHookEmptyErrorWithNative>;
     };
 
 export interface ServertoolResponseStageOrchestrationOutputPlan {
@@ -3364,6 +3388,58 @@ export function finalizeServertoolResponseStageWithNative(input: {
       return action.finalizeResult;
     default:
       throw new Error('[servertool] invalid response-stage finalize action');
+  }
+}
+
+export function resolveServertoolResponseStageAutoHookPreDecisionWithNative(input: {
+  responseStageGatePlan: NativeServertoolResponseStageGate;
+}): ServertoolResponseStageAutoHookPreDecision {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  });
+  switch (action.action) {
+    case 'return_passthrough_bypass':
+      return {
+        action: 'return_pass_result',
+        result: action.passResult
+      };
+    case 'run_auto_hooks':
+      return { action: 'run_auto_hooks' };
+    default:
+      throw new Error('[servertool] invalid response-stage pre auto-hook action');
+  }
+}
+
+export function resolveServertoolResponseStageAutoHookPostDecisionWithNative(input: {
+  requestId: string;
+  responseStageGatePlan: NativeServertoolResponseStageGate;
+  autoHookResult: ServertoolResponseStageAutoHookResult | null;
+}): ServertoolResponseStageAutoHookPostDecision {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    autoHookEvaluated: true,
+    hasAutoHookResult: input.autoHookResult != null,
+    autoHookResult: input.autoHookResult
+  });
+  switch (action.action) {
+    case 'return_required_response_hook_empty':
+      return {
+        action: 'throw_required_response_hook_empty',
+        errorPlan: planServertoolRequiredResponseHookEmptyErrorWithNative({
+          requestId: input.requestId,
+          responseHookName: action.responseHookName
+        })
+      };
+    case 'return_auto_hook_result':
+    case 'return_passthrough_no_auto_hook_result':
+      return {
+        action: 'return_pass_result',
+        result: action.passResult
+      };
+    default:
+      throw new Error('[servertool] invalid response-stage post auto-hook action');
   }
 }
 

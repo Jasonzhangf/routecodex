@@ -6433,6 +6433,15 @@ function checkServertoolResponseStageGateThinShell() {
     "if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass')",
     "if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty')",
     "if (postAutoHookRuntimeAction.action === 'return_auto_hook_result')",
+    'switch (preAutoHookRuntimeAction.action)',
+    'switch (postAutoHookRuntimeAction.action)',
+    'return preAutoHookRuntimeAction.passResult',
+    'return postAutoHookRuntimeAction.passResult',
+    'responseHookName: postAutoHookRuntimeAction.responseHookName',
+    'hasAutoHookResult: autoHookResult != null',
+    'if (autoHookResult == null)',
+    'invalid response-stage pre auto-hook action',
+    'invalid response-stage post auto-hook action',
     'function hasServerSideToolEngineResult(',
     'hasServerSideToolEngineResult(autoHookResult)',
   ]) {
@@ -6447,19 +6456,19 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'switch (preAutoHookRuntimeAction.action)'
+    'resolveServertoolResponseStageAutoHookPreDecisionWithNative'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'switch (postAutoHookRuntimeAction.action)'
+    'resolveServertoolResponseStageAutoHookPostDecisionWithNative'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'responseHookName: postAutoHookRuntimeAction.responseHookName'
+    'createServertoolProviderProtocolErrorFromPlan(postAutoHookDecision.errorPlan)'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
@@ -6471,37 +6480,13 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'return preAutoHookRuntimeAction.passResult'
+    'return preAutoHookDecision.result'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'return postAutoHookRuntimeAction.passResult'
-  );
-  assertContains(
-    'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
-    responseStageAutoHookShell,
-    'hasAutoHookResult: autoHookResult != null'
-  );
-  assertContains(
-    'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
-    responseStageAutoHookShell,
-    'if (autoHookResult == null)'
-  );
-  assertContains(
-    'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
-    responseStageAutoHookShell,
-    'invalid response-stage pre auto-hook action'
-  );
-  assertContains(
-    'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
-    responseStageAutoHookShell,
-    'invalid response-stage post auto-hook action'
+    'return postAutoHookDecision.result'
   );
 }
 
