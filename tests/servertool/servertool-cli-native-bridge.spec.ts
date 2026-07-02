@@ -715,6 +715,9 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'return_passthrough_bypass',
+      passResult: {
+        action: 'return_passthrough_bypass'
+      },
       passthroughResult: {
         mode: 'passthrough',
         finalChatResponse: { ok: 'bypass' }
@@ -733,6 +736,9 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'return_passthrough_bypass',
+      passResult: {
+        action: 'return_passthrough_bypass'
+      },
       passthroughResult: {
         mode: 'passthrough',
         finalChatResponse: { ok: 'bypass-skip' }
@@ -759,10 +765,23 @@ describe('servertool CLI native bridge', () => {
         },
         autoHookEvaluated: true,
         hasAutoHookResult: true,
+        autoHookResult: {
+          mode: 'tool_flow',
+          finalChatResponse: { ok: true },
+          execution: { flowId: 'flow_1' }
+        },
         responseHookRequired: false
       })
     ).toEqual({
-      action: 'return_auto_hook_result'
+      action: 'return_auto_hook_result',
+      passResult: {
+        action: 'return_auto_hook_result',
+        result: {
+          mode: 'tool_flow',
+          finalChatResponse: { ok: true },
+          execution: { flowId: 'flow_1' }
+        }
+      }
     });
 
     expect(
@@ -770,10 +789,23 @@ describe('servertool CLI native bridge', () => {
         responseStageNextAction: 'run_auto_hooks',
         autoHookEvaluated: true,
         hasAutoHookResult: true,
+        autoHookResult: {
+          mode: 'tool_flow',
+          finalChatResponse: { ok: true },
+          execution: { flowId: 'flow_1' }
+        },
         responseHookRequired: false
       })
     ).toEqual({
-      action: 'return_auto_hook_result'
+      action: 'return_auto_hook_result',
+      passResult: {
+        action: 'return_auto_hook_result',
+        result: {
+          mode: 'tool_flow',
+          finalChatResponse: { ok: true },
+          execution: { flowId: 'flow_1' }
+        }
+      }
     });
 
     expect(
@@ -786,6 +818,9 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'return_passthrough_no_auto_hook_result',
+      passResult: {
+        action: 'continue_without_result'
+      },
       passthroughResult: {
         mode: 'passthrough',
         finalChatResponse: { ok: 'no-hook' }

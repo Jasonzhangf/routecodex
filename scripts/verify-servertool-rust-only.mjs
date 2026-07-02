@@ -6388,6 +6388,9 @@ function checkServertoolResponseStageGateThinShell() {
     'Boolean(autoHookResult)',
     'responseHookName: postAutoHookRuntimeAction.responseHookName as string',
     'result: autoHookResult as ServerSideToolEngineResult',
+    "return { action: 'return_passthrough_bypass' }",
+    "return { action: 'continue_without_result' }",
+    "action: 'return_auto_hook_result',",
     'preAutoHookRuntimeAction as { action: string }',
     'postAutoHookRuntimeAction as { action: string }',
     "if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass')",
@@ -6425,7 +6428,19 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'result: autoHookResult'
+    'autoHookResult'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'return preAutoHookRuntimeAction.passResult'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'return postAutoHookRuntimeAction.passResult'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',

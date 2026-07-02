@@ -36,10 +36,18 @@ describe('response-stage-auto-hook-shell', () => {
     jest.clearAllMocks();
     planServertoolResponseStageRuntimeActionWithNative.mockImplementation((input: any) => {
       if (input?.autoHookEvaluated === false) {
-        return { action: 'run_auto_hooks' };
+        return input?.responseStageGatePlan?.nextAction === 'bypass'
+          ? { action: 'return_passthrough_bypass', passResult: { action: 'return_passthrough_bypass' } }
+          : { action: 'run_auto_hooks' };
       }
       if (input?.hasAutoHookResult === true) {
-        return { action: 'return_auto_hook_result' };
+        return {
+          action: 'return_auto_hook_result',
+          passResult: {
+            action: 'return_auto_hook_result',
+            result: input?.autoHookResult
+          }
+        };
       }
       if (input?.responseStageGatePlan?.responseHookRequired === true) {
         return {
@@ -47,7 +55,7 @@ describe('response-stage-auto-hook-shell', () => {
           responseHookName: String(input?.responseStageGatePlan?.responseHookName ?? '').trim()
         };
       }
-      return { action: 'return_passthrough_no_auto_hook_result' };
+      return { action: 'return_passthrough_no_auto_hook_result', passResult: { action: 'continue_without_result' } };
     });
     runServertoolAutoHookCaller.mockResolvedValue({
       mode: 'tool_flow',
@@ -69,7 +77,10 @@ describe('response-stage-auto-hook-shell', () => {
   });
 
   test('bypasses when native runtime action says bypass', async () => {
-    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({ action: 'return_passthrough_bypass' });
+    planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
+      action: 'return_passthrough_bypass',
+      passResult: { action: 'return_passthrough_bypass' }
+    });
 
     await expect(
       runServertoolResponseStageAutoHookPass({
@@ -121,8 +132,13 @@ describe('response-stage-auto-hook-shell', () => {
     expect(source).toContain('switch (preAutoHookRuntimeAction.action)');
     expect(source).toContain('switch (postAutoHookRuntimeAction.action)');
     expect(source).toContain('hasAutoHookResult: autoHookResult != null');
-    expect(source).toContain('result: autoHookResult');
+    expect(source).toContain('autoHookResult');
     expect(source).toContain('if (autoHookResult == null)');
+    expect(source).toContain('return preAutoHookRuntimeAction.passResult');
+    expect(source).toContain('return postAutoHookRuntimeAction.passResult');
+    expect(source).not.toContain("return { action: 'return_passthrough_bypass' }");
+    expect(source).not.toContain("return { action: 'continue_without_result' }");
+    expect(source).not.toContain("action: 'return_auto_hook_result',");
     expect(source).not.toContain('result: autoHookResult as ServerSideToolEngineResult');
     expect(source).not.toContain('responseHookName: postAutoHookRuntimeAction.responseHookName as string');
   });

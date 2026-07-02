@@ -2,6 +2,7 @@
 // Provides inspect_stop_gateway_signal, evaluate_loop_guard, calculate_budget.
 
 import type { JsonObject } from '../../conversion/hub/types/json.js';
+import type { ServerSideToolEngineResult } from '../../servertool/types.js';
 import {
   ProviderProtocolError,
   type ProviderErrorCategory,
@@ -445,12 +446,17 @@ export type ServertoolExecutionLoopEffectPlan =
   | ServertoolExecutionLoopHandlerErrorEffectPlan
   | ServertoolExecutionLoopEffectBasePlan;
 
+export type ServertoolResponseStageAutoHookResult = ServerSideToolEngineResult;
+
 export type ServertoolResponseStageRuntimeActionPlan =
   | {
       action: 'return_passthrough_bypass' | 'return_passthrough_no_auto_hook_result';
       passthroughResult: {
         mode: 'passthrough';
         finalChatResponse: unknown;
+      };
+      passResult: {
+        action: 'return_passthrough_bypass' | 'continue_without_result';
       };
       skipReason?: string;
     }
@@ -459,7 +465,14 @@ export type ServertoolResponseStageRuntimeActionPlan =
       responseHookName: string;
     }
   | {
-      action: 'run_auto_hooks' | 'return_auto_hook_result';
+      action: 'run_auto_hooks';
+    }
+  | {
+      action: 'return_auto_hook_result';
+      passResult: {
+        action: 'return_auto_hook_result';
+        result: ServertoolResponseStageAutoHookResult;
+      };
     };
 
 export interface ServertoolResponseStageOrchestrationOutputPlan {
@@ -2969,6 +2982,7 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
   responseStageGatePlan?: unknown;
   responseStageNextAction?: string;
   baseObject?: JsonObject;
+  autoHookResult?: ServertoolResponseStageAutoHookResult | null;
   autoHookEvaluated: boolean;
   hasAutoHookResult: boolean;
 }): ServertoolResponseStageRuntimeActionPlan {
@@ -3025,11 +3039,24 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     if (!Object.prototype.hasOwnProperty.call(passthroughResult, 'finalChatResponse')) {
       throw new Error('planServertoolResponseStageRuntimeActionJson native returned passthroughResult without finalChatResponse');
     }
+    if (!record.passResult || typeof record.passResult !== 'object' || Array.isArray(record.passResult)) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned passthrough action without passResult');
+    }
+    const passResult = record.passResult as Record<string, unknown>;
+    const expectedPassAction = record.action === 'return_passthrough_bypass'
+      ? 'return_passthrough_bypass'
+      : 'continue_without_result';
+    if (passResult.action !== expectedPassAction) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid passthrough passResult action');
+    }
     return {
       action: record.action,
       passthroughResult: {
         mode: 'passthrough',
         finalChatResponse: passthroughResult.finalChatResponse
+      },
+      passResult: {
+        action: expectedPassAction
       },
       ...(skipReason ? { skipReason } : {})
     };
@@ -3043,9 +3070,45 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
       responseHookName: record.responseHookName
     };
   }
-  if (record.action === 'run_auto_hooks' || record.action === 'return_auto_hook_result') {
+  if (record.action === 'run_auto_hooks') {
     return {
       action: record.action
+    };
+  }
+  if (record.action === 'return_auto_hook_result') {
+    if (!record.passResult || typeof record.passResult !== 'object' || Array.isArray(record.passResult)) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned auto-hook result without passResult');
+    }
+    const passResult = record.passResult as Record<string, unknown>;
+    if (passResult.action !== 'return_auto_hook_result' || !passResult.result || typeof passResult.result !== 'object' || Array.isArray(passResult.result)) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid auto-hook passResult');
+    }
+    const passResultPayload = passResult.result as Record<string, unknown>;
+    if (
+      (passResultPayload.mode !== 'passthrough' && passResultPayload.mode !== 'tool_flow') ||
+      !passResultPayload.finalChatResponse ||
+      typeof passResultPayload.finalChatResponse !== 'object' ||
+      Array.isArray(passResultPayload.finalChatResponse)
+    ) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid auto-hook result shape');
+    }
+    if (
+      passResultPayload.execution != null &&
+      (
+        typeof passResultPayload.execution !== 'object' ||
+        Array.isArray(passResultPayload.execution) ||
+        typeof (passResultPayload.execution as Record<string, unknown>).flowId !== 'string' ||
+        !(passResultPayload.execution as Record<string, unknown>).flowId
+      )
+    ) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid auto-hook execution shape');
+    }
+    return {
+      action: 'return_auto_hook_result',
+      passResult: {
+        action: 'return_auto_hook_result',
+        result: passResult.result as ServertoolResponseStageAutoHookResult
+      }
     };
   }
   throw new Error('planServertoolResponseStageRuntimeActionJson native returned unhandled action');

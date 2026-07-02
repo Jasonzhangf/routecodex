@@ -30,7 +30,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   });
   switch (preAutoHookRuntimeAction.action) {
     case 'return_passthrough_bypass':
-      return { action: 'return_passthrough_bypass' };
+      return preAutoHookRuntimeAction.passResult;
     case 'run_auto_hooks':
       break;
     default:
@@ -46,7 +46,8 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     autoHookEvaluated: true,
-    hasAutoHookResult: autoHookResult != null
+    hasAutoHookResult: autoHookResult != null,
+    autoHookResult
   });
   switch (postAutoHookRuntimeAction.action) {
     case 'return_required_response_hook_empty':
@@ -60,15 +61,12 @@ export async function runServertoolResponseStageAutoHookPass(args: {
       if (autoHookResult == null) {
         throw new Error('[servertool] invalid response-stage auto-hook result action without result');
       }
-      return {
-        action: 'return_auto_hook_result',
-        result: autoHookResult
-      };
+      return postAutoHookRuntimeAction.passResult;
     case 'return_passthrough_no_auto_hook_result':
       break;
     default:
       throw new Error('[servertool] invalid response-stage post auto-hook action');
   }
 
-  return { action: 'continue_without_result' };
+  return postAutoHookRuntimeAction.passResult;
 }

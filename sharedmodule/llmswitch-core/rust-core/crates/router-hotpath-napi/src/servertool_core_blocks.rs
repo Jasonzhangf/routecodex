@@ -3130,6 +3130,12 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
             "finalChatResponse": null
         })
     );
+    assert_eq!(
+        bypass_value["passResult"],
+        serde_json::json!({
+            "action": "return_passthrough_bypass"
+        })
+    );
     assert_eq!(bypass_value.get("skipReason"), None);
 
     let bypass_with_skip_reason = plan_servertool_response_stage_runtime_action_json(
@@ -3203,6 +3209,40 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         serde_json::json!({
             "mode": "passthrough",
             "finalChatResponse": null
+        })
+    );
+    assert_eq!(
+        passthrough_value["passResult"],
+        serde_json::json!({
+            "action": "continue_without_result"
+        })
+    );
+
+    let auto_hook_result = plan_servertool_response_stage_runtime_action_json(
+        &serde_json::json!({
+            "responseStageNextAction": "run_auto_hooks",
+            "autoHookEvaluated": true,
+            "hasAutoHookResult": true,
+            "autoHookResult": {
+                "mode": "tool_flow",
+                "finalChatResponse": { "ok": true },
+                "execution": { "flowId": "flow_1" }
+            }
+        })
+        .to_string(),
+    )
+    .expect("response-stage runtime action auto-hook result plan");
+    let auto_hook_result_value: serde_json::Value =
+        serde_json::from_str(&auto_hook_result).expect("parse auto-hook result plan");
+    assert_eq!(
+        auto_hook_result_value["passResult"],
+        serde_json::json!({
+            "action": "return_auto_hook_result",
+            "result": {
+                "mode": "tool_flow",
+                "finalChatResponse": { "ok": true },
+                "execution": { "flowId": "flow_1" }
+            }
         })
     );
 
