@@ -78,7 +78,7 @@ async function runAutoHookExecutionQueue(args: {
         ...traceBase,
         error
       });
-      args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
+      args.options.onAutoHookTrace?.(attemptPlan.traceEvent);
       throw error;
     }
 
@@ -94,7 +94,7 @@ async function runAutoHookExecutionQueue(args: {
         ? { materializedFlowId: result.execution.flowId }
         : {})
     });
-    args.options.onAutoHookTrace?.(attemptPlan.traceEvent as ServerToolAutoHookTraceEvent);
+    args.options.onAutoHookTrace?.(attemptPlan.traceEvent);
 
     switch (attemptPlan.action) {
       case 'return_result':

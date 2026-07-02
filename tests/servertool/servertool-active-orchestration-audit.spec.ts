@@ -228,6 +228,7 @@ const TARGETS = [
       'attemptPlan as { action: unknown }',
       'function planAutoHookCallerFinalization(',
       'const finalizationPlan = planAutoHookCallerFinalization({',
+      'attemptPlan.traceEvent as ServerToolAutoHookTraceEvent',
       'if (finalizationPlan.returnResult)',
       'if (finalizationPlan.continueNextQueue)',
       'if (finalizationPlan.returnNull)',

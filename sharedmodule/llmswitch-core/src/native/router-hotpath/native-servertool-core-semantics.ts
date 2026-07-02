@@ -125,7 +125,7 @@ export interface AutoHookTraceEventPlan {
   hookId: string;
   phase: string;
   priority: number;
-  queue: string;
+  queue: 'A_optional' | 'B_mandatory';
   queueIndex: number;
   queueTotal: number;
   result: 'miss' | 'match' | 'error';
@@ -2005,13 +2005,19 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
   ) {
     throw new Error('planAutoHookRuntimeAttemptJson native returned action/disposition mismatch');
   }
+  const traceQueue =
+    traceRecord.queue === 'A_optional' || traceRecord.queue === 'B_mandatory'
+      ? traceRecord.queue
+      : (() => {
+          throw new Error('planAutoHookRuntimeAttemptJson native returned invalid queue');
+        })();
   return {
     action: record.action,
     traceEvent: {
       hookId: traceRecord.hookId,
       phase: traceRecord.phase,
       priority: traceRecord.priority,
-      queue: traceRecord.queue,
+      queue: traceQueue,
       queueIndex: traceRecord.queueIndex,
       queueTotal: traceRecord.queueTotal,
       result: traceRecord.result,
@@ -3514,11 +3520,17 @@ function parseAutoHookTraceEventPlan(value: unknown, capability: string): AutoHo
   ) {
     throw new Error(`${capability} native returned malformed traceEvent`);
   }
+  const traceQueue =
+    record.queue === 'A_optional' || record.queue === 'B_mandatory'
+      ? record.queue
+      : (() => {
+          throw new Error(`${capability} native returned invalid queue`);
+        })();
   return {
     hookId: record.hookId,
     phase: record.phase,
     priority: record.priority,
-    queue: record.queue,
+    queue: traceQueue,
     queueIndex: record.queueIndex,
     queueTotal: record.queueTotal,
     result: record.result,

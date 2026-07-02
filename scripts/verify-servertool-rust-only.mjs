@@ -3482,6 +3482,7 @@ function checkAutoHookExecutionRustOwner() {
     'attemptPlan as { action: unknown }',
     'function planAutoHookCallerFinalization(',
     'const finalizationPlan = planAutoHookCallerFinalization({',
+    'attemptPlan.traceEvent as ServerToolAutoHookTraceEvent',
     'finalizationPlan as { action: string }',
     'planned as any',
     'const queueResultForReturn = queueResult as ServerToolHandlerResult',

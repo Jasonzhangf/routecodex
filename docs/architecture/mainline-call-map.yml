@@ -874,7 +874,7 @@ chains:
         to_node: MetaResp06ResponseObserved
         caller_symbol: convertProviderResponse
         caller_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
-        callee_symbol: readMetadataCenterRequestTruth
+        callee_symbol: readRequestTruthFromBoundMetadataCenter
         callee_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "provider response plus provider observation plus request-scoped metadata carrier"

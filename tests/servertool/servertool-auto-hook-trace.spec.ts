@@ -463,6 +463,8 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('return result;');
     expect(callerSource).toContain('switch (attemptPlan.action)');
     expect(callerSource).not.toContain('attemptPlan as { action: unknown }');
+    expect(callerSource).not.toContain('attemptPlan.traceEvent as ServerToolAutoHookTraceEvent');
+    expect(callerSource).toContain('args.options.onAutoHookTrace?.(attemptPlan.traceEvent);');
     expect(callerSource).not.toContain('switch (attemptPlan.returnResult)');
     expect(callerSource).not.toContain('if (planned) {');
     expect(callerSource).not.toContain('if (attemptPlan.returnResult)');

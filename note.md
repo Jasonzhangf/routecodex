@@ -1,3 +1,10 @@
+# 2026-07-02: servertool auto-hook trace cast removed
+
+- Slice: `auto-hook-caller.ts` no longer casts native `attemptPlan.traceEvent as ServerToolAutoHookTraceEvent`; `native-servertool-core-semantics.ts` now types native auto-hook trace queues as `A_optional | B_mandatory` and fail-fast rejects invalid queue strings.
+- Gate: `execution-shell.auto-hook-failfast.spec.ts`, `servertool-auto-hook-trace.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old trace-event cast marker and require direct native trace event pass-through.
+- Map fix: `docs/architecture/mainline-call-map.yml` metadata-center edge `mtc-05` now points to the real `readRequestTruthFromBoundMetadataCenter` symbol, restoring `verify:architecture-mainline-call-map`.
+- Evidence: focused Jest `execution-shell.auto-hook-failfast + servertool-auto-hook-trace + servertool-active-orchestration-audit` PASS 53/53; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool response-stage gate plan typed
 
 - Slice: `response-stage-prepass-shell.ts`, `response-stage-auto-hook-shell.ts`, `response-stage-finalize-shell.ts`, and `execution-stage-shell.ts` now carry `NativeServertoolResponseStageGate` instead of loose `Record<string, unknown>`; prepass no longer casts native gate output with `as Record<string, unknown>`.
