@@ -249,7 +249,9 @@ export async function runServerToolOrchestrationShell(
   const runtimeAction = planServertoolEngineRuntimeActionWithNative({
     isStopMessageFlow: stoplessPlan.isStopMessageFlow === true,
     stoplessExecutionFlowId: typeof stoplessExecution.flowId === 'string' ? stoplessExecution.flowId : undefined,
-    stoplessAction: stoplessPlan.action
+    stoplessAction: stoplessPlan.action,
+    engineExecutionFlowId: typeof stoplessExecution.flowId === 'string' ? stoplessExecution.flowId : undefined,
+    currentFlowId: flowId
   });
   runTriggerObservationPlan({
     stopSignal,

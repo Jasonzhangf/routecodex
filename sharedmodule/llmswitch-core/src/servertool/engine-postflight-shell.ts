@@ -23,21 +23,6 @@ const SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER = {
   stage: 'HubRespChatProcess03Governed',
 } as const;
 
-function resolvePostflightFlowId(args: {
-  runtimeAction: ServertoolEngineRuntimeActionPlan;
-  engineResult: ServerSideToolEngineResult;
-  flowId: string;
-}): string | undefined {
-  switch (args.runtimeAction.flowIdSource) {
-    case 'engine_execution':
-      return args.engineResult.execution?.flowId;
-    case 'current_flow':
-      return args.flowId;
-    default:
-      throw new Error('[servertool] invalid postflight flowIdSource');
-  }
-}
-
 export async function runServertoolEnginePostflight(args: {
   options: {
     requestId: string;
@@ -58,11 +43,7 @@ export async function runServertoolEnginePostflight(args: {
   | undefined
 > {
   const { engineResult, runtimeAction, options, flowId, totalSteps } = args;
-  const projectedFlowId = resolvePostflightFlowId({
-    runtimeAction,
-    engineResult,
-    flowId
-  });
+  const projectedFlowId = runtimeAction.projectedFlowId;
   if (engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object') {
     const runtimeControl = projectNativeMetadataWritePlanToRuntimeControl(engineResult.metadataWritePlan);
     if (Object.keys(runtimeControl).length > 0) {

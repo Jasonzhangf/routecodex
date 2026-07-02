@@ -9,6 +9,8 @@ pub struct ServertoolResponseStageRuntimeActionInput {
     pub response_stage_gate_plan: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_stage_next_action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_object: Option<Value>,
     pub auto_hook_evaluated: bool,
     pub has_auto_hook_result: bool,
 }
@@ -32,7 +34,16 @@ pub struct ServertoolResponseStageRuntimeActionPlan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub passthrough_result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_reason: Option<String>,
+}
+
+fn build_passthrough_result(input: &ServertoolResponseStageRuntimeActionInput) -> Value {
+    serde_json::json!({
+        "mode": "passthrough",
+        "finalChatResponse": input.base_object.clone().unwrap_or(Value::Null)
+    })
 }
 
 fn resolve_response_stage_next_action(input: &ServertoolResponseStageRuntimeActionInput) -> &str {
@@ -91,7 +102,8 @@ pub fn plan_servertool_response_stage_runtime_action(
         return ServertoolResponseStageRuntimeActionPlan {
             action: ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass,
             response_hook_name: None,
-            result_mode: Some("passthrough".to_string()),
+            result_mode: None,
+            passthrough_result: Some(build_passthrough_result(&input)),
             skip_reason: resolve_skip_reason(&input),
         };
     }
@@ -101,6 +113,7 @@ pub fn plan_servertool_response_stage_runtime_action(
             action: ServertoolResponseStageRuntimeAction::RunAutoHooks,
             response_hook_name: None,
             result_mode: None,
+            passthrough_result: None,
             skip_reason: None,
         };
     }
@@ -110,6 +123,7 @@ pub fn plan_servertool_response_stage_runtime_action(
             action: ServertoolResponseStageRuntimeAction::ReturnAutoHookResult,
             response_hook_name: None,
             result_mode: None,
+            passthrough_result: None,
             skip_reason: None,
         };
     }
@@ -119,6 +133,7 @@ pub fn plan_servertool_response_stage_runtime_action(
             action: ServertoolResponseStageRuntimeAction::ReturnRequiredResponseHookEmpty,
             response_hook_name: resolve_response_hook_name(&input),
             result_mode: None,
+            passthrough_result: None,
             skip_reason: None,
         };
     }
@@ -126,7 +141,8 @@ pub fn plan_servertool_response_stage_runtime_action(
     ServertoolResponseStageRuntimeActionPlan {
         action: ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult,
         response_hook_name: None,
-        result_mode: Some("passthrough".to_string()),
+        result_mode: None,
+        passthrough_result: Some(build_passthrough_result(&input)),
         skip_reason: None,
     }
 }
@@ -141,6 +157,7 @@ mod tests {
             ServertoolResponseStageRuntimeActionInput {
                 response_stage_gate_plan: None,
                 response_stage_next_action: Some("bypass".to_string()),
+                base_object: Some(serde_json::json!({"id": "chat_bypass"})),
                 auto_hook_evaluated: false,
                 has_auto_hook_result: false,
             },
@@ -149,7 +166,14 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass
         );
-        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
+        assert_eq!(plan.result_mode, None);
+        assert_eq!(
+            plan.passthrough_result,
+            Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": {"id": "chat_bypass"}
+            }))
+        );
         assert_eq!(plan.skip_reason, None);
     }
 
@@ -162,6 +186,7 @@ mod tests {
                     "skipReason": " empty_assistant_payload "
                 })),
                 response_stage_next_action: None,
+                base_object: Some(serde_json::json!({"id": "chat_bypass_skip"})),
                 auto_hook_evaluated: false,
                 has_auto_hook_result: false,
             },
@@ -170,7 +195,7 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnPassthroughBypass
         );
-        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
+        assert_eq!(plan.result_mode, None);
         assert_eq!(plan.skip_reason.as_deref(), Some("empty_assistant_payload"));
     }
 
@@ -180,6 +205,7 @@ mod tests {
             ServertoolResponseStageRuntimeActionInput {
                 response_stage_gate_plan: None,
                 response_stage_next_action: Some("run_auto_hooks".to_string()),
+                base_object: None,
                 auto_hook_evaluated: false,
                 has_auto_hook_result: false,
             },
@@ -189,6 +215,7 @@ mod tests {
             ServertoolResponseStageRuntimeAction::RunAutoHooks
         );
         assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.passthrough_result, None);
         assert_eq!(plan.skip_reason, None);
     }
 
@@ -198,6 +225,7 @@ mod tests {
             ServertoolResponseStageRuntimeActionInput {
                 response_stage_gate_plan: None,
                 response_stage_next_action: Some("run_auto_hooks".to_string()),
+                base_object: None,
                 auto_hook_evaluated: true,
                 has_auto_hook_result: true,
             },
@@ -207,6 +235,7 @@ mod tests {
             ServertoolResponseStageRuntimeAction::ReturnAutoHookResult
         );
         assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.passthrough_result, None);
         assert_eq!(plan.skip_reason, None);
     }
 
@@ -216,6 +245,7 @@ mod tests {
             ServertoolResponseStageRuntimeActionInput {
                 response_stage_gate_plan: None,
                 response_stage_next_action: Some("other".to_string()),
+                base_object: Some(serde_json::json!({"id": "chat_other"})),
                 auto_hook_evaluated: true,
                 has_auto_hook_result: true,
             },
@@ -224,7 +254,14 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult
         );
-        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
+        assert_eq!(plan.result_mode, None);
+        assert_eq!(
+            plan.passthrough_result,
+            Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": {"id": "chat_other"}
+            }))
+        );
     }
 
     #[test]
@@ -233,6 +270,7 @@ mod tests {
             ServertoolResponseStageRuntimeActionInput {
                 response_stage_gate_plan: None,
                 response_stage_next_action: Some("run_auto_hooks".to_string()),
+                base_object: Some(serde_json::json!({"id": "chat_no_hook"})),
                 auto_hook_evaluated: true,
                 has_auto_hook_result: false,
             },
@@ -241,7 +279,14 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnPassthroughNoAutoHookResult
         );
-        assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
+        assert_eq!(plan.result_mode, None);
+        assert_eq!(
+            plan.passthrough_result,
+            Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": {"id": "chat_no_hook"}
+            }))
+        );
     }
 
     #[test]
@@ -254,6 +299,7 @@ mod tests {
                     "responseHookName": " stop_message_auto "
                 })),
                 response_stage_next_action: None,
+                base_object: None,
                 auto_hook_evaluated: true,
                 has_auto_hook_result: false,
             },
@@ -267,6 +313,7 @@ mod tests {
             Some("stop_message_auto")
         );
         assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.passthrough_result, None);
     }
 
     #[test]
@@ -278,6 +325,7 @@ mod tests {
                     "nextAction": "run_auto_hooks"
                 })),
                 response_stage_next_action: None,
+                base_object: None,
                 auto_hook_evaluated: true,
                 has_auto_hook_result: true,
             },

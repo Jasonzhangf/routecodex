@@ -5506,7 +5506,8 @@ function checkServertoolRustOutcomeCloseout() {
     'readServertoolEntryBaseObjectWithNative(args.options.chatResponse)',
     'hasBaseObject: base != null',
     'switch (entryPreflightPlan.action)',
-    'result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }'
+    'chatResponse: args.options.chatResponse',
+    'result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult'
   ]) {
     if (!entryPreflightShell.includes(marker)) {
       fail(
@@ -5523,6 +5524,8 @@ function checkServertoolRustOutcomeCloseout() {
     'base as JsonObject',
     "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')",
     "if (entryPreflightPlan.action === 'throw_client_disconnected')",
+    'result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }',
+    'entryPreflightPlan.resultMode',
     'entryPreflightPlan as { action: unknown }',
     "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }",
   ]) {
@@ -6258,7 +6261,13 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
-    'mode: finalizeRuntimeAction.resultMode'
+    'baseObject: args.baseObject'
+  );
+  assertContains(
+    'servertool-response-stage-finalize-shell-owner',
+    TS_RESPONSE_STAGE_FINALIZE_SHELL,
+    responseStageFinalizeShell,
+    'return finalizeRuntimeAction.passthroughResult as ServerSideToolEngineResult'
   );
   assertContains(
     'servertool-response-stage-finalize-shell-owner',
@@ -6269,6 +6278,7 @@ function checkServertoolResponseStageGateThinShell() {
   for (const marker of [
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
     'return passthroughResult;',
+    'mode: finalizeRuntimeAction.resultMode',
     "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
     'initialResponseStageGatePlan',
     'planServertoolResponseStageGateWithNative',
@@ -7031,6 +7041,10 @@ function checkServertoolPostflightLoggingFailFast() {
     "engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'",
     'options.adapterContext as unknown as Record<string, unknown>',
     'String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)',
+    'runtimeAction.flowIdSource',
+    'engineResult.execution?.flowId',
+    'function resolvePostflightFlowId(',
+    'resolvePostflightFlowId({',
     'executed: true',
   ]) {
     if (postflightSource.includes(marker)) {
@@ -7046,7 +7060,7 @@ function checkServertoolPostflightLoggingFailFast() {
     "engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'",
     'chat: engineResult.finalChatResponse',
     'executed: runtimeAction.executed',
-    'resolvePostflightFlowId({',
+    'const projectedFlowId = runtimeAction.projectedFlowId;',
   ]) {
     if (!postflightSource.includes(marker)) {
       fail(

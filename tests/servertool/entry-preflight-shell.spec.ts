@@ -72,7 +72,9 @@ describe('entry-preflight-shell', () => {
     expect(source).not.toContain("if (entryPreflightPlan.action === 'throw_client_disconnected')");
     expect(source).toContain('switch (entryPreflightPlan.action)');
     expect(source).not.toContain('entryPreflightPlan as { action: unknown }');
-    expect(source).toContain('result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }');
+    expect(source).not.toContain('result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }');
+    expect(source).toContain('chatResponse: args.options.chatResponse');
+    expect(source).toContain('result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult');
     expect(source).not.toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
     expect(source).not.toContain('const passthroughResult =');
   });
@@ -80,7 +82,10 @@ describe('entry-preflight-shell', () => {
   test('returns passthrough result when native preflight says non-object chat', () => {
     planServertoolEntryPreflightWithNativeMock.mockReturnValue({
       action: 'return_passthrough_non_object_chat',
-      resultMode: 'passthrough'
+      passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: 'raw-chat'
+      }
     });
 
     const result = runServertoolEntryPreflight({
@@ -93,6 +98,11 @@ describe('entry-preflight-shell', () => {
     expect(result).toEqual({
       action: 'return_result',
       result: { mode: 'passthrough', finalChatResponse: 'raw-chat' }
+    });
+    expect(planServertoolEntryPreflightWithNativeMock).toHaveBeenCalledWith({
+      hasBaseObject: false,
+      adapterClientDisconnected: false,
+      chatResponse: 'raw-chat'
     });
   });
 

@@ -25,6 +25,7 @@ export async function finalizeServertoolResponseStage(args: {
   });
   const finalizeRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
+    baseObject: args.baseObject,
     autoHookEvaluated: true,
     hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'
   });
@@ -33,7 +34,7 @@ export async function finalizeServertoolResponseStage(args: {
       return responseStageAutoHook.result;
     case 'return_passthrough_bypass':
     case 'return_passthrough_no_auto_hook_result':
-      return { mode: finalizeRuntimeAction.resultMode, finalChatResponse: args.baseObject };
+      return finalizeRuntimeAction.passthroughResult as ServerSideToolEngineResult;
     default:
       throw new Error('[servertool] invalid response-stage finalize action');
   }

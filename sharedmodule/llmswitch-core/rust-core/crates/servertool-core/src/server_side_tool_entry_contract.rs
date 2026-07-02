@@ -7,6 +7,8 @@ use serde_json::Value;
 pub struct ServertoolEntryPreflightInput {
     pub has_base_object: bool,
     pub adapter_client_disconnected: bool,
+    #[serde(default)]
+    pub chat_response: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -23,6 +25,8 @@ pub struct ServertoolEntryPreflightPlan {
     pub action: ServertoolEntryPreflightAction,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passthrough_result: Option<Value>,
 }
 
 pub fn plan_servertool_entry_preflight(
@@ -32,17 +36,23 @@ pub fn plan_servertool_entry_preflight(
         return ServertoolEntryPreflightPlan {
             action: ServertoolEntryPreflightAction::ReturnPassthroughNonObjectChat,
             result_mode: Some("passthrough".to_string()),
+            passthrough_result: Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": input.chat_response.unwrap_or(Value::Null)
+            })),
         };
     }
     if input.adapter_client_disconnected {
         return ServertoolEntryPreflightPlan {
             action: ServertoolEntryPreflightAction::ThrowClientDisconnected,
             result_mode: None,
+            passthrough_result: None,
         };
     }
     ServertoolEntryPreflightPlan {
         action: ServertoolEntryPreflightAction::ContinueToToolFlow,
         result_mode: None,
+        passthrough_result: None,
     }
 }
 
@@ -106,12 +116,20 @@ mod tests {
         let plan = plan_servertool_entry_preflight(ServertoolEntryPreflightInput {
             has_base_object: false,
             adapter_client_disconnected: false,
+            chat_response: Some(Value::String("raw-chat".to_string())),
         });
         assert_eq!(
             plan.action,
             ServertoolEntryPreflightAction::ReturnPassthroughNonObjectChat
         );
         assert_eq!(plan.result_mode.as_deref(), Some("passthrough"));
+        assert_eq!(
+            plan.passthrough_result,
+            Some(serde_json::json!({
+                "mode": "passthrough",
+                "finalChatResponse": "raw-chat"
+            }))
+        );
     }
 
     #[test]
@@ -119,12 +137,14 @@ mod tests {
         let plan = plan_servertool_entry_preflight(ServertoolEntryPreflightInput {
             has_base_object: true,
             adapter_client_disconnected: true,
+            chat_response: Some(serde_json::json!({"id": "chat"})),
         });
         assert_eq!(
             plan.action,
             ServertoolEntryPreflightAction::ThrowClientDisconnected
         );
         assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.passthrough_result, None);
     }
 
     #[test]
@@ -132,12 +152,14 @@ mod tests {
         let plan = plan_servertool_entry_preflight(ServertoolEntryPreflightInput {
             has_base_object: true,
             adapter_client_disconnected: false,
+            chat_response: Some(serde_json::json!({"id": "chat"})),
         });
         assert_eq!(
             plan.action,
             ServertoolEntryPreflightAction::ContinueToToolFlow
         );
         assert_eq!(plan.result_mode, None);
+        assert_eq!(plan.passthrough_result, None);
     }
 
     #[test]

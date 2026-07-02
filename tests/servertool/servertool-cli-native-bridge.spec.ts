@@ -195,36 +195,45 @@ describe('servertool CLI native bridge', () => {
       planServertoolEngineRuntimeActionWithNative({
         isStopMessageFlow: true,
         stoplessExecutionFlowId: 'servertool_cli_projection',
-        stoplessAction: 'terminal_final'
+        stoplessAction: 'terminal_final',
+        engineExecutionFlowId: ' terminal-flow ',
+        currentFlowId: 'current-flow'
       })
     ).toEqual({
       action: 'return_stop_message_terminal_final',
       executed: true,
-      flowIdSource: 'engine_execution'
+      flowIdSource: 'engine_execution',
+      projectedFlowId: 'terminal-flow'
     });
 
     expect(
       planServertoolEngineRuntimeActionWithNative({
         isStopMessageFlow: false,
         stoplessExecutionFlowId: ' servertool_cli_projection ',
-        stoplessAction: 'cli_projection'
+        stoplessAction: 'cli_projection',
+        engineExecutionFlowId: 'servertool-cli-flow',
+        currentFlowId: 'current-flow'
       })
     ).toEqual({
       action: 'return_servertool_cli_projection_final',
       executed: true,
-      flowIdSource: 'engine_execution'
+      flowIdSource: 'engine_execution',
+      projectedFlowId: 'servertool-cli-flow'
     });
 
     expect(
       planServertoolEngineRuntimeActionWithNative({
         isStopMessageFlow: true,
         stoplessExecutionFlowId: 'stop_message_flow',
-        stoplessAction: 'cli_projection'
+        stoplessAction: 'cli_projection',
+        engineExecutionFlowId: 'engine-flow',
+        currentFlowId: ' current-flow '
       })
     ).toEqual({
       action: 'build_stop_message_cli_projection',
       executed: true,
-      flowIdSource: 'current_flow'
+      flowIdSource: 'current_flow',
+      projectedFlowId: 'current-flow'
     });
   });
 
@@ -359,17 +368,22 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolEntryPreflightWithNative({
         hasBaseObject: false,
-        adapterClientDisconnected: false
+        adapterClientDisconnected: false,
+        chatResponse: 'raw-chat'
       })
     ).toEqual({
       action: 'return_passthrough_non_object_chat',
-      resultMode: 'passthrough'
+      passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: 'raw-chat'
+      }
     });
 
     expect(
       planServertoolEntryPreflightWithNative({
         hasBaseObject: true,
-        adapterClientDisconnected: true
+        adapterClientDisconnected: true,
+        chatResponse: { id: 'chat-disconnected' }
       })
     ).toEqual({
       action: 'throw_client_disconnected'
@@ -378,7 +392,8 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolEntryPreflightWithNative({
         hasBaseObject: true,
-        adapterClientDisconnected: false
+        adapterClientDisconnected: false,
+        chatResponse: { id: 'chat-continue' }
       })
     ).toEqual({
       action: 'continue_to_tool_flow'
@@ -658,13 +673,17 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
         responseStageNextAction: 'bypass',
+        baseObject: { ok: 'bypass' },
         autoHookEvaluated: false,
         hasAutoHookResult: false,
         responseHookRequired: false
       })
     ).toEqual({
       action: 'return_passthrough_bypass',
-      resultMode: 'passthrough'
+      passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: { ok: 'bypass' }
+      }
     });
 
     expect(
@@ -673,12 +692,16 @@ describe('servertool CLI native bridge', () => {
           nextAction: 'bypass',
           skipReason: ' empty_assistant_payload '
         },
+        baseObject: { ok: 'bypass-skip' },
         autoHookEvaluated: false,
         hasAutoHookResult: false
       })
     ).toEqual({
       action: 'return_passthrough_bypass',
-      resultMode: 'passthrough',
+      passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: { ok: 'bypass-skip' }
+      },
       skipReason: 'empty_assistant_payload'
     });
 
@@ -721,13 +744,17 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolResponseStageRuntimeActionWithNative({
         responseStageNextAction: 'run_auto_hooks',
+        baseObject: { ok: 'no-hook' },
         autoHookEvaluated: true,
         hasAutoHookResult: false,
         responseHookRequired: false
       })
     ).toEqual({
       action: 'return_passthrough_no_auto_hook_result',
-      resultMode: 'passthrough'
+      passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: { ok: 'no-hook' }
+      }
     });
 
     expect(

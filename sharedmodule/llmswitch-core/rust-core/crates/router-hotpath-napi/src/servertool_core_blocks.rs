@@ -2354,6 +2354,13 @@ fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
         passthrough_parsed["resultMode"],
         serde_json::Value::String("passthrough".to_string())
     );
+    assert_eq!(
+        passthrough_parsed["passthroughResult"],
+        serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": null
+        })
+    );
 
     let disconnected = plan_servertool_entry_preflight_json(
         &serde_json::json!({
@@ -3091,9 +3098,13 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         bypass_value["action"],
         serde_json::json!("return_passthrough_bypass")
     );
+    assert_eq!(bypass_value.get("resultMode"), None);
     assert_eq!(
-        bypass_value["resultMode"],
-        serde_json::json!("passthrough")
+        bypass_value["passthroughResult"],
+        serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": null
+        })
     );
     assert_eq!(bypass_value.get("skipReason"), None);
 
@@ -3115,9 +3126,13 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         bypass_with_skip_reason_value["action"],
         serde_json::json!("return_passthrough_bypass")
     );
+    assert_eq!(bypass_with_skip_reason_value.get("resultMode"), None);
     assert_eq!(
-        bypass_with_skip_reason_value["resultMode"],
-        serde_json::json!("passthrough")
+        bypass_with_skip_reason_value["passthroughResult"],
+        serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": null
+        })
     );
     assert_eq!(
         bypass_with_skip_reason_value["skipReason"],
@@ -3158,9 +3173,13 @@ fn plans_servertool_response_stage_runtime_action_via_servertool_core_bridge() {
         passthrough_value["action"],
         serde_json::json!("return_passthrough_no_auto_hook_result")
     );
+    assert_eq!(passthrough_value.get("resultMode"), None);
     assert_eq!(
-        passthrough_value["resultMode"],
-        serde_json::json!("passthrough")
+        passthrough_value["passthroughResult"],
+        serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": null
+        })
     );
 
     let required_empty = plan_servertool_response_stage_runtime_action_json(
@@ -3379,7 +3398,9 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
         &serde_json::json!({
             "isStopMessageFlow": true,
             "stoplessExecutionFlowId": "servertool_cli_projection",
-            "stoplessAction": "terminal_final"
+            "stoplessAction": "terminal_final",
+            "engineExecutionFlowId": " terminal-flow ",
+            "currentFlowId": "current-flow"
         })
         .to_string(),
     )
@@ -3395,12 +3416,18 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
         terminal_value["flowIdSource"],
         serde_json::json!("engine_execution")
     );
+    assert_eq!(
+        terminal_value["projectedFlowId"],
+        serde_json::json!("terminal-flow")
+    );
 
     let cli_projection = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
             "isStopMessageFlow": false,
             "stoplessExecutionFlowId": " servertool_cli_projection ",
-            "stoplessAction": "continue"
+            "stoplessAction": "continue",
+            "engineExecutionFlowId": "servertool-cli-flow",
+            "currentFlowId": "current-flow"
         })
         .to_string(),
     )
@@ -3416,12 +3443,18 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
         cli_projection_value["flowIdSource"],
         serde_json::json!("engine_execution")
     );
+    assert_eq!(
+        cli_projection_value["projectedFlowId"],
+        serde_json::json!("servertool-cli-flow")
+    );
 
     let stopless_cli = plan_servertool_engine_runtime_action_json(
         &serde_json::json!({
             "isStopMessageFlow": true,
             "stoplessExecutionFlowId": "stop_message_flow",
-            "stoplessAction": "cli_projection"
+            "stoplessAction": "cli_projection",
+            "engineExecutionFlowId": "engine-flow",
+            "currentFlowId": " current-flow "
         })
         .to_string(),
     )
@@ -3436,6 +3469,10 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
     assert_eq!(
         stopless_cli_value["flowIdSource"],
         serde_json::json!("current_flow")
+    );
+    assert_eq!(
+        stopless_cli_value["projectedFlowId"],
+        serde_json::json!("current-flow")
     );
 }
 

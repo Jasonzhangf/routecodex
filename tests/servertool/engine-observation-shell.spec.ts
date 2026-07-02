@@ -190,7 +190,8 @@ describe('engine-observation-shell', () => {
         runtimeAction: {
           action: 'return_servertool_cli_projection_final',
           executed: true,
-          flowIdSource: 'engine_execution'
+          flowIdSource: 'engine_execution',
+          projectedFlowId: 'flow-postflight-failfast'
         },
         flowId: 'flow-postflight-failfast',
         totalSteps: 5,
@@ -213,8 +214,11 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("if (runtimeAction.action === 'return_stop_message_terminal_final')");
     expect(source).not.toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
     expect(source).toContain('switch (runtimeAction.action)');
-    expect(source).toContain('resolvePostflightFlowId({');
+    expect(source).not.toContain('resolvePostflightFlowId');
+    expect(source).toContain('const projectedFlowId = runtimeAction.projectedFlowId;');
     expect(source).not.toContain('String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)');
+    expect(source).not.toContain('runtimeAction.flowIdSource');
+    expect(source).not.toContain('engineResult.execution?.flowId');
     expect(source).toContain('executed: runtimeAction.executed');
     expect(source).not.toContain('executed: true');
     expect(source).not.toContain('const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (');
@@ -255,7 +259,8 @@ describe('engine-observation-shell', () => {
       runtimeAction: {
         action: 'return_servertool_cli_projection_final',
         executed: true,
-        flowIdSource: 'engine_execution'
+        flowIdSource: 'engine_execution',
+        projectedFlowId: 'flow-postflight-summary'
       },
       flowId: 'flow-postflight-summary',
       totalSteps: 5,
@@ -281,32 +286,38 @@ describe('engine-observation-shell', () => {
     );
   });
 
-  test('postflight rejects unknown native flow id source without reading the payload in TS', async () => {
+  test('postflight consumes Rust-projected flow id without interpreting flowIdSource in TS', async () => {
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
+    const logProgress = jest.fn();
 
     await expect(
       mod.runServertoolEnginePostflight({
         options: {
-          requestId: 'req-postflight-invalid-flow-source',
+          requestId: 'req-postflight-rust-projected-flow',
           adapterContext: {} as any
         },
         engineResult: {
           mode: 'tool_flow',
-          finalChatResponse: { id: 'chat-postflight-invalid-flow-source' },
+          finalChatResponse: { id: 'chat-postflight-rust-projected-flow' },
           execution: {
-            flowId: 'flow-engine'
+            flowId: 'flow-engine-ts-must-not-read'
           }
         } as any,
         runtimeAction: {
           action: 'return_servertool_cli_projection_final',
           executed: true,
-          flowIdSource: 'unknown_flow_id_source'
+          flowIdSource: 'unknown_flow_id_source',
+          projectedFlowId: 'flow-rust-projected'
         } as any,
-        flowId: 'flow-current',
+        flowId: 'flow-current-ts-must-not-read',
         totalSteps: 5,
-        logProgress: jest.fn()
+        logProgress
       })
-    ).rejects.toThrow('[servertool] invalid postflight flowIdSource');
+    ).resolves.toEqual({
+      chat: { id: 'chat-postflight-rust-projected-flow' },
+      executed: true,
+      flowId: 'flow-rust-projected'
+    });
   });
 
   test('engine-orchestration-shell owns the engine mainline body', () => {

@@ -12,7 +12,10 @@ const planServertoolResponseStageGateWithNativeMock = jest.fn(() => ({
 const planServertoolResponseStageRuntimeActionWithNativeMock = jest.fn((input: any) => {
   const nextAction = String(input?.responseStageGatePlan?.nextAction ?? input?.responseStageNextAction ?? '').trim();
   if (nextAction === 'bypass') {
-    return { action: 'return_passthrough_bypass' };
+    return {
+      action: 'return_passthrough_bypass',
+      passthroughResult: { mode: 'passthrough', finalChatResponse: input?.baseObject ?? null }
+    };
   }
   if (input?.autoHookEvaluated !== true) {
     return { action: 'run_auto_hooks' };
@@ -26,7 +29,10 @@ const planServertoolResponseStageRuntimeActionWithNativeMock = jest.fn((input: a
       responseHookName: String(input?.responseStageGatePlan?.responseHookName ?? '').trim()
     };
   }
-  return { action: 'return_passthrough_no_auto_hook_result' };
+  return {
+    action: 'return_passthrough_no_auto_hook_result',
+    passthroughResult: { mode: 'passthrough', finalChatResponse: input?.baseObject ?? null }
+  };
 });
 const planServertoolRequiredResponseHookEmptyErrorWithNativeMock = jest.fn((input: any) => ({
   code: 'SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY',
@@ -62,7 +68,13 @@ const planServertoolExecutionBranchWithNativeMock = jest.fn((input: any) => {
 });
 const planServertoolEntryPreflightWithNativeMock = jest.fn((input: any) => {
   if (input?.hasBaseObject !== true) {
-    return { action: 'return_passthrough_non_object_chat', resultMode: 'passthrough' };
+    return {
+      action: 'return_passthrough_non_object_chat',
+      passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: input?.chatResponse ?? null
+      }
+    };
   }
   if (input?.adapterClientDisconnected === true) {
     return { action: 'throw_client_disconnected' };
@@ -1016,7 +1028,10 @@ describe('server-side-tools tool-error closed loop', () => {
     planServertoolResponseStageRuntimeActionWithNativeMock.mockImplementation((input: any) => {
       const nextAction = String(input?.responseStageGatePlan?.nextAction ?? input?.responseStageNextAction ?? '').trim();
       if (nextAction === 'bypass') {
-        return { action: 'return_passthrough_bypass' };
+        return {
+          action: 'return_passthrough_bypass',
+          passthroughResult: { mode: 'passthrough', finalChatResponse: input?.baseObject ?? null }
+        };
       }
       if (input?.autoHookEvaluated !== true) {
         return { action: 'run_auto_hooks' };
@@ -1030,7 +1045,10 @@ describe('server-side-tools tool-error closed loop', () => {
           responseHookName: String(input?.responseStageGatePlan?.responseHookName ?? '').trim()
         };
       }
-      return { action: 'return_passthrough_no_auto_hook_result' };
+      return {
+        action: 'return_passthrough_no_auto_hook_result',
+        passthroughResult: { mode: 'passthrough', finalChatResponse: input?.baseObject ?? null }
+      };
     });
     planServertoolExecutionBranchWithNativeMock.mockClear();
     planServertoolEntryPreflightWithNativeMock.mockClear();

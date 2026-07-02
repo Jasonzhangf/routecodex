@@ -351,6 +351,7 @@ export interface ServertoolEngineRuntimeActionPlan {
     | 'build_stop_message_cli_projection';
   executed: true;
   flowIdSource: 'engine_execution' | 'current_flow';
+  projectedFlowId?: string;
 }
 
 export interface ServertoolEngineTriggerObservationPlan {
@@ -427,7 +428,10 @@ export type ServertoolExecutionLoopEffectPlan =
 export type ServertoolResponseStageRuntimeActionPlan =
   | {
       action: 'return_passthrough_bypass' | 'return_passthrough_no_auto_hook_result';
-      resultMode: 'passthrough';
+      passthroughResult: {
+        mode: 'passthrough';
+        finalChatResponse: unknown;
+      };
       skipReason?: string;
     }
   | {
@@ -454,7 +458,10 @@ export interface ServertoolResponseStageOrchestrationMaterializedOutput {
 export type ServertoolEntryPreflightPlan =
   | {
       action: 'return_passthrough_non_object_chat';
-      resultMode: 'passthrough';
+      passthroughResult: {
+        mode: 'passthrough';
+        finalChatResponse: unknown;
+      };
     }
   | {
       action: 'throw_client_disconnected' | 'continue_to_tool_flow';
@@ -2385,6 +2392,8 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   isStopMessageFlow: boolean;
   stoplessExecutionFlowId?: string;
   stoplessAction: string;
+  engineExecutionFlowId?: string;
+  currentFlowId?: string;
 }): ServertoolEngineRuntimeActionPlan {
   const capability = 'planServertoolEngineRuntimeActionJson';
   const fn = readNativeFunction(capability);
@@ -2396,7 +2405,13 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
     ...(typeof input.stoplessExecutionFlowId === 'string'
       ? { stoplessExecutionFlowId: input.stoplessExecutionFlowId }
       : {}),
-    stoplessAction: input.stoplessAction
+    stoplessAction: input.stoplessAction,
+    ...(typeof input.engineExecutionFlowId === 'string'
+      ? { engineExecutionFlowId: input.engineExecutionFlowId }
+      : {}),
+    ...(typeof input.currentFlowId === 'string'
+      ? { currentFlowId: input.currentFlowId }
+      : {})
   };
   const raw = fn(JSON.stringify(payload));
   const parsed = typeof raw === 'string' ? JSON.parse(raw) as unknown : raw;
@@ -2417,10 +2432,16 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   if (record.flowIdSource !== 'engine_execution' && record.flowIdSource !== 'current_flow') {
     throw new Error('planServertoolEngineRuntimeActionJson native returned invalid flowIdSource');
   }
+  if (record.projectedFlowId != null && typeof record.projectedFlowId !== 'string') {
+    throw new Error('planServertoolEngineRuntimeActionJson native returned invalid projectedFlowId');
+  }
   return {
     action: record.action,
     executed: true,
-    flowIdSource: record.flowIdSource
+    flowIdSource: record.flowIdSource,
+    ...(typeof record.projectedFlowId === 'string'
+      ? { projectedFlowId: record.projectedFlowId }
+      : {})
   };
 }
 
@@ -2856,6 +2877,7 @@ function encodeServertoolHandlerErrorCarrier(error: unknown): unknown {
 export function planServertoolResponseStageRuntimeActionWithNative(input: {
   responseStageGatePlan?: unknown;
   responseStageNextAction?: string;
+  baseObject?: JsonObject;
   autoHookEvaluated: boolean;
   hasAutoHookResult: boolean;
 }): ServertoolResponseStageRuntimeActionPlan {
@@ -2888,8 +2910,8 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
   const isPassthroughAction =
     record.action === 'return_passthrough_bypass' ||
     record.action === 'return_passthrough_no_auto_hook_result';
-  if (isPassthroughAction && record.resultMode !== 'passthrough') {
-    throw new Error('planServertoolResponseStageRuntimeActionJson native returned passthrough action without passthrough resultMode');
+  if (isPassthroughAction && record.resultMode !== undefined) {
+    throw new Error('planServertoolResponseStageRuntimeActionJson native returned deprecated resultMode for passthrough action');
   }
   const skipReason =
     typeof record.skipReason === 'string' && record.skipReason
@@ -2902,9 +2924,22 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     throw new Error('planServertoolResponseStageRuntimeActionJson native returned resultMode for non-passthrough action');
   }
   if (record.action === 'return_passthrough_bypass' || record.action === 'return_passthrough_no_auto_hook_result') {
+    if (!record.passthroughResult || typeof record.passthroughResult !== 'object' || Array.isArray(record.passthroughResult)) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned passthrough action without passthroughResult');
+    }
+    const passthroughResult = record.passthroughResult as Record<string, unknown>;
+    if (passthroughResult.mode !== 'passthrough') {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned invalid passthroughResult mode');
+    }
+    if (!Object.prototype.hasOwnProperty.call(passthroughResult, 'finalChatResponse')) {
+      throw new Error('planServertoolResponseStageRuntimeActionJson native returned passthroughResult without finalChatResponse');
+    }
     return {
       action: record.action,
-      resultMode: 'passthrough',
+      passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: passthroughResult.finalChatResponse
+      },
       ...(skipReason ? { skipReason } : {})
     };
   }
@@ -3015,13 +3050,18 @@ export function materializeServertoolResponseStageOrchestrationOutputWithNative(
 export function planServertoolEntryPreflightWithNative(input: {
   hasBaseObject: boolean;
   adapterClientDisconnected: boolean;
+  chatResponse: unknown;
 }): ServertoolEntryPreflightPlan {
   const capability = 'planServertoolEntryPreflightJson';
   const fn = readNativeFunction(capability);
   if (!fn) {
     throw new Error('planServertoolEntryPreflightJson native unavailable');
   }
-  const resultJson = fn(JSON.stringify(input));
+  const resultJson = fn(JSON.stringify({
+    hasBaseObject: input.hasBaseObject,
+    adapterClientDisconnected: input.adapterClientDisconnected,
+    chatResponse: input.chatResponse
+  }));
   if (typeof resultJson !== 'string') {
     throw new Error(`planServertoolEntryPreflightJson native returned non-string: ${typeof resultJson}`);
   }
@@ -3041,13 +3081,26 @@ export function planServertoolEntryPreflightWithNative(input: {
     if (record.resultMode !== 'passthrough') {
       throw new Error('planServertoolEntryPreflightJson native returned passthrough action without passthrough resultMode');
     }
+    if (!record.passthroughResult || typeof record.passthroughResult !== 'object' || Array.isArray(record.passthroughResult)) {
+      throw new Error('planServertoolEntryPreflightJson native returned invalid passthroughResult');
+    }
+    const passthroughResult = record.passthroughResult as Record<string, unknown>;
+    if (passthroughResult.mode !== 'passthrough') {
+      throw new Error('planServertoolEntryPreflightJson native returned invalid passthroughResult.mode');
+    }
     return {
       action: 'return_passthrough_non_object_chat',
-      resultMode: 'passthrough'
+      passthroughResult: {
+        mode: 'passthrough',
+        finalChatResponse: passthroughResult.finalChatResponse
+      }
     };
   }
   if (record.resultMode !== undefined) {
     throw new Error('planServertoolEntryPreflightJson native returned resultMode for non-passthrough action');
+  }
+  if (record.passthroughResult !== undefined) {
+    throw new Error('planServertoolEntryPreflightJson native returned passthroughResult for non-passthrough action');
   }
   return {
     action: record.action

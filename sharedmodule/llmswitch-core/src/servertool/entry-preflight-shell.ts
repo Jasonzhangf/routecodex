@@ -18,13 +18,14 @@ export function runServertoolEntryPreflight(args: {
   const base = readServertoolEntryBaseObjectWithNative(args.options.chatResponse);
   const entryPreflightPlan = planServertoolEntryPreflightWithNative({
     hasBaseObject: base != null,
-    adapterClientDisconnected: isAdapterClientDisconnectedWithNative(args.options.adapterContext)
+    adapterClientDisconnected: isAdapterClientDisconnectedWithNative(args.options.adapterContext),
+    chatResponse: args.options.chatResponse
   });
   switch (entryPreflightPlan.action) {
     case 'return_passthrough_non_object_chat':
       return {
         action: 'return_result',
-        result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }
+        result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult
       };
     case 'throw_client_disconnected':
       throw createServertoolProviderProtocolErrorFromPlan(

@@ -8,6 +8,10 @@ pub struct ServertoolEngineRuntimeActionInput {
     #[serde(default)]
     pub stopless_execution_flow_id: Option<String>,
     pub stopless_action: String,
+    #[serde(default)]
+    pub engine_execution_flow_id: Option<String>,
+    #[serde(default)]
+    pub current_flow_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -31,6 +35,8 @@ pub struct ServertoolEngineRuntimeActionPlan {
     pub action: ServertoolEngineRuntimeAction,
     pub executed: bool,
     pub flow_id_source: ServertoolEngineRuntimeFlowIdSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projected_flow_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -77,12 +83,15 @@ pub fn plan_servertool_engine_runtime_action(
         .trim();
     let has_servertool_cli_projection_context =
         stopless_execution_flow_id == "servertool_cli_projection";
+    let engine_execution_flow_id = normalize_optional_flow_id(input.engine_execution_flow_id);
+    let current_flow_id = normalize_optional_flow_id(input.current_flow_id);
 
     if !input.is_stop_message_flow && has_servertool_cli_projection_context {
         return Ok(ServertoolEngineRuntimeActionPlan {
             action: ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal,
             executed: true,
             flow_id_source: ServertoolEngineRuntimeFlowIdSource::EngineExecution,
+            projected_flow_id: engine_execution_flow_id,
         });
     }
     if input.stopless_action.trim() == "terminal_final" {
@@ -90,6 +99,7 @@ pub fn plan_servertool_engine_runtime_action(
             action: ServertoolEngineRuntimeAction::ReturnStopMessageTerminalFinal,
             executed: true,
             flow_id_source: ServertoolEngineRuntimeFlowIdSource::EngineExecution,
+            projected_flow_id: engine_execution_flow_id,
         });
     }
     if input.is_stop_message_flow && input.stopless_action.trim() == "cli_projection" {
@@ -97,6 +107,7 @@ pub fn plan_servertool_engine_runtime_action(
             action: ServertoolEngineRuntimeAction::BuildStopMessageCliProjection,
             executed: true,
             flow_id_source: ServertoolEngineRuntimeFlowIdSource::CurrentFlow,
+            projected_flow_id: current_flow_id,
         });
     }
     Err(format!(
@@ -106,6 +117,12 @@ pub fn plan_servertool_engine_runtime_action(
         false,
         stopless_execution_flow_id
     ))
+}
+
+fn normalize_optional_flow_id(value: Option<String>) -> Option<String> {
+    value
+        .map(|raw| raw.trim().to_string())
+        .filter(|trimmed| !trimmed.is_empty())
 }
 
 pub fn plan_servertool_engine_trigger_observation(
@@ -146,6 +163,8 @@ mod tests {
             is_stop_message_flow: false,
             stopless_execution_flow_id: Some(" servertool_cli_projection ".to_string()),
             stopless_action: "cli_projection".to_string(),
+            engine_execution_flow_id: Some(" engine-flow ".to_string()),
+            current_flow_id: Some("current-flow".to_string()),
         })
         .expect("cli projection plan");
         assert_eq!(
@@ -157,6 +176,7 @@ mod tests {
             plan.flow_id_source,
             ServertoolEngineRuntimeFlowIdSource::EngineExecution
         );
+        assert_eq!(plan.projected_flow_id, Some("engine-flow".to_string()));
     }
 
     #[test]
@@ -165,6 +185,8 @@ mod tests {
             is_stop_message_flow: true,
             stopless_execution_flow_id: None,
             stopless_action: "terminal_final".to_string(),
+            engine_execution_flow_id: Some("terminal-flow".to_string()),
+            current_flow_id: Some("current-flow".to_string()),
         })
         .expect("terminal plan");
         assert_eq!(
@@ -176,6 +198,7 @@ mod tests {
             plan.flow_id_source,
             ServertoolEngineRuntimeFlowIdSource::EngineExecution
         );
+        assert_eq!(plan.projected_flow_id, Some("terminal-flow".to_string()));
     }
 
     #[test]
@@ -184,6 +207,8 @@ mod tests {
             is_stop_message_flow: true,
             stopless_execution_flow_id: None,
             stopless_action: "cli_projection".to_string(),
+            engine_execution_flow_id: Some("engine-flow".to_string()),
+            current_flow_id: Some(" current-flow ".to_string()),
         })
         .expect("stopless cli plan");
         assert_eq!(
@@ -195,6 +220,7 @@ mod tests {
             plan.flow_id_source,
             ServertoolEngineRuntimeFlowIdSource::CurrentFlow
         );
+        assert_eq!(plan.projected_flow_id, Some("current-flow".to_string()));
     }
 
     #[test]
@@ -203,6 +229,8 @@ mod tests {
             is_stop_message_flow: false,
             stopless_execution_flow_id: Some("generic_flow".to_string()),
             stopless_action: "continue".to_string(),
+            engine_execution_flow_id: None,
+            current_flow_id: None,
         })
         .expect_err("residual reenter mainline must fail");
         assert!(err.contains("no reenter mainline"));
