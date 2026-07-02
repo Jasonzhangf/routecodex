@@ -7,32 +7,10 @@ import type {
 } from "./hub-pipeline.js";
 import { runHubPipelineLibWithNative } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { attachHubStageTopSummary } from "./hub-stage-timing.js";
-import { applyNativeRuntimeControlWritePlan } from "../metadata-center-runtime-control-writer.js";
+import { applyNativeRuntimeControlWritePlan, readRuntimeControlFromBoundMetadataCenter, readRequestTruthFromBoundMetadataCenter, readContinuationContextFromBoundMetadataCenter } from "../metadata-center-runtime-control-writer.js";
 
-const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
-type MetadataCenterLike = {
-  readRequestTruth: () => Record<string, unknown> | undefined;
-  readContinuationContext: () => Record<string, unknown> | undefined;
-  readRuntimeControl: () => Record<string, unknown> | undefined;
-  writeRuntimeControl?: (
-    key: string,
-    value: unknown,
-    writtenBy: { module: string; symbol: string; stage: string },
-    reason?: string
-  ) => void;
-};
 
-function isMetadataCenterLike(value: unknown): value is MetadataCenterLike {
-  return Boolean(
-    value
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && typeof (value as { readRequestTruth?: unknown }).readRequestTruth === 'function'
-    && typeof (value as { readContinuationContext?: unknown }).readContinuationContext === 'function'
-    && typeof (value as { readRuntimeControl?: unknown }).readRuntimeControl === 'function'
-  );
-}
 
 function readRuntimeControlPayload(metadata: Record<string, unknown>): Record<string, unknown> {
   return metadata.runtime_control && typeof metadata.runtime_control === 'object' && !Array.isArray(metadata.runtime_control)
@@ -40,38 +18,8 @@ function readRuntimeControlPayload(metadata: Record<string, unknown>): Record<st
     : {};
 }
 
-function readRuntimeControlFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
-  const symbolCenterCandidate = Reflect.get(metadata, METADATA_CENTER_SYMBOL);
-  if (isMetadataCenterLike(symbolCenterCandidate)) {
-    const runtimeControl = symbolCenterCandidate.readRuntimeControl();
-    if (runtimeControl && typeof runtimeControl === 'object' && !Array.isArray(runtimeControl)) {
-      return { ...runtimeControl };
-    }
-  }
-  return {};
-}
 
-function readRequestTruthFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
-  const symbolCenterCandidate = Reflect.get(metadata, METADATA_CENTER_SYMBOL);
-  if (isMetadataCenterLike(symbolCenterCandidate)) {
-    const requestTruth = symbolCenterCandidate.readRequestTruth();
-    if (requestTruth && typeof requestTruth === 'object' && !Array.isArray(requestTruth)) {
-      return { ...requestTruth };
-    }
-  }
-  return {};
-}
 
-function readContinuationContextFromMetadataCenter(metadata: Record<string, unknown>): Record<string, unknown> {
-  const symbolCenterCandidate = Reflect.get(metadata, METADATA_CENTER_SYMBOL);
-  if (isMetadataCenterLike(symbolCenterCandidate)) {
-    const continuationContext = symbolCenterCandidate.readContinuationContext();
-    if (continuationContext && typeof continuationContext === 'object' && !Array.isArray(continuationContext)) {
-      return { ...continuationContext };
-    }
-  }
-  return {};
-}
 
 function stripLegacyMetadataResidue(metadata: Record<string, unknown>): Record<string, unknown> {
   const omittedKeys = new Set([
@@ -163,9 +111,9 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   const { normalized, config } = args;
   const entryMode = args.entryMode ?? "request_stage";
   const runtimeControlPayload = readRuntimeControlPayload(normalized.metadata);
-  const requestTruthPayload = readRequestTruthFromMetadataCenter(normalized.metadata);
-  const continuationContextPayload = readContinuationContextFromMetadataCenter(normalized.metadata);
-  const metadataCenterRuntimeControl = readRuntimeControlFromMetadataCenter(normalized.metadata);
+  const requestTruthPayload = readRequestTruthFromBoundMetadataCenter(normalized.metadata);
+  const continuationContextPayload = readContinuationContextFromBoundMetadataCenter(normalized.metadata);
+  const metadataCenterRuntimeControl = readRuntimeControlFromBoundMetadataCenter(normalized.metadata);
   const mergedRuntimeControl = {
     ...runtimeControlPayload,
     ...metadataCenterRuntimeControl,

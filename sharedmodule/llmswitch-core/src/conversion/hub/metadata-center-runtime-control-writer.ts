@@ -1,6 +1,8 @@
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
 
+export { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL };
+
 type RuntimeControlWriter = {
   module: string;
   symbol: string;
@@ -14,6 +16,9 @@ type MetadataCenterLike = {
     writtenBy: RuntimeControlWriter,
     reason?: string
   ) => void;
+  readRuntimeControl?: () => Record<string, unknown>;
+  readRequestTruth?: () => Record<string, unknown>;
+  readContinuationContext?: () => Record<string, unknown>;
 };
 
 type BoundMetadataCenterTarget = {
@@ -44,6 +49,45 @@ function readBoundMetadataCenterTarget(target: Record<string, unknown>): BoundMe
 
 export function readBoundMetadataCenter(target: Record<string, unknown>): MetadataCenterLike | undefined {
   return readBoundMetadataCenterTarget(target)?.center;
+}
+
+export function readRuntimeControlFromBoundMetadataCenter(
+  target: Record<string, unknown>
+): Record<string, unknown> {
+  const center = readBoundMetadataCenter(target);
+  if (center && typeof center.readRuntimeControl === 'function') {
+    const rc = center.readRuntimeControl();
+    if (rc && typeof rc === 'object' && !Array.isArray(rc)) {
+      return { ...rc };
+    }
+  }
+  return {};
+}
+
+export function readRequestTruthFromBoundMetadataCenter(
+  target: Record<string, unknown>
+): Record<string, unknown> {
+  const center = readBoundMetadataCenter(target);
+  if (center && typeof center.readRequestTruth === 'function') {
+    const rt = center.readRequestTruth();
+    if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
+      return { ...rt };
+    }
+  }
+  return {};
+}
+
+export function readContinuationContextFromBoundMetadataCenter(
+  target: Record<string, unknown>
+): Record<string, unknown> {
+  const center = readBoundMetadataCenter(target);
+  if (center && typeof center.readContinuationContext === 'function') {
+    const cc = center.readContinuationContext();
+    if (cc && typeof cc === 'object' && !Array.isArray(cc)) {
+      return { ...cc };
+    }
+  }
+  return {};
 }
 
 function writeMetadataCenterSlot(args: {
