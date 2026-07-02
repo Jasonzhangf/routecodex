@@ -1,30 +1,15 @@
 // feature_id: sse.anthropic_gemini_stream_projection
 import type {
   AnthropicMessageResponse,
-  AnthropicSseEvent,
   SseToAnthropicJsonOptions,
   SseToAnthropicJsonContext
 } from '../types/index.js';
+import { buildAnthropicJsonFromSseWithNative } from '../../native/router-hotpath/native-anthropic-sse-event-payload.js';
 import { ErrorUtils } from '../shared/utils.js';
-import { createSseParser } from './parsers/sse-parser.js';
-import { createAnthropicResponseBuilder } from './builders/anthropic-response-builder.js';
 
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
-const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
 const DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS = 45_000;
 const DEFAULT_CONTENT_IDLE_TIMEOUT_MS = 300_000;
-
-const hasExplicitToolWrapperProgress = (text: string): boolean => {
-  if (!text) {
-    return false;
-  }
-  return (
-    /<tool_call\b/i.test(text)
-    || /<function_calls?\b/i.test(text)
-    || /<<\s*RCC_TOOL_CALLS(?:_JSON)?/i.test(text)
-    || /<use_mcp_tool\b/i.test(text)
-  );
-};
 
 export class AnthropicSseToJsonConverter {
   private contexts = new Map<string, SseToAnthropicJsonContext>();
@@ -36,57 +21,23 @@ export class AnthropicSseToJsonConverter {
     const context = this.createContext(options);
     this.contexts.set(options.requestId, context);
 
-    const parser = createSseParser({
-      enableStrictValidation: true,
-      enableEventRecovery: false,
-      allowedEventTypes: new Set([
-        'message_start',
-        'content_block_start',
-        'content_block_delta',
-        'content_block_stop',
-        'message_delta',
-        'message_stop',
-        'error'
-      ])
-    });
-    const builder = createAnthropicResponseBuilder({
-      reasoningMode: options.reasoningMode,
-      reasoningTextPrefix: options.reasoningTextPrefix
-    });
-
     try {
-      for await (const result of parser.parseStreamAsync(this.chunkStrings(sseStream, context))) {
-        if (!result.success || !result.event) {
-          throw new Error(result.error || 'Failed to parse Anthropic SSE event');
-        }
-
-        context.eventStats.firstEventAtMs ??= Date.now();
-        context.eventStats.lastEventAtMs = Date.now();
-
-        const upstreamError = this.extractAnthropicErrorEventMessage(result.event);
-        if (upstreamError) {
-          throw new Error(upstreamError);
-        }
-
-        if ((result.event as AnthropicSseEvent).protocol !== 'anthropic-messages') {
-          throw new Error(`Unexpected Anthropic SSE protocol: ${(result.event as AnthropicSseEvent).protocol}`);
-        }
-        const builderStartedAt = Date.now();
-        builder.processEvent(result.event as AnthropicSseEvent);
-        context.eventStats.builderMs = (context.eventStats.builderMs ?? 0) + Math.max(0, Date.now() - builderStartedAt);
-        this.updateStats(context, result.event as AnthropicSseEvent);
-      }
-
+      const bodyText = await this.collectBodyText(sseStream, context);
       const resultStartedAt = Date.now();
-      const outcome = builder.getResult();
-      context.eventStats.builderMs = (context.eventStats.builderMs ?? 0) + Math.max(0, Date.now() - resultStartedAt);
-      if (!outcome.success || !outcome.response) {
-        throw outcome.error || new Error('Anthropic SSE conversion incomplete');
-      }
+      const response = buildAnthropicJsonFromSseWithNative({
+        bodyText,
+        requestId: options.requestId,
+        model: options.model,
+        config: {
+          reasoningMode: options.reasoningMode,
+          reasoningTextPrefix: options.reasoningTextPrefix
+        }
+      }) as unknown as AnthropicMessageResponse;
+      context.eventStats.builderMs = Math.max(0, Date.now() - resultStartedAt);
       context.isCompleted = true;
       context.eventStats.endTime = Date.now();
-      this.attachDecodeStats(outcome.response, context);
-      return outcome.response;
+      this.attachDecodeStats(response, context);
+      return response;
     } catch (error) {
       context.eventStats.errors = (context.eventStats.errors ?? 0) + 1;
       throw this.wrapError('ANTHROPIC_SSE_TO_JSON_FAILED', error as Error, options.requestId);
@@ -119,29 +70,28 @@ export class AnthropicSseToJsonConverter {
     };
   }
 
-  private async *chunkStrings(
+  private async collectBodyText(
     stream: AsyncIterable<string | Buffer>,
     context: SseToAnthropicJsonContext
-  ): AsyncGenerator<string> {
+  ): Promise<string> {
+    const chunks: string[] = [];
     const iterator = stream[Symbol.asyncIterator]();
     while (true) {
       const next = await this.readNextStreamChunk(iterator, context);
       if (next.done) {
         break;
       }
-      const chunk = next.value;
       const now = Date.now();
-      const text = typeof chunk === 'string' ? chunk : chunk.toString();
+      const text = typeof next.value === 'string' ? next.value : next.value.toString();
       context.eventStats.firstFrameAtMs ??= now;
       context.eventStats.lastFrameAtMs = now;
-      context.eventStats.chunkCount = (context.eventStats.chunkCount ?? 0) + 1;
-      context.eventStats.byteCount = (context.eventStats.byteCount ?? 0) + Buffer.byteLength(text);
       context.eventStats.firstChunkAtMs ??= now;
       context.eventStats.lastChunkAtMs = now;
-      const parserStartedAt = Date.now();
-      yield text;
-      context.eventStats.parserMs = (context.eventStats.parserMs ?? 0) + Math.max(0, Date.now() - parserStartedAt);
+      context.eventStats.chunkCount = (context.eventStats.chunkCount ?? 0) + 1;
+      context.eventStats.byteCount = (context.eventStats.byteCount ?? 0) + Buffer.byteLength(text);
+      chunks.push(text);
     }
+    return chunks.join('');
   }
 
   private async readNextStreamChunk<T>(
@@ -156,7 +106,7 @@ export class AnthropicSseToJsonConverter {
     anchorMs: number;
     code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT' | 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT';
   } {
-    const options = (context as unknown as { options?: SseToAnthropicJsonOptions }).options;
+    const options = context.options;
     if (context.eventStats.firstFrameAtMs === undefined) {
       const configured = Number(options?.firstFrameTimeoutMs);
       return {
@@ -167,7 +117,7 @@ export class AnthropicSseToJsonConverter {
         code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT'
       };
     }
-    if (context.eventStats.firstContentAtMs === undefined) {
+    if (!context.isCompleted) {
       const configured = Number(options?.preAnchorIdleTimeoutMs ?? options?.noContentTimeoutMs);
       return {
         timeoutMs: Number.isFinite(configured) && configured > 0
@@ -182,7 +132,7 @@ export class AnthropicSseToJsonConverter {
       timeoutMs: Number.isFinite(configured) && configured > 0
         ? Math.floor(configured)
         : DEFAULT_CONTENT_IDLE_TIMEOUT_MS,
-      anchorMs: context.eventStats.lastContentAtMs ?? context.eventStats.firstContentAtMs ?? context.startTime,
+      anchorMs: context.eventStats.lastChunkAtMs ?? context.eventStats.firstChunkAtMs ?? context.startTime,
       code: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
     };
   }
@@ -247,39 +197,6 @@ export class AnthropicSseToJsonConverter {
     return error;
   }
 
-  private markSemanticContentSeen(context: SseToAnthropicJsonContext): void {
-    const now = Date.now();
-    context.eventStats.firstContentAtMs ??= now;
-    context.eventStats.lastContentAtMs = now;
-  }
-
-  private updateStats(context: SseToAnthropicJsonContext, event: AnthropicSseEvent): void {
-    context.eventStats.totalEvents += 1;
-    if (event.type === 'content_block_start') {
-      context.eventStats.contentBlocks += 1;
-      const blockType = (event.data as any)?.content_block?.type;
-      if (blockType === 'tool_use') context.eventStats.toolUseBlocks += 1;
-      if (blockType === 'thinking' || blockType === 'redacted_thinking') context.eventStats.thinkingBlocks += 1;
-      if (blockType === 'text') context.eventStats.textBlocks += 1;
-    }
-    if (event.type === 'content_block_delta') {
-      const delta = (event.data as any)?.delta;
-      const text = typeof delta?.text === 'string' ? delta.text : '';
-      const partialJson = typeof delta?.partial_json === 'string' ? delta.partial_json : '';
-      const thinking = typeof delta?.thinking === 'string' ? delta.thinking : '';
-      if (
-        text.length > 0
-        || partialJson.length > 0
-        || thinking.length > 0
-      ) {
-        this.markSemanticContentSeen(context);
-      }
-    }
-    if (event.type === 'message_stop') {
-      context.eventStats.messageStopSeen = true;
-    }
-  }
-
   private attachDecodeStats(response: AnthropicMessageResponse, context: SseToAnthropicJsonContext): void {
     Object.defineProperty(response, '__rccDecodeStats', {
       value: {
@@ -288,64 +205,12 @@ export class AnthropicSseToJsonConverter {
           context.eventStats.firstChunkAtMs !== undefined && context.eventStats.lastChunkAtMs !== undefined
             ? Math.max(0, context.eventStats.lastChunkAtMs - context.eventStats.firstChunkAtMs)
             : undefined,
-        eventSpanMs:
-          context.eventStats.firstEventAtMs !== undefined && context.eventStats.lastEventAtMs !== undefined
-            ? Math.max(0, context.eventStats.lastEventAtMs - context.eventStats.firstEventAtMs)
-            : undefined
+        eventSpanMs: undefined
       },
       configurable: true,
       enumerable: false,
       writable: false
     });
-  }
-
-  private extractAnthropicErrorEventMessage(event: unknown): string | null {
-    const node = event as {
-      type?: unknown;
-      data?: unknown;
-    };
-    if (node?.type !== 'error') {
-      return null;
-    }
-
-    const dataNode = node.data as {
-      error?: { message?: unknown; code?: unknown };
-      message?: unknown;
-      code?: unknown;
-      request_id?: unknown;
-      requestId?: unknown;
-    } | string | null | undefined;
-
-    if (typeof dataNode === 'string' && dataNode.trim()) {
-      return `Anthropic SSE error event: ${dataNode.trim()}`;
-    }
-
-    const nestedError = dataNode && typeof dataNode === 'object' ? dataNode.error : undefined;
-    const message =
-      (nestedError && typeof nestedError.message === 'string' && nestedError.message.trim()) ||
-      (dataNode && typeof dataNode === 'object' && typeof dataNode.message === 'string' && dataNode.message.trim()) ||
-      'Anthropic SSE upstream returned an error event';
-
-    const code =
-      (nestedError && typeof nestedError.code === 'string' && nestedError.code.trim()) ||
-      (nestedError && typeof nestedError.code === 'number' ? String(nestedError.code) : '') ||
-      (dataNode && typeof dataNode === 'object' && typeof dataNode.code === 'string' && dataNode.code.trim()) ||
-      (dataNode && typeof dataNode === 'object' && typeof dataNode.code === 'number' ? String(dataNode.code) : '');
-
-    const requestId =
-      (dataNode && typeof dataNode === 'object' && typeof dataNode.request_id === 'string' && dataNode.request_id.trim()) ||
-      (dataNode && typeof dataNode === 'object' && typeof dataNode.requestId === 'string' && dataNode.requestId.trim()) ||
-      '';
-
-    const parts: string[] = ['Anthropic SSE error event'];
-    if (code) {
-      parts.push(`[${code}]`);
-    }
-    parts.push(message);
-    if (requestId) {
-      parts.push(`(request_id=${requestId})`);
-    }
-    return parts.join(' ');
   }
 
   private wrapError(code: string, error: Error, requestId: string): Error {

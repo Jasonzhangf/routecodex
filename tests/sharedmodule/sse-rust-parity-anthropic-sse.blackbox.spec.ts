@@ -3,8 +3,12 @@ import path from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { buildAnthropicSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.js';
+import {
+  buildAnthropicJsonFromSseWithNative,
+  buildAnthropicSseEventSequenceWithNative
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.js';
 import { createAnthropicSequencer } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.js';
+import { AnthropicSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.js';
 import type { AnthropicMessageResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectEvents(stream: AsyncIterable<unknown>): Promise<unknown[]> {
@@ -13,6 +17,16 @@ async function collectEvents(stream: AsyncIterable<unknown>): Promise<unknown[]>
     events.push(event);
   }
   return events;
+}
+
+function toSseBody(events: Array<Record<string, unknown>>): string {
+  return events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('');
+}
+
+async function* streamChunks(chunks: Array<string | Buffer>): AsyncGenerator<string | Buffer> {
+  for (const chunk of chunks) {
+    yield chunk;
+  }
 }
 
 describe('Anthropic JSON to SSE Rust parity boundary', () => {
@@ -129,5 +143,48 @@ describe('Anthropic JSON to SSE Rust parity boundary', () => {
     expect(source).not.toContain('function createEvent');
     expect(source).not.toContain('function chunkText');
     expect(source).not.toContain('function normalizeToolInput');
+  });
+
+  it('decodes Anthropic SSE through the native Rust decoder', async () => {
+    const response: AnthropicMessageResponse = {
+      id: 'msg_anthropic_decode_native',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-test',
+      content: [
+        { type: 'text', text: 'hello decode' },
+        { type: 'tool_use', id: 'tool_decode', name: 'lookup', input: { query: 'weather' } }
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 3, output_tokens: 4 }
+    };
+    const events = buildAnthropicSseEventSequenceWithNative({ response, config: { chunkSize: 5 } });
+    const bodyText = toSseBody(events);
+    const converter = new AnthropicSseToJsonConverter();
+
+    const decoded = await converter.convertSseToJson(streamChunks([bodyText.slice(0, 80), Buffer.from(bodyText.slice(80))]), {
+      requestId: 'req_anthropic_decode_native',
+      model: 'claude-test'
+    });
+    const nativeDecoded = buildAnthropicJsonFromSseWithNative({ bodyText });
+
+    expect(decoded).toEqual(nativeDecoded);
+    expect(decoded).toEqual(response);
+  });
+
+  it('keeps the TS Anthropic SSE decoder as a native-backed thin shell', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts'),
+      'utf8'
+    );
+    const builderSourcePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/anthropic-response-builder.ts'
+    );
+
+    expect(source).toContain('buildAnthropicJsonFromSseWithNative');
+    expect(source).not.toContain('createAnthropicResponseBuilder');
+    expect(source).not.toContain('createSseParser');
+    expect(fs.existsSync(builderSourcePath)).toBe(false);
   });
 });

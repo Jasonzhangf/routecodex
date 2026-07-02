@@ -2117,6 +2117,7 @@ verification:
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners."
       - "Anthropic JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
+      - "Anthropic SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned; focused parity must prove TS converter and native decoder output/error behavior match."
       - "Gemini JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
       - "Gemini SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned; focused parity must prove TS converter and native decoder output/error behavior match."
 

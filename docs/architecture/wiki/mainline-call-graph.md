@@ -534,6 +534,7 @@ flowchart LR
   HubRespOutbound04ClientSemantic -->|chat-sse-01| ServerRespOutbound05ClientFrame
   ProviderRespInbound01Raw -->|chat-sse-02| HubRespInbound02Parsed
   HubRespOutbound04ClientSemantic -->|anthropic-sse-01| ServerRespOutbound05ClientFrame
+  ProviderRespInbound01Raw -->|anthropic-sse-02| HubRespInbound02Parsed
   HubRespOutbound04ClientSemantic -->|gemini-sse-01| ServerRespOutbound05ClientFrame
   ProviderRespInbound01Raw -->|gemini-sse-02| HubRespInbound02Parsed
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
@@ -550,6 +551,7 @@ flowchart LR
 | chat-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `processResponseToSseWithFunctions -> buildChatSseEventSequenceWithNative` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
 | chat-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `convertSseToJson -> buildChatJsonFromSseWithNative` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
 | anthropic-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `sequenceResponse -> buildAnthropicSseEventSequenceWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+| anthropic-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `convertSseToJson -> buildAnthropicJsonFromSseWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
 | gemini-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `sequenceResponse -> buildGeminiSseEventSequenceWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
 | gemini-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `convertSseToJson -> buildGeminiJsonFromSseWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
 

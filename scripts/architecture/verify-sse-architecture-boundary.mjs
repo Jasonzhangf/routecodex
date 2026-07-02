@@ -494,17 +494,10 @@ if (sseParser.includes('enableEventRecovery: true')) {
   failures.push('SSE parser default must not enable event recovery');
 }
 
-const anthropicResponseBuilder = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/anthropic-response-builder.ts');
-for (const forbidden of [
-  'state.id || `msg_${Date.now()}`',
-  "state.role || 'assistant'",
-  "state.model || 'unknown'",
-  'input = { _raw: block.buffer }',
-  '_raw: block.buffer',
-]) {
-  if (anthropicResponseBuilder.includes(forbidden)) {
-    failures.push(`Anthropic SSE builder resurrects message fallback: ${forbidden}`);
-  }
+const retiredAnthropicResponseBuilderPath =
+  'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/anthropic-response-builder.ts';
+if (fs.existsSync(path.join(root, retiredAnthropicResponseBuilderPath))) {
+  failures.push(`${retiredAnthropicResponseBuilderPath} must stay physically deleted; Anthropic SSE decode is Rust-owned`);
 }
 
 for (const [relPath, source] of [
