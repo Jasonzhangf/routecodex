@@ -3443,6 +3443,8 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const result = planned != null');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'await materializeServertoolPlannedResult(planned, args.options)');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'result?.execution != null && typeof result.execution.flowId');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'if (result == null)');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'return result;');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'switch (attemptPlan.action)');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationPlan = planAutoHookCallerFinalizationWithNative({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'includeAutoHookIds: args.includeAutoHookIds != null ? [...args.includeAutoHookIds] : null');
@@ -3504,6 +3506,7 @@ function checkAutoHookExecutionRustOwner() {
     '...(args.excludeAutoHookIds ? { excludeAutoHookIds: [...args.excludeAutoHookIds] } : {})',
     'if (result) {',
     'if (!result)',
+    'return result as ServerToolHandlerResult',
     'if (!queueResult)',
     'native auto-hook execution requested result but materialization was empty',
     'native auto-hook queue progress requested result but queue result was empty',

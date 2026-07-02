@@ -98,7 +98,10 @@ async function runAutoHookExecutionQueue(args: {
 
     switch (attemptPlan.action) {
       case 'return_result':
-        return result as ServerToolHandlerResult;
+        if (result == null) {
+          throw new Error('[servertool] invalid auto-hook attempt result action without materialized result');
+        }
+        return result;
       case 'continue_queue':
         continue;
       case 'rethrow_error':

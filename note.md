@@ -1,3 +1,10 @@
+# 2026-07-02: servertool auto-hook attempt result cast removed
+
+- Slice: `auto-hook-caller.ts` no longer returns `result as ServerToolHandlerResult` when native `attemptPlan.action` is `return_result`; TS now fail-fast checks `result == null` and returns the already materialized result directly.
+- Gate: `servertool-auto-hook-trace.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old cast marker and require `if (result == null)` plus `return result;`.
+- Red evidence: focused Jest failed on `return result as ServerToolHandlerResult`; `verify:servertool-rust-only` failed on missing null guard/direct return and forbidden cast.
+- Green evidence: focused Jest `servertool-auto-hook-trace + execution-shell.auto-hook-failfast + servertool-active-orchestration-audit` PASS 53/53; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: provider-request replay snapshot capture verified
 
 - Slice: provider-request replay snapshots are no longer a blanket hard error; default snapshots still exclude provider-request, while explicit stage/force-local replay capture can persist final provider wire body through provider snapshot writer.
