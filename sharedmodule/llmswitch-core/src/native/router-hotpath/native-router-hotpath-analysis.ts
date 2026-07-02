@@ -1,4 +1,5 @@
 import { formatUnknownError } from '../../shared/common-utils.js';
+import type { JsonObject } from '../../conversion/hub/types/json.js';
 
 export type PendingToolSyncPayload = {
   ready: boolean;
@@ -51,9 +52,13 @@ export type ServertoolResponseStagePayload = {
     reason: string;
     marker: string;
   } | null;
-  normalizedPayload: unknown;
+  normalizedPayload: JsonObject | null;
   toolCalls: ServertoolResponseStageToolCallPayload[];
 };
+
+function isJsonObjectLike(value: unknown): value is JsonObject {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
 
 export type ServertoolDispatchCandidatePayload = {
   id: string;
@@ -358,7 +363,7 @@ export function parseServertoolResponseStagePayload(raw: string): ServertoolResp
     providerResponseShape: parsed.providerResponseShape,
     isCanonicalChatCompletionPayload: parsed.isCanonicalChatCompletionPayload,
     ...(payloadContractSignal !== undefined ? { payloadContractSignal } : {}),
-    normalizedPayload: parsed.normalizedPayload,
+    normalizedPayload: isJsonObjectLike(parsed.normalizedPayload) ? parsed.normalizedPayload : null,
     toolCalls
   };
 }

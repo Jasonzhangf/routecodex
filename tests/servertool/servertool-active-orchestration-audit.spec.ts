@@ -333,11 +333,13 @@ const TARGETS = [
     forbidden: [
       'function asObject(',
       "stage.normalizedPayload && typeof stage.normalizedPayload === 'object'",
+      'stage.normalizedPayload as JsonObject',
     ],
     required: [
       'runServertoolResponseStageWithNative',
       'replaceJsonObjectInPlace',
       "stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object'",
+      '? stage.normalizedPayload',
       'stage.toolCalls.map(',
     ],
   },

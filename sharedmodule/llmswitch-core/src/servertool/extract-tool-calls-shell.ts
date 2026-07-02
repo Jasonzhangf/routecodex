@@ -7,7 +7,7 @@ export const extractToolCallsFromResponseStage = (chatResponse: JsonObject, requ
   const stage = runServertoolResponseStageWithNative(chatResponse, requestId);
   const normalizedPayload =
     stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object' && !Array.isArray(stage.normalizedPayload)
-      ? (stage.normalizedPayload as JsonObject)
+      ? stage.normalizedPayload
       : chatResponse;
   replaceJsonObjectInPlace(chatResponse, normalizedPayload);
   return stage.toolCalls.map((entry) => ({

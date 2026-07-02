@@ -515,7 +515,13 @@ function assertStoplessSchemaFeedbackLock() {
     'stopless-schema-feedback-lock',
     `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
     readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`),
-    "expect((result.chat as any).choices?.[0]?.message?.reasoning_text).toContain('need more evidence')"
+    "expect(message?.content).toContain('need more evidence')"
+  );
+  assertContains(
+    'stopless-schema-feedback-lock',
+    `${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`,
+    readRequired(`${ROOT}/tests/servertool/stopless-cli-continuation.spec.ts`),
+    'expect(message?.reasoning_text).toBeUndefined();'
   );
   assertContains(
     'stopless-schema-feedback-lock',
@@ -5238,6 +5244,7 @@ function checkServertoolRustOutcomeCloseout() {
     'export const extractToolCallsFromResponseStage =',
     'runServertoolResponseStageWithNative',
     "stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object'",
+    '? stage.normalizedPayload',
     'replaceJsonObjectInPlace'
   ]) {
     if (!extractToolCallsShell.includes(marker)) {
@@ -5250,6 +5257,7 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'function asObject(',
     "stage.normalizedPayload && typeof stage.normalizedPayload === 'object'",
+    'stage.normalizedPayload as JsonObject',
   ]) {
     if (extractToolCallsShell.includes(marker)) {
       fail(
