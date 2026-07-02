@@ -23,7 +23,8 @@ export function recordStage(recorder: StageRecorder | undefined, stageId: string
   }
   try {
     recorder.record(stageId, normalizeRecordPayload(payload));
-  } catch {
-    // Snapshot failures should not block the pipeline.
+  } catch (err) {
+    // Snapshot failures should not block the pipeline but must be visible.
+    console.warn('[hub-pipeline] recordStage failed (non-blocking):', err instanceof Error ? err.message : String(err));
   }
 }

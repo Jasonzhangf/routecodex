@@ -47,8 +47,9 @@ class SnapshotStageRecorder implements StageRecorder {
     }
     try {
       this.writer(stage, normalized as object);
-    } catch {
-      // ignore snapshot write errors
+    } catch (err) {
+      // Snapshot write failure must not block the pipeline but must be visible.
+      console.warn('[snapshot-recorder] write failed (non-blocking):', err instanceof Error ? err.message : String(err));
     }
   }
 }

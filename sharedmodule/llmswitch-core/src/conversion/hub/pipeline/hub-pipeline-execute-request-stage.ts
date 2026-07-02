@@ -206,10 +206,10 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     },
   });
   if (nativePlan.success !== true) {
-    const fallbackMessage = entryMode === "chat_process"
+    const errorMessage = entryMode === "chat_process"
       ? "Rust HubPipeline chat_process path failed"
       : "Rust HubPipeline request path failed";
-    const error = new Error(nativePlan.error?.message ?? fallbackMessage) as Error & {
+    const error = new Error(nativePlan.error?.message ?? errorMessage) as Error & {
       code?: string;
       status?: number;
       statusCode?: number;
@@ -230,10 +230,10 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   });
   const providerPayload = nativePlan.payload;
   if (!providerPayload || typeof providerPayload !== 'object' || Array.isArray(providerPayload)) {
-    const fallbackMessage = entryMode === "chat_process"
+    const errorMessage = entryMode === "chat_process"
       ? "Rust HubPipeline chat_process path returned invalid provider payload"
       : "Rust HubPipeline request path returned invalid provider payload";
-    throw new Error(fallbackMessage);
+    throw new Error(errorMessage);
   }
 
   attachHubStageTopSummary({
