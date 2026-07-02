@@ -1,3 +1,9 @@
+# 2026-07-02: servertool entry preflight base casts removed
+
+- Slice: `entry-preflight-shell.ts` no longer casts `args.options.chatResponse as JsonObject` or `base as JsonObject`; it consumes `readServertoolEntryBaseObjectWithNative(args.options.chatResponse)` from the native bridge.
+- Gate: `entry-preflight-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old chatResponse/base cast markers and require the native bridge helper.
+- Evidence: focused Jest `entry-preflight-shell + servertool-active-orchestration-audit` PASS 48/48; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool execution queue materialized response cast removed
 
 - Slice: `execution-queue-shell.ts` no longer casts `result.chatResponse as JsonObject` after handler materialization; the queue consumes the typed `ServerToolHandlerResult.chatResponse` directly.

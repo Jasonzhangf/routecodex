@@ -3888,6 +3888,12 @@ function checkServertoolEntryPreflightRustOwner() {
     'planServertoolEntryPreflightWithNative'
   );
   assertContains(
+    'servertool-entry-preflight-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
+    'readServertoolEntryBaseObjectWithNative'
+  );
+  assertContains(
     'servertool-entry-context-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,
@@ -3909,7 +3915,7 @@ function checkServertoolEntryPreflightRustOwner() {
     'servertool-entry-preflight-ts-thin-shell',
     TS_ENTRY_PREFLIGHT_SHELL,
     readRequired(TS_ENTRY_PREFLIGHT_SHELL),
-    "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'"
+    'readServertoolEntryBaseObjectWithNative(args.options.chatResponse)'
   );
   assertContains(
     'servertool-entry-preflight-ts-thin-shell',
@@ -3920,6 +3926,9 @@ function checkServertoolEntryPreflightRustOwner() {
   for (const marker of [
     'Boolean(base)',
     "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
+    "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'",
+    'args.options.chatResponse as JsonObject',
+    'base as JsonObject',
     'entryPreflightPlan as { action: unknown }',
   ]) {
     if (!readRequired(TS_ENTRY_PREFLIGHT_SHELL).includes(marker)) {
@@ -5469,7 +5478,7 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEntryPreflightWithNative',
     'planServertoolClientDisconnectedErrorWithNative',
     'createServertoolProviderProtocolErrorFromPlan',
-    "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'",
+    'readServertoolEntryBaseObjectWithNative(args.options.chatResponse)',
     'hasBaseObject: base != null',
     'switch (entryPreflightPlan.action)',
     'result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }'
@@ -5484,6 +5493,9 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'Boolean(base)',
     "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
+    "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'",
+    'args.options.chatResponse as JsonObject',
+    'base as JsonObject',
     "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')",
     "if (entryPreflightPlan.action === 'throw_client_disconnected')",
     'entryPreflightPlan as { action: unknown }',

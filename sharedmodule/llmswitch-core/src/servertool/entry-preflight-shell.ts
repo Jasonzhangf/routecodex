@@ -3,7 +3,8 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   isAdapterClientDisconnectedWithNative,
   planServertoolClientDisconnectedErrorWithNative,
-  planServertoolEntryPreflightWithNative
+  planServertoolEntryPreflightWithNative,
+  readServertoolEntryBaseObjectWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   createServertoolProviderProtocolErrorFromPlan
@@ -14,10 +15,7 @@ export function runServertoolEntryPreflight(args: {
 }):
   | { action: 'continue'; baseObject: JsonObject }
   | { action: 'return_result'; result: ServerSideToolEngineResult } {
-  const base =
-    args.options.chatResponse != null && typeof args.options.chatResponse === 'object' && !Array.isArray(args.options.chatResponse)
-      ? args.options.chatResponse as JsonObject
-      : null;
+  const base = readServertoolEntryBaseObjectWithNative(args.options.chatResponse);
   const entryPreflightPlan = planServertoolEntryPreflightWithNative({
     hasBaseObject: base != null,
     adapterClientDisconnected: isAdapterClientDisconnectedWithNative(args.options.adapterContext)
@@ -37,7 +35,7 @@ export function runServertoolEntryPreflight(args: {
     case 'continue_to_tool_flow':
       return {
         action: 'continue',
-        baseObject: base as JsonObject
+        baseObject: base
       };
     default:
       throw new Error('[servertool] invalid entry preflight action');

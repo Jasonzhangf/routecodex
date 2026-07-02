@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolEntryPreflightWithNativeMock = jest.fn();
 const isAdapterClientDisconnectedWithNativeMock = jest.fn(() => false);
+const readServertoolEntryBaseObjectWithNativeMock = jest.fn((chatResponse: unknown) =>
+  chatResponse != null && typeof chatResponse === 'object' && !Array.isArray(chatResponse)
+    ? chatResponse
+    : null
+);
 const planServertoolClientDisconnectedErrorWithNativeMock = jest.fn((input: any) => ({
   message: `[servertool] client disconnected: ${String(input?.requestId ?? '')}`,
   code: 'SERVERTOOL_CLIENT_DISCONNECTED',
@@ -20,6 +25,7 @@ jest.unstable_mockModule(
   () => ({
     isAdapterClientDisconnectedWithNative: isAdapterClientDisconnectedWithNativeMock,
     planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
+    readServertoolEntryBaseObjectWithNative: readServertoolEntryBaseObjectWithNativeMock,
     planServertoolClientDisconnectedErrorWithNative: planServertoolClientDisconnectedErrorWithNativeMock
   })
 );
@@ -53,11 +59,14 @@ describe('entry-preflight-shell', () => {
 
     expect(source).toContain('planServertoolEntryPreflightWithNative');
     expect(source).toContain('isAdapterClientDisconnectedWithNative(args.options.adapterContext)');
+    expect(source).toContain('readServertoolEntryBaseObjectWithNative(args.options.chatResponse)');
     expect(source).toContain('planServertoolClientDisconnectedErrorWithNative');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
     expect(source).not.toContain('Boolean(base)');
     expect(source).not.toContain("args.options.chatResponse && typeof args.options.chatResponse === 'object'");
-    expect(source).toContain("args.options.chatResponse != null && typeof args.options.chatResponse === 'object'");
+    expect(source).not.toContain("args.options.chatResponse != null && typeof args.options.chatResponse === 'object'");
+    expect(source).not.toContain('args.options.chatResponse as JsonObject');
+    expect(source).not.toContain('base as JsonObject');
     expect(source).toContain('hasBaseObject: base != null');
     expect(source).not.toContain("if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')");
     expect(source).not.toContain("if (entryPreflightPlan.action === 'throw_client_disconnected')");

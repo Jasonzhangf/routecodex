@@ -2874,6 +2874,13 @@ export function planServertoolEntryPreflightWithNative(input: {
   };
 }
 
+export function readServertoolEntryBaseObjectWithNative(chatResponse: unknown): JsonObject | null {
+  if (chatResponse == null || typeof chatResponse !== 'object' || Array.isArray(chatResponse)) {
+    return null;
+  }
+  return chatResponse as JsonObject;
+}
+
 export interface ServertoolEntryContextPlan {
   includeToolCallNames?: string[];
   excludeToolCallNames?: string[];
