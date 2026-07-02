@@ -192,6 +192,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildChatSseFinishPayloadJson",
   "buildChatSseEventSequenceJson",
   "buildChatJsonFromSseJson",
+  "buildGeminiSseEventSequenceJson",
   "normalizeMessageReasoningToolsJson",
   "normalizeOpenaiMessageJson",
   "normalizeOpenaiChatMessagesJson",

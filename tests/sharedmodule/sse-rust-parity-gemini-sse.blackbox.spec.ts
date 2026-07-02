@@ -96,14 +96,14 @@ describe('Gemini JSON to SSE Rust parity boundary', () => {
     };
 
     const sequencer = createGeminiSequencer({
-      reasoningMode: 'content',
+      reasoningMode: 'text',
       reasoningTextPrefix: '[thought] '
     });
     const tsEvents = await collectEvents(sequencer.sequenceResponse(response));
     const nativeEvents = buildGeminiSseEventSequenceWithNative({
       response,
       config: {
-        reasoningMode: 'content',
+        reasoningMode: 'text',
         reasoningTextPrefix: '[thought] '
       }
     });

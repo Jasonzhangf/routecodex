@@ -1,14 +1,10 @@
 // feature_id: sse.anthropic_gemini_stream_projection
 import type {
   GeminiResponse,
-  GeminiSseEvent,
-  GeminiChunkEventData,
-  GeminiDoneEventData,
-  GeminiContentPart,
-  GeminiCandidate
+  GeminiSseEvent
 } from '../../types/index.js';
 import type { ChatReasoningMode } from '../../types/chat-types.js';
-import { dispatchReasoning } from '../../shared/reasoning-dispatcher.js';
+import { buildGeminiSseEventSequenceWithNative } from '../../../native/router-hotpath/native-gemini-sse-event-payload.js';
 
 export interface GeminiSequencerConfig {
   chunkDelayMs: number;
@@ -22,47 +18,9 @@ const DEFAULT_CONFIG: GeminiSequencerConfig = {
   reasoningTextPrefix: undefined
 };
 
-function createEvent(type: GeminiSseEvent['type'], data: GeminiChunkEventData | GeminiDoneEventData): GeminiSseEvent {
-  return {
-    type,
-    event: type,
-    protocol: 'gemini-chat',
-    direction: 'json_to_sse',
-    data
-  };
-}
-
 async function maybeDelay(config: GeminiSequencerConfig): Promise<void> {
   if (!config.chunkDelayMs) return;
   await new Promise((resolve) => setTimeout(resolve, config.chunkDelayMs));
-}
-
-function getCandidateRole(candidate: GeminiCandidate): string {
-  const role = candidate?.content?.role;
-  if (typeof role === 'string' && role.trim().length) {
-    return role;
-  }
-  throw new Error('Invalid Gemini candidate: missing role');
-}
-
-function getCandidateAtIndex(candidate: GeminiCandidate | null | undefined, index: number): GeminiCandidate {
-  if (candidate && typeof candidate === 'object') {
-    return candidate;
-  }
-  throw new Error(`Invalid Gemini candidate at index ${index}`);
-}
-
-function getCandidateParts(candidate: GeminiCandidate): GeminiContentPart[] {
-  const parts = candidate?.content?.parts;
-  if (Array.isArray(parts)) {
-    for (let index = 0; index < parts.length; index += 1) {
-      if (parts[index] === null || parts[index] === undefined) {
-        throw new Error(`Invalid Gemini candidate part at index ${index}`);
-      }
-    }
-    return parts;
-  }
-  throw new Error('Invalid Gemini candidate: missing parts');
 }
 
 export function createGeminiSequencer(config?: Partial<GeminiSequencerConfig>) {
@@ -70,67 +28,17 @@ export function createGeminiSequencer(config?: Partial<GeminiSequencerConfig>) {
 
   return {
     async *sequenceResponse(response: GeminiResponse): AsyncGenerator<GeminiSseEvent> {
-      if (!Array.isArray(response.candidates)) {
-        throw new Error('Invalid Gemini response: missing candidates');
-      }
-      const candidates = response.candidates;
-      for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
-        const candidate = getCandidateAtIndex(candidates[candidateIndex], candidateIndex);
-        const role = getCandidateRole(candidate);
-        const parts = getCandidateParts(candidate);
-        for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-          const normalizedParts = normalizeReasoningPart(parts[partIndex], partIndex, finalConfig);
-          for (const normalizedPart of normalizedParts) {
-            yield createEvent('gemini.data', {
-              kind: 'part',
-              candidateIndex,
-              partIndex,
-              role,
-              part: normalizedPart
-            });
-            await maybeDelay(finalConfig);
-          }
+      const events = buildGeminiSseEventSequenceWithNative({
+        response,
+        config: {
+          reasoningMode: finalConfig.reasoningMode,
+          reasoningTextPrefix: finalConfig.reasoningTextPrefix
         }
+      });
+      for (const event of events) {
+        yield event as GeminiSseEvent;
+        await maybeDelay(finalConfig);
       }
-
-      const doneData: GeminiDoneEventData = {
-        kind: 'done',
-        usageMetadata: response.usageMetadata,
-        promptFeedback: response.promptFeedback,
-        modelVersion: response.modelVersion,
-        candidates: candidates.map((candidate, index) => ({
-          index,
-          finishReason: candidate?.finishReason,
-          safetyRatings: candidate?.safetyRatings
-        }))
-      };
-      yield createEvent('gemini.done', doneData);
     }
   };
-}
-
-function normalizeReasoningPart(
-  part: GeminiContentPart,
-  partIndex: number,
-  config: GeminiSequencerConfig
-): GeminiContentPart[] {
-  if (!part || typeof part !== 'object') {
-    throw new Error(`Invalid Gemini candidate part at index ${partIndex}`);
-  }
-  const reasoning = typeof (part as any).reasoning === 'string' ? (part as any).reasoning : undefined;
-  if (!reasoning) {
-    return [part];
-  }
-  const decision = dispatchReasoning(reasoning, {
-    mode: config.reasoningMode,
-    prefix: config.reasoningTextPrefix
-  });
-  const normalized: GeminiContentPart[] = [];
-  if (decision.appendToContent) {
-    normalized.push({ text: decision.appendToContent });
-  }
-  if (decision.channel) {
-    normalized.push({ reasoning: decision.channel } as Record<string, unknown>);
-  }
-  return normalized;
 }

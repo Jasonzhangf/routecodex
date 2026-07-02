@@ -24,6 +24,7 @@ mod direct_decision;
 mod failure_policy;
 mod followup_mainline_blocks;
 mod gemini_openai_codec;
+mod gemini_sse_event_payload;
 mod hashline;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
@@ -2241,6 +2242,12 @@ pub fn build_chat_sse_event_sequence_json(input_json: String) -> NapiResult<Stri
 #[napi(js_name = "buildChatJsonFromSseJson")]
 pub fn build_chat_json_from_sse_json(input_json: String) -> NapiResult<String> {
     chat_sse_event_payload::build_chat_json_from_sse_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildGeminiSseEventSequenceJson")]
+pub fn build_gemini_sse_event_sequence_json(input_json: String) -> NapiResult<String> {
+    gemini_sse_event_payload::build_gemini_sse_event_sequence_json(input_json)
         .map_err(napi::Error::from_reason)
 }
 

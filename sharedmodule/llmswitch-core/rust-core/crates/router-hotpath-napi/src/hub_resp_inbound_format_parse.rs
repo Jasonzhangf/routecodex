@@ -1625,4 +1625,71 @@ mod tests {
         let result = parse_resp_format_envelope(input).unwrap();
         assert_eq!(result.envelope.format, "openai-responses");
     }
+    // ─── Echo tests for napi bridge functions ───
+
+    #[test]
+    fn materialize_provider_response_sse_payload_json_echo_sse_body_text() {
+        let input = r#"{
+            "payload": {"sseStream": true, "trace": "echo-test"},
+            "streamBodyText": "data: {\"id\":\"resp_1\"}\n\ndata: [DONE]\n\n"
+        }"#;
+        let result = materialize_provider_response_sse_payload_json(input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["mode"], "sse");
+        assert!(parsed["bodyText"].as_str().unwrap().contains("resp_1"));
+        assert_eq!(parsed["trace"], "echo-test");
+    }
+
+    #[test]
+    fn materialize_provider_response_sse_payload_json_echo_no_sse_passthrough() {
+        let input = r#"{
+            "payload": {"id":"resp_1","object":"response","status":"completed"},
+            "streamBodyText": null
+        }"#;
+        let result = materialize_provider_response_sse_payload_json(input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        // Not an SSE marker → passthrough
+        assert_eq!(parsed["id"], "resp_1");
+        assert!(parsed.get("mode").is_none(), "non-SSE payload should have no mode");
+    }
+
+    #[test]
+    fn materialize_provider_response_sse_payload_json_echo_raw_text() {
+        let input = r#"{
+            "payload": {"mode":"sse","raw":"event: completed\ndata: {}\n\n"},
+            "streamBodyText": null
+        }"#;
+        let result = materialize_provider_response_sse_payload_json(input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["mode"], "sse");
+        assert_eq!(parsed["bodyText"], "event: completed\ndata: {}\n\n");
+    }
+
+    #[test]
+    fn materialize_provider_response_sse_payload_json_echo_empty_input() {
+        let result = materialize_provider_response_sse_payload_json("".to_string());
+        assert!(result.is_err(), "empty input should fail");
+    }
+
+    #[test]
+    fn build_provider_sse_stream_read_error_descriptor_json_echo() {
+        let input = r#"{
+            "message": "Stream read failed",
+            "code": "SSE_READ_TIMEOUT",
+            "upstream_code": "UPSTREAM_TIMEOUT"
+        }"#;
+        let result = build_provider_sse_stream_read_error_descriptor_json(input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["code"], "SSE_DECODE_ERROR");
+        assert_eq!(parsed["upstreamCode"], "SSE_READ_TIMEOUT");
+        assert_eq!(parsed["statusCode"], 502);
+        assert!(parsed["retryable"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn build_provider_sse_stream_read_error_descriptor_json_echo_empty() {
+        let result = build_provider_sse_stream_read_error_descriptor_json("".to_string());
+        assert!(result.is_err(), "empty input should fail");
+    }
+
 }

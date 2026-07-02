@@ -514,7 +514,7 @@ flowchart LR
 | mtc-02-result | `MetaReq02TruthMaterialized -> MetaReq03ContinuationAttached` | anchored | `attachResponsesRequestContextToResultForHttp -> writeContinuationContext` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-03 | `MetaReq03ContinuationAttached -> MetaReq04RuntimeControlBound` | anchored | `finalizeRequestExecutorAttemptMetadata -> finalizeRequestExecutorAttemptMetadata` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-04 | `MetaReq04RuntimeControlBound -> MetaReq05ProviderObservationProjected` | anchored | `resolveRequestExecutorPipelineAttempt -> resolveRequestExecutorPipelineAttempt` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
-| mtc-05 | `MetaReq05ProviderObservationProjected -> MetaResp06ResponseObserved` | anchored | `convertProviderResponse -> readMetadataCenterRequestTruth` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-05 | `MetaReq05ProviderObservationProjected -> MetaResp06ResponseObserved` | anchored | `convertProviderResponse -> readRequestTruthFromBoundMetadataCenter` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-06 | `MetaResp06ResponseObserved -> MetaResp07BridgeMetadataBound` | anchored | `buildBridgeAdapterContext -> readRuntimeServerToolProjection` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-07 | `MetaResp07BridgeMetadataBound -> MetaResp07ServertoolContextProjected` | anchored | `runServertoolResponseStageOrchestrationShell -> readRuntimeControlFromAnyBoundMetadataCenter` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-08 | `MetaResp07ServertoolContextProjected -> MetaResp08CloseoutReleased` | anchored | `releaseMetadataCenterForHttpResponse -> markReleased` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
@@ -533,6 +533,7 @@ flowchart LR
   HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
   HubRespOutbound04ClientSemantic -->|chat-sse-01| ServerRespOutbound05ClientFrame
   ProviderRespInbound01Raw -->|chat-sse-02| HubRespInbound02Parsed
+  HubRespOutbound04ClientSemantic -->|gemini-sse-01| ServerRespOutbound05ClientFrame
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -546,6 +547,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | chat-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `processResponseToSseWithFunctions -> buildChatSseEventSequenceWithNative` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
 | chat-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `convertSseToJson -> buildChatJsonFromSseWithNative` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
+| gemini-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `sequenceResponse -> buildGeminiSseEventSequenceWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
 
 ## Shared Multi-Reference Functions
 

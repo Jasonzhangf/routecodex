@@ -2085,8 +2085,11 @@ verification:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs
     contract:
       - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
+      - tests/sharedmodule/sse-rust-parity-gemini-sse.blackbox.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     integration: []
     smoke:
@@ -2096,6 +2099,7 @@ verification:
       - npm run build:base
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners."
+      - "Gemini JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
 
   - feature_id: error.pipeline_contract
     change_risk: high
