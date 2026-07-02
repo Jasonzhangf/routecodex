@@ -33,6 +33,10 @@ pub struct ServertoolResponseStageOrchestrationMaterializeInput {
     pub orchestration_executed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orchestration_flow_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_shape: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_shape: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -43,6 +47,8 @@ pub struct ServertoolResponseStageOrchestrationMaterializedOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flow_id: Option<String>,
     pub returned_executed_payload: bool,
+    pub shell_result: serde_json::Value,
+    pub record_event: serde_json::Value,
 }
 
 pub fn plan_servertool_response_stage_orchestration_output(
@@ -83,20 +89,55 @@ pub fn materialize_servertool_response_stage_orchestration_output(
     );
 
     match plan.return_action {
-        ServertoolResponseStageOrchestrationReturnAction::ReturnExecutedPayload => {
+            ServertoolResponseStageOrchestrationReturnAction::ReturnExecutedPayload => {
+            let mut shell_result = serde_json::json!({
+                "payload": input.executed_payload.clone(),
+                "executed": plan.record_executed
+            });
+            if let Some(flow_id) = plan.record_flow_id.clone() {
+                shell_result["flowId"] = serde_json::Value::String(flow_id);
+            }
+
+            let mut record_event = serde_json::json!({
+                "executed": plan.record_executed
+            });
+            if let Some(flow_id) = plan.record_flow_id.clone() {
+                record_event["flowId"] = serde_json::Value::String(flow_id);
+            }
+            if let Some(input_shape) = input.input_shape.clone() {
+                record_event["inputShape"] = serde_json::Value::String(input_shape);
+            }
+            if let Some(output_shape) = input.output_shape.clone() {
+                record_event["outputShape"] = serde_json::Value::String(output_shape);
+            }
+
             ServertoolResponseStageOrchestrationMaterializedOutput {
                 payload: input.executed_payload,
                 executed: plan.record_executed,
                 flow_id: plan.record_flow_id,
                 returned_executed_payload: true,
+                shell_result,
+                record_event,
             }
         }
         ServertoolResponseStageOrchestrationReturnAction::ReturnOriginalPayload => {
+            let mut record_event = serde_json::json!({
+                "executed": plan.record_executed
+            });
+            if let Some(input_shape) = input.input_shape.clone() {
+                record_event["inputShape"] = serde_json::Value::String(input_shape);
+            }
+
             ServertoolResponseStageOrchestrationMaterializedOutput {
-                payload: input.original_payload,
+                payload: input.original_payload.clone(),
                 executed: plan.record_executed,
                 flow_id: plan.record_flow_id,
                 returned_executed_payload: false,
+                shell_result: serde_json::json!({
+                    "payload": input.original_payload,
+                    "executed": plan.record_executed
+                }),
+                record_event,
             }
         }
     }
@@ -148,6 +189,8 @@ mod tests {
                 executed_payload: serde_json::json!({ "id": "executed" }),
                 orchestration_executed: true,
                 orchestration_flow_id: Some(" flow_1 ".to_string()),
+                input_shape: Some("chat_completion".to_string()),
+                output_shape: Some("responses".to_string()),
             },
         );
 
@@ -155,6 +198,23 @@ mod tests {
         assert_eq!(output.executed, true);
         assert_eq!(output.flow_id.as_deref(), Some("flow_1"));
         assert_eq!(output.returned_executed_payload, true);
+        assert_eq!(
+            output.shell_result,
+            serde_json::json!({
+                "payload": { "id": "executed" },
+                "executed": true,
+                "flowId": "flow_1"
+            })
+        );
+        assert_eq!(
+            output.record_event,
+            serde_json::json!({
+                "executed": true,
+                "flowId": "flow_1",
+                "inputShape": "chat_completion",
+                "outputShape": "responses"
+            })
+        );
     }
 
     #[test]
@@ -165,6 +225,8 @@ mod tests {
                 executed_payload: serde_json::json!({ "id": "ignored" }),
                 orchestration_executed: false,
                 orchestration_flow_id: Some("ignored".to_string()),
+                input_shape: Some("chat_completion".to_string()),
+                output_shape: None,
             },
         );
 
@@ -172,5 +234,19 @@ mod tests {
         assert_eq!(output.executed, false);
         assert_eq!(output.flow_id, None);
         assert_eq!(output.returned_executed_payload, false);
+        assert_eq!(
+            output.shell_result,
+            serde_json::json!({
+                "payload": { "id": "original" },
+                "executed": false
+            })
+        );
+        assert_eq!(
+            output.record_event,
+            serde_json::json!({
+                "executed": false,
+                "inputShape": "chat_completion"
+            })
+        );
     }
 }

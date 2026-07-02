@@ -92,30 +92,17 @@ export async function runServertoolResponseStageOrchestrationShell(
     originalPayload: options.payload,
     executedPayload: orchestration.chat as ChatCompletionLike,
     orchestrationExecuted: orchestration.executed,
-    orchestrationFlowId: orchestration.flowId
+    orchestrationFlowId: orchestration.flowId,
+    inputShape,
+    outputShape: orchestration.executed
+      ? detectProviderResponseShapeWithNative(orchestration.chat as ChatCompletionLike)
+      : undefined
   });
 
-  if (output.returnedExecutedPayload) {
-    const outputShape = detectProviderResponseShapeWithNative(output.payload);
-    recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
-      executed: output.executed,
-      flowId: output.flowId,
-      inputShape,
-      outputShape
-    });
-    return {
-      payload: output.payload,
-      executed: output.executed,
-      flowId: output.flowId
-    };
-  }
-
-  recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
-    executed: output.executed,
-    inputShape
-  });
-  return {
-    payload: output.payload,
-    executed: output.executed
-  };
+  recordStage(
+    options.stageRecorder,
+    'HubRespChatProcess03Governed.servertool_orchestration',
+    output.recordEvent
+  );
+  return output.shellResult;
 }

@@ -498,6 +498,12 @@ export interface ServertoolResponseStageOrchestrationMaterializedOutput {
   executed: boolean;
   flowId?: string;
   returnedExecutedPayload: boolean;
+  shellResult: {
+    payload: JsonObject;
+    executed: boolean;
+    flowId?: string;
+  };
+  recordEvent: JsonObject;
 }
 
 export type ServertoolEntryPreflightPlan =
@@ -3231,6 +3237,8 @@ export function materializeServertoolResponseStageOrchestrationOutputWithNative(
   executedPayload: JsonObject;
   orchestrationExecuted: boolean;
   orchestrationFlowId?: string;
+  inputShape?: string;
+  outputShape?: string;
 }): ServertoolResponseStageOrchestrationMaterializedOutput {
   const capability = 'materializeServertoolResponseStageOrchestrationOutputJson';
   const fn = readNativeFunction(capability);
@@ -3261,10 +3269,34 @@ export function materializeServertoolResponseStageOrchestrationOutputWithNative(
   if (record.returnedExecutedPayload && record.executed !== true) {
     throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned executed payload without executed record');
   }
+  if (!record.shellResult || typeof record.shellResult !== 'object' || Array.isArray(record.shellResult)) {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid shellResult');
+  }
+  const shellResult = record.shellResult as Record<string, unknown>;
+  if (!shellResult.payload || typeof shellResult.payload !== 'object' || Array.isArray(shellResult.payload)) {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid shellResult payload');
+  }
+  if (typeof shellResult.executed !== 'boolean') {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid shellResult executed flag');
+  }
+  if (shellResult.flowId !== undefined && typeof shellResult.flowId !== 'string') {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid shellResult flowId');
+  }
+  if (!record.recordEvent || typeof record.recordEvent !== 'object' || Array.isArray(record.recordEvent)) {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid recordEvent');
+  }
   return {
     payload: record.payload as JsonObject,
     executed: record.executed,
     returnedExecutedPayload: record.returnedExecutedPayload,
+    shellResult: {
+      payload: shellResult.payload as JsonObject,
+      executed: shellResult.executed,
+      ...(typeof shellResult.flowId === 'string' && shellResult.flowId.trim()
+        ? { flowId: shellResult.flowId.trim() }
+        : {})
+    },
+    recordEvent: record.recordEvent as JsonObject,
     ...(typeof record.flowId === 'string' && record.flowId.trim()
       ? { flowId: record.flowId.trim() }
       : {})

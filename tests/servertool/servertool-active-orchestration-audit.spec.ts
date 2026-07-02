@@ -734,13 +734,15 @@ const TARGETS = [
       'const passthroughResult: ServertoolResponseStageShellResult = {',
       'return passthroughResult;',
       'options.adapterContext as Record<string, unknown>',
+      'if (output.returnedExecutedPayload)',
+      'payload: output.payload',
+      'executed: output.executed',
     ],
     required: [
-      "return {",
       'chat: options.payload',
       'adapterContext: options.adapterContext',
-      'payload: options.payload',
-      'executed: false',
+      'output.recordEvent',
+      'return output.shellResult',
     ],
   },
   {

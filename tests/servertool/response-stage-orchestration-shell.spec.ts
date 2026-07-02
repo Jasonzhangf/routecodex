@@ -59,12 +59,31 @@ describe('response-stage-orchestration-shell', () => {
             payload: input.executedPayload,
             executed: true,
             flowId: String(input.orchestrationFlowId ?? '').trim(),
-            returnedExecutedPayload: true
+            returnedExecutedPayload: true,
+            shellResult: {
+              payload: input.executedPayload,
+              executed: true,
+              flowId: String(input.orchestrationFlowId ?? '').trim()
+            },
+            recordEvent: {
+              executed: true,
+              flowId: String(input.orchestrationFlowId ?? '').trim(),
+              inputShape: input.inputShape,
+              outputShape: input.outputShape
+            }
           }
         : {
             payload: input.originalPayload,
             executed: false,
-            returnedExecutedPayload: false
+            returnedExecutedPayload: false,
+            shellResult: {
+              payload: input.originalPayload,
+              executed: false
+            },
+            recordEvent: {
+              executed: false,
+              inputShape: input.inputShape
+            }
           }
     );
     runServerToolOrchestrationShell.mockResolvedValue({
@@ -103,6 +122,7 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain("gatePlan.nextAction === 'bypass'");
     expect(source).not.toContain("if (gateRuntimeAction.action === 'return_passthrough_bypass')");
     expect(source).not.toContain('if (orchestration.executed)');
+    expect(source).not.toContain('if (output.returnedExecutedPayload)');
     expect(source).not.toContain('chat: options.payload as JsonObject');
     expect(source).not.toContain('options.adapterContext as Record<string, unknown>');
     expect(source).toContain('chat: options.payload');
@@ -176,7 +196,18 @@ describe('response-stage-orchestration-shell', () => {
       payload: { id: 'resp_executed' },
       executed: true,
       flowId: 'flow_executed',
-      returnedExecutedPayload: true
+      returnedExecutedPayload: true,
+      shellResult: {
+        payload: { id: 'resp_executed' },
+        executed: true,
+        flowId: 'flow_executed'
+      },
+      recordEvent: {
+        executed: true,
+        flowId: 'flow_executed',
+        inputShape: 'chat_completion',
+        outputShape: 'chat_completion'
+      }
     });
 
     await expect(
@@ -197,7 +228,9 @@ describe('response-stage-orchestration-shell', () => {
       originalPayload: { id: 'resp_input' },
       executedPayload: { id: 'resp_executed' },
       orchestrationExecuted: true,
-      orchestrationFlowId: ' flow_executed '
+      orchestrationFlowId: ' flow_executed ',
+      inputShape: 'chat_completion',
+      outputShape: 'chat_completion'
     });
     expect(stageRecorder.record).toHaveBeenCalledWith(
       'HubRespChatProcess03Governed.servertool_orchestration',
@@ -235,7 +268,15 @@ describe('response-stage-orchestration-shell', () => {
     materializeServertoolResponseStageOrchestrationOutputWithNative.mockReturnValue({
       payload: { id: 'resp_original' },
       executed: false,
-      returnedExecutedPayload: false
+      returnedExecutedPayload: false,
+      shellResult: {
+        payload: { id: 'resp_original' },
+        executed: false
+      },
+      recordEvent: {
+        executed: false,
+        inputShape: 'chat_completion'
+      }
     });
 
     await expect(
@@ -255,7 +296,9 @@ describe('response-stage-orchestration-shell', () => {
       originalPayload: { id: 'resp_original' },
       executedPayload: { id: 'resp_ignored' },
       orchestrationExecuted: false,
-      orchestrationFlowId: undefined
+      orchestrationFlowId: undefined,
+      inputShape: 'chat_completion',
+      outputShape: undefined
     });
     expect(stageRecorder.record).toHaveBeenCalledWith(
       'HubRespChatProcess03Governed.servertool_orchestration',

@@ -3405,7 +3405,9 @@ fn materializes_servertool_response_stage_orchestration_output_via_servertool_co
             "originalPayload": { "id": "original" },
             "executedPayload": { "id": "executed" },
             "orchestrationExecuted": true,
-            "orchestrationFlowId": " flow_1 "
+            "orchestrationFlowId": " flow_1 ",
+            "inputShape": "chat_completion",
+            "outputShape": "responses"
         })
         .to_string(),
     )
@@ -3419,13 +3421,31 @@ fn materializes_servertool_response_stage_orchestration_output_via_servertool_co
         executed_value["returnedExecutedPayload"],
         serde_json::json!(true)
     );
+    assert_eq!(
+        executed_value["shellResult"],
+        serde_json::json!({
+            "payload": { "id": "executed" },
+            "executed": true,
+            "flowId": "flow_1"
+        })
+    );
+    assert_eq!(
+        executed_value["recordEvent"],
+        serde_json::json!({
+            "executed": true,
+            "flowId": "flow_1",
+            "inputShape": "chat_completion",
+            "outputShape": "responses"
+        })
+    );
 
     let passthrough = materialize_servertool_response_stage_orchestration_output_json(
         &serde_json::json!({
             "originalPayload": { "id": "original" },
             "executedPayload": { "id": "ignored" },
             "orchestrationExecuted": false,
-            "orchestrationFlowId": "ignored"
+            "orchestrationFlowId": "ignored",
+            "inputShape": "chat_completion"
         })
         .to_string(),
     )
@@ -3441,6 +3461,20 @@ fn materializes_servertool_response_stage_orchestration_output_via_servertool_co
     assert_eq!(
         passthrough_value["returnedExecutedPayload"],
         serde_json::json!(false)
+    );
+    assert_eq!(
+        passthrough_value["shellResult"],
+        serde_json::json!({
+            "payload": { "id": "original" },
+            "executed": false
+        })
+    );
+    assert_eq!(
+        passthrough_value["recordEvent"],
+        serde_json::json!({
+            "executed": false,
+            "inputShape": "chat_completion"
+        })
     );
 }
 

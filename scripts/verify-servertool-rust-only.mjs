@@ -5702,6 +5702,7 @@ function checkServertoolRustOutcomeCloseout() {
     'String(gateRuntimeAction.action)',
     'String(outputPlan.returnAction)',
     'switch (outputPlan.returnAction)',
+    'if (output.returnedExecutedPayload)',
     'planServertoolResponseStageOrchestrationOutputWithNative',
     'invalid response-stage orchestration output action',
     'chat: options.payload as JsonObject',
@@ -5727,8 +5728,8 @@ function checkServertoolRustOutcomeCloseout() {
     'runServerToolOrchestrationShell',
     'chat: options.payload',
     'adapterContext: options.adapterContext',
-    'payload: options.payload',
-    'executed: false',
+    'output.recordEvent',
+    'return output.shellResult',
   ]) {
     if (!responseStageOrchestrationShell.includes(marker)) {
       fail(
@@ -5742,6 +5743,8 @@ function checkServertoolRustOutcomeCloseout() {
     'return bypassResult;',
     'const passthroughResult: ServertoolResponseStageShellResult = {',
     'return passthroughResult;',
+    'payload: output.payload',
+    'executed: output.executed',
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
