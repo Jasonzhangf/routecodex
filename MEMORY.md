@@ -565,6 +565,11 @@
 - `ResponsesReasoningItem.content` may be absent, but if present it must be an array; non-array content now fails fast in the Rust SSE event payload descriptor owner with `Invalid Responses reasoning content: expected array`.
 - The old TS generator fallback `Array.isArray(reasoning.content) ? reasoning.content : []` is forbidden by `verify:sse-architecture-boundary`.
 - Verification: focused Rust/Jest, SSE gates, typechecks, native hotpath build, source replay, and `build:base` passed; current 4444 provider-response samples still lack SSE wire payload fields for real wire replay.
+# 2026-07-02: servertool CLI projection branch casts removed
+- Verified slice: `execution-stage-shell.ts` no longer casts CLI projection branch `chatResponse` or `execution`; `native-servertool-core-semantics.ts` exposes `ServertoolCliProjectionRuntimeBranchOutput` as `JsonObject` plus `NativeServertoolExecutionSummary`.
+- Verification: focused Jest 81/81 passed, sharedmodule `tsc` passed, `verify:servertool-rust-only` passed, `verify:function-map-compile-gate` passed, `verify:architecture-mainline-call-map` passed, `git diff --check` passed.
+- Reusable rule: native CLI projection branch wrappers should expose the exact runtime result contract so execution-stage can remain a direct branch dispatcher, not a result-shape caster.
+
 # 2026-07-02: servertool execution loop effect casts removed
 - Verified slice: `execution-queue-shell.ts` no longer casts Rust-owned execution loop effect plans into executed-record shapes; `native-servertool-core-semantics.ts` now exposes effect plan `toolCall` / `execution` with the native executed-record types consumed by `appendServertoolExecutedRecordWithNative`.
 - Verification: focused Jest 84/84 passed, sharedmodule `tsc` passed, `verify:servertool-rust-only` passed, `verify:function-map-compile-gate` passed, `verify:architecture-mainline-call-map` passed, `git diff --check` passed.

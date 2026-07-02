@@ -89,6 +89,10 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('planServertoolExecutionBranchWithNative');
     expect(source).toContain('buildServertoolCliProjectionRuntimeBranchWithNative');
     expect(source).toContain('mode: branch.resultMode');
+    expect(source).not.toContain('finalChatResponse: branch.chatResponse as JsonObject');
+    expect(source).not.toContain('execution: branch.execution as {');
+    expect(source).toContain('finalChatResponse: branch.chatResponse');
+    expect(source).toContain('execution: branch.execution');
     expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
     expect(source).toContain('switch (preExecutionBranchPlan.action)');

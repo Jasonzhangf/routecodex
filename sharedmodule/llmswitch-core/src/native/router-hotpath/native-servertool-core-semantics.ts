@@ -222,8 +222,8 @@ export interface ServertoolCliProjectionRuntimeBranchInput {
 
 export interface ServertoolCliProjectionRuntimeBranchOutput {
   resultMode: 'tool_flow';
-  chatResponse: Record<string, unknown>;
-  execution: ServertoolCliProjectionExecutionContextOutput;
+  chatResponse: JsonObject;
+  execution: NativeServertoolExecutionSummary;
 }
 
 export interface NativeServertoolExecutionSummary {
@@ -1787,7 +1787,7 @@ export function buildServertoolCliProjectionRuntimeBranchWithNative(
   }
   return {
     resultMode: 'tool_flow',
-    chatResponse: record.chatResponse as Record<string, unknown>,
+    chatResponse: record.chatResponse as JsonObject,
     execution: {
       flowId: 'servertool_cli_projection'
     }

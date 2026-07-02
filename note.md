@@ -1,3 +1,8 @@
+# 2026-07-02: servertool CLI projection branch casts removed
+- Slice: `native-servertool-core-semantics.ts` now types `ServertoolCliProjectionRuntimeBranchOutput.chatResponse` as `JsonObject` and `execution` as `NativeServertoolExecutionSummary`; `execution-stage-shell.ts` no longer casts `branch.chatResponse` / `branch.execution` before returning CLI projection results.
+- Gate: `execution-stage-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old CLI projection branch cast markers and require direct typed branch fields.
+- Evidence: focused Jest `execution-stage-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 81/81; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool execution loop effect casts removed
 - Slice: `native-servertool-core-semantics.ts` now types `ServertoolExecutionLoopEffectBasePlan.toolCall` / `execution` as native executed-record shapes; `execution-queue-shell.ts` no longer casts `errorEffectPlan` / `noopEffectPlan` before appending executed records.
 - Gate: `execution-queue-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the four effect-plan cast markers and require direct typed effect-plan fields.

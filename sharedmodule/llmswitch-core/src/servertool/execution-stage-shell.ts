@@ -48,11 +48,8 @@ export async function runServertoolExecutionStage(args: {
       });
       return {
         mode: branch.resultMode,
-        finalChatResponse: branch.chatResponse as JsonObject,
-        execution: branch.execution as {
-          flowId: string;
-          context?: JsonObject;
-        }
+        finalChatResponse: branch.chatResponse,
+        execution: branch.execution
       };
     }
     case 'continue_response_stage':
