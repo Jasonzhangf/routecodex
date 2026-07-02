@@ -19,7 +19,7 @@ export function renderTimingDetails(details?: Record<string, unknown>): string {
   }
   try {
     return ` ${JSON.stringify(details)}`;
-  } catch {
+  } catch (err) { console.warn('[renderTimingDetails] JSON.stringify failed:', err);
     return "";
   }
 }

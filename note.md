@@ -1,7 +1,7 @@
-# 2026-07-02: servertool engine contextBase cast gate locked
+# 2026-07-02: servertool engine contextBase cast removed
 
-- Slice: `run-server-side-tool-engine-shell.ts` currently passes `entryContext.contextBase` directly without `as ServerToolHandlerContext`; this turn locks that existing thin-shell state with focused and global gates.
-- Gate: `run-server-side-tool-engine-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid `contextBase: entryContext.contextBase as ServerToolHandlerContext` and require direct `contextBase: entryContext.contextBase`.
+- Slice: `run-server-side-tool-engine-shell.ts` no longer imports `ServerToolHandlerContext` or casts `entryContext.contextBase as ServerToolHandlerContext`; `ServerToolHandlerContext.toolCall` is optional, so the prepass shell can consume the typed entry context directly.
+- Gate: `run-server-side-tool-engine-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the cast marker and require direct `contextBase: entryContext.contextBase`.
 - Evidence: focused Jest `run-server-side-tool-engine-shell + servertool-active-orchestration-audit` PASS 50/50; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
 
 # 2026-07-02: servertool execution queue base casts removed
@@ -33,6 +33,10 @@
 - Owner/map check: function map currently lists Rust `chat_sse_event_payload.rs` for Chat stream projection and still allows `sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts`; mainline currently documents only JSON->SSE encode edge, so decode native owner/export/mainline update is required before claiming this slice closed.
 - Current TS semantic markers in decode converter: `parseSseChunk`, `processSseEvent`, `processChoice/processDelta`, `processToolCallDelta`, `normalizeReasoning`, `buildPartialResponse`, `finalizeResponse`, plus imports of `normalizeMessageReasoningTools`, `normalizeChatMessageContent`, and `dispatchReasoning`.
 - Next action: add `tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts` first against current baseline, covering standard chunk, usage final chunk, tool/function delta aggregation, incomplete stream, malformed post-content chunk, and TS semantic-owner markers.
+- Red evidence: new Chat SSE->JSON parity test proved current TS baseline silently completed an incomplete stream without terminal `[DONE]`.
+- Green slice: Rust `build_chat_json_from_sse_json` now owns Chat SSE parse/materialize, usage normalization, tool/function delta aggregation, and incomplete stream fail-fast; TS converter is an IO/timeout/native-call shell.
+- Evidence: Rust `cargo test -p router-hotpath-napi chat_sse_event_payload --lib -- --nocapture` PASS 22/22; focused Chat SSE Jest PASS 35/35; sharedmodule/root `tsc` PASS; native hotpath build PASS; `verify:sse-architecture-boundary`, `verify:responses-sse-business-module`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, wiki sync/html sync/mainline manifest sync, and `git diff --check` PASS.
+- Known unrelated gap: full `tests/sharedmodule/native-required-exports-sse-stream.spec.ts` still has 3 servertool/req_inbound assertion failures, but its required native export list test passed and direct binding probe confirmed `buildChatJsonFromSseJson=true`.
 
 # 2026-07-02: servertool noop response cast removed
 

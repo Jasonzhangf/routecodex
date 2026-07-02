@@ -13,6 +13,7 @@ export interface HttpErrorPayload {
       upstream_status?: number;
       upstream_code?: string;
       upstream_message?: string;
+      internalCode?: string;
       tool_name?: string;
       validation_reason?: string;
       validation_message?: string;
@@ -308,8 +309,9 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
 
   if (status === 401 || status === 403) {
     return formatPayload(502, {
-      message: 'Upstream provider error',
+      message: upstreamMessage || 'Upstream provider error',
       code: 'upstream_error',
+      internalCode: upstreamCode || effectiveCode || 'upstream_401_403',
       ...validationFields,
       ...detailField
     });
@@ -465,7 +467,8 @@ export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): s
   }
   const message = projected.body.error.message;
   if (projected.body.error.code === 'upstream_error') {
-    return message || 'Upstream provider error';
+    const internalCode = projected.body.error.internalCode;
+    return internalCode ? `${message} (internal: ${internalCode})` : (message || 'Upstream provider error');
   }
   if (fallback !== undefined && projected.status !== 401 && projected.status !== 403 && projected.status !== 429) {
     return fallback;

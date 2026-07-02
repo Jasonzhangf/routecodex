@@ -84,13 +84,7 @@ function readMetadataCenterSnapshotForRust(context: AdapterContext): Record<stri
   return nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) ?? null : null;
 }
 
-function readMetadataCenterRequestTruth(metadata?: Record<string, unknown>): Record<string, unknown> {
-  return asRecord(readBoundMetadataCenter(metadata)?.readRequestTruth()) ?? {};
-}
 
-function readMetadataCenterRuntimeControl(metadata?: Record<string, unknown>): Record<string, unknown> {
-  return asRecord(readBoundMetadataCenter(metadata)?.readRuntimeControl()) ?? {};
-}
 
 function writeRustStopGatewayContextToMetadataCenter(args: {
   metadata: Record<string, unknown>;
@@ -110,7 +104,7 @@ function writeRustStopGatewayContextToMetadataCenter(args: {
 function readProviderProtocolWithinCore(args: {
   metadata?: Record<string, unknown>;
 }): ProviderProtocol {
-  const runtimeControl = readMetadataCenterRuntimeControl(args.metadata);
+  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(args.metadata);
   const providerProtocol =
     typeof runtimeControl.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
       ? runtimeControl.providerProtocol.trim()
