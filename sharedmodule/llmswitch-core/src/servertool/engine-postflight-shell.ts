@@ -7,7 +7,7 @@ import type {
 import {
   type ServertoolEngineRuntimeActionPlan,
   buildServertoolPostflightObservationSummaryWithNative,
-  buildStoplessAutoCliProjectionFromEngineWithNative
+  resolveServertoolEnginePostflightPayloadWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
@@ -61,33 +61,14 @@ export async function runServertoolEnginePostflight(args: {
     });
     args.stageRecorder.record('servertool.execution', summary);
   }
-  let chat: JsonObject;
-  switch (runtimeAction.finalPayloadSource) {
-    case 'engine_result':
-      chat = engineResult.finalChatResponse;
-      break;
-    case 'stop_message_cli_projection': {
-      const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(options.adapterContext);
-      const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot;
-      const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
-        metadataCenterSnapshot: metadataCenterSnapshot ?? null,
-        execution: engineResult.execution ?? null,
-        metadataWritePlan: engineResult.metadataWritePlan ?? null,
-        requestId: options.requestId ?? null
-      });
-      chat = projection.chatResponse;
-      break;
-    }
-    default:
-      throw Object.assign(new Error(`[servertool] unexpected postflight payload source for flow ${flowId}`), {
-        code: 'SERVERTOOL_RUNTIME_ACTION_INVALID',
-        details: {
-          requestId: options.requestId,
-          flowId,
-          finalPayloadSource: runtimeAction.finalPayloadSource
-        }
-      });
-  }
+  const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(options.adapterContext);
+  const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot;
+  const chat = resolveServertoolEnginePostflightPayloadWithNative({
+    runtimeAction,
+    engineResult,
+    metadataCenterSnapshot: metadataCenterSnapshot ?? null,
+    requestId: options.requestId ?? null
+  });
   args.logProgress(5, totalSteps, runtimeAction.progressStatus, { flowId });
   return {
     chat,

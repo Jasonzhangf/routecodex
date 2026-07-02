@@ -36,8 +36,9 @@ describe('engine stopless session thin-shell guard', () => {
       'utf8'
     );
 
-    expect(source).toContain('switch (runtimeAction.finalPayloadSource)');
-    expect(source).toContain("case 'stop_message_cli_projection'");
+    expect(source).not.toContain('switch (runtimeAction.finalPayloadSource)');
+    expect(source).not.toContain("case 'stop_message_cli_projection'");
+    expect(source).toContain('resolveServertoolEnginePostflightPayloadWithNative({');
   });
 
   test('runServerToolOrchestration does not locally derive stopless CLI projection context', () => {

@@ -297,6 +297,13 @@ export interface StoplessAutoCliProjectionFromEngineOutput {
   chatResponse: JsonObject;
 }
 
+export interface ServertoolEnginePostflightPayloadInput {
+  runtimeAction: ServertoolEngineRuntimeActionPlan;
+  engineResult: ServerSideToolEngineResult;
+  metadataCenterSnapshot?: unknown;
+  requestId?: string | null;
+}
+
 export interface NativeServertoolExecutedToolCall {
   id: string;
   name: string;
@@ -865,6 +872,32 @@ export function buildStoplessAutoCliProjectionFromEngineWithNative(input: {
   return {
     chatResponse: chatResponse as JsonObject
   };
+}
+
+export function resolveServertoolEnginePostflightPayloadWithNative(
+  input: ServertoolEnginePostflightPayloadInput
+): JsonObject {
+  switch (input.runtimeAction.finalPayloadSource) {
+    case 'engine_result':
+      return input.engineResult.finalChatResponse;
+    case 'stop_message_cli_projection': {
+      const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
+        metadataCenterSnapshot: input.metadataCenterSnapshot ?? null,
+        execution: input.engineResult.execution ?? null,
+        metadataWritePlan: input.engineResult.metadataWritePlan ?? null,
+        requestId: input.requestId ?? null
+      });
+      return projection.chatResponse;
+    }
+    default:
+      throw Object.assign(new Error('[servertool] unexpected postflight payload source'), {
+        code: 'SERVERTOOL_RUNTIME_ACTION_INVALID',
+        details: {
+          requestId: input.requestId ?? null,
+          finalPayloadSource: input.runtimeAction.finalPayloadSource
+        }
+      });
+  }
 }
 
 export interface ServertoolHookSchedulerInput {

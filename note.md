@@ -1,3 +1,10 @@
+# 2026-07-03: servertool postflight payload-source switch moved to native helper
+
+- Slice: `engine-postflight-shell.ts` no longer switches over `runtimeAction.finalPayloadSource` or constructs stopless CLI projection input inline. TS now reads the request-scoped MetadataCenter snapshot and delegates final postflight chat payload selection to `resolveServertoolEnginePostflightPayloadWithNative()`.
+- Gate: `engine-observation-shell.spec.ts`, `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the old postflight `finalPayloadSource` switch/case markers and require the native helper path.
+- Evidence: focused Jest `engine-observation-shell + engine.stopless-session-thin-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 92/92; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this closes one Phase 1 postflight TS switch slice only. Other servertool action switches/casts remain to classify or migrate before Phase 1 can be declared closed; Hub Pipeline, Virtual Router, aggregate build, and live/replay closeout remain open.
+
 # 2026-07-03: servertool response-stage auto-hook switches moved to native helpers
 
 - Slice: `response-stage-auto-hook-shell.ts` no longer switches over `preAutoHookRuntimeAction.action` or `postAutoHookRuntimeAction.action`. TS now delegates pre/post response-stage auto-hook decisions to `resolveServertoolResponseStageAutoHookPreDecisionWithNative()` and `resolveServertoolResponseStageAutoHookPostDecisionWithNative()`, leaving TS to execute the auto-hook IO and throw the native-planned required-hook-empty provider protocol error.

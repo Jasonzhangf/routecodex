@@ -215,9 +215,10 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("if (runtimeAction.action === 'return_servertool_cli_projection_final')");
     expect(source).not.toContain("if (runtimeAction.action === 'return_stop_message_terminal_final')");
     expect(source).not.toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
-    expect(source).toContain('switch (runtimeAction.finalPayloadSource)');
-    expect(source).toContain("case 'engine_result'");
-    expect(source).toContain("case 'stop_message_cli_projection'");
+    expect(source).not.toContain('switch (runtimeAction.finalPayloadSource)');
+    expect(source).not.toContain("case 'engine_result'");
+    expect(source).not.toContain("case 'stop_message_cli_projection'");
+    expect(source).toContain('resolveServertoolEnginePostflightPayloadWithNative({');
     expect(source).not.toContain('resolvePostflightFlowId');
     expect(source).not.toContain('const projectedFlowId = runtimeAction.projectedFlowId;');
     expect(source).not.toContain('String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)');
