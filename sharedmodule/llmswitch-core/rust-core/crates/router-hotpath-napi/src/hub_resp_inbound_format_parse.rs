@@ -494,6 +494,9 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
 
 fn merge_response_object(target: &mut Map<String, Value>, response: &Map<String, Value>) {
     for (key, value) in response {
+        if key == "metadata" {
+            continue;
+        }
         if key == "output" {
             merge_response_output_array(target, value);
             continue;
@@ -631,6 +634,14 @@ fn materialize_openai_responses_sse_body_text(body_text: &str) -> Result<Value, 
         };
         let event_type = read_trimmed_string(event_obj.get("type")).unwrap_or_default();
         let event_name = event_name.unwrap_or_default();
+        if event_name == "response.error" || event_type == "response.error" {
+            let message = event_obj
+                .get("error")
+                .and_then(Value::as_object)
+                .and_then(|error| read_trimmed_string(error.get("message")))
+                .unwrap_or_else(|| "OpenAI Responses SSE stream error".to_string());
+            return Err(format!("OpenAI Responses SSE stream error: {}", message));
+        }
         if let Some(response_obj) = event_obj.get("response").and_then(Value::as_object) {
             merge_response_object(&mut response, response_obj);
         }
@@ -1141,6 +1152,50 @@ mod tests {
             result.envelope.payload["output"][0]["arguments"],
             "{\"cmd\":\"pwd\"}"
         );
+    }
+
+    #[test]
+    fn test_parse_openai_responses_sse_strips_response_metadata() {
+        let body_text = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse_metadata\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-5.5\",\"output\":[],\"metadata\":{\"secret\":\"must-not-leak\"}}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse_metadata\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-5.5\",\"output\":[],\"metadata\":{\"secret\":\"must-not-leak\"}}}\n\n",
+            "event: response.done\n",
+            "data: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_sse_metadata\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-5.5\",\"output\":[],\"metadata\":{\"secret\":\"must-not-leak\"}}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "mode": "sse",
+                "bodyText": body_text
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let result = parse_resp_format_envelope(input).unwrap();
+        assert!(result.envelope.payload.get("metadata").is_none());
+        assert!(!result.envelope.payload.to_string().contains("must-not-leak"));
+    }
+
+    #[test]
+    fn test_parse_openai_responses_sse_error_event_fails_fast() {
+        let body_text = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse_error\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-5.5\",\"output\":[]}}\n\n",
+            "event: response.error\n",
+            "data: {\"type\":\"response.error\",\"error\":{\"message\":\"provider failed\",\"code\":\"upstream_error\"}}\n\n"
+        );
+        let input = RespFormatParseInput {
+            payload: serde_json::json!({
+                "mode": "sse",
+                "bodyText": body_text
+            }),
+            protocol: "openai-responses".to_string(),
+        };
+
+        let err = parse_resp_format_envelope(input).unwrap_err();
+        assert!(err.contains("OpenAI Responses SSE stream error: provider failed"));
     }
 
     #[test]
