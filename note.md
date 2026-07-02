@@ -1,3 +1,10 @@
+# 2026-07-02: Gemini JSON->SSE sequence moved to Rust
+
+- Slice: current `HEAD` contains `gemini_sse_event_payload.rs`, `buildGeminiSseEventSequenceJson`, `native-gemini-sse-event-payload.ts`, and a thin `gemini-sequencer.ts`; Gemini JSON->SSE part/done ordering and reasoning projection are Rust-owned through `build_gemini_sse_event_sequence_json`.
+- Map/mainline: `sse.anthropic_gemini_stream_projection` now points at the Rust Gemini SSE owner; `gemini-sse-01` is anchored in mainline call map and wiki review surface; mainline binding budget updated to 3 anchored SSE projection edges.
+- Evidence: red parity first failed on missing native Gemini bridge; Rust `cargo test -p router-hotpath-napi gemini_sse_event_sequence --lib -- --nocapture` PASS 3/3; native hotpath build PASS; focused Gemini Jest PASS 10/10; sharedmodule/root `tsc` PASS; `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-review-surface-light`, wiki/html/manifest sync, and `git diff --check` PASS.
+- Remaining goal gap: Anthropic JSON->SSE/SSE->JSON and Gemini SSE->JSON still need Rust parity closeout before full SSE Rustification can be claimed complete.
+
 # 2026-07-02: servertool engine postflight adapterContext casts removed
 
 - Slice: `engine-postflight-shell.ts` now passes `options.adapterContext` directly into runtime-control writer and MetadataCenter snapshot reader; `applyNativeRuntimeControlWritePlan()` owns unknown-object narrowing and still fail-fasts when bound MetadataCenter is missing.
