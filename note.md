@@ -1,3 +1,8 @@
+# 2026-07-02: servertool execution queue dispatch mismatch fallback removed
+- Slice: `execution-queue-shell.ts` no longer sends `nativeExecutionMode: entry?.registration.executionMode ?? ''` when Rust plans `throw_dispatch_spec_mismatch`; after the native loop plan confirms handler entry presence, TS passes `entry.registration.executionMode` directly and no longer manufactures an empty-string dispatch error payload.
+- Gate: `execution-queue-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the empty-string fallback marker and require the direct native execution mode path.
+- Evidence: focused Jest `execution-queue-shell + execution-dispatch-outcome-shell + servertool-active-orchestration-audit` PASS 54/54; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool auto-hook planned any cast removed
 - Slice: `auto-hook-caller.ts` no longer passes `planned as any` into `materializeServertoolPlannedResult`; the materializer surface now accepts `planned: unknown` and keeps the native materialization owner on the Rust side.
 - Gate: `servertool-auto-hook-trace.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, `execution-handler-materialization-shell.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the cast marker and require the direct `materializeServertoolPlannedResult(planned, args.options)` path.

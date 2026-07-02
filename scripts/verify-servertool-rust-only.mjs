@@ -2793,6 +2793,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'Boolean(entry)',
     'Boolean(result)',
     'planned ? await materializeServertoolPlannedResult',
+    "nativeExecutionMode: entry?.registration.executionMode ?? ''",
     'if (lastErr) {',
     'Boolean(lastErr)',
     "String(lastErr ?? 'unknown')",
@@ -2827,6 +2828,7 @@ function checkServertoolExecutionDispatchRustOwner() {
   );
   for (const marker of [
     'hasHandlerEntry: entry != null',
+    'nativeExecutionMode: entry.registration.executionMode',
     'planned != null ? await materializeServertoolPlannedResult',
     'hasMaterializedResult: result != null',
     'switch (initialLoopActionPlan.action)',

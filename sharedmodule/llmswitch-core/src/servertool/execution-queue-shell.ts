@@ -55,7 +55,7 @@ export async function runServertoolIoExecutionQueue(args: {
             kind: 'dispatch_spec_mismatch',
             requestId: args.options.requestId,
             toolName: toolCall.name,
-            nativeExecutionMode: entry?.registration.executionMode ?? '',
+            nativeExecutionMode: entry.registration.executionMode,
             tsExecutionMode: toolCall.executionMode
           })
         );

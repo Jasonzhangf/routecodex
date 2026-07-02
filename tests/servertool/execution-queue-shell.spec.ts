@@ -194,7 +194,9 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain('Boolean(entry)');
     expect(source).not.toContain('Boolean(result)');
     expect(source).not.toContain('planned ? await materializeServertoolPlannedResult');
+    expect(source).not.toContain("nativeExecutionMode: entry?.registration.executionMode ?? ''");
     expect(source).toContain('hasHandlerEntry: entry != null');
+    expect(source).toContain('nativeExecutionMode: entry.registration.executionMode');
     expect(source).toContain('planned != null ? await materializeServertoolPlannedResult');
     expect(source).toContain('hasMaterializedResult: result != null');
     expect(source).toContain('handlerErrorMessage: lastErr');
