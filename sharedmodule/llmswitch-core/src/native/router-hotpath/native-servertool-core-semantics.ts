@@ -216,6 +216,10 @@ export type EngineSelectionAfterRunPlan = {
   overrides: EngineSelectionOverridesPlan;
 };
 
+export type EngineSelectionAfterRunDecision = {
+  rerunOverrides?: EngineSelectionOverridesPlan;
+};
+
 export interface ClientExecCliProjectionInput {
   toolName?: string;
   flowId?: string;
@@ -4287,6 +4291,21 @@ export function planEngineSelectionAfterRunWithNative(input: {
     throw new Error('planEngineSelectionAfterRunJson native returned overrides for return_current action');
   }
   return { action: record.action };
+}
+
+export function resolveEngineSelectionAfterRunWithNative(input: {
+  primaryAutoHookIds: string[];
+  engineResult: unknown;
+}): EngineSelectionAfterRunDecision {
+  const plan = planEngineSelectionAfterRunWithNative(input);
+  switch (plan.action) {
+    case 'rerun_excluding_primary_hooks':
+      return { rerunOverrides: plan.overrides };
+    case 'return_current':
+      return {};
+    default:
+      throw new Error('[servertool] invalid engine selection action');
+  }
 }
 
 function parseEngineSelectionOverridesPlan(value: unknown, capability: string): EngineSelectionOverridesPlan {

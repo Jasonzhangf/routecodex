@@ -1,3 +1,10 @@
+# 2026-07-03: servertool engine-selection after-run switch moved to native helper
+
+- Slice: `engine-selection-block.ts` no longer switches over `afterRunPlan.action`. TS now calls `resolveEngineSelectionAfterRunWithNative()` and only performs the optional rerun IO when native returns `rerunOverrides`; the action validation and invalid-action error stay in the native wrapper.
+- Gate: `engine-selection-block.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the old `switch (afterRunPlan.action)` / direct `afterRunPlan.overrides` markers and require the new native helper.
+- Evidence: focused Jest `engine-selection-block + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 80/80; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this closes one Phase 1 engine-selection TS switch slice only. Remaining servertool Phase 1 switches/casts still need classification or migration before Phase 1 can close; Hub Pipeline, Virtual Router, aggregate build, and live/replay remain open.
+
 # 2026-07-03: servertool postflight payload-source switch moved to native helper
 
 - Slice: `engine-postflight-shell.ts` no longer switches over `runtimeAction.finalPayloadSource` or constructs stopless CLI projection input inline. TS now reads the request-scoped MetadataCenter snapshot and delegates final postflight chat payload selection to `resolveServertoolEnginePostflightPayloadWithNative()`.

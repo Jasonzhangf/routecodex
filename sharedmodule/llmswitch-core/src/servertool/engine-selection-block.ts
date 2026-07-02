@@ -1,8 +1,8 @@
 import type { ServerSideToolEngineOptions, ServerSideToolEngineResult } from './types.js';
 import { readServertoolPrimaryAutoHookIdsWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  planEngineSelectionAfterRunWithNative,
   planEngineSelectionStartWithNative,
+  resolveEngineSelectionAfterRunWithNative,
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 // feature_id: hub.servertool_engine_selection
@@ -17,16 +17,12 @@ export async function runPrimaryServerToolEngineSelection(args: {
     primaryAutoHookIds: readServertoolPrimaryAutoHookIdsWithNative()
   });
   const engineResult = await args.runEngine(startPlan.overrides);
-  const afterRunPlan = planEngineSelectionAfterRunWithNative({
+  const afterRunDecision = resolveEngineSelectionAfterRunWithNative({
     primaryAutoHookIds: startPlan.primaryAutoHookIds,
     engineResult
   });
-  switch (afterRunPlan.action) {
-    case 'rerun_excluding_primary_hooks':
-      return await args.runEngine(afterRunPlan.overrides);
-    case 'return_current':
-      return engineResult;
-    default:
-      throw new Error('[servertool] invalid engine selection action');
+  if (afterRunDecision.rerunOverrides != null) {
+    return await args.runEngine(afterRunDecision.rerunOverrides);
   }
+  return engineResult;
 }

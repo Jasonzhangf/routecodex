@@ -4042,6 +4042,7 @@ function checkEngineSelectionRustOwner() {
   for (const needle of [
     'planEngineSelectionStartWithNative',
     'planEngineSelectionAfterRunWithNative',
+    'resolveEngineSelectionAfterRunWithNative',
   ]) {
     assertContains(
       'servertool-engine-selection-native-bridge',
@@ -4049,6 +4050,11 @@ function checkEngineSelectionRustOwner() {
       nativeWrapper,
       needle
     );
+  }
+  for (const needle of [
+    'planEngineSelectionStartWithNative',
+    'resolveEngineSelectionAfterRunWithNative',
+  ]) {
     assertContains(
       'servertool-engine-selection-ts-thin-shell',
       TS_ENGINE_SELECTION,
@@ -4096,6 +4102,9 @@ function checkEngineSelectionRustOwner() {
     "if (afterRunPlan.action === 'rerun_excluding_primary_hooks')",
     'String(afterRunPlan.action)',
     'afterRunPlan.overrides ?? {}',
+    'switch (afterRunPlan.action)',
+    'return await args.runEngine(afterRunPlan.overrides);',
+    "[servertool] invalid engine selection action",
   ]) {
     if (engineSelectionShell.includes(keyword)) {
       fail(
@@ -4108,13 +4117,13 @@ function checkEngineSelectionRustOwner() {
     'servertool-engine-selection-ts-thin-shell',
     TS_ENGINE_SELECTION,
     engineSelectionShell,
-    'switch (afterRunPlan.action)'
+    'resolveEngineSelectionAfterRunWithNative'
   );
   assertContains(
     'servertool-engine-selection-ts-thin-shell',
     TS_ENGINE_SELECTION,
     engineSelectionShell,
-    'return await args.runEngine(afterRunPlan.overrides);'
+    'return await args.runEngine(afterRunDecision.rerunOverrides);'
   );
   pass(
     'servertool-engine-selection-no-ts-owner',

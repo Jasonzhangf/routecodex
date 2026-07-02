@@ -30,11 +30,12 @@ describe('servertool engine selection block', () => {
     expect(source).not.toContain('autoHookQueueConfig as');
     expect(source).not.toContain('optionalPrimaryOrder: string[]');
     expect(source).not.toContain("if (afterRunPlan.action === 'rerun_excluding_primary_hooks')");
-    expect(source).toContain('switch (afterRunPlan.action)');
+    expect(source).not.toContain('switch (afterRunPlan.action)');
+    expect(source).toContain('resolveEngineSelectionAfterRunWithNative');
     expect(source).not.toContain('String(afterRunPlan.action)');
     expect(source).not.toContain('afterRunPlan.overrides ?? {}');
-    expect(source).toContain('return await args.runEngine(afterRunPlan.overrides);');
-    expect(source).toContain("[servertool] invalid engine selection action");
+    expect(source).toContain('return await args.runEngine(afterRunDecision.rerunOverrides);');
+    expect(source).not.toContain("[servertool] invalid engine selection action");
   });
 
   test('runs primary hooks first and returns current result when execution exists', async () => {
