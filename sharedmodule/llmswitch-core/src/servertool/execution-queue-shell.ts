@@ -85,7 +85,7 @@ export async function runServertoolIoExecutionQueue(args: {
     });
     switch (resultLoopActionPlan.action) {
       case 'apply_materialized_result':
-        replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse as JsonObject);
+        replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse);
         executionState = appendServertoolExecutedRecordWithNative({
           state: executionState,
           toolCall,

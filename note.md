@@ -1,3 +1,9 @@
+# 2026-07-02: servertool execution queue materialized response cast removed
+
+- Slice: `execution-queue-shell.ts` no longer casts `result.chatResponse as JsonObject` after handler materialization; the queue consumes the typed `ServerToolHandlerResult.chatResponse` directly.
+- Gate: `execution-queue-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old materialized response cast marker and require direct `replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse)`.
+- Evidence: focused Jest `execution-queue-shell + servertool-active-orchestration-audit` PASS 49/49; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool handler planned-result casts removed
 
 - Slice: `execution-handler-materialization-shell.ts` no longer casts `planned as ServerToolHandlerResult` or `planned as ServerToolHandlerPlan`; it now delegates finalize/result materialization to native bridge wrappers and only switches on Rust-owned materialization action.
