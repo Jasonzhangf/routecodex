@@ -1,3 +1,9 @@
+# 2026-07-02: servertool engine contextBase cast gate locked
+
+- Slice: `run-server-side-tool-engine-shell.ts` currently passes `entryContext.contextBase` directly without `as ServerToolHandlerContext`; this turn locks that existing thin-shell state with focused and global gates.
+- Gate: `run-server-side-tool-engine-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid `contextBase: entryContext.contextBase as ServerToolHandlerContext` and require direct `contextBase: entryContext.contextBase`.
+- Evidence: focused Jest `run-server-side-tool-engine-shell + servertool-active-orchestration-audit` PASS 50/50; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool execution queue base casts removed
 
 - Slice: `native-chat-process-servertool-orchestration-semantics.ts` now types `planServertoolNoopOutcomeWithNative()` and `buildServertoolHandlerErrorToolOutputPayloadWithNative()` base inputs as `JsonObject`; `execution-queue-shell.ts` passes `args.baseForExecution` directly without `as Record<string, unknown>`.
