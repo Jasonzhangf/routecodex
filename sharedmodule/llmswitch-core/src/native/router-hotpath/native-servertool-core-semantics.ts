@@ -360,6 +360,8 @@ export interface ServertoolEngineRuntimeActionPlan {
     | 'build_stop_message_cli_projection';
   executed: true;
   flowIdSource: 'engine_execution' | 'current_flow';
+  progressStatus: string;
+  finalPayloadSource: 'engine_result' | 'stop_message_cli_projection';
   projectedFlowId?: string;
 }
 
@@ -2479,6 +2481,12 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
   if (record.flowIdSource !== 'engine_execution' && record.flowIdSource !== 'current_flow') {
     throw new Error('planServertoolEngineRuntimeActionJson native returned invalid flowIdSource');
   }
+  if (typeof record.progressStatus !== 'string' || record.progressStatus.trim().length === 0) {
+    throw new Error('planServertoolEngineRuntimeActionJson native returned invalid progressStatus');
+  }
+  if (record.finalPayloadSource !== 'engine_result' && record.finalPayloadSource !== 'stop_message_cli_projection') {
+    throw new Error('planServertoolEngineRuntimeActionJson native returned invalid finalPayloadSource');
+  }
   if (record.projectedFlowId != null && typeof record.projectedFlowId !== 'string') {
     throw new Error('planServertoolEngineRuntimeActionJson native returned invalid projectedFlowId');
   }
@@ -2486,6 +2494,8 @@ export function planServertoolEngineRuntimeActionWithNative(input: {
     action: record.action,
     executed: true,
     flowIdSource: record.flowIdSource,
+    progressStatus: record.progressStatus,
+    finalPayloadSource: record.finalPayloadSource,
     ...(typeof record.projectedFlowId === 'string'
       ? { projectedFlowId: record.projectedFlowId }
       : {})

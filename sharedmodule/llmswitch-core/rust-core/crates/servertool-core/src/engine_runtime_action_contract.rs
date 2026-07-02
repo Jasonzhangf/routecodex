@@ -35,8 +35,17 @@ pub struct ServertoolEngineRuntimeActionPlan {
     pub action: ServertoolEngineRuntimeAction,
     pub executed: bool,
     pub flow_id_source: ServertoolEngineRuntimeFlowIdSource,
+    pub progress_status: String,
+    pub final_payload_source: ServertoolEnginePostflightPayloadSource,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projected_flow_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServertoolEnginePostflightPayloadSource {
+    EngineResult,
+    StopMessageCliProjection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -91,6 +100,8 @@ pub fn plan_servertool_engine_runtime_action(
             action: ServertoolEngineRuntimeAction::ReturnServertoolCliProjectionFinal,
             executed: true,
             flow_id_source: ServertoolEngineRuntimeFlowIdSource::EngineExecution,
+            progress_status: "completed (servertool cli projection; no reenter)".to_string(),
+            final_payload_source: ServertoolEnginePostflightPayloadSource::EngineResult,
             projected_flow_id: engine_execution_flow_id,
         });
     }
@@ -99,6 +110,8 @@ pub fn plan_servertool_engine_runtime_action(
             action: ServertoolEngineRuntimeAction::ReturnStopMessageTerminalFinal,
             executed: true,
             flow_id_source: ServertoolEngineRuntimeFlowIdSource::EngineExecution,
+            progress_status: "completed (stop_message terminal)".to_string(),
+            final_payload_source: ServertoolEnginePostflightPayloadSource::EngineResult,
             projected_flow_id: engine_execution_flow_id,
         });
     }
@@ -107,6 +120,8 @@ pub fn plan_servertool_engine_runtime_action(
             action: ServertoolEngineRuntimeAction::BuildStopMessageCliProjection,
             executed: true,
             flow_id_source: ServertoolEngineRuntimeFlowIdSource::CurrentFlow,
+            progress_status: "completed (stop_message cli projection; no reenter)".to_string(),
+            final_payload_source: ServertoolEnginePostflightPayloadSource::StopMessageCliProjection,
             projected_flow_id: current_flow_id,
         });
     }
@@ -176,6 +191,14 @@ mod tests {
             plan.flow_id_source,
             ServertoolEngineRuntimeFlowIdSource::EngineExecution
         );
+        assert_eq!(
+            plan.final_payload_source,
+            ServertoolEnginePostflightPayloadSource::EngineResult
+        );
+        assert_eq!(
+            plan.progress_status,
+            "completed (servertool cli projection; no reenter)"
+        );
         assert_eq!(plan.projected_flow_id, Some("engine-flow".to_string()));
     }
 
@@ -198,6 +221,11 @@ mod tests {
             plan.flow_id_source,
             ServertoolEngineRuntimeFlowIdSource::EngineExecution
         );
+        assert_eq!(
+            plan.final_payload_source,
+            ServertoolEnginePostflightPayloadSource::EngineResult
+        );
+        assert_eq!(plan.progress_status, "completed (stop_message terminal)");
         assert_eq!(plan.projected_flow_id, Some("terminal-flow".to_string()));
     }
 
@@ -219,6 +247,14 @@ mod tests {
         assert_eq!(
             plan.flow_id_source,
             ServertoolEngineRuntimeFlowIdSource::CurrentFlow
+        );
+        assert_eq!(
+            plan.final_payload_source,
+            ServertoolEnginePostflightPayloadSource::StopMessageCliProjection
+        );
+        assert_eq!(
+            plan.progress_status,
+            "completed (stop_message cli projection; no reenter)"
         );
         assert_eq!(plan.projected_flow_id, Some("current-flow".to_string()));
     }

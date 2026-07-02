@@ -208,6 +208,8 @@ describe('servertool CLI native bridge', () => {
       action: 'return_stop_message_terminal_final',
       executed: true,
       flowIdSource: 'engine_execution',
+      progressStatus: 'completed (stop_message terminal)',
+      finalPayloadSource: 'engine_result',
       projectedFlowId: 'terminal-flow'
     });
 
@@ -223,6 +225,8 @@ describe('servertool CLI native bridge', () => {
       action: 'return_servertool_cli_projection_final',
       executed: true,
       flowIdSource: 'engine_execution',
+      progressStatus: 'completed (servertool cli projection; no reenter)',
+      finalPayloadSource: 'engine_result',
       projectedFlowId: 'servertool-cli-flow'
     });
 
@@ -238,6 +242,8 @@ describe('servertool CLI native bridge', () => {
       action: 'build_stop_message_cli_projection',
       executed: true,
       flowIdSource: 'current_flow',
+      progressStatus: 'completed (stop_message cli projection; no reenter)',
+      finalPayloadSource: 'stop_message_cli_projection',
       projectedFlowId: 'current-flow'
     });
   });

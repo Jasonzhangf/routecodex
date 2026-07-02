@@ -191,6 +191,8 @@ describe('engine-observation-shell', () => {
           action: 'return_servertool_cli_projection_final',
           executed: true,
           flowIdSource: 'engine_execution',
+          progressStatus: 'completed (servertool cli projection; no reenter)',
+          finalPayloadSource: 'engine_result',
           projectedFlowId: 'flow-postflight-failfast'
         },
         flowId: 'flow-postflight-failfast',
@@ -213,13 +215,17 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("if (runtimeAction.action === 'return_servertool_cli_projection_final')");
     expect(source).not.toContain("if (runtimeAction.action === 'return_stop_message_terminal_final')");
     expect(source).not.toContain("if (runtimeAction.action === 'build_stop_message_cli_projection')");
-    expect(source).toContain('switch (runtimeAction.action)');
+    expect(source).toContain('switch (runtimeAction.finalPayloadSource)');
+    expect(source).toContain("case 'engine_result'");
+    expect(source).toContain("case 'stop_message_cli_projection'");
     expect(source).not.toContain('resolvePostflightFlowId');
-    expect(source).toContain('const projectedFlowId = runtimeAction.projectedFlowId;');
+    expect(source).not.toContain('const projectedFlowId = runtimeAction.projectedFlowId;');
     expect(source).not.toContain('String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)');
     expect(source).not.toContain('runtimeAction.flowIdSource');
     expect(source).not.toContain('engineResult.execution?.flowId');
     expect(source).toContain('executed: runtimeAction.executed');
+    expect(source).toContain('runtimeAction.progressStatus');
+    expect(source).toContain('flowId: runtimeAction.projectedFlowId');
     expect(source).not.toContain('executed: true');
     expect(source).not.toContain('const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (');
     expect(source).not.toContain('runtimeControl ? { runtimeControl } : null');
@@ -260,6 +266,8 @@ describe('engine-observation-shell', () => {
         action: 'return_servertool_cli_projection_final',
         executed: true,
         flowIdSource: 'engine_execution',
+        progressStatus: 'completed (servertool cli projection; no reenter)',
+        finalPayloadSource: 'engine_result',
         projectedFlowId: 'flow-postflight-summary'
       },
       flowId: 'flow-postflight-summary',
@@ -307,6 +315,8 @@ describe('engine-observation-shell', () => {
           action: 'return_servertool_cli_projection_final',
           executed: true,
           flowIdSource: 'unknown_flow_id_source',
+          progressStatus: 'completed (servertool cli projection; no reenter)',
+          finalPayloadSource: 'engine_result',
           projectedFlowId: 'flow-rust-projected'
         } as any,
         flowId: 'flow-current-ts-must-not-read',

@@ -43,7 +43,6 @@ export async function runServertoolEnginePostflight(args: {
   | undefined
 > {
   const { engineResult, runtimeAction, options, flowId, totalSteps } = args;
-  const projectedFlowId = runtimeAction.projectedFlowId;
   if (engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object') {
     const runtimeControl = projectNativeMetadataWritePlanToRuntimeControl(engineResult.metadataWritePlan);
     if (Object.keys(runtimeControl).length > 0) {
@@ -62,22 +61,12 @@ export async function runServertoolEnginePostflight(args: {
     });
     args.stageRecorder.record('servertool.execution', summary);
   }
-  switch (runtimeAction.action) {
-    case 'return_servertool_cli_projection_final':
-      args.logProgress(5, totalSteps, 'completed (servertool cli projection; no reenter)', { flowId });
-      return {
-        chat: engineResult.finalChatResponse,
-        executed: runtimeAction.executed,
-        flowId: projectedFlowId
-      };
-    case 'return_stop_message_terminal_final':
-      args.logProgress(5, totalSteps, 'completed (stop_message terminal)', { flowId });
-      return {
-        chat: engineResult.finalChatResponse,
-        executed: runtimeAction.executed,
-        flowId: projectedFlowId
-      };
-    case 'build_stop_message_cli_projection': {
+  let chat: JsonObject;
+  switch (runtimeAction.finalPayloadSource) {
+    case 'engine_result':
+      chat = engineResult.finalChatResponse;
+      break;
+    case 'stop_message_cli_projection': {
       const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(options.adapterContext);
       const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
       const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
@@ -86,21 +75,23 @@ export async function runServertoolEnginePostflight(args: {
         metadataWritePlan: engineResult.metadataWritePlan ?? null,
         requestId: options.requestId ?? null
       });
-      args.logProgress(5, totalSteps, 'completed (stop_message cli projection; no reenter)', { flowId });
-      return {
-        chat: projection.chatResponse,
-        executed: runtimeAction.executed,
-        flowId: projectedFlowId
-      };
+      chat = projection.chatResponse;
+      break;
     }
     default:
-      throw Object.assign(new Error(`[servertool] unexpected runtime action for flow ${flowId}`), {
+      throw Object.assign(new Error(`[servertool] unexpected postflight payload source for flow ${flowId}`), {
         code: 'SERVERTOOL_RUNTIME_ACTION_INVALID',
         details: {
           requestId: options.requestId,
           flowId,
-          runtimeAction: runtimeAction.action
+          finalPayloadSource: runtimeAction.finalPayloadSource
         }
       });
   }
+  args.logProgress(5, totalSteps, runtimeAction.progressStatus, { flowId });
+  return {
+    chat,
+    executed: runtimeAction.executed,
+    flowId: runtimeAction.projectedFlowId
+  };
 }

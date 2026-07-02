@@ -6565,8 +6565,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
     );
   }
   for (const marker of [
-    'switch (runtimeAction.action)',
-    "case 'build_stop_message_cli_projection'",
+    'switch (runtimeAction.finalPayloadSource)',
+    "case 'stop_message_cli_projection'",
     'buildStoplessAutoCliProjectionFromEngineWithNative({',
   ]) {
     if (!postflightSource.includes(marker)) {
@@ -7049,7 +7049,12 @@ function checkServertoolPostflightLoggingFailFast() {
     'engineResult.execution?.flowId',
     'function resolvePostflightFlowId(',
     'resolvePostflightFlowId({',
+    'switch (runtimeAction.action)',
+    "'completed (servertool cli projection; no reenter)'",
+    "'completed (stop_message terminal)'",
+    "'completed (stop_message cli projection; no reenter)'",
     'executed: true',
+    'const projectedFlowId = runtimeAction.projectedFlowId;',
   ]) {
     if (postflightSource.includes(marker)) {
       fail(
@@ -7062,9 +7067,13 @@ function checkServertoolPostflightLoggingFailFast() {
     'buildServertoolPostflightObservationSummaryWithNative({',
     "args.stageRecorder.record('servertool.execution', summary);",
     "engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'",
-    'chat: engineResult.finalChatResponse',
+    'switch (runtimeAction.finalPayloadSource)',
+    "case 'engine_result'",
+    "case 'stop_message_cli_projection'",
+    'chat = engineResult.finalChatResponse',
     'executed: runtimeAction.executed',
-    'const projectedFlowId = runtimeAction.projectedFlowId;',
+    'runtimeAction.progressStatus',
+    'flowId: runtimeAction.projectedFlowId',
   ]) {
     if (!postflightSource.includes(marker)) {
       fail(
