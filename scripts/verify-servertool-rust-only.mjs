@@ -5111,6 +5111,12 @@ function checkStoplessNoTsRuntimeControlSpecialization() {
     engineShell,
     'options.adapterContext as Record<string, unknown>'
   );
+  assertMissing(
+    'stopless-no-ts-runtime-control-specialization',
+    TS_ENGINE_ORCHESTRATION_SHELL,
+    engineShell,
+    'options.adapterContext as unknown as Record<string, unknown>'
+  );
   if (!engineShell.includes('readRuntimeControlFromAnyBoundMetadataCenter(')) {
     fail(
       'stopless-no-ts-runtime-control-specialization',
@@ -6972,6 +6978,7 @@ function checkServertoolPostflightLoggingFailFast() {
     'const engineFinalResult = {',
     'return engineFinalResult;',
     "engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'",
+    'options.adapterContext as unknown as Record<string, unknown>',
     'String((args.runtimeAction as { flowIdSource: unknown }).flowIdSource)',
     'executed: true',
   ]) {

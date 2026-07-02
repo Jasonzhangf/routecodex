@@ -67,7 +67,7 @@ export async function runServertoolEnginePostflight(args: {
     const runtimeControl = projectNativeMetadataWritePlanToRuntimeControl(engineResult.metadataWritePlan);
     if (Object.keys(runtimeControl).length > 0) {
       applyNativeRuntimeControlWritePlan({
-        metadata: options.adapterContext as unknown as Record<string, unknown>,
+        metadata: options.adapterContext,
         runtimeControl,
         writer: SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER,
         reason: 'rust servertool postflight runtime control'
@@ -97,8 +97,7 @@ export async function runServertoolEnginePostflight(args: {
         flowId: projectedFlowId
       };
     case 'build_stop_message_cli_projection': {
-      const adapterRecord = options.adapterContext as unknown as Record<string, unknown>;
-      const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(adapterRecord);
+      const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(options.adapterContext);
       const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
       const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
         metadataCenterSnapshot: metadataCenterSnapshot ?? null,

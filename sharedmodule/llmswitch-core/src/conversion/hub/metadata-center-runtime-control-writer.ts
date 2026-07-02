@@ -112,12 +112,13 @@ function writeMetadataCenterSlot(args: {
 }
 
 export function applyNativeRuntimeControlWritePlan(args: {
-  metadata: Record<string, unknown>;
+  metadata: unknown;
   runtimeControl: Record<string, unknown>;
   writer: RuntimeControlWriter;
   reason: string;
 }): void {
-  const bound = readBoundMetadataCenterTarget(args.metadata);
+  const metadata = asRecord(args.metadata);
+  const bound = metadata ? readBoundMetadataCenterTarget(metadata) : undefined;
   if (!bound) {
     throw new Error('MetadataCenter runtime_control write failed: bound MetadataCenter missing');
   }

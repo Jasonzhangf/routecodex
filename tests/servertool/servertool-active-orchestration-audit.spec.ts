@@ -731,6 +731,7 @@ const TARGETS = [
       "engineResult.execution && typeof engineResult.execution === 'object'",
       "runtimeControl && typeof runtimeControl === 'object'",
       'options.adapterContext as Record<string, unknown>',
+      'options.adapterContext as unknown as Record<string, unknown>',
     ],
     required: [
       'resolveServertoolTimeoutMsFromEnvCandidatesWithNative({',

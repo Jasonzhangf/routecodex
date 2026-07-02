@@ -1,3 +1,9 @@
+# 2026-07-02: servertool engine postflight adapterContext casts removed
+
+- Slice: `engine-postflight-shell.ts` now passes `options.adapterContext` directly into runtime-control writer and MetadataCenter snapshot reader; `applyNativeRuntimeControlWritePlan()` owns unknown-object narrowing and still fail-fasts when bound MetadataCenter is missing.
+- Gate: `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `options.adapterContext as unknown as Record<string, unknown>` marker.
+- Evidence: focused Jest `engine.stopless-session-thin-shell + servertool-active-orchestration-audit + engine-observation-shell` PASS 60/60; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool engine orchestration adapterContext casts removed
 
 - Slice: `engine-orchestration-shell.ts` now passes `options.adapterContext` directly into MetadataCenter carrier readers; carrier owns object narrowing.
