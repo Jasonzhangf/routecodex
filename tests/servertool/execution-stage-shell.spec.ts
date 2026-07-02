@@ -18,6 +18,7 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
     buildServertoolCliProjectionRuntimeBranchWithNative,
+    materializeNativeToolCallExecutionOutcomeWithNative: materializeNativeToolCallExecutionOutcome,
     planServertoolExecutionBranchWithNative
   })
 );
@@ -26,13 +27,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js',
   () => ({
     runServertoolIoExecutionQueue
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
-  () => ({
-    materializeNativeToolCallExecutionOutcome
   })
 );
 
@@ -106,6 +100,8 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('contextBase: args.contextBase');
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
+    expect(source).toContain('materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome');
+    expect(source).not.toContain("from './execution-handler-materialization-shell.js'");
     expect(source).toContain('finalizeServertoolResponseStage');
     expect(source).not.toContain("from './cli-projection-runtime-shell.js'");
     expect(source).not.toContain('buildServertoolCliProjectionBranchResult');

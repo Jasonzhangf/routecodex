@@ -9,6 +9,19 @@ const materializeNativeToolCallExecutionOutcomeNative = jest.fn((args: any) => (
   finalChatResponse: args.base,
   execution: { flowId: args.options.requestId }
 }));
+const createServertoolProviderProtocolErrorFromPlanWithNative = jest.fn((plan: any) => {
+  const error = new Error(String(plan?.message ?? '[servertool] error')) as Error & {
+    code?: string;
+    category?: string;
+    details?: Record<string, unknown>;
+    status?: number;
+  };
+  error.code = String(plan?.code ?? 'SERVERTOOL_HANDLER_FAILED');
+  error.category = String(plan?.category ?? 'INTERNAL_ERROR');
+  error.details = (plan?.details ?? {}) as Record<string, unknown>;
+  error.status = Number(plan?.status ?? 500);
+  return error;
+});
 const buildServertoolHandlerErrorToolOutputPayloadWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
@@ -53,28 +66,11 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
-  () => ({
-    materializeServertoolPlannedResult,
-    materializeNativeToolCallExecutionOutcome: materializeNativeToolCallExecutionOutcomeNative
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
-  () => ({
-    planServertoolNoopOutcomeWithNative: jest.fn(),
-    planServertoolOutcomeWithNative,
-    buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
-    buildServertoolOutcomePlanInputWithNative,
-    planServertoolToolCallDispatchWithNative: jest.fn(),
-    buildServertoolHandlerErrorToolOutputPayloadWithNative
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    materializeServertoolPlannedResultWithNative: materializeServertoolPlannedResult,
+    materializeNativeToolCallExecutionOutcomeWithNative: materializeNativeToolCallExecutionOutcomeNative,
+    createServertoolProviderProtocolErrorFromPlanWithNative,
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
@@ -124,6 +120,18 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  () => ({
+    planServertoolNoopOutcomeWithNative: jest.fn(),
+    planServertoolOutcomeWithNative,
+    buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
+    buildServertoolOutcomePlanInputWithNative,
+    planServertoolToolCallDispatchWithNative: jest.fn(),
+    buildServertoolHandlerErrorToolOutputPayloadWithNative
+  })
+);
+
+jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js',
   () => ({
     replaceJsonObjectInPlace: jest.fn((target: any, next: any) => {
@@ -147,6 +155,9 @@ describe('execution queue dispatch runtime', () => {
     await expect(
       fs.access('sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts')
     ).rejects.toThrow();
+    await expect(
+      fs.access('sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts')
+    ).rejects.toThrow();
 
     const source = await fs.readFile(
       'sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts',
@@ -158,6 +169,8 @@ describe('execution queue dispatch runtime', () => {
     expect(source).not.toContain('planServertoolOutcomeWithNative(');
     expect(source).not.toContain('planServertoolExecutionOutcomeRuntimeActionWithNative(');
     expect(source).not.toContain('function assertDispatchExecutionMode(');
+    expect(source).not.toContain("from './execution-handler-materialization-shell.js'");
+    expect(source).toContain('materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult');
     expect(source).not.toContain("String(lastErr ?? 'unknown')");
     expect(source).not.toContain('lastErr instanceof Error ? lastErr.message : lastErr');
     expect(source).not.toContain('Boolean(lastErr)');

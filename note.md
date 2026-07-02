@@ -1,3 +1,11 @@
+# 2026-07-02: servertool materialization shell deleted
+
+- Slice: physically deleted `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts` and `tests/servertool/execution-handler-materialization-shell.spec.ts`; active TS callers now import native Rust bridge materialization directly through `materializeServertoolPlannedResultWithNative` / `materializeNativeToolCallExecutionOutcomeWithNative`.
+- Test repair: `server-side-tools.failfast.spec.ts` now keeps one native servertool-core mock; removed the duplicate mock block that shadowed required exports and caused false missing-export failures.
+- Gate repair: `scripts/verify-servertool-rust-only.mjs` now treats the deleted materialization shell/spec as forbidden and avoids false positives on legitimate native wrapper / queue markers.
+- Evidence: targeted Jest `execution-dispatch-outcome-shell + execution-queue-shell + execution-stage-shell + execution-shell.backend-failfast + servertool-active-orchestration-audit + servertool-auto-hook-trace + server-side-tools.failfast` PASS 7 suites / 75 tests; `tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS; `npm run verify:servertool-rust-only` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+- Remaining gap: this is a servertool TS shell removal slice only; unrelated SSE dirty files remain out of scope and must not be included in this commit.
+
 # 2026-07-02: priority retry provider pin release
 
 - Symptom: priority/provider-error retry could reselect the same failed provider even after `excludedProviderKeys` was set.

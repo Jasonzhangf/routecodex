@@ -94,6 +94,15 @@ const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    materializeServertoolPlannedResultWithNative: jest.fn(async (planned: any) => {
+      if (!planned) {
+        return null;
+      }
+      if (typeof planned.finalize === 'function') {
+        return await planned.finalize();
+      }
+      return planned;
+    }),
     planAutoHookRuntimeAttemptWithNative: planAutoHookRuntimeAttemptWithNativeMock,
     planAutoHookCallerFinalizationWithNative: planAutoHookCallerFinalizationWithNativeMock,
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(async (input: any) => {
@@ -149,30 +158,6 @@ jest.unstable_mockModule(
           { queue: 'B_mandatory', entries: mandatoryQueue }
         ]
       };
-    })
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
-  () => ({
-    executeBuiltinServerToolHandler: jest.fn(async ({ builtinName, ctx }: any) => {
-      const hook = registryHooks.find(
-        (entry) => entry.id === builtinName && entry.execution.kind === 'builtin'
-      );
-      if (!hook || typeof hook.execution.__testHandler !== 'function') {
-        throw new Error(`missing test builtin handler for ${builtinName}`);
-      }
-      return await hook.execution.__testHandler(ctx);
-    }),
-    materializeServertoolPlannedResult: jest.fn(async (planned: any) => {
-      if (!planned) {
-        return null;
-      }
-      if (typeof planned.finalize === 'function') {
-        return await planned.finalize();
-      }
-      return planned;
     })
   })
 );

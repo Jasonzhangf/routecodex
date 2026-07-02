@@ -160,6 +160,10 @@ const DELETED_CLI_RESULT_GUARD_TS_FILES = [
 const DELETED_SERVERTOOL_DISPATCH_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`,
 ];
+const DELETED_SERVERTOOL_EXECUTION_MATERIALIZATION_SHELL_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts`,
+  `${ROOT}/tests/servertool/execution-handler-materialization-shell.spec.ts`,
+];
 const DELETED_SERVERTOOL_CLI_PROJECTION_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/cli-projection-runtime-shell.ts`,
@@ -237,7 +241,6 @@ const STOPLESS_SESSION_LOCK_FILES = [
 
 const SERVERTOOL_ACTIVE_ORCHESTRATION_AUDIT = `${ROOT}/tests/servertool/servertool-active-orchestration-audit.spec.ts`;
 const SERVERTOOL_ACTIVE_ORCHESTRATION_OWNER_FILES = [
-  `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
   `${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`,
 ];
 const SERVERTOOL_DISPATCH_OUTCOME_FORBIDDEN_MARKERS = [
@@ -2712,6 +2715,13 @@ function checkServertoolExecutionDispatchRustOwner() {
       `${file.replace(`${ROOT}/`, '')} must stay physically deleted; execution queue runtime must import execution-queue-shell.ts directly`
     );
   }
+  for (const file of DELETED_SERVERTOOL_EXECUTION_MATERIALIZATION_SHELL_FILES) {
+    assertMissingFile(
+      'servertool-execution-materialization-shell-deleted',
+      file,
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import native-servertool-core-semantics.ts directly`
+    );
+  }
   const executionQueueShell = readRequired(TS_EXECUTION_QUEUE_SHELL);
   const rustExecutionBranch = readRequired(RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT);
   const rustExecutionLoopEffect = readRequired(RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT);
@@ -2764,12 +2774,6 @@ function checkServertoolExecutionDispatchRustOwner() {
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeCoreWrapper,
     'const outcomePlan = planServertoolOutcomeWithNative('
-  );
-  assertMissing(
-    'servertool-execution-handler-outcome-rust-owner',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
-    'function dehydrateExecutionLoopState('
   );
   for (const keyword of [
     'listRegisteredServerToolHandlerRecords()',
@@ -2867,7 +2871,7 @@ function checkServertoolExecutionDispatchRustOwner() {
   assertMissingFile(
     'servertool-execution-shell-deleted',
     TS_EXECUTION_SHELL,
-    'execution-shell.ts must stay physically deleted after moving pre-command wrappers to pre-command-hooks.ts and direct imports to execution-handler-materialization-shell.ts'
+    'execution-shell.ts must stay physically deleted after moving pre-command wrappers to pre-command-hooks.ts and materialization imports directly to native-servertool-core-semantics.ts'
   );
 
   assertMissingFile(
@@ -2959,7 +2963,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-outcome-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionOutcomeMaterializationJson'],
     ['servertool-execution-outcome-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
     ['servertool-execution-outcome-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionOutcomeMaterializationWithNative'],
-    ['servertool-execution-outcome-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome'],
+    ['servertool-execution-outcome-runtime-action-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'feature_id: hub.servertool_execution_state_contract'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn create_servertool_execution_loop_state'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn append_executed_tool_record'],
@@ -2983,12 +2987,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'function hydrateExecutionLoopState(',
     'new Set(state.executedIds)'
   ]) {
-    assertMissing(
-      'servertool-execution-state-wrapper-deleted',
-      `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-      readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
-      marker
-    );
+    assertMissing('servertool-execution-state-wrapper-deleted', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, marker);
   }
   for (const marker of [
     'record.skipReason.trim()',
@@ -3023,7 +3022,6 @@ function checkServertoolExecutionDispatchRustOwner() {
   for (const [file, content, marker] of [
     [RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub context: Option<Value>'],
     [RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'context: input.context'],
-    [`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'context?: unknown'],
   ]) {
     if (content.includes(marker)) {
       fail(
@@ -5755,7 +5753,6 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   const executionShell = existsSync(TS_EXECUTION_SHELL) ? readRequired(TS_EXECUTION_SHELL) : '';
-  const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
   const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
   const executionQueueShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`);
   const rustExecutionHandlerContract = readRequired(RUST_SERVERTOOL_EXECUTION_HANDLER_CONTRACT);
@@ -5786,7 +5783,6 @@ function checkServertoolRustOutcomeCloseout() {
     'const servertoolBackendExecutors',
     'function throwServertoolExecutionDispatchError(',
     'planServertoolExecutionDispatchErrorWithNative(args)',
-    'planServertoolExecutionDispatchErrorWithNative({',
     "outcomeRuntimeActionPlan.action === 'invalid_mixed_client_tools_outcome'",
     "outcomeRuntimeActionPlan.action === 'missing_servertool_execution_contract'",
     'function isServerToolHandlerPlan(',
@@ -5822,17 +5818,19 @@ function checkServertoolRustOutcomeCloseout() {
     'isServerToolHandlerPlanLike',
     'typeof (planned as Record<string, unknown>).finalize',
     'record.chatResponse != null',
-    "mode: 'tool_flow'",
     "await import('./builtin-handler-catalog.js')",
     'getBuiltinHandlerEntry(args.builtinName)',
     'builtin handler missing execution descriptor',
     'structuredClone(args.base)',
     'planned as any',
   ]) {
-    if (executionMaterializationShell.includes(marker)) {
+    if (
+      autoHookCaller.includes(marker) ||
+      executionQueueShell.includes(marker)
+    ) {
       fail(
         'servertool-execution-shell-ts-orchestration-guard',
-        `execution-handler-materialization-shell.ts must not retain TS materialization guard marker ${marker}`
+        `active servertool materialization surface must not retain retired TS materialization guard marker ${marker}`
       );
     }
   }
@@ -6059,8 +6057,14 @@ function checkServertoolRustOutcomeCloseout() {
   );
   assertContains(
     'servertool-execution-handler-contract-ts-thin-shell',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`,
+    autoHookCaller,
+    'materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult'
+  );
+  assertContains(
+    'servertool-execution-handler-contract-ts-thin-shell',
+    `${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`,
+    executionQueueShell,
     'materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult'
   );
 
@@ -6428,7 +6432,6 @@ function checkServertoolEngineStoplessSessionThinShell() {
   );
   const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`);
   const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
-  const executionMaterializationShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`);
   const registryOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`);
   const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
   const executionQueueShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`);
@@ -6631,7 +6634,11 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'function runBuiltinHandlerForRuntimeNapi(',
     'function runBuiltinHandler(',
   ]) {
-    if (executionMaterializationShell.includes(marker) || registryOrchestrationShell.includes(marker)) {
+    if (
+      autoHookCaller.includes(marker) ||
+      executionQueueShell.includes(marker) ||
+      registryOrchestrationShell.includes(marker)
+    ) {
       fail(
         'servertool-builtin-handler-stopless-no-ts-action-owner',
         `servertool TS runtime shells must not retain builtin handler action semantic marker ${marker}`
@@ -6644,7 +6651,11 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'getServertoolToolSpec',
     'listServertoolToolSpecs',
   ]) {
-    if (executionMaterializationShell.includes(marker) || registryOrchestrationShell.includes(marker)) {
+    if (
+      autoHookCaller.includes(marker) ||
+      executionQueueShell.includes(marker) ||
+      registryOrchestrationShell.includes(marker)
+    ) {
       fail(
         'servertool-builtin-handler-catalog-rust-plan',
         `servertool TS runtime shells must not retain builtin catalog semantic marker ${marker}`
@@ -6657,7 +6668,6 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'planServertoolBuiltinAutoHandlerEntriesWithNative(',
   ]) {
     if (
-      !executionMaterializationShell.includes(marker) &&
       !registryOrchestrationShell.includes(marker) &&
       !autoHookCaller.includes(marker) &&
       !executionQueueShell.includes(marker)
@@ -6675,21 +6685,36 @@ function checkServertoolEngineStoplessSessionThinShell() {
 }
 
 function checkServertoolActiveOrchestrationAuditRedGate() {
+  for (const file of DELETED_SERVERTOOL_EXECUTION_MATERIALIZATION_SHELL_FILES) {
+    assertMissingFile(
+      'servertool-active-orchestration-audit',
+      file,
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; materialization now routes through native-servertool-core-semantics.ts`
+    );
+  }
   const forbiddenByFile = new Map([
-    [
-      `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-      [
-        'const SERVERTOOL_BACKEND_EXECUTORS',
-        'const servertoolBackendExecutors',
-        'const materializePlannedServertoolResult',
-        'const executeBackendPlanViaThinShell',
-        'const runServertoolHandlerThinShell',
-        'export async function executeBuiltinServerToolHandler(',
-        'function materializeServertoolPlannedResult(',
-        'function executeServertoolBackendPlan(',
-        'export async function runServertoolHandler(',
-      ],
-    ],
+    [`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, [
+      'const SERVERTOOL_BACKEND_EXECUTORS',
+      'const servertoolBackendExecutors',
+      'const materializePlannedServertoolResult',
+      'const executeBackendPlanViaThinShell',
+      'const runServertoolHandlerThinShell',
+      'export async function executeBuiltinServerToolHandler(',
+      'function materializeServertoolPlannedResult(',
+      'function executeServertoolBackendPlan(',
+      'export async function runServertoolHandler(',
+    ]],
+    [`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`, [
+      'const SERVERTOOL_BACKEND_EXECUTORS',
+      'const servertoolBackendExecutors',
+      'const materializePlannedServertoolResult',
+      'const executeBackendPlanViaThinShell',
+      'const runServertoolHandlerThinShell',
+      'export async function executeBuiltinServerToolHandler(',
+      'function materializeServertoolPlannedResult(',
+      'function executeServertoolBackendPlan(',
+      'export async function runServertoolHandler(',
+    ]],
   ]);
   for (const [file, markers] of forbiddenByFile) {
     const source = readRequired(file);

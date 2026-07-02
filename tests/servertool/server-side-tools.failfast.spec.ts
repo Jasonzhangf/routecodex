@@ -208,6 +208,9 @@ jest.unstable_mockModule(
       excludeAutoHookIds: input?.excludeAutoHookIds,
     })),
     planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
+    readServertoolEntryBaseObjectWithNative: jest.fn((value: any) =>
+      value && typeof value === 'object' && !Array.isArray(value) ? value : null
+    ),
     isServertoolClientExecCliProjectionToolCallWithNative: jest.fn((input: any) => {
       const executionMode = typeof input?.executionMode === 'string' ? input.executionMode.trim() : '';
       return executionMode === 'client_exec_cli_projection';
@@ -263,6 +266,19 @@ jest.unstable_mockModule(
       message: '[servertool] timeout',
       details: {}
     })),
+    createServertoolProviderProtocolErrorFromPlanWithNative: jest.fn((plan: any) => {
+      const error = new Error(String(plan?.message ?? '[servertool] error')) as Error & {
+        code?: string;
+        category?: string;
+        details?: Record<string, unknown>;
+        status?: number;
+      };
+      error.code = String(plan?.code ?? 'SERVERTOOL_HANDLER_FAILED');
+      error.category = String(plan?.category ?? 'INTERNAL_ERROR');
+      error.details = (plan?.details ?? {}) as Record<string, unknown>;
+      error.status = Number(plan?.status ?? 500);
+      return error;
+    }),
     planServertoolStateLoadFailedErrorWithNative: jest.fn((input: any) => ({
       code: 'SERVERTOOL_STATE_LOAD_FAILED',
       category: 'INTERNAL_ERROR',
@@ -324,6 +340,26 @@ jest.unstable_mockModule(
         }
       };
     }),
+    materializeServertoolPlannedResultWithNative: jest.fn(async (planned: any) => planned),
+    materializeNativeToolCallExecutionOutcomeWithNative: jest.fn((args: any) => ({
+      mode: 'tool_flow',
+      finalChatResponse: args.baseForExecution,
+      execution: {
+        flowId:
+          args.executionState?.lastExecution?.flowId ??
+          args.executionState?.executedToolCalls?.[0]?.execution?.flowId ??
+          'servertool_unknown',
+        followup: {
+          requestIdSuffix: ':servertool_followup',
+          injection: {
+            ops: [
+              { op: 'append_assistant_message', required: true },
+              { op: 'append_tool_messages_from_tool_outputs', required: true }
+            ]
+          }
+        }
+      }
+    })),
     planAutoHookRuntimeAttemptWithNative: jest.fn((input: any) => ({
       action: input?.message ? 'rethrow_error' : input?.hasMaterializedResult === true ? 'return_result' : 'continue_queue',
       returnResult: !input?.message && input?.hasMaterializedResult === true,
@@ -849,32 +885,6 @@ jest.unstable_mockModule(
       }
       return state;
     }),
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
-  () => ({
-    materializeServertoolPlannedResult: jest.fn(async (planned: any) => planned),
-    materializeNativeToolCallExecutionOutcome: jest.fn((args: any) => ({
-      mode: 'tool_flow',
-      finalChatResponse: args.baseForExecution,
-      execution: {
-        flowId:
-          args.executionState?.lastExecution?.flowId ??
-          args.executionState?.executedToolCalls?.[0]?.execution?.flowId ??
-          'servertool_unknown',
-        followup: {
-          requestIdSuffix: ':servertool_followup',
-          injection: {
-            ops: [
-              { op: 'append_assistant_message', required: true },
-              { op: 'append_tool_messages_from_tool_outputs', required: true }
-            ]
-          }
-        }
-      }
-    }))
   })
 );
 

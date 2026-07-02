@@ -12,11 +12,11 @@ import {
   planServertoolExecutionLoopRuntimeActionWithNative,
   appendServertoolExecutedRecordWithNative,
   createServertoolExecutionLoopStateWithNative,
+  materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult,
   runStoplessBuiltinHandlerForRuntimeWithNative,
   type NativeServertoolExecutedRecord,
   type NativeServertoolExecutionLoopState
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { materializeServertoolPlannedResult } from './execution-handler-materialization-shell.js';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 

@@ -8,6 +8,7 @@ import type {
 import { listAutoServerToolHooks } from './registry-orchestration-shell.js';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
 import {
+  materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult,
   planAutoHookCallerFinalizationWithNative,
   planAutoHookRuntimeAttemptWithNative,
   runStoplessBuiltinHandlerForRuntimeWithNative
@@ -16,7 +17,6 @@ import {
   planServertoolAutoHookQueueItemsWithNative,
   planServertoolSkeletonDerivedConfigWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { materializeServertoolPlannedResult } from './execution-handler-materialization-shell.js';
 
 function buildAutoHookQueuesFromNativePlan(args: {
   hooks: ServerToolAutoHookDescriptor[];

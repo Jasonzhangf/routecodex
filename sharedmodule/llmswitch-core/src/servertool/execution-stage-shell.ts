@@ -7,10 +7,10 @@ import type {
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { prepareServertoolDispatchStage } from './dispatch-preparation-shell.js';
 import { runServertoolIoExecutionQueue } from './execution-queue-shell.js';
-import { materializeNativeToolCallExecutionOutcome } from './execution-handler-materialization-shell.js';
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
 import {
   buildServertoolCliProjectionRuntimeBranchWithNative,
+  materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome,
   planServertoolExecutionBranchWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';

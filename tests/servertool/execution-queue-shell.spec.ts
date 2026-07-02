@@ -9,6 +9,19 @@ const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
 const runStoplessBuiltinHandlerForRuntimeWithNative = jest.fn();
+const createServertoolProviderProtocolErrorFromPlanWithNative = jest.fn((plan: any) => {
+  const error = new Error(String(plan?.message ?? '[servertool] error')) as Error & {
+    code?: string;
+    category?: string;
+    details?: Record<string, unknown>;
+    status?: number;
+  };
+  error.code = String(plan?.code ?? 'SERVERTOOL_HANDLER_FAILED');
+  error.category = String(plan?.category ?? 'INTERNAL_ERROR');
+  error.details = (plan?.details ?? {}) as Record<string, unknown>;
+  error.status = Number(plan?.status ?? 500);
+  return error;
+});
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js',
@@ -18,9 +31,16 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    materializeServertoolPlannedResult
+    materializeServertoolPlannedResultWithNative: materializeServertoolPlannedResult,
+    createServertoolProviderProtocolErrorFromPlanWithNative,
+    planServertoolExecutionDispatchErrorWithNative,
+    planServertoolExecutionLoopEffectWithNative,
+    planServertoolExecutionLoopRuntimeActionWithNative,
+    createServertoolExecutionLoopStateWithNative,
+    appendServertoolExecutedRecordWithNative,
+    runStoplessBuiltinHandlerForRuntimeWithNative
   })
 );
 
@@ -31,18 +51,6 @@ jest.unstable_mockModule(
     buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
     planServertoolToolCallDispatchWithNative: jest.fn(),
     buildServertoolHandlerErrorToolOutputPayloadWithNative
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
-  () => ({
-    planServertoolExecutionDispatchErrorWithNative,
-    planServertoolExecutionLoopEffectWithNative,
-    planServertoolExecutionLoopRuntimeActionWithNative,
-    createServertoolExecutionLoopStateWithNative,
-    appendServertoolExecutedRecordWithNative,
-    runStoplessBuiltinHandlerForRuntimeWithNative
   })
 );
 
@@ -193,6 +201,8 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain('Boolean(lastErr)');
     expect(source).not.toContain('Boolean(entry)');
     expect(source).not.toContain('Boolean(result)');
+    expect(source).not.toContain("from './execution-handler-materialization-shell.js'");
+    expect(source).toContain('materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult');
     expect(source).not.toContain('planned ? await materializeServertoolPlannedResult');
     expect(source).not.toContain("nativeExecutionMode: entry?.registration.executionMode ?? ''");
     expect(source).not.toContain("toolCall: errorEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall']");

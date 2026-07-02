@@ -5,6 +5,19 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    createServertoolProviderProtocolErrorFromPlanWithNative: jest.fn((plan: any) => {
+      const error = new Error(String(plan?.message ?? '[servertool] error')) as Error & {
+        code?: string;
+        category?: string;
+        details?: Record<string, unknown>;
+        status?: number;
+      };
+      error.code = String(plan?.code ?? 'SERVERTOOL_HANDLER_FAILED');
+      error.category = String(plan?.category ?? 'INTERNAL_ERROR');
+      error.details = (plan?.details ?? {}) as Record<string, unknown>;
+      error.status = Number(plan?.status ?? 500);
+      return error;
+    }),
     appendServertoolExecutedRecordWithNative: jest.fn((input: any) => input?.state ?? {}),
     planServertoolExecutionDispatchErrorWithNative: jest.fn(() => ({
       code: 'SERVERTOOL_HANDLER_FAILED',
@@ -102,7 +115,16 @@ jest.unstable_mockModule(
       action: 'return_tool_flow',
       resultMode: 'tool_flow',
       executionFlowId: 'flow-test'
-    }))
+    })),
+    materializeServertoolPlannedResultWithNative: jest.fn(async (planned: any, options: any) => {
+      if (typeof planned?.finalize === 'function') {
+        return planned.finalize(options);
+      }
+      if (typeof planned?.flowId === 'string') {
+        throw new Error('[servertool] invalid handler plan contract: missing finalize');
+      }
+      throw new Error('[servertool] invalid handler plan/result contract');
+    })
   })
 );
 
@@ -125,7 +147,7 @@ jest.unstable_mockModule(
   })
 );
 
-let materializeServertoolPlannedResult: typeof import('../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js').materializeServertoolPlannedResult;
+let materializeServertoolPlannedResult: typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js').materializeServertoolPlannedResultWithNative;
 
 function buildOptions(overrides: Partial<ServerSideToolEngineOptions> = {}): ServerSideToolEngineOptions {
   return {
@@ -149,8 +171,8 @@ function buildOptions(overrides: Partial<ServerSideToolEngineOptions> = {}): Ser
 
 beforeAll(async () => {
   ({
-    materializeServertoolPlannedResult
-  } = await import('../../sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.js'));
+    materializeServertoolPlannedResultWithNative: materializeServertoolPlannedResult
+  } = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js'));
 });
 
 describe('execution-shell handler materialization', () => {
