@@ -916,7 +916,7 @@ export function planServertoolNoopOutcomeWithNative(input: {
   toolCallId: string;
   toolName: string;
   toolArguments?: string;
-  base: Record<string, unknown>;
+  base: JsonObject;
 }): NativeServertoolNoopOutcome {
   const capability = 'planServertoolNoopOutcomeJson';
   const fail = (reason?: string) => failNativeRequired<NativeServertoolNoopOutcome>(capability, reason);
@@ -1171,7 +1171,7 @@ export function buildServertoolToolOutputPayloadWithNative(input: {
 }
 
 export function buildServertoolHandlerErrorToolOutputPayloadWithNative(input: {
-  base: Record<string, unknown>;
+  base: JsonObject;
   toolCallId: string;
   toolName: string;
   message: string;

@@ -204,7 +204,9 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain('noopResult.chatResponse as JsonObject');
     expect(source).toContain('replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse)');
     expect(source).not.toContain('buildServertoolHandlerErrorToolOutputPayloadWithNative({\n          base: args.baseForExecution as Record<string, unknown>,\n          toolCallId: toolCall.id,\n          toolName: toolCall.name,\n          message: errorEffectPlan.handlerErrorMessage\n        }) as JsonObject');
+    expect(source).not.toContain('base: args.baseForExecution as Record<string, unknown>');
     expect(source).toContain('const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({');
+    expect(source).toContain('base: args.baseForExecution');
     expect(source).toContain('hasHandlerEntry: entry != null');
     expect(source).toContain('nativeExecutionMode: entry.registration.executionMode');
     expect(source).toContain('planned != null ? await materializeServertoolPlannedResult');

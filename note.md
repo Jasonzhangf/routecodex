@@ -1,3 +1,9 @@
+# 2026-07-02: servertool execution queue base casts removed
+
+- Slice: `native-chat-process-servertool-orchestration-semantics.ts` now types `planServertoolNoopOutcomeWithNative()` and `buildServertoolHandlerErrorToolOutputPayloadWithNative()` base inputs as `JsonObject`; `execution-queue-shell.ts` passes `args.baseForExecution` directly without `as Record<string, unknown>`.
+- Gate: `execution-queue-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old base cast marker and require direct native wrapper input.
+- Evidence: focused Jest `execution-queue-shell + servertool-active-orchestration-audit` PASS 49/49; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool response-stage payload cast removed
 
 - Slice: `response-stage-orchestration-shell.ts` now passes `options.payload` directly into `runServerToolOrchestrationShell` without `as JsonObject`.

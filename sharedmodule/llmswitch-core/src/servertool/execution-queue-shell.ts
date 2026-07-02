@@ -105,7 +105,7 @@ export async function runServertoolIoExecutionQueue(args: {
           handlerErrorMessage: lastErr
         });
         const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({
-          base: args.baseForExecution as Record<string, unknown>,
+          base: args.baseForExecution,
           toolCallId: toolCall.id,
           toolName: toolCall.name,
           message: errorEffectPlan.handlerErrorMessage
@@ -130,7 +130,7 @@ export async function runServertoolIoExecutionQueue(args: {
       toolCallId: toolCall.id,
       toolName: toolCall.name,
       toolArguments: toolCall.arguments,
-      base: args.baseForExecution as Record<string, unknown>
+      base: args.baseForExecution
     });
     const {
       flowId: noopFlowId
