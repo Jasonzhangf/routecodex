@@ -16,6 +16,43 @@ const ATTEMPT_STATE_RUNTIME_CONTROL_WRITER = {
   stage: 'request_executor_attempt_runtime_control'
 } as const;
 
+function readTrimmedString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function resolveAttemptRetryProviderKey(args: {
+  metadataCenter: MetadataCenter | undefined;
+  explicitRetryProviderKey?: unknown;
+}): string | undefined {
+  const explicit = readTrimmedString(args.explicitRetryProviderKey);
+  if (explicit) {
+    return explicit;
+  }
+  const metadataCenter = args.metadataCenter;
+  if (!metadataCenter) {
+    return undefined;
+  }
+  const runtimeControl = metadataCenter.readRuntimeControl();
+  const existing = readTrimmedString(runtimeControl.retryProviderKey);
+  if (existing) {
+    return existing;
+  }
+  const responsesResume = readRecord(metadataCenter.readContinuationContext().responsesResume);
+  if (!responsesResume) {
+    return undefined;
+  }
+  if (readTrimmedString(responsesResume.continuationOwner) === 'relay') {
+    return undefined;
+  }
+  return readTrimmedString(responsesResume.providerKey);
+}
+
 export type PreparedRequestExecutorAttemptState = {
   metadataForAttempt: Record<string, unknown>;
   clientAbortSignal: AbortSignal | undefined;
@@ -29,6 +66,7 @@ export function prepareRequestExecutorAttemptState(args: {
   attempt: number;
   initialMetadata: Record<string, unknown>;
   excludedProviderKeys: Set<string>;
+  retryProviderKey?: string;
   inboundClientHeaders: Record<string, string> | undefined;
   clientRequestId: string;
   sessionId?: string;
@@ -49,7 +87,20 @@ export function prepareRequestExecutorAttemptState(args: {
     args.attempt,
     args.excludedProviderKeys
   );
+  delete metadataForAttempt.__routecodexRetryProviderKey;
   const metadataCenter = MetadataCenter.attach(metadataForAttempt);
+  const retryProviderKey = resolveAttemptRetryProviderKey({
+    metadataCenter,
+    explicitRetryProviderKey: args.retryProviderKey
+  });
+  if (retryProviderKey) {
+    delete metadataForAttempt.excludedProviderKeys;
+    metadataCenter.writeRuntimeControl(
+      'retryProviderKey',
+      retryProviderKey,
+      ATTEMPT_STATE_RUNTIME_CONTROL_WRITER
+    );
+  }
   const clientAbortSignal = resolveClientAbortSignalFromCarrier(metadataForAttempt);
   args.throwIfClientAbortSignalAborted(clientAbortSignal);
 

@@ -1,3 +1,10 @@
+# 2026-07-02: priority retry provider pin attempt contract fixed
+
+- Symptom: priority retry/failover could still be pinned back to the same provider after an upstream/provider error, even though provider-switch logic had excluded the failed provider.
+- Root cause: `prepareRequestExecutorAttemptState()` no longer consumed explicit `retryProviderKey`, while stale flat `__routecodexRetryProviderKey` / top-level `excludedProviderKeys` could remain on attempt metadata and conflict with the MetadataCenter runtime_control truth.
+- Fix: attempt-state now resolves retry provider pins from explicit arg, existing MetadataCenter runtime_control, or direct non-relay `responsesResume.providerKey`; legacy flat retry pin is physically deleted and pin attempts remove top-level `excludedProviderKeys` so VR sees a single runtime_control pin truth.
+- Evidence: red/green targeted Jest `request-executor-attempt-state.contract + retry-execution-plan + request-executor-provider-failure-plan` PASS 32/32; `tsc -p tsconfig.json --noEmit` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `verify:vr-no-ts-runtime` PASS; Rust `cargo test -p router-hotpath-napi priority_forwarder_retry_exclusion --lib -- --nocapture` PASS 2/2; scoped `git diff --check` PASS.
+- Remaining gap: no live 5555 failing-sample replay has been run in this slice; current evidence proves code/test/gate/Rust priority behavior, not full online closure.
 # 2026-07-02: servertool auto-hook caller result projection moved to Rust
 
 - Slice: `auto-hook-caller.ts` no longer projects the final `tool_flow` engine result shape from `finalizationPlan.resultMode`; Rust/servertool-core now owns `plan_auto_hook_caller_result_projection`, exported through router-hotpath NAPI and `planAutoHookCallerResultProjectionWithNative`.

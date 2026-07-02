@@ -713,8 +713,13 @@ export function decorateMetadataForAttempt(
   }
   preserveLiveClientAbortCarriers({ source: base, target: clone });
   clone.retryAttempt = attempt;
+  delete clone.__routecodexRetryProviderKey;
   if (excludedProviderKeys.size > 0) {
-    clone.excludedProviderKeys = Array.from(excludedProviderKeys);
+    if (attempt > 1) {
+      clone.excludedProviderKeys = Array.from(excludedProviderKeys);
+    } else {
+      delete clone.excludedProviderKeys;
+    }
     delete clone.__routecodexPreselectedRoute;
   } else if (clone.excludedProviderKeys) {
     delete clone.excludedProviderKeys;
