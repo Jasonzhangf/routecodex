@@ -36,10 +36,10 @@ export async function runServertoolResponseStageOrchestrationShell(
   options: ServertoolResponseStageShellOptions
 ): Promise<ServertoolResponseStageShellResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(options.adapterContext as Record<string, unknown>);
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(options.adapterContext);
   const gatePlan = planServertoolResponseStageGateWithNative({
     payload: options.payload,
-    adapterContext: options.adapterContext as Record<string, unknown>,
+    adapterContext: options.adapterContext,
     runtimeControl,
     allowFollowup: options.allowFollowup === true
   });

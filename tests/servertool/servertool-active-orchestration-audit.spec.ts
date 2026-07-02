@@ -769,10 +769,12 @@ const TARGETS = [
       'return bypassResult;',
       'const passthroughResult: ServertoolResponseStageShellResult = {',
       'return passthroughResult;',
+      'options.adapterContext as Record<string, unknown>',
     ],
     required: [
       "return {",
       'chat: options.payload',
+      'adapterContext: options.adapterContext',
       'payload: options.payload',
       'executed: false',
     ],

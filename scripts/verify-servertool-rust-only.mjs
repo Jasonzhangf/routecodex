@@ -5685,6 +5685,7 @@ function checkServertoolRustOutcomeCloseout() {
     'String(gateRuntimeAction.action)',
     'String(outputPlan.returnAction)',
     'chat: options.payload as JsonObject',
+    'options.adapterContext as Record<string, unknown>',
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
@@ -5705,6 +5706,7 @@ function checkServertoolRustOutcomeCloseout() {
     'const orchestration = await runServerToolOrchestrationShell(',
     'runServerToolOrchestrationShell',
     'chat: options.payload',
+    'adapterContext: options.adapterContext',
     'payload: options.payload',
     'executed: false',
   ]) {
