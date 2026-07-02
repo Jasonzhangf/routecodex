@@ -1,3 +1,9 @@
+# 2026-07-02: servertool engine orchestration adapterContext casts removed
+
+- Slice: `engine-orchestration-shell.ts` now passes `options.adapterContext` directly into MetadataCenter carrier readers; carrier owns object narrowing.
+- Gate: `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `options.adapterContext as Record<string, unknown>` marker.
+- Evidence: focused Jest `engine.stopless-session-thin-shell + servertool-active-orchestration-audit` PASS 51/51; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool response-stage prepass adapterContext casts removed
 
 - Slice: `response-stage-prepass-shell.ts` now passes `args.options.adapterContext` directly to `planServertoolResponseStageGateWithNative` and `readRuntimeControlFromAnyBoundMetadataCenter`; native wrapper / carrier own unknown-object narrowing.

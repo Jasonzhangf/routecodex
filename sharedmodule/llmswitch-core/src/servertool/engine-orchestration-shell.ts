@@ -225,12 +225,8 @@ export async function runServerToolOrchestrationShell(
     execution: engineResult.execution
   });
   const totalSteps = 5;
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(
-    options.adapterContext as Record<string, unknown>
-  );
-  const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
-    options.adapterContext as Record<string, unknown>
-  );
+  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(options.adapterContext);
+  const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(options.adapterContext);
   const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
   const stoplessExecutionPlan = planStoplessExecutionWithNative({
     flowId,

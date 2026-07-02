@@ -730,6 +730,7 @@ const TARGETS = [
       'if (stopSignal.observed) {',
       "engineResult.execution && typeof engineResult.execution === 'object'",
       "runtimeControl && typeof runtimeControl === 'object'",
+      'options.adapterContext as Record<string, unknown>',
     ],
     required: [
       'resolveServertoolTimeoutMsFromEnvCandidatesWithNative({',
