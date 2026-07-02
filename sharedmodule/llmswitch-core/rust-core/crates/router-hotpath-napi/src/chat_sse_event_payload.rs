@@ -1,4 +1,6 @@
-use serde_json::Value;
+use crate::hub_reasoning_tool_normalizer::normalize_message_reasoning_tools_record;
+use crate::shared_chat_output_normalizer::normalize_chat_message_content;
+use serde_json::{Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn current_unix_timestamp_ms() -> Result<i64, String> {
@@ -474,6 +476,368 @@ pub fn build_chat_sse_finish_payload_json(input_json: String) -> Result<String, 
             error
         )
     })
+}
+
+fn read_input_object(input_json: String, label: &str) -> Result<Map<String, Value>, String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| format!("Failed to parse {} JSON: {}", label, error))?;
+    input
+        .as_object()
+        .cloned()
+        .ok_or_else(|| format!("{} expected object", label))
+}
+
+fn has_meaningful_content(content: Option<&Value>) -> bool {
+    match content {
+        Some(Value::String(value)) => !value.trim().is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(row)) => !row.is_empty(),
+        Some(Value::Null) | None => false,
+        Some(_) => false,
+    }
+}
+
+fn read_config_bool(config: &Map<String, Value>, field: &str, default_value: bool) -> bool {
+    config
+        .get(field)
+        .and_then(Value::as_bool)
+        .unwrap_or(default_value)
+}
+
+fn read_reasoning_mode(config: &Map<String, Value>) -> &str {
+    config
+        .get("reasoningMode")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("channel")
+}
+
+fn dispatch_reasoning_for_channel(reasoning: Option<String>, config: &Map<String, Value>) -> Option<String> {
+    let raw = reasoning?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || read_reasoning_mode(config) == "drop" {
+        return None;
+    }
+    if read_reasoning_mode(config) == "text" {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn next_envelope(
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+) -> Result<Map<String, Value>, String> {
+    let envelope_raw = build_chat_sse_event_envelope_json(
+        serde_json::json!({
+            "request_id": request_id,
+            "current_sequence": *sequence_counter,
+            "enable_timestamp_generation": read_config_bool(config, "enableTimestampGeneration", true),
+            "enable_sequence_numbers": read_config_bool(config, "includeSequenceNumbers", true)
+        })
+        .to_string(),
+    )?;
+    let envelope = read_input_object(envelope_raw, "Chat SSE event envelope output")?;
+    *sequence_counter = envelope
+        .get("nextSequenceCounter")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Chat SSE event envelope output missing nextSequenceCounter".to_string())?;
+    Ok(envelope)
+}
+
+fn push_chat_event(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    event_name: &str,
+    payload: Value,
+) -> Result<(), String> {
+    let envelope = next_envelope(request_id, sequence_counter, config)?;
+    let timestamp = envelope
+        .get("timestamp")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Chat SSE event envelope output missing timestamp".to_string())?;
+    let sequence_number = envelope
+        .get("sequenceNumber")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Chat SSE event envelope output missing sequenceNumber".to_string())?;
+    events.push(serde_json::json!({
+        "event": event_name,
+        "type": event_name,
+        "timestamp": timestamp,
+        "data": if event_name == "chat.done" { "[DONE]".to_string() } else { serde_json::to_string(&payload).map_err(|error| format!("Failed to serialize Chat SSE event data: {}", error))? },
+        "sequenceNumber": sequence_number,
+        "protocol": "chat",
+        "direction": "json_to_sse"
+    }));
+    Ok(())
+}
+
+fn build_payload_value(input: Value, builder: fn(String) -> Result<String, String>) -> Result<Value, String> {
+    let raw = builder(input.to_string())?;
+    serde_json::from_str(&raw).map_err(|error| format!("Failed to parse Chat SSE payload JSON: {}", error))
+}
+
+pub fn build_chat_sse_event_sequence_json(input_json: String) -> Result<String, String> {
+    let input = read_input_object(input_json, "Chat SSE event sequence")?;
+    let response = input
+        .get("response")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Chat SSE event sequence missing response".to_string())?;
+    let model = input
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| response.get("model").and_then(Value::as_str))
+        .ok_or_else(|| "Chat SSE event sequence missing model".to_string())?;
+    let request_id = input
+        .get("request_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Chat SSE event sequence missing request_id".to_string())?;
+    let response_id = response
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Invalid ChatCompletionResponse: missing id".to_string())?;
+    let created = response
+        .get("created")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "Invalid ChatCompletionResponse: missing created timestamp".to_string())?;
+    let config = input
+        .get("config")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let choices = response
+        .get("choices")
+        .and_then(Value::as_array)
+        .filter(|choices| !choices.is_empty())
+        .ok_or_else(|| "Invalid ChatCompletionResponse: missing choices".to_string())?;
+    let choice = choices
+        .first()
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Invalid ChatCompletionResponse choice".to_string())?;
+    let choice_index = choice.get("index").and_then(Value::as_i64).unwrap_or(0);
+    if choice_index < 0 {
+        return Err("Invalid ChatCompletionResponse choice: negative index".to_string());
+    }
+
+    let mut message = choice
+        .get("message")
+        .and_then(Value::as_object)
+        .cloned()
+        .or_else(|| {
+            let delta = choice.get("delta")?.as_object()?;
+            Some(delta.clone())
+        })
+        .ok_or_else(|| "Invalid ChatCompletionResponse choice: missing message".to_string())?;
+    let role = message
+        .get("role")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Invalid message sequence for role: unknown".to_string())?
+        .to_string();
+
+    if !message.contains_key("tool_calls") {
+        if let Some(function_call) = message.get("function_call").and_then(Value::as_object) {
+            let id = function_call
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Invalid legacy function_call: missing id".to_string())?;
+            let name = function_call
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Invalid legacy function_call: missing name".to_string())?;
+            let arguments = function_call
+                .get("arguments")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Invalid legacy function_call: missing arguments".to_string())?;
+            message.insert(
+                "tool_calls".to_string(),
+                serde_json::json!([{
+                    "id": id,
+                    "type": "function",
+                    "function": { "name": name, "arguments": arguments }
+                }]),
+            );
+        }
+    }
+
+    let content_normalization =
+        normalize_chat_message_content(message.get("content").unwrap_or(&Value::Null));
+    if let Some(content_text) = content_normalization.content_text {
+        message.insert("content".to_string(), Value::String(content_text));
+    }
+    let (_tool_calls_added, cleaned_reasoning) =
+        normalize_message_reasoning_tools_record(&mut message, "chat_seq_reasoning_1");
+    let reasoning_text = cleaned_reasoning
+        .or(content_normalization.reasoning_text)
+        .or_else(|| message.get("reasoning_content").and_then(Value::as_str).map(str::to_string))
+        .or_else(|| message.get("reasoning").and_then(Value::as_str).map(str::to_string));
+    let reasoning_for_channel = dispatch_reasoning_for_channel(reasoning_text, &config);
+    let tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if reasoning_for_channel.is_some()
+        && tool_calls.is_empty()
+        && !has_meaningful_content(message.get("content"))
+    {
+        message.insert(
+            "content".to_string(),
+            Value::String(reasoning_for_channel.clone().unwrap()),
+        );
+    }
+    if !has_meaningful_content(message.get("content"))
+        && reasoning_for_channel.is_none()
+        && tool_calls.is_empty()
+    {
+        return Err(format!("Invalid message sequence for role: {}", role));
+    }
+
+    let finish_reason = choice
+        .get("finish_reason")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Invalid ChatCompletionResponse choice: missing finish_reason".to_string())?;
+
+    let mut events = Vec::new();
+    let mut sequence_counter = 0_i64;
+    let common = |extra: Value| -> Value {
+        let mut row = extra.as_object().cloned().unwrap_or_default();
+        row.insert("response_id".to_string(), Value::String(response_id.to_string()));
+        row.insert("created".to_string(), Value::Number(created.into()));
+        row.insert("model".to_string(), Value::String(model.to_string()));
+        row.insert("choice_index".to_string(), Value::Number(choice_index.into()));
+        Value::Object(row)
+    };
+
+    push_chat_event(
+        &mut events,
+        request_id,
+        &mut sequence_counter,
+        &config,
+        "chat_chunk",
+        build_payload_value(common(serde_json::json!({ "role": role })), build_chat_sse_role_delta_payload_json)?,
+    )?;
+    if let Some(reasoning) = reasoning_for_channel {
+        push_chat_event(
+            &mut events,
+            request_id,
+            &mut sequence_counter,
+            &config,
+            "chat_chunk",
+            build_payload_value(
+                common(serde_json::json!({ "reasoning": reasoning })),
+                build_chat_sse_reasoning_delta_payload_json,
+            )?,
+        )?;
+    }
+    if let Some(content) = message.get("content").and_then(Value::as_str).filter(|value| !value.is_empty()) {
+        push_chat_event(
+            &mut events,
+            request_id,
+            &mut sequence_counter,
+            &config,
+            "chat_chunk",
+            build_payload_value(
+                common(serde_json::json!({ "content": content })),
+                build_chat_sse_content_delta_payload_json,
+            )?,
+        )?;
+    }
+    for (tool_call_index, tool_call) in tool_calls.iter().enumerate() {
+        let tool_call = tool_call
+            .as_object()
+            .ok_or_else(|| "Invalid Chat tool call: expected object".to_string())?;
+        let function = tool_call
+            .get("function")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "Invalid Chat tool call: missing function".to_string())?;
+        let tool_call_id = tool_call
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "Chat SSE tool call start payload missing tool_call_id".to_string())?;
+        let tool_call_type = tool_call
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "Chat SSE tool call start payload missing tool_call_type".to_string())?;
+        let function_name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "Chat SSE tool call start payload missing function_name".to_string())?;
+        push_chat_event(
+            &mut events,
+            request_id,
+            &mut sequence_counter,
+            &config,
+            "chat_chunk",
+            build_payload_value(
+                common(serde_json::json!({
+                    "tool_call_index": tool_call_index,
+                    "tool_call_id": tool_call_id,
+                    "tool_call_type": tool_call_type,
+                    "function_name": function_name
+                })),
+                build_chat_sse_tool_call_start_payload_json,
+            )?,
+        )?;
+        let arguments = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Chat SSE tool call args delta payload missing arguments".to_string())?;
+        push_chat_event(
+            &mut events,
+            request_id,
+            &mut sequence_counter,
+            &config,
+            "chat_chunk",
+            build_payload_value(
+                common(serde_json::json!({
+                    "tool_call_index": tool_call_index,
+                    "arguments": arguments
+                })),
+                build_chat_sse_tool_call_args_delta_payload_json,
+            )?,
+        )?;
+    }
+
+    let mut finish_input = common(serde_json::json!({ "finish_reason": finish_reason }));
+    if let Some(usage) = response.get("usage") {
+        finish_input
+            .as_object_mut()
+            .expect("finish input must be object")
+            .insert("usage".to_string(), usage.clone());
+    }
+    push_chat_event(
+        &mut events,
+        request_id,
+        &mut sequence_counter,
+        &config,
+        "chat_chunk",
+        build_payload_value(finish_input, build_chat_sse_finish_payload_json)?,
+    )?;
+    push_chat_event(
+        &mut events,
+        request_id,
+        &mut sequence_counter,
+        &config,
+        "chat.done",
+        Value::Null,
+    )?;
+
+    serde_json::to_string(&events)
+        .map_err(|error| format!("Failed to serialize Chat SSE event sequence JSON: {}", error))
 }
 
 #[cfg(test)]

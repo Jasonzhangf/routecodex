@@ -2061,13 +2061,16 @@ verification:
     contract:
       - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
+      - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
     integration: []
     smoke:
+      - cargo test -p router-hotpath-napi chat_sse_event_payload --lib -- --nocapture
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
     notes:
+      - "Chat JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
       - "Chat stream projection preserves stream shape; provider health, route policy, and Hub tool governance remain outside SSE."
 
   - feature_id: sse.anthropic_gemini_stream_projection

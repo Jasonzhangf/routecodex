@@ -5,6 +5,8 @@ import {
   readNativeFunction
 } from './native-hub-pipeline-resp-semantics-shared.js';
 
+// feature_id: sse.chat_stream_projection
+// canonical_builder: build_chat_sse_event_sequence_json
 export interface ChatSseEventEnvelopeNative {
   requestId: string;
   timestamp: number;
@@ -13,6 +15,30 @@ export interface ChatSseEventEnvelopeNative {
   protocol: 'chat';
   direction: 'json_to_sse';
 }
+
+export interface ChatSseEventSequenceNativeInput {
+  response: Record<string, unknown>;
+  model: string;
+  requestId: string;
+  config?: {
+    chunkSize?: number;
+    chunkDelayMs?: number;
+    enableTimestampGeneration?: boolean;
+    includeSequenceNumbers?: boolean;
+    reasoningMode?: string;
+    reasoningTextPrefix?: string;
+  };
+}
+
+export type ChatSseEventSequenceNativeEvent = Record<string, unknown> & {
+  event: string;
+  type: string;
+  data: string;
+  timestamp: number;
+  sequenceNumber: number;
+  protocol: 'chat';
+  direction: 'json_to_sse';
+};
 
 function parseNativeEventPayload(raw: string): Record<string, unknown> | null {
   try {
@@ -45,6 +71,80 @@ function parseNativeChatEventEnvelope(raw: string): ChatSseEventEnvelopeNative |
     return row as unknown as ChatSseEventEnvelopeNative;
   } catch {
     return null;
+  }
+}
+
+function parseNativeChatEventSequence(raw: string): ChatSseEventSequenceNativeEvent[] | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+    const events: ChatSseEventSequenceNativeEvent[] = [];
+    for (const event of parsed) {
+      if (!event || typeof event !== 'object' || Array.isArray(event)) {
+        return null;
+      }
+      const row = event as Record<string, unknown>;
+      if (
+        typeof row.event !== 'string'
+        || typeof row.type !== 'string'
+        || typeof row.data !== 'string'
+        || typeof row.timestamp !== 'number'
+        || typeof row.sequenceNumber !== 'number'
+        || row.protocol !== 'chat'
+        || row.direction !== 'json_to_sse'
+      ) {
+        return null;
+      }
+      events.push(row as ChatSseEventSequenceNativeEvent);
+    }
+    return events;
+  } catch {
+    return null;
+  }
+}
+
+export function buildChatSseEventSequenceWithNative(
+  input: ChatSseEventSequenceNativeInput
+): ChatSseEventSequenceNativeEvent[] {
+  const capability = 'buildChatSseEventSequenceJson';
+  const fail = (reason?: string) => failNative<ChatSseEventSequenceNativeEvent[]>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      response: input.response,
+      model: input.model,
+      request_id: input.requestId,
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Chat SSE event sequence result');
+    }
+    const parsed = parseNativeChatEventSequence(raw);
+    if (!parsed) {
+      return fail('invalid Chat SSE event sequence result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
   }
 }
 

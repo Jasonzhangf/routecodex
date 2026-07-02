@@ -2226,6 +2226,12 @@ pub fn build_chat_sse_finish_payload_json(input_json: String) -> NapiResult<Stri
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildChatSseEventSequenceJson")]
+pub fn build_chat_sse_event_sequence_json(input_json: String) -> NapiResult<String> {
+    chat_sse_event_payload::build_chat_sse_event_sequence_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "hasRequestedToolsInSemanticsJson")]
 pub fn has_requested_tools_in_semantics_json_bridge(
     request_semantics_json: String,

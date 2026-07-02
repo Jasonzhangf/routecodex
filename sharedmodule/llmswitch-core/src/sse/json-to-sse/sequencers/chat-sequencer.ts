@@ -1,26 +1,15 @@
 /**
- * Chat协议事件编排器
- * 负责严格的事件时序组合：role → content OR tool_calls(name → args.delta*) → finish_reason → done
+ * Chat SSE sequencer thin shell.
+ * Rust owns role/content/reasoning/tool/finish/done event ordering.
  */
 
 import type { ChatCompletionResponse, ChatReasoningMode, ChatSseEvent } from '../../types/index.js';
 import {
-  buildRoleDelta,
-  buildReasoningDeltas,
-  buildContentDeltas,
-  buildToolCallStart,
-  buildToolCallArgsDeltas,
-  buildFinishEvent,
-  buildDoneEvent,
   DEFAULT_CHAT_EVENT_GENERATOR_CONFIG,
-  createDefaultContext
+  type ChatEventGeneratorConfig
 } from '../event-generators/chat.js';
-import type { ChatEventGeneratorContext, ChatEventGeneratorConfig } from '../event-generators/chat.js';
-import { normalizeMessageReasoningTools } from '../../../conversion/shared/reasoning-tool-normalizer.js';
-import { normalizeChatMessageContent } from '../../../conversion/shared/chat-output-normalizer.js';
-import { dispatchReasoning } from '../../shared/reasoning-dispatcher.js';
+import { buildChatSseEventSequenceWithNative } from '../../../native/router-hotpath/native-chat-sse-event-payload.js';
 
-// 排列器配置
 export interface ChatSequencerConfig extends ChatEventGeneratorConfig {
   includeSequenceNumbers: boolean;
   enableDelay: boolean;
@@ -29,7 +18,6 @@ export interface ChatSequencerConfig extends ChatEventGeneratorConfig {
   reasoningTextPrefix?: string;
 }
 
-// 默认配置
 export const DEFAULT_CHAT_SEQUENCER_CONFIG: ChatSequencerConfig = {
   ...DEFAULT_CHAT_EVENT_GENERATOR_CONFIG,
   includeSequenceNumbers: true,
@@ -38,262 +26,35 @@ export const DEFAULT_CHAT_SEQUENCER_CONFIG: ChatSequencerConfig = {
   reasoningMode: 'channel'
 };
 
-/**
- * 验证消息顺序的合法性
- */
-function validateMessageSequence(message: any, previousMessage?: any): boolean {
-  // 基本字段
-  if (!message || typeof message.role !== 'string') return false;
-
-  // 允许两种有效形态：
-  // 1) content 存在（字符串/数组/对象）
-  // 2) reasoning-only 输出
-  // 3) 仅工具调用（content 为空，但存在 tool_calls[] 且 finish_reason=tool_calls）
-  const hasContent = hasMeaningfulContent((message as any).content);
-  const hasReasoning =
-    (typeof (message as any).reasoning_content === 'string' && (message as any).reasoning_content.trim().length > 0)
-    || (typeof (message as any).reasoning === 'string' && (message as any).reasoning.trim().length > 0);
-  const hasToolCalls = Array.isArray((message as any).tool_calls) && (message as any).tool_calls.length > 0;
-  if (!hasContent && !hasReasoning && !hasToolCalls) return false;
-
-  // 不允许 assistant 之后出现 user 倒序
-  if (previousMessage?.role === 'assistant' && message.role === 'user') return false;
-
-  return true;
-}
-
-function hasMeaningfulContent(content: any): boolean {
-  if (content == null) return false;
-  if (typeof content === 'string') return content.trim().length > 0;
-  if (Array.isArray(content)) return content.length > 0;
-  if (typeof content === 'object') return Object.keys(content).length > 0;
-  return false;
-}
-
-function appendReasoningToContent(message: any, reasoningText: string, prefix?: string): void {
-  const trimmed = reasoningText.trim();
-  if (!trimmed) {
-    return;
-  }
-  const normalizedPrefix = typeof prefix === 'string' && prefix.length ? prefix : '';
-  const formatted = normalizedPrefix ? `${normalizedPrefix}${normalizedPrefix.endsWith(' ') || normalizedPrefix.endsWith('\n') ? '' : ' '}${trimmed}` : trimmed;
-  const current = (message as any).content;
-  if (typeof current === 'string' || current == null) {
-    (message as any).content = typeof current === 'string' && current.length
-      ? `${current}${current.endsWith('\n') ? '' : '\n\n'}${formatted}`
-      : formatted;
-    return;
-  }
-  if (Array.isArray(current)) {
-    current.push({ type: 'text', text: formatted });
-    return;
-  }
-  (message as any).content = [current, { type: 'text', text: formatted }];
-}
-
-/**
- * 异步生成器：为事件添加序列号和延迟
- */
-async function* withSequencing(
-  events: Generator<ChatSseEvent> | AsyncGenerator<ChatSseEvent> | ChatSseEvent[],
-  config: ChatSequencerConfig,
-  startSequence: number = 0
+export async function* sequenceChatResponse(
+  response: ChatCompletionResponse,
+  model: string,
+  requestId: string,
+  config: ChatSequencerConfig = DEFAULT_CHAT_SEQUENCER_CONFIG
 ): AsyncGenerator<ChatSseEvent> {
-  for await (const event of events) {
-    yield event;
+  const events = buildChatSseEventSequenceWithNative({
+    response: response as unknown as Record<string, unknown>,
+    model,
+    requestId,
+    config
+  });
 
+  for (const event of events) {
+    yield event as ChatSseEvent;
     if (config.enableDelay && config.chunkDelayMs > 0) {
       await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs));
     }
   }
 }
 
-/**
- * 序列化单个消息的内容和工具调用
- */
-async function* sequenceMessageContent(
-  message: any,
-  context: ChatEventGeneratorContext,
-  config: ChatSequencerConfig
-): AsyncGenerator<ChatSseEvent> {
-  // 1. 发送role delta
-  for (const roleEvent of buildRoleDelta(message.role, context, config)) {
-    yield roleEvent;
-  }
-
-  const contentNormalization = normalizeChatMessageContent((message as any).content);
-  if (contentNormalization.contentText !== undefined) {
-    (message as any).content = contentNormalization.contentText;
-  }
-
-  const normalization = normalizeMessageReasoningTools(message, {
-    idPrefix: `chat_seq_reasoning_${context.choiceIndex + 1}`
-  });
-  const reasoningText = normalization.cleanedReasoning
-    ?? contentNormalization.reasoningText
-    ?? (typeof (message as any)?.reasoning_content === 'string'
-      ? (message as any).reasoning_content
-      : typeof (message as any)?.reasoning === 'string'
-        ? (message as any).reasoning
-        : undefined);
-  const reasoningDispatch = dispatchReasoning(reasoningText, {
-    mode: config.reasoningMode,
-    prefix: config.reasoningTextPrefix
-  });
-  const reasoningForChannel = reasoningDispatch.channel;
-
-  // chat protocol explicit projection rule: when reasoning exists but
-  // content is empty, project reasoning text into content so the client
-  // always receives visible assistant text, not an empty message.
-  // This is a resp_chatprocess -> resp_outbound contract, not a normalizer
-  // side-effect. Do NOT lift reasoning into content inside the normalizer;
-  // only project here at the outbound boundary.
-  // Outbound projection: reasoning-only assistant turns get their
-  // reasoning text projected into the `content` channel for chat protocol.
-  // This preserves user-visible assistant text while keeping the original
-  // reasoning in its own channel for downstream consumption.
-  if (reasoningForChannel && !message?.tool_calls?.length && !hasMeaningfulContent(message.content)) {
-    message.content = reasoningForChannel;
-  }
-
-  // 2. 处理reasoning（如果有）
-  if (reasoningForChannel) {
-    yield* withSequencing(
-      buildReasoningDeltas(reasoningForChannel, context, config),
-      config
-    );
-  }
-
-  // 3. 处理content和tool_calls
-  if (hasMeaningfulContent(message.content)) {
-    yield* withSequencing(
-      buildContentDeltas(message.content, context, config),
-      config
-    );
-  }
-
-  if (message.tool_calls && message.tool_calls.length > 0) {
-    for (let i = 0; i < message.tool_calls.length; i++) {
-      const toolCall = message.tool_calls[i];
-      const toolCallIndex = context.toolCallIndexCounter + i;
-
-      yield buildToolCallStart(toolCall, toolCallIndex, context, config);
-
-      yield* withSequencing(
-        buildToolCallArgsDeltas(toolCall.function?.arguments, toolCallIndex, context, config),
-        config
-      );
-    }
-  }
-}
-
-/**
- * 主编排器：将Chat响应转换为有序的SSE事件流
- */
-export async function* sequenceChatResponse(
-  response: ChatCompletionResponse,
-  context: ChatEventGeneratorContext,
-  config: ChatSequencerConfig = DEFAULT_CHAT_SEQUENCER_CONFIG
-): AsyncGenerator<ChatSseEvent> {
-  // 验证响应格式
-  if (!response.choices || response.choices.length === 0) {
-    throw new Error('Invalid ChatCompletionResponse: missing choices');
-  }
-
-  const choice = response.choices[0] as any;
-  let message = choice?.message;
-  // 兼容上游给到的 chunk 形态（choices[0].delta）
-  if (!message && choice && typeof choice === 'object' && choice.delta) {
-    const d = choice.delta;
-    if (typeof d.role !== 'string' || !d.role.trim()) {
-      throw new Error('Invalid ChatCompletionChunk delta: missing role');
-    }
-    message = {
-      role: d.role,
-      content: typeof d.content !== 'undefined' ? d.content : null,
-      tool_calls: Array.isArray(d.tool_calls) ? d.tool_calls : undefined
-    };
-  }
-
-  message = normalizeFunctionCall(message);
-
-  // 验证消息顺序（如果启用）
-  if (config.validateOrder) {
-    // 这里可以添加更多的顺序验证逻辑
-    if (!validateMessageSequence(message)) {
-      const roleSafe = message && typeof (message as any).role === 'string' ? (message as any).role : 'unknown';
-      throw new Error(`Invalid message sequence for role: ${roleSafe}`);
-    }
-  }
-
-  // 序列化消息内容
-  yield* sequenceMessageContent(message, context, config);
-
-  const finishReason = (choice as any).finish_reason;
-  if (typeof finishReason !== 'string' || !finishReason.trim()) {
-    throw new Error('Invalid ChatCompletionResponse choice: missing finish_reason');
-  }
-
-  // 发送显式finish_reason事件
-  yield buildFinishEvent(
-    finishReason as 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call',
-    context,
-    config,
-    response.usage
-  );
-
-  // 发送done事件
-  yield buildDoneEvent(context, config);
-}
-
-function normalizeFunctionCall(message: any): any {
-  if (!message || typeof message !== 'object') return message;
-  if ((message.tool_calls && message.tool_calls.length) || !message.function_call) {
-    return message;
-  }
-  const fc = message.function_call;
-  if (typeof fc?.id !== 'string' || !fc.id.trim()) {
-    throw new Error('Invalid legacy function_call: missing id');
-  }
-  if (typeof fc?.name !== 'string' || !fc.name.trim()) {
-    throw new Error('Invalid legacy function_call: missing name');
-  }
-  if (typeof fc?.arguments !== 'string') {
-    throw new Error('Invalid legacy function_call: missing arguments');
-  }
-  message.tool_calls = [
-    {
-      id: fc.id,
-      type: 'function',
-      function: { name: fc.name, arguments: fc.arguments }
-    }
-  ];
-  return message;
-}
-
-/**
- * 创建Chat事件序列化器工厂
- */
 export function createChatSequencer(config?: Partial<ChatSequencerConfig>) {
   const finalConfig = { ...DEFAULT_CHAT_SEQUENCER_CONFIG, ...config };
 
   return {
-    /**
-     * 序列化响应
-     */
     async *sequenceResponse(response: ChatCompletionResponse, model: string, requestId: string) {
-      const context = createDefaultContext(
-        model,
-        requestId,
-        typeof (response as { id?: unknown }).id === 'string' ? (response as { id: string }).id : undefined,
-        typeof (response as { created?: unknown }).created === 'number' ? (response as { created: number }).created : undefined
-      );
-      yield* sequenceChatResponse(response, context, finalConfig);
+      yield* sequenceChatResponse(response, model, requestId, finalConfig);
     },
 
-    /**
-     * 获取当前配置
-     */
     getConfig(): ChatSequencerConfig {
       return { ...finalConfig };
     }

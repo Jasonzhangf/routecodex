@@ -3692,15 +3692,15 @@ owners:
   - feature_id: sse.chat_stream_projection
     status: active
     summary: "OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas"
-    owner_kind: server_projection
-    owner_scope: "OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas"
-    owner_module: sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
+    owner_kind: rust_ssot
+    owner_scope: "OpenAI Chat JSON->SSE event sequence projection for chat chunks, usage, reasoning, and tool-call deltas; TS remains native wrapper / stream IO shell"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
     canonical_types:
       - ChatCompletionResponse
       - ChatSseEvent
       - SseToChatJsonOptions
     canonical_builders:
-      - ChatJsonToSseConverter
+      - build_chat_sse_event_sequence_json
     allowed_paths:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts
@@ -3711,6 +3711,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
       - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
+      - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
@@ -3719,11 +3720,13 @@ owners:
     required_tests:
       - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
+      - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
+      - "Chat JSON->SSE role/content/reasoning/tool/finish/done ordering is Rust-owned through `build_chat_sse_event_sequence_json`; TS sequencer may only call native and yield events."
       - "Chat stream projection may preserve stream shape; it must not own provider health, route policy, or Hub tool governance."
 
   - feature_id: sse.anthropic_gemini_stream_projection

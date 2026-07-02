@@ -29,6 +29,13 @@
 - Red evidence: focused Jest failed on `return result as ServerToolHandlerResult`; `verify:servertool-rust-only` failed on missing null guard/direct return and forbidden cast.
 - Green evidence: focused Jest `servertool-auto-hook-trace + execution-shell.auto-hook-failfast + servertool-active-orchestration-audit` PASS 53/53; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
 
+# 2026-07-02: Chat JSON->SSE sequence owner moved to Rust
+- Slice: `sse.chat_stream_projection` Chat JSON->SSE role/content/reasoning/tool/finish/done event ordering moved from TS `chat-sequencer.ts` into Rust `build_chat_sse_event_sequence_json`; TS sequencer is now a native wrapper + optional delay shell.
+- Gate: new `tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts` compares TS wrapper output to native sequence output and locks missing `finish_reason` fail-fast plus no TS normalizer/dispatcher imports in sequencer.
+- Evidence so far: Rust focused `cargo test -p router-hotpath-napi chat_sse_event_payload --lib -- --nocapture` PASS 20/20; sharedmodule `tsc` PASS; root `tsc --noEmit` PASS; native hotpath rebuild PASS; Chat parity Jest PASS; `verify:sse-architecture-boundary` PASS; `verify:responses-sse-business-module` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; focused native export-list Jest PASS 2/2.
+- Live evidence after user rebuilt/restarted 5555: `/health` returned `ready=true`; `/v1/chat/completions stream=true` returned keepalive + role/content/tool_call/finish + `[DONE]` frames for `SSE_OK`; `/v1/responses stream=true` returned `response.created -> in_progress -> output_text.delta/done -> completed -> done` frames for `RESPONSES_SSE_OK`.
+- Known unrelated gap: full `tests/sharedmodule/native-required-exports-sse-stream.spec.ts` currently has servertool/req_inbound assertion failures after native rebuild; SSE export-list subset passes and the failing assertions are not caused by this Chat SSE cutover.
+
 # 2026-07-02: provider-request replay snapshot capture verified
 
 - Slice: provider-request replay snapshots are no longer a blanket hard error; default snapshots still exclude provider-request, while explicit stage/force-local replay capture can persist final provider wire body through provider snapshot writer.
