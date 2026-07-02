@@ -923,6 +923,8 @@ Canonical types:
 Canonical builders:
 - `resolve_servertool_progress_tool_name_json`
 - `should_use_servertool_gold_progress_highlight_json`
+- `build_servertool_stop_entry_progress_event_json`
+- `build_servertool_stop_compare_progress_event_json`
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`

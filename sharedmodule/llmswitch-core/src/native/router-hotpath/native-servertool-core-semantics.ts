@@ -377,6 +377,11 @@ export interface ServertoolEnginePreflightPlan {
   };
 }
 
+export interface ServertoolEnginePreflightDecision {
+  result: ServertoolEnginePreflightPlan['result'];
+  shouldRunSideEffects: boolean;
+}
+
 export interface ServertoolEngineOrchestrationPreflightActionPlan {
   action: 'return_preflight_chat' | 'continue_engine';
 }
@@ -2603,6 +2608,26 @@ export function planServertoolEnginePreflightWithNative(input: {
     ...(logStopEntry ? { logStopEntry } : {}),
     ...(logStopCompare ? { logStopCompare } : {})
   };
+}
+
+export function resolveServertoolEnginePreflightDecisionWithNative(input: {
+  preflightAction: ServertoolEnginePreflightPlan;
+}): ServertoolEnginePreflightDecision {
+  switch (input.preflightAction.action) {
+    case 'return_original_chat':
+      return {
+        result: input.preflightAction.result,
+        shouldRunSideEffects: false
+      };
+    case 'return_original_chat_direct_passthrough':
+    case 'continue_to_engine':
+      return {
+        result: input.preflightAction.result,
+        shouldRunSideEffects: true
+      };
+    default:
+      throw new Error('[servertool] invalid engine preflight action');
+  }
 }
 
 export function planServertoolEngineOrchestrationPreflightActionWithNative(input: {

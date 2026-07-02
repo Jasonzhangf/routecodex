@@ -57,7 +57,7 @@ describe('stage logger release summary mode', () => {
     expect(String(logSpy.mock.calls[3]?.[0] ?? '')).toContain('\x1b[97mfinish_reason=tool_calls\x1b[0m');
   });
 
-  it('prints router-direct summaries in release mode', async () => {
+  it('does not print router-direct completed summaries in release mode', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
@@ -75,8 +75,7 @@ describe('stage logger release summary mode', () => {
       finishReason: 'tool_calls'
     });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    expect(String(logSpy.mock.calls[0]?.[0] ?? '')).toContain('[router-direct.send][req_router_direct] completed total=150ms');
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   it('prints session storm backoff observability events in release mode', async () => {

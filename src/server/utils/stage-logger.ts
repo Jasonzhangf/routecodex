@@ -585,7 +585,6 @@ function shouldLogReleaseSummaryStage(stage: string): boolean {
     || normalized === 'hub.response.completed'
     || normalized === 'response.completed'
     || normalized === 'provider.send.completed'
-    || normalized === 'router-direct.send.completed'
     || normalized === 'request.session_storm_backoff.recorded'
     || normalized === 'request.session_storm_backoff_wait'
     || normalized === 'request.session_storm_backoff_wait.completed';

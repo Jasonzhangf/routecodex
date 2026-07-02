@@ -85,4 +85,14 @@ describe('logRequestComplete', () => {
 
     expect(logSpy).not.toHaveBeenCalled();
   });
+
+  it('omits the standalone completed line when usage will emit terminal summary', () => {
+    logRequestComplete('/v1/responses', 'req-resp-usage-owned', 200, {
+      status: 'completed'
+    }, {
+      preserveTimingForUsage: true
+    });
+
+    expect(logSpy).not.toHaveBeenCalled();
+  });
 });

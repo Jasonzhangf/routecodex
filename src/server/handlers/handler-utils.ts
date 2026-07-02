@@ -389,12 +389,6 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
           typeof bag.type === 'string' && bag.type.trim() ? `type=${bag.type}` : undefined,
           typeof bag.rawInputItems === 'number' ? `rawInputItems=${bag.rawInputItems}` : undefined,
           typeof bag.preparedInputItems === 'number' ? `preparedInputItems=${bag.preparedInputItems}` : undefined,
-          formatCompactLogShape(bag.rawInputShape)
-            ? `rawInputShape=${formatCompactLogShape(bag.rawInputShape)}`
-            : undefined,
-          formatCompactLogShape(bag.preparedInputShape)
-            ? `preparedInputShape=${formatCompactLogShape(bag.preparedInputShape)}`
-            : undefined,
           typeof bag.plannedEntryMode === 'string' && bag.plannedEntryMode.trim()
             ? `plannedEntryMode=${bag.plannedEntryMode}`
             : undefined,
@@ -415,12 +409,18 @@ export function logRequestComplete(
   requestId: string,
   status: number,
   body?: unknown,
-  options?: { preserveTimingForUsage?: boolean }
+  options?: { preserveTimingForUsage?: boolean; suppressCompletedLog?: boolean }
 ): void {
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
   }
   const resolvedId = formatRequestId(requestId);
+  if (options?.suppressCompletedLog || options?.preserveTimingForUsage) {
+    if (!options?.preserveTimingForUsage) {
+      formatRequestTimingSummary(resolvedId, { terminal: true });
+    }
+    return;
+  }
   const timestamp = formatTimestamp();
   const finishReason = deriveFinishReason(body);
   const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';

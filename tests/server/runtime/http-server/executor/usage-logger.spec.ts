@@ -196,6 +196,50 @@ describe('usage logger timing summary', () => {
     expect(matches).toHaveLength(1);
   });
 
+  it('does not synthesize finish_reason=unknown when no terminal reason is available', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logUsageSummary('req_usage_missing_finish', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      routeName: 'coding',
+      poolId: 'coding-primary',
+      latencyMs: 120,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('[usage] req=');
+    expect(plain).not.toContain('finish_reason=unknown');
+    expect(plain).not.toContain('finish_reason=');
+  });
+
+  it('does not print n/a usage placeholders when upstream usage is absent', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logUsageSummary('req_usage_missing_tokens', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      routeName: 'coding',
+      poolId: 'coding-primary',
+      finishReason: 'stop',
+      latencyMs: 120
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('[usage] req=');
+    expect(plain).toContain('finish_reason=stop');
+    expect(plain).not.toContain('usage=in:n/a');
+    expect(plain).not.toContain('out:n/a');
+    expect(plain).not.toContain('cache=n/a/n/a');
+    expect(plain).not.toContain('total=n/a');
+    expect(plain).toContain('usage=unreported');
+  });
+
   it('keeps usage detail logging free of request metadata noise', async () => {
     process.env.NODE_ENV = 'development';
     process.env.ROUTECODEX_BUILD_MODE = 'release';

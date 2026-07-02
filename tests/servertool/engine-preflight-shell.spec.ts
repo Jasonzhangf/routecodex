@@ -4,6 +4,10 @@ const inspectStopGatewaySignalMock = jest.fn();
 const attachStopGatewayContextMock = jest.fn();
 const containsSyntheticRouteCodexControlTextMock = jest.fn(() => false);
 const planServertoolEnginePreflightWithNativeMock = jest.fn();
+const resolveServertoolEnginePreflightDecisionWithNativeMock = jest.fn((input: any) => ({
+  result: input.preflightAction.result,
+  shouldRunSideEffects: input.preflightAction.action !== 'return_original_chat'
+}));
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
@@ -24,6 +28,7 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
     planServertoolEnginePreflightWithNative: planServertoolEnginePreflightWithNativeMock,
+    resolveServertoolEnginePreflightDecisionWithNative: resolveServertoolEnginePreflightDecisionWithNativeMock,
   })
 );
 
@@ -34,6 +39,10 @@ const { runEnginePreflight } = await import(
 describe('engine-preflight-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    resolveServertoolEnginePreflightDecisionWithNativeMock.mockImplementation((input: any) => ({
+      result: input.preflightAction.result,
+      shouldRunSideEffects: input.preflightAction.action !== 'return_original_chat'
+    }));
     inspectStopGatewaySignalMock.mockReturnValue({
       observed: true,
       eligible: true,
@@ -82,12 +91,13 @@ describe('engine-preflight-shell', () => {
     expect(source).not.toContain('if (stopSignal.observed) {');
     expect(source).not.toContain("if (preflightAction.action === 'return_original_chat')");
     expect(source).not.toContain("if (preflightAction.action === 'return_original_chat_direct_passthrough')");
-    expect(source).toContain("case 'return_original_chat'");
-    expect(source).toContain("case 'return_original_chat_direct_passthrough'");
-    expect(source).toContain("case 'continue_to_engine'");
+    expect(source).not.toContain("case 'return_original_chat'");
+    expect(source).not.toContain("case 'return_original_chat_direct_passthrough'");
+    expect(source).not.toContain("case 'continue_to_engine'");
     expect(source).toContain('chat: args.chat');
     expect(source).toContain('stopSignal,');
-    expect(source).toContain('return preflightAction.result');
+    expect(source).toContain('resolveServertoolEnginePreflightDecisionWithNative');
+    expect(source).toContain('return preflightDecision.result');
     expect(source).toContain('preflightAction.attachStopGatewayContext === true');
     expect(source).toContain('preflightAction.logStopEntry');
     expect(source).toContain('preflightAction.logStopCompare');
@@ -101,7 +111,7 @@ describe('engine-preflight-shell', () => {
     expect(source).not.toContain('./orchestration-policy-block.js');
   });
 
-  test('fails fast on unknown native preflight action without reading action payload in TS', () => {
+  test('fails fast when native preflight decision rejects action', () => {
     const logStopEntry = jest.fn();
     const logStopCompare = jest.fn();
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
@@ -119,6 +129,9 @@ describe('engine-preflight-shell', () => {
       logStopCompare: {
         stage: 'entry'
       }
+    });
+    resolveServertoolEnginePreflightDecisionWithNativeMock.mockImplementation(() => {
+      throw new Error('[servertool] invalid engine preflight action');
     });
 
     expect(() =>

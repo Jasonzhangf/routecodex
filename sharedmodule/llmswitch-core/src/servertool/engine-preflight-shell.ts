@@ -7,7 +7,10 @@ import {
   attachStopGatewayContext,
   inspectStopGatewaySignal
 } from './metadata-center-carrier.js';
-import { planServertoolEnginePreflightWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  planServertoolEnginePreflightWithNative,
+  resolveServertoolEnginePreflightDecisionWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 type StopGatewayContext = ReturnType<typeof inspectStopGatewaySignal>;
 type EnginePreflightNativePlan = ReturnType<typeof planServertoolEnginePreflightWithNative>;
@@ -81,28 +84,19 @@ export function runEnginePreflight(args: {
     stopSignal,
     adapterContext: args.adapterContext
   });
-  switch (preflightAction.action) {
-    case 'return_original_chat':
-      return preflightAction.result as EnginePreflightOriginalChatResult;
-    case 'return_original_chat_direct_passthrough':
-      runPreflightSideEffects({
-        preflightAction,
-        stopSignal,
-        adapterContext: args.adapterContext,
-        logStopEntry: args.logStopEntry,
-        logStopCompare: args.logStopCompare
-      });
-      return preflightAction.result as EnginePreflightDirectPassthroughResult;
-    case 'continue_to_engine':
-      runPreflightSideEffects({
-        preflightAction,
-        stopSignal,
-        adapterContext: args.adapterContext,
-        logStopEntry: args.logStopEntry,
-        logStopCompare: args.logStopCompare
-      });
-      return preflightAction.result as EnginePreflightContinueResult;
-    default:
-      throw new Error('[servertool] invalid engine preflight action');
+  const preflightDecision = resolveServertoolEnginePreflightDecisionWithNative({
+    preflightAction
+  });
+  if (preflightDecision.shouldRunSideEffects) {
+    runPreflightSideEffects({
+      preflightAction,
+      stopSignal,
+      adapterContext: args.adapterContext,
+      logStopEntry: args.logStopEntry,
+      logStopCompare: args.logStopCompare
+    });
   }
+  return preflightDecision.result as EnginePreflightOriginalChatResult
+    | EnginePreflightDirectPassthroughResult
+    | EnginePreflightContinueResult;
 }

@@ -24446,3 +24446,16 @@ NODE_OPTIONS='--experimental-vm-modules'是本地调试ESM测试的正确方式�
 - Gate: `run-server-side-tool-engine-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the old action switches and direct prepass planner in this active shell, requiring the two native decision helpers.
 - Evidence: focused Jest `run-server-side-tool-engine-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 82/82; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
 - Remaining gap: this closes the run-engine shell action-switch slice only. Phase 1 still has active TS switches in auto-hook, engine orchestration/preflight, execution queue/stage, plus small carrier casts to classify or migrate before Hub Pipeline Phase 2.
+
+# 2026-07-03: request/usage console log cleanup verified live
+
+- Slice: request start logs no longer print raw/prepared input shape payload summaries; usage logs no longer synthesize finish_reason=unknown or n/a token placeholders; router-direct completed release-summary line is suppressed so terminal request info stays in the usage line.
+- Evidence: focused Jest request-start/request-complete/usage/stage logging PASS 36/36; npm run build:base PASS; global install version 0.90.3522; routecodex restart --port 5520 PASS; /health reports ready version 0.90.3522; live codex exec marker RCC_USAGE_LOG_VERIFY_20260703T064644 returned exactly and new server-4444.log lines contain no rawInputShape/preparedInputShape, finish_reason=unknown, n/a usage placeholders, or standalone router-direct completed marker.
+- Remaining gap: this slice only cleans request/usage console output; broader provider true-error propagation audit remains separate.
+
+# 2026-07-03: servertool engine-preflight action switch moved to native helper
+
+- Slice: `engine-preflight-shell.ts` no longer switches over `preflightAction.action`. TS now calls `resolveServertoolEnginePreflightDecisionWithNative()` for action/result mapping and keeps only stop-gateway side-effect IO (`attachStopGatewayContext`, stop entry/compare logging) driven by native decision flags.
+- Gate: `engine-preflight-shell.spec.ts`, `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the old preflight action case markers and require the native decision helper.
+- Evidence: focused Jest `engine-preflight-shell + engine.stopless-session-thin-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 88/88; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this closes the engine-preflight shell action-switch slice only. Phase 1 still has active TS switches in auto-hook, engine orchestration, execution queue/stage, plus small carrier casts to classify or migrate before Hub Pipeline Phase 2.

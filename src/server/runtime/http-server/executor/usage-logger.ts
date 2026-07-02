@@ -262,12 +262,22 @@ export function logUsageSummary(
   }
   const cacheRatio = computeProtocolAwareCacheHitRatio(info.usage, providerProtocol);
   const cacheValue = cacheRatio !== undefined ? `${(cacheRatio * 100).toFixed(1)}%` : '-';
-  const finishReason = info.finishReason && info.finishReason.trim() ? info.finishReason.trim() : 'unknown';
+  const finishReason = info.finishReason && info.finishReason.trim() ? info.finishReason.trim() : undefined;
   const usage = info.usage;
-  const inputTokens = usage?.prompt_tokens ?? 'n/a';
-  const outputTokens = usage?.completion_tokens ?? 'n/a';
-  const totalTokens = usage?.total_tokens ?? 'n/a';
-  const cacheReadTokens = usage?.cache_read_input_tokens ?? 'n/a';
+  const hasUsageMetrics = Boolean(
+    usage
+    && (
+      Number.isFinite(usage.prompt_tokens)
+      || Number.isFinite(usage.completion_tokens)
+      || Number.isFinite(usage.total_tokens)
+      || Number.isFinite(usage.cache_read_input_tokens)
+      || Number.isFinite(usage.cache_creation_input_tokens)
+    )
+  );
+  const inputTokens = usage?.prompt_tokens;
+  const outputTokens = usage?.completion_tokens;
+  const totalTokens = usage?.total_tokens;
+  const cacheReadTokens = usage?.cache_read_input_tokens;
   const route = info.routeName ?? '-';
   const entryPort = typeof info.entryPort === 'number' ? info.entryPort : undefined;
   const requestModel = typeof info.requestModel === 'string' && info.requestModel.trim() ? info.requestModel.trim() : '-';
@@ -296,10 +306,14 @@ export function logUsageSummary(
     formatTimingSuffix(timingSuffix, requestColor),
     hubStageTopSuffix.trim()
   ].filter(Boolean);
-  const cacheSummary = `${cacheReadTokens}/${inputTokens}(${cacheValue})`;
+  const cacheSummary = `${cacheReadTokens ?? 0}/${inputTokens ?? 0}(${cacheValue})`;
+  const usageSummary = hasUsageMetrics
+    ? `usage=in:${inputTokens ?? 0} out:${outputTokens ?? 0} cache=${cacheSummary} total=${totalTokens ?? ((inputTokens ?? 0) + (outputTokens ?? 0))}`
+    : 'usage=unreported';
+  const finishReasonSuffix = finishReason ? ` finish_reason=${finishReason}` : '';
   const lines = [
     `${requestColor}${colorizeNumericValues(
-      `[usage] req=${shortReq} project=${projectPort} route=${routeLabel} model=${requestModel}->${hitModel} usage=in:${inputTokens} out:${outputTokens} cache=${cacheSummary} total=${totalTokens} time=i:${formatMs(internalLatencyMs)} e:${formatMs(externalLatencyMs)} t:${latency}ms finish_reason=${finishReason}`,
+      `[usage] req=${shortReq} project=${projectPort} route=${routeLabel} model=${requestModel}->${hitModel} ${usageSummary} time=i:${formatMs(internalLatencyMs)} e:${formatMs(externalLatencyMs)} t:${latency}ms${finishReasonSuffix}`,
       requestColor
     )}${ANSI_RESET}`
   ];
