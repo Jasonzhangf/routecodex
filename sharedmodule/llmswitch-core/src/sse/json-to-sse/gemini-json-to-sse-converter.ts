@@ -72,7 +72,7 @@ export class GeminiJsonToSseConverter {
         reasoningTextPrefix: context.options.reasoningTextPrefix
       });
       const events = sequencer.sequenceResponse(response);
-      await writer.writeGeminiEvents(events);
+      await writer.writeGeminiEvents(events as any);
       this.updateStats(context, 'done');
       writer.complete();
     } catch (error) {

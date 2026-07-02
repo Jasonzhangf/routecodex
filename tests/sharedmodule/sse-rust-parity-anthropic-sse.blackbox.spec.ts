@@ -1,0 +1,133 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { describe, expect, it } from '@jest/globals';
+
+import { buildAnthropicSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.js';
+import { createAnthropicSequencer } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.js';
+import type { AnthropicMessageResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
+
+async function collectEvents(stream: AsyncIterable<unknown>): Promise<unknown[]> {
+  const events: unknown[] = [];
+  for await (const event of stream) {
+    events.push(event);
+  }
+  return events;
+}
+
+describe('Anthropic JSON to SSE Rust parity boundary', () => {
+  it('matches native sequence for text and tool_use blocks', async () => {
+    const response: AnthropicMessageResponse = {
+      id: 'msg_anthropic_sequence_text_tool',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-test',
+      content: [
+        { type: 'text', text: 'hello world' },
+        { type: 'tool_use', id: 'tool_1', name: 'get_weather', input: { city: 'SF' } }
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1, output_tokens: 2 }
+    };
+    const config = { chunkSize: 5, reasoningMode: 'channel' as const };
+    const sequencer = createAnthropicSequencer(config);
+
+    const tsEvents = await collectEvents(sequencer.sequenceResponse(response, 'req_anthropic_sequence_text_tool'));
+    const nativeEvents = buildAnthropicSseEventSequenceWithNative({ response, config });
+
+    expect(tsEvents).toEqual(nativeEvents);
+    expect(tsEvents.map((event: any) => event.type)).toEqual([
+      'message_start',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_delta',
+      'content_block_delta',
+      'content_block_stop',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop',
+      'message_delta',
+      'message_stop'
+    ]);
+    expect((tsEvents[2] as any).data.delta.text).toBe('hello');
+    expect((tsEvents[7] as any).data.delta.partial_json).toBe('{"city":"SF"}');
+  });
+
+  it('keeps Anthropic reasoning projection native-owned', async () => {
+    const response: AnthropicMessageResponse = {
+      id: 'msg_anthropic_reasoning',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-test',
+      content: [{ type: 'thinking', text: 'hidden plan', signature: 'sig_ignored_by_legacy_ts' }],
+      stop_reason: 'end_turn'
+    };
+    const config = {
+      chunkSize: 1024,
+      reasoningMode: 'text' as const,
+      reasoningTextPrefix: '[thought] '
+    };
+    const sequencer = createAnthropicSequencer(config);
+
+    const tsEvents = await collectEvents(sequencer.sequenceResponse(response, 'req_anthropic_reasoning'));
+    const nativeEvents = buildAnthropicSseEventSequenceWithNative({ response, config });
+
+    expect(tsEvents).toEqual(nativeEvents);
+    expect((tsEvents[1] as any).data.content_block.type).toBe('text');
+    expect((tsEvents[2] as any).data.delta).toEqual({
+      type: 'text_delta',
+      text: '[thought] hidden plan'
+    });
+    expect(JSON.stringify(tsEvents)).not.toContain('sig_ignored_by_legacy_ts');
+  });
+
+  it('fails fast through native when stop_reason is missing', async () => {
+    const response = {
+      id: 'msg_anthropic_missing_stop_reason',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-test',
+      content: [{ type: 'text', text: 'hello' }]
+    };
+    const sequencer = createAnthropicSequencer();
+
+    await expect(
+      collectEvents(sequencer.sequenceResponse(response as AnthropicMessageResponse, 'req_anthropic_missing_stop_reason'))
+    ).rejects.toThrow('Invalid Anthropic response: missing stop_reason');
+    expect(() => buildAnthropicSseEventSequenceWithNative({ response })).toThrow(
+      'Invalid Anthropic response: missing stop_reason'
+    );
+  });
+
+  it('fails fast through native when tool_result.tool_use_id is missing', async () => {
+    const response = {
+      id: 'msg_anthropic_missing_tool_use_id',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-test',
+      content: [{ type: 'tool_result', content: 'done' }],
+      stop_reason: 'end_turn'
+    };
+    const sequencer = createAnthropicSequencer();
+
+    await expect(
+      collectEvents(sequencer.sequenceResponse(response as AnthropicMessageResponse, 'req_anthropic_missing_tool_use_id'))
+    ).rejects.toThrow('Invalid Anthropic tool_result block: missing tool_use_id');
+    expect(() => buildAnthropicSseEventSequenceWithNative({ response })).toThrow(
+      'Invalid Anthropic tool_result block: missing tool_use_id'
+    );
+  });
+
+  it('keeps the TS Anthropic sequencer as a native-backed thin shell', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts'),
+      'utf8'
+    );
+
+    expect(source).toContain('buildAnthropicSseEventSequenceWithNative');
+    expect(source).not.toContain('dispatchReasoning');
+    expect(source).not.toContain('function createEvent');
+    expect(source).not.toContain('function chunkText');
+    expect(source).not.toContain('function normalizeToolInput');
+  });
+});

@@ -3767,14 +3767,15 @@ owners:
     status: active
     summary: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners"
     owner_kind: rust_ssot
-    owner_scope: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners; Gemini JSON->SSE sequence and SSE->JSON decode are Rust-owned and TS remains native wrapper / stream IO shell"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs
+    owner_scope: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners; Anthropic JSON->SSE sequence, Gemini JSON->SSE sequence, and Gemini SSE->JSON decode are Rust-owned and TS remains native wrapper / stream IO shell"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - AnthropicSseEvent
       - GeminiSseEvent
       - AnthropicMessageResponse
       - GeminiResponse
     canonical_builders:
+      - build_anthropic_sse_event_sequence_json
       - build_gemini_sse_event_sequence_json
       - build_gemini_json_from_sse_json
     allowed_paths:
@@ -3783,11 +3784,13 @@ owners:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/src/sse/shared/serializers/anthropic-event-serializer.ts
       - sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts
       - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
+      - tests/sharedmodule/sse-rust-parity-anthropic-sse.blackbox.spec.ts
       - tests/sharedmodule/sse-rust-parity-gemini-sse.blackbox.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
@@ -3796,6 +3799,7 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/hub/process
     required_tests:
       - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
+      - tests/sharedmodule/sse-rust-parity-anthropic-sse.blackbox.spec.ts
       - tests/sharedmodule/sse-rust-parity-gemini-sse.blackbox.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     required_gates:
@@ -3804,6 +3808,7 @@ owners:
     migration_target: rust
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners; shared registry/writer must not learn provider-specific branches."
+      - "Anthropic JSON->SSE message/content/reasoning/tool/stop event ordering is Rust-owned through `build_anthropic_sse_event_sequence_json`; `anthropic-sequencer.ts` may only call native and yield events with optional delay."
       - "Gemini JSON->SSE part/done event ordering and reasoning projection are Rust-owned through `build_gemini_sse_event_sequence_json`; `gemini-sequencer.ts` may only call native and yield events with optional delay."
       - "Gemini SSE->JSON data/done parse, text/reasoning aggregation, done metadata materialization, and malformed/missing-done fail-fast behavior are Rust-owned through `build_gemini_json_from_sse_json`; `gemini-sse-to-json-converter.ts` may only collect stream bytes and call native."
 

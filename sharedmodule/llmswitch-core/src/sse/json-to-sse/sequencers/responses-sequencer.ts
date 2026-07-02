@@ -5,17 +5,28 @@ import type {
   ResponsesSseEvent
 } from '../../types/index.js';
 import { buildResponsesSseEventSequenceWithNative } from '../../../native/router-hotpath/native-responses-sse-event-payload.js';
-import type { ResponsesEventGeneratorConfig, ResponsesEventGeneratorContext } from '../event-generators/responses.js';
-import { DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG } from '../event-generators/responses.js';
 
-export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesEventGeneratorConfig = {
-  ...DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
+export interface ResponsesSequencerConfig {
+  chunkSize: number;
+  enableTimestampGeneration: boolean;
+  enableSequenceNumbers: boolean;
+}
+
+export interface ResponsesSequencerContext {
+  requestId: string;
+  model: string;
+}
+
+export const DEFAULT_RESPONSES_SEQUENCER_CONFIG: ResponsesSequencerConfig = {
+  chunkSize: 0,
+  enableTimestampGeneration: true,
+  enableSequenceNumbers: true
 };
 
 export async function* sequenceResponse(
   response: ResponsesResponse,
-  context: ResponsesEventGeneratorContext,
-  config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
+  context: ResponsesSequencerContext,
+  config: ResponsesSequencerConfig = DEFAULT_RESPONSES_SEQUENCER_CONFIG
 ): AsyncGenerator<ResponsesSseEvent> {
   const events = buildResponsesSseEventSequenceWithNative({
     response,

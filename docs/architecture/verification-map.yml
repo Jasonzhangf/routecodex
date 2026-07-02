@@ -2099,10 +2099,13 @@ verification:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_sse_event_payload.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs
     contract:
       - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
+      - tests/sharedmodule/sse-rust-parity-anthropic-sse.blackbox.spec.ts
       - tests/sharedmodule/sse-rust-parity-gemini-sse.blackbox.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     integration: []
@@ -2113,6 +2116,7 @@ verification:
       - npm run build:base
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners."
+      - "Anthropic JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
       - "Gemini JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
       - "Gemini SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned; focused parity must prove TS converter and native decoder output/error behavior match."
 

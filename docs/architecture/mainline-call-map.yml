@@ -947,6 +947,18 @@ chains:
         semantic_output: "final ChatCompletionResponse with aggregated content/reasoning/tool/function deltas and strict terminal [DONE] validation"
         status: anchored
         note: "TS `ChatSseToJsonConverter` is a stream IO/timeout shell; Rust `build_chat_json_from_sse_json` owns SSE parse/materialize, usage normalization, tool/function argument aggregation, and incomplete stream fail-fast."
+      - step_id: anthropic-sse-01
+        from_node: HubRespOutbound04ClientSemantic
+        to_node: ServerRespOutbound05ClientFrame
+        caller_symbol: sequenceResponse
+        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts
+        callee_symbol: buildAnthropicSseEventSequenceWithNative
+        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
+        owner_feature_id: sse.anthropic_gemini_stream_projection
+        semantic_input: "validated Anthropic message response plus request-scoped AnthropicJsonToSseOptions"
+        semantic_output: "ordered AnthropicSseEvent stream for message/content/reasoning/tool/stop frames"
+        status: anchored
+        note: "TS `createAnthropicSequencer` is a thin wrapper around native `buildAnthropicSseEventSequenceWithNative`; Rust `build_anthropic_sse_event_sequence_json` owns Anthropic JSON->SSE event ordering, reasoning projection, chunking, and fail-fast validation."
       - step_id: gemini-sse-01
         from_node: HubRespOutbound04ClientSemantic
         to_node: ServerRespOutbound05ClientFrame

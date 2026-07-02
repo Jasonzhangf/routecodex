@@ -94,11 +94,12 @@ chains:
       project Rust-produced status and dry-run diagnostics without route
       recomputation.
   - chain_id: sse.chat_stream_projection.mainline
-    expected_total_edges: 4
-    min_anchored_edges: 4
+    expected_total_edges: 5
+    min_anchored_edges: 5
     max_partial_edges: 0
     max_binding_pending_edges: 0
     note: >
-      Chat JSON-to-SSE, Chat SSE-to-JSON, Gemini JSON-to-SSE, and Gemini
-      SSE-to-JSON projection edges are anchored to native/Rust owners; malformed
-      semantics must fail fast and must not synthesize fallback error frames.
+      Chat JSON-to-SSE, Chat SSE-to-JSON, Anthropic JSON-to-SSE, Gemini
+      JSON-to-SSE, and Gemini SSE-to-JSON projection edges are anchored to
+      native/Rust owners; malformed semantics must fail fast and must not
+      synthesize fallback error frames.

@@ -11,6 +11,7 @@ use chat_process_media_semantics::{
 use chat_web_search_intent::analyze_chat_web_search_intent;
 mod anthropic_openai_codec;
 mod anthropic_response_helper;
+mod anthropic_sse_event_payload;
 mod chat_governed_filter_payload;
 mod chat_node_result_semantics;
 mod chat_process_media_semantics;
@@ -2252,14 +2253,26 @@ pub fn build_chat_json_from_sse_json(input_json: String) -> NapiResult<String> {
 }
 
 #[napi(js_name = "buildGeminiSseEventSequenceJson")]
-pub fn build_gemini_sse_event_sequence_json(input_json: String) -> NapiResult<String> {
+pub fn napi_build_gemini_sse_event_sequence_json(input_json: String) -> NapiResult<String> {
     gemini_sse_event_payload::build_gemini_sse_event_sequence_json(input_json)
         .map_err(napi::Error::from_reason)
 }
 
 #[napi(js_name = "buildGeminiJsonFromSseJson")]
-pub fn build_gemini_json_from_sse_json(input_json: String) -> NapiResult<String> {
+pub fn napi_build_gemini_json_from_sse_json(input_json: String) -> NapiResult<String> {
     gemini_sse_event_payload::build_gemini_json_from_sse_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildAnthropicSseEventSequenceJson")]
+pub fn napi_build_anthropic_sse_event_sequence_json(input_json: String) -> NapiResult<String> {
+    anthropic_sse_event_payload::build_anthropic_sse_event_sequence_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildAnthropicJsonFromSseJson")]
+pub fn napi_build_anthropic_json_from_sse_json(input_json: String) -> NapiResult<String> {
+    anthropic_sse_event_payload::build_anthropic_json_from_sse_json(input_json)
         .map_err(napi::Error::from_reason)
 }
 

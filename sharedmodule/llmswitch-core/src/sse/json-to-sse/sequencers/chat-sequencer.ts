@@ -4,13 +4,12 @@
  */
 
 import type { ChatCompletionResponse, ChatReasoningMode, ChatSseEvent } from '../../types/index.js';
-import {
-  DEFAULT_CHAT_EVENT_GENERATOR_CONFIG,
-  type ChatEventGeneratorConfig
-} from '../event-generators/chat.js';
 import { buildChatSseEventSequenceWithNative } from '../../../native/router-hotpath/native-chat-sse-event-payload.js';
 
-export interface ChatSequencerConfig extends ChatEventGeneratorConfig {
+export interface ChatSequencerConfig {
+  chunkSize: number;
+  chunkDelayMs: number;
+  enableTimestampGeneration: boolean;
   includeSequenceNumbers: boolean;
   enableDelay: boolean;
   validateOrder: boolean;
@@ -19,7 +18,9 @@ export interface ChatSequencerConfig extends ChatEventGeneratorConfig {
 }
 
 export const DEFAULT_CHAT_SEQUENCER_CONFIG: ChatSequencerConfig = {
-  ...DEFAULT_CHAT_EVENT_GENERATOR_CONFIG,
+  chunkSize: 0,
+  chunkDelayMs: 0,
+  enableTimestampGeneration: true,
   includeSequenceNumbers: true,
   enableDelay: false,
   validateOrder: true,
