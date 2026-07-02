@@ -199,7 +199,7 @@ describe('response-stage-prepass-shell', () => {
     expect(source).not.toContain('responseHookMatched !== true');
     expect(source).not.toContain('}) as Record<string, unknown>');
     expect(source).not.toContain('responseStageGatePlan: Record<string, unknown>');
-    expect(source).toContain('type NativeServertoolResponseStageGate');
+    expect(source).toContain('NativeServertoolResponseStageGate');
   });
 
   test('fails fast for unknown prepass native runtime action', async () => {

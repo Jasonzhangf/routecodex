@@ -1,3 +1,10 @@
+# 2026-07-02: servertool response-stage gate plan typed
+
+- Slice: `response-stage-prepass-shell.ts`, `response-stage-auto-hook-shell.ts`, `response-stage-finalize-shell.ts`, and `execution-stage-shell.ts` now carry `NativeServertoolResponseStageGate` instead of loose `Record<string, unknown>`; prepass no longer casts native gate output with `as Record<string, unknown>`.
+- Gate: `response-stage-prepass-shell.spec.ts`, `response-stage-finalize-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old gate-plan record/cast markers and require typed native gate plan usage.
+- Evidence: focused Jest `execution-stage-shell + response-stage-prepass-shell + response-stage-finalize-shell + servertool-active-orchestration-audit` PASS 61/61; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `git diff --check` PASS.
+- Remaining gap: `verify:architecture-mainline-call-map` still fails on an existing provider-response anchor drift (`readMetadataCenterRequestTruth` not found in `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`); not part of this slice.
+
 # 2026-07-02: servertool engine contextBase cast removed
 
 - Slice: `run-server-side-tool-engine-shell.ts` no longer imports `ServerToolHandlerContext` or casts `entryContext.contextBase as ServerToolHandlerContext`; `ServerToolHandlerContext.toolCall` is optional, so the prepass shell can consume the typed entry context directly.

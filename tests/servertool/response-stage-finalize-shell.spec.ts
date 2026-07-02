@@ -140,7 +140,7 @@ describe('response-stage-finalize-shell', () => {
     );
 
     expect(source).toContain('responseStageGatePlan: args.responseStageGatePlan');
-    expect(source).toContain('type NativeServertoolResponseStageGate');
+    expect(source).toContain('NativeServertoolResponseStageGate');
     expect(source).not.toContain('responseStageGatePlan: Record<string, unknown>');
     expect(source).toContain("contextBase: Omit<ServerToolHandlerContext, 'toolCall'>");
     expect(source).not.toContain('initialResponseStageGatePlan');

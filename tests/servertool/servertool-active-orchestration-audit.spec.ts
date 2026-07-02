@@ -288,7 +288,7 @@ const TARGETS = [
     ],
     required: [
       "contextBase: Omit<ServerToolHandlerContext, 'toolCall'>",
-      'type NativeServertoolResponseStageGate',
+      'NativeServertoolResponseStageGate',
       'runServertoolResponseStageAutoHookPass',
       'responseStageGatePlan: args.responseStageGatePlan',
       'planServertoolResponseStageRuntimeActionWithNative',
@@ -339,7 +339,7 @@ const TARGETS = [
     ],
     required: [
       'planServertoolResponseStageGateWithNative',
-      'type NativeServertoolResponseStageGate',
+      'NativeServertoolResponseStageGate',
       'planServertoolResponseStageRuntimeActionWithNative',
       'switch (prepassRuntimeAction.action)',
       'switch (responseStageAutoHook.action)',

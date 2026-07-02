@@ -13,6 +13,7 @@ import {
   buildServertoolCliProjectionRuntimeBranchWithNative,
   planServertoolExecutionBranchWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export async function runServertoolExecutionStage(args: {
   options: ServerSideToolEngineOptions;
@@ -23,7 +24,7 @@ export async function runServertoolExecutionStage(args: {
   excludeToolCallNames: Set<string> | null;
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
-  responseStageGatePlan: Record<string, unknown>;
+  responseStageGatePlan: NativeServertoolResponseStageGate;
 }): Promise<ServerSideToolEngineResult> {
   const { dispatchPlan } = prepareServertoolDispatchStage({
     options: args.options,

@@ -6185,7 +6185,7 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
-    'type NativeServertoolResponseStageGate'
+    'NativeServertoolResponseStageGate'
   );
   assertContains(
     'servertool-response-stage-finalize-shell-owner',
@@ -6270,7 +6270,7 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-prepass-shell-owner',
     TS_RESPONSE_STAGE_PREPASS_SHELL,
     responseStagePrePassShell,
-    'type NativeServertoolResponseStageGate'
+    'NativeServertoolResponseStageGate'
   );
   assertContains(
     'servertool-response-stage-prepass-shell-owner',
