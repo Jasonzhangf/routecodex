@@ -1,3 +1,8 @@
+# 2026-07-02: servertool execution loop effect casts removed
+- Slice: `native-servertool-core-semantics.ts` now types `ServertoolExecutionLoopEffectBasePlan.toolCall` / `execution` as native executed-record shapes; `execution-queue-shell.ts` no longer casts `errorEffectPlan` / `noopEffectPlan` before appending executed records.
+- Gate: `execution-queue-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the four effect-plan cast markers and require direct typed effect-plan fields.
+- Evidence: focused Jest `execution-queue-shell + execution-dispatch-outcome-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 84/84; sharedmodule `tsc` PASS after restoring type-only exported alias import; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool response-stage context cast removed
 - Slice: `execution-stage-shell.ts` no longer casts `args.contextBase as ServerToolHandlerContext` when finalizing response stage; `response-stage-finalize-shell.ts` and `response-stage-auto-hook-shell.ts` now accept `Omit<ServerToolHandlerContext, 'toolCall'>`, matching the actual context base shape.
 - Gate: `execution-stage-shell.spec.ts`, `response-stage-finalize-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the cast marker and require the narrowed context type.

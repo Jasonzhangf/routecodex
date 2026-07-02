@@ -1,8 +1,5 @@
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import type {
-  ServerSideToolEngineOptions,
-  ServerToolExecution
-} from './types.js';
+import type { ServerSideToolEngineOptions } from './types.js';
 import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {
   planServertoolNoopOutcomeWithNative,
@@ -116,8 +113,8 @@ export async function runServertoolIoExecutionQueue(args: {
         replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
         executionState = appendServertoolExecutedRecordWithNative({
           state: executionState,
-          toolCall: errorEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall'],
-          execution: errorEffectPlan.execution as ServerToolExecution
+          toolCall: errorEffectPlan.toolCall,
+          execution: errorEffectPlan.execution
         });
         break;
       }
@@ -154,8 +151,8 @@ export async function runServertoolIoExecutionQueue(args: {
     });
     executionState = appendServertoolExecutedRecordWithNative({
       state: executionState,
-      toolCall: noopEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall'],
-      execution: noopEffectPlan.execution as ServerToolExecution
+      toolCall: noopEffectPlan.toolCall,
+      execution: noopEffectPlan.execution
     });
   }
 

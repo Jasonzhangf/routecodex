@@ -565,6 +565,11 @@
 - `ResponsesReasoningItem.content` may be absent, but if present it must be an array; non-array content now fails fast in the Rust SSE event payload descriptor owner with `Invalid Responses reasoning content: expected array`.
 - The old TS generator fallback `Array.isArray(reasoning.content) ? reasoning.content : []` is forbidden by `verify:sse-architecture-boundary`.
 - Verification: focused Rust/Jest, SSE gates, typechecks, native hotpath build, source replay, and `build:base` passed; current 4444 provider-response samples still lack SSE wire payload fields for real wire replay.
+# 2026-07-02: servertool execution loop effect casts removed
+- Verified slice: `execution-queue-shell.ts` no longer casts Rust-owned execution loop effect plans into executed-record shapes; `native-servertool-core-semantics.ts` now exposes effect plan `toolCall` / `execution` with the native executed-record types consumed by `appendServertoolExecutedRecordWithNative`.
+- Verification: focused Jest 84/84 passed, sharedmodule `tsc` passed, `verify:servertool-rust-only` passed, `verify:function-map-compile-gate` passed, `verify:architecture-mainline-call-map` passed, `git diff --check` passed.
+- Reusable rule: if Rust/native wrapper validates a payload shape, type the wrapper output to the consumer contract and remove call-site casts instead of adding TS guard logic.
+
 # 2026-07-02: servertool response-stage context cast removed
 - Verified slice: `execution-stage-shell.ts` no longer casts response-stage context with `as ServerToolHandlerContext`; response-stage finalize and auto-hook pass now accept `Omit<ServerToolHandlerContext, 'toolCall'>`.
 - Verification: focused Jest 64/64 passed, sharedmodule `tsc` passed, `verify:servertool-rust-only` passed, `verify:function-map-compile-gate` passed, `verify:architecture-mainline-call-map` passed, `git diff --check` passed.

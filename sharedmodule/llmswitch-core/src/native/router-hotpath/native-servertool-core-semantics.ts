@@ -376,17 +376,8 @@ function parseNativeJson(capability: string, raw: unknown): unknown {
 }
 
 export interface ServertoolExecutionLoopEffectBasePlan {
-  toolCall: {
-    id: string;
-    name: string;
-    arguments: string;
-    executionMode?: string;
-    stripAfterExecute?: boolean;
-  };
-  execution: {
-    flowId: string;
-    followup?: unknown;
-  };
+  toolCall: NativeServertoolExecutedRecord['toolCall'];
+  execution: NativeServertoolExecutionSummary;
 }
 
 export interface ServertoolExecutionLoopHandlerErrorEffectPlan extends ServertoolExecutionLoopEffectBasePlan {
@@ -2676,8 +2667,8 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
       id: toolCall.id,
       name: toolCall.name,
       arguments: toolCall.arguments,
-      ...(typeof toolCall.executionMode === 'string' ? { executionMode: toolCall.executionMode } : {}),
-      ...(typeof toolCall.stripAfterExecute === 'boolean' ? { stripAfterExecute: toolCall.stripAfterExecute } : {})
+      executionMode: typeof toolCall.executionMode === 'string' ? toolCall.executionMode : '',
+      stripAfterExecute: typeof toolCall.stripAfterExecute === 'boolean' ? toolCall.stripAfterExecute : false
     },
     execution: {
       flowId: execution.flowId

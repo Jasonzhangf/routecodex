@@ -2794,6 +2794,10 @@ function checkServertoolExecutionDispatchRustOwner() {
     'Boolean(result)',
     'planned ? await materializeServertoolPlannedResult',
     "nativeExecutionMode: entry?.registration.executionMode ?? ''",
+    "toolCall: errorEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall']",
+    'execution: errorEffectPlan.execution as ServerToolExecution',
+    "toolCall: noopEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall']",
+    'execution: noopEffectPlan.execution as ServerToolExecution',
     'if (lastErr) {',
     'Boolean(lastErr)',
     "String(lastErr ?? 'unknown')",
@@ -2833,6 +2837,10 @@ function checkServertoolExecutionDispatchRustOwner() {
     'hasMaterializedResult: result != null',
     'switch (initialLoopActionPlan.action)',
     'switch (resultLoopActionPlan.action)',
+    'toolCall: errorEffectPlan.toolCall',
+    'execution: errorEffectPlan.execution',
+    'toolCall: noopEffectPlan.toolCall',
+    'execution: noopEffectPlan.execution',
   ]) {
     assertContains(
       'servertool-execution-dispatch-rust-owner',
