@@ -47,7 +47,7 @@ function applyEventTypeValidation(
   result: SseParseResult,
   config: SseParserConfig
 ): SseParseResult {
-  const eventType = result.event?.event;
+  const eventType = result.event?.type;
   if (!result.success || typeof eventType !== 'string') {
     return result;
   }

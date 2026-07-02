@@ -3637,6 +3637,7 @@ owners:
       - isAllowedEventType
     allowed_paths:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/shared/sse-event-validator.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
       - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
