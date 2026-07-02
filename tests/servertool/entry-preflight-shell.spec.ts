@@ -1,6 +1,34 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolEntryPreflightWithNativeMock = jest.fn();
+const resolveServertoolEntryPreflightWithNativeMock = jest.fn((input: any) => {
+  const plan = planServertoolEntryPreflightWithNativeMock({
+    hasBaseObject: input.baseObject != null,
+    adapterClientDisconnected: input.adapterClientDisconnected,
+    chatResponse: input.chatResponse
+  });
+  switch (plan.action) {
+    case 'return_passthrough_non_object_chat':
+      return {
+        action: 'return_result',
+        result: plan.passthroughResult
+      };
+    case 'throw_client_disconnected':
+      return {
+        action: 'throw_error',
+        errorPlan: planServertoolClientDisconnectedErrorWithNativeMock({
+          requestId: input.requestId
+        })
+      };
+    case 'continue_to_tool_flow':
+      return {
+        action: 'continue',
+        baseObject: input.baseObject
+      };
+    default:
+      throw new Error('[servertool] invalid entry preflight action');
+  }
+});
 const isAdapterClientDisconnectedWithNativeMock = jest.fn(() => false);
 const readServertoolEntryBaseObjectWithNativeMock = jest.fn((chatResponse: unknown) =>
   chatResponse != null && typeof chatResponse === 'object' && !Array.isArray(chatResponse)
@@ -25,6 +53,7 @@ jest.unstable_mockModule(
   () => ({
     isAdapterClientDisconnectedWithNative: isAdapterClientDisconnectedWithNativeMock,
     planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
+    resolveServertoolEntryPreflightWithNative: resolveServertoolEntryPreflightWithNativeMock,
     readServertoolEntryBaseObjectWithNative: readServertoolEntryBaseObjectWithNativeMock,
     planServertoolClientDisconnectedErrorWithNative: planServertoolClientDisconnectedErrorWithNativeMock
   })
@@ -57,24 +86,26 @@ describe('entry-preflight-shell', () => {
       )
     );
 
-    expect(source).toContain('planServertoolEntryPreflightWithNative');
+    expect(source).not.toContain('planServertoolEntryPreflightWithNative');
+    expect(source).toContain('resolveServertoolEntryPreflightWithNative');
     expect(source).toContain('isAdapterClientDisconnectedWithNative(args.options.adapterContext)');
     expect(source).toContain('readServertoolEntryBaseObjectWithNative(args.options.chatResponse)');
-    expect(source).toContain('planServertoolClientDisconnectedErrorWithNative');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
     expect(source).not.toContain('Boolean(base)');
     expect(source).not.toContain("args.options.chatResponse && typeof args.options.chatResponse === 'object'");
     expect(source).not.toContain("args.options.chatResponse != null && typeof args.options.chatResponse === 'object'");
     expect(source).not.toContain('args.options.chatResponse as JsonObject');
     expect(source).not.toContain('base as JsonObject');
-    expect(source).toContain('hasBaseObject: base != null');
+    expect(source).not.toContain('hasBaseObject: base != null');
+    expect(source).toContain('baseObject: base');
     expect(source).not.toContain("if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')");
     expect(source).not.toContain("if (entryPreflightPlan.action === 'throw_client_disconnected')");
-    expect(source).toContain('switch (entryPreflightPlan.action)');
+    expect(source).not.toContain('switch (entryPreflightPlan.action)');
     expect(source).not.toContain('entryPreflightPlan as { action: unknown }');
     expect(source).not.toContain('result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }');
     expect(source).toContain('chatResponse: args.options.chatResponse');
-    expect(source).toContain('result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult');
+    expect(source).not.toContain('result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult');
+    expect(source).toContain('entryPreflightDecision.errorPlan');
     expect(source).not.toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
     expect(source).not.toContain('const passthroughResult =');
   });

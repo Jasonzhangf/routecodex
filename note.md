@@ -1,3 +1,10 @@
+# 2026-07-03: servertool entry-preflight action switch moved to native helper
+
+- Slice: `entry-preflight-shell.ts` no longer switches over `entryPreflightPlan.action`, constructs passthrough result projection, or builds client-disconnect error plan in TS. TS now reads the base object, calls `resolveServertoolEntryPreflightWithNative()`, and only throws `createServertoolProviderProtocolErrorFromPlan(entryPreflightDecision.errorPlan)` when native requests an error.
+- Gate: `entry-preflight-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the old `entryPreflightPlan` switch/direct passthrough/disconnect markers and require the native helper path.
+- Evidence: focused Jest `entry-preflight-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge + run-server-side-tool-engine-shell` PASS 86/86; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this closes one Phase 1 entry-preflight TS switch slice only. Remaining servertool Phase 1 switches/casts still need classification or migration before Phase 1 can close; Hub Pipeline, Virtual Router, aggregate build, and live/replay remain open.
+
 # 2026-07-03: servertool engine-selection after-run switch moved to native helper
 
 - Slice: `engine-selection-block.ts` no longer switches over `afterRunPlan.action`. TS now calls `resolveEngineSelectionAfterRunWithNative()` and only performs the optional rerun IO when native returns `rerunOverrides`; the action validation and invalid-action error stay in the native wrapper.

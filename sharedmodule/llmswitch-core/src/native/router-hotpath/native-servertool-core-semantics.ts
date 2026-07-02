@@ -591,6 +591,20 @@ export type ServertoolEntryPreflightPlan =
       action: 'throw_client_disconnected' | 'continue_to_tool_flow';
     };
 
+export type ServertoolEntryPreflightDecision =
+  | {
+      action: 'return_result';
+      result: ServerSideToolEngineResult;
+    }
+  | {
+      action: 'throw_error';
+      errorPlan: ReturnType<typeof planServertoolClientDisconnectedErrorWithNative>;
+    }
+  | {
+      action: 'continue';
+      baseObject: JsonObject;
+    };
+
 export type ServertoolHandlerMaterializationPlan =
   | {
       action: 'finalize_without_backend';
@@ -3658,6 +3672,43 @@ export function readServertoolEntryBaseObjectWithNative(chatResponse: unknown): 
     return null;
   }
   return chatResponse as JsonObject;
+}
+
+export function resolveServertoolEntryPreflightWithNative(input: {
+  requestId: string;
+  baseObject: JsonObject | null;
+  adapterClientDisconnected: boolean;
+  chatResponse: unknown;
+}): ServertoolEntryPreflightDecision {
+  const plan = planServertoolEntryPreflightWithNative({
+    hasBaseObject: input.baseObject != null,
+    adapterClientDisconnected: input.adapterClientDisconnected,
+    chatResponse: input.chatResponse
+  });
+  switch (plan.action) {
+    case 'return_passthrough_non_object_chat':
+      return {
+        action: 'return_result',
+        result: plan.passthroughResult as ServerSideToolEngineResult
+      };
+    case 'throw_client_disconnected':
+      return {
+        action: 'throw_error',
+        errorPlan: planServertoolClientDisconnectedErrorWithNative({
+          requestId: input.requestId
+        })
+      };
+    case 'continue_to_tool_flow':
+      if (input.baseObject == null) {
+        throw new Error('[servertool] invalid entry preflight continue without base object');
+      }
+      return {
+        action: 'continue',
+        baseObject: input.baseObject
+      };
+    default:
+      throw new Error('[servertool] invalid entry preflight action');
+  }
 }
 
 export interface ServertoolEntryContextPlan {

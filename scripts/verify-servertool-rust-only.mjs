@@ -3923,6 +3923,12 @@ function checkServertoolEntryPreflightRustOwner() {
     'servertool-entry-preflight-native-bridge',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeWrapper,
+    'resolveServertoolEntryPreflightWithNative'
+  );
+  assertContains(
+    'servertool-entry-preflight-native-bridge',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeWrapper,
     'readServertoolEntryBaseObjectWithNative'
   );
   assertContains(
@@ -3953,7 +3959,7 @@ function checkServertoolEntryPreflightRustOwner() {
     'servertool-entry-preflight-ts-thin-shell',
     TS_ENTRY_PREFLIGHT_SHELL,
     readRequired(TS_ENTRY_PREFLIGHT_SHELL),
-    'hasBaseObject: base != null'
+    'resolveServertoolEntryPreflightWithNative'
   );
   for (const marker of [
     'Boolean(base)',
@@ -3962,6 +3968,10 @@ function checkServertoolEntryPreflightRustOwner() {
     'args.options.chatResponse as JsonObject',
     'base as JsonObject',
     'entryPreflightPlan as { action: unknown }',
+    'planServertoolEntryPreflightWithNative',
+    'planServertoolClientDisconnectedErrorWithNative',
+    'switch (entryPreflightPlan.action)',
+    'result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult',
   ]) {
     if (!readRequired(TS_ENTRY_PREFLIGHT_SHELL).includes(marker)) {
       continue;
@@ -5581,14 +5591,11 @@ function checkServertoolRustOutcomeCloseout() {
   const entryPreflightShell = readRequired(TS_ENTRY_PREFLIGHT_SHELL);
   for (const marker of [
     'export function runServertoolEntryPreflight(',
-    'planServertoolEntryPreflightWithNative',
-    'planServertoolClientDisconnectedErrorWithNative',
+    'resolveServertoolEntryPreflightWithNative',
     'createServertoolProviderProtocolErrorFromPlan',
     'readServertoolEntryBaseObjectWithNative(args.options.chatResponse)',
-    'hasBaseObject: base != null',
-    'switch (entryPreflightPlan.action)',
     'chatResponse: args.options.chatResponse',
-    'result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult'
+    'entryPreflightDecision.errorPlan'
   ]) {
     if (!entryPreflightShell.includes(marker)) {
       fail(
