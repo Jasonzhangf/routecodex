@@ -909,7 +909,13 @@ export class HubRequestExecutor implements RequestExecutor {
           routePool: routePoolForAttempt,
           excludedProviderKeys,
         });
-        const routePoolIsAuthoritativeForAttempt = initialRoutePool !== null;
+        const routePoolIsAuthoritativeForAttempt =
+          routePoolForAttempt.length > 1
+          || (
+            routePoolForAttempt.length === 1
+            && defaultTierAvailableForAttempt === false
+            && excludedProviderKeys.size > 0
+          );
         const concurrencyScopeKey =
           typeof target.concurrencyScopeKey === 'string' && target.concurrencyScopeKey.trim()
             ? target.concurrencyScopeKey.trim()

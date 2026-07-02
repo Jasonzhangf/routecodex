@@ -487,6 +487,102 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
+  test('provider failure does not retry the same provider from an observed singleton routePool', async () => {
+    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
+    const providerA = 'primary.key1.gpt-5.5';
+    const providerB = 'backup.key1.gpt-5.5';
+
+    const failingProcess = jest.fn(async () => {
+      throw Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
+        statusCode: 525,
+        code: 'HTTP_525',
+        upstreamCode: 'HTTP_525'
+      });
+    });
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+    const handles = new Map<string, ProviderHandle>([
+      [providerA, buildHandle(providerA, failingProcess, 'openai-chat')],
+      [providerB, buildHandle(providerB, successProcess, 'openai-chat')]
+    ]);
+    const selectedProviders: string[] = [];
+    const metadataSeenByAttempt: Array<Record<string, unknown> | undefined> = [];
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+        );
+        const selected = excluded.has(providerA) ? providerB : providerA;
+        selectedProviders.push(selected);
+        metadataSeenByAttempt.push(input?.metadata);
+        return {
+          requestId: input.id,
+          providerPayload: { model: 'gpt-5.5', messages: [{ role: 'user', content: 'ping' }] },
+          target: {
+            providerKey: selected,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: selected
+          },
+          routingDecision: {
+            routeName: 'tools',
+            providerProtocol: 'openai-chat',
+            pool: [selected]
+          },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    try {
+      const executor = createRequestExecutor({
+        runtimeManager,
+        getHubPipeline: () => pipeline as any,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage: jest.fn(),
+        stats: new StatsManager()
+      });
+      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+        status: 200,
+        body: buildMinimalResponsesSuccessBody('resp_ok_after_switch', 'ok')
+      });
+
+      const result = await executor.execute({
+        requestId: 'req-observed-singleton-routepool-switches-provider',
+        entryEndpoint: '/v1/chat/completions',
+        body: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: 'ping' }],
+          stream: false
+        },
+        headers: {},
+        metadata: {}
+      });
+
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(selectedProviders).toEqual([providerA, providerB]);
+      expect(failingProcess).toHaveBeenCalledTimes(1);
+      expect(successProcess).toHaveBeenCalledTimes(1);
+      expect(pipeline.execute).toHaveBeenCalledTimes(2);
+      expect(metadataSeenByAttempt[1]?.excludedProviderKeys).toEqual([providerA]);
+    } finally {
+      if (previousMaxAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
+      }
+    }
+  });
+
   test('clears router-direct preselectedRoute before provider failure reroute so Hub can reselect tokenrelay', async () => {
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '3';
