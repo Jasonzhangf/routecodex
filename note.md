@@ -6,6 +6,15 @@
 - Evidence: focused red/green `executor-metadata.spec.ts -t "preserves providerProtocol across retry attempts while releasing provider pins"` PASS; `retry-execution-plan.spec.ts` PASS 16/16; `tsc -p tsconfig.json --noEmit` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS for changed priority files.
 - Remaining gap: no live 5555 replay has been run in this slice; current evidence is code/test/gate only.
 
+# 2026-07-02: priority forwarder retry routePool expansion
+
+- Symptom: priority mode could keep hitting the same resolved provider after provider execution failure, especially when the configured route pool contained a logical `fwd.*` forwarder target rather than real provider keys.
+- Root cause: Rust VR already applied `excludedProviderKeys` to real forwarder targets during selection, but `SelectionResult.routePool` exposed the logical forwarder id to the executor. Executor retry/exhaustion logic then compared a real failed provider key against a logical `fwd.*` pool and could misjudge whether alternatives existed / whether the current provider was last.
+- Fix in progress: `ForwarderRegistry::expand_target_keys()` expands enabled forwarder targets; VR selection now emits executor-facing `routePool` as real provider keys while preserving `pool` as the configured logical pool. Added forward/reverse Rust tests for priority forwarder retry switching and last-provider exhaustion.
+- Red evidence: clean temporary worktree at HEAD `ce8caa3c9` with only the new priority forwarder retry test applied failed as expected: `priority_forwarder_retry_exclusion_selects_next_real_provider` saw `routePool=["fwd.gpt.gpt-test"]` instead of real provider keys.
+- Green evidence: clean temporary worktree at HEAD `ce8caa3c9` with the full priority patch applied ran `cargo test -p router-hotpath-napi priority_forwarder_retry_exclusion --lib -- --nocapture` PASS: 2 passed, 0 failed.
+- Main worktree validation blocker: unrelated dirty `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs` references missing `anthropic_sse_event_payload`, so main-worktree Rust build is currently blocked until that separate SSE slice is completed or removed.
+
 # 2026-07-02: 5520 GPT forwarder routing update
 
 - User request: temporarily remove `ykk` from 5520 GPT routes; make `gpt-5.5` priority `cc -> asxs -> XL -> 1token`; make mini mainly `asxs -> XL`.

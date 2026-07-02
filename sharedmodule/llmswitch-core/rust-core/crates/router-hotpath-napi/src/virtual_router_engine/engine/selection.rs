@@ -231,6 +231,27 @@ fn dedupe_candidate_order(candidates: Vec<String>) -> Vec<String> {
     out
 }
 
+fn expand_route_pool_targets_for_execution_decision(
+    forwarder_registry: &crate::virtual_router_engine::forwarder::ForwarderRegistry,
+    targets: &[String],
+) -> Vec<String> {
+    let mut expanded = Vec::new();
+    for target in targets {
+        if let Some(keys) = forwarder_registry.expand_target_keys(target) {
+            for key in keys {
+                if !expanded.contains(&key) {
+                    expanded.push(key);
+                }
+            }
+            continue;
+        }
+        if !expanded.contains(target) {
+            expanded.push(target.clone());
+        }
+    }
+    expanded
+}
+
 fn preserve_priority_context_candidates(
     available: &[String],
     safe_context: &[String],
@@ -633,6 +654,10 @@ impl VirtualRouterEngineCore {
                 if pool_candidate_targets.is_empty() {
                     continue;
                 }
+                let execution_route_pool = expand_route_pool_targets_for_execution_decision(
+                    &self.forwarder_registry,
+                    &pool.targets,
+                );
                 let mut floor_candidates = apply_non_availability_filters(
                     &self.provider_registry,
                     &pool_candidate_targets,
@@ -752,7 +777,7 @@ impl VirtualRouterEngineCore {
                                     filtered_candidates[0].clone(),
                                     route_name.to_string(),
                                     pool.targets.clone(),
-                                    pool.targets.clone(),
+                                    execution_route_pool.clone(),
                                     Some(pool.id.clone()),
                                 )
                                 .with_route_params(pool.route_params.clone()),
@@ -818,7 +843,7 @@ impl VirtualRouterEngineCore {
                         key,
                         route_name.to_string(),
                         pool.targets.clone(),
-                        pool.targets.clone(),
+                        execution_route_pool.clone(),
                         Some(pool.id.clone()),
                     )
                     .with_route_params(pool.route_params.clone())
@@ -4058,5 +4083,165 @@ mod tests {
         });
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
+    }
+
+    #[test]
+    fn priority_forwarder_retry_exclusion_selects_next_real_provider() {
+        let mut core = VirtualRouterEngineCore::new();
+        let config = json!({
+            "providers": {
+                "primary.key1.gpt-test": {
+                    "providerKey": "primary.key1.gpt-test",
+                    "providerType": "responses",
+                    "modelId": "gpt-test",
+                    "enabled": true
+                },
+                "secondary.key1.gpt-test": {
+                    "providerKey": "secondary.key1.gpt-test",
+                    "providerType": "responses",
+                    "modelId": "gpt-test",
+                    "enabled": true
+                }
+            },
+            "forwarders": {
+                "fwd.gpt.gpt-test": {
+                    "forwarderId": "fwd.gpt.gpt-test",
+                    "protocol": "openai-responses",
+                    "modelId": "gpt-test",
+                    "resolutionMode": "model-first",
+                    "strategy": "priority",
+                    "targets": [
+                        { "providerKey": "primary.key1.gpt-test", "priority": 1, "disabled": false },
+                        { "providerKey": "secondary.key1.gpt-test", "priority": 2, "disabled": false }
+                    ],
+                    "stickyKey": "none"
+                }
+            },
+            "routing": {
+                "default": [{
+                    "id": "default-priority-forwarder",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["fwd.gpt.gpt-test"]
+                }]
+            }
+        });
+
+        core.initialize(&config).unwrap();
+        let classification = ClassificationResult {
+            route_name: DEFAULT_ROUTE.to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec![DEFAULT_ROUTE.to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let selected = core
+            .select_provider(
+                DEFAULT_ROUTE,
+                &json!({}),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("initial selection should succeed");
+        assert_eq!(selected.provider_key, "primary.key1.gpt-test");
+
+        let retry_selected = core
+            .select_provider(
+                DEFAULT_ROUTE,
+                &json!({ "excludedProviderKeys": ["primary.key1.gpt-test"] }),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("retry selection should switch to the next priority target");
+
+        assert_eq!(retry_selected.provider_key, "secondary.key1.gpt-test");
+        assert_eq!(
+            retry_selected.route_pool,
+            vec![
+                "primary.key1.gpt-test".to_string(),
+                "secondary.key1.gpt-test".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn priority_forwarder_retry_exclusion_exhausts_only_after_last_real_provider() {
+        let mut core = VirtualRouterEngineCore::new();
+        let config = json!({
+            "providers": {
+                "primary.key1.gpt-test": {
+                    "providerKey": "primary.key1.gpt-test",
+                    "providerType": "responses",
+                    "modelId": "gpt-test",
+                    "enabled": true
+                },
+                "secondary.key1.gpt-test": {
+                    "providerKey": "secondary.key1.gpt-test",
+                    "providerType": "responses",
+                    "modelId": "gpt-test",
+                    "enabled": true
+                }
+            },
+            "forwarders": {
+                "fwd.gpt.gpt-test": {
+                    "forwarderId": "fwd.gpt.gpt-test",
+                    "protocol": "openai-responses",
+                    "modelId": "gpt-test",
+                    "resolutionMode": "model-first",
+                    "strategy": "priority",
+                    "targets": [
+                        { "providerKey": "primary.key1.gpt-test", "priority": 1, "disabled": false },
+                        { "providerKey": "secondary.key1.gpt-test", "priority": 2, "disabled": false }
+                    ],
+                    "stickyKey": "none"
+                }
+            },
+            "routing": {
+                "default": [{
+                    "id": "default-priority-forwarder",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["fwd.gpt.gpt-test"]
+                }]
+            }
+        });
+
+        core.initialize(&config).unwrap();
+        let classification = ClassificationResult {
+            route_name: DEFAULT_ROUTE.to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec![DEFAULT_ROUTE.to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let exhausted = core.select_provider(
+            DEFAULT_ROUTE,
+            &json!({
+                "excludedProviderKeys": [
+                    "primary.key1.gpt-test",
+                    "secondary.key1.gpt-test"
+                ]
+            }),
+            &classification,
+            &features,
+            &routing_state,
+            None,
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+        );
+
+        assert!(
+            exhausted.is_err(),
+            "forwarder must be unavailable only after every real target is excluded"
+        );
     }
 }

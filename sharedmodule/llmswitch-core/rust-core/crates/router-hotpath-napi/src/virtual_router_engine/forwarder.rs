@@ -178,6 +178,20 @@ impl ForwarderRegistry {
         entries
     }
 
+    pub(crate) fn expand_target_keys(&self, target_key: &str) -> Option<Vec<String>> {
+        let entry = self.entries.get(target_key)?;
+        let mut keys = Vec::new();
+        for target in &entry.targets {
+            if target.disabled {
+                continue;
+            }
+            if !keys.contains(&target.provider_key) {
+                keys.push(target.provider_key.clone());
+            }
+        }
+        Some(keys)
+    }
+
     /// model-first 解析
     pub(crate) fn resolve_by_model(&self, protocol: &str, model: &str) -> Option<&ForwarderEntry> {
         let id = self
