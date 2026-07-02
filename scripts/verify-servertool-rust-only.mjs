@@ -5172,6 +5172,7 @@ function checkServertoolRustOutcomeCloseout() {
     'export const collectAdditionalClientToolCalls',
     'return isServertoolClientExecCliProjectionToolCallWithNative({',
     'executionMode: toolCall.executionMode',
+    'contextBase: args.contextBase as ServerToolHandlerContext',
   ]) {
     if (executionStageShell.includes(marker)) {
       fail(
@@ -6110,6 +6111,12 @@ function checkServertoolResponseStageGateThinShell() {
   );
 
   const responseStageFinalizeShell = readRequired(TS_RESPONSE_STAGE_FINALIZE_SHELL);
+  assertContains(
+    'servertool-response-stage-finalize-shell-owner',
+    TS_RESPONSE_STAGE_FINALIZE_SHELL,
+    responseStageFinalizeShell,
+    "contextBase: Omit<ServerToolHandlerContext, 'toolCall'>"
+  );
   assertContains(
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,

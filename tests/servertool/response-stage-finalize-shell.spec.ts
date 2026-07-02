@@ -140,6 +140,7 @@ describe('response-stage-finalize-shell', () => {
     );
 
     expect(source).toContain('responseStageGatePlan: args.responseStageGatePlan');
+    expect(source).toContain("contextBase: Omit<ServerToolHandlerContext, 'toolCall'>");
     expect(source).not.toContain('initialResponseStageGatePlan');
     expect(source).not.toContain('planServertoolResponseStageGateWithNative');
     expect(source).not.toContain('readRuntimeControlFromAnyBoundMetadataCenter');

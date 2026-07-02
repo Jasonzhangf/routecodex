@@ -1,3 +1,8 @@
+# 2026-07-02: servertool response-stage context cast removed
+- Slice: `execution-stage-shell.ts` no longer casts `args.contextBase as ServerToolHandlerContext` when finalizing response stage; `response-stage-finalize-shell.ts` and `response-stage-auto-hook-shell.ts` now accept `Omit<ServerToolHandlerContext, 'toolCall'>`, matching the actual context base shape.
+- Gate: `execution-stage-shell.spec.ts`, `response-stage-finalize-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the cast marker and require the narrowed context type.
+- Evidence: focused Jest `execution-stage-shell + response-stage-finalize-shell + servertool-active-orchestration-audit + servertool-auto-hook-trace` PASS 64/64; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool execution queue dispatch mismatch fallback removed
 - Slice: `execution-queue-shell.ts` no longer sends `nativeExecutionMode: entry?.registration.executionMode ?? ''` when Rust plans `throw_dispatch_spec_mismatch`; after the native loop plan confirms handler entry presence, TS passes `entry.registration.executionMode` directly and no longer manufactures an empty-string dispatch error payload.
 - Gate: `execution-queue-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the empty-string fallback marker and require the direct native execution mode path.

@@ -258,6 +258,7 @@ const TARGETS = [
       'native response-stage finalize requested auto-hook result but result was empty',
     ],
     required: [
+      "contextBase: Omit<ServerToolHandlerContext, 'toolCall'>",
       'runServertoolResponseStageAutoHookPass',
       'responseStageGatePlan: args.responseStageGatePlan',
       'planServertoolResponseStageRuntimeActionWithNative',
@@ -497,6 +498,7 @@ const TARGETS = [
       'native execution-branch projected missing tool call',
       'String(preExecutionBranchPlan.action)',
       'String(postExecutionBranchPlan.action)',
+      'contextBase: args.contextBase as ServerToolHandlerContext',
       '}\n\n  return finalizeServertoolResponseStage({',
     ],
     required: [
@@ -511,6 +513,7 @@ const TARGETS = [
       'runServertoolIoExecutionQueue',
       'materializeNativeToolCallExecutionOutcome',
       'finalizeServertoolResponseStage',
+      'contextBase: args.contextBase',
     ],
   },
   {

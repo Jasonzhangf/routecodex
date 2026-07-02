@@ -84,7 +84,7 @@ export async function runServertoolExecutionStage(args: {
       return finalizeServertoolResponseStage({
         options: args.options,
         baseObject: args.baseObject,
-        contextBase: args.contextBase as ServerToolHandlerContext,
+        contextBase: args.contextBase,
         includeAutoHookIds: args.includeAutoHookIds,
         excludeAutoHookIds: args.excludeAutoHookIds,
         responseStageGatePlan: args.responseStageGatePlan

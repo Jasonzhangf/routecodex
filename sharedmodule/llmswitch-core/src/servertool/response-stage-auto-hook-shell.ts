@@ -17,7 +17,7 @@ export type ServertoolResponseStageAutoHookPassResult =
 
 export async function runServertoolResponseStageAutoHookPass(args: {
   options: ServerSideToolEngineOptions;
-  contextBase: ServerToolHandlerContext;
+  contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
   responseStageGatePlan: Record<string, unknown>;

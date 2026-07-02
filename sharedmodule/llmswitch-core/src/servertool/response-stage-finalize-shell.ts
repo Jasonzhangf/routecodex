@@ -10,7 +10,7 @@ import { planServertoolResponseStageRuntimeActionWithNative } from '../native/ro
 export async function finalizeServertoolResponseStage(args: {
   options: ServerSideToolEngineOptions;
   baseObject: JsonObject;
-  contextBase: ServerToolHandlerContext;
+  contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
   responseStageGatePlan: Record<string, unknown>;

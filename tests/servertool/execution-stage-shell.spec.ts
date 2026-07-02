@@ -98,6 +98,8 @@ describe('execution-stage-shell', () => {
     expect(source).toContain("[servertool] invalid post-execution branch action");
     expect(source).not.toContain('String(preExecutionBranchPlan.action)');
     expect(source).not.toContain('String(postExecutionBranchPlan.action)');
+    expect(source).not.toContain('contextBase: args.contextBase as ServerToolHandlerContext');
+    expect(source).toContain('contextBase: args.contextBase');
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('materializeNativeToolCallExecutionOutcome');
     expect(source).toContain('finalizeServertoolResponseStage');
