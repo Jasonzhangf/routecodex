@@ -1,3 +1,8 @@
+# 2026-07-02: router-direct hook clone can drop provider runtime carrier
+- Verified root cause: router-direct attaches provider runtime metadata as a non-enumerable symbol, so later `{ ...payload }` clones in direct hooks drop `requestId` / MetadataCenter port truth before `processIncomingDirect()`. This caused direct Responses raw SSE provider snapshot writes to use local `req_...` and fail `entryPort required`.
+- Durable rule: after direct-route hooks or any direct-path clone, reattach the provider runtime carrier to the exact payload object sent to provider. Do not fix this in snapshot writer by guessing ports or reading client payload metadata.
+- Verified closure: global `routecodex 0.90.3510`, managed `routecodex restart --port 5520`, `/health` ready, live `/v1/responses` stream returned `routecodex-smoke-5520-3510`, and the post-restart log slice had zero new `entryPort required` / `UPSTREAM_STREAM_IDLE_TIMEOUT`.
+
 # 2026-07-02: servertool auto-hook attempt result cast removed
 - `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts` no longer returns `result as ServerToolHandlerResult` after native `attemptPlan.action === 'return_result'`; TS now only fail-fast checks `result == null` and returns the materialized result directly.
 - `tests/servertool/servertool-auto-hook-trace.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` forbid the cast marker and require the direct return path.
