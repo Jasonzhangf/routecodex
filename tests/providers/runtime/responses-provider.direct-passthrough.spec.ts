@@ -27,6 +27,17 @@ import type { OpenAIStandardConfig } from '../../../src/providers/core/api/provi
 import type { ModuleDependencies } from '../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { attachProviderRuntimeMetadata } from '../../../src/providers/core/runtime/provider-runtime-metadata.js';
 import { createProviderContext } from '../../../src/providers/core/runtime/base-provider-runtime-helpers.js';
+import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+const writeProviderSnapshot = jest.fn(async () => undefined);
+const attachProviderSseSnapshotStream = jest.fn((stream: NodeJS.ReadableStream) => stream);
+let captureProviderSseSnapshots = false;
+
+jest.unstable_mockModule('../../../src/providers/core/utils/snapshot-writer.js', () => ({
+  writeProviderSnapshot,
+  attachProviderSseSnapshotStream,
+  shouldCaptureProviderStreamSnapshots: () => captureProviderSseSnapshots
+}));
 
 const { ResponsesProvider } = await import('../../../src/providers/core/runtime/responses-provider.js');
 
@@ -38,6 +49,12 @@ const emptyDeps: ModuleDependencies = {
 } as ModuleDependencies;
 
 describe('ResponsesProvider direct passthrough', () => {
+  beforeEach(() => {
+    writeProviderSnapshot.mockClear();
+    attachProviderSseSnapshotStream.mockClear();
+    captureProviderSseSnapshots = false;
+  });
+
   test('sends direct request as provider wire body with protocol metadata payload fields', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-metadata-boundary',
@@ -245,6 +262,95 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(context.metadata).not.toHaveProperty('existingFlag');
   });
 
+  test('binds direct SSE provider snapshot requestId and entryPort from runtime carrier', async () => {
+    captureProviderSseSnapshots = true;
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-sse-snapshot-entry-port',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: response.created\n',
+        `data: ${JSON.stringify({
+          type: 'response.created',
+          response: { id: 'resp_snapshot', object: 'response', status: 'in_progress', output: [] }
+        })}\n\n`,
+        'event: response.completed\n',
+        `data: ${JSON.stringify({
+          type: 'response.completed',
+          response: { id: 'resp_snapshot', object: 'response', status: 'completed', output: [] }
+        })}\n\n`,
+        'event: response.done\n',
+        `data: ${JSON.stringify({
+          type: 'response.done',
+          response: { id: 'resp_snapshot', object: 'response', status: 'completed', output: [] }
+        })}\n\n`
+      ])
+    };
+
+    const runtimeCarrier = {
+      entryEndpoint: '/v1/responses',
+      __responsesDirectPassthrough: true
+    } as Record<string, unknown>;
+    MetadataCenter.attach(runtimeCarrier).writeRequestTruth(
+      'portScope',
+      '5520',
+      {
+        module: 'tests/providers/runtime/responses-provider.direct-passthrough.spec.ts',
+        symbol: 'binds direct SSE provider snapshot requestId and entryPort from runtime carrier',
+        stage: 'ServerReqInbound01ClientRaw'
+      }
+    );
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true,
+      metadata: {
+        entryPort: 9999
+      }
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      requestId: 'openai-responses-router-gpt-5.4-20260702T124533719-448200-562',
+      providerId: 'cc',
+      providerKey: 'cc.key1.gpt-5.5',
+      metadata: runtimeCarrier
+    });
+
+    const result = await provider.sendRequestInternal(inbound) as { sseStream: NodeJS.ReadableStream };
+    for await (const _chunk of result.sseStream as AsyncIterable<Buffer | string>) {
+      // drain stream so direct passthrough lifecycle completes in the test
+    }
+
+    expect(attachProviderSseSnapshotStream).toHaveBeenCalledTimes(1);
+    expect(attachProviderSseSnapshotStream.mock.calls[0]?.[1]).toMatchObject({
+      requestId: 'openai-responses-router-gpt-5.4-20260702T124533719-448200-562',
+      entryEndpoint: '/v1/responses',
+      entryPort: 5520,
+      providerKey: 'cc.key1.gpt-5.5',
+      providerId: 'cc'
+    });
+    expect(attachProviderSseSnapshotStream.mock.calls[0]?.[1]).not.toMatchObject({
+      entryPort: 9999
+    });
+    expect(writeProviderSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'provider-response',
+      requestId: 'openai-responses-router-gpt-5.4-20260702T124533719-448200-562',
+      entryPort: 5520
+    }));
+  });
+
   test('direct submit_tool_outputs hits native upstream submit endpoint instead of plain /responses', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-submit-tool-outputs-endpoint',
@@ -297,7 +403,7 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(capturedBody.response_id).toBeUndefined();
   });
 
-  test('passes Responses stream transport timeouts into provider SSE transport config', async () => {
+  test('keeps direct Responses transport idle watchdog behind semantic stream watchdogs', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-provider-idle-timeout',
       type: 'responses-http-provider',
@@ -331,13 +437,15 @@ describe('ResponsesProvider direct passthrough', () => {
     attachProviderRuntimeMetadata(inbound, {
       metadata: {
         entryEndpoint: '/v1/responses',
+        __responsesDirectPassthrough: true,
         providerStreamNoContentTimeoutMs: 75,
+        providerStreamContentIdleTimeoutMs: 150,
         providerStreamHeadersTimeoutMs: 240_000
       }
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
-    expect(capturedStreamConfig).toEqual({ idleTimeoutMs: 75, headersTimeoutMs: 240_000 });
+    expect(capturedStreamConfig).toEqual({ idleTimeoutMs: 5_150, headersTimeoutMs: 240_000 });
   });
 
   test('direct passthrough no-content timeout ignores keepalive-only SSE traffic', async () => {

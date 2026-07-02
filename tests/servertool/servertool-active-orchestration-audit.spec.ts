@@ -336,6 +336,7 @@ const TARGETS = [
       'prepassRuntimeAction as { action: string }',
       'responseStageAutoHook as { action: string }',
       '}) as Record<string, unknown>',
+      'args.options.adapterContext as Record<string, unknown>',
       'responseStageGatePlan: Record<string, unknown>',
     ],
     required: [

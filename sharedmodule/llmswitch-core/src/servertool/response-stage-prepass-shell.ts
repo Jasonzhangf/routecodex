@@ -28,9 +28,9 @@ export async function runServertoolResponseStagePrePass(args: {
 > {
   const responseStageGatePlan = planServertoolResponseStageGateWithNative({
     payload: args.baseObject,
-    adapterContext: args.options.adapterContext as Record<string, unknown>,
+    adapterContext: args.options.adapterContext,
     runtimeControl: readRuntimeControlFromAnyBoundMetadataCenter(
-      args.options.adapterContext as Record<string, unknown>
+      args.options.adapterContext
     )
   });
 

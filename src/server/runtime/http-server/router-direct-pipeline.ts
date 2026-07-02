@@ -31,6 +31,10 @@ import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
 import { writeMetadataCenterSlot } from './metadata-center/dualwrite-api.js';
 import { stripDirectTargetUnsupportedMedia } from './router-direct-media-capability.js';
+import {
+  attachProviderRuntimeMetadata,
+  extractProviderRuntimeMetadata
+} from '../../../providers/core/runtime/provider-runtime-metadata.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -239,6 +243,10 @@ export async function executeRouterDirectPipeline(
   }
 
   const payloadToSend = recordPayloadAudit(hookResult.payload, auditContext);
+  const runtimeMetadata = extractProviderRuntimeMetadata(input.requestPayload);
+  if (runtimeMetadata) {
+    attachProviderRuntimeMetadata(payloadToSend, runtimeMetadata);
+  }
 
   input.onSnapshotBefore?.(payloadToSend, auditContext);
 

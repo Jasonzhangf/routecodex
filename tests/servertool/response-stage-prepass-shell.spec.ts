@@ -198,6 +198,7 @@ describe('response-stage-prepass-shell', () => {
     expect(source).not.toContain('responseStageGatePlan.responseHookMatched !== true');
     expect(source).not.toContain('responseHookMatched !== true');
     expect(source).not.toContain('}) as Record<string, unknown>');
+    expect(source).not.toContain('args.options.adapterContext as Record<string, unknown>');
     expect(source).not.toContain('responseStageGatePlan: Record<string, unknown>');
     expect(source).toContain('NativeServertoolResponseStageGate');
   });

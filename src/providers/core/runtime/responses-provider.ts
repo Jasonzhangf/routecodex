@@ -114,6 +114,36 @@ const buildProviderSseStreamConfig = (context: ProviderContext): {
   return config;
 };
 
+function buildDirectResponsesProviderSseStreamConfig(
+  context: ProviderContext,
+  semanticTimeouts: {
+    noContentTimeoutMs?: number;
+    contentIdleTimeoutMs?: number;
+  }
+): {
+  idleTimeoutMs?: number;
+  headersTimeoutMs?: number;
+} {
+  const config = buildProviderSseStreamConfig(context);
+  const semanticCandidates = [
+    semanticTimeouts.noContentTimeoutMs,
+    semanticTimeouts.contentIdleTimeoutMs
+  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  const semanticCeilingMs = semanticCandidates.length > 0 ? Math.max(...semanticCandidates) : undefined;
+  if (typeof semanticCeilingMs !== 'number') {
+    return config;
+  }
+  const minimumTransportIdleMs = Math.floor(semanticCeilingMs + 5_000);
+  if (
+    typeof config.idleTimeoutMs !== 'number'
+    || !Number.isFinite(config.idleTimeoutMs)
+    || config.idleTimeoutMs <= minimumTransportIdleMs
+  ) {
+    config.idleTimeoutMs = minimumTransportIdleMs;
+  }
+  return config;
+}
+
 function readProviderSnapshotEntryPort(metadata: unknown): number | undefined {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return undefined;
@@ -157,13 +187,50 @@ function applyRequestRuntimeMetadataToProviderContext(
   if (!runtimeMetadata) {
     return;
   }
-  context.runtimeMetadata = context.runtimeMetadata ?? runtimeMetadata;
-  context.providerId = context.providerId ?? runtimeMetadata.providerId ?? runtimeMetadata.providerKey;
-  context.providerKey = context.providerKey ?? runtimeMetadata.providerKey;
-  context.providerProtocol = context.providerProtocol ?? runtimeMetadata.providerProtocol;
-  context.routeName = context.routeName ?? runtimeMetadata.routeName;
-  context.target = context.target ?? runtimeMetadata.target;
-  context.pipelineId = context.pipelineId ?? runtimeMetadata.pipelineId;
+  const runtimeMetadataRecord =
+    runtimeMetadata.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
+      ? runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
+  const existingMetadata =
+    context.metadata && typeof context.metadata === 'object' && !Array.isArray(context.metadata)
+      ? context.metadata
+      : undefined;
+  const mergedMetadata = runtimeMetadataRecord
+    ? { ...(existingMetadata ?? {}), ...runtimeMetadataRecord }
+    : existingMetadata;
+  const runtimeMetadataCenter = runtimeMetadataRecord ? MetadataCenter.read(runtimeMetadataRecord) : undefined;
+  const entryPort =
+    readProviderSnapshotEntryPort(runtimeMetadataRecord)
+    ?? readProviderSnapshotEntryPort(runtimeMetadata as Record<string, unknown>)
+    ?? readProviderSnapshotEntryPort(mergedMetadata);
+  if (mergedMetadata) {
+    if (typeof entryPort === 'number') {
+      mergedMetadata.entryPort = entryPort;
+      mergedMetadata.matchedPort = entryPort;
+      if (runtimeMetadataRecord) {
+        runtimeMetadataRecord.entryPort = entryPort;
+        runtimeMetadataRecord.matchedPort = entryPort;
+      }
+    }
+    if (runtimeMetadataCenter) {
+      MetadataCenter.bind(mergedMetadata, runtimeMetadataCenter);
+    }
+    context.metadata = mergedMetadata;
+  }
+  context.runtimeMetadata = {
+    ...(context.runtimeMetadata ?? {}),
+    ...runtimeMetadata,
+    ...(mergedMetadata ? { metadata: mergedMetadata } : {})
+  };
+  if (typeof runtimeMetadata.requestId === 'string' && runtimeMetadata.requestId.trim()) {
+    context.requestId = runtimeMetadata.requestId;
+  }
+  context.providerId = runtimeMetadata.providerId ?? runtimeMetadata.providerKey ?? context.providerId;
+  context.providerKey = runtimeMetadata.providerKey ?? context.providerKey;
+  context.providerProtocol = runtimeMetadata.providerProtocol ?? context.providerProtocol;
+  context.routeName = runtimeMetadata.routeName ?? context.routeName;
+  context.target = runtimeMetadata.target ?? context.target;
+  context.pipelineId = runtimeMetadata.pipelineId ?? context.pipelineId;
 }
 
 function buildDirectResponsesSemanticTimeoutError(code: 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'): Error & { code: string } {
@@ -554,10 +621,14 @@ export class ResponsesProvider extends HttpTransportProvider {
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
     const { body, headers, context, targetUrl, entryEndpoint, httpClient } = options;
+    const semanticTimeouts = {
+      noContentTimeoutMs: this.resolveNoContentTimeoutMs(context),
+      contentIdleTimeoutMs: this.resolveContentIdleTimeoutMs(context)
+    };
     const upstreamResult = await this.postStreamOrResponse(httpClient, targetUrl, body, {
       ...headers,
       Accept: 'text/event-stream'
-    }, buildProviderSseStreamConfig(context));
+    }, buildDirectResponsesProviderSseStreamConfig(context, semanticTimeouts));
     if (upstreamResult.kind === 'response') {
       await this.snapshotPhase(
         'provider-response',
@@ -581,10 +652,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
     const stream = upstreamResult.stream;
 
-    const preparedStream = await prepareDirectResponsesSsePassthroughStream(stream, {
-      noContentTimeoutMs: this.resolveNoContentTimeoutMs(context),
-      contentIdleTimeoutMs: this.resolveContentIdleTimeoutMs(context)
-    });
+    const preparedStream = await prepareDirectResponsesSsePassthroughStream(stream, semanticTimeouts);
 
     const streamForHost = shouldCaptureProviderStreamSnapshots()
       ? attachProviderSseSnapshotStream(preparedStream, {
@@ -592,10 +660,11 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url: targetUrl,
         entryEndpoint,
-      entryPort: readProviderContextSnapshotEntryPort(context),
+        entryPort: readProviderContextSnapshotEntryPort(context),
         clientRequestId: extractClientRequestId(context),
         providerKey: context.providerKey,
-        providerId: context.providerId
+        providerId: context.providerId,
+        metadata: context.metadata
       })
       : preparedStream;
 
@@ -703,10 +772,11 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url: targetUrl,
         entryEndpoint,
-          entryPort: readProviderContextSnapshotEntryPort(context),
+        entryPort: readProviderContextSnapshotEntryPort(context),
         clientRequestId: extractClientRequestId(context),
         providerKey: context.providerKey,
-        providerId: context.providerId
+        providerId: context.providerId,
+        metadata: context.metadata
       })
       : stream;
 

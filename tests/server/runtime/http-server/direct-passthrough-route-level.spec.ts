@@ -343,6 +343,89 @@ describe('direct passthrough route-level', () => {
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
   });
 
+  it('router direct keeps runtime carrier after model override clones payload', async () => {
+    jest.resetModules();
+    const { executeRouterDirectPipeline } = await import('../../../../src/server/runtime/http-server/router-direct-pipeline.js');
+    const {
+      attachProviderRuntimeMetadata,
+      extractProviderRuntimeMetadata
+    } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
+    const { MetadataCenter } = await import('../../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
+
+    let sentPayload: Record<string, unknown> | undefined;
+    const metadataCarrier = {
+      entryEndpoint: '/v1/responses',
+      __responsesDirectPassthrough: true
+    } as Record<string, unknown>;
+    MetadataCenter.attach(metadataCarrier).writeRequestTruth(
+      'portScope',
+      '5520',
+      {
+        module: 'tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts',
+        symbol: 'router direct keeps runtime carrier after model override clones payload',
+        stage: 'ServerReqInbound01ClientRaw'
+      }
+    );
+    const requestPayload = {
+      model: 'client-alias',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }]
+    } as Record<string, unknown>;
+    attachProviderRuntimeMetadata(requestPayload, {
+      requestId: 'req_router_direct_runtime_clone',
+      providerId: 'cc',
+      providerKey: 'cc.key1.gpt-5.5',
+      providerProtocol: 'openai-responses',
+      metadata: metadataCarrier
+    });
+
+    const outcome = await executeRouterDirectPipeline({
+      portConfig: {
+        port: 5520,
+        host: '0.0.0.0',
+        mode: 'router',
+        sameProtocolBehavior: 'direct'
+      },
+      providerPayload: requestPayload,
+      requestPayload,
+      requestId: 'req_router_direct_runtime_clone',
+      target: {
+        providerKey: 'cc.key1.gpt-5.5',
+        providerType: 'responses',
+        runtimeKey: 'cc.key1.gpt-5.5',
+        modelId: 'gpt-5.5'
+      },
+      requestInfo: {
+        path: '/v1/responses',
+        headers: {}
+      },
+      resolveProviderByRuntimeKey: () => ({
+        runtimeKey: 'cc.key1.gpt-5.5',
+        providerId: 'cc',
+        providerType: 'responses',
+        providerFamily: 'responses',
+        providerProtocol: 'openai-responses',
+        runtime: {},
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: jest.fn(async (payload: Record<string, unknown>) => {
+            sentPayload = payload;
+            return { status: 200, body: { ok: true } };
+          })
+        }
+      } as any)
+    });
+
+    expect(outcome.used).toBe(true);
+    expect(sentPayload).toMatchObject({ model: 'gpt-5.5' });
+    const runtimeMetadata = extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>);
+    expect(runtimeMetadata?.requestId).toBe('req_router_direct_runtime_clone');
+    expect(runtimeMetadata?.providerKey).toBe('cc.key1.gpt-5.5');
+    expect(runtimeMetadata?.metadata?.__responsesDirectPassthrough).toBe(true);
+    expect(MetadataCenter.read(runtimeMetadata?.metadata)?.readRequestTruth().portScope).toBe('5520');
+  });
+
   it('router same-protocol direct keeps client tools on direct path', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

@@ -1799,4 +1799,80 @@ mod tests {
         );
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn normalize_snapshot_stage_payload_json_echo_req_inbound_semantic_map() {
+        // req_inbound_stage2_semantic_map with chat envelope → normalized (messages + meta)
+        let input = r#"{"model":"gpt-4","messages":[{"role":"user","content":"hello"}],"metadata":{"context":"test"},"stream":true}"#;
+        let stage = "req_inbound_stage2_semantic_map".to_string();
+        let result = normalize_snapshot_stage_payload_json(stage, input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let obj = parsed.as_object().unwrap();
+        assert!(obj.contains_key("messages"), "chat envelope should keep messages: {:?}", obj);
+        assert!(obj.contains_key("meta"), "chat envelope should produce meta snapshot");
+        assert_eq!(obj["messages"][0]["content"], "hello");
+        // Ensure model/stream were filtered out by normalization
+        assert!(!obj.contains_key("model"), "model should be filtered: {:?}", obj);
+        assert!(!obj.contains_key("stream"), "stream should be filtered: {:?}", obj);
+    }
+
+    #[test]
+    fn normalize_snapshot_stage_payload_json_echo_req_inbound_non_chat_envelope_passthrough() {
+        let input = r#"{"model":"gpt-4","messages":[{"role":"user","content":"hello"}],"stream":true}"#;
+        let stage = "req_inbound_stage2_semantic_map".to_string();
+        let result = normalize_snapshot_stage_payload_json(stage, input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        // No metadata → not a chat envelope → passthrough
+        assert_eq!(parsed["model"], "gpt-4");
+        assert_eq!(parsed["messages"][0]["content"], "hello");
+    }
+
+    #[test]
+    fn normalize_snapshot_stage_payload_json_echo_resp_inbound() {
+        let input = r#"{"id":"resp_1","object":"response","status":"completed"}"#;
+        let stage = "resp_inbound".to_string();
+        let result = normalize_snapshot_stage_payload_json(stage, input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["id"], "resp_1");
+    }
+
+    #[test]
+    fn normalize_snapshot_stage_payload_json_echo_custom_stage() {
+        let input = r#"{"foo":"bar"}"#;
+        let stage = "custom_stage".to_string();
+        let result = normalize_snapshot_stage_payload_json(stage, input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["foo"], "bar");
+    }
+
+    #[test]
+    fn normalize_snapshot_stage_payload_json_echo_non_chat_envelope_req_inbound() {
+        let input = r#"{"providerKey":"test.key1","body":{"messages":[]}}"#;
+        let stage = "req_inbound".to_string();
+        let result = normalize_snapshot_stage_payload_json(stage, input.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["providerKey"], "test.key1");
+    }
+
+    #[test]
+    fn write_snapshot_via_hooks_json_echo_valid_input() {
+        let input = r#"{
+            "endpoint": "/v1/chat/completions",
+            "stage": "req_inbound",
+            "requestId": "test_req_echo_1",
+            "data": {"messages": [{"role": "user", "content": "hello"}]},
+            "verbosity": "minimal",
+            "channel": "test",
+            "providerKey": "test.key1",
+            "groupRequestId": "test_grp_echo_1",
+            "entryProtocol": "openai-chat",
+            "entryPort": 5555,
+            "runtimeMetadata": {"foo": "bar"}
+        }"#;
+        let result = write_snapshot_via_hooks_json(input.to_string());
+        assert!(result.is_ok(), "write_snapshot_via_hooks_json should succeed: {:?}", result.err());
+        let parsed: bool = serde_json::from_str(&result.unwrap()).unwrap();
+        assert!(parsed, "should return true");
+    }
+
 }

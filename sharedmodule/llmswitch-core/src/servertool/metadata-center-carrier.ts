@@ -135,13 +135,14 @@ function readRuntimeControlFromBoundMetadataCenter(
 }
 
 export function readRuntimeControlFromAnyBoundMetadataCenter(
-  target: Record<string, unknown> | undefined
+  target: unknown
 ): Record<string, unknown> | undefined {
-  const direct = readRuntimeControlFromBoundMetadataCenter(target);
+  const targetRecord = asRecord(target);
+  const direct = readRuntimeControlFromBoundMetadataCenter(targetRecord);
   if (direct) {
     return direct;
   }
-  const metadata = asRecord(target?.metadata);
+  const metadata = asRecord(targetRecord?.metadata);
   return readRuntimeControlFromBoundMetadataCenter(metadata);
 }
 

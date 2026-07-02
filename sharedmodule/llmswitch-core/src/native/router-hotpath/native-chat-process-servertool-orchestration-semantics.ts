@@ -374,7 +374,7 @@ export function runServertoolResponseStageWithNative(
 
 export function planServertoolResponseStageGateWithNative(input: {
   payload: unknown;
-  adapterContext?: Record<string, unknown>;
+  adapterContext?: unknown;
   runtimeControl?: Record<string, unknown>;
   allowFollowup?: boolean;
   hasServertoolSupport?: boolean;
