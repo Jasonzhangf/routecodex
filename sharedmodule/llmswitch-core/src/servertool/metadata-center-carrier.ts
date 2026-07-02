@@ -7,8 +7,10 @@ import {
   type StopMessageCompareContext
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
-const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
-const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
+import { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL } from '../conversion/hub/metadata-center-runtime-control-writer.js';
+
+// re-export for consumers that reference these via servertool module
+export { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL };
 
 type RuntimeControlWriter = {
   module: string;
