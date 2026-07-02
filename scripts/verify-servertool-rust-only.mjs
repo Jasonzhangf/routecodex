@@ -6571,6 +6571,8 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'const preflightKind = preflight.kind',
     'switch (preflightKind)',
     'invalid engine preflight result kind',
+    'planServertoolEngineOrchestrationPreflightActionWithNative({',
+    'switch (preflightOrchestrationAction.action)',
     'String(preflightOrchestrationAction.action)',
     'const preflightChat = (preflight as { chat?: JsonObject }).chat',
     'const preflightStopSignal = (preflight as { stopSignal?: typeof stopSignal }).stopSignal',
@@ -6585,21 +6587,15 @@ function checkServertoolEngineStoplessSessionThinShell() {
       );
     }
   }
-  if (!engineSource.includes('planServertoolEngineOrchestrationPreflightActionWithNative({')) {
+  if (!engineSource.includes('resolveServertoolEngineOrchestrationPreflightDecisionWithNative({')) {
     fail(
       'servertool-engine-stopless-session-thin-shell',
-      'engine-orchestration-shell.ts must keep preflight orchestration dispatch on Rust action plan'
-    );
-  }
-  if (!engineSource.includes('switch (preflightOrchestrationAction.action)')) {
-    fail(
-      'servertool-engine-stopless-session-thin-shell',
-      'engine-orchestration-shell.ts must dispatch preflight orchestration action as a thin switch over native plan'
+      'engine-orchestration-shell.ts must keep preflight orchestration dispatch behind native decision helper'
     );
   }
   for (const marker of [
-    'chat: preflight.chat',
-    'stopSignal = preflight.stopSignal',
+    'chat: preflightDecision.chat',
+    'stopSignal = preflightDecision.stopSignal',
   ]) {
     if (!engineSource.includes(marker)) {
       fail(

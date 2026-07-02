@@ -1,3 +1,10 @@
+# 2026-07-03: servertool engine orchestration preflight switch moved to native helper
+
+- Slice: `engine-orchestration-shell.ts` no longer switches over `preflightOrchestrationAction.action` or validates the preflight action shape locally. TS now calls `resolveServertoolEngineOrchestrationPreflightDecisionWithNative()` and only applies the native decision by returning the preflight chat or forwarding the native stop signal into the engine path.
+- Gate: `engine-observation-shell.spec.ts`, `engine.stopless-session-thin-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now forbid the old `planServertoolEngineOrchestrationPreflightActionWithNative({` / `switch (preflightOrchestrationAction.action)` markers and require the native decision helper path.
+- Evidence before note update: focused Jest `engine-observation-shell + engine.stopless-session-thin-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 92/92; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS. Final scoped `git diff --check` and clean relevant-only staging still required before commit.
+- Remaining gap: this closes one Phase 1 engine-orchestration preflight TS switch slice only. `engineSkipPlan.action`, execution queue/stage switches, auto-hook caller switches, and Hub Pipeline/VR closeout remain open; no live/replay closure claimed.
+
 # 2026-07-03: servertool entry-preflight action switch moved to native helper
 
 - Slice: `entry-preflight-shell.ts` no longer switches over `entryPreflightPlan.action`, constructs passthrough result projection, or builds client-disconnect error plan in TS. TS now reads the base object, calls `resolveServertoolEntryPreflightWithNative()`, and only throws `createServertoolProviderProtocolErrorFromPlan(entryPreflightDecision.errorPlan)` when native requests an error.

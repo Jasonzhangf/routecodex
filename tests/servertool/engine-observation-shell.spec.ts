@@ -348,8 +348,8 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("if (preflight.kind === 'return_original_chat' || preflight.kind === 'return_original_chat_direct_passthrough')");
     expect(source).not.toContain('const preflightKind = preflight.kind');
     expect(source).not.toContain('switch (preflightKind)');
-    expect(source).toContain('planServertoolEngineOrchestrationPreflightActionWithNative({');
-    expect(source).toContain('switch (preflightOrchestrationAction.action)');
+    expect(source).toContain('resolveServertoolEngineOrchestrationPreflightDecisionWithNative({');
+    expect(source).not.toContain('switch (preflightOrchestrationAction.action)');
     expect(source).not.toContain('String(preflightOrchestrationAction.action)');
     expect(source).toContain('planServertoolEngineSkipWithNative({');
     expect(source).toContain('switch (engineSkipPlan.action)');

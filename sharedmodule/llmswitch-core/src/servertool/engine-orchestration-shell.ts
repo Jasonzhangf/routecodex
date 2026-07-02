@@ -27,7 +27,7 @@ import {
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineTriggerObservationWithNative,
   planServertoolEngineSkipWithNative,
-  planServertoolEngineOrchestrationPreflightActionWithNative,
+  resolveServertoolEngineOrchestrationPreflightDecisionWithNative,
   resolveServertoolTimeoutMsFromEnvCandidatesWithNative,
   planServertoolTimeoutErrorWithNative,
   planStoplessExecutionWithNative
@@ -141,27 +141,16 @@ export async function runServerToolOrchestrationShell(
     logStopCompare
   });
   let stopSignal: NonNullable<Extract<typeof preflight, { kind: 'continue' }>['stopSignal']>;
-  const preflightOrchestrationAction = planServertoolEngineOrchestrationPreflightActionWithNative({
-    preflightKind: preflight.kind
+  const preflightDecision = resolveServertoolEngineOrchestrationPreflightDecisionWithNative({
+    preflight
   });
-  switch (preflightOrchestrationAction.action) {
-    case 'return_preflight_chat':
-      if (preflight.kind === 'continue') {
-        throw new Error('[servertool] invalid engine preflight orchestration action');
-      }
-      return {
-        chat: preflight.chat,
-        executed: false
-      };
-    case 'continue_engine':
-      if (preflight.kind !== 'continue') {
-        throw new Error('[servertool] invalid engine preflight orchestration action');
-      }
-      stopSignal = preflight.stopSignal;
-      break;
-    default:
-      throw new Error('[servertool] invalid engine preflight orchestration action');
+  if (preflightDecision.action === 'return_preflight_chat') {
+    return {
+      chat: preflightDecision.chat,
+      executed: false
+    };
   }
+  stopSignal = preflightDecision.stopSignal as NonNullable<Extract<typeof preflight, { kind: 'continue' }>['stopSignal']>;
 
   const serverToolTimeoutMs = resolveServerToolTimeoutMs();
   const engineOptions: ServerSideToolEngineOptions = {

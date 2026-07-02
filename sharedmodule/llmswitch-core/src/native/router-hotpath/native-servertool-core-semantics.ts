@@ -386,6 +386,16 @@ export interface ServertoolEngineOrchestrationPreflightActionPlan {
   action: 'return_preflight_chat' | 'continue_engine';
 }
 
+export type ServertoolEngineOrchestrationPreflightDecision =
+  | {
+      action: 'return_preflight_chat';
+      chat: JsonObject;
+    }
+  | {
+      action: 'continue_engine';
+      stopSignal: unknown;
+    };
+
 export interface ServertoolEngineRuntimeActionPlan {
   action:
     | 'return_servertool_cli_projection_final'
@@ -2653,6 +2663,38 @@ export function planServertoolEngineOrchestrationPreflightActionWithNative(input
   return {
     action: record.action
   };
+}
+
+export function resolveServertoolEngineOrchestrationPreflightDecisionWithNative(input: {
+  preflight: {
+    kind: 'return_original_chat' | 'return_original_chat_direct_passthrough' | 'continue';
+    chat?: JsonObject;
+    stopSignal?: unknown;
+  };
+}): ServertoolEngineOrchestrationPreflightDecision {
+  const action = planServertoolEngineOrchestrationPreflightActionWithNative({
+    preflightKind: input.preflight.kind
+  });
+  switch (action.action) {
+    case 'return_preflight_chat':
+      if (input.preflight.kind === 'continue' || input.preflight.chat == null) {
+        throw new Error('[servertool] invalid engine preflight orchestration action');
+      }
+      return {
+        action: 'return_preflight_chat',
+        chat: input.preflight.chat
+      };
+    case 'continue_engine':
+      if (input.preflight.kind !== 'continue') {
+        throw new Error('[servertool] invalid engine preflight orchestration action');
+      }
+      return {
+        action: 'continue_engine',
+        stopSignal: input.preflight.stopSignal
+      };
+    default:
+      throw new Error('[servertool] invalid engine preflight orchestration action');
+  }
 }
 
 function parseServertoolEnginePreflightStage(value: unknown, field: string): 'entry' | 'trigger' {
