@@ -181,8 +181,12 @@ export type AutoHookCallerFinalizationPlan =
     };
 
 export type AutoHookCallerResultProjectionPlan = {
-  mode: 'tool_flow';
-  includeMetadataWritePlan: boolean;
+  result: {
+    mode: 'tool_flow';
+    finalChatResponse: JsonObject;
+    execution: NativeServerToolExecution;
+    metadataWritePlan?: JsonObject;
+  };
 };
 
 export interface EngineSelectionOverridesPlan {
@@ -2196,6 +2200,9 @@ export function planAutoHookCallerFinalizationWithNative(input: {
 export function planAutoHookCallerResultProjectionWithNative(input: {
   resultPresent: boolean;
   metadataWritePlanPresent: boolean;
+  chatResponse?: JsonObject;
+  execution?: NativeServerToolExecution;
+  metadataWritePlan?: JsonObject;
 }): AutoHookCallerResultProjectionPlan {
   const capability = 'planAutoHookCallerResultProjectionJson';
   const fn = readNativeFunction(capability);
@@ -2225,15 +2232,29 @@ export function planAutoHookCallerResultProjectionWithNative(input: {
   if (record.mode !== 'tool_flow') {
     throw new Error('planAutoHookCallerResultProjectionJson native returned invalid mode');
   }
-  if (typeof record.includeMetadataWritePlan !== 'boolean') {
+  if (typeof record.includeMetadataWritePlan !== 'boolean' || !record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
     throw new Error('planAutoHookCallerResultProjectionJson native returned malformed plan');
   }
-  if (input.metadataWritePlanPresent !== true && record.includeMetadataWritePlan === true) {
+  const result = record.result as Record<string, unknown>;
+  if (result.mode !== 'tool_flow' || !result.finalChatResponse || typeof result.finalChatResponse !== 'object' || Array.isArray(result.finalChatResponse)) {
+    throw new Error('planAutoHookCallerResultProjectionJson native returned malformed result');
+  }
+  if (!result.execution || typeof result.execution !== 'object' || Array.isArray(result.execution) || typeof (result.execution as Record<string, unknown>).flowId !== 'string') {
+    throw new Error('planAutoHookCallerResultProjectionJson native returned malformed execution');
+  }
+  if (input.metadataWritePlanPresent !== true && ('metadataWritePlan' in result || record.includeMetadataWritePlan === true)) {
     throw new Error('planAutoHookCallerResultProjectionJson native requested missing metadataWritePlan');
   }
+  if (input.metadataWritePlanPresent === true && (!('metadataWritePlan' in result) || !result.metadataWritePlan || typeof result.metadataWritePlan !== 'object' || Array.isArray(result.metadataWritePlan))) {
+    throw new Error('planAutoHookCallerResultProjectionJson native omitted requested metadataWritePlan');
+  }
   return {
-    mode: 'tool_flow',
-    includeMetadataWritePlan: record.includeMetadataWritePlan
+    result: {
+      mode: 'tool_flow',
+      finalChatResponse: result.finalChatResponse as JsonObject,
+      execution: result.execution as NativeServerToolExecution,
+      ...(record.includeMetadataWritePlan === true ? { metadataWritePlan: result.metadataWritePlan as JsonObject } : {})
+    }
   };
 }
 

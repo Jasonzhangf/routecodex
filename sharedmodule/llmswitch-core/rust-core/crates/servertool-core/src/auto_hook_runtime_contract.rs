@@ -83,6 +83,12 @@ pub enum AutoHookCallerFinalizationAction {
 pub struct AutoHookCallerResultProjectionInput {
     pub result_present: bool,
     pub metadata_write_plan_present: bool,
+    #[serde(default)]
+    pub chat_response: Option<serde_json::Value>,
+    #[serde(default)]
+    pub execution: Option<serde_json::Value>,
+    #[serde(default)]
+    pub metadata_write_plan: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -90,6 +96,7 @@ pub struct AutoHookCallerResultProjectionInput {
 pub struct AutoHookCallerResultProjectionPlan {
     pub mode: String,
     pub include_metadata_write_plan: bool,
+    pub result: serde_json::Value,
 }
 
 pub fn plan_auto_hook_runtime_attempt(
@@ -170,9 +177,27 @@ pub fn plan_auto_hook_caller_result_projection(
     if !input.result_present {
         return Err("auto-hook caller result projection requires queue result".to_string());
     }
+    let chat_response = input
+        .chat_response
+        .ok_or_else(|| "auto-hook caller result projection requires chatResponse".to_string())?;
+    let execution = input.execution.unwrap_or(serde_json::Value::Null);
+    if input.metadata_write_plan_present && input.metadata_write_plan.is_none() {
+        return Err("auto-hook caller result projection requires metadataWritePlan".to_string());
+    }
+    let mut result = serde_json::json!({
+        "mode": "tool_flow",
+        "finalChatResponse": chat_response,
+        "execution": execution,
+    });
+    if input.metadata_write_plan_present {
+        if let Some(metadata_write_plan) = input.metadata_write_plan {
+            result["metadataWritePlan"] = metadata_write_plan;
+        }
+    }
     Ok(AutoHookCallerResultProjectionPlan {
         mode: "tool_flow".to_string(),
         include_metadata_write_plan: input.metadata_write_plan_present,
+        result,
     })
 }
 
@@ -365,16 +390,59 @@ mod tests {
             AutoHookCallerResultProjectionInput {
                 result_present: true,
                 metadata_write_plan_present: true,
+                chat_response: Some(serde_json::json!({ "choices": [] })),
+                execution: Some(serde_json::json!({ "flowId": "auto-hook" })),
+                metadata_write_plan: Some(serde_json::json!({
+                    "runtimeControl": { "servertool": true }
+                })),
             },
         )
         .expect("projection");
         assert_eq!(projection.mode, "tool_flow");
         assert!(projection.include_metadata_write_plan);
+        assert_eq!(projection.result["mode"], "tool_flow");
+        assert_eq!(projection.result["finalChatResponse"], serde_json::json!({ "choices": [] }));
+        assert_eq!(projection.result["execution"], serde_json::json!({ "flowId": "auto-hook" }));
+        assert_eq!(
+            projection.result["metadataWritePlan"],
+            serde_json::json!({ "runtimeControl": { "servertool": true } })
+        );
+
+        let missing_chat_response = plan_auto_hook_caller_result_projection(
+            AutoHookCallerResultProjectionInput {
+                result_present: true,
+                metadata_write_plan_present: false,
+                chat_response: None,
+                execution: None,
+                metadata_write_plan: None,
+            },
+        );
+        assert_eq!(
+            missing_chat_response.expect_err("missing chat response"),
+            "auto-hook caller result projection requires chatResponse"
+        );
+
+        let missing_metadata_write_plan = plan_auto_hook_caller_result_projection(
+            AutoHookCallerResultProjectionInput {
+                result_present: true,
+                metadata_write_plan_present: true,
+                chat_response: Some(serde_json::json!({ "choices": [] })),
+                execution: None,
+                metadata_write_plan: None,
+            },
+        );
+        assert_eq!(
+            missing_metadata_write_plan.expect_err("missing metadata write plan"),
+            "auto-hook caller result projection requires metadataWritePlan"
+        );
 
         let missing = plan_auto_hook_caller_result_projection(
             AutoHookCallerResultProjectionInput {
                 result_present: false,
                 metadata_write_plan_present: false,
+                chat_response: None,
+                execution: None,
+                metadata_write_plan: None,
             },
         );
         assert_eq!(

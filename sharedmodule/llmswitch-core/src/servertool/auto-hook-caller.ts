@@ -150,16 +150,12 @@ export async function runServertoolAutoHookCaller(args: {
         }
         const resultProjectionPlan = planAutoHookCallerResultProjectionWithNative({
           resultPresent: true,
-          metadataWritePlanPresent: queueResult.metadataWritePlan != null
-        });
-        return {
-          mode: resultProjectionPlan.mode,
-          finalChatResponse: queueResult.chatResponse,
+          metadataWritePlanPresent: queueResult.metadataWritePlan != null,
+          chatResponse: queueResult.chatResponse,
           execution: queueResult.execution,
-          ...(resultProjectionPlan.includeMetadataWritePlan
-            ? { metadataWritePlan: queueResult.metadataWritePlan }
-            : {})
-        };
+          metadataWritePlan: queueResult.metadataWritePlan
+        });
+        return resultProjectionPlan.result;
       }
       case 'continue_next_queue':
         continue;

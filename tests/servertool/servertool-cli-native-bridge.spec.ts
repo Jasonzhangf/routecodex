@@ -926,21 +926,33 @@ describe('servertool CLI native bridge', () => {
     expect(
       planAutoHookCallerResultProjectionWithNative({
         resultPresent: true,
-        metadataWritePlanPresent: true
+        metadataWritePlanPresent: true,
+        chatResponse: { choices: [] },
+        execution: { flowId: 'auto-hook' },
+        metadataWritePlan: { runtimeControl: { servertool: true } }
       })
     ).toEqual({
-      mode: 'tool_flow',
-      includeMetadataWritePlan: true
+      result: {
+        mode: 'tool_flow',
+        finalChatResponse: { choices: [] },
+        execution: { flowId: 'auto-hook' },
+        metadataWritePlan: { runtimeControl: { servertool: true } }
+      }
     });
 
     expect(
       planAutoHookCallerResultProjectionWithNative({
         resultPresent: true,
-        metadataWritePlanPresent: false
+        metadataWritePlanPresent: false,
+        chatResponse: { choices: [] },
+        execution: { flowId: 'auto-hook' }
       })
     ).toEqual({
-      mode: 'tool_flow',
-      includeMetadataWritePlan: false
+      result: {
+        mode: 'tool_flow',
+        finalChatResponse: { choices: [] },
+        execution: { flowId: 'auto-hook' }
+      }
     });
 
     expect(() =>

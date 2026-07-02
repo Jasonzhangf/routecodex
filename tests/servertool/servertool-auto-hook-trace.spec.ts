@@ -92,8 +92,12 @@ const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
 });
 
 const planAutoHookCallerResultProjectionWithNativeMock = jest.fn((input: any) => ({
-  mode: 'tool_flow',
-  includeMetadataWritePlan: input?.metadataWritePlanPresent === true
+  result: {
+    mode: 'tool_flow',
+    finalChatResponse: input?.chatResponse ?? {},
+    execution: input?.execution ?? null,
+    ...(input?.metadataWritePlanPresent === true ? { metadataWritePlan: input?.metadataWritePlan ?? {} } : {})
+  }
 }));
 
 jest.unstable_mockModule(
@@ -245,8 +249,12 @@ beforeEach(() => {
     return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
   });
   planAutoHookCallerResultProjectionWithNativeMock.mockImplementation((input: any) => ({
-    mode: 'tool_flow',
-    includeMetadataWritePlan: input?.metadataWritePlanPresent === true
+    result: {
+      mode: 'tool_flow',
+      finalChatResponse: input?.chatResponse ?? {},
+      execution: input?.execution ?? null,
+      ...(input?.metadataWritePlanPresent === true ? { metadataWritePlan: input?.metadataWritePlan ?? {} } : {})
+    }
   }));
 });
 
@@ -469,10 +477,15 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('if (queueResult == null)');
     expect(callerSource).toContain('const resultProjectionPlan = planAutoHookCallerResultProjectionWithNative({');
     expect(callerSource).toContain('queueResult.metadataWritePlan != null');
+    expect(callerSource).toContain('chatResponse: queueResult.chatResponse');
+    expect(callerSource).toContain('execution: queueResult.execution');
+    expect(callerSource).toContain('metadataWritePlan: queueResult.metadataWritePlan');
+    expect(callerSource).toContain('return resultProjectionPlan.result;');
     expect(callerSource).toContain('switch (finalizationPlan.action)');
     expect(callerSource).not.toContain('mode: finalizationPlan.resultMode');
-    expect(callerSource).toContain('mode: resultProjectionPlan.mode');
-    expect(callerSource).toContain('resultProjectionPlan.includeMetadataWritePlan');
+    expect(callerSource).not.toContain('mode: resultProjectionPlan.mode');
+    expect(callerSource).not.toContain('resultProjectionPlan.includeMetadataWritePlan');
+    expect(callerSource).not.toContain('finalChatResponse: queueResult.chatResponse');
     expect(callerSource).not.toContain('finalizationPlan as { action: string }');
     expect(callerSource).not.toContain("mode: 'tool_flow'");
     expect(callerSource).not.toContain('if (finalizationPlan.returnResult)');
