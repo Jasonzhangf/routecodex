@@ -444,6 +444,13 @@ export interface ServertoolResponseStageOrchestrationOutputPlan {
   recordFlowId?: string;
 }
 
+export interface ServertoolResponseStageOrchestrationMaterializedOutput {
+  payload: JsonObject;
+  executed: boolean;
+  flowId?: string;
+  returnedExecutedPayload: boolean;
+}
+
 export type ServertoolEntryPreflightPlan =
   | {
       action: 'return_passthrough_non_object_chat';
@@ -2163,6 +2170,17 @@ export function planAutoHookCallerResultProjectionWithNative(input: {
     throw new Error('planAutoHookCallerResultProjectionJson native unavailable');
   }
   const resultJson = fn(JSON.stringify(input));
+  if (resultJson instanceof Error) {
+    throw resultJson;
+  }
+  if (
+    resultJson
+    && typeof resultJson === 'object'
+    && 'message' in resultJson
+    && typeof (resultJson as { message?: unknown }).message === 'string'
+  ) {
+    throw new Error((resultJson as { message: string }).message);
+  }
   if (typeof resultJson !== 'string') {
     throw new Error(`planAutoHookCallerResultProjectionJson native returned non-string: ${typeof resultJson}`);
   }
@@ -2945,6 +2963,51 @@ export function planServertoolResponseStageOrchestrationOutputWithNative(input: 
     recordExecuted: record.recordExecuted,
     ...(typeof record.recordFlowId === 'string' && record.recordFlowId.trim()
       ? { recordFlowId: record.recordFlowId.trim() }
+      : {})
+  };
+}
+
+export function materializeServertoolResponseStageOrchestrationOutputWithNative(input: {
+  originalPayload: JsonObject;
+  executedPayload: JsonObject;
+  orchestrationExecuted: boolean;
+  orchestrationFlowId?: string;
+}): ServertoolResponseStageOrchestrationMaterializedOutput {
+  const capability = 'materializeServertoolResponseStageOrchestrationOutputJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`materializeServertoolResponseStageOrchestrationOutputJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid output');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (!record.payload || typeof record.payload !== 'object' || Array.isArray(record.payload)) {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid payload');
+  }
+  if (typeof record.executed !== 'boolean') {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid executed flag');
+  }
+  if (record.flowId !== undefined && typeof record.flowId !== 'string') {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid flowId');
+  }
+  if (typeof record.returnedExecutedPayload !== 'boolean') {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned invalid returnedExecutedPayload flag');
+  }
+  if (record.returnedExecutedPayload && record.executed !== true) {
+    throw new Error('materializeServertoolResponseStageOrchestrationOutputJson native returned executed payload without executed record');
+  }
+  return {
+    payload: record.payload as JsonObject,
+    executed: record.executed,
+    returnedExecutedPayload: record.returnedExecutedPayload,
+    ...(typeof record.flowId === 'string' && record.flowId.trim()
+      ? { flowId: record.flowId.trim() }
       : {})
   };
 }

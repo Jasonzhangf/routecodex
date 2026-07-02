@@ -324,6 +324,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planServertoolExecutionOutcomeMaterializationJson",
   "planServertoolResponseStageRuntimeActionJson",
   "planServertoolResponseStageOrchestrationOutputJson",
+  "materializeServertoolResponseStageOrchestrationOutputJson",
 "planServertoolEntryPreflightJson",
 "planServertoolEntryContextJson",
 "planServertoolEnginePrepassActionJson",

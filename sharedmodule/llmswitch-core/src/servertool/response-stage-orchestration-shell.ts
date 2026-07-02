@@ -9,7 +9,7 @@ import {
   detectProviderResponseShapeWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
-  planServertoolResponseStageOrchestrationOutputWithNative,
+  materializeServertoolResponseStageOrchestrationOutputWithNative,
   planServertoolResponseStageRuntimeActionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
@@ -88,38 +88,34 @@ export async function runServertoolResponseStageOrchestrationShell(
     forceLog: forceDetailLog
   });
 
-  const outputPlan = planServertoolResponseStageOrchestrationOutputWithNative({
+  const output = materializeServertoolResponseStageOrchestrationOutputWithNative({
+    originalPayload: options.payload,
+    executedPayload: orchestration.chat as ChatCompletionLike,
     orchestrationExecuted: orchestration.executed,
     orchestrationFlowId: orchestration.flowId
   });
-  switch (outputPlan.returnAction) {
-    case 'return_executed_payload': {
-      const outputPayload = orchestration.chat as ChatCompletionLike;
-      const outputShape = detectProviderResponseShapeWithNative(outputPayload);
-      recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
-        executed: outputPlan.recordExecuted,
-        flowId: outputPlan.recordFlowId,
-        inputShape,
-        outputShape
-      });
-      return {
-        payload: outputPayload,
-        executed: outputPlan.recordExecuted,
-        flowId: outputPlan.recordFlowId
-      };
-    }
-    case 'return_original_payload':
-      break;
-    default:
-      throw new Error('[servertool] invalid response-stage orchestration output action');
+
+  if (output.returnedExecutedPayload) {
+    const outputShape = detectProviderResponseShapeWithNative(output.payload);
+    recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
+      executed: output.executed,
+      flowId: output.flowId,
+      inputShape,
+      outputShape
+    });
+    return {
+      payload: output.payload,
+      executed: output.executed,
+      flowId: output.flowId
+    };
   }
 
   recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
-    executed: outputPlan.recordExecuted,
+    executed: output.executed,
     inputShape
   });
   return {
-    payload: options.payload,
-    executed: outputPlan.recordExecuted
+    payload: output.payload,
+    executed: output.executed
   };
 }

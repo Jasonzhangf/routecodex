@@ -5688,6 +5688,9 @@ function checkServertoolRustOutcomeCloseout() {
     "if (gateRuntimeAction.action === 'return_passthrough_bypass')",
     'String(gateRuntimeAction.action)',
     'String(outputPlan.returnAction)',
+    'switch (outputPlan.returnAction)',
+    'planServertoolResponseStageOrchestrationOutputWithNative',
+    'invalid response-stage orchestration output action',
     'chat: options.payload as JsonObject',
     'options.adapterContext as Record<string, unknown>',
   ]) {
@@ -5705,7 +5708,7 @@ function checkServertoolRustOutcomeCloseout() {
     "case 'return_passthrough_bypass'",
     "case 'run_auto_hooks'",
     'invalid response-stage orchestration action',
-    'invalid response-stage orchestration output action',
+    'materializeServertoolResponseStageOrchestrationOutputWithNative',
     'detectProviderResponseShapeWithNative',
     'const orchestration = await runServerToolOrchestrationShell(',
     'runServerToolOrchestrationShell',

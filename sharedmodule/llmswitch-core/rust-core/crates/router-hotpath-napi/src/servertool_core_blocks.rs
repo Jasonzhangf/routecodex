@@ -523,6 +523,21 @@ pub fn plan_servertool_response_stage_orchestration_output_json(
     .map_err(|e| format!("serialize servertool response stage orchestration output plan: {e}"))
 }
 
+pub fn materialize_servertool_response_stage_orchestration_output_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: response_stage_orchestration_contract::ServertoolResponseStageOrchestrationMaterializeInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool response stage orchestration materialize input: {e}")
+        })?;
+    serde_json::to_string(
+        &response_stage_orchestration_contract::materialize_servertool_response_stage_orchestration_output(
+            input,
+        ),
+    )
+    .map_err(|e| format!("serialize servertool response stage orchestration materialized output: {e}"))
+}
+
 pub fn plan_servertool_entry_preflight_json(input_json: &str) -> Result<String, String> {
     let input: server_side_tool_entry_contract::ServertoolEntryPreflightInput =
         serde_json::from_str(input_json)
@@ -3211,6 +3226,52 @@ fn plans_servertool_response_stage_orchestration_output_via_servertool_core_brid
         serde_json::json!(false)
     );
     assert!(passthrough_value.get("recordFlowId").is_none());
+}
+
+#[test]
+fn materializes_servertool_response_stage_orchestration_output_via_servertool_core_bridge() {
+    let executed = materialize_servertool_response_stage_orchestration_output_json(
+        &serde_json::json!({
+            "originalPayload": { "id": "original" },
+            "executedPayload": { "id": "executed" },
+            "orchestrationExecuted": true,
+            "orchestrationFlowId": " flow_1 "
+        })
+        .to_string(),
+    )
+    .expect("response-stage orchestration output executed materialization");
+    let executed_value: serde_json::Value =
+        serde_json::from_str(&executed).expect("parse executed materialized output");
+    assert_eq!(executed_value["payload"], serde_json::json!({ "id": "executed" }));
+    assert_eq!(executed_value["executed"], serde_json::json!(true));
+    assert_eq!(executed_value["flowId"], serde_json::json!("flow_1"));
+    assert_eq!(
+        executed_value["returnedExecutedPayload"],
+        serde_json::json!(true)
+    );
+
+    let passthrough = materialize_servertool_response_stage_orchestration_output_json(
+        &serde_json::json!({
+            "originalPayload": { "id": "original" },
+            "executedPayload": { "id": "ignored" },
+            "orchestrationExecuted": false,
+            "orchestrationFlowId": "ignored"
+        })
+        .to_string(),
+    )
+    .expect("response-stage orchestration output passthrough materialization");
+    let passthrough_value: serde_json::Value =
+        serde_json::from_str(&passthrough).expect("parse passthrough materialized output");
+    assert_eq!(
+        passthrough_value["payload"],
+        serde_json::json!({ "id": "original" })
+    );
+    assert_eq!(passthrough_value["executed"], serde_json::json!(false));
+    assert!(passthrough_value.get("flowId").is_none());
+    assert_eq!(
+        passthrough_value["returnedExecutedPayload"],
+        serde_json::json!(false)
+    );
 }
 
 #[test]

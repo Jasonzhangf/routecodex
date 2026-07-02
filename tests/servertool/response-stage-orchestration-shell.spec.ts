@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageGateWithNative = jest.fn();
 const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
-const planServertoolResponseStageOrchestrationOutputWithNative = jest.fn();
+const materializeServertoolResponseStageOrchestrationOutputWithNative = jest.fn();
 const detectProviderResponseShapeWithNative = jest.fn(() => 'chat_completion');
 const readRuntimeControlFromAnyBoundMetadataCenter = jest.fn(() => ({}));
 const runServerToolOrchestrationShell = jest.fn();
@@ -18,7 +18,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolResponseStageOrchestrationOutputWithNative,
+    materializeServertoolResponseStageOrchestrationOutputWithNative,
     planServertoolResponseStageRuntimeActionWithNative
   })
 );
@@ -53,16 +53,18 @@ describe('response-stage-orchestration-shell', () => {
     planServertoolResponseStageRuntimeActionWithNative.mockReturnValue({
       action: 'run_auto_hooks'
     });
-    planServertoolResponseStageOrchestrationOutputWithNative.mockImplementation((input: any) =>
+    materializeServertoolResponseStageOrchestrationOutputWithNative.mockImplementation((input: any) =>
       input?.orchestrationExecuted === true
         ? {
-            returnAction: 'return_executed_payload',
-            recordExecuted: true,
-            recordFlowId: input.orchestrationFlowId
+            payload: input.executedPayload,
+            executed: true,
+            flowId: String(input.orchestrationFlowId ?? '').trim(),
+            returnedExecutedPayload: true
           }
         : {
-            returnAction: 'return_original_payload',
-            recordExecuted: false
+            payload: input.originalPayload,
+            executed: false,
+            returnedExecutedPayload: false
           }
     );
     runServerToolOrchestrationShell.mockResolvedValue({
@@ -97,6 +99,7 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain('gatePlan.skipReason as string');
     expect(source).not.toContain('String(gateRuntimeAction.action)');
     expect(source).not.toContain('String(outputPlan.returnAction)');
+    expect(source).not.toContain('switch (outputPlan.returnAction)');
     expect(source).not.toContain("gatePlan.nextAction === 'bypass'");
     expect(source).not.toContain("if (gateRuntimeAction.action === 'return_passthrough_bypass')");
     expect(source).not.toContain('if (orchestration.executed)');
@@ -108,9 +111,8 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).toContain("case 'return_passthrough_bypass'");
     expect(source).toContain("case 'run_auto_hooks'");
     expect(source).toContain('invalid response-stage orchestration action');
-    expect(source).toContain('invalid response-stage orchestration output action');
     expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
-    expect(source).toContain('planServertoolResponseStageOrchestrationOutputWithNative({');
+    expect(source).toContain('materializeServertoolResponseStageOrchestrationOutputWithNative({');
   });
 
   test('returns native skipReason without TS fallback or whitelist filtering', async () => {
@@ -163,17 +165,18 @@ describe('response-stage-orchestration-shell', () => {
     });
   });
 
-  test('uses native orchestration output plan for executed response projection', async () => {
+  test('uses native orchestration output materializer for executed response projection', async () => {
     const stageRecorder = { record: jest.fn() };
     runServerToolOrchestrationShell.mockResolvedValue({
       chat: { id: 'resp_executed' },
       executed: true,
       flowId: ' flow_executed '
     });
-    planServertoolResponseStageOrchestrationOutputWithNative.mockReturnValue({
-      returnAction: 'return_executed_payload',
-      recordExecuted: true,
-      recordFlowId: 'flow_executed'
+    materializeServertoolResponseStageOrchestrationOutputWithNative.mockReturnValue({
+      payload: { id: 'resp_executed' },
+      executed: true,
+      flowId: 'flow_executed',
+      returnedExecutedPayload: true
     });
 
     await expect(
@@ -190,7 +193,9 @@ describe('response-stage-orchestration-shell', () => {
       flowId: 'flow_executed'
     });
 
-    expect(planServertoolResponseStageOrchestrationOutputWithNative).toHaveBeenCalledWith({
+    expect(materializeServertoolResponseStageOrchestrationOutputWithNative).toHaveBeenCalledWith({
+      originalPayload: { id: 'resp_input' },
+      executedPayload: { id: 'resp_executed' },
       orchestrationExecuted: true,
       orchestrationFlowId: ' flow_executed '
     });
@@ -221,23 +226,43 @@ describe('response-stage-orchestration-shell', () => {
     expect(runServerToolOrchestrationShell).not.toHaveBeenCalled();
   });
 
-  test('fails fast for unknown response-stage output action', async () => {
+  test('uses native orchestration output materializer for original response projection', async () => {
+    const stageRecorder = { record: jest.fn() };
     runServerToolOrchestrationShell.mockResolvedValue({
-      chat: { id: 'resp_unknown_output_action' },
+      chat: { id: 'resp_ignored' },
       executed: false
     });
-    planServertoolResponseStageOrchestrationOutputWithNative.mockReturnValue({
-      returnAction: 'unknown_response_stage_output',
-      recordExecuted: false
+    materializeServertoolResponseStageOrchestrationOutputWithNative.mockReturnValue({
+      payload: { id: 'resp_original' },
+      executed: false,
+      returnedExecutedPayload: false
     });
 
     await expect(
       runServertoolResponseStageOrchestrationShell({
-        payload: { id: 'resp_input_unknown_output' },
+        payload: { id: 'resp_original' },
         adapterContext: {} as any,
-        requestId: 'req-unknown-response-stage-output-action',
-        entryEndpoint: '/v1/responses'
+        requestId: 'req-output-original',
+        entryEndpoint: '/v1/responses',
+        stageRecorder: stageRecorder as any
       })
-    ).rejects.toThrow('[servertool] invalid response-stage orchestration output action');
+    ).resolves.toEqual({
+      payload: { id: 'resp_original' },
+      executed: false
+    });
+
+    expect(materializeServertoolResponseStageOrchestrationOutputWithNative).toHaveBeenCalledWith({
+      originalPayload: { id: 'resp_original' },
+      executedPayload: { id: 'resp_ignored' },
+      orchestrationExecuted: false,
+      orchestrationFlowId: undefined
+    });
+    expect(stageRecorder.record).toHaveBeenCalledWith(
+      'HubRespChatProcess03Governed.servertool_orchestration',
+      expect.objectContaining({
+        executed: false,
+        inputShape: 'chat_completion'
+      })
+    );
   });
 });
