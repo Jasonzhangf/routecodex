@@ -10,7 +10,7 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   materializeServertoolResponseStageOrchestrationOutputWithNative,
-  planServertoolResponseStageRuntimeActionWithNative
+  resolveServertoolResponseStageOrchestrationGateDecisionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
@@ -43,30 +43,22 @@ export async function runServertoolResponseStageOrchestrationShell(
     runtimeControl,
     allowFollowup: options.allowFollowup === true
   });
-  const gateRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-    responseStageGatePlan: gatePlan,
-    autoHookEvaluated: false,
-    hasAutoHookResult: false
+  const gateDecision = resolveServertoolResponseStageOrchestrationGateDecisionWithNative({
+    responseStageGatePlan: gatePlan
   });
 
-  switch (gateRuntimeAction.action) {
-    case 'return_passthrough_bypass': {
-      const skipReason = gateRuntimeAction.skipReason;
-      recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
-        executed: false,
-        skipReason,
-        inputShape: detectProviderResponseShapeWithNative(options.payload)
-      });
-      return {
-        payload: options.payload,
-        executed: false,
-        skipReason
-      };
-    }
-    case 'run_auto_hooks':
-      break;
-    default:
-      throw new Error('[servertool] invalid response-stage orchestration action');
+  if (gateDecision.action === 'return_passthrough_bypass') {
+    const skipReason = gateDecision.skipReason;
+    recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
+      executed: false,
+      skipReason,
+      inputShape: detectProviderResponseShapeWithNative(options.payload)
+    });
+    return {
+      payload: options.payload,
+      executed: false,
+      skipReason
+    };
   }
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
 

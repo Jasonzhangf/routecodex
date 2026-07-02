@@ -509,6 +509,15 @@ export type ServertoolResponseStageRuntimeActionPlan =
       finalizeResult: ServertoolResponseStageAutoHookResult;
     };
 
+export type ServertoolResponseStageOrchestrationGateDecision =
+  | {
+      action: 'return_passthrough_bypass';
+      skipReason?: string;
+    }
+  | {
+      action: 'run_orchestration';
+    };
+
 type ServertoolResponseStageAutoHookPassResult = Extract<
   ServertoolResponseStageRuntimeActionPlan,
   { passResult: unknown }
@@ -3368,6 +3377,27 @@ export function resolveServertoolResponseStagePrepassInitialDecisionWithNative(i
       };
     default:
       throw new Error('[servertool] invalid response-stage prepass action');
+  }
+}
+
+export function resolveServertoolResponseStageOrchestrationGateDecisionWithNative(input: {
+  responseStageGatePlan: NativeServertoolResponseStageGate;
+}): ServertoolResponseStageOrchestrationGateDecision {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  });
+  switch (action.action) {
+    case 'return_passthrough_bypass':
+      return {
+        action: 'return_passthrough_bypass',
+        ...(action.skipReason ? { skipReason: action.skipReason } : {})
+      };
+    case 'run_auto_hooks':
+      return { action: 'run_orchestration' };
+    default:
+      throw new Error('[servertool] invalid response-stage orchestration action');
   }
 }
 
