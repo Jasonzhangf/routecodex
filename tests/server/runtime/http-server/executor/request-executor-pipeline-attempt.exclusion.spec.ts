@@ -1,4 +1,5 @@
 import { __requestExecutorTestables } from '../../../../../src/server/runtime/http-server/request-executor.js';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const { resolveRequestExecutorPipelineAttempt } = __requestExecutorTestables;
 
@@ -103,5 +104,54 @@ describe('resolveRequestExecutorPipelineAttempt excluded provider guard', () => 
     })).toThrow('Virtual router reselected excluded provider primary.key1.gpt-5.5');
 
     expect(Array.from(excludedProviderKeys)).toEqual([providerKey]);
+  });
+
+  it('does not reject VR hits when selected target protocol requires relay conversion', () => {
+    const providerKey = 'minimax.key1.MiniMax-M3';
+    const metadataForAttempt: Record<string, unknown> = {};
+    MetadataCenter.attach(metadataForAttempt);
+
+    const resolved = resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-cross-protocol-vr-hit',
+      providerRequestId: 'provider-req-cross-protocol-vr-hit',
+      attempt: 1,
+      metadataForAttempt,
+      pipelineResult: {
+        providerPayload: { model: 'MiniMax-M3', messages: [] },
+        target: {
+          providerKey,
+          providerType: 'anthropic',
+          outboundProfile: 'anthropic-messages',
+          runtimeKey: providerKey
+        },
+        routingDecision: {
+          routeName: 'default',
+          providerProtocol: 'openai-responses',
+          pool: [providerKey],
+          routePool: [providerKey]
+        },
+        processMode: 'chat',
+        metadata: {}
+      },
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-req-cross-protocol-vr-hit',
+      clientAbortSignal: undefined,
+      initialRoutePool: null,
+      excludedProviderKeys: new Set<string>(),
+      lastError: undefined,
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: () => ({
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'unused'
+      }),
+      hubStartedAtMs: Date.now(),
+      pipelineLabel: 'hub.pipeline'
+    });
+
+    expect(resolved.kind).toBe('resolved');
+    expect(resolved.target?.providerKey).toBe(providerKey);
+    expect(MetadataCenter.read(metadataForAttempt)?.readRuntimeControl().providerProtocol).toBe('openai-responses');
   });
 });

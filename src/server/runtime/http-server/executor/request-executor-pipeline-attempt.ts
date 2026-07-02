@@ -59,27 +59,12 @@ function commitRequestExecutorAttemptSelection(args: {
   const routeName = readTrimmedString(routingDecision?.routeName);
   const routeId = readTrimmedString(routingDecision?.routeId);
   const providerProtocol = readTrimmedString(routingDecision?.providerProtocol);
-  const targetProviderProtocol = readTrimmedString(targetRecord.outboundProfile);
   if (!providerProtocol) {
     throw Object.assign(new Error('Virtual router selection missing providerProtocol'), {
       code: 'ERR_VR_SELECTION_MISSING_PROVIDER_PROTOCOL',
       providerKey: target.providerKey,
       routeName
     });
-  }
-  if (targetProviderProtocol && targetProviderProtocol !== providerProtocol) {
-    throw Object.assign(
-      new Error(
-        `Virtual router selection providerProtocol mismatch: decision=${providerProtocol} target=${targetProviderProtocol}`
-      ),
-      {
-        code: 'ERR_VR_SELECTION_PROVIDER_PROTOCOL_MISMATCH',
-        providerKey: target.providerKey,
-        routeName,
-        providerProtocol,
-        targetProviderProtocol
-      }
-    );
   }
 
   writeMetadataCenterSlot({
