@@ -500,6 +500,7 @@ const TARGETS = [
       'const responseStagePrePassAction = responseStagePrePass.action',
       'entryPreflight as { action: unknown }',
       'enginePrepassAction as { action: unknown }',
+      'contextBase: entryContext.contextBase as ServerToolHandlerContext',
     ],
     required: [
       'orchestrateServertoolEngine',
@@ -511,6 +512,7 @@ const TARGETS = [
       'planServertoolEnginePrepassActionWithNative',
       'switch (entryPreflight.action)',
       'switch (enginePrepassAction.action)',
+      'contextBase: entryContext.contextBase',
     ],
   },
   {

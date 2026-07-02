@@ -5575,6 +5575,7 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEnginePrepassActionWithNative',
     'switch (entryPreflight.action)',
     'switch (enginePrepassAction.action)',
+    'contextBase: entryContext.contextBase',
   ]) {
     if (!runServerSideToolEngineShell.includes(marker)) {
       fail(
@@ -5599,6 +5600,7 @@ function checkServertoolRustOutcomeCloseout() {
     'const responseStagePrePassAction = responseStagePrePass.action',
     'entryPreflight as { action: unknown }',
     'enginePrepassAction as { action: unknown }',
+    'contextBase: entryContext.contextBase as ServerToolHandlerContext',
   ]) {
     if (runServerSideToolEngineShell.includes(marker)) {
       fail(

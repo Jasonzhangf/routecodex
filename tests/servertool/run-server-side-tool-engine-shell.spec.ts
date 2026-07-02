@@ -86,6 +86,9 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain('const responseStagePrePassAction = responseStagePrePass.action');
     expect(source).not.toContain('entryPreflight as { action: unknown }');
     expect(source).not.toContain('enginePrepassAction as { action: unknown }');
+    expect(source).not.toContain('contextBase: entryContext.contextBase as ServerToolHandlerContext');
+    expect(source).not.toContain('ServerToolHandlerContext');
+    expect(source).toContain('contextBase: entryContext.contextBase');
     expect(source).not.toContain('const base =');
     expect(source).not.toContain("typeof options.chatResponse === 'object'");
     expect(source).not.toContain("case 'return_non_object_base':");
