@@ -359,7 +359,8 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("engineResult.execution && typeof engineResult.execution === 'object'");
     expect(source).toContain("engineResult.execution != null && typeof engineResult.execution === 'object'");
     expect(source).not.toContain("runtimeControl && typeof runtimeControl === 'object'");
-    expect(source).toContain("runtimeControl != null && typeof runtimeControl === 'object'");
+    expect(source).not.toContain("runtimeControl != null && typeof runtimeControl === 'object'");
+    expect(source).toContain('runtimeControl: runtimeControl ?? null');
     expect(source).toContain('hasExecution: engineResult.execution != null');
     expect(source).toContain('finalChatResponse: engineResult.finalChatResponse');
     expect(source).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");

@@ -5432,6 +5432,10 @@ function checkServertoolRustOutcomeCloseout() {
     'Boolean(engineResult.execution)',
     "engineResult.execution && typeof engineResult.execution === 'object'",
     "runtimeControl && typeof runtimeControl === 'object'",
+    'engineResult.execution as unknown as Record<string, unknown>',
+    'runtimeControl as Record<string, unknown>',
+    'runtimeControl != null && typeof runtimeControl ===',
+    'runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown>',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(
@@ -5448,7 +5452,7 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     "engineResult.execution != null && typeof engineResult.execution === 'object'",
-    "runtimeControl != null && typeof runtimeControl === 'object'",
+    'runtimeControl: runtimeControl ?? null',
   ]) {
     if (!engineOrchestrationShell.includes(marker)) {
       fail(

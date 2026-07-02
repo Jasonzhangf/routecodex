@@ -747,10 +747,10 @@ export interface ServertoolHookSpec {
 
 export function planStoplessExecutionWithNative(input: {
   flowId?: string;
-  execution: Record<string, unknown>;
+  execution: unknown;
   requestTruthSessionId?: string;
-  metadataCenterSnapshot?: Record<string, unknown> | null;
-  runtimeControl?: Record<string, unknown> | null;
+  metadataCenterSnapshot?: unknown;
+  runtimeControl?: unknown;
 }): StoplessExecutionPlanOutput {
   const capability = 'planStoplessExecutionJson';
   const fn = readNativeFunction(capability);

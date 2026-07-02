@@ -1,3 +1,10 @@
+# 2026-07-03: servertool engine stopless carrier casts removed
+
+- Slice: `engine-orchestration-shell.ts` no longer casts `engineResult.execution`, `runtimeControl`, or `metadataCenterSnapshot` to `Record<string, unknown>` before calling `planStoplessExecutionWithNative()`. The native wrapper now accepts these fields as `unknown` carriers and passes them to Rust JSON `Value`; TS only preserves the non-null execution/object presence check before choosing `{}`.
+- Gate: `engine.stopless-session-thin-shell.spec.ts`, `engine-observation-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old stopless carrier cast/object-guard markers and require `runtimeControl: runtimeControl ?? null`.
+- Evidence: initial focused run failed because two tests still required the old `runtimeControl != null && typeof runtimeControl === 'object'` marker; after updating the tests/gate, focused Jest `engine.stopless-session-thin-shell + engine-observation-shell + servertool-active-orchestration-audit` PASS 61/61; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: Phase 1 still has allowed native action switches and MetadataCenter carrier internal casts to classify; Hub Pipeline/VR aggregate closeout remains open.
+
 # 2026-07-03: servertool registry auto-hook carrier casts removed
 
 - Slice: `registry-orchestration-shell.ts` no longer casts builtin auto-hook `entry.registration` / `entry.execution` to `Record<string, unknown>` before calling the native registry auto-hook planner. `planServertoolRegistryBuiltinAutoHookEntriesWithNative()` now accepts those fields as `unknown` carriers and only returns the native-selected entries.

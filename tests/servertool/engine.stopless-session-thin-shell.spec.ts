@@ -21,7 +21,12 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain('requestTruthSessionId,');
     expect(source).not.toContain('options.adapterContext as Record<string, unknown>');
     expect(source).not.toContain('options.adapterContext as unknown as Record<string, unknown>');
+    expect(source).not.toContain('engineResult.execution as unknown as Record<string, unknown>');
+    expect(source).not.toContain('runtimeControl as Record<string, unknown>');
+    expect(source).not.toContain('runtimeControl != null && typeof runtimeControl ===');
+    expect(source).not.toContain('runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown>');
     expect(source).toContain('metadataCenterSnapshot: metadataCenterSnapshot ?? null');
+    expect(source).toContain('runtimeControl: runtimeControl ?? null');
     expect(source).toContain('adapterContext: options.adapterContext');
   });
 
@@ -119,7 +124,8 @@ describe('engine stopless session thin-shell guard', () => {
     expect(source).not.toContain("engineResult.execution && typeof engineResult.execution === 'object'");
     expect(source).toContain("engineResult.execution != null && typeof engineResult.execution === 'object'");
     expect(source).not.toContain("runtimeControl && typeof runtimeControl === 'object'");
-    expect(source).toContain("runtimeControl != null && typeof runtimeControl === 'object'");
+    expect(source).not.toContain("runtimeControl != null && typeof runtimeControl === 'object'");
+    expect(source).toContain('runtimeControl: runtimeControl ?? null');
     expect(source).not.toContain("if (engineResult.mode === 'passthrough' || !engineResult.execution)");
   });
 
