@@ -62,6 +62,7 @@ describe('engine-preflight-shell', () => {
     );
 
     expect(source).toContain('planServertoolEnginePreflightWithNative');
+    expect(source).not.toContain('args.adapterContext as Record<string, unknown>');
     expect(source).toContain('function runPreflightSideEffects(');
     expect(source).toContain('inspectStopGatewaySignal(');
     expect(source).toContain('attachStopGatewayContext(');

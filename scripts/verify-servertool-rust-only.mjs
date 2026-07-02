@@ -5466,6 +5466,7 @@ function checkServertoolRustOutcomeCloseout() {
     'preflightAction.logStopEntry.stage',
     'preflightAction.logStopEntry.result',
     'String(preflightAction.action)',
+    'args.adapterContext as Record<string, unknown>',
   ]) {
     if (enginePreflightShell.includes(marker)) {
       fail(

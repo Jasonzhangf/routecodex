@@ -421,6 +421,7 @@ const TARGETS = [
       'preflightAction.logStopEntry.stage',
       'preflightAction.logStopEntry.result',
       'String(preflightAction.action)',
+      'args.adapterContext as Record<string, unknown>',
     ],
     required: [
       'runEnginePreflight',

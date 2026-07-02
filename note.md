@@ -1,3 +1,9 @@
+# 2026-07-02: servertool engine preflight adapterContext cast removed
+
+- Slice: `engine-preflight-shell.ts` now passes `args.adapterContext` directly into `planServertoolEnginePreflightWithNative`; the native wrapper already accepts `adapterContext?: unknown`, so the TS `as Record<string, unknown>` escape is gone.
+- Gate: `engine-preflight-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `args.adapterContext as Record<string, unknown>` marker.
+- Evidence: focused Jest `engine-preflight-shell + servertool-active-orchestration-audit` PASS 49/49; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool entry context adapterContext cast removed
 
 - Slice: `entry-context-shell.ts` now passes `args.options.adapterContext` directly into `readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter`; MetadataCenter carrier owns object narrowing.

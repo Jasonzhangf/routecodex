@@ -74,7 +74,7 @@ export function runEnginePreflight(args: {
   const preflightAction = planServertoolEnginePreflightWithNative({
     hasSyntheticControlText: containsSyntheticRouteCodexControlTextWithNative(args.chat),
     stopSignalObserved: stopSignal.observed,
-    adapterContext: args.adapterContext as Record<string, unknown>
+    adapterContext: args.adapterContext
   });
   switch (preflightAction.action) {
     case 'return_original_chat':
