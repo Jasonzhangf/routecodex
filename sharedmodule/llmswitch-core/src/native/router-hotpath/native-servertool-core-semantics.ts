@@ -2,8 +2,17 @@
 // Provides inspect_stop_gateway_signal, evaluate_loop_guard, calculate_budget.
 
 import type { JsonObject } from '../../conversion/hub/types/json.js';
+import {
+  ProviderProtocolError,
+  type ProviderErrorCategory,
+  type ProviderProtocolErrorCode
+} from '../../conversion/provider-protocol-error.js';
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
 import { parseStopMessagePersistedLookupPlanPayload } from './native-router-hotpath-analysis.js';
+import {
+  buildServertoolOutcomePlanInputWithNative,
+  planServertoolOutcomeWithNative
+} from './native-chat-process-servertool-orchestration-semantics.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -77,7 +86,7 @@ export interface DefaultBudgetConfig {
   is_non_active_managed_goal: boolean;
 }
 
-type NativeServerToolExecution = {
+export type NativeServerToolExecution = {
   flowId: string;
   stopMessageReservation?: {
     stickyKey: string;
@@ -85,10 +94,18 @@ type NativeServerToolExecution = {
   };
 };
 
-type NativeServerToolHandlerResult = {
+export type NativeServerToolHandlerResult = {
   chatResponse: JsonObject;
   execution: NativeServerToolExecution;
   metadataWritePlan?: JsonObject;
+};
+
+export type NativeServertoolMaterializedEngineResult = {
+  mode: 'tool_flow';
+  finalChatResponse: JsonObject;
+  execution: {
+    flowId: string;
+  };
 };
 
 export interface BudgetStateUpdatePlanInput {
@@ -2582,6 +2599,62 @@ export function planServertoolExecutionOutcomeMaterializationWithNative(input: {
   };
 }
 
+export function createServertoolProviderProtocolErrorFromPlanWithNative(
+  plan: ServertoolErrorPlan
+): ProviderProtocolError & { status?: number } {
+  const err = new ProviderProtocolError(plan.message, {
+    code: plan.code as ProviderProtocolErrorCode,
+    category: plan.category as ProviderErrorCategory,
+    details: plan.details
+  }) as ProviderProtocolError & { status?: number };
+  err.status = plan.status;
+  return err;
+}
+
+export function materializeNativeToolCallExecutionOutcomeWithNative(args: {
+  baseForExecution: JsonObject;
+  options: {
+    requestId: string;
+    adapterContext?: unknown;
+  };
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  executionState: NativeServertoolExecutionLoopState;
+}): NativeServertoolMaterializedEngineResult {
+  const outcomePlan = planServertoolOutcomeWithNative(
+    buildServertoolOutcomePlanInputWithNative({
+      toolCalls: args.toolCalls,
+      executionState: args.executionState,
+      adapterContext: args.options.adapterContext,
+      baseForExecution: args.baseForExecution,
+    })
+  );
+
+  const materializationPlan = planServertoolExecutionOutcomeMaterializationWithNative({
+    requestId: args.options.requestId,
+    outcomeMode: outcomePlan.outcomeMode,
+    requiresPendingInjection: outcomePlan.requiresPendingInjection,
+    hasLastExecution: args.executionState.lastExecution != null,
+    executedToolCallsLen: args.executionState.executedToolCalls.length,
+    lastExecution: args.executionState.lastExecution,
+    flowId: outcomePlan.flowId
+  });
+
+  switch (materializationPlan.action) {
+    case 'throw_dispatch_error':
+      throw createServertoolProviderProtocolErrorFromPlanWithNative(materializationPlan.errorPlan);
+    case 'return_tool_flow':
+      return {
+        mode: materializationPlan.resultMode,
+        finalChatResponse: args.baseForExecution,
+        execution: {
+          flowId: materializationPlan.executionFlowId
+        }
+      };
+    default:
+      throw new Error('[servertool] invalid execution outcome materialization action');
+  }
+}
+
 export function planServertoolExecutionLoopRuntimeActionWithNative(input: {
   hasHandlerEntry: boolean;
   triggerMode?: string;
@@ -3399,6 +3472,27 @@ export async function finalizeServertoolHandlerPlanWithNative(
   }
   return await (planned as { finalize: () => Promise<NativeServerToolHandlerResult | null> }).finalize();
 }
+
+export const materializeServertoolPlannedResultWithNative = async (
+  planned: unknown,
+  options: { requestId: string }
+): Promise<NativeServerToolHandlerResult | null> => {
+  const actionPlan = planServertoolHandlerMaterializationForPlannedWithNative(
+    planned,
+    options.requestId
+  );
+  switch (actionPlan.action) {
+    case 'finalize_without_backend': {
+      return await finalizeServertoolHandlerPlanWithNative(planned, options.requestId);
+    }
+    case 'throw_handler_error':
+      throw createServertoolProviderProtocolErrorFromPlanWithNative(actionPlan.errorPlan);
+    case 'return_handler_result':
+      return materializeServertoolHandlerResultWithNative(planned, options.requestId);
+    default:
+      throw new Error('[servertool] invalid handler materialization action');
+  }
+};
 
 export function planEngineSelectionStartWithNative(input: {
   primaryAutoHookIds: string[];

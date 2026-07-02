@@ -4,6 +4,7 @@ import {
   type ProviderProtocolErrorCode
 } from '../conversion/provider-protocol-error.js';
 import {
+  createServertoolProviderProtocolErrorFromPlanWithNative,
   planServertoolTimeoutWatcherWithNative,
   type ServertoolErrorPlan
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -33,15 +34,5 @@ export function withTimeout<T>(
 export function createServertoolProviderProtocolErrorFromPlan(
   plan: ServertoolErrorPlan
 ): ProviderProtocolError & { status?: number } {
-  return buildProviderProtocolError(plan);
-}
-
-function buildProviderProtocolError(plan: ServertoolErrorPlan): ProviderProtocolError & { status?: number } {
-  const err = new ProviderProtocolError(plan.message, {
-    code: plan.code as ProviderProtocolErrorCode,
-    category: plan.category as ProviderErrorCategory,
-    details: plan.details
-  }) as ProviderProtocolError & { status?: number };
-  err.status = plan.status;
-  return err;
+  return createServertoolProviderProtocolErrorFromPlanWithNative(plan);
 }

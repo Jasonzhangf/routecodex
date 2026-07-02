@@ -63,6 +63,69 @@ jest.unstable_mockModule(
     })),
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
     parseServertoolCliProjectionToolArgumentsWithNative: jest.fn(() => ({})),
+    materializeNativeToolCallExecutionOutcomeWithNative: (args: any) => {
+      const outcomePlan = planServertoolOutcomeWithNative(
+        buildServertoolOutcomePlanInputWithNativeMock({
+          toolCalls: args.toolCalls,
+          executionState: args.executionState,
+          adapterContext: args.options.adapterContext,
+          baseForExecution: args.baseForExecution,
+        })
+      );
+      const materializationPlan = planServertoolExecutionOutcomeMaterializationWithNative({
+        requestId: args.options.requestId,
+        outcomeMode: outcomePlan.outcomeMode,
+        requiresPendingInjection: outcomePlan.requiresPendingInjection,
+        hasLastExecution: args.executionState.lastExecution != null,
+        executedToolCallsLen: args.executionState.executedToolCalls.length,
+        lastExecution: args.executionState.lastExecution,
+        flowId: outcomePlan.flowId
+      });
+      switch (materializationPlan.action) {
+        case 'throw_dispatch_error': {
+          const errorPlan = materializationPlan.errorPlan;
+          throw Object.assign(new Error(errorPlan?.message ?? 'servertool dispatch error'), {
+            code: errorPlan?.code,
+            category: errorPlan?.category,
+            status: errorPlan?.status,
+            details: errorPlan?.details
+          });
+        }
+        case 'return_tool_flow':
+          return {
+            mode: materializationPlan.resultMode,
+            finalChatResponse: args.baseForExecution,
+            execution: {
+              flowId: materializationPlan.executionFlowId
+            }
+          };
+        default:
+          throw new Error('[servertool] invalid execution outcome materialization action');
+      }
+    },
+    materializeServertoolPlannedResultWithNative: async (planned: any, options: any) => {
+      const actionPlan = planServertoolHandlerMaterializationForPlannedWithNative(
+        planned,
+        options.requestId
+      );
+      switch (actionPlan.action) {
+        case 'finalize_without_backend':
+          return await finalizeServertoolHandlerPlanWithNative(planned, options.requestId);
+        case 'throw_handler_error': {
+          const errorPlan = actionPlan.errorPlan;
+          throw Object.assign(new Error(errorPlan?.message ?? 'servertool handler error'), {
+            code: errorPlan?.code,
+            category: errorPlan?.category,
+            status: errorPlan?.status,
+            details: errorPlan?.details
+          });
+        }
+        case 'return_handler_result':
+          return materializeServertoolHandlerResultWithNative(planned, options.requestId);
+        default:
+          throw new Error('[servertool] invalid handler materialization action');
+      }
+    },
     planServertoolExecutionOutcomeMaterializationWithNative,
     planServertoolHandlerMaterializationForPlannedWithNative,
     finalizeServertoolHandlerPlanWithNative,
@@ -166,32 +229,34 @@ describe('execution-handler-materialization-shell', () => {
       )
     );
 
-    expect(source).toContain('adapterContext: args.options.adapterContext');
-    expect(source).toContain('baseForExecution: args.baseForExecution');
-    expect(source).toContain('const outcomePlan = planServertoolOutcomeWithNative(');
-    expect(source).toContain('buildServertoolOutcomePlanInputWithNative({');
+    expect(source).toContain('materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome');
+    expect(source).toContain('materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult');
+    expect(source).not.toContain('adapterContext: args.options.adapterContext');
+    expect(source).not.toContain('baseForExecution: args.baseForExecution');
+    expect(source).not.toContain('const outcomePlan = planServertoolOutcomeWithNative(');
+    expect(source).not.toContain('buildServertoolOutcomePlanInputWithNative({');
     expect(source).not.toContain('const outcomePlanInput =');
-    expect(source).toContain('throw createServertoolProviderProtocolErrorFromPlan(');
-    expect(source).toContain('planServertoolExecutionOutcomeMaterializationWithNative({');
+    expect(source).not.toContain('throw createServertoolProviderProtocolErrorFromPlan(');
+    expect(source).not.toContain('planServertoolExecutionOutcomeMaterializationWithNative({');
     expect(source).not.toContain("if (materializationPlan.action === 'throw_dispatch_error')");
-    expect(source).toContain('switch (materializationPlan.action)');
+    expect(source).not.toContain('switch (materializationPlan.action)');
     expect(source).not.toContain('materializationPlan as { action: unknown }');
     expect(source).not.toContain('const materializationAction = materializationPlan.action');
     expect(source).not.toContain('Boolean(args.executionState.lastExecution)');
-    expect(source).toContain('hasLastExecution: args.executionState.lastExecution != null');
+    expect(source).not.toContain('hasLastExecution: args.executionState.lastExecution != null');
     expect(source).not.toContain('planServertoolExecutionDispatchErrorWithNative({');
-    expect(source).toContain('planServertoolHandlerMaterializationForPlannedWithNative(');
-    expect(source).toContain('planned: unknown');
+    expect(source).not.toContain('planServertoolHandlerMaterializationForPlannedWithNative(');
+    expect(source).not.toContain('planned: unknown');
     expect(source).not.toContain('planServertoolHandlerContractErrorWithNative(');
-    expect(source).toContain('finalizeServertoolHandlerPlanWithNative');
-    expect(source).toContain('materializeServertoolHandlerResultWithNative');
+    expect(source).not.toContain('finalizeServertoolHandlerPlanWithNative');
+    expect(source).not.toContain('materializeServertoolHandlerResultWithNative');
     expect(source).not.toContain('isServerToolHandlerResultLike');
     expect(source).not.toContain('isServerToolHandlerPlanLike');
     expect(source).not.toContain("actionPlan.action === 'invalid_plan_missing_finalize'");
     expect(source).not.toContain("actionPlan.action === 'invalid_plan_result'");
     expect(source).not.toContain("if (actionPlan.action === 'finalize_without_backend')");
     expect(source).not.toContain("if (actionPlan.action === 'throw_handler_error')");
-    expect(source).toContain('switch (actionPlan.action)');
+    expect(source).not.toContain('switch (actionPlan.action)');
     expect(source).not.toContain('actionPlan as { action: string }');
     expect(source).not.toContain('typeof (planned as Record<string, unknown>).finalize');
     expect(source).not.toContain('record.chatResponse != null');
@@ -200,10 +265,10 @@ describe('execution-handler-materialization-shell', () => {
     expect(source).not.toContain('record.executionFlowId.trim()');
     expect(source).not.toContain("input.outcomeMode === 'mixed_client_tools'");
     expect(source).not.toContain('function throwServertoolExecutionDispatchError(');
-    expect(source).toContain('mode: materializationPlan.resultMode');
+    expect(source).not.toContain('mode: materializationPlan.resultMode');
     expect(source).not.toContain("mode: 'tool_flow'");
-    expect(source).toContain('invalid execution outcome materialization action');
-    expect(source).toContain('finalChatResponse: args.baseForExecution');
+    expect(source).not.toContain('invalid execution outcome materialization action');
+    expect(source).not.toContain('finalChatResponse: args.baseForExecution');
     expect(source).not.toContain('export const buildServertoolOutcomePlanInput =');
     expect(source).not.toContain('structuredClone(args.base)');
     expect(source).not.toContain('base: JsonObject;');

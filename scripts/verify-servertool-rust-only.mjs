@@ -2749,20 +2749,20 @@ function checkServertoolExecutionDispatchRustOwner() {
   );
   assertContains(
     'servertool-execution-handler-outcome-rust-owner',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'buildServertoolOutcomePlanInputWithNative'
   );
   assertContains(
     'servertool-execution-handler-outcome-rust-owner',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'buildServertoolOutcomePlanInputWithNative({'
   );
   assertContains(
     'servertool-execution-handler-outcome-rust-owner',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`),
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'const outcomePlan = planServertoolOutcomeWithNative('
   );
   assertMissing(
@@ -2959,7 +2959,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-outcome-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionOutcomeMaterializationJson'],
     ['servertool-execution-outcome-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionOutcomeRuntimeActionWithNative'],
     ['servertool-execution-outcome-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionOutcomeMaterializationWithNative'],
-    ['servertool-execution-outcome-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'planServertoolExecutionOutcomeMaterializationWithNative'],
+    ['servertool-execution-outcome-runtime-action-ts-thin-shell', `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`, readRequired(`${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`), 'materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'feature_id: hub.servertool_execution_state_contract'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn create_servertool_execution_loop_state'],
     ['servertool-execution-state-rust-owner', RUST_SERVERTOOL_EXECUTION_STATE_CONTRACT, rustExecutionState, 'pub fn append_executed_tool_record'],
@@ -5838,44 +5838,44 @@ function checkServertoolRustOutcomeCloseout() {
   }
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'planServertoolHandlerMaterializationForPlannedWithNative'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'planned: unknown'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'switch (materializationPlan.action)'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'mode: materializationPlan.resultMode'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'invalid handler materialization action'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'finalizeServertoolHandlerPlanWithNative'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',
-    `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
-    executionMaterializationShell,
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeCoreWrapper,
     'materializeServertoolHandlerResultWithNative'
   );
   assertContains(
@@ -6061,7 +6061,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-handler-contract-ts-thin-shell',
     `${SERVERTOOL_TS_DIR}/execution-handler-materialization-shell.ts`,
     executionMaterializationShell,
-    'planServertoolHandlerMaterializationForPlannedWithNative'
+    'materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult'
   );
 
   pass('servertool-outcome-rust-owner', 'servertool-core owns outcome planning and cli contract');

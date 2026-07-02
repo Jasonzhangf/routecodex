@@ -86,8 +86,6 @@ const TARGETS = [
       "if (planHandlerMaterializationAction(planned, options) === 'handler_plan')",
       'structuredClone(args.base)',
       'planned as any',
-    ],
-    required: [
       'throw createServertoolProviderProtocolErrorFromPlan(',
       'planServertoolExecutionOutcomeMaterializationWithNative({',
       'planServertoolHandlerMaterializationForPlannedWithNative(',
@@ -100,6 +98,10 @@ const TARGETS = [
       'materializeServertoolHandlerResultWithNative',
       'const outcomePlan = planServertoolOutcomeWithNative(',
       'buildServertoolOutcomePlanInputWithNative({',
+    ],
+    required: [
+      'materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome',
+      'materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult',
     ],
   },
   {
