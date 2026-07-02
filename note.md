@@ -1,3 +1,11 @@
+# 2026-07-03: servertool auto-hook finalization errors surfaced through NAPI
+
+- Slice: `plan_auto_hook_caller_finalization_json` now propagates Rust finalization/projection errors with `?` instead of serializing a `Result`-shaped value as if it were a valid plan. This keeps malformed auto-hook queue result payloads fail-fast across the NAPI bridge.
+- Rust owner: `auto_hook_runtime_contract.rs` remains the source of finalization/result projection semantics, including required `chatResponse` and `metadataWritePlan` validation.
+- Bridge guard: `servertool_core_blocks.rs` now verifies finalization output includes native `result.mode`, `finalChatResponse`, `execution`, and `metadataWritePlan`, proving the bridge emits the Rust-owned result projection rather than a wrapper artifact.
+- Evidence: `cargo test -p servertool-core auto_hook --quiet` PASS; `cargo test -p router-hotpath-napi plans_auto_hook_caller_finalization_via_servertool_core_bridge --lib -- --nocapture` PASS; `build-native-hotpath` PASS; focused Jest `servertool-cli-native-bridge + servertool-auto-hook-trace` PASS 39/39; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+- Remaining gap: this closes auto-hook finalization NAPI error/result projection only. Other Rust formatting-only dirt and non-servertool dirty work remain outside this slice.
+
 # 2026-07-03: servertool engine stopless carrier casts removed
 
 - Slice: `engine-orchestration-shell.ts` no longer casts `engineResult.execution`, `runtimeControl`, or `metadataCenterSnapshot` to `Record<string, unknown>` before calling `planStoplessExecutionWithNative()`. The native wrapper now accepts these fields as `unknown` carriers and passes them to Rust JSON `Value`; TS only preserves the non-null execution/object presence check before choosing `{}`.

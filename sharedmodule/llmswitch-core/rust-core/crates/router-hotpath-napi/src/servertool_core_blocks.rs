@@ -369,7 +369,7 @@ pub fn plan_auto_hook_caller_finalization_json(input_json: &str) -> Result<Strin
     let input: auto_hook_runtime_contract::AutoHookCallerFinalizationInput =
         serde_json::from_str(input_json)
             .map_err(|e| format!("deserialize auto-hook caller finalization input: {e}"))?;
-    serde_json::to_string(&auto_hook_runtime_contract::plan_auto_hook_caller_finalization(input))
+    serde_json::to_string(&auto_hook_runtime_contract::plan_auto_hook_caller_finalization(input)?)
         .map_err(|e| format!("serialize auto-hook caller finalization plan: {e}"))
 }
 
@@ -2511,8 +2511,12 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     let result = plan_auto_hook_caller_finalization_json(
         &serde_json::json!({
             "resultPresent": true,
+            "metadataWritePlanPresent": true,
             "queueIndex": 1,
-            "queueTotal": 2
+            "queueTotal": 2,
+            "chatResponse": { "choices": [] },
+            "execution": { "flowId": "auto-hook" },
+            "metadataWritePlan": { "runtimeControl": { "servertool": true } }
         })
         .to_string(),
     )
@@ -2523,6 +2527,19 @@ fn plans_auto_hook_caller_finalization_via_servertool_core_bridge() {
     assert_eq!(parsed["continueNextQueue"], false);
     assert_eq!(parsed["returnNull"], false);
     assert_eq!(parsed["resultMode"], serde_json::json!("tool_flow"));
+    assert_eq!(parsed["result"]["mode"], serde_json::json!("tool_flow"));
+    assert_eq!(
+        parsed["result"]["finalChatResponse"],
+        serde_json::json!({ "choices": [] })
+    );
+    assert_eq!(
+        parsed["result"]["execution"],
+        serde_json::json!({ "flowId": "auto-hook" })
+    );
+    assert_eq!(
+        parsed["result"]["metadataWritePlan"],
+        serde_json::json!({ "runtimeControl": { "servertool": true } })
+    );
 
     let next = plan_auto_hook_caller_finalization_json(
         &serde_json::json!({
@@ -3453,7 +3470,10 @@ fn materializes_servertool_response_stage_orchestration_output_via_servertool_co
     .expect("response-stage orchestration output executed materialization");
     let executed_value: serde_json::Value =
         serde_json::from_str(&executed).expect("parse executed materialized output");
-    assert_eq!(executed_value["payload"], serde_json::json!({ "id": "executed" }));
+    assert_eq!(
+        executed_value["payload"],
+        serde_json::json!({ "id": "executed" })
+    );
     assert_eq!(executed_value["executed"], serde_json::json!(true));
     assert_eq!(executed_value["flowId"], serde_json::json!("flow_1"));
     assert_eq!(

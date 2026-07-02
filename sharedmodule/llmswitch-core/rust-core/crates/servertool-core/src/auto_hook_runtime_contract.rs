@@ -154,15 +154,14 @@ pub fn plan_auto_hook_caller_finalization(
     input: AutoHookCallerFinalizationInput,
 ) -> Result<AutoHookCallerFinalizationPlan, String> {
     if input.result_present {
-        let projection = plan_auto_hook_caller_result_projection(
-            AutoHookCallerResultProjectionInput {
+        let projection =
+            plan_auto_hook_caller_result_projection(AutoHookCallerResultProjectionInput {
                 result_present: input.result_present,
                 metadata_write_plan_present: input.metadata_write_plan_present,
                 chat_response: input.chat_response,
                 execution: input.execution,
                 metadata_write_plan: input.metadata_write_plan,
-            },
-        )?;
+            })?;
         return Ok(AutoHookCallerFinalizationPlan {
             action: AutoHookCallerFinalizationAction::ReturnResult,
             return_result: true,
@@ -435,8 +434,8 @@ mod tests {
         );
         assert!(malformed.return_null);
 
-        let missing_chat_response = plan_auto_hook_caller_finalization(
-            AutoHookCallerFinalizationInput {
+        let missing_chat_response =
+            plan_auto_hook_caller_finalization(AutoHookCallerFinalizationInput {
                 result_present: true,
                 queue_index: 1,
                 queue_total: 1,
@@ -444,15 +443,14 @@ mod tests {
                 chat_response: None,
                 execution: None,
                 metadata_write_plan: None,
-            },
-        );
+            });
         assert_eq!(
             missing_chat_response.expect_err("missing finalization chat response"),
             "auto-hook caller result projection requires chatResponse"
         );
 
-        let projection = plan_auto_hook_caller_result_projection(
-            AutoHookCallerResultProjectionInput {
+        let projection =
+            plan_auto_hook_caller_result_projection(AutoHookCallerResultProjectionInput {
                 result_present: true,
                 metadata_write_plan_present: true,
                 chat_response: Some(serde_json::json!({ "choices": [] })),
@@ -460,56 +458,58 @@ mod tests {
                 metadata_write_plan: Some(serde_json::json!({
                     "runtimeControl": { "servertool": true }
                 })),
-            },
-        )
-        .expect("projection");
+            })
+            .expect("projection");
         assert_eq!(projection.mode, "tool_flow");
         assert!(projection.include_metadata_write_plan);
         assert_eq!(projection.result["mode"], "tool_flow");
-        assert_eq!(projection.result["finalChatResponse"], serde_json::json!({ "choices": [] }));
-        assert_eq!(projection.result["execution"], serde_json::json!({ "flowId": "auto-hook" }));
+        assert_eq!(
+            projection.result["finalChatResponse"],
+            serde_json::json!({ "choices": [] })
+        );
+        assert_eq!(
+            projection.result["execution"],
+            serde_json::json!({ "flowId": "auto-hook" })
+        );
         assert_eq!(
             projection.result["metadataWritePlan"],
             serde_json::json!({ "runtimeControl": { "servertool": true } })
         );
 
-        let missing_chat_response = plan_auto_hook_caller_result_projection(
-            AutoHookCallerResultProjectionInput {
+        let missing_chat_response =
+            plan_auto_hook_caller_result_projection(AutoHookCallerResultProjectionInput {
                 result_present: true,
                 metadata_write_plan_present: false,
                 chat_response: None,
                 execution: None,
                 metadata_write_plan: None,
-            },
-        );
+            });
         assert_eq!(
             missing_chat_response.expect_err("missing chat response"),
             "auto-hook caller result projection requires chatResponse"
         );
 
-        let missing_metadata_write_plan = plan_auto_hook_caller_result_projection(
-            AutoHookCallerResultProjectionInput {
+        let missing_metadata_write_plan =
+            plan_auto_hook_caller_result_projection(AutoHookCallerResultProjectionInput {
                 result_present: true,
                 metadata_write_plan_present: true,
                 chat_response: Some(serde_json::json!({ "choices": [] })),
                 execution: None,
                 metadata_write_plan: None,
-            },
-        );
+            });
         assert_eq!(
             missing_metadata_write_plan.expect_err("missing metadata write plan"),
             "auto-hook caller result projection requires metadataWritePlan"
         );
 
-        let missing = plan_auto_hook_caller_result_projection(
-            AutoHookCallerResultProjectionInput {
+        let missing =
+            plan_auto_hook_caller_result_projection(AutoHookCallerResultProjectionInput {
                 result_present: false,
                 metadata_write_plan_present: false,
                 chat_response: None,
                 execution: None,
                 metadata_write_plan: None,
-            },
-        );
+            });
         assert_eq!(
             missing.expect_err("missing queue result"),
             "auto-hook caller result projection requires queue result"
