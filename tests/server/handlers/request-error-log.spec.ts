@@ -193,6 +193,8 @@ describe('logRequestError diagnostics', () => {
       );
       err.statusCode = 401;
       err.code = 'HTTP_401';
+      err.catalogCode = '401.1002';
+      err.catalogKey = 'INVALID_ACCESS_TOKEN';
       err.rawErrorSnippet =
         '{"error":{"code":"new_api_error","message":"Invalid token (request id: 202606071512468498407098268d9d6mBARM7HT)","type":"new_api_error"}}';
 
@@ -202,6 +204,8 @@ describe('logRequestError diagnostics', () => {
       expect(rendered).toContain('Upstream provider error');
       expect(rendered).toContain('status=401');
       expect(rendered).toContain('code=HTTP_401');
+      expect(rendered).toContain('catalogCode=401.1002');
+      expect(rendered).toContain('catalogKey=INVALID_ACCESS_TOKEN');
       expect(rendered).not.toContain('Upstream authentication failed');
       expect(rendered).not.toContain('Invalid token');
       expect(rendered).not.toContain('202606071512468498407098268d9d6mBARM7HT');
@@ -224,6 +228,8 @@ describe('logRequestError diagnostics', () => {
       );
       err.statusCode = 403;
       err.code = 'HTTP_403';
+      err.catalogCode = '429.2000';
+      err.catalogKey = 'INSUFFICIENT_QUOTA';
       err.rawErrorSnippet =
         '{"error":{"message":"余额和订阅额度均不足，请充值后再使用","type":"permission_error","code":"insufficient_quota"}}';
 
@@ -233,9 +239,10 @@ describe('logRequestError diagnostics', () => {
       expect(rendered).toContain('Upstream provider error');
       expect(rendered).toContain('status=403');
       expect(rendered).toContain('code=HTTP_403');
+      expect(rendered).toContain('catalogCode=429.2000');
+      expect(rendered).toContain('catalogKey=INSUFFICIENT_QUOTA');
       expect(rendered).not.toContain('Upstream authentication failed');
       expect(rendered).not.toContain('余额和订阅额度均不足');
-      expect(rendered).not.toContain('insufficient_quota');
       expect(rendered).not.toContain('permission_error');
     } finally {
       if (previousVerbose === undefined) {

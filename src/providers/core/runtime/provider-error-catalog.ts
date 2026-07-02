@@ -75,6 +75,31 @@ export function normalizeKnownProviderError(input: {
   const upstream = readUpper(input.upstreamCode);
   const message = typeof input.message === 'string' ? input.message.toLowerCase() : '';
 
+  if (
+    status === 401
+    && (
+      message.includes('invalid token')
+      || message.includes('invalid access token')
+      || message.includes('access token is invalid')
+    )
+  ) {
+    return ALIAS_INDEX.get('INVALID_ACCESS_TOKEN');
+  }
+
+  if (
+    (status === 403 || status === 429)
+    && (
+      message.includes('insufficient_quota')
+      || message.includes('quota exceeded')
+      || message.includes('quota depleted')
+      || message.includes('额度不足')
+      || message.includes('订阅额度')
+      || message.includes('余额')
+    )
+  ) {
+    return ALIAS_INDEX.get('INSUFFICIENT_QUOTA');
+  }
+
   if (status === 429 && (message.includes('daily') || message.includes('quota exceeded') || message.includes('daily_limit_exceeded'))) {
     return ALIAS_INDEX.get('INSUFFICIENT_QUOTA');
   }

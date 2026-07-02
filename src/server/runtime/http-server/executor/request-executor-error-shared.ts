@@ -101,3 +101,28 @@ export function deriveRetryErrorStatusCode(error: unknown, retryError: RetryErro
     ? retryError.statusCode
     : extractStatusCodeFromError(error);
 }
+
+export function attachRetryErrorSnapshotToError(error: unknown, retryError: RetryErrorSnapshot): void {
+  if (!error || typeof error !== 'object') {
+    return;
+  }
+  const target = error as Record<string, unknown>;
+  if (typeof retryError.statusCode === 'number' && target.statusCode === undefined) {
+    target.statusCode = retryError.statusCode;
+  }
+  if (retryError.errorCode && target.errorCode === undefined) {
+    target.errorCode = retryError.errorCode;
+  }
+  if (retryError.upstreamCode && target.upstreamCode === undefined) {
+    target.upstreamCode = retryError.upstreamCode;
+  }
+  if (typeof retryError.upstreamStatus === 'number' && target.upstreamStatus === undefined) {
+    target.upstreamStatus = retryError.upstreamStatus;
+  }
+  if (retryError.catalogCode && target.catalogCode === undefined) {
+    target.catalogCode = retryError.catalogCode;
+  }
+  if (retryError.catalogKey && target.catalogKey === undefined) {
+    target.catalogKey = retryError.catalogKey;
+  }
+}

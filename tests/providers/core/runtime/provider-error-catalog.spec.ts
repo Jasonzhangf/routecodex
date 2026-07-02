@@ -2,6 +2,28 @@ import { describe, expect, it } from '@jest/globals';
 import { normalizeKnownProviderError } from '../../../../src/providers/core/runtime/provider-error-catalog.js';
 
 describe('provider error catalog normalization', () => {
+  it('normalizes upstream invalid-token messages to access-token catalog identity', () => {
+    const normalized = normalizeKnownProviderError({
+      statusCode: 401,
+      code: 'HTTP_401',
+      message: 'Invalid token (request id: redacted)'
+    });
+
+    expect(normalized?.code).toBe('401.1002');
+    expect(normalized?.key).toBe('INVALID_ACCESS_TOKEN');
+  });
+
+  it('normalizes upstream quota text under 403 to quota catalog identity', () => {
+    const normalized = normalizeKnownProviderError({
+      statusCode: 403,
+      code: 'HTTP_403',
+      message: '{"error":{"message":"quota exceeded","code":"insufficient_quota"}}'
+    });
+
+    expect(normalized?.code).toBe('429.2000');
+    expect(normalized?.key).toBe('INSUFFICIENT_QUOTA');
+  });
+
   it('normalizes provider_status_2056 to unified numeric code', () => {
     const normalized = normalizeKnownProviderError({ upstreamCode: 'provider_status_2056', statusCode: 429 });
     expect(normalized?.code).toBe('429.2056');

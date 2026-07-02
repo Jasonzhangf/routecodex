@@ -102,7 +102,7 @@ function formatCompactLogShape(value: unknown): string | undefined {
 
 function shouldEmitHttpErrorMeta(args: {
   rawMeta: RequestLogMeta;
-  fields: { statusCode?: number; errorCode?: string; upstreamCode?: string };
+  fields: { statusCode?: number; errorCode?: string; upstreamCode?: string; catalogCode?: string; catalogKey?: string };
   publicSummary: string;
 }): boolean {
   if (!args.rawMeta || !shouldLogHttpErrorMeta()) {
@@ -168,6 +168,8 @@ function extractErrorLogFields(error: unknown, summary: string): {
   errorCode?: string;
   internalCode?: string;
   upstreamCode?: string;
+  catalogCode?: string;
+  catalogKey?: string;
   externalSource?: 'external_transport';
   reason?: string;
 } {
@@ -231,6 +233,18 @@ function extractErrorLogFields(error: unknown, summary: string): {
   const fromText = parseFieldFromText(summary);
   const resolvedErrorCode = errorCode ?? fromText.errorCode;
   const resolvedUpstreamCode = upstreamCode ?? fromText.upstreamCode;
+  const resolvedStatusCode =
+    typeof statusCode === 'number'
+      ? statusCode
+      : (typeof fromText.statusCode === 'number' ? fromText.statusCode : undefined);
+  const catalogCode =
+    readTrimmedString(bag.catalogCode)
+    ?? readTrimmedString(details?.catalogCode)
+    ?? readTrimmedString(details?.catalog_code);
+  const catalogKey =
+    readTrimmedString(bag.catalogKey)
+    ?? readTrimmedString(details?.catalogKey)
+    ?? readTrimmedString(details?.catalog_key);
   const externalSource = resolveExternalErrorSource({
     errorCode: resolvedErrorCode,
     upstreamCode: resolvedUpstreamCode,
@@ -239,12 +253,12 @@ function extractErrorLogFields(error: unknown, summary: string): {
     ? resolveExternalTransportReason(error, summary)
     : undefined;
   return {
-    ...(typeof statusCode === 'number'
-      ? { statusCode }
-      : (typeof fromText.statusCode === 'number' ? { statusCode: fromText.statusCode } : {})),
+    ...(typeof resolvedStatusCode === 'number' ? { statusCode: resolvedStatusCode } : {}),
     ...(resolvedErrorCode ? { errorCode: resolvedErrorCode } : {}),
     ...(internalCode ? { internalCode } : {}),
     ...(resolvedUpstreamCode ? { upstreamCode: resolvedUpstreamCode } : {}),
+    ...(catalogCode ? { catalogCode } : {}),
+    ...(catalogKey ? { catalogKey } : {}),
     ...(externalSource ? { externalSource } : {}),
     ...(reason ? { reason } : {})
   };
@@ -303,7 +317,7 @@ function parseJsonErrorMessage(value: string): string | undefined {
 
 function buildPublicRawErrorMeta(args: {
   rawMeta: { rawError?: string; rawErrorSnippet?: string };
-  fields: { statusCode?: number; errorCode?: string; upstreamCode?: string };
+  fields: { statusCode?: number; errorCode?: string; upstreamCode?: string; catalogCode?: string; catalogKey?: string };
   publicSummary: string;
 }): { rawError?: string; rawErrorSnippet?: string } {
   const errorNode: Record<string, unknown> = {};
@@ -315,6 +329,12 @@ function buildPublicRawErrorMeta(args: {
   }
   if (args.fields.upstreamCode) {
     errorNode.upstream_code = args.fields.upstreamCode;
+  }
+  if (args.fields.catalogCode) {
+    errorNode.catalog_code = args.fields.catalogCode;
+  }
+  if (args.fields.catalogKey) {
+    errorNode.catalog_key = args.fields.catalogKey;
   }
   if (!Object.keys(errorNode).length) {
     errorNode.message = args.publicSummary;
@@ -437,6 +457,8 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
     fields.errorCode ? `code=${fields.errorCode}` : undefined,
     fields.internalCode ? `internalCode=${fields.internalCode}` : undefined,
     fields.upstreamCode ? `upstreamCode=${fields.upstreamCode}` : undefined,
+    fields.catalogCode ? `catalogCode=${fields.catalogCode}` : undefined,
+    fields.catalogKey ? `catalogKey=${fields.catalogKey}` : undefined,
     fields.externalSource ? `source=${fields.externalSource}` : undefined,
     fields.reason ? `reason=${JSON.stringify(fields.reason)}` : undefined,
   ]
