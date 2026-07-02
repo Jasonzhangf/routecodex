@@ -704,7 +704,10 @@ describe('servertool CLI native bridge', () => {
           executionMode: 'guarded',
           stripAfterExecute: false
         },
-        noopFlowId: 'continue_execution_flow'
+      noopOutcome: {
+        flowId: 'continue_execution_flow',
+        chatResponse: {}
+      }
       })
     ).toEqual({
       toolCall: {

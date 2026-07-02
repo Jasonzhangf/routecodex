@@ -2957,7 +2957,7 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     executionMode?: string;
     stripAfterExecute?: boolean;
   };
-  noopFlowId?: string;
+  noopOutcome?: unknown;
   handlerErrorMessage?: unknown;
 }): ServertoolExecutionLoopHandlerErrorEffectPlan;
 export function planServertoolExecutionLoopEffectWithNative(input: {
@@ -2969,7 +2969,7 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     executionMode?: string;
     stripAfterExecute?: boolean;
   };
-  noopFlowId?: string;
+  noopOutcome?: unknown;
   handlerErrorMessage?: unknown;
 }): ServertoolExecutionLoopEffectBasePlan;
 export function planServertoolExecutionLoopEffectWithNative(input: {
@@ -2981,7 +2981,7 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     executionMode?: string;
     stripAfterExecute?: boolean;
   };
-  noopFlowId?: string;
+  noopOutcome?: unknown;
   handlerErrorMessage?: unknown;
 }): ServertoolExecutionLoopEffectPlan {
   const capability = 'planServertoolExecutionLoopEffectJson';

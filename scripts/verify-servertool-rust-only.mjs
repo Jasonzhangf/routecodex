@@ -2817,6 +2817,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     "String(lastErr ?? 'unknown')",
     "lastErr instanceof Error ? lastErr.message : String",
     'lastErr instanceof Error ? lastErr.message : lastErr',
+    'flowId: noopFlowId',
+    'noopFlowId',
     'executedToolCalls: [],',
     'executedIds: new Set<string>()',
     'executedFlowIds: []',
@@ -2859,6 +2861,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'execution: errorEffectPlan.execution',
     'toolCall: noopEffectPlan.toolCall',
     'execution: noopEffectPlan.execution',
+    'noopOutcome: noopResult',
   ]) {
     assertContains(
       'servertool-execution-dispatch-rust-owner',

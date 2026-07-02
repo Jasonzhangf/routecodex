@@ -226,6 +226,9 @@ describe('execution-queue-shell', () => {
     expect(source).toContain('execution: errorEffectPlan.execution');
     expect(source).toContain('toolCall: noopEffectPlan.toolCall');
     expect(source).toContain('execution: noopEffectPlan.execution');
+    expect(source).toContain('noopOutcome: noopResult');
+    expect(source).not.toContain('flowId: noopFlowId');
+    expect(source).not.toContain('noopFlowId');
     expect(source).not.toContain('buildServertoolDispatchPlanInputWithNative');
     expect(source).not.toContain('String(initialLoopActionPlan.action)');
     expect(source).not.toContain('String(resultLoopActionPlan.action)');

@@ -25,7 +25,7 @@ pub struct ServertoolExecutionLoopEffectInput {
     pub mode: String,
     pub tool_call: ServertoolExecutionLoopEffectToolCallInput,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub noop_flow_id: Option<String>,
+    pub noop_outcome: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handler_error_message: Option<serde_json::Value>,
 }
@@ -73,14 +73,22 @@ pub fn plan_servertool_execution_loop_effect(
             strip_after_execute: Some(true),
         },
         execution: ServertoolExecutionLoopEffectExecutionSummary {
-            flow_id: input
-                .noop_flow_id
-                .unwrap_or_else(|| "continue_execution_flow".to_string())
-                .trim()
-                .to_string(),
+            flow_id: resolve_noop_flow_id(input.noop_outcome.as_ref()),
         },
         handler_error_message: None,
     }
+}
+
+fn resolve_noop_flow_id(noop_outcome: Option<&serde_json::Value>) -> String {
+    let from_outcome = noop_outcome
+        .and_then(|value| value.as_object())
+        .and_then(|object| object.get("flowId"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    from_outcome
+        .unwrap_or("continue_execution_flow")
+        .to_string()
 }
 
 fn normalize_handler_error_message(value: Option<&serde_json::Value>) -> String {
@@ -118,7 +126,7 @@ mod tests {
                 execution_mode: Some("guarded".to_string()),
                 strip_after_execute: Some(true),
             },
-            noop_flow_id: None,
+            noop_outcome: None,
             handler_error_message: Some(serde_json::json!(" boom ")),
         });
         assert_eq!(plan.tool_call.execution_mode.as_deref(), Some("guarded"));
@@ -137,7 +145,10 @@ mod tests {
                 execution_mode: Some("guarded".to_string()),
                 strip_after_execute: Some(false),
             },
-            noop_flow_id: Some("continue_execution_flow".to_string()),
+            noop_outcome: Some(serde_json::json!({
+                "flowId": "continue_execution_flow",
+                "chatResponse": {}
+            })),
             handler_error_message: Some(serde_json::json!("ignored")),
         });
         assert_eq!(plan.tool_call.execution_mode.as_deref(), Some("noop"));
@@ -157,7 +168,7 @@ mod tests {
                 execution_mode: Some("guarded".to_string()),
                 strip_after_execute: Some(true),
             },
-            noop_flow_id: None,
+            noop_outcome: None,
             handler_error_message: Some(serde_json::json!("  ")),
         });
         assert_eq!(plan.handler_error_message.as_deref(), Some("unknown"));
@@ -174,7 +185,7 @@ mod tests {
                 execution_mode: Some("guarded".to_string()),
                 strip_after_execute: Some(true),
             },
-            noop_flow_id: None,
+            noop_outcome: None,
             handler_error_message: Some(
                 serde_json::json!({ "message": " boom-from-error-object " }),
             ),
@@ -183,5 +194,24 @@ mod tests {
             plan.handler_error_message.as_deref(),
             Some("boom-from-error-object")
         );
+    }
+
+    #[test]
+    fn defaults_noop_flow_id_when_noop_outcome_has_no_flow_id() {
+        let plan = plan_servertool_execution_loop_effect(ServertoolExecutionLoopEffectInput {
+            mode: "noop".to_string(),
+            tool_call: ServertoolExecutionLoopEffectToolCallInput {
+                id: "call_continue".to_string(),
+                name: "continue_execution".to_string(),
+                arguments: "{}".to_string(),
+                execution_mode: Some("guarded".to_string()),
+                strip_after_execute: Some(false),
+            },
+            noop_outcome: Some(serde_json::json!({
+                "chatResponse": {}
+            })),
+            handler_error_message: None,
+        });
+        assert_eq!(plan.execution.flow_id, "continue_execution_flow");
     }
 }

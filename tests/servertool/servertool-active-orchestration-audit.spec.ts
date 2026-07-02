@@ -67,6 +67,8 @@ const TARGETS = [
       'String(initialLoopActionPlan.action)',
       'String(resultLoopActionPlan.action)',
       'errorEffectPlan.handlerErrorMessage as string',
+      'flowId: noopFlowId',
+      'noopFlowId',
     ],
     required: [
       'runServertoolIoExecutionQueue',
@@ -89,6 +91,7 @@ const TARGETS = [
       'execution: errorEffectPlan.execution',
       'toolCall: noopEffectPlan.toolCall',
       'execution: noopEffectPlan.execution',
+      'noopOutcome: noopResult',
     ],
   },
   {

@@ -3121,7 +3121,10 @@ fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
                 "executionMode": "guarded",
                 "stripAfterExecute": false
             },
-            "noopFlowId": "continue_execution_flow"
+            "noopOutcome": {
+                "flowId": "continue_execution_flow",
+                "chatResponse": {}
+            }
         })
         .to_string(),
     )

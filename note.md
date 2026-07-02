@@ -1,3 +1,10 @@
+# 2026-07-03: servertool noop effect flowId input moved to Rust carrier
+
+- Slice: `execution-queue-shell.ts` no longer destructures `noopResult.flowId` or passes `noopFlowId` into the execution-loop effect planner. TS now passes the native `noopOutcome` carrier unchanged; Rust `execution_loop_effect_contract.rs` owns extracting/defaulting the noop execution `flowId` from that carrier.
+- Gate: `execution-queue-shell.spec.ts`, `execution-dispatch-outcome-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, `servertool-cli-native-bridge.spec.ts`, and `verify-servertool-rust-only.mjs` require `noopOutcome: noopResult` and forbid TS `noopFlowId` markers. TS wrapper no longer exposes `noopFlowId`; Rust contract no longer has `noop_flow_id` legacy fallback.
+- Evidence: Rust focused `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p servertool-core execution_loop_effect_contract --lib -- --nocapture` PASS 5/5; NAPI bridge `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi plans_servertool_execution_loop_effect_via_servertool_core_bridge --lib -- --nocapture` PASS 1/1; native rebuild PASS; focused Jest `execution-queue-shell + execution-dispatch-outcome-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 86/86; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS.
+- Remaining gap: this is one Phase 1 servertool TS semantic-residue slice only. Full closeout still requires remaining servertool switch/cast classification, Hub Pipeline Phase 2/3, VR Phase 4, aggregate build, and live/replay validation.
+
 # 2026-07-03: servertool auto-hook finalization result moved to Rust
 
 - Slice: `auto-hook-caller.ts` no longer calls TS-side `planAutoHookCallerResultProjectionWithNative` after native finalization. Rust `auto_hook_runtime_contract.rs` now makes `plan_auto_hook_caller_finalization` return the final `tool_flow` result when action is `return_result`; TS only passes queue result carrier fields and returns `finalizationPlan.result`.

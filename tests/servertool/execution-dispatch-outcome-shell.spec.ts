@@ -258,7 +258,7 @@ describe('execution queue dispatch runtime', () => {
           stripAfterExecute: true
         },
         execution: {
-          flowId: String(input?.noopFlowId ?? 'continue_execution_flow')
+          flowId: String(input?.noopOutcome?.flowId ?? 'continue_execution_flow')
         }
       };
     });
@@ -534,7 +534,14 @@ describe('execution queue dispatch runtime', () => {
         executionMode: 'guarded',
         stripAfterExecute: false
       },
-      noopFlowId: 'continue_execution_flow'
+      noopOutcome: {
+        chatResponse: {
+          id: 'chatcmpl-noop',
+          tool_outputs: [{ tool_call_id: 'call_continue_1', name: 'continue_execution', content: '{"ok":true}' }]
+        },
+        flowId: 'continue_execution_flow',
+        followup: { requestIdSuffix: ':continue_execution_followup' }
+      }
     });
     expect(result.executedToolCalls[0]).toMatchObject({
       toolCall: {
