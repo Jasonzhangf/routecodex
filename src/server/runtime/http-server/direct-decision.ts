@@ -16,11 +16,11 @@
  *       HTTP 204 + CLIENT_DISCONNECTED code. The "no cooldown" guarantee is
  *       delivered upstream by `isProviderFailureHealthNeutral(args) === true`,
  *       NOT by this consumer.
- *   - `exclude_and_reroute` plan + >=2 candidates left:
+ *   - `exclude_and_reroute` plan:
  *       decision is `request_reroute` with `mutatedExcluded` containing the
  *       current provider key. If ErrorErr05 explicitly allows switching
  *       beyond the numeric attempt budget, that provider switch still wins.
- *   - only 1 candidate left OR no retryable plan OR attempt budget exhausted
+ *   - no retryable plan OR attempt budget exhausted
  *       without ErrorErr05 budget override:
  *       decision is `rethrow` with `mutatedExcluded = new Set()`.
  *   - provider auth/quota failures (401/402/403/INVALID_API_KEY/etc.):
@@ -94,14 +94,6 @@ function requestRerouteDecision(
   };
 }
 
-function remainingCandidates(pool: ReadonlyArray<string>, excluded: ReadonlySet<string>): number {
-  let n = 0;
-  for (const key of pool) {
-    if (!excluded.has(key)) n += 1;
-  }
-  return n;
-}
-
 export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): DirectRetryDecision {
   const {
     retryExecutionPlan,
@@ -109,7 +101,6 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     directAttempt,
     maxAttempts,
     providerKey,
-    pool,
     error,
   } = args;
 
@@ -137,18 +128,12 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     return rethrowDecision(error, excludedProviderKeys);
   }
 
-  // Forward: switchAction is allowed; only flip to reroute if there is at
-  // least one other candidate after excluding the current provider.
+  // Forward: ErrorErr05 owns whether provider switching is legal. Router-direct
+  // must not re-decide from its observed route pool, which may be only the
+  // selected priority tier rather than the full configured candidate set.
   const excluded = retryExecutionPlan.excludedCurrentProvider
     ? newExcluded(excludedProviderKeys, providerKey)
     : new Set(excludedProviderKeys);
-  const remaining = remainingCandidates(pool, excluded);
-  if (remaining <= 0) {
-    if (retryExecutionPlan.defaultPoolAvailable === true && retryExecutionPlan.mayProject !== true) {
-      return requestRerouteDecision(error, excludedProviderKeys, excluded);
-    }
-    return rethrowDecision(error, excludedProviderKeys);
-  }
   return requestRerouteDecision(error, excludedProviderKeys, excluded);
 }
 

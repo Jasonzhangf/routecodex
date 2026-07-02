@@ -35,11 +35,30 @@ describe('direct-decision upstream_stream_incomplete', () => {
     expect(decision.mutatedExcluded.has('cc.key1.gpt-5.4-mini')).toBe(false);
   });
 
-  it('[reverse] stream incomplete with no remaining candidates must rethrow (no host-injected fallback)', () => {
+  it('[reverse] stream incomplete with no ErrorErr05 switch plan must rethrow (no host-injected fallback)', () => {
     const decision = decideDirectRouterRetry(buildArgs({
       pool: ['1token.key1.gpt-5.4-mini'],
       excludedProviderKeys: new Set<string>(['1token.key1.gpt-5.4-mini']),
+      retryExecutionPlan: {
+        shouldRetry: false,
+      },
     }));
     expect(decision.action).toBe('rethrow');
+  });
+
+  it('[forward] ErrorErr05 exclude_and_reroute must recurse even when observed router-direct pool is current-only', () => {
+    const decision = decideDirectRouterRetry(buildArgs({
+      pool: ['1token.key1.gpt-5.4-mini'],
+      retryExecutionPlan: {
+        shouldRetry: true,
+        retrySwitchPlan: {
+          switchAction: 'exclude_and_reroute',
+          reason: 'recoverable',
+        },
+        excludedCurrentProvider: true,
+      },
+    }));
+    expect(decision.action).toBe('request_reroute');
+    expect(decision.mutatedExcluded.has('1token.key1.gpt-5.4-mini')).toBe(true);
   });
 });

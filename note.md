@@ -1,3 +1,11 @@
+# 2026-07-03: router-direct consumes ErrorErr05 switch decision without local pool recheck
+
+- Symptom: router-direct/provider error switching could still rethrow or keep hitting the same provider when the observed direct route pool was current-only, even though ErrorErr05 had already produced `exclude_and_reroute`.
+- Root cause: `decideDirectRouterRetry()` re-decided candidate availability from the local observed pool, which can be only the selected priority tier and not the full configured VR candidate set. `http-server/index.ts` also used raw `routingDecision.pool/routePool` presence as `routePoolIsAuthoritative` for router-direct.
+- Fix: router-direct now consumes ErrorErr05 `exclude_and_reroute` directly and physically removes the local `remainingCandidates()` pool veto. Router-direct resolve/send failure paths now reuse `resolveRoutePoolAuthoritativeForRetry()` with route tiers/default availability, matching relay executor semantics.
+- Evidence: red/green `direct-decision.upstream-stream-incomplete.spec.ts` added current-only observed pool case; focused Jest `retry-execution-plan + request-executor-provider-failure-plan + direct-decision` PASS 30/30; targeted direct blackbox `router-direct switches provider request-locally|switches to alternative provider immediately|reroutes by decision.routePool` PASS 3/3; `tsc -p tsconfig.json --noEmit` PASS; `verify:error-pipeline-contract` PASS; `verify:provider-failure-ban-blackbox` PASS with provider-switch to backup evidence; `verify:function-map-compile-gate` PASS; scoped `git diff --check` PASS.
+- Remaining gap: no live 5555 old-sample replay was run in this slice; evidence covers unit/blackbox/gates for ErrorErr05 and router-direct consumption.
+
 # 2026-07-03: priority singleton tier no longer proves last provider
 
 - Symptom: priority routing can select a singleton first tier, and after provider error the executor could treat that singleton `routingDecision.routePool` as authoritative “last provider” evidence, allowing same-provider retry instead of switching to a later tier/provider.

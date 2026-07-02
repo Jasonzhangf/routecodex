@@ -81,7 +81,11 @@ import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
 import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
 import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
-import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
+import {
+  createRequestExecutor,
+  resolveRoutePoolAuthoritativeForRetry,
+  type RequestExecutor,
+} from './request-executor.js';
 import { resolveSessionLogColorKey } from '../../../utils/session-log-color.js';
 import {
   clearResponsesConversationByRequestId,
@@ -1841,6 +1845,13 @@ export class RouteCodexHttpServer {
         routePool: routingDecisionProviderPool,
         excludedProviderKeys: retryState.excludedProviderKeys,
       });
+      const routePoolIsAuthoritativeForDecision = resolveRoutePoolAuthoritativeForRetry({
+        routingDecision: routingDecision as Record<string, unknown> | undefined,
+        routePoolForAttempt: routingDecisionProviderPool,
+        routeTiersForAttempt: routingDecisionTiers,
+        defaultTierAvailable: defaultTierAvailableForDecision,
+        excludedProviderKeys: retryState.excludedProviderKeys,
+      });
       await processProviderResolveFailure({
         error: resolveError,
         requestId: input.requestId,
@@ -1860,8 +1871,7 @@ export class RouteCodexHttpServer {
         maxAttempts: retryState.maxAttempts,
         logicalRequestChainKey: input.requestId,
         routePoolForAttempt: routingDecisionProviderPool,
-        routePoolIsAuthoritative: Array.isArray((routingDecision as Record<string, unknown> | undefined)?.routePool)
-          || Array.isArray((routingDecision as Record<string, unknown> | undefined)?.pool),
+        routePoolIsAuthoritative: routePoolIsAuthoritativeForDecision,
         defaultTierAvailable: defaultTierAvailableForDecision,
         excludedProviderKeys: retryState.excludedProviderKeys,
         recordAttempt: () => {},
@@ -2065,6 +2075,13 @@ export class RouteCodexHttpServer {
           routePool: routingDecisionProviderPool,
           excludedProviderKeys: retryState.excludedProviderKeys,
         });
+        const routePoolIsAuthoritativeForDecision = resolveRoutePoolAuthoritativeForRetry({
+          routingDecision: ctx.routingDecision as Record<string, unknown> | undefined,
+          routePoolForAttempt: routingDecisionProviderPool,
+          routeTiersForAttempt: routingDecisionTiers,
+          defaultTierAvailable: defaultTierAvailableForDecision,
+          excludedProviderKeys: retryState.excludedProviderKeys,
+        });
         this.logStage('router-direct.send.error', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -2102,8 +2119,7 @@ export class RouteCodexHttpServer {
           maxAttempts: retryState.maxAttempts,
           logicalRequestChainKey: input.requestId,
           routePoolForAttempt: routingDecisionProviderPool,
-          routePoolIsAuthoritative: Array.isArray((ctx.routingDecision as Record<string, unknown> | undefined)?.routePool)
-            || Array.isArray((ctx.routingDecision as Record<string, unknown> | undefined)?.pool),
+          routePoolIsAuthoritative: routePoolIsAuthoritativeForDecision,
           defaultTierAvailable: defaultTierAvailableForDecision,
           excludedProviderKeys: retryState.excludedProviderKeys,
           recordAttempt: () => {},
