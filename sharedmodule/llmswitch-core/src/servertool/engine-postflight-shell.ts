@@ -68,7 +68,7 @@ export async function runServertoolEnginePostflight(args: {
       break;
     case 'stop_message_cli_projection': {
       const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(options.adapterContext);
-      const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown> | undefined;
+      const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot;
       const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
         metadataCenterSnapshot: metadataCenterSnapshot ?? null,
         execution: engineResult.execution ?? null,

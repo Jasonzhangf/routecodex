@@ -1,3 +1,10 @@
+# 2026-07-03: servertool postflight metadata snapshot cast removed
+
+- Slice: `engine-postflight-shell.ts` no longer casts `runtimeMetadataSnapshot?.metadataCenterSnapshot` to `Record<string, unknown>` before stopless CLI projection. `buildStoplessAutoCliProjectionFromEngineWithNative()` now accepts the snapshot carrier as `unknown`, so the TS shell only forwards the MetadataCenter snapshot to the native/Rust owner.
+- Gate: `engine-observation-shell.spec.ts` and `verify-servertool-rust-only.mjs` forbid the old postflight snapshot cast marker while requiring direct `metadataCenterSnapshot: metadataCenterSnapshot ?? null` pass-through.
+- Evidence: focused Jest `engine-observation-shell + engine.stopless-session-thin-shell + servertool-active-orchestration-audit` PASS 61/61; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this is one Phase 1 postflight carrier slice only. Remaining Phase 1 residues are mostly native action switches/result labels and JS in-place mutation/narrowing to classify; full Hub Pipeline/VR/live closeout remains open.
+
 # 2026-07-03: servertool MetadataCenter carrier external casts removed
 
 - Slice: `metadata-center-carrier.ts` now accepts `unknown` in `writeRuntimeControlToBoundMetadataCenter()` and performs object-carrier narrowing/fail-fast internally. `attachStopGatewayContext()`, `attachStopMessageCompareContext()`, and `readStopMessageCompareContext()` no longer cast `adapterContext` to `Record<string, unknown>` before MetadataCenter read/write; TS only passes the carrier through.

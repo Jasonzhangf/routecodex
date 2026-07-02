@@ -788,7 +788,7 @@ export function planStoplessExecutionWithNative(input: {
 }
 
 export function buildStoplessAutoCliProjectionFromEngineWithNative(input: {
-  metadataCenterSnapshot?: Record<string, unknown> | null;
+  metadataCenterSnapshot?: unknown;
   execution?: unknown;
   metadataWritePlan?: unknown;
   requestId?: string | null;

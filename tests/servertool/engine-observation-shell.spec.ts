@@ -228,9 +228,11 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('flowId: runtimeAction.projectedFlowId');
     expect(source).not.toContain('executed: true');
     expect(source).not.toContain('const nativeMetadataCenterSnapshot = metadataCenterSnapshot ?? (');
+    expect(source).not.toContain('runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown>');
     expect(source).not.toContain('runtimeControl ? { runtimeControl } : null');
     expect(source).not.toContain("engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'");
     expect(source).toContain("engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'");
+    expect(source).toContain('const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot;');
     expect(source).toContain('metadataCenterSnapshot: metadataCenterSnapshot ?? null');
 
     const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
