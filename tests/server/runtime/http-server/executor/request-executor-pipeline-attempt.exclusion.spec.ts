@@ -4,6 +4,30 @@ import { MetadataCenter } from '../../../../../src/server/runtime/http-server/me
 const { resolveRequestExecutorPipelineAttempt } = __requestExecutorTestables;
 
 describe('resolveRequestExecutorPipelineAttempt excluded provider guard', () => {
+  it('does not mark a narrowed current-only routePool authoritative after prior exclusions', () => {
+    const narrowedCurrentOnly = __requestExecutorTestables.resolveRoutePoolAuthoritativeForRetry({
+      routingDecision: {
+        routeName: 'tools/gateway-priority-5555-priority-tools',
+        routePool: ['minimax.key1.MiniMax-M3']
+      },
+      routePoolForAttempt: ['minimax.key1.MiniMax-M3'],
+      defaultTierAvailable: false,
+      excludedProviderKeys: new Set<string>(['spark.key1.gpt-5.3-codex-spark'])
+    });
+    const trueSingletonLastProvider = __requestExecutorTestables.resolveRoutePoolAuthoritativeForRetry({
+      routingDecision: {
+        routeName: 'tools/gateway-priority-5555-priority-tools',
+        routePool: ['minimax.key1.MiniMax-M3']
+      },
+      routePoolForAttempt: ['minimax.key1.MiniMax-M3'],
+      defaultTierAvailable: false,
+      excludedProviderKeys: new Set<string>()
+    });
+
+    expect(narrowedCurrentOnly).toBe(false);
+    expect(trueSingletonLastProvider).toBe(true);
+  });
+
   it('fails fast when VR reselects an excluded provider without an alternative', () => {
     const providerKey = 'primary.key1.gpt-5.5';
     const excludedProviderKeys = new Set<string>([providerKey]);

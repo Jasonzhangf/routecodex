@@ -321,6 +321,47 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     ]);
   });
 
+  it('does not allow same-provider retry when prior exclusions prove this is not the original last provider', async () => {
+    const excludedProviderKeys = new Set<string>(['spark.key1.gpt-5.3-codex-spark']);
+    const error = Object.assign(new Error('HTTP 502: upstream failed again'), {
+      statusCode: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: upstream failed again'
+      },
+      attempt: 2,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'minimax.key1.MiniMax-M3',
+      runtimeKey: 'minimax.key1',
+      logicalRequestChainKey: 'req-priority-prior-exclusion-not-last',
+      logicalChainRetryLimitStageRequestId: 'req-priority-prior-exclusion-not-last',
+      routePool: ['minimax.key1.MiniMax-M3'],
+      routePoolIsAuthoritative: true,
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      isStreamingRequest: true
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(Array.from(excludedProviderKeys)).toEqual([
+      'spark.key1.gpt-5.3-codex-spark',
+      'minimax.key1.MiniMax-M3'
+    ]);
+  });
+
   it('does not infer last provider from an observed current-only routePool', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {

@@ -1,3 +1,11 @@
+# 2026-07-03: priority failover no same-provider retry after exclusions
+
+- Symptom: priority failover could keep retrying the currently selected provider after earlier provider exclusions narrowed the observed `routePool` to a single key, even though this was not the original last provider.
+- Root cause: ErrorErr05 same-provider retry only checked `routePoolIsAuthoritative + current-only routePool`; it did not require `excludedProviderKeys.size === 0`, so a narrowed single-provider pool after prior exclusions could be treated as the final provider. The executor routePool authoritative check was also inline and unguarded by a reusable testable contract.
+- Fix: `resolveProviderRetryExecutionPlan()` now allows same-provider last-provider retry only when no prior exclusions exist; prior-exclusion + current-only retryable failure forces `exclude_and_reroute` and adds the current provider. `resolveRoutePoolAuthoritativeForRetry()` now owns the executor-side authoritative routePool predicate and is test-covered.
+- Evidence: red test `retry-execution-plan.spec.ts -t "prior exclusions prove"` failed before the retry plan fix and passed after; targeted Jest `retry-execution-plan + request-executor-provider-failure-plan + request-executor-provider-send-failure.abort` PASS 34/34; entry guard Jest `retry-execution-plan + request-executor-pipeline-attempt.exclusion` PASS 23/23; `tsc -p tsconfig.json --noEmit` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `verify:vr-no-ts-runtime` PASS; `git diff --check` PASS.
+- Remaining gap: no live 5555 same-entry replay has been run in this slice; current evidence is code/test/gate closure for ErrorErr05 retry planning and executor routePool authoritative semantics.
+
 # 2026-07-03: servertool execution-stage CLI projection result moved to Rust
 
 - Slice: `execution-stage-shell.ts` no longer constructs CLI projection engine result from `branch.resultMode`, `branch.chatResponse`, and `branch.execution`; NAPI `build_servertool_cli_projection_runtime_branch_json` now returns full `result`, and TS execution stage only returns `branch.result`.

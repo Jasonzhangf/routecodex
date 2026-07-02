@@ -222,6 +222,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     && args.defaultTierAvailable !== true
     && args.promptTooLong !== true
     && args.providerOwnedContinuation !== true
+    && args.excludedProviderKeys.size === 0
     && args.attempt < args.maxAttempts
     && isLastProviderRetryEligibleStage(args.stage)
     && retryActionPlan.shouldRetry;
@@ -262,6 +263,37 @@ export async function resolveProviderRetryExecutionPlan(args: {
   });
   const maySwitchToAlternativeProvider = hasAlternativeCandidate && exclusionPlan.excludedCurrentProvider;
   if (!hasAlternativeCandidate) {
+    if (
+      args.excludedProviderKeys.size > 0
+      && args.providerKey
+      && retryActionPlan.shouldRetry
+      && !hostContractFailure
+      && !mayRetryVerifiedLastProvider
+    ) {
+      args.excludedProviderKeys.add(args.providerKey);
+      const narrowedPoolGate = resolveProviderRetryExecutionPlanExhaustionGate({
+        routePool: args.routePool,
+        excludedProviderKeys: args.excludedProviderKeys,
+        defaultPoolAvailable: args.defaultTierAvailable === true,
+      });
+      const retrySwitchPlan = {
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'exclude_and_reroute',
+        runtimeScopeExcluded: [],
+        runtimeScopeExcludedCount: 0
+      } as NonNullable<ProviderRetryExecutionPlan['retrySwitchPlan']>;
+      return {
+        shouldRetry: true,
+        excludedCurrentProvider: true,
+        allowRetryBeyondAttemptBudget: true,
+        retrySwitchPlan,
+        retryExecutionPolicyReason: nativeExecutionPolicy.reason,
+        routePoolRemainingAfterExclusion: narrowedPoolGate.routePoolRemainingAfterExclusion,
+        defaultPoolAvailable: narrowedPoolGate.defaultPoolAvailable,
+        policyExhausted: false,
+        mayProject: false,
+      };
+    }
     if (
       args.promptTooLong === true
       && retryActionPlan.shouldRetry

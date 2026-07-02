@@ -128,6 +128,24 @@ function isSameMetadataCenterWriter(a: MetadataCenterWriter | undefined, b: Meta
   );
 }
 
+export function resolveRoutePoolAuthoritativeForRetry(args: {
+  routingDecision?: Record<string, unknown>;
+  routePoolForAttempt: string[];
+  defaultTierAvailable: boolean;
+  excludedProviderKeys: Set<string>;
+}): boolean {
+  const decisionRoutePool = args.routingDecision?.routePool;
+  if (!Array.isArray(decisionRoutePool) || decisionRoutePool.length === 0) {
+    return false;
+  }
+  if (args.routePoolForAttempt.length > 1) {
+    return true;
+  }
+  return args.routePoolForAttempt.length === 1
+    && args.defaultTierAvailable === false
+    && args.excludedProviderKeys.size === 0;
+}
+
 export function writeProviderProtocolRuntimeControl(
   metadata: Record<string, unknown>,
   providerProtocol: string | undefined
@@ -913,19 +931,12 @@ export class HubRequestExecutor implements RequestExecutor {
           excludedProviderKeys,
         });
         const routingDecisionForAttempt = pipelineResult.routingDecision as Record<string, unknown> | undefined;
-        const hasAuthoritativeVrRoutePool =
-          Array.isArray(routingDecisionForAttempt?.routePool)
-          && routingDecisionForAttempt.routePool.length > 0;
-        const routePoolIsAuthoritativeForAttempt =
-          hasAuthoritativeVrRoutePool
-          && (
-            routePoolForAttempt.length > 1
-            || (
-              routePoolForAttempt.length === 1
-              && defaultTierAvailableForAttempt === false
-              && excludedProviderKeys.size === 0
-            )
-          );
+        const routePoolIsAuthoritativeForAttempt = resolveRoutePoolAuthoritativeForRetry({
+          routingDecision: routingDecisionForAttempt,
+          routePoolForAttempt,
+          defaultTierAvailable: defaultTierAvailableForAttempt,
+          excludedProviderKeys,
+        });
         const concurrencyScopeKey =
           typeof target.concurrencyScopeKey === 'string' && target.concurrencyScopeKey.trim()
             ? target.concurrencyScopeKey.trim()
@@ -1744,6 +1755,7 @@ export const __requestExecutorTestables = {
   resolveProviderRetryExclusionPlan,
   resolveProviderRetryExecutionPlan,
   resolveRequestExecutorPipelineAttempt,
+  resolveRoutePoolAuthoritativeForRetry,
   buildProviderRetryTelemetryPlan,
   writeProviderProtocolRuntimeControl,
   resetRequestExecutorInternalStateForTests
