@@ -372,6 +372,16 @@ pub fn plan_auto_hook_caller_finalization_json(input_json: &str) -> Result<Strin
         .map_err(|e| format!("serialize auto-hook caller finalization plan: {e}"))
 }
 
+pub fn plan_auto_hook_caller_result_projection_json(input_json: &str) -> Result<String, String> {
+    let input: auto_hook_runtime_contract::AutoHookCallerResultProjectionInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize auto-hook caller result projection input: {e}"))?;
+    serde_json::to_string(
+        &auto_hook_runtime_contract::plan_auto_hook_caller_result_projection(input)?,
+    )
+    .map_err(|e| format!("serialize auto-hook caller result projection plan: {e}"))
+}
+
 pub fn plan_servertool_execution_branch_json(input_json: &str) -> Result<String, String> {
     let input: execution_branch_contract::ServertoolExecutionBranchPlanInput =
         serde_json::from_str(input_json)

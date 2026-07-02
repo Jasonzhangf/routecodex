@@ -78,6 +78,20 @@ pub enum AutoHookCallerFinalizationAction {
     ReturnNull,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoHookCallerResultProjectionInput {
+    pub result_present: bool,
+    pub metadata_write_plan_present: bool,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoHookCallerResultProjectionPlan {
+    pub mode: String,
+    pub include_metadata_write_plan: bool,
+}
+
 pub fn plan_auto_hook_runtime_attempt(
     input: AutoHookRuntimeAttemptInput,
 ) -> AutoHookRuntimeAttemptPlan {
@@ -150,6 +164,18 @@ pub fn plan_auto_hook_caller_finalization(
     }
 }
 
+pub fn plan_auto_hook_caller_result_projection(
+    input: AutoHookCallerResultProjectionInput,
+) -> Result<AutoHookCallerResultProjectionPlan, String> {
+    if !input.result_present {
+        return Err("auto-hook caller result projection requires queue result".to_string());
+    }
+    Ok(AutoHookCallerResultProjectionPlan {
+        mode: "tool_flow".to_string(),
+        include_metadata_write_plan: input.metadata_write_plan_present,
+    })
+}
+
 fn normalize_optional_text(value: String) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -181,8 +207,9 @@ fn normalize_error_message(
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_auto_hook_caller_finalization, plan_auto_hook_runtime_attempt,
-        AutoHookCallerFinalizationInput, AutoHookRuntimeAttemptInput,
+        plan_auto_hook_caller_finalization, plan_auto_hook_caller_result_projection,
+        plan_auto_hook_runtime_attempt, AutoHookCallerFinalizationInput,
+        AutoHookCallerResultProjectionInput, AutoHookRuntimeAttemptInput,
     };
 
     #[test]
@@ -333,5 +360,26 @@ mod tests {
             super::AutoHookCallerFinalizationAction::ReturnNull
         );
         assert!(malformed.return_null);
+
+        let projection = plan_auto_hook_caller_result_projection(
+            AutoHookCallerResultProjectionInput {
+                result_present: true,
+                metadata_write_plan_present: true,
+            },
+        )
+        .expect("projection");
+        assert_eq!(projection.mode, "tool_flow");
+        assert!(projection.include_metadata_write_plan);
+
+        let missing = plan_auto_hook_caller_result_projection(
+            AutoHookCallerResultProjectionInput {
+                result_present: false,
+                metadata_write_plan_present: false,
+            },
+        );
+        assert_eq!(
+            missing.expect_err("missing queue result"),
+            "auto-hook caller result projection requires queue result"
+        );
     }
 }

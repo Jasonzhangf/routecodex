@@ -12,6 +12,7 @@ import {
   planServertoolEngineTriggerObservationWithNative,
   planEngineSelectionAfterRunWithNative,
   planAutoHookCallerFinalizationWithNative,
+  planAutoHookCallerResultProjectionWithNative,
   planAutoHookRuntimeAttemptWithNative,
   planStoplessCliProjectionContextWithNative,
   planServertoolExecutionBranchWithNative,
@@ -887,6 +888,35 @@ describe('servertool CLI native bridge', () => {
       continueNextQueue: true,
       returnNull: false
     });
+  });
+
+  it('uses Rust-owned auto-hook caller result projection planning', () => {
+    expect(
+      planAutoHookCallerResultProjectionWithNative({
+        resultPresent: true,
+        metadataWritePlanPresent: true
+      })
+    ).toEqual({
+      mode: 'tool_flow',
+      includeMetadataWritePlan: true
+    });
+
+    expect(
+      planAutoHookCallerResultProjectionWithNative({
+        resultPresent: true,
+        metadataWritePlanPresent: false
+      })
+    ).toEqual({
+      mode: 'tool_flow',
+      includeMetadataWritePlan: false
+    });
+
+    expect(() =>
+      planAutoHookCallerResultProjectionWithNative({
+        resultPresent: false,
+        metadataWritePlanPresent: false
+      })
+    ).toThrow('auto-hook caller result projection requires queue result');
   });
 
   it('uses Rust-owned engine selection rerun overrides without TS empty-object fallback', () => {

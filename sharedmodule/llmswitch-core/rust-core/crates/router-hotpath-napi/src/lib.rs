@@ -1384,6 +1384,12 @@ pub fn plan_auto_hook_caller_finalization_json(input_json: String) -> NapiResult
 }
 
 #[napi]
+pub fn plan_auto_hook_caller_result_projection_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_auto_hook_caller_result_projection_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_execution_branch_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_execution_branch_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

@@ -180,6 +180,11 @@ export type AutoHookCallerFinalizationPlan =
       returnNull: true;
     };
 
+export type AutoHookCallerResultProjectionPlan = {
+  mode: 'tool_flow';
+  includeMetadataWritePlan: boolean;
+};
+
 export interface EngineSelectionOverridesPlan {
   disableToolCallHandlers?: boolean;
   includeAutoHookIds?: string[];
@@ -2145,6 +2150,39 @@ export function planAutoHookCallerFinalizationWithNative(input: {
     returnResult: false,
     continueNextQueue: false,
     returnNull: true
+  };
+}
+
+export function planAutoHookCallerResultProjectionWithNative(input: {
+  resultPresent: boolean;
+  metadataWritePlanPresent: boolean;
+}): AutoHookCallerResultProjectionPlan {
+  const capability = 'planAutoHookCallerResultProjectionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planAutoHookCallerResultProjectionJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planAutoHookCallerResultProjectionJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planAutoHookCallerResultProjectionJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.mode !== 'tool_flow') {
+    throw new Error('planAutoHookCallerResultProjectionJson native returned invalid mode');
+  }
+  if (typeof record.includeMetadataWritePlan !== 'boolean') {
+    throw new Error('planAutoHookCallerResultProjectionJson native returned malformed plan');
+  }
+  if (input.metadataWritePlanPresent !== true && record.includeMetadataWritePlan === true) {
+    throw new Error('planAutoHookCallerResultProjectionJson native requested missing metadataWritePlan');
+  }
+  return {
+    mode: 'tool_flow',
+    includeMetadataWritePlan: record.includeMetadataWritePlan
   };
 }
 

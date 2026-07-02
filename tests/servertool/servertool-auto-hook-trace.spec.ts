@@ -91,6 +91,11 @@ const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
   return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
 });
 
+const planAutoHookCallerResultProjectionWithNativeMock = jest.fn((input: any) => ({
+  mode: 'tool_flow',
+  includeMetadataWritePlan: input?.metadataWritePlanPresent === true
+}));
+
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
@@ -105,6 +110,7 @@ jest.unstable_mockModule(
     }),
     planAutoHookRuntimeAttemptWithNative: planAutoHookRuntimeAttemptWithNativeMock,
     planAutoHookCallerFinalizationWithNative: planAutoHookCallerFinalizationWithNativeMock,
+    planAutoHookCallerResultProjectionWithNative: planAutoHookCallerResultProjectionWithNativeMock,
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(async (input: any) => {
       const hook = registryHooks.find(
         (entry) => entry.id === input?.name && entry.execution.kind === 'builtin'
@@ -174,6 +180,7 @@ beforeEach(() => {
   registryHooks.length = 0;
   planAutoHookRuntimeAttemptWithNativeMock.mockClear();
   planAutoHookCallerFinalizationWithNativeMock.mockClear();
+  planAutoHookCallerResultProjectionWithNativeMock.mockClear();
   planAutoHookRuntimeAttemptWithNativeMock.mockImplementation((input: any) => {
     const flowId =
       typeof input?.materializedFlowId === 'string' && input.materializedFlowId.trim()
@@ -237,6 +244,10 @@ beforeEach(() => {
     }
     return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
   });
+  planAutoHookCallerResultProjectionWithNativeMock.mockImplementation((input: any) => ({
+    mode: 'tool_flow',
+    includeMetadataWritePlan: input?.metadataWritePlanPresent === true
+  }));
 });
 
 function createOptions(traces: ServerToolAutoHookTraceEvent[]): ServerSideToolEngineOptions {
@@ -456,9 +467,12 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('hasMaterializedResult: result != null');
     expect(callerSource).toContain('resultPresent: queueResult != null');
     expect(callerSource).toContain('if (queueResult == null)');
+    expect(callerSource).toContain('const resultProjectionPlan = planAutoHookCallerResultProjectionWithNative({');
     expect(callerSource).toContain('queueResult.metadataWritePlan != null');
     expect(callerSource).toContain('switch (finalizationPlan.action)');
-    expect(callerSource).toContain('mode: finalizationPlan.resultMode');
+    expect(callerSource).not.toContain('mode: finalizationPlan.resultMode');
+    expect(callerSource).toContain('mode: resultProjectionPlan.mode');
+    expect(callerSource).toContain('resultProjectionPlan.includeMetadataWritePlan');
     expect(callerSource).not.toContain('finalizationPlan as { action: string }');
     expect(callerSource).not.toContain("mode: 'tool_flow'");
     expect(callerSource).not.toContain('if (finalizationPlan.returnResult)');
@@ -485,6 +499,9 @@ describe('servertool auto hook trace', () => {
     );
     expect(nativeWrapperSource).toContain(
       'planAutoHookCallerFinalizationJson native returned result disposition without queue result'
+    );
+    expect(nativeWrapperSource).toContain(
+      'planAutoHookCallerResultProjectionJson native requested missing metadataWritePlan'
     );
   });
 

@@ -1,3 +1,10 @@
+# 2026-07-02: servertool auto-hook caller result projection moved to Rust
+
+- Slice: `auto-hook-caller.ts` no longer projects the final `tool_flow` engine result shape from `finalizationPlan.resultMode`; Rust/servertool-core now owns `plan_auto_hook_caller_result_projection`, exported through router-hotpath NAPI and `planAutoHookCallerResultProjectionWithNative`.
+- TS role: auto-hook caller still executes builtin IO and passes carrier fields, but final result mode / metadataWritePlan inclusion is now a native projection plan; gate forbids reviving `mode: finalizationPlan.resultMode`.
+- Evidence: focused Jest `servertool-auto-hook-trace + servertool-active-orchestration-audit + server-side-tools.failfast` PASS 3 suites / 56 tests; `tsc -p sharedmodule/llmswitch-core/tsconfig.json --pretty false` PASS; `cargo test -p servertool-core auto_hook --lib -- --nocapture` PASS 10/10; clean temporary worktree with only servertool patch applied ran `cargo test -p router-hotpath-napi plan_auto_hook_caller --lib -- --nocapture` PASS compile/test (0 matching tests, 2057 filtered); `npm run verify:servertool-rust-only` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+- Validation caveat: main worktree has unrelated Anthropic SSE dirty files and unrelated `lib.rs` SSE hunks; servertool Rust verification was run in clean temp worktree using only the servertool patch to avoid mixing slices.
+
 # 2026-07-02: servertool materialization shell deleted
 
 - Slice: physically deleted `sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts` and `tests/servertool/execution-handler-materialization-shell.spec.ts`; active TS callers now import native Rust bridge materialization directly through `materializeServertoolPlannedResultWithNative` / `materializeNativeToolCallExecutionOutcomeWithNative`.

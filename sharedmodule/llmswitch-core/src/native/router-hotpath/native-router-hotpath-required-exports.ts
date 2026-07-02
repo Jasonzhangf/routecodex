@@ -309,6 +309,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveStopMessageFollowupToolContentMaxCharsJson",
   "planAutoHookRuntimeAttemptJson",
   "planAutoHookCallerFinalizationJson",
+  "planAutoHookCallerResultProjectionJson",
   "planServertoolExecutionBranchJson",
   "planServertoolEnginePreflightJson",
   "planServertoolEngineOrchestrationPreflightActionJson",

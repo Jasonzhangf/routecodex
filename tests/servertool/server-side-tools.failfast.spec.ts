@@ -386,6 +386,10 @@ jest.unstable_mockModule(
       }
       return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
     }),
+    planAutoHookCallerResultProjectionWithNative: jest.fn((input: any) => ({
+      mode: 'tool_flow',
+      includeMetadataWritePlan: input?.metadataWritePlanPresent === true
+    })),
     extractTextFromChatLikeWithNative: jest.fn(() => ''),
     buildClientExecCliProjectionOutputWithNative: jest.fn(() => ({})),
     buildClientVisibleProjectionShellWithNative: jest.fn((input: any) => input?.base ?? {}),
