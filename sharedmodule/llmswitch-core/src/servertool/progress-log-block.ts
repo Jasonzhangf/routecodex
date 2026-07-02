@@ -4,9 +4,10 @@ import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import {
   buildServertoolAutoHookTraceProgressEventWithNative,
   buildServertoolMatchSkippedProgressEventWithNative,
+  buildServertoolStopCompareProgressEventWithNative,
+  buildServertoolStopEntryProgressEventWithNative,
   normalizeServertoolProgressFlowIdWithNative,
   normalizeServertoolProgressResultWithNative,
-  normalizeServertoolProgressTokenWithNative,
   resolveServertoolProgressStageWithNative,
   resolveServertoolProgressToolNameWithNative,
   shouldUseServertoolGoldProgressHighlightWithNative
@@ -77,8 +78,6 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     result: string,
     extra?: Record<string, unknown>
   ): void => {
-    const color = args.blue;
-    const viewStage = stage === 'trigger' ? 'match' : 'entry';
     const source = typeof extra?.source === 'string' ? extra.source : 'unknown';
     const reason = typeof extra?.reason === 'string' ? extra.reason : 'unknown';
     const eligible = typeof extra?.eligible === 'boolean' ? String(extra.eligible) : 'unknown';
@@ -88,14 +87,18 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     } else {
       stopMatchBrief = { result, flow: flowId || 'none' };
     }
+    const progressEvent = buildServertoolStopEntryProgressEventWithNative({
+      stage,
+      result
+    });
     appendServerToolProgressFileEvent({
       requestId: args.requestId,
-      flowId: 'stop_message_flow',
-      tool: 'stop_message_auto',
-      stage,
-      result,
-      message: result,
-      step: stage === 'entry' ? 0 : 2,
+      flowId: progressEvent.flowId,
+      tool: progressEvent.tool,
+      stage: progressEvent.stage,
+      result: progressEvent.result,
+      message: progressEvent.message,
+      step: progressEvent.step,
       entryEndpoint: args.entryEndpoint,
       providerProtocol
     });
@@ -169,18 +172,20 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     const compareContext = readStopMessageCompareContext(args.adapterContext);
     const summary = formatStopMessageCompareContextWithNative(compareContext);
     const viewStage = stage === 'trigger' ? 'match' : 'entry';
-    const flowToken = normalizeServertoolProgressFlowIdWithNative({ value: flowId });
-    const compareResult = compareContext
-      ? `${compareContext.decision}_${normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })}`
-      : 'unknown_no_context';
+    const progressEvent = buildServertoolStopCompareProgressEventWithNative({
+      stage,
+      flowId,
+      summary,
+      compare: compareContext
+    });
     appendServerToolProgressFileEvent({
       requestId: args.requestId,
-      flowId: flowToken,
-      tool: 'stop_message_auto',
-      stage: 'compare',
-      result: compareResult,
-      message: summary,
-      step: stage === 'entry' ? 1 : 3,
+      flowId: progressEvent.flowId,
+      tool: progressEvent.tool,
+      stage: progressEvent.stage,
+      result: progressEvent.result,
+      message: progressEvent.message,
+      step: progressEvent.step,
       entryEndpoint: args.entryEndpoint,
       providerProtocol
     });
@@ -193,15 +198,15 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       ] : [];
       const matchBrief = stopMatchBrief ? [
         ['match', stopMatchBrief.result],
-        ['flow', flowToken || stopMatchBrief.flow]
-      ] : [['flow', flowToken]];
+        ['flow', progressEvent.flowId || stopMatchBrief.flow]
+      ] : [['flow', progressEvent.flowId]];
       console.log(`${args.blue}[servertool] ${[
         field('requestId', args.requestId, args.blue, args.reset),
         'tool=stop_message_auto',
         'stage=summary',
         ...entryBrief.map(([key, value]) => field(key, value, args.blue, args.reset)),
         ...matchBrief.map(([key, value]) => field(key, value, args.blue, args.reset)),
-        field('result', compareResult, args.blue, args.reset),
+        field('result', progressEvent.result, args.blue, args.reset),
         ...compact.split(/\s+/).filter(Boolean).map((part) => {
           const index = part.indexOf('=');
           if (index <= 0) return part;
@@ -211,7 +216,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     }
     args.stageRecorder?.record('servertool.stop_compare', {
       stage: viewStage,
-      flowId: flowToken,
+      flowId: progressEvent.flowId,
       summary,
       ...(compareContext ? { compare: compareContext } : {})
     });

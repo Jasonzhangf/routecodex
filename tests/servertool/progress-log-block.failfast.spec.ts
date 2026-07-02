@@ -20,6 +20,22 @@ jest.unstable_mockModule(
       message: `skipped (${skipReason})`,
       step: 0
     })),
+    buildServertoolStopEntryProgressEventWithNative: jest.fn(({ stage, result }) => ({
+      flowId: 'stop_message_flow',
+      tool: 'stop_message_auto',
+      stage,
+      result,
+      message: result,
+      step: stage === 'entry' ? 0 : 2
+    })),
+    buildServertoolStopCompareProgressEventWithNative: jest.fn(({ stage, flowId, summary, compare }) => ({
+      flowId: flowId || 'none',
+      tool: 'stop_message_auto',
+      stage: 'compare',
+      result: compare ? `${compare.decision}_native_token` : 'unknown_no_context',
+      message: summary,
+      step: stage === 'entry' ? 1 : 3
+    })),
     normalizeServertoolProgressFlowIdWithNative: jest.fn(({ value }) =>
       typeof value === 'string' && value.trim() ? value.trim() : 'none'
     ),
@@ -87,19 +103,25 @@ describe('progress-log-block fail-fast behavior', () => {
     expect(source).not.toContain('extra.flowId.trim()');
     expect(source).not.toContain('flowId.trim()');
     expect(source).toContain('normalizeServertoolProgressFlowIdWithNative({ value: extra?.flowId })');
-    expect(source).toContain('normalizeServertoolProgressFlowIdWithNative({ value: flowId })');
     expect(source).toContain('resolveServertoolProgressStageWithNative({ step, message })');
     expect(source).toContain('normalizeServertoolProgressResultWithNative({ message })');
-    expect(source).toContain('normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })');
     expect(source).toContain('export function appendServertoolMatchSkippedProgressEvent(');
     expect(source).toContain('readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext');
     expect(source).toContain('buildServertoolAutoHookTraceProgressEventWithNative(event)');
     expect(source).toContain('buildServertoolMatchSkippedProgressEventWithNative({');
+    expect(source).toContain('buildServertoolStopEntryProgressEventWithNative({');
+    expect(source).toContain('buildServertoolStopCompareProgressEventWithNative({');
     expect(source).not.toContain('const reasonToken = normalizeServertoolProgressTokenWithNative({ value: event.reason })');
     expect(source).not.toContain('result: `${event.result}_${reasonToken ||');
     expect(source).not.toContain('message: `${event.result} (${event.reason}) queue=');
     expect(source).not.toContain("result: 'skipped_' + args.skipReason");
     expect(source).not.toContain("message: 'skipped (' + args.skipReason + ')'");
+    expect(source).not.toContain('const compareResult = compareContext');
+    expect(source).not.toContain('normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })');
+    expect(source).not.toContain("stage: 'compare'");
+    expect(source).not.toContain("unknown_no_context");
+    expect(source).not.toContain("step: stage === 'entry' ? 0 : 2");
+    expect(source).not.toContain("step: stage === 'entry' ? 1 : 3");
   });
 
   test('match skipped progress event reads protocol in progress log owner', async () => {

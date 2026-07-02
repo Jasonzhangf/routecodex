@@ -353,6 +353,53 @@ fn build_auto_hook_trace_progress_event(input: &Value) -> Value {
     })
 }
 
+fn build_stop_entry_progress_event(stage: &str, result: &str) -> Value {
+    let stage = match stage.trim() {
+        "trigger" => "trigger",
+        _ => "entry",
+    };
+    json!({
+        "flowId": "stop_message_flow",
+        "tool": "stop_message_auto",
+        "stage": stage,
+        "result": result,
+        "message": result,
+        "step": if stage == "entry" { 0 } else { 2 }
+    })
+}
+
+fn build_stop_compare_progress_event(
+    stage: &str,
+    flow_id: &str,
+    summary: &str,
+    compare: Option<&Value>,
+) -> Value {
+    let flow_id = normalize_progress_flow_id(flow_id);
+    let flow_id = if flow_id.is_empty() {
+        "none".to_string()
+    } else {
+        flow_id
+    };
+    let result = compare
+        .and_then(Value::as_object)
+        .map(|record| {
+            let decision = read_trimmed_string(record.get("decision"))
+                .unwrap_or_else(|| "unknown".to_string());
+            let reason =
+                read_trimmed_string(record.get("reason")).unwrap_or_else(|| "unknown".to_string());
+            format!("{decision}_{}", normalize_progress_token(&reason))
+        })
+        .unwrap_or_else(|| "unknown_no_context".to_string());
+    json!({
+        "flowId": flow_id,
+        "tool": "stop_message_auto",
+        "stage": "compare",
+        "result": result,
+        "message": summary,
+        "step": if stage.trim() == "entry" { 1 } else { 3 }
+    })
+}
+
 fn build_builtin_handler_entry_plan(document: &Value, name: &str) -> Value {
     let Some(canonical) = normalize_servertool_name(Some(&Value::String(name.to_string()))) else {
         return json!({ "action": "return_none" });
@@ -1110,6 +1157,35 @@ pub fn build_servertool_auto_hook_trace_progress_event_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi]
+pub fn build_servertool_stop_entry_progress_event_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let stage = read_trimmed_string(input.get("stage")).unwrap_or_else(|| "entry".to_string());
+    let result = read_trimmed_string(input.get("result")).ok_or_else(|| {
+        napi::Error::from_reason("result is required for stop entry progress event".to_string())
+    })?;
+    let output = build_stop_entry_progress_event(&stage, &result);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn build_servertool_stop_compare_progress_event_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let stage = read_trimmed_string(input.get("stage")).unwrap_or_else(|| "entry".to_string());
+    let flow_id = input
+        .get("flowId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let summary = input
+        .get("summary")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let output = build_stop_compare_progress_event(&stage, flow_id, summary, input.get("compare"));
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn resolve_servertool_followup_flow_profile(flow_id: &str) -> Value {
     let normalized_flow_id = flow_id.trim();
     if normalized_flow_id.is_empty() {
@@ -1160,9 +1236,12 @@ mod tests {
         build_servertool_auto_hook_trace_progress_event_json,
         build_servertool_dispatch_plan_input_json,
         build_servertool_match_skipped_progress_event_json,
-        build_servertool_outcome_plan_input_json, get_default_servertool_skeleton_document_json,
-        normalize_servertool_progress_flow_id_json, normalize_servertool_progress_result_json,
-        normalize_servertool_progress_token_json, normalize_servertool_registration_spec_json,
+        build_servertool_outcome_plan_input_json,
+        build_servertool_stop_compare_progress_event_json,
+        build_servertool_stop_entry_progress_event_json,
+        get_default_servertool_skeleton_document_json, normalize_servertool_progress_flow_id_json,
+        normalize_servertool_progress_result_json, normalize_servertool_progress_token_json,
+        normalize_servertool_registration_spec_json,
         plan_servertool_builtin_auto_handler_entries_json,
         plan_servertool_builtin_handler_entry_json, plan_servertool_builtin_handler_names_json,
         plan_servertool_builtin_handler_record_entries_json, plan_servertool_followup_runtime_json,
@@ -1686,6 +1765,51 @@ mod tests {
                 "result": "match_matched_stop",
                 "message": "match (Matched Stop) queue=A_optional[1/2] phase=post priority=100",
                 "step": 2
+            })
+        );
+
+        let stop_entry = build_servertool_stop_entry_progress_event_json(
+            json!({ "stage": "entry", "result": "eligible" }).to_string(),
+        )
+        .expect("stop entry progress event");
+        let stop_entry_value: Value =
+            serde_json::from_str(&stop_entry).expect("parse stop entry event");
+        assert_eq!(
+            stop_entry_value,
+            json!({
+                "flowId": "stop_message_flow",
+                "tool": "stop_message_auto",
+                "stage": "entry",
+                "result": "eligible",
+                "message": "eligible",
+                "step": 0
+            })
+        );
+
+        let stop_compare = build_servertool_stop_compare_progress_event_json(
+            json!({
+                "stage": "trigger",
+                "flowId": " stop_message_flow ",
+                "summary": "decision=trigger reason=finish_reason_stop",
+                "compare": {
+                    "decision": "trigger",
+                    "reason": "finish_reason_stop"
+                }
+            })
+            .to_string(),
+        )
+        .expect("stop compare progress event");
+        let stop_compare_value: Value =
+            serde_json::from_str(&stop_compare).expect("parse stop compare event");
+        assert_eq!(
+            stop_compare_value,
+            json!({
+                "flowId": "stop_message_flow",
+                "tool": "stop_message_auto",
+                "stage": "compare",
+                "result": "trigger_finish_reason_stop",
+                "message": "decision=trigger reason=finish_reason_stop",
+                "step": 3
             })
         );
     }

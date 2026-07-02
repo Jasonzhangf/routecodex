@@ -95,7 +95,7 @@ export type NativeServertoolRegistryLookupActionPlan =
 export interface NativeServertoolProgressEvent {
   flowId: string;
   tool: string;
-  stage: 'match' | 'hook';
+  stage: 'entry' | 'trigger' | 'match' | 'hook' | 'compare';
   result: string;
   message: string;
   step: number;
@@ -932,6 +932,84 @@ export function buildServertoolAutoHookTraceProgressEventWithNative(input: {
       typeof record.flowId !== 'string' ||
       typeof record.tool !== 'string' ||
       record.stage !== 'hook' ||
+      typeof record.result !== 'string' ||
+      typeof record.message !== 'string' ||
+      typeof record.step !== 'number'
+    ) {
+      return fail('invalid progress event');
+    }
+    return {
+      flowId: record.flowId,
+      tool: record.tool,
+      stage: record.stage,
+      result: record.result,
+      message: record.message,
+      step: record.step
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function buildServertoolStopEntryProgressEventWithNative(input: {
+  stage: 'entry' | 'trigger';
+  result: string;
+}): NativeServertoolProgressEvent {
+  const capability = 'buildServertoolStopEntryProgressEventJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolProgressEvent>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      typeof record.flowId !== 'string' ||
+      record.tool !== 'stop_message_auto' ||
+      (record.stage !== 'entry' && record.stage !== 'trigger') ||
+      typeof record.result !== 'string' ||
+      typeof record.message !== 'string' ||
+      typeof record.step !== 'number'
+    ) {
+      return fail('invalid progress event');
+    }
+    return {
+      flowId: record.flowId,
+      tool: record.tool,
+      stage: record.stage,
+      result: record.result,
+      message: record.message,
+      step: record.step
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function buildServertoolStopCompareProgressEventWithNative(input: {
+  stage: 'entry' | 'trigger';
+  flowId?: string;
+  summary: string;
+  compare?: unknown;
+}): NativeServertoolProgressEvent {
+  const capability = 'buildServertoolStopCompareProgressEventJson';
+  const fail = (reason?: string) => failNativeRequired<NativeServertoolProgressEvent>(capability, reason);
+  try {
+    const inputJson = encodeJsonArg(capability, input);
+    const raw = invokeNativeStringCapability(capability, [inputJson]);
+    const parsed = parseJson(capability, raw);
+    if (!parsed || parsed === JSON_PARSE_FAILED || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      typeof record.flowId !== 'string' ||
+      record.tool !== 'stop_message_auto' ||
+      record.stage !== 'compare' ||
       typeof record.result !== 'string' ||
       typeof record.message !== 'string' ||
       typeof record.step !== 'number'

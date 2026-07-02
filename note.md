@@ -1,3 +1,9 @@
+# 2026-07-03: servertool stop progress event envelope moved to Rust
+
+- Slice: `progress-log-block.ts` no longer builds stop-entry or stop-compare progress file event envelopes (`flowId/tool/stage/result/message/step`) in TS. Rust `servertool_skeleton_config.rs` owns `build_servertool_stop_entry_progress_event_json` and `build_servertool_stop_compare_progress_event_json`; TS now only reads metadata, calls native builders, writes progress-file IO, and does console/stageRecorder presentation.
+- Gate: `verify-servertool-rust-only.mjs` now requires the Rust exports/native wrappers and forbids TS markers such as local `compareResult`, `unknown_no_context`, fixed stop progress envelope fields, and stop event step ternaries in `progress-log-block.ts`.
+- Evidence: Rust focused `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi resolves_progress_stage_and_result_from_rust --lib -- --nocapture` PASS; native rebuild PASS; focused Jest `progress-log-block.failfast + engine-observation-shell` PASS 13/13; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+
 # 2026-07-03: router-direct consumes ErrorErr05 switch decision without local pool recheck
 
 - Symptom: router-direct/provider error switching could still rethrow or keep hitting the same provider when the observed direct route pool was current-only, even though ErrorErr05 had already produced `exclude_and_reroute`.

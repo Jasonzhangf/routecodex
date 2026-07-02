@@ -30,6 +30,7 @@ verification:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
       - sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts
     contract:
+      - tests/servertool/progress-log-block.failfast.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - tests/servertool/engine-selection-block.spec.ts

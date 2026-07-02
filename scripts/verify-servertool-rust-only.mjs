@@ -4120,6 +4120,8 @@ function checkServertoolFlowPresentationRustOwner() {
     'pub fn normalize_servertool_progress_flow_id_json',
     'pub fn build_servertool_match_skipped_progress_event_json',
     'pub fn build_servertool_auto_hook_trace_progress_event_json',
+    'pub fn build_servertool_stop_entry_progress_event_json',
+    'pub fn build_servertool_stop_compare_progress_event_json',
   ]) {
     assertContains(
       'servertool-flow-presentation-rust-owner',
@@ -4137,6 +4139,8 @@ function checkServertoolFlowPresentationRustOwner() {
     'normalizeServertoolProgressFlowIdJson',
     'buildServertoolMatchSkippedProgressEventJson',
     'buildServertoolAutoHookTraceProgressEventJson',
+    'buildServertoolStopEntryProgressEventJson',
+    'buildServertoolStopCompareProgressEventJson',
   ]) {
     assertContains(
       'servertool-flow-presentation-required-export',
@@ -4154,6 +4158,8 @@ function checkServertoolFlowPresentationRustOwner() {
     'normalizeServertoolProgressFlowIdWithNative',
     'buildServertoolMatchSkippedProgressEventWithNative',
     'buildServertoolAutoHookTraceProgressEventWithNative',
+    'buildServertoolStopEntryProgressEventWithNative',
+    'buildServertoolStopCompareProgressEventWithNative',
   ]) {
     assertContains(
       'servertool-flow-presentation-native-bridge',
@@ -4161,6 +4167,18 @@ function checkServertoolFlowPresentationRustOwner() {
       nativeWrapper,
       needle
     );
+  }
+  for (const needle of [
+    'resolveServertoolProgressToolNameWithNative',
+    'shouldUseServertoolGoldProgressHighlightWithNative',
+    'resolveServertoolProgressStageWithNative',
+    'normalizeServertoolProgressResultWithNative',
+    'normalizeServertoolProgressFlowIdWithNative',
+    'buildServertoolMatchSkippedProgressEventWithNative',
+    'buildServertoolAutoHookTraceProgressEventWithNative',
+    'buildServertoolStopEntryProgressEventWithNative',
+    'buildServertoolStopCompareProgressEventWithNative',
+  ]) {
     assertContains(
       'servertool-flow-presentation-ts-thin-shell',
       `${SERVERTOOL_TS_DIR}/progress-log-block.ts`,
@@ -4176,6 +4194,15 @@ function checkServertoolFlowPresentationRustOwner() {
     'message: `${event.result} (${event.reason}) queue=',
     "result: 'skipped_' + args.skipReason",
     "message: 'skipped (' + args.skipReason + ')'",
+    "flowId: 'stop_message_flow'",
+    "tool: 'stop_message_auto'",
+    "stage: 'compare'",
+    'const compareResult = compareContext',
+    'compareContext.decision',
+    'compareContext.reason',
+    "unknown_no_context",
+    "step: stage === 'entry' ? 0 : 2",
+    "step: stage === 'entry' ? 1 : 3",
   ]) {
     if (progressLogShell.includes(keyword)) {
       fail(

@@ -373,6 +373,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planBudgetStateUpdateJson",
   "planStopMessagePersistedLookupJson",
   "buildClientVisibleProjectionShellJson",
+  "buildServertoolStopEntryProgressEventJson",
+  "buildServertoolStopCompareProgressEventJson",
   "hasStopMessageAutoCliResultInRequestJson",
   "extractStopMessageAutoCliResultSnapshotFromRequestJson",
   "extractServertoolTextFromChatLikeJson",
