@@ -167,5 +167,7 @@ describe('registry-orchestration-shell', () => {
     expect(source).not.toContain('descriptor.sourceIndex');
     expect(source).not.toContain('native registry auto-hook descriptor missing entry');
     expect(source).toContain('planServertoolRegistryBuiltinAutoHookEntriesWithNative({');
+    expect(source).not.toContain('registration: entry.registration as unknown as Record<string, unknown>');
+    expect(source).not.toContain('execution: entry.execution as Record<string, unknown>');
   });
 });

@@ -39,8 +39,8 @@ export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
       phase: entry.autoHook?.phase,
       priority: entry.autoHook?.priority,
       order: entry.autoHook?.order,
-      registration: entry.registration as unknown as Record<string, unknown>,
-      execution: entry.execution as Record<string, unknown>
+      registration: entry.registration,
+      execution: entry.execution
     }))
   }).map((entry) => ({
     id: entry.id,

@@ -3649,8 +3649,8 @@ export function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: {
     phase?: string;
     priority?: number;
     order?: number;
-    registration: Record<string, unknown>;
-    execution: Record<string, unknown>;
+    registration: unknown;
+    execution: unknown;
   }>;
 }): ServertoolRegistryBuiltinAutoHookEntryPlan[] {
   const descriptors = planServertoolRegistryAutoHookDescriptorsWithNative({
@@ -3668,13 +3668,19 @@ export function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: {
         `planServertoolRegistryAutoHookDescriptorsJson native returned descriptor without builtin hook sourceIndex: ${descriptor.sourceIndex}`
       );
     }
+    if (!source.registration || typeof source.registration !== 'object' || Array.isArray(source.registration)) {
+      throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid builtin hook registration');
+    }
+    if (!source.execution || typeof source.execution !== 'object' || Array.isArray(source.execution)) {
+      throw new Error('planServertoolRegistryAutoHookDescriptorsJson native returned invalid builtin hook execution');
+    }
     return {
       id: descriptor.id,
       phase: descriptor.phase,
       priority: descriptor.priority,
       order: descriptor.order,
-      registration: source.registration,
-      execution: source.execution,
+      registration: source.registration as Record<string, unknown>,
+      execution: source.execution as Record<string, unknown>,
     };
   });
 }

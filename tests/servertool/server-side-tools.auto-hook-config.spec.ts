@@ -894,6 +894,10 @@ describe('servertool skeleton config', () => {
 
     expect(source).toContain('planServertoolAutoHookQueueItemsWithNative({');
     expect(source).not.toContain('planServertoolAutoHookQueuesWithNative({');
+    expect(source).not.toContain('planServertoolSkeletonDerivedConfigWithNative');
+    expect(source).not.toContain('autoHookQueueConfig as');
+    expect(source).not.toContain('optionalPrimaryHookOrder');
+    expect(source).not.toContain('mandatoryHookOrder');
     expect(source).not.toContain('args.hooks[entry.sourceIndex]');
     expect(source).not.toContain('native auto-hook queue returned invalid sourceIndex');
     expect(planServertoolHookScheduleWithNative).not.toHaveBeenCalled();

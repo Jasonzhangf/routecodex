@@ -3503,6 +3503,10 @@ function checkAutoHookExecutionRustOwner() {
     'const queueResultForReturn = queueResult as ServerToolHandlerResult',
     'const toolFlowResult: ServerSideToolEngineResult = {',
     'return toolFlowResult;',
+    'planServertoolSkeletonDerivedConfigWithNative',
+    'autoHookQueueConfig as',
+    'optionalPrimaryHookOrder',
+    'mandatoryHookOrder',
     'auto_hook_queue_contract',
     'plan_auto_hook_queue_progress',
     'plan_auto_hook_execution_decision_json',
@@ -3755,6 +3759,8 @@ function checkServertoolRegistryRustOwner() {
     'listBuiltinHandlerRecordEntries',
     "from './registry-projection-shell.js'",
     'projectAutoServerToolHookDescriptors',
+    'registration: entry.registration as unknown as Record<string, unknown>',
+    'execution: entry.execution as Record<string, unknown>',
   ]) {
     if (registryOrchestrationShell.includes(marker)) {
       fail(

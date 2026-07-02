@@ -14,8 +14,7 @@ import {
   runStoplessBuiltinHandlerForRuntimeWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
-  planServertoolAutoHookQueueItemsWithNative,
-  planServertoolSkeletonDerivedConfigWithNative
+  planServertoolAutoHookQueueItemsWithNative
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 function buildAutoHookQueuesFromNativePlan(args: {
@@ -28,16 +27,10 @@ function buildAutoHookQueuesFromNativePlan(args: {
     hooks: ServerToolAutoHookDescriptor[];
   }>;
 } {
-  const queueConfig = planServertoolSkeletonDerivedConfigWithNative().autoHookQueueConfig as {
-    optionalPrimaryOrder: string[];
-    mandatoryOrder: string[];
-  };
   const nativePlan = planServertoolAutoHookQueueItemsWithNative({
     hooks: args.hooks,
     includeAutoHookIds: args.includeAutoHookIds != null ? [...args.includeAutoHookIds] : null,
-    excludeAutoHookIds: args.excludeAutoHookIds != null ? [...args.excludeAutoHookIds] : null,
-    optionalPrimaryHookOrder: queueConfig.optionalPrimaryOrder,
-    mandatoryHookOrder: queueConfig.mandatoryOrder
+    excludeAutoHookIds: args.excludeAutoHookIds != null ? [...args.excludeAutoHookIds] : null
   });
   return {
     queueOrder: nativePlan.queueOrder.map((queue) => ({

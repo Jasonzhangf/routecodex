@@ -462,6 +462,45 @@ export function readServertoolPrimaryAutoHookIdsWithNative(input: {
   return ids;
 }
 
+function readServertoolAutoHookQueueOrderConfigWithNative(input: {
+  document?: unknown;
+} = {}): { optionalPrimaryOrder: string[]; mandatoryOrder: string[] } {
+  const capability = 'readServertoolAutoHookQueueOrderConfigWithNative';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ optionalPrimaryOrder: string[]; mandatoryOrder: string[] }>(capability, reason);
+  const derivedConfig = planServertoolSkeletonDerivedConfigWithNative(input);
+  const autoHookQueueConfig = derivedConfig.autoHookQueueConfig;
+  if (!autoHookQueueConfig || typeof autoHookQueueConfig !== 'object' || Array.isArray(autoHookQueueConfig)) {
+    return fail('missing autoHookQueueConfig');
+  }
+  const optionalPrimaryOrder = (autoHookQueueConfig as { optionalPrimaryOrder?: unknown }).optionalPrimaryOrder;
+  const mandatoryOrder = (autoHookQueueConfig as { mandatoryOrder?: unknown }).mandatoryOrder;
+  if (!Array.isArray(optionalPrimaryOrder)) {
+    return fail('missing optionalPrimaryOrder');
+  }
+  if (!Array.isArray(mandatoryOrder)) {
+    return fail('missing mandatoryOrder');
+  }
+  const normalizedOptionalPrimaryOrder: string[] = [];
+  for (const entry of optionalPrimaryOrder) {
+    if (typeof entry !== 'string') {
+      return fail('invalid optionalPrimaryOrder entry');
+    }
+    normalizedOptionalPrimaryOrder.push(entry);
+  }
+  const normalizedMandatoryOrder: string[] = [];
+  for (const entry of mandatoryOrder) {
+    if (typeof entry !== 'string') {
+      return fail('invalid mandatoryOrder entry');
+    }
+    normalizedMandatoryOrder.push(entry);
+  }
+  return {
+    optionalPrimaryOrder: normalizedOptionalPrimaryOrder,
+    mandatoryOrder: normalizedMandatoryOrder
+  };
+}
+
 export function buildServertoolDispatchPlanInputWithNative(input: {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   disableToolCallHandlers: boolean;
@@ -1144,9 +1183,11 @@ export function planServertoolAutoHookQueueItemsWithNative<T extends {
   hooks: T[];
   includeAutoHookIds?: string[] | null;
   excludeAutoHookIds?: string[] | null;
-  optionalPrimaryHookOrder: string[];
-  mandatoryHookOrder: string[];
+  document?: unknown;
 }): NativeServertoolAutoHookQueueItems<T> {
+  const queueOrderConfig = readServertoolAutoHookQueueOrderConfigWithNative({
+    document: input.document
+  });
   const nativePlan = planServertoolAutoHookQueuesWithNative({
     hooks: input.hooks.map((hook, sourceIndex) => ({
       id: hook.id,
@@ -1157,8 +1198,8 @@ export function planServertoolAutoHookQueueItemsWithNative<T extends {
     })),
     includeAutoHookIds: input.includeAutoHookIds ?? null,
     excludeAutoHookIds: input.excludeAutoHookIds ?? null,
-    optionalPrimaryHookOrder: input.optionalPrimaryHookOrder,
-    mandatoryHookOrder: input.mandatoryHookOrder
+    optionalPrimaryHookOrder: queueOrderConfig.optionalPrimaryOrder,
+    mandatoryHookOrder: queueOrderConfig.mandatoryOrder
   });
   return {
     queueOrder: nativePlan.queueOrder.map((queue) => ({
