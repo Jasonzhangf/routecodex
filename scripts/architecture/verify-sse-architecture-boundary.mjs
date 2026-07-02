@@ -726,7 +726,22 @@ for (const relPath of providerNeutralProjectionFiles) {
 }
 
 const chatSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts');
+if (!chatSseToJsonConverter.includes('buildChatJsonFromSseWithNative')) {
+  failures.push('Chat SSE decode converter must call native buildChatJsonFromSseWithNative');
+}
 for (const forbidden of [
+  'normalizeMessageReasoningTools',
+  'normalizeChatMessageContent',
+  'dispatchReasoning',
+  'processSseEvent(',
+  'processChatChunk(',
+  'processChoice(',
+  'processDelta(',
+  'processToolCallDelta(',
+  'normalizeReasoning(',
+  'buildPartialResponse(',
+  'finalizeResponse(',
+  'parseSseChunk(',
   'function normalizeChatUsage(usage: unknown): ChatUsage | null',
   'function normalizeChatUsage(usage: unknown): ChatUsage | undefined',
   'function readNonNegativeInteger(',

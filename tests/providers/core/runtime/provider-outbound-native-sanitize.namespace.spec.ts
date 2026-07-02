@@ -136,6 +136,157 @@ describe('provider outbound native sanitize namespace guard', () => {
     expect(output.tools[0]).not.toHaveProperty('function');
   });
 
+  test('strips nested Responses input tools before provider transport', () => {
+    const output = sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-responses',
+      payload: {
+        model: 'gpt-5.4-mini',
+        input: [{
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'continue' }],
+          tools: [{
+            type: 'namespace',
+            name: 'multi_agent_v1',
+            tools: [{
+              type: 'function',
+              name: 'spawn_agent',
+              description: 'spawn',
+              parameters: { type: 'object' }
+            }]
+          }]
+        }],
+        tools: [{
+          type: 'namespace',
+          name: 'multi_agent_v1',
+          tools: [{
+            type: 'function',
+            name: 'spawn_agent',
+            description: 'spawn',
+            parameters: { type: 'object' }
+          }]
+        }]
+      }
+    });
+
+    expect(output.input[0]).not.toHaveProperty('tools');
+    expect(output.tools).toEqual([{
+      type: 'function',
+      name: 'spawn_agent',
+      description: 'spawn',
+      parameters: { type: 'object' }
+    }]);
+  });
+
+  test('strips nested Responses input tools for loose direct layout before provider transport', () => {
+    const output = sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-responses',
+      enforceLayout: false,
+      payload: {
+        model: 'gpt-5.5',
+        input: [{
+          type: 'tool_search_output',
+          id: 'search_1',
+          status: 'completed',
+          output: [],
+          tools: [{
+            type: 'namespace',
+            name: 'mcp__node_repl',
+            tools: [{
+              type: 'function',
+              name: 'js',
+              description: 'Run JS',
+              parameters: { type: 'object' }
+            }]
+          }]
+        }],
+        tools: [{
+          type: 'function',
+          name: 'exec_command',
+          description: 'Run command',
+          parameters: { type: 'object' }
+        }],
+        stream: true
+      }
+    });
+
+    expect(output.input).toEqual([]);
+    expect(output.tools).toEqual([{
+      type: 'function',
+      name: 'exec_command',
+      description: 'Run command',
+      parameters: { type: 'object' }
+    }]);
+    expect(output.stream).toBe(true);
+  });
+
+  test('strips client tool_search history before provider transport', () => {
+    const output = sanitizeProviderOutboundPayloadWithNative({
+      protocol: 'openai-responses',
+      enforceLayout: false,
+      payload: {
+        model: 'gpt-5.5',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'continue' }]
+          },
+          {
+            type: 'tool_search_call',
+            call_id: 'call_search',
+            status: 'completed',
+            execution: 'client',
+            arguments: { query: 'node_repl js', limit: 10 }
+          },
+          {
+            type: 'reasoning',
+            summary: [],
+            content: null,
+            encrypted_content: 'encrypted'
+          },
+          {
+            type: 'tool_search_output',
+            call_id: 'call_search',
+            status: 'completed',
+            execution: 'client',
+            tools: [{
+              type: 'namespace',
+              name: 'mcp__node_repl',
+              tools: [{
+                type: 'function',
+                name: 'js',
+                description: 'Run JS',
+                parameters: { type: 'object' }
+              }]
+            }]
+          },
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'next' }]
+          }
+        ],
+        tools: [{
+          type: 'function',
+          name: 'exec_command',
+          description: 'Run command',
+          parameters: { type: 'object' }
+        }],
+        stream: true
+      }
+    });
+
+    expect(output.input.map((item: { type?: string }) => item.type)).toEqual([
+      'message',
+      'reasoning',
+      'message'
+    ]);
+    expect(output.input).not.toContainEqual(expect.objectContaining({ type: 'tool_search_call' }));
+    expect(output.input).not.toContainEqual(expect.objectContaining({ type: 'tool_search_output' }));
+    expect(output.stream).toBe(true);
+  });
+
   test('keeps OpenAI Responses function tools in flat Responses wire shape', () => {
     const output = sanitizeProviderOutboundPayloadWithNative({
       protocol: 'openai-responses',

@@ -262,8 +262,12 @@ describe('stopless CLI continuation', () => {
     expect(command).toContain('routecodex hook run reasoningStop');
     expect(command).not.toContain('--session-id');
     expect(command).not.toContain('--request-id');
-    expect((result.chat as any).choices?.[0]?.message?.content).toBe('');
-    expect((result.chat as any).choices?.[0]?.message?.reasoning_text).toContain('need more evidence');
+    const message = (result.chat as any).choices?.[0]?.message;
+    expect(message?.content).toContain('need more evidence');
+    expect(message?.reasoning_text).toBeUndefined();
+    expect(message?.reasoning_content).toBeUndefined();
+    expect(message?.reasoning).toBeUndefined();
+    expect(JSON.stringify(result.chat)).not.toContain('function_call_output');
     expect(command).not.toContain('schemaGuidance');
     const cliStdout = await runStoplessCliStdout(command);
     expect(cliStdout.routeHint).toBe('thinking');

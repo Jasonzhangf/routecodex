@@ -38,7 +38,7 @@ const asStringArray = (value: unknown): string[] | undefined => {
 const dropToon = (value: UnknownRecord): void => {
   try {
     if (Object.prototype.hasOwnProperty.call(value, 'toon')) delete (value as { toon?: unknown }).toon;
-  } catch {}
+  } catch (err) { console.warn('[dropToon] failed to delete toon property:', err); }
 };
 
 export type ExecCommandNormalizeResult =

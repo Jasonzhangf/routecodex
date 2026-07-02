@@ -353,6 +353,28 @@ fn collect_executed_tool_call_ids(response: &Map<String, Value>) -> HashSet<Stri
     ids
 }
 
+fn is_client_visible_servertool_cli_shell(
+    response: &Map<String, Value>,
+    tool_calls: &[Value],
+) -> bool {
+    if response
+        .get("model")
+        .and_then(Value::as_str)
+        .map(|model| model == "routecodex-servertool-cli")
+        != Some(true)
+    {
+        return false;
+    }
+    tool_calls.iter().any(|call| {
+        call.as_object()
+            .and_then(|row| row.get("function"))
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            == Some("exec_command")
+    })
+}
+
 type PendingToolCall = (usize, String, String, String);
 
 fn build_chat_payload_from_anthropic_message_for_responses(
@@ -705,7 +727,8 @@ pub(crate) fn build_responses_payload_from_chat_core(
     if !tool_calls.is_empty() {
         content_parts = strip_tool_markup_from_output_text_parts(content_parts.as_slice());
     }
-    let should_emit_message = !has_tool_calls && !content_parts.is_empty();
+    let should_emit_message = !content_parts.is_empty()
+        && (!has_tool_calls || is_client_visible_servertool_cli_shell(response_row, &tool_calls));
 
     let response_id = allocate_responses_id(response_row);
     let request_id_value = read_request_id(response_row, request_id_hint);
@@ -1112,6 +1135,61 @@ mod tests {
         assert_eq!(
             result["output"][0]["content"][0]["text"],
             "stopless budget exhausted"
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_keeps_stopless_cli_shell_visible_text_with_tool_call() {
+        let payload = json!({
+            "id": "chatcmpl_stopless_cli_shell",
+            "object": "chat.completion",
+            "model": "routecodex-servertool-cli",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": "阶段完成：已定位 stopless 投影问题。",
+                    "tool_calls": [{
+                        "id": "call_servertool_cli_stop_1",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let result =
+            build_responses_payload_from_chat_core(&payload, Some("req-stopless-cli"), &json!({}))
+                .expect("responses payload");
+
+        assert_eq!(result["status"], "requires_action");
+        assert_eq!(result["output_text"], "阶段完成：已定位 stopless 投影问题。");
+        assert_eq!(result["output"][0]["type"], "message");
+        assert_eq!(result["output"][0]["content"][0]["type"], "output_text");
+        assert_eq!(
+            result["output"][0]["content"][0]["text"],
+            "阶段完成：已定位 stopless 投影问题。"
+        );
+        assert_eq!(result["output"][1]["type"], "function_call");
+        assert!(
+            !result["output"]
+                .as_array()
+                .unwrap_or(&Vec::new())
+                .iter()
+                .any(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
+        );
+        assert!(
+            !result["output"]
+                .as_array()
+                .unwrap_or(&Vec::new())
+                .iter()
+                .any(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                })
         );
     }
 

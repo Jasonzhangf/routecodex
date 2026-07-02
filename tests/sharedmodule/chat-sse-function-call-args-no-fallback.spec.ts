@@ -177,6 +177,6 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
       model: response.model
     });
 
-    await expectStreamToReject(stream, 'Invalid ChatCompletionChunk delta: missing role');
+    await expectStreamToReject(stream, 'Invalid message sequence for role: unknown');
   });
 });

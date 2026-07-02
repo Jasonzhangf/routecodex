@@ -186,6 +186,7 @@ owners:
       - "If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook."
       - "When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history."
       - "When the client executes the shell projection and submits the result, request-side hooks must restore model-visible history as `reasoningStop -> function_call_output`; raw `exec_command` shell history must not become model truth."
+      - "Client-visible stopless projection text must be ordinary assistant text (`message.content` / Responses `output_text`), never `reasoning_text` / `reasoning_content` / `reasoning.summary`; `function_call_output` is reserved for next-turn model-side tool result restore and must not carry client-visible stopless prose."
       - "For `/v1/responses`, req-side stopless contract cannot rely on `messages` only: the request mainline must preserve the contract in `instructions`, and the responses bridge must materialize that contract back into the outbound chat/system message before provider wire build."
       - "CLI command input stays concise/status-only: `flowId/repeatCount/maxRepeats/triggerHint` plus optional structured `schemaFeedback{reasonCode,missingFields}`; continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string."
       - "Client-visible exec_command must use the public stopless alias `reasoningStop`; the client payload must not leak internal marker `__servertool_cli_projection`."
@@ -3701,6 +3702,7 @@ owners:
       - SseToChatJsonOptions
     canonical_builders:
       - build_chat_sse_event_sequence_json
+      - build_chat_json_from_sse_json
     allowed_paths:
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts
@@ -3712,6 +3714,7 @@ owners:
       - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
       - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
+      - tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
@@ -3721,12 +3724,14 @@ owners:
       - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
       - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
+      - tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
       - "Chat JSON->SSE role/content/reasoning/tool/finish/done ordering is Rust-owned through `build_chat_sse_event_sequence_json`; TS sequencer may only call native and yield events."
+      - "Chat SSE->JSON event aggregation, usage normalization, tool/function delta accumulation, and incomplete stream detection are Rust-owned through `build_chat_json_from_sse_json`; TS converter may only collect stream bytes/events and call native."
       - "Chat stream projection may preserve stream shape; it must not own provider health, route policy, or Hub tool governance."
 
   - feature_id: sse.anthropic_gemini_stream_projection

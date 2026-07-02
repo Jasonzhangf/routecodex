@@ -119,6 +119,7 @@ verification:
       - "Validation must prove `stopreason=2 + next_step` sends the next_step content back to the model as the continuation text, while `blocked + needs_user_input=true` returns summary plus the user decision question to the client and terminates with stop."
       - "If stop arrives with valid terminal schema, validation must prove stop is allowed even when the model did not proactively call the stop hook."
       - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
+      - "Validation must prove client-visible stopless prose is ordinary assistant text and not `reasoning_text` / `reasoning_content` / `reasoning.summary`; `function_call_output` remains only the next-turn model-side restore shape."
       - "Focused Rust gates: `cargo test -p servertool-core stopless --lib -- --nocapture`, `cargo test -p servertool-core cli_contract --lib -- --nocapture`, and `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`."
       - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/execution-stage-shell.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`."
 
@@ -2062,15 +2063,18 @@ verification:
       - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
       - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
       - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
+      - tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts
     integration: []
     smoke:
       - cargo test -p router-hotpath-napi chat_sse_event_payload --lib -- --nocapture
+      - node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts --runInBand
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
     notes:
       - "Chat JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
+      - "Chat SSE->JSON decode aggregation must stay native/Rust-owned; focused parity must prove incomplete streams fail fast and TS converter remains a native-backed IO shell."
       - "Chat stream projection preserves stream shape; provider health, route policy, and Hub tool governance remain outside SSE."
 
   - feature_id: sse.anthropic_gemini_stream_projection

@@ -230,6 +230,7 @@
           <li><code>/v1/responses</code> stopless turns now have an explicit two-owner contract: req owner preserves schema contract in <code>instructions</code>, bridge owner materializes it back into the outbound system message.</li>
           <li><code>/v1/responses</code> stopless turns have an explicit two-owner contract: req owner preserves schema contract in <code>instructions</code>, bridge owner materializes it back into the outbound system message. This is independent of Responses continuation store and must not mutate continuation scope.</li>
           <li><code>responsesRequestContext.sessionId/conversationId</code> is Responses continuation context only; it must not be promoted into stopless session truth, stopless activation input, or stopless state key material.</li>
+          <li>client-visible stopless projection prose is ordinary assistant text; reasoning fields are not the display surface, and <code>function_call_output</code> is reserved for next-turn model-side restore.</li>
         </ul>
         <h2>Review Checklist</h2>
         <ul>

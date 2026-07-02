@@ -143,6 +143,7 @@
         <tr><td><code>hub.servertool_auto_hook_execution</code></td><td>servertool auto-hook runtime attempt, trace, and caller finalization planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_engine_preflight_contract</code></td><td>servertool engine preflight early-return planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_engine_runtime_action_contract</code></td><td>servertool engine runtime action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_engine_prepass_action_contract</code></td><td>servertool engine prepass action planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_engine_skip_contract</code></td><td>servertool engine skip planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_branch_contract</code></td><td>servertool execution branch and CLI projection target planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_execution_dispatch_contract</code></td><td>servertool execution dispatch error and followup contract planning</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
@@ -378,6 +379,7 @@
           <li>If <code>finish_reason=stop</code> arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook.</li>
           <li>When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history.</li>
           <li>When the client executes the shell projection and submits the result, request-side hooks must restore model-visible history as <code>reasoningStop -&gt; function_call_output</code>; raw <code>exec_command</code> shell history must not become model truth.</li>
+          <li>Client-visible stopless projection text must be ordinary assistant text (<code>message.content</code> / Responses <code>output_text</code>), never <code>reasoning_text</code> / <code>reasoning_content</code> / <code>reasoning.summary</code>; <code>function_call_output</code> is reserved for next-turn model-side tool result restore and must not carry client-visible stopless prose.</li>
           <li>For <code>/v1/responses</code>, req-side stopless contract cannot rely on <code>messages</code> only: the request mainline must preserve the contract in <code>instructions</code>, and the responses bridge must materialize that contract back into the outbound chat/system message before provider wire build.</li>
           <li>CLI command input stays concise/status-only: <code>flowId/repeatCount/maxRepeats/triggerHint</code> plus optional structured <code>schemaFeedback{reasonCode,missingFields}</code>; continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string.</li>
           <li>Client-visible exec_command must use the public stopless alias <code>reasoningStop</code>; the client payload must not leak internal marker <code>__servertool_cli_projection</code>.</li>
@@ -487,10 +489,13 @@
           <li><code>ServertoolEngineRuntimeActionInput</code></li>
           <li><code>ServertoolEngineRuntimeAction</code></li>
           <li><code>ServertoolEngineRuntimeActionPlan</code></li>
+          <li><code>ServertoolEngineTriggerObservationInput</code></li>
+          <li><code>ServertoolEngineTriggerObservationPlan</code></li>
         </ul>
         <p>Canonical builders:</p>
         <ul>
           <li><code>plan_servertool_engine_runtime_action</code></li>
+          <li><code>plan_servertool_engine_trigger_observation</code></li>
         </ul>
         <p>Allowed paths:</p>
         <ul>
@@ -518,7 +523,49 @@
         </ul>
         <p>Notes:</p>
         <ul>
-          <li>Rust owns engine runtime action selection.</li>
+          <li>Rust owns engine runtime action selection and trigger observation planning.</li>
+        </ul>
+        <h2>hub.servertool_engine_prepass_action_contract</h2>
+        <p>Summary: servertool engine prepass action planning</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs</code> Owner scope: servertool engine prepass action planning</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>ServertoolEnginePrepassActionInput</code></li>
+          <li><code>ServertoolEnginePrepassAction</code></li>
+          <li><code>ServertoolEnginePrepassActionPlan</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>plan_servertool_engine_prepass_action</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts</code></li>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+          <li><code>tests/servertool/run-server-side-tool-engine-shell.spec.ts</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>tests/servertool/servertool-cli-native-bridge.spec.ts</code></li>
+          <li><code>tests/servertool/run-server-side-tool-engine-shell.spec.ts</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>Rust owns engine prepass action selection; TS shell may only execute returned prepass/continue action.</li>
         </ul>
         <h2>hub.servertool_engine_skip_contract</h2>
         <p>Summary: servertool engine skip planning</p>

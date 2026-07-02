@@ -159,6 +159,11 @@ const repairArgKeyArtifactsInObject = (value: unknown): void => {
   visit(value);
 };
 
+
+/**
+ * Parse tool arguments JSON with artifact repair.
+ * Single-attempt only: no fallback chain. Parse failure returns {} after repair attempt.
+ */
 export function parseToolArgsJson(input: unknown): unknown {
   const raw = typeof input === 'string' ? input : '';
   if (!raw.trim()) return {};
@@ -167,44 +172,9 @@ export function parseToolArgsJson(input: unknown): unknown {
     repairArgKeyArtifactsInKeys(parsed);
     repairArgKeyArtifactsInObject(parsed);
     return parsed;
-  } catch {
-    // attempt raw string repair for arg_key/arg_value artifacts
-    try {
-      const repairedRaw = repairArgKeyArtifactsInRawJson(raw).trim();
-      if (repairedRaw && repairedRaw !== raw) {
-        const parsed = JSON.parse(repairedRaw);
-        repairArgKeyArtifactsInKeys(parsed);
-        repairArgKeyArtifactsInObject(parsed);
-        return parsed;
-      }
-    } catch {
-      // continue
-    }
-    // try stripping common tool-call markup artifacts and parsing again
-    try {
-      const stripped = stripArgKeyArtifacts(raw).trim();
-      if (stripped && stripped !== raw) {
-        const parsed = JSON.parse(stripped);
-        repairArgKeyArtifactsInKeys(parsed);
-        repairArgKeyArtifactsInObject(parsed);
-        return parsed;
-      }
-    } catch {
-      // continue
-    }
-    // attempt to parse the first JSON container substring
-    try {
-      const candidate = raw.match(/\{[\s\S]*\}|\[[\s\S]*\]/)?.[0];
-      if (candidate) {
-        const strippedCandidate = stripArgKeyArtifacts(candidate).trim();
-        const parsed = JSON.parse(strippedCandidate);
-        repairArgKeyArtifactsInKeys(parsed);
-        repairArgKeyArtifactsInObject(parsed);
-        return parsed;
-      }
-    } catch {
-      // ignore
-    }
+  } catch (err) {
+    console.warn('[parseToolArgsJson] JSON.parse failed after repair, returning {}:', err);
     return {};
   }
 }
+

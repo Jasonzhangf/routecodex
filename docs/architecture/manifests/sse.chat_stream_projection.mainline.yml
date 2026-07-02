@@ -1,0 +1,33 @@
+lifecycle_id: sse.chat_stream_projection.mainline
+summary: Chat JSON response projection into client-visible SSE frames and Chat
+  provider SSE decode into final Chat JSON; malformed semantics fail fast
+  instead of being synthesized into successful frames/responses.
+owner_feature_id: sse.chat_stream_projection
+entrypoint:
+  node_id: HubRespOutbound04ClientSemantic
+  wiki_page: null
+  call_map_chain_id: sse.chat_stream_projection.mainline
+node_ids:
+  - HubRespInbound02Parsed
+  - HubRespOutbound04ClientSemantic
+  - ProviderRespInbound01Raw
+  - ServerRespOutbound05ClientFrame
+edges:
+  - step_id: chat-sse-01
+    from_node: HubRespOutbound04ClientSemantic
+    to_node: ServerRespOutbound05ClientFrame
+    status: anchored
+    owner_feature_id: sse.chat_stream_projection
+    binding_pending: null
+    split_binding_id: null
+  - step_id: chat-sse-02
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    status: anchored
+    owner_feature_id: sse.chat_stream_projection
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

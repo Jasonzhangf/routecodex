@@ -521,25 +521,31 @@ flowchart LR
 
 ## sse.chat_stream_projection.mainline
 
-Chat JSON response projection into client-visible SSE frames; malformed encode-side semantics fail fast instead of being synthesized into error frames.
+Chat JSON response projection into client-visible SSE frames and Chat provider SSE decode into final Chat JSON; malformed semantics fail fast instead of being synthesized into successful frames/responses.
 
 Entry contract: `HubRespOutbound04ClientSemantic` via `docs/design/pipeline-type-topology-and-module-boundaries.md`
 
 ```mermaid
 flowchart LR
+  HubRespInbound02Parsed["HubRespInbound02Parsed"]
+  ProviderRespInbound01Raw["ProviderRespInbound01Raw"]
   ServerRespOutbound05ClientFrame["ServerRespOutbound05ClientFrame"]
   HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
   HubRespOutbound04ClientSemantic -->|chat-sse-01| ServerRespOutbound05ClientFrame
+  ProviderRespInbound01Raw -->|chat-sse-02| HubRespInbound02Parsed
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
   class HubRespOutbound04ClientSemantic anchored;
   class ServerRespOutbound05ClientFrame anchored;
+  class ProviderRespInbound01Raw anchored;
+  class HubRespInbound02Parsed anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
 | chat-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `processResponseToSseWithFunctions -> buildChatSseEventSequenceWithNative` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
+| chat-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `convertSseToJson -> buildChatJsonFromSseWithNative` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
 
 ## Shared Multi-Reference Functions
 

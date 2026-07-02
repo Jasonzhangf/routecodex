@@ -1,81 +1,77 @@
 /**
- * Chat SSE → JSON转换器
- * 将SSE事件流聚合为ChatCompletion响应
+ * Chat SSE -> JSON converter.
+ * TS owns stream IO / timeout / abort plumbing only; Rust owns SSE decode semantics.
  */
 
 // feature_id: sse.chat_stream_projection
-import { CHAT_CONVERSION_ERROR_CODES } from '../types/index.js';
 import type {
   ChatCompletionResponse,
-  ChatCompletionChunk,
   ChatSseEvent,
-  ChatSseEventType,
-  SseToChatJsonContext,
   SseToChatJsonOptions,
-  ChatEventStats,
-  ChatChoiceBuilder,
-  ChatToolCallChunk,
-  ChatMessage,
-  ChatToolCall,
-  ChatUsage
+  ChatEventStats
 } from '../types/index.js';
-import {
-  TimeUtils,
-  ErrorUtils
-} from '../shared/utils.js';
-import { normalizeMessageReasoningTools } from '../../conversion/shared/reasoning-tool-normalizer.js';
-import { normalizeChatMessageContent } from '../../conversion/shared/chat-output-normalizer.js';
-import { dispatchReasoning } from '../shared/reasoning-dispatcher.js';
-import { normalizeChatUsageWithNative } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
-
-const hasExplicitToolWrapperProgress = (text: string): boolean => {
-  if (!text) {
-    return false;
-  }
-  return (
-    /<tool_call\b/i.test(text)
-    || /<function_calls?\b/i.test(text)
-    || /<<\s*RCC_TOOL_CALLS(?:_JSON)?/i.test(text)
-    || /<use_mcp_tool\b/i.test(text)
-  );
-};
+import { ErrorUtils } from '../shared/utils.js';
+import { buildChatJsonFromSseWithNative } from '../../native/router-hotpath/native-chat-sse-event-payload.js';
 
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
-const DEFAULT_NO_CONTENT_TIMEOUT_MS = 120_000;
 const DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS = 45_000;
 const DEFAULT_CONTENT_IDLE_TIMEOUT_MS = 300_000;
 
-function coerceNormalizedChatUsage(usage: unknown): ChatUsage | undefined {
-  if (typeof usage === 'undefined' || usage === null) {
-    return undefined;
-  }
-  const normalized = normalizeChatUsageWithNative(usage);
-  if (typeof normalized === 'undefined' || normalized === null) {
-    return undefined;
-  }
-  if (typeof normalized !== 'object' || Array.isArray(normalized)) {
-    throw new Error('Invalid Chat usage: native normalization returned non-object');
-  }
-  return normalized as ChatUsage;
+type DecodeStats = ChatEventStats & {
+  firstFrameAtMs?: number;
+  lastFrameAtMs?: number;
+  firstContentAtMs?: number;
+  lastContentAtMs?: number;
+};
+
+interface DecodeContext {
+  requestId: string;
+  model: string;
+  options: SseToChatJsonOptions;
+  startTime: number;
+  isCompleted: boolean;
+  eventStats: DecodeStats;
 }
 
-/**
- * Chat SSE到JSON转换器
- */
-export class ChatSseToJsonConverter {
-  private contexts = new Map<string, SseToChatJsonContext>();
+function nowMs(): number {
+  return Date.now();
+}
 
-  /**
-   * 将SSE流转换为Chat Completion响应
-   */
+function isChatSseEvent(value: unknown): value is ChatSseEvent {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value) && 'event' in value);
+}
+
+function eventToWire(event: ChatSseEvent): string {
+  const lines: string[] = [];
+  if (event.event && event.event !== 'chat_chunk') {
+    lines.push(`event: ${event.event}`);
+  }
+  lines.push(`data: ${typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? {})}`);
+  return `${lines.join('\n')}\n\n`;
+}
+
+function parseNativeProjectedError(error: unknown): Record<string, unknown> | null {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  try {
+    const parsed = JSON.parse(message);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch (_parseError) {
+    return null;
+  }
+}
+
+export class ChatSseToJsonConverter {
+  private readonly stats = new Map<string, DecodeStats>();
+
   async convertSseToJson(
     sseStream: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>,
     options: SseToChatJsonOptions
   ): Promise<ChatCompletionResponse> {
     const context = this.createContext(options);
-    this.contexts.set(options.requestId, context);
+    this.stats.set(options.requestId, context.eventStats);
 
-    // Client abort signal: 当客户端断开连接时，立即中断 SSE 读取，不再等内部超时。
     const abortSignal = options.abortSignal;
     let abortHandler: (() => void) | null = null;
     if (abortSignal && !abortSignal.aborted) {
@@ -87,128 +83,119 @@ export class ChatSseToJsonConverter {
     }
 
     try {
-      // 处理SSE流
-      for await (const event of this.ensureEventStream(sseStream, context)) {
-        await this.processSseEvent(event, context);
-        if (context.isCompleted) {
-          break;
-        }
+      const bodyText = await this.collectBodyText(sseStream, context);
+      if (abortSignal?.aborted) {
+        const reason = (abortSignal as { reason?: unknown }).reason;
+        const error = reason instanceof Error ? reason : new Error(String(reason ?? 'CLIENT_DISCONNECTED'));
+        Object.assign(error, { code: 'CLIENT_DISCONNECTED', name: 'AbortError' });
+        throw error;
       }
 
-      // 验证并返回最终响应
-      return this.finalizeResponse(context);
-
+      const response = buildChatJsonFromSseWithNative({
+        bodyText,
+        requestId: options.requestId,
+        model: options.model,
+        config: {
+          reasoningMode: options.reasoningMode,
+          reasoningTextPrefix: options.reasoningTextPrefix
+        }
+      }) as unknown as ChatCompletionResponse;
+      context.isCompleted = true;
+      context.eventStats.endTime = nowMs();
+      context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
+      options.onCompletion?.(response);
+      this.attachDecodeStats(response, context);
+      return response;
     } catch (error) {
       context.eventStats.errorCount++;
       options.onError?.(error as Error);
       throw this.wrapSseError(error, 'SSE to JSON conversion failed');
     } finally {
-      if (abortHandler) {
-        abortHandler();
-        abortHandler = null;
-      }
+      abortHandler?.();
       this.cleanup(options.requestId);
     }
   }
 
-  /**
-   * 将SSE流转换为流式响应
-   */
   async *aggregateSseStream(
     sseStream: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>,
     options: SseToChatJsonOptions
   ): AsyncGenerator<ChatCompletionResponse> {
-    const context = this.createContext(options);
-    this.contexts.set(options.requestId, context);
-
-    try {
-      for await (const event of this.ensureEventStream(sseStream, context)) {
-        await this.processSseEvent(event, context);
-
-        // 每处理完一个chunk就生成部分响应
-        const partialResponse = this.buildPartialResponse(context);
-        if (partialResponse) {
-          options.onPartialResponse?.(partialResponse);
-          yield partialResponse;
-        }
-      }
-
-      // 返回最终响应
-      const finalResponse = this.finalizeResponse(context);
-      options.onCompletion?.(finalResponse);
-      yield finalResponse;
-
-    } catch (error) {
-      context.eventStats.errorCount++;
-      options.onError?.(error as Error);
-      throw this.wrapSseError(error, 'SSE stream aggregation failed');
-    } finally {
-      this.cleanup(options.requestId);
-    }
+    const response = await this.convertSseToJson(sseStream, options);
+    options.onPartialResponse?.(response);
+    yield response;
   }
 
-  /**
-   * 确保输入流转换为 ChatSseEvent 流
-   */
-  private async *ensureEventStream(
+  private createContext(options: SseToChatJsonOptions): DecodeContext {
+    return {
+      requestId: options.requestId,
+      model: options.model,
+      options,
+      startTime: nowMs(),
+      isCompleted: false,
+      eventStats: {
+        totalChunks: 0,
+        totalTokens: 0,
+        totalChoices: 0,
+        totalToolCalls: 0,
+        startTime: nowMs(),
+        tokenRate: 0,
+        chunkRate: 0,
+        errorCount: 0,
+        retryCount: 0
+      }
+    };
+  }
+
+  private async collectBodyText(
     source: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>,
-    context?: SseToChatJsonContext
-  ): AsyncGenerator<ChatSseEvent> {
-    let tailBuffer = '';
+    context: DecodeContext
+  ): Promise<string> {
+    const chunks: string[] = [];
     const iterator = source[Symbol.asyncIterator]() as AsyncIterator<ChatSseEvent | string | Buffer>;
     while (true) {
       const next = await this.readNextStreamChunk(iterator, context);
       if (next.done) {
         break;
       }
-      const chunk = next.value;
-      if (typeof chunk === 'string' || Buffer.isBuffer(chunk)) {
-        const raw = typeof chunk === 'string' ? chunk : chunk.toString();
-        const normalized = raw.replace(/\r\n/g, '\n');
-        const combined = tailBuffer + normalized;
-        const segments = combined.split('\n\n');
-        tailBuffer = segments.pop() ?? '';
-
-        for (const segment of segments) {
-          const trimmed = segment.trim();
-          if (trimmed) {
-            const parsed = this.parseSseChunk(trimmed);
-            if (parsed) {
-              yield parsed;
-            }
-          }
-        }
-      } else if ((chunk as ChatSseEvent)?.event) {
-        yield chunk as ChatSseEvent;
-      } else {
-        throw ErrorUtils.createError(
-          'Unsupported SSE chunk format',
-          CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-          { chunk }
-        );
-      }
+      const value = next.value;
+      const text = typeof value === 'string'
+        ? value
+        : Buffer.isBuffer(value)
+          ? value.toString()
+          : isChatSseEvent(value)
+            ? eventToWire(value)
+            : (() => {
+                throw ErrorUtils.createError(
+                  'Chat SSE decode requires wire string, Buffer, or ChatSseEvent chunks',
+                  'CHAT_PARSE_ERROR',
+                  { chunk: value }
+                );
+              })();
+      chunks.push(text);
+      this.updateStatsFromChunkText(context, text);
     }
-
-    const trailing = tailBuffer.trim();
-    if (trailing) {
-      const parsed = this.parseSseChunk(trailing);
-      if (parsed) {
-        yield parsed;
-      }
-    }
+    return chunks.join('');
   }
 
   private async readNextStreamChunk<T>(
     iterator: AsyncIterator<T>,
-    context?: SseToChatJsonContext
+    context: DecodeContext
   ): Promise<IteratorResult<T>> {
-    if (!context) {
-      return iterator.next();
-    }
     return this.raceWithTimeoutState(iterator.next(), context);
   }
 
-  private resolveTimeoutState(context: SseToChatJsonContext): {
+  private updateStatsFromChunkText(context: DecodeContext, text: string): void {
+    const now = nowMs();
+    context.eventStats.totalChunks++;
+    context.eventStats.firstFrameAtMs ??= now;
+    context.eventStats.lastFrameAtMs = now;
+    if (text.includes('"content"') || text.includes('"tool_calls"') || text.includes('"function_call"')) {
+      context.eventStats.firstContentAtMs ??= now;
+      context.eventStats.lastContentAtMs = now;
+    }
+  }
+
+  private resolveTimeoutState(context: DecodeContext): {
     timeoutMs: number;
     anchorMs: number;
     code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT' | 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT';
@@ -243,26 +230,18 @@ export class ChatSseToJsonConverter {
     };
   }
 
-  private markSemanticContentSeen(context: SseToChatJsonContext): void {
-    const now = TimeUtils.now();
-    context.eventStats.firstContentAtMs ??= now;
-    context.eventStats.lastContentAtMs = now;
-  }
-
   private async raceWithTimeoutState<T>(
     pending: Promise<IteratorResult<T>>,
-    context: SseToChatJsonContext
+    context: DecodeContext
   ): Promise<IteratorResult<T>> {
     let timer: NodeJS.Timeout | null = null;
     const timeoutState = this.resolveTimeoutState(context);
-    const remainingTimeoutMs = Math.max(1, timeoutState.anchorMs + Math.max(1, timeoutState.timeoutMs) - TimeUtils.now());
+    const remainingTimeoutMs = Math.max(1, timeoutState.anchorMs + Math.max(1, timeoutState.timeoutMs) - nowMs());
     try {
       return await Promise.race([
         pending,
         new Promise<IteratorResult<T>>((_, reject) => {
-          timer = setTimeout(() => {
-            reject(this.createSemanticTimeoutError(timeoutState));
-          }, remainingTimeoutMs);
+          timer = setTimeout(() => reject(this.createSemanticTimeoutError(timeoutState)), remainingTimeoutMs);
           timer.unref?.();
         })
       ]);
@@ -276,14 +255,7 @@ export class ChatSseToJsonConverter {
   private createSemanticTimeoutError(timeoutState: {
     timeoutMs: number;
     code: 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT' | 'UPSTREAM_STREAM_PRE_ANCHOR_IDLE_TIMEOUT' | 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT';
-  }): Error & {
-    code?: string;
-    status?: number;
-    statusCode?: number;
-    retryable?: boolean;
-    upstreamCode?: string;
-    requestExecutorProviderErrorStage?: string;
-  } {
+  }): Error {
     const { code, timeoutMs } = timeoutState;
     const message =
       code === 'UPSTREAM_STREAM_NO_FRAME_TIMEOUT'
@@ -308,803 +280,26 @@ export class ChatSseToJsonConverter {
     return error;
   }
 
-  /**
-   * 将SSE文本块解析为Chat事件
-   */
-  private parseSseChunk(chunk: string): ChatSseEvent | null {
-    const lines = chunk.trim().split('\n');
-    let rawEventType: string | undefined;
-    const dataLines: string[] = [];
-    let hasCommentOnlyLines = false;
-
-    for (const line of lines) {
-      if (line.startsWith('event:')) {
-        rawEventType = line.substring(6).trim();
-      } else if (line.startsWith('data:')) {
-        dataLines.push(line.substring(5).trim());
-      } else if (line.startsWith(':')) {
-        hasCommentOnlyLines = true;
-      }
-    }
-    const dataValue = dataLines.join('\n');
-    const parsedData = (() => {
-      if (!dataValue) {
-        return undefined;
-      }
-      if (dataValue === '[DONE]') {
-        return undefined;
-      }
-      const parsed = JSON.parse(dataValue);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>;
-      }
-      return undefined;
-    })();
-    const normalizeEventType = (
-      candidate: string | undefined
-    ): ChatSseEventType | undefined => {
-      if (!candidate) return undefined;
-      const v = candidate.trim().toLowerCase();
-      if (!v) return undefined;
-      // OpenAI Chat Completions SSE does not include `event:` lines; we infer types elsewhere.
-      // When upstream does include `event:`, accept common aliases for compatibility.
-      if (v === 'chat_chunk') return 'chat_chunk';
-      if (v === 'chat.done' || v === 'chat_done') return 'chat.done';
-      if (v === 'ping' || v === 'heartbeat') return 'ping';
-      if (v === 'error') return 'error';
-      // Legacy aliases
-      if (v === 'chunk') return 'chat_chunk';
-      if (v === 'done') return 'chat.done';
-      return undefined;
-    };
-
-    let eventType = normalizeEventType(rawEventType);
-    if (!eventType) {
-      // OpenAI-compatible streams often omit `event:`; use `[DONE]` sentinel to mark completion.
-      if (dataValue) {
-        eventType = dataValue === '[DONE]' ? 'chat.done' : 'chat_chunk';
-      }
-    }
-
-    if (!eventType && !dataValue && hasCommentOnlyLines) {
-      return null;
-    }
-
-    if (!eventType) {
-      throw ErrorUtils.createError(
-        'SSE event type is required',
-        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-        { chunk }
-      );
-    }
-
-    return {
-      event: eventType,
-      type: eventType,
-      timestamp: TimeUtils.now(),
-      data: dataValue,
-      protocol: 'chat',
-      direction: 'sse_to_json',
-      parsedData
-    };
-  }
-
-  /**
-   * 创建转换上下文
-   */
-  private createContext(options: SseToChatJsonOptions): SseToChatJsonContext {
-    return {
-      requestId: options.requestId,
-      model: options.model,
-      options,
-      startTime: TimeUtils.now(),
-      currentResponse: {
-        id: '',
-        object: 'chat.completion',
-        created: 0,
-        model: options.model,
-        choices: []
-      },
-      choiceIndexMap: new Map(),
-      toolCallIndexMap: new Map(),
-      eventStats: {
-        totalChunks: 0,
-        totalTokens: 0,
-        totalChoices: 0,
-        totalToolCalls: 0,
-        startTime: TimeUtils.now(),
-        tokenRate: 0,
-        chunkRate: 0,
-        errorCount: 0,
-        retryCount: 0
-      },
-      isCompleted: false
-    };
-  }
-
-  /**
-   * 处理SSE事件
-   */
-  private async processSseEvent(
-    event: ChatSseEvent,
-    context: SseToChatJsonContext
-  ): Promise<void> {
-    try {
-      // 验证事件格式
-      if (context.options.validateChunks) {
-        this.validateSseEvent(event);
-      }
-
-      context.eventStats.totalChunks++;
-      const now = TimeUtils.now();
-      context.eventStats.firstFrameAtMs ??= now;
-      context.eventStats.lastFrameAtMs = now;
-      context.options.onEvent?.(event);
-
-      switch (event.event) {
-        case 'chat_chunk':
-          await this.processChatChunk(event, context);
-          break;
-
-        case 'chat.done':
-          await this.processDoneEvent(event, context);
-          break;
-
-        case 'error':
-          await this.processErrorEvent(event, context);
-          break;
-
-        case 'ping':
-          // 心跳事件，忽略处理
-          break;
-
-        default:
-          throw ErrorUtils.createError(
-            `Unknown SSE event type: ${event.event}`,
-            CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-            { event }
-          );
-      }
-
-    } catch (error) {
-      context.eventStats.errorCount++;
-      throw ErrorUtils.wrapError(error, `Failed to process SSE event: ${event.event}`);
-    }
-  }
-
-  /**
-   * 处理chat_chunk事件
-   */
-  private async processChatChunk(
-    event: ChatSseEvent,
-    context: SseToChatJsonContext
-  ): Promise<void> {
-    try {
-      const parsedEntries = event.parsedData !== undefined
-        ? [event.parsedData]
-        : this.parseChatChunkPayload(typeof event.data === 'string' ? event.data : '{}');
-
-      for (const parsed of parsedEntries) {
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw ErrorUtils.createError(
-            'Invalid chat_chunk payload',
-            CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-            { parsed }
-          );
-        }
-        const chunk = parsed as ChatCompletionChunk;
-
-        // 允许 provider 在终止前发送 inert tail/usage-only chunk，但首个语义块仍必须完整。
-        this.validateChatChunk(chunk, context);
-
-        // 初始化响应结构（如果是第一个chunk）
-        if (!context.currentResponse.id && chunk.id) {
-          context.currentResponse.id = chunk.id;
-          context.currentResponse.object = 'chat.completion';
-          context.currentResponse.created = chunk.created;
-          context.currentResponse.model = chunk.model;
-        }
-
-        const normalizedUsage = coerceNormalizedChatUsage(chunk.usage);
-        if (normalizedUsage) {
-          context.currentResponse.usage = normalizedUsage;
-          context.eventStats.totalTokens = normalizedUsage.total_tokens;
-        }
-
-        // 处理choices
-        if (chunk.choices && Array.isArray(chunk.choices)) {
-          for (const choice of chunk.choices) {
-            await this.processChoice(choice, context);
-          }
-        }
-      }
-    } catch (error) {
-      throw ErrorUtils.wrapError(error, 'Failed to parse chat_chunk');
-    }
-  }
-
-  private parseChatChunkPayload(payload: string): unknown[] {
-    return [JSON.parse(payload) as unknown];
-  }
-
-  private ensureChoiceBuilder(
-    context: SseToChatJsonContext,
-    choiceIndex: number
-  ): ChatChoiceBuilder {
-    let choiceBuilder = context.choiceIndexMap.get(choiceIndex);
-    if (!choiceBuilder) {
-      choiceBuilder = this.createChoiceBuilder(choiceIndex);
-      context.choiceIndexMap.set(choiceIndex, choiceBuilder);
-      context.currentResponse.choices?.push({
-        index: choiceIndex,
-        message: {
-          role: 'assistant',
-          content: ''
-        },
-        finish_reason: null
-      });
-    }
-    return choiceBuilder;
-  }
-
-  /**
-   * 处理choice
-   */
-  private async processChoice(
-    choice: ChatCompletionChunk['choices'][number],
-    context: SseToChatJsonContext
-  ): Promise<void> {
-    const choiceIndex = choice.index || 0;
-
-    // 获取或创建choice构建器
-    let choiceBuilder = context.choiceIndexMap.get(choiceIndex);
-    if (!choiceBuilder) {
-      choiceBuilder = this.createChoiceBuilder(choiceIndex);
-      context.choiceIndexMap.set(choiceIndex, choiceBuilder);
-      context.currentResponse.choices?.push({
-        index: choiceIndex,
-        message: {
-          role: 'assistant',
-          content: ''
-        },
-        logprobs: choice.logprobs
-      });
-    }
-
-    // 处理delta
-    if (choice.delta) {
-      await this.processDelta(choice.delta, choiceBuilder, context);
-    }
-
-    // 处理finish_reason
-    if (choice.finish_reason) {
-      choiceBuilder.finishReason = choice.finish_reason;
-      choiceBuilder.isCompleted = true;
-    }
-
-    // 更新响应中的choice
-    this.updateResponseChoice(choiceIndex, choiceBuilder, context);
-  }
-
-  /**
-   * 创建choice构建器
-   */
-  private createChoiceBuilder(index: number): ChatChoiceBuilder {
-    return {
-      index,
-      delta: {},
-      finishReason: undefined,
-      logprobs: undefined,
-      messageBuilder: {
-        role: undefined,
-        content: '',
-        reasoningContent: '',
-        name: undefined,
-        functionCall: undefined,
-        toolCalls: [],
-        toolCallId: undefined,
-        isCompleted: false
-      },
-      isCompleted: false,
-      accumulatedContent: '',
-      toolCallBuilders: new Map()
-    };
-  }
-
-  /**
-   * 将reasoning文本附加到消息内容
-   */
-  private appendReasoningToMessageContent(message: ChatMessage, reasoningText: string): void {
-    const trimmed = typeof reasoningText === 'string' ? reasoningText.trim() : '';
-    if (!trimmed) {
-      return;
-    }
-    const current = typeof message.content === 'string' ? message.content : '';
-    const needsSeparator = current.length > 0;
-    const separator = !needsSeparator ? '' : current.endsWith('\n') ? '\n' : '\n\n';
-    message.content = `${current}${separator}${trimmed}`;
-  }
-
-  /**
-   * 处理delta
-   */
-  private async processDelta(
-    delta: NonNullable<ChatCompletionChunk['choices'][number]['delta']>,
-    choiceBuilder: ChatChoiceBuilder,
-    context: SseToChatJsonContext
-  ): Promise<void> {
-    const messageBuilder = choiceBuilder.messageBuilder;
-
-    // 处理role
-    if (delta.role) {
-      messageBuilder.role = delta.role;
-    }
-
-    // 处理reasoning
-    if (delta.reasoning_content || delta.reasoning) {
-      const chunk = delta.reasoning_content || delta.reasoning || '';
-      if (hasExplicitToolWrapperProgress(chunk)) {
-        this.markSemanticContentSeen(context);
-      }
-      messageBuilder.reasoningContent = (messageBuilder.reasoningContent || '') + chunk;
-      choiceBuilder.accumulatedContent += chunk;
-    }
-
-    // 处理content
-    if (delta.content) {
-      this.markSemanticContentSeen(context);
-      messageBuilder.content += delta.content;
-      choiceBuilder.accumulatedContent += delta.content;
-    }
-
-    // 处理function_call
-    if (delta.function_call) {
-      if (delta.function_call.name) {
-        messageBuilder.functionCall = {
-          ...messageBuilder.functionCall,
-          name: delta.function_call.name
-        };
-      }
-      if (delta.function_call.arguments) {
-        messageBuilder.functionCall = {
-          ...messageBuilder.functionCall,
-          arguments: (messageBuilder.functionCall?.arguments || '') + delta.function_call.arguments
-        };
-      }
-    }
-
-    // 处理tool_calls
-    if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
-      for (const toolCallDelta of delta.tool_calls) {
-        await this.processToolCallDelta(toolCallDelta, choiceBuilder);
-      }
-    }
-
-    // 合并delta到choiceBuilder
-    choiceBuilder.delta = { ...choiceBuilder.delta, ...delta };
-  }
-
-  /**
-   * 处理tool_call delta
-   */
-  private async processToolCallDelta(
-    toolCallDelta: ChatToolCallChunk,
-    choiceBuilder: ChatChoiceBuilder
-  ): Promise<void> {
-    const toolCallIndex = toolCallDelta.index;
-
-    // 获取或创建tool_call构建器
-    let toolCallBuilder = choiceBuilder.toolCallBuilders.get(toolCallIndex);
-    if (!toolCallBuilder) {
-      toolCallBuilder = {
-        index: toolCallIndex,
-        id: '',
-        type: 'function',
-        function: {
-          name: '',
-          arguments: ''
-        },
-        isCompleted: false,
-        accumulatedArguments: ''
-      };
-      choiceBuilder.toolCallBuilders.set(toolCallIndex, toolCallBuilder);
-    }
-
-    // 更新tool_call构建器
-    if (toolCallDelta.id) {
-      toolCallBuilder.id = toolCallDelta.id;
-    }
-
-    if (toolCallDelta.type) {
-      toolCallBuilder.type = toolCallDelta.type;
-    }
-
-    if (toolCallDelta.function) {
-      if (toolCallDelta.function.name) {
-        toolCallBuilder.function!.name = toolCallDelta.function.name;
-      }
-      if (toolCallDelta.function.arguments) {
-        toolCallBuilder.function!.arguments += toolCallDelta.function.arguments;
-        toolCallBuilder.accumulatedArguments += toolCallDelta.function.arguments;
-      }
-    }
-
-    // 标记完成（当arguments不为空且id存在时）
-    if (toolCallBuilder.id && toolCallBuilder.function!.arguments) {
-      toolCallBuilder.isCompleted = true;
-    }
-  }
-
-  /**
-   * 更新响应中的choice
-   */
-  private updateResponseChoice(
-    choiceIndex: number,
-    choiceBuilder: ChatChoiceBuilder,
-    context: SseToChatJsonContext
-  ): void {
-    const responseChoice = context.currentResponse.choices?.[choiceIndex];
-    if (!responseChoice) {
-      return;
-    }
-
-    const messageBuilder = choiceBuilder.messageBuilder;
-    if (typeof messageBuilder.role !== 'string' || !messageBuilder.role.trim()) {
-      throw ErrorUtils.createError(
-        'Chat SSE stream missing message role',
-        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-        { choiceIndex }
-      );
-    }
-
-    // 构建message
-    const message: ChatMessage = {
-      role: messageBuilder.role
-    };
-
-    const normalizedContent = normalizeChatMessageContent(messageBuilder.content);
-    if (normalizedContent.contentText !== undefined) {
-      message.content = normalizedContent.contentText;
-    } else if (messageBuilder.content) {
-      message.content = messageBuilder.content;
-    }
-    const reasoningCandidate =
-      messageBuilder.reasoningContent && messageBuilder.reasoningContent.length
-        ? messageBuilder.reasoningContent
-        : normalizedContent.reasoningText;
-    if (reasoningCandidate) {
-      (message as any).reasoning_content = reasoningCandidate;
-    }
-
-    if (messageBuilder.functionCall) {
-      message.function_call = messageBuilder.functionCall;
-    }
-
-    // 构建tool_calls
-    const toolCalls: ChatToolCall[] = [];
-    for (const toolCallBuilder of choiceBuilder.toolCallBuilders.values()) {
-      if (toolCallBuilder.id && toolCallBuilder.function) {
-        toolCalls.push({
-          id: toolCallBuilder.id,
-          type: toolCallBuilder.type || 'function',
-          function: {
-            name: toolCallBuilder.function.name ?? '',
-            arguments: toolCallBuilder.function.arguments ?? ''
-          }
-        });
-      }
-    }
-
-    if (toolCalls.length > 0) {
-      message.tool_calls = toolCalls;
-    }
-
-    this.normalizeReasoning(choiceBuilder, message, context);
-
-    responseChoice.message = message;
-    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
-      responseChoice.finish_reason = 'tool_calls';
-    } else if (choiceBuilder.finishReason) {
-      responseChoice.finish_reason = choiceBuilder.finishReason;
-    }
-
-    context.eventStats.totalToolCalls += toolCalls.length;
-  }
-
-  /**
-   * 将reasoning内容规范化为独立字段并抽取工具调用
-   */
-  private normalizeReasoning(
-    choiceBuilder: ChatChoiceBuilder,
-    message: ChatMessage,
-    context: SseToChatJsonContext
-  ): void {
-    if (!(message as any).reasoning_content && !(message as any).reasoning) {
-      return;
-    }
-
-    const target = message as unknown as Record<string, unknown>;
-    const normalization = normalizeMessageReasoningTools(target, {
-      idPrefix: `chat_sse_reasoning_${choiceBuilder.index + 1}`
-    });
-
-    const reasoningSource =
-      typeof normalization.cleanedReasoning === 'string'
-        ? normalization.cleanedReasoning
-        : typeof (target as any).reasoning_content === 'string'
-        ? (target as any).reasoning_content
-        : typeof (target as any).reasoning === 'string'
-          ? (target as any).reasoning
-          : undefined;
-
-    const reasoningText = typeof reasoningSource === 'string' ? reasoningSource.trim() : '';
-    if (!reasoningText) {
-      if ('reasoning_content' in target) delete (target as any).reasoning_content;
-      if ('reasoning' in target) delete (target as any).reasoning;
-      return;
-    }
-
-    const dispatchResult = dispatchReasoning(reasoningText, {
-      mode: context.options.reasoningMode,
-      prefix: context.options.reasoningTextPrefix
-    });
-
-    if (dispatchResult.appendToContent) {
-      this.appendReasoningToMessageContent(message, dispatchResult.appendToContent);
-      if ('reasoning_content' in target) delete (target as any).reasoning_content;
-      if ('reasoning' in target) delete (target as any).reasoning;
-      return;
-    }
-
-    if (dispatchResult.channel) {
-      (target as any).reasoning_content = dispatchResult.channel;
-      if ('reasoning' in target) delete (target as any).reasoning;
-      return;
-    }
-
-    if ('reasoning_content' in target) delete (target as any).reasoning_content;
-    if ('reasoning' in target) delete (target as any).reasoning;
-  }
-
-  /**
-   * 处理done事件
-   */
-  private async processDoneEvent(
-    event: ChatSseEvent,
-    context: SseToChatJsonContext
-  ): Promise<void> {
-    context.isCompleted = true;
-
-    const doneData = event.parsedData && typeof event.parsedData === 'object' && !Array.isArray(event.parsedData)
-      ? event.parsedData as { totalTokens?: number }
-      : typeof event.data === 'string'
-        ? event.data === '[DONE]'
-          ? undefined
-          : JSON.parse(event.data) as { totalTokens?: number }
-        : undefined;
-    if (doneData) {
-      if (typeof doneData.totalTokens === 'number') {
-        context.eventStats.totalTokens = doneData.totalTokens;
-      }
-    }
-  }
-
-  /**
-   * 处理error事件
-   */
-  private async processErrorEvent(
-    event: ChatSseEvent,
-    _context: SseToChatJsonContext
-  ): Promise<void> {
-    const rawPayload = typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? {});
-    const parsed = event.parsedData !== undefined
-      ? event.parsedData
-      : JSON.parse(rawPayload);
-    const errorData = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : undefined;
-    if (!errorData && event.parsedData !== undefined) {
-      throw ErrorUtils.createError(
-        'Invalid SSE error payload',
-        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-        { event, rawPayload }
-      );
-    }
-
-    const errorMessage = errorData
-      ? (typeof errorData.error === 'string'
-          ? errorData.error
-          : typeof errorData.message === 'string'
-            ? errorData.message
-            : typeof errorData.content === 'string'
-              ? errorData.content
-              : 'Unknown SSE error')
-      : `SSE error event: ${event.data}`;
-    const code = errorData
-      ? (typeof errorData.code === 'string'
-          ? errorData.code
-          : typeof errorData.finish_reason === 'string'
-            ? errorData.finish_reason
-            : 'SSE_ERROR')
-      : 'SSE_ERROR';
-
-    const normalizedCode = code.trim().toLowerCase();
-    const status =
-      normalizedCode.includes('context_length_exceeded') || normalizedCode.includes('input_exceeds_limit') || normalizedCode.includes('context window')
-        ? 400
-        : normalizedCode.includes('rate_limit')
-          ? 429
-          : 502;
-    const retryable = status === 429;
-    const projectedErrorData = errorData
-      ? {
-          ...errorData,
-          code
-        }
-      : undefined;
-
-    const error = ErrorUtils.createError(
-      errorMessage,
-      code,
-      {
-        errorData: projectedErrorData,
-        event,
-        status,
-        statusCode: status,
-        retryable,
-        upstreamCode: code,
-        requestExecutorProviderErrorStage: 'provider.sse_decode'
-      }
-    );
-    (error as Error & {
-      status?: number;
-      statusCode?: number;
-      retryable?: boolean;
-      upstreamCode?: string;
-      requestExecutorProviderErrorStage?: string;
-    }).status = status;
-    (error as Error & {
-      status?: number;
-      statusCode?: number;
-      retryable?: boolean;
-      upstreamCode?: string;
-      requestExecutorProviderErrorStage?: string;
-    }).statusCode = status;
-    (error as Error & {
-      status?: number;
-      statusCode?: number;
-      retryable?: boolean;
-      upstreamCode?: string;
-      requestExecutorProviderErrorStage?: string;
-    }).retryable = retryable;
-    (error as Error & {
-      status?: number;
-      statusCode?: number;
-      retryable?: boolean;
-      upstreamCode?: string;
-      requestExecutorProviderErrorStage?: string;
-    }).upstreamCode = code;
-    (error as Error & {
-      status?: number;
-      statusCode?: number;
-      retryable?: boolean;
-      upstreamCode?: string;
-      requestExecutorProviderErrorStage?: string;
-    }).requestExecutorProviderErrorStage = 'provider.sse_decode';
-    throw error;
-  }
-
-  /**
-   * 构建部分响应
-   */
-  private buildPartialResponse(context: SseToChatJsonContext): ChatCompletionResponse | null {
-    const choices = context.currentResponse.choices || [];
-    if (choices.length === 0) {
-      return null;
-    }
-    if (typeof context.currentResponse.id !== 'string' || !context.currentResponse.id.trim()) {
-      throw ErrorUtils.createError(
-        'Chat SSE partial response missing id',
-        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-        { requestId: context.requestId }
-      );
-    }
-    if (
-      typeof context.currentResponse.created !== 'number' ||
-      !Number.isFinite(context.currentResponse.created) ||
-      context.currentResponse.created <= 0
-    ) {
-      throw ErrorUtils.createError(
-        'Chat SSE partial response missing created timestamp',
-        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-        { requestId: context.requestId }
-      );
-    }
-    if (typeof context.currentResponse.model !== 'string' || !context.currentResponse.model.trim()) {
-      throw ErrorUtils.createError(
-        'Chat SSE partial response missing model',
-        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-        { requestId: context.requestId }
-      );
-    }
-
-    return {
-      id: context.currentResponse.id,
-      object: 'chat.completion',
-      created: context.currentResponse.created,
-      model: context.currentResponse.model,
-      usage: this.buildUsageInfo(context) || undefined,
-      choices: choices.map(choice => {
-        if (!choice.message) {
-          throw ErrorUtils.createError(
-            'Chat SSE partial response missing message',
-            CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-            { requestId: context.requestId, choiceIndex: choice.index }
-          );
-        }
-        return {
-          ...choice,
-          message: choice.message
-        };
-      })
-    };
-  }
-
-  /**
-   * 完成响应构建
-   */
-  private finalizeResponse(context: SseToChatJsonContext): ChatCompletionResponse {
-    for (const [choiceIndex, choiceBuilder] of context.choiceIndexMap.entries()) {
-      this.updateResponseChoice(choiceIndex, choiceBuilder, context);
-    }
-
-    const choices = context.currentResponse.choices || [];
-
-    // 构建usage信息
-    const usage = this.buildUsageInfo(context);
-
-    context.eventStats.totalChoices = choices.length;
-    context.eventStats.endTime = TimeUtils.now();
-    context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
-    if (context.eventStats.duration > 0) {
-      context.eventStats.chunkRate = context.eventStats.totalChunks / context.eventStats.duration;
-      context.eventStats.tokenRate = context.eventStats.totalTokens / context.eventStats.duration;
-    }
-
-    const response: ChatCompletionResponse = {
-      id: context.currentResponse.id,
-      object: 'chat.completion',
-      created: context.currentResponse.created,
-      model: context.currentResponse.model,
-      choices,
-      usage: usage || undefined
-    };
-
-    // Attach decode stats for TTFT tracking
+  private attachDecodeStats(response: ChatCompletionResponse, context: DecodeContext): void {
     Object.defineProperty(response, '__rccDecodeStats', {
       value: {
         chunkCount: context.eventStats.totalChunks,
         totalEvents: context.eventStats.totalChunks,
-        contentBlocks: context.eventStats.totalChoices,
+        contentBlocks: response.choices?.length ?? 0,
         firstFrameAtMs: context.eventStats.firstFrameAtMs,
         lastFrameAtMs: context.eventStats.lastFrameAtMs,
         firstContentAtMs: context.eventStats.firstContentAtMs,
         lastContentAtMs: context.eventStats.lastContentAtMs,
-        streamMs:
-          context.eventStats.firstContentAtMs !== undefined && context.eventStats.lastContentAtMs !== undefined
-            ? Math.max(0, context.eventStats.lastContentAtMs - context.eventStats.firstContentAtMs)
-            : undefined,
-        totalTokens: context.eventStats.totalTokens,
-        tokenRate: context.eventStats.tokenRate
+        totalTokens: response.usage?.total_tokens ?? 0
       },
       configurable: true,
       enumerable: false,
       writable: false
     });
-    return response;
   }
 
   private wrapSseError(error: unknown, contextMessage: string): Error {
+    const nativeProjected = parseNativeProjectedError(error);
     const wrapped = ErrorUtils.wrapError(error, contextMessage) as Error & {
       code?: string;
       status?: number;
@@ -1113,7 +308,7 @@ export class ChatSseToJsonConverter {
       upstreamCode?: string;
       requestExecutorProviderErrorStage?: string;
     };
-    const source = error as Record<string, unknown> | undefined;
+    const source = nativeProjected ?? (error as Record<string, unknown> | undefined);
     const code = typeof source?.code === 'string' ? source.code : undefined;
     const statusCode =
       typeof source?.statusCode === 'number'
@@ -1128,6 +323,12 @@ export class ChatSseToJsonConverter {
         : code;
     if (code) {
       wrapped.code = code === 'CHAT_STREAM_ERROR' ? 'SSE_DECODE_ERROR' : code;
+    } else if (
+      wrapped.message.includes('Invalid SSE event type:')
+      || wrapped.message.includes('Failed to parse Chat SSE frame JSON:')
+      || wrapped.message.includes('Invalid chat_chunk payload')
+    ) {
+      wrapped.code = 'CHAT_PARSE_ERROR';
     }
     if (typeof statusCode === 'number') {
       wrapped.status = statusCode;
@@ -1143,134 +344,17 @@ export class ChatSseToJsonConverter {
     return wrapped;
   }
 
-  /**
-   * 构建使用量信息
-   */
-  private buildUsageInfo(_context: SseToChatJsonContext): ChatCompletionResponse['usage'] | null {
-    const directUsage = coerceNormalizedChatUsage(_context.currentResponse.usage);
-    return directUsage || null;
-  }
-
-  /**
-   * 验证SSE事件
-   */
-  private validateSseEvent(event: ChatSseEvent): void {
-    if (!event.event) {
-      throw ErrorUtils.createError(
-        'SSE event type is required',
-        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-        { event }
-      );
-    }
-
-    if (!event.data) {
-      throw ErrorUtils.createError(
-        'SSE event data is required',
-        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-        { event }
-      );
-    }
-
-    const validEvents: ChatSseEventType[] = ['chat_chunk', 'chat.done', 'error', 'ping'];
-    if (!validEvents.includes(event.event as ChatSseEventType)) {
-      throw ErrorUtils.createError(
-        `Invalid SSE event type: ${event.event}`,
-        CHAT_CONVERSION_ERROR_CODES.VALIDATION_ERROR,
-        { event }
-      );
-    }
-  }
-
-  /**
-   * 验证Chat chunk
-   */
-  private validateChatChunk(chunk: ChatCompletionChunk, context: SseToChatJsonContext): void {
-    const hasEstablishedResponse =
-      typeof context.currentResponse.id === 'string'
-      && context.currentResponse.id.trim().length > 0
-      && typeof context.currentResponse.created === 'number'
-      && Number.isFinite(context.currentResponse.created)
-      && context.currentResponse.created > 0
-      && typeof context.currentResponse.model === 'string'
-      && context.currentResponse.model.trim().length > 0;
-    const hasNoChoices = Array.isArray(chunk.choices) && chunk.choices.length === 0;
-    const allowInertTailChunk = hasEstablishedResponse && hasNoChoices;
-
-    if (typeof chunk.id !== 'string' || !chunk.id.trim()) {
-      if (allowInertTailChunk) {
-        return;
-      }
-      throw ErrorUtils.createError(
-        'Invalid chat completion chunk id',
-        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-        { chunk }
-      );
-    }
-
-    if (!chunk.object || chunk.object !== 'chat.completion.chunk') {
-      if (allowInertTailChunk) {
-        return;
-      }
-      throw ErrorUtils.createError(
-        'Invalid chat completion chunk object',
-        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-        { chunk }
-      );
-    }
-
-    if (typeof chunk.created !== 'number' || !Number.isFinite(chunk.created) || chunk.created <= 0) {
-      if (allowInertTailChunk) {
-        return;
-      }
-      throw ErrorUtils.createError(
-        'Invalid chat completion chunk created timestamp',
-        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-        { chunk }
-      );
-    }
-
-    if (typeof chunk.model !== 'string' || !chunk.model.trim()) {
-      if (allowInertTailChunk) {
-        return;
-      }
-      throw ErrorUtils.createError(
-        'Invalid chat completion chunk model',
-        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-        { chunk }
-      );
-    }
-
-    if (!Array.isArray(chunk.choices)) {
-      throw ErrorUtils.createError(
-        'Chunk choices must be an array',
-        CHAT_CONVERSION_ERROR_CODES.PARSE_ERROR,
-        { chunk }
-      );
-    }
-  }
-
-  /**
-   * 获取转换统计
-   */
   getStats(requestId: string): ChatEventStats | undefined {
-    const context = this.contexts.get(requestId);
-    return context?.eventStats;
+    return this.stats.get(requestId);
   }
 
-  /**
-   * 清理上下文
-   */
   cleanup(requestId: string): void {
-    this.contexts.delete(requestId);
+    this.stats.delete(requestId);
   }
 
-  /**
-   * 清理所有上下文
-   */
   cleanupAll(): void {
-    this.contexts.clear();
+    this.stats.clear();
   }
 }
 
-// 创建默认转换器实例
 export const defaultChatSseToJsonConverter = new ChatSseToJsonConverter();

@@ -1382,12 +1382,7 @@ pub fn build_client_visible_projection_shell(
                 "index": 0,
                 "message": {
                     "role": "assistant",
-                    "content": "",
-                    "reasoning_text": reasoning_text,
-                    "reasoning_content": reasoning_text,
-                    "reasoning": {
-                        "summary": [{ "type": "summary_text", "text": reasoning_text }]
-                    },
+                    "content": reasoning_text,
                     "tool_calls": tool_calls
                 },
                 "finish_reason": "tool_calls"
@@ -2061,7 +2056,7 @@ mod tests {
     }
 
     #[test]
-    fn client_visible_projection_shell_omits_responses_reasoning_content_array() {
+    fn client_visible_projection_shell_uses_visible_text_not_reasoning() {
         let native_projection = build_client_exec_cli_projection_output(
             "stop_message_auto",
             "stop_message_flow",
@@ -2081,12 +2076,14 @@ mod tests {
             .expect("client visible shell");
 
         let message = &shell["choices"][0]["message"];
-        assert_eq!(message["reasoning_content"], "intercepted stop text");
-        assert_eq!(message["reasoning"]["summary"][0]["type"], "summary_text");
-        assert!(message["reasoning"].get("content").is_none());
+        assert_eq!(message["content"], "intercepted stop text");
+        assert!(message.get("reasoning_text").is_none());
+        assert!(message.get("reasoning_content").is_none());
+        assert!(message.get("reasoning").is_none());
         assert_eq!(message["tool_calls"][0]["function"]["name"], "exec_command");
         assert!(shell.get("__servertool_cli_projection").is_none());
         let serialized = serde_json::to_string(&shell).expect("serialize shell");
+        assert!(!serialized.contains("function_call_output"));
         for denied in [
             "reenterPipeline",
             "providerInvoker",

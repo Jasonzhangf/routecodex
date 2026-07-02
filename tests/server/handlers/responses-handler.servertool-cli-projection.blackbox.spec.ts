@@ -359,10 +359,11 @@ describe('servertool CLI projection blackbox', () => {
     const responsesPayload = buildResponsesPayloadFromChatWithNative(result.chat as any, {
       requestId: 'req_stop_cli_lifecycle'
     }) as Record<string, any>;
-    const reasoning = responsesPayload.output.find((item: any) => item.type === 'reasoning');
-    expect(reasoning?.summary?.[0]?.type).toBe('summary_text');
-    expect(reasoning?.summary?.[0]?.text).toContain('已定位 stopless 投影问题');
-    expect(reasoning?.content).toBeUndefined();
+    const message = responsesPayload.output.find((item: any) => item.type === 'message');
+    expect(message?.content?.[0]?.type).toBe('output_text');
+    expect(message?.content?.[0]?.text).toContain('已定位 stopless 投影问题');
+    expect(responsesPayload.output.some((item: any) => item?.type === 'reasoning')).toBe(false);
+    expect(responsesPayload.output.some((item: any) => item?.type === 'function_call_output')).toBe(false);
     expect(JSON.stringify(responsesPayload)).not.toContain('<rcc_stop_schema>');
     expect(JSON.stringify(responsesPayload)).not.toContain('</rcc_stop_schema>');
   });

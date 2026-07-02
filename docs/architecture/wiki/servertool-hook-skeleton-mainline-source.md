@@ -154,7 +154,9 @@ only. It must never be returned to the client as a client-executable
 - terminal schema: convert to terminal stop, extract safe visible summary, strip
   internal tool artifacts, and return to normal `HubRespOutbound04ClientSemantic`;
 - non-terminal / missing / invalid schema: project a client-visible
-  `exec_command` that runs `routecodex hook run reasoningStop ...`;
+  `exec_command` that runs `routecodex hook run reasoningStop ...`, while any
+  client-visible prose is ordinary assistant text, not reasoning content or
+  `function_call_output`;
 - client tool result submit: request-side hooks must restore the model-visible
   pair as `reasoningStop -> function_call_output`, not preserve raw
   `exec_command` history as model-owned truth.

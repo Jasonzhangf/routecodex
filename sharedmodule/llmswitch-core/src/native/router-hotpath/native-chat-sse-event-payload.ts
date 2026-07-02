@@ -40,6 +40,14 @@ export type ChatSseEventSequenceNativeEvent = Record<string, unknown> & {
   direction: 'json_to_sse';
 };
 
+export type ChatSseDecodeNativeResponse = Record<string, unknown> & {
+  id: string;
+  object: 'chat.completion';
+  created: number;
+  model: string;
+  choices: unknown[];
+};
+
 function parseNativeEventPayload(raw: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(raw);
@@ -140,6 +148,74 @@ export function buildChatSseEventSequenceWithNative(
     const parsed = parseNativeChatEventSequence(raw);
     if (!parsed) {
       return fail('invalid Chat SSE event sequence result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
+function parseNativeChatDecodeResponse(raw: string): ChatSseDecodeNativeResponse | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    const row = parsed as Record<string, unknown>;
+    if (
+      typeof row.id !== 'string'
+      || row.object !== 'chat.completion'
+      || typeof row.created !== 'number'
+      || typeof row.model !== 'string'
+      || !Array.isArray(row.choices)
+    ) {
+      return null;
+    }
+    return row as ChatSseDecodeNativeResponse;
+  } catch {
+    return null;
+  }
+}
+
+export function buildChatJsonFromSseWithNative(input: {
+  bodyText: string;
+  requestId: string;
+  model: string;
+  config?: Record<string, unknown>;
+}): ChatSseDecodeNativeResponse {
+  const capability = 'buildChatJsonFromSseJson';
+  const fail = (reason?: string) => failNative<ChatSseDecodeNativeResponse>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      body_text: input.bodyText,
+      request_id: input.requestId,
+      model: input.model,
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Chat SSE decode result');
+    }
+    const parsed = parseNativeChatDecodeResponse(raw);
+    if (!parsed) {
+      return fail('invalid Chat SSE decode result');
     }
     return parsed;
   } catch (error) {

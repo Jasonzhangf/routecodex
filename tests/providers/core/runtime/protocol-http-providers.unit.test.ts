@@ -322,7 +322,6 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       'openai-responses',
       'ports',
       '5555',
-      'asxs.crsa.gpt-5.4-mini',
       'req_openai_responses_provider_request_snapshot',
       'provider-request.json'
     );
@@ -439,7 +438,6 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       'openai-responses',
       'ports',
       '5555',
-      'asxs.crsa.gpt-5.4-mini',
       'req_openai_responses_provider_request_image_normalization',
       'provider-request.json'
     );

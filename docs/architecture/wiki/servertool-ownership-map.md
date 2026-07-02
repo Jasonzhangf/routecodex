@@ -20,6 +20,7 @@ Feature scope: `hub.servertool_*`
 | `hub.servertool_auto_hook_execution` | servertool auto-hook runtime attempt, trace, and caller finalization planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_preflight_contract` | servertool engine preflight early-return planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_runtime_action_contract` | servertool engine runtime action planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
+| `hub.servertool_engine_prepass_action_contract` | servertool engine prepass action planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_engine_skip_contract` | servertool engine skip planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_execution_branch_contract` | servertool execution branch and CLI projection target planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_execution_dispatch_contract` | servertool execution dispatch error and followup contract planning | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
@@ -246,6 +247,7 @@ Notes:
 - If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex may allow final stop whether or not the model proactively called the stop hook.
 - When stopless auto-projects the stop hook because the model did not proactively call it, the returned CLI result must be rewritten during req_chatprocess into text guidance for the next model turn, not preserved as model-owned tool-call history.
 - When the client executes the shell projection and submits the result, request-side hooks must restore model-visible history as `reasoningStop -> function_call_output`; raw `exec_command` shell history must not become model truth.
+- Client-visible stopless projection text must be ordinary assistant text (`message.content` / Responses `output_text`), never `reasoning_text` / `reasoning_content` / `reasoning.summary`; `function_call_output` is reserved for next-turn model-side tool result restore and must not carry client-visible stopless prose.
 - For `/v1/responses`, req-side stopless contract cannot rely on `messages` only: the request mainline must preserve the contract in `instructions`, and the responses bridge must materialize that contract back into the outbound chat/system message before provider wire build.
 - CLI command input stays concise/status-only: `flowId/repeatCount/maxRepeats/triggerHint` plus optional structured `schemaFeedback{reasonCode,missingFields}`; continuationPrompt/schemaGuidance are CLI-result-side material and must not be embedded in the command string.
 - Client-visible exec_command must use the public stopless alias `reasoningStop`; the client payload must not leak internal marker `__servertool_cli_projection`.
@@ -355,9 +357,12 @@ Canonical types:
 - `ServertoolEngineRuntimeActionInput`
 - `ServertoolEngineRuntimeAction`
 - `ServertoolEngineRuntimeActionPlan`
+- `ServertoolEngineTriggerObservationInput`
+- `ServertoolEngineTriggerObservationPlan`
 
 Canonical builders:
 - `plan_servertool_engine_runtime_action`
+- `plan_servertool_engine_trigger_observation`
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs`
@@ -380,7 +385,47 @@ Required gates:
 - `npm run verify:function-map-compile-gate`
 
 Notes:
-- Rust owns engine runtime action selection.
+- Rust owns engine runtime action selection and trigger observation planning.
+
+## hub.servertool_engine_prepass_action_contract
+
+Summary: servertool engine prepass action planning
+
+Owner kind: `rust_ssot`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs`
+Owner scope: servertool engine prepass action planning
+
+Canonical types:
+- `ServertoolEnginePrepassActionInput`
+- `ServertoolEnginePrepassAction`
+- `ServertoolEnginePrepassActionPlan`
+
+Canonical builders:
+- `plan_servertool_engine_prepass_action`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
+- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
+
+Forbidden paths:
+- `src/providers`
+- `src/server/runtime/http-server/executor`
+
+Required tests:
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
+- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
+
+Required gates:
+- `npm run verify:servertool-rust-only`
+- `npm run verify:function-map-compile-gate`
+
+Notes:
+- Rust owns engine prepass action selection; TS shell may only execute returned prepass/continue action.
 
 ## hub.servertool_engine_skip_contract
 

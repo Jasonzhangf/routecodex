@@ -1,6 +1,8 @@
 use crate::hub_reasoning_tool_normalizer::normalize_message_reasoning_tools_record;
+use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::normalize_chat_usage;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn current_unix_timestamp_ms() -> Result<i64, String> {
@@ -840,6 +842,417 @@ pub fn build_chat_sse_event_sequence_json(input_json: String) -> Result<String, 
         .map_err(|error| format!("Failed to serialize Chat SSE event sequence JSON: {}", error))
 }
 
+#[derive(Default)]
+struct DecodeToolCallBuilder {
+    id: String,
+    tool_type: String,
+    function_name: String,
+    arguments: String,
+}
+
+#[derive(Default)]
+struct DecodeChoiceBuilder {
+    role: Option<String>,
+    content: String,
+    reasoning_content: String,
+    function_name: Option<String>,
+    function_arguments: String,
+    tool_calls: BTreeMap<i64, DecodeToolCallBuilder>,
+    finish_reason: Option<String>,
+    logprobs: Option<Value>,
+}
+
+struct ChatSseFrame {
+    event_type: String,
+    data: String,
+    parsed_data: Option<Value>,
+}
+
+fn parse_chat_sse_frames(body_text: &str) -> Result<Vec<ChatSseFrame>, String> {
+    let normalized = body_text.replace("\r\n", "\n");
+    let mut frames = Vec::new();
+    for segment in normalized.split("\n\n") {
+        let trimmed = segment.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut event_type: Option<String> = None;
+        let mut data_lines: Vec<String> = Vec::new();
+        let mut comment_only = false;
+        for line in trimmed.lines() {
+            if let Some(raw) = line.strip_prefix("event:") {
+                event_type = Some(raw.trim().to_ascii_lowercase());
+            } else if let Some(raw) = line.strip_prefix("data:") {
+                data_lines.push(raw.trim().to_string());
+            } else if line.starts_with(':') {
+                comment_only = true;
+            }
+        }
+        let data = data_lines.join("\n");
+        if data.is_empty() && comment_only && event_type.is_none() {
+            continue;
+        }
+        let normalized_event = match event_type.as_deref() {
+            Some("chat_chunk") | Some("chunk") => "chat_chunk".to_string(),
+            Some("chat.done") | Some("chat_done") | Some("done") => "chat.done".to_string(),
+            Some("ping") | Some("heartbeat") => "ping".to_string(),
+            Some("error") => "error".to_string(),
+            Some(other) if !other.is_empty() => {
+                return Err(format!("Invalid SSE event type: {}", other));
+            }
+            _ if data == "[DONE]" => "chat.done".to_string(),
+            _ if !data.is_empty() => "chat_chunk".to_string(),
+            _ => return Err("SSE event type is required".to_string()),
+        };
+        let parsed_data = if data.is_empty() || data == "[DONE]" {
+            None
+        } else {
+            let parsed: Value = serde_json::from_str(&data)
+                .map_err(|error| format!("Failed to parse Chat SSE frame JSON: {}", error))?;
+            Some(parsed)
+        };
+        frames.push(ChatSseFrame {
+            event_type: normalized_event,
+            data,
+            parsed_data,
+        });
+    }
+    Ok(frames)
+}
+
+fn read_chat_chunk_object<'a>(value: &'a Value) -> Result<&'a Map<String, Value>, String> {
+    value
+        .as_object()
+        .ok_or_else(|| "Invalid chat_chunk payload".to_string())
+}
+
+fn validate_chat_chunk(chunk: &Map<String, Value>, established: bool) -> Result<bool, String> {
+    let has_no_choices = chunk
+        .get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty);
+    let allow_inert_tail = established && has_no_choices;
+    let id_valid = chunk
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    if !id_valid && !allow_inert_tail {
+        return Err("Invalid chat completion chunk id".to_string());
+    }
+    let object_valid = chunk
+        .get("object")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == "chat.completion.chunk");
+    if !object_valid && !allow_inert_tail {
+        return Err("Invalid chat completion chunk object".to_string());
+    }
+    let created_valid = chunk
+        .get("created")
+        .and_then(Value::as_i64)
+        .is_some_and(|value| value > 0);
+    if !created_valid && !allow_inert_tail {
+        return Err("Invalid chat completion chunk created timestamp".to_string());
+    }
+    let model_valid = chunk
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    if !model_valid && !allow_inert_tail {
+        return Err("Invalid chat completion chunk model".to_string());
+    }
+    if !chunk.get("choices").is_some_and(Value::is_array) {
+        return Err("Chunk choices must be an array".to_string());
+    }
+    Ok(allow_inert_tail)
+}
+
+fn read_choice_index(choice: &Map<String, Value>) -> i64 {
+    choice.get("index").and_then(Value::as_i64).unwrap_or(0)
+}
+
+fn merge_chat_delta(
+    builder: &mut DecodeChoiceBuilder,
+    delta: &Map<String, Value>,
+) -> Result<(), String> {
+    if let Some(role) = delta.get("role").and_then(Value::as_str) {
+        if !role.trim().is_empty() {
+            builder.role = Some(role.to_string());
+        }
+    }
+    if let Some(content) = delta.get("content").and_then(Value::as_str) {
+        builder.content.push_str(content);
+    }
+    if let Some(reasoning) = delta
+        .get("reasoning_content")
+        .or_else(|| delta.get("reasoning"))
+        .and_then(Value::as_str)
+    {
+        builder.reasoning_content.push_str(reasoning);
+    }
+    if let Some(function_call) = delta.get("function_call").and_then(Value::as_object) {
+        if let Some(name) = function_call.get("name").and_then(Value::as_str) {
+            builder.function_name = Some(name.to_string());
+        }
+        if let Some(arguments) = function_call.get("arguments").and_then(Value::as_str) {
+            builder.function_arguments.push_str(arguments);
+        }
+    }
+    if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
+        for tool_call in tool_calls {
+            let row = tool_call
+                .as_object()
+                .ok_or_else(|| "Invalid Chat tool call delta: expected object".to_string())?;
+            let index = row
+                .get("index")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "Invalid Chat tool call delta: missing index".to_string())?;
+            let entry = builder.tool_calls.entry(index).or_insert_with(|| DecodeToolCallBuilder {
+                tool_type: "function".to_string(),
+                ..Default::default()
+            });
+            if let Some(id) = row.get("id").and_then(Value::as_str) {
+                entry.id = id.to_string();
+            }
+            if let Some(tool_type) = row.get("type").and_then(Value::as_str) {
+                entry.tool_type = tool_type.to_string();
+            }
+            if let Some(function) = row.get("function").and_then(Value::as_object) {
+                if let Some(name) = function.get("name").and_then(Value::as_str) {
+                    entry.function_name = name.to_string();
+                }
+                if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
+                    entry.arguments.push_str(arguments);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn process_chat_decode_chunk(
+    chunk: &Map<String, Value>,
+    response: &mut Map<String, Value>,
+    choices: &mut BTreeMap<i64, DecodeChoiceBuilder>,
+    usage: &mut Option<Value>,
+) -> Result<(), String> {
+    let established = response
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    let inert_tail = validate_chat_chunk(chunk, established)?;
+    if !established && !inert_tail {
+        response.insert(
+            "id".to_string(),
+            chunk.get("id").cloned().unwrap_or(Value::Null),
+        );
+        response.insert("object".to_string(), Value::String("chat.completion".to_string()));
+        response.insert(
+            "created".to_string(),
+            chunk.get("created").cloned().unwrap_or(Value::Null),
+        );
+        response.insert(
+            "model".to_string(),
+            chunk.get("model").cloned().unwrap_or(Value::Null),
+        );
+    }
+    if let Some(usage_raw) = chunk.get("usage").filter(|value| !value.is_null()) {
+        *usage = Some(normalize_chat_usage(usage_raw)?);
+    }
+    let Some(choice_values) = chunk.get("choices").and_then(Value::as_array) else {
+        return Err("Chunk choices must be an array".to_string());
+    };
+    for choice_value in choice_values {
+        let choice = choice_value
+            .as_object()
+            .ok_or_else(|| "Invalid Chat choice chunk".to_string())?;
+        let choice_index = read_choice_index(choice);
+        let builder = choices.entry(choice_index).or_default();
+        if let Some(logprobs) = choice.get("logprobs").filter(|value| !value.is_null()) {
+            builder.logprobs = Some(logprobs.clone());
+        }
+        if let Some(delta) = choice.get("delta").and_then(Value::as_object) {
+            merge_chat_delta(builder, delta)?;
+        }
+        if let Some(finish_reason) = choice.get("finish_reason").and_then(Value::as_str) {
+            if !finish_reason.trim().is_empty() {
+                builder.finish_reason = Some(finish_reason.to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn project_decode_choice(index: i64, builder: DecodeChoiceBuilder) -> Result<Value, String> {
+    let role = builder
+        .role
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Chat SSE stream missing message role".to_string())?;
+    let mut message = Map::new();
+    message.insert("role".to_string(), Value::String(role));
+    message.insert("content".to_string(), Value::String(builder.content));
+    if !builder.reasoning_content.trim().is_empty() {
+        message.insert(
+            "reasoning_content".to_string(),
+            Value::String(builder.reasoning_content),
+        );
+    }
+    if builder.function_name.is_some() || !builder.function_arguments.is_empty() {
+        let mut function_call = Map::new();
+        if let Some(name) = builder.function_name {
+            function_call.insert("name".to_string(), Value::String(name));
+        }
+        function_call.insert(
+            "arguments".to_string(),
+            Value::String(builder.function_arguments),
+        );
+        message.insert("function_call".to_string(), Value::Object(function_call));
+    }
+    if !builder.tool_calls.is_empty() {
+        let mut tool_calls = Vec::new();
+        for (_tool_index, tool) in builder.tool_calls {
+            if tool.id.trim().is_empty() {
+                continue;
+            }
+            tool_calls.push(serde_json::json!({
+                "id": tool.id,
+                "type": if tool.tool_type.trim().is_empty() { "function" } else { tool.tool_type.as_str() },
+                "function": {
+                    "name": tool.function_name,
+                    "arguments": tool.arguments
+                }
+            }));
+        }
+        if !tool_calls.is_empty() {
+            message.insert("tool_calls".to_string(), Value::Array(tool_calls));
+        }
+    }
+    let mut choice = Map::new();
+    choice.insert("index".to_string(), Value::from(index));
+    choice.insert("message".to_string(), Value::Object(message));
+    if let Some(logprobs) = builder.logprobs {
+        choice.insert("logprobs".to_string(), logprobs);
+    }
+    if let Some(finish_reason) = builder.finish_reason {
+        choice.insert("finish_reason".to_string(), Value::String(finish_reason));
+    }
+    Ok(Value::Object(choice))
+}
+
+fn chat_decode_error_descriptor(
+    message: String,
+    code: String,
+    status: i64,
+    retryable: bool,
+) -> String {
+    serde_json::json!({
+        "message": message,
+        "code": code,
+        "status": status,
+        "statusCode": status,
+        "retryable": retryable,
+        "upstreamCode": code,
+        "requestExecutorProviderErrorStage": "provider.sse_decode"
+    })
+    .to_string()
+}
+
+fn process_chat_error_frame(frame: &ChatSseFrame) -> Result<(), String> {
+    let error_data = frame
+        .parsed_data
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Invalid SSE error payload".to_string())?;
+    let message = error_data
+        .get("error")
+        .or_else(|| error_data.get("message"))
+        .or_else(|| error_data.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or("Unknown SSE error")
+        .to_string();
+    let code = error_data
+        .get("code")
+        .or_else(|| error_data.get("finish_reason"))
+        .and_then(Value::as_str)
+        .unwrap_or("SSE_ERROR")
+        .to_string();
+    let normalized = code.trim().to_ascii_lowercase();
+    let status = if normalized.contains("context_length_exceeded")
+        || normalized.contains("input_exceeds_limit")
+        || normalized.contains("context window")
+    {
+        400
+    } else if normalized.contains("rate_limit") {
+        429
+    } else {
+        502
+    };
+    Err(chat_decode_error_descriptor(
+        message,
+        code,
+        status,
+        status == 429,
+    ))
+}
+
+pub fn build_chat_json_from_sse_json(input_json: String) -> Result<String, String> {
+    let input = read_input_object(input_json, "Chat SSE decode")?;
+    let body_text = input
+        .get("body_text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Chat SSE decode missing body_text".to_string())?;
+    if body_text.trim().is_empty() {
+        return Err("Empty Chat SSE body text".to_string());
+    }
+    let frames = parse_chat_sse_frames(body_text)?;
+    let mut response = Map::new();
+    let mut choices: BTreeMap<i64, DecodeChoiceBuilder> = BTreeMap::new();
+    let mut usage: Option<Value> = None;
+    let mut saw_terminal = false;
+    for frame in frames {
+        match frame.event_type.as_str() {
+            "chat_chunk" => {
+                let parsed = frame
+                    .parsed_data
+                    .as_ref()
+                    .ok_or_else(|| "Invalid chat_chunk payload".to_string())?;
+                let chunk = read_chat_chunk_object(parsed)?;
+                process_chat_decode_chunk(chunk, &mut response, &mut choices, &mut usage)?;
+            }
+            "chat.done" => {
+                if frame.data != "[DONE]" && !frame.data.trim().is_empty() {
+                    let _: Value = serde_json::from_str(&frame.data)
+                        .map_err(|error| format!("Failed to parse chat.done payload: {}", error))?;
+                }
+                saw_terminal = true;
+            }
+            "error" => process_chat_error_frame(&frame)?,
+            "ping" => {}
+            other => return Err(format!("Unknown SSE event type: {}", other)),
+        }
+    }
+    if !saw_terminal {
+        return Err(chat_decode_error_descriptor(
+            "Chat SSE stream ended before terminal [DONE]".to_string(),
+            "SSE_DECODE_INCOMPLETE".to_string(),
+            502,
+            true,
+        ));
+    }
+    if choices.is_empty() {
+        return Err("Chat SSE stream produced no choices".to_string());
+    }
+    let mut projected_choices = Vec::new();
+    for (index, builder) in choices {
+        projected_choices.push(project_decode_choice(index, builder)?);
+    }
+    response.insert("choices".to_string(), Value::Array(projected_choices));
+    if let Some(usage) = usage {
+        response.insert("usage".to_string(), usage);
+    }
+    serde_json::to_string(&Value::Object(response))
+        .map_err(|error| format!("Failed to serialize Chat SSE decode response JSON: {}", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1285,5 +1698,57 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("invalid finish_reason"));
+    }
+
+    #[test]
+    fn decodes_chat_sse_text_usage_tool_and_terminal_truth() {
+        let body_text = [
+            "data: {\"id\":\"chatcmpl_decode_native\",\"object\":\"chat.completion.chunk\",\"created\":1781149600,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello \"},\"finish_reason\":null}]}",
+            "",
+            "data: {\"id\":\"chatcmpl_decode_native\",\"object\":\"chat.completion.chunk\",\"created\":1781149600,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"\"}}]},\"finish_reason\":null}]}",
+            "",
+            "data: {\"id\":\"chatcmpl_decode_native\",\"object\":\"chat.completion.chunk\",\"created\":1781149600,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"pwd\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"input_tokens\":3,\"output_tokens\":4,\"total_tokens\":7}}",
+            "",
+            "data: [DONE]",
+            ""
+        ].join("\n");
+        let output = build_chat_json_from_sse_json(
+            json!({
+                "body_text": body_text,
+                "request_id": "req_decode_native",
+                "model": "gpt-test"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["id"], json!("chatcmpl_decode_native"));
+        assert_eq!(parsed["choices"][0]["message"]["content"], json!("hello "));
+        assert_eq!(parsed["choices"][0]["finish_reason"], json!("tool_calls"));
+        assert_eq!(
+            parsed["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
+            json!("{\"cmd\":\"pwd\"}")
+        );
+        assert_eq!(parsed["usage"]["prompt_tokens"], json!(3));
+        assert_eq!(parsed["usage"]["completion_tokens"], json!(4));
+        assert_eq!(parsed["usage"]["total_tokens"], json!(7));
+    }
+
+    #[test]
+    fn rejects_chat_sse_decode_without_terminal_done() {
+        let body_text = "data: {\"id\":\"chatcmpl_incomplete_native\",\"object\":\"chat.completion.chunk\",\"created\":1781149600,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"partial\"},\"finish_reason\":null}]}\n\n";
+        let err = build_chat_json_from_sse_json(
+            json!({
+                "body_text": body_text,
+                "request_id": "req_decode_native_incomplete",
+                "model": "gpt-test"
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("SSE_DECODE_INCOMPLETE"), "err={err}");
+        assert!(err.contains("provider.sse_decode"), "err={err}");
     }
 }

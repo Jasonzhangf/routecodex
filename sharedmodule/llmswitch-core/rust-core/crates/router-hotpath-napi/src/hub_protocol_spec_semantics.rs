@@ -627,6 +627,7 @@ fn normalize_openai_responses_input_items(payload: &mut Map<String, Value>) {
         let Some(row) = item.as_object_mut() else {
             continue;
         };
+        row.remove("tools");
         let Some(Value::Array(content)) = row.get_mut("content") else {
             continue;
         };
@@ -634,6 +635,22 @@ fn normalize_openai_responses_input_items(payload: &mut Map<String, Value>) {
             normalize_openai_responses_content_part(part);
         }
     }
+}
+
+fn strip_openai_responses_client_tool_search_items(payload: &mut Map<String, Value>) {
+    let Some(Value::Array(input_items)) = payload.get_mut("input") else {
+        return;
+    };
+    input_items.retain(|item| {
+        item.as_object()
+            .and_then(|row| row.get("type"))
+            .and_then(Value::as_str)
+            .map(|entry_type| {
+                let normalized = entry_type.trim().to_ascii_lowercase();
+                normalized != "tool_search_call" && normalized != "tool_search_output"
+            })
+            .unwrap_or(true)
+    });
 }
 
 fn default_allowlists_for_input() -> HubProtocolAllowlists {
@@ -683,6 +700,7 @@ fn apply_provider_outbound_policy(
     normalize_provider_outbound_tools(protocol, &mut payload);
     if protocol == "openai-responses" {
         normalize_openai_responses_input_items(&mut payload);
+        strip_openai_responses_client_tool_search_items(&mut payload);
     }
     if !spec.provider_outbound.enforce_enabled {
         return payload;
@@ -932,6 +950,10 @@ pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult
     let protocol = normalize_provider_protocol(input.protocol.as_deref());
     if input.enforce_layout == Some(false) {
         normalize_provider_outbound_tools(&protocol, &mut payload);
+        if protocol == "openai-responses" {
+            normalize_openai_responses_input_items(&mut payload);
+            strip_openai_responses_client_tool_search_items(&mut payload);
+        }
         assert_no_provider_wire_internal_carrier(&Value::Object(payload.clone()), "$")
             .map_err(napi::Error::from_reason)?;
         assert_no_namespace_tool_aggregate(&Value::Object(payload.clone()), "$")
@@ -1222,6 +1244,167 @@ mod tests {
         assert_eq!(tools[0]["description"], serde_json::json!("spawn"));
         assert_eq!(tools[0]["parameters"], serde_json::json!({"type":"object"}));
         assert!(tools[0].get("function").is_none());
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_strips_nested_input_tools() {
+        let input = serde_json::json!({
+            "protocol": "openai-responses",
+            "payload": {
+                "model": "gpt-5.4-mini",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "continue" }],
+                    "tools": [{
+                        "type": "namespace",
+                        "name": "multi_agent_v1",
+                        "tools": [{
+                            "type": "function",
+                            "name": "spawn_agent",
+                            "description": "spawn",
+                            "parameters": { "type": "object" }
+                        }]
+                    }]
+                }],
+                "tools": [{
+                    "type": "namespace",
+                    "name": "multi_agent_v1",
+                    "tools": [{
+                        "type": "function",
+                        "name": "spawn_agent",
+                        "description": "spawn",
+                        "parameters": { "type": "object" }
+                    }]
+                }]
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let input_items = output["input"].as_array().unwrap();
+        assert!(input_items[0].get("tools").is_none());
+        let tools = output["tools"].as_array().unwrap();
+        assert_eq!(tools[0]["type"], serde_json::json!("function"));
+        assert_eq!(tools[0]["name"], serde_json::json!("spawn_agent"));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_strips_nested_input_tools_in_loose_layout() {
+        let input = serde_json::json!({
+            "protocol": "openai-responses",
+            "enforceLayout": false,
+            "payload": {
+                "model": "gpt-5.5",
+                "input": [{
+                    "type": "tool_search_output",
+                    "id": "search_1",
+                    "status": "completed",
+                    "output": [],
+                    "tools": [{
+                        "type": "namespace",
+                        "name": "mcp__node_repl",
+                        "tools": [{
+                            "type": "function",
+                            "name": "js",
+                            "description": "Run JS",
+                            "parameters": { "type": "object" }
+                        }]
+                    }]
+                }],
+                "tools": [{
+                    "type": "function",
+                    "name": "exec_command",
+                    "description": "Run command",
+                    "parameters": { "type": "object" }
+                }],
+                "stream": true
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let input_items = output["input"].as_array().unwrap();
+        assert!(input_items.is_empty());
+        assert_eq!(output["stream"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_strips_client_tool_search_history_in_loose_layout() {
+        let input = serde_json::json!({
+            "protocol": "openai-responses",
+            "enforceLayout": false,
+            "payload": {
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "continue" }]
+                    },
+                    {
+                        "type": "tool_search_call",
+                        "call_id": "call_search",
+                        "status": "completed",
+                        "execution": "client",
+                        "arguments": { "query": "node_repl js", "limit": 10 }
+                    },
+                    {
+                        "type": "reasoning",
+                        "summary": [],
+                        "content": null,
+                        "encrypted_content": "encrypted"
+                    },
+                    {
+                        "type": "tool_search_output",
+                        "call_id": "call_search",
+                        "status": "completed",
+                        "execution": "client",
+                        "tools": [{
+                            "type": "namespace",
+                            "name": "mcp__node_repl",
+                            "tools": [{
+                                "type": "function",
+                                "name": "js",
+                                "description": "Run JS",
+                                "parameters": { "type": "object" }
+                            }]
+                        }]
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "next" }]
+                    }
+                ],
+                "tools": [{
+                    "type": "function",
+                    "name": "exec_command",
+                    "description": "Run command",
+                    "parameters": { "type": "object" }
+                }],
+                "stream": true
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        let input_items = output["input"].as_array().unwrap();
+        assert_eq!(input_items.len(), 3);
+        assert_eq!(input_items[0]["type"], serde_json::json!("message"));
+        assert_eq!(input_items[1]["type"], serde_json::json!("reasoning"));
+        assert_eq!(input_items[2]["type"], serde_json::json!("message"));
+        assert!(input_items
+            .iter()
+            .all(|item| item["type"] != serde_json::json!("tool_search_call")
+                && item["type"] != serde_json::json!("tool_search_output")));
+        assert_eq!(output["stream"], serde_json::json!(true));
     }
 
     #[test]

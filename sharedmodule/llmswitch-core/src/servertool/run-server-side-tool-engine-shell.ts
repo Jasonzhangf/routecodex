@@ -1,7 +1,6 @@
 import type {
   ServerSideToolEngineOptions,
-  ServerSideToolEngineResult,
-  ServerToolHandlerContext
+  ServerSideToolEngineResult
 } from './types.js';
 import { extractToolCallsFromResponseStage } from './extract-tool-calls-shell.js';
 import { runServertoolEntryPreflight } from './entry-preflight-shell.js';
@@ -34,7 +33,7 @@ export async function orchestrateServertoolEngine(
   const responseStagePrePass = await runServertoolResponseStagePrePass({
     options,
     baseObject: entryContext.baseObject,
-    contextBase: entryContext.contextBase as ServerToolHandlerContext,
+    contextBase: entryContext.contextBase,
     includeAutoHookIds: entryContext.includeAutoHookIds,
     excludeAutoHookIds: entryContext.excludeAutoHookIds
   });
