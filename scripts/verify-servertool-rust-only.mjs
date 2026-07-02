@@ -6185,6 +6185,12 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-finalize-shell-owner',
     TS_RESPONSE_STAGE_FINALIZE_SHELL,
     responseStageFinalizeShell,
+    'type NativeServertoolResponseStageGate'
+  );
+  assertContains(
+    'servertool-response-stage-finalize-shell-owner',
+    TS_RESPONSE_STAGE_FINALIZE_SHELL,
+    responseStageFinalizeShell,
     'runServertoolResponseStageAutoHookPass'
   );
   assertContains(
@@ -6243,6 +6249,7 @@ function checkServertoolResponseStageGateThinShell() {
     'autoHookResult == null',
     'autoHookResult as ServerSideToolEngineResult',
     'native response-stage finalize requested auto-hook result but result was empty',
+    'responseStageGatePlan: Record<string, unknown>',
   ]) {
     if (responseStageFinalizeShell.includes(marker)) {
       fail(
@@ -6258,6 +6265,12 @@ function checkServertoolResponseStageGateThinShell() {
     TS_RESPONSE_STAGE_PREPASS_SHELL,
     responseStagePrePassShell,
     'planServertoolResponseStageGateWithNative'
+  );
+  assertContains(
+    'servertool-response-stage-prepass-shell-owner',
+    TS_RESPONSE_STAGE_PREPASS_SHELL,
+    responseStagePrePassShell,
+    'type NativeServertoolResponseStageGate'
   );
   assertContains(
     'servertool-response-stage-prepass-shell-owner',
@@ -6304,6 +6317,8 @@ function checkServertoolResponseStageGateThinShell() {
     'postAutoHookRuntimeAction',
     'prepassRuntimeAction as { action: string }',
     'responseStageAutoHook as { action: string }',
+    '}) as Record<string, unknown>',
+    'responseStageGatePlan: Record<string, unknown>',
   ]) {
     if (responseStagePrePassShell.includes(marker)) {
       fail(

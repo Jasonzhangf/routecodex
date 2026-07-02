@@ -59,6 +59,93 @@ export interface ResponsesSseEventEnvelopeNative {
   direction: 'json_to_sse';
 }
 
+export type ResponsesSseEventSequenceNativeEvent = Record<string, unknown> & {
+  type: string;
+  timestamp: number;
+  protocol: 'responses';
+  direction: 'json_to_sse';
+  data: Record<string, unknown>;
+  sequenceNumber: number;
+};
+
+function parseNativeResponsesEventSequence(raw: string): ResponsesSseEventSequenceNativeEvent[] | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+    const events: ResponsesSseEventSequenceNativeEvent[] = [];
+    for (const event of parsed) {
+      if (!event || typeof event !== 'object' || Array.isArray(event)) {
+        return null;
+      }
+      const row = event as Record<string, unknown>;
+      if (
+        typeof row.type !== 'string'
+        || typeof row.timestamp !== 'number'
+        || row.protocol !== 'responses'
+        || row.direction !== 'json_to_sse'
+        || !row.data
+        || typeof row.data !== 'object'
+        || Array.isArray(row.data)
+        || typeof row.sequenceNumber !== 'number'
+      ) {
+        return null;
+      }
+      events.push(row as ResponsesSseEventSequenceNativeEvent);
+    }
+    return events;
+  } catch {
+    return null;
+  }
+}
+
+export function buildResponsesSseEventSequenceWithNative(input: {
+  response: unknown;
+  requestId: string;
+  model?: string;
+  config?: Record<string, unknown>;
+}): ResponsesSseEventSequenceNativeEvent[] {
+  const capability = 'buildResponsesSseEventSequenceJson';
+  const fail = (reason?: string) => failNative<ResponsesSseEventSequenceNativeEvent[]>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      response: input.response,
+      request_id: input.requestId,
+      ...(input.model ? { model: input.model } : {}),
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE event sequence result');
+    }
+    const parsed = parseNativeResponsesEventSequence(raw);
+    if (!parsed) {
+      return fail('invalid Responses SSE event sequence result');
+    }
+    return parsed;
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
+
 function parseNativeEventEnvelope(raw: string): ResponsesSseEventEnvelopeNative | null {
   try {
     const parsed = JSON.parse(raw);

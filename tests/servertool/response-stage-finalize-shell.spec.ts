@@ -140,6 +140,8 @@ describe('response-stage-finalize-shell', () => {
     );
 
     expect(source).toContain('responseStageGatePlan: args.responseStageGatePlan');
+    expect(source).toContain('type NativeServertoolResponseStageGate');
+    expect(source).not.toContain('responseStageGatePlan: Record<string, unknown>');
     expect(source).toContain("contextBase: Omit<ServerToolHandlerContext, 'toolCall'>");
     expect(source).not.toContain('initialResponseStageGatePlan');
     expect(source).not.toContain('planServertoolResponseStageGateWithNative');
@@ -170,7 +172,12 @@ describe('response-stage-finalize-shell', () => {
         contextBase: {} as any,
         includeAutoHookIds: null,
         excludeAutoHookIds: null,
-        responseStageGatePlan: { responseHookMatched: false, responseHookRequired: false }
+        responseStageGatePlan: {
+          shouldBypass: false,
+          nextAction: 'continue_to_execution',
+          responseHookMatched: false,
+          responseHookRequired: false
+        }
       })
     ).rejects.toThrow('[servertool] invalid response-stage finalize action');
   });

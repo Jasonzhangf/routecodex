@@ -4,7 +4,10 @@ import type {
 } from './types.js';
 import type { ServerSideToolEngineResult } from './types.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import { planServertoolResponseStageGateWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import {
+  planServertoolResponseStageGateWithNative,
+  type NativeServertoolResponseStageGate
+} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { planServertoolResponseStageRuntimeActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
@@ -16,10 +19,10 @@ export async function runServertoolResponseStagePrePass(args: {
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
 }): Promise<
-  | { action: 'continue_to_execution'; responseStageGatePlan: Record<string, unknown> }
+  | { action: 'continue_to_execution'; responseStageGatePlan: NativeServertoolResponseStageGate }
   | {
       action: 'return_result';
-      responseStageGatePlan: Record<string, unknown>;
+      responseStageGatePlan: NativeServertoolResponseStageGate;
       result: ServerSideToolEngineResult;
     }
 > {
@@ -29,7 +32,7 @@ export async function runServertoolResponseStagePrePass(args: {
     runtimeControl: readRuntimeControlFromAnyBoundMetadataCenter(
       args.options.adapterContext as Record<string, unknown>
     )
-  }) as Record<string, unknown>;
+  });
 
   const prepassRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan,

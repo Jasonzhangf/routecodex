@@ -7,6 +7,7 @@ import {
   planServertoolRequiredResponseHookEmptyErrorWithNative,
   planServertoolResponseStageRuntimeActionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
@@ -20,7 +21,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
-  responseStageGatePlan: Record<string, unknown>;
+  responseStageGatePlan: NativeServertoolResponseStageGate;
 }): Promise<ServertoolResponseStageAutoHookPassResult> {
   const preAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: args.responseStageGatePlan,

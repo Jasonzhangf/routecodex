@@ -1625,6 +1625,721 @@ pub fn build_responses_sse_reasoning_delta_payload_json(
     })
 }
 
+fn read_config_bool(config: &Map<String, Value>, field: &str, default_value: bool) -> bool {
+    config
+        .get(field)
+        .and_then(Value::as_bool)
+        .unwrap_or(default_value)
+}
+
+fn read_config_i64(config: &Map<String, Value>, field: &str, default_value: i64) -> i64 {
+    config
+        .get(field)
+        .and_then(Value::as_i64)
+        .unwrap_or(default_value)
+}
+
+fn next_sequence_envelope(
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+) -> Result<Map<String, Value>, String> {
+    let envelope_raw = build_responses_sse_event_envelope_json(
+        serde_json::json!({
+            "request_id": request_id,
+            "current_sequence": *sequence_counter,
+            "enable_timestamp_generation": read_config_bool(config, "enableTimestampGeneration", true),
+            "enable_sequence_numbers": read_config_bool(config, "includeSequenceNumbers", true)
+        })
+        .to_string(),
+    )?;
+    let envelope: Value = serde_json::from_str(&envelope_raw)
+        .map_err(|error| format!("Failed to parse Responses SSE event envelope output: {}", error))?;
+    let Some(envelope) = envelope.as_object() else {
+        return Err("Responses SSE event envelope output expected object".to_string());
+    };
+    *sequence_counter = envelope
+        .get("nextSequenceCounter")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            "Responses SSE event envelope output missing nextSequenceCounter".to_string()
+        })?;
+    Ok(envelope.clone())
+}
+
+fn push_responses_sse_event(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    event_type: &str,
+    data: Value,
+) -> Result<(), String> {
+    let envelope = next_sequence_envelope(request_id, sequence_counter, config)?;
+    let timestamp = envelope
+        .get("timestamp")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses SSE event envelope output missing timestamp".to_string())?;
+    let sequence_number = envelope
+        .get("sequenceNumber")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Responses SSE event envelope output missing sequenceNumber".to_string())?;
+    let event = canonicalize_responses_sse_event_payload(serde_json::json!({
+        "type": event_type,
+        "timestamp": timestamp,
+        "protocol": "responses",
+        "direction": "json_to_sse",
+        "sequenceNumber": sequence_number,
+        "data": data
+    }))?;
+    events.push(event);
+    Ok(())
+}
+
+fn read_response_output_items(response: &Map<String, Value>) -> Result<&Vec<Value>, String> {
+    response
+        .get("output")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Invalid Responses response: missing output array".to_string())
+}
+
+fn read_required_item_string<'a>(
+    item: &'a Map<String, Value>,
+    field: &str,
+    item_type: &str,
+) -> Result<&'a str, String> {
+    item.get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("Invalid Responses {} item: missing {}", item_type, field))
+}
+
+fn read_required_item_string_allow_empty<'a>(
+    item: &'a Map<String, Value>,
+    field: &str,
+    item_type: &str,
+) -> Result<&'a str, String> {
+    item.get(field)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("Invalid Responses {} item: missing {}", item_type, field))
+}
+
+fn push_response_event(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    event_type: &str,
+    response: Value,
+    status: &str,
+    lifecycle: &str,
+    required_action: Option<Value>,
+) -> Result<(), String> {
+    let data = build_responses_sse_response_event_payload(
+        response,
+        Some(status),
+        lifecycle,
+        required_action,
+    )?;
+    push_responses_sse_event(events, request_id, sequence_counter, config, event_type, data)
+}
+
+fn push_output_item_event(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    event_type: &str,
+    item: Value,
+    output_index: i64,
+    lifecycle: &str,
+) -> Result<(), String> {
+    let data = build_responses_sse_output_item_event_payload(item, output_index, lifecycle)?;
+    push_responses_sse_event(events, request_id, sequence_counter, config, event_type, data)
+}
+
+fn push_content_part_event(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    event_type: &str,
+    content_part: Option<Value>,
+    output_index: i64,
+    item_id: &str,
+    content_index: i64,
+    lifecycle: &str,
+) -> Result<(), String> {
+    let data = build_responses_sse_content_part_event_payload(
+        content_part,
+        output_index,
+        item_id,
+        content_index,
+        lifecycle,
+    )?;
+    push_responses_sse_event(events, request_id, sequence_counter, config, event_type, data)
+}
+
+fn push_text_chunks(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    event_type: &str,
+    output_index: i64,
+    item_id: &str,
+    content_index: i64,
+    text: &str,
+    payload_builder: fn(i64, &str, i64, &str) -> Result<Value, String>,
+) -> Result<(), String> {
+    let chunks = build_responses_sse_text_chunks(text, Some(read_config_i64(config, "chunkSize", 0)))?;
+    for chunk in chunks {
+        let data = payload_builder(output_index, item_id, content_index, &chunk)?;
+        push_responses_sse_event(
+            events,
+            request_id,
+            sequence_counter,
+            config,
+            event_type,
+            data,
+        )?;
+    }
+    Ok(())
+}
+
+fn sequence_responses_message_item(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    item: &Map<String, Value>,
+    output_index: i64,
+) -> Result<(), String> {
+    let item_id = read_required_item_string(item, "id", "message")?;
+    let content = item
+        .get("content")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Invalid Responses message item: missing content".to_string())?;
+    push_output_item_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.output_item.added",
+        Value::Object(item.clone()),
+        output_index,
+        "added",
+    )?;
+
+    for (content_index, content_part) in content.iter().enumerate() {
+        let Some(content_part_object) = content_part.as_object() else {
+            return Err("Invalid Responses message content: expected object".to_string());
+        };
+        let content_type = content_part_object
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Invalid Responses message content: missing type".to_string())?;
+        let content_index = i64::try_from(content_index)
+            .map_err(|_| "Responses content index overflow".to_string())?;
+        push_content_part_event(
+            events,
+            request_id,
+            sequence_counter,
+            config,
+            "response.content_part.added",
+            Some(content_part.clone()),
+            output_index,
+            item_id,
+            content_index,
+            "added",
+        )?;
+        if content_type == "input_text" || content_type == "output_text" {
+            let text = content_part_object
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Responses content part descriptor missing text".to_string())?;
+            push_text_chunks(
+                events,
+                request_id,
+                sequence_counter,
+                config,
+                "response.output_text.delta",
+                output_index,
+                item_id,
+                content_index,
+                text,
+                build_responses_sse_output_text_delta_payload,
+            )?;
+            if content_type == "output_text" {
+                let data = build_responses_sse_output_text_done_payload(
+                    output_index,
+                    item_id,
+                    content_index,
+                    text,
+                )?;
+                push_responses_sse_event(
+                    events,
+                    request_id,
+                    sequence_counter,
+                    config,
+                    "response.output_text.done",
+                    data,
+                )?;
+            }
+        }
+        push_content_part_event(
+            events,
+            request_id,
+            sequence_counter,
+            config,
+            "response.content_part.done",
+            Some(content_part.clone()),
+            output_index,
+            item_id,
+            content_index,
+            "done",
+        )?;
+    }
+
+    push_output_item_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.output_item.done",
+        Value::Object(item.clone()),
+        output_index,
+        "done",
+    )
+}
+
+fn sequence_responses_function_call_item(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    item: &Map<String, Value>,
+    output_index: i64,
+) -> Result<(), String> {
+    let item_id = read_required_item_string(item, "id", "function_call")?;
+    let call_id = read_required_item_string(item, "call_id", "function_call")?;
+    let name = read_required_item_string(item, "name", "function_call")?;
+    let arguments =
+        read_required_item_string_allow_empty(item, "arguments", "function_call")?;
+    push_output_item_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.output_item.added",
+        Value::Object(item.clone()),
+        output_index,
+        "added",
+    )?;
+    let chunks = build_responses_sse_text_chunks(arguments, Some(read_config_i64(config, "chunkSize", 0)))?;
+    for chunk in chunks {
+        let data = build_responses_sse_function_call_arguments_delta_payload(
+            output_index,
+            item_id,
+            call_id,
+            &chunk,
+        )?;
+        push_responses_sse_event(
+            events,
+            request_id,
+            sequence_counter,
+            config,
+            "response.function_call_arguments.delta",
+            data,
+        )?;
+    }
+    let data = build_responses_sse_function_call_arguments_done_payload(
+        output_index,
+        item_id,
+        call_id,
+        name,
+        arguments,
+    )?;
+    push_responses_sse_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.function_call_arguments.done",
+        data,
+    )?;
+    push_output_item_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.output_item.done",
+        Value::Object(item.clone()),
+        output_index,
+        "done",
+    )
+}
+
+fn sequence_responses_function_call_output_item(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    item: &Map<String, Value>,
+    output_index: i64,
+) -> Result<(), String> {
+    push_output_item_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.output_item.added",
+        Value::Object(item.clone()),
+        output_index,
+        "added",
+    )?;
+    push_output_item_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.output_item.done",
+        Value::Object(item.clone()),
+        output_index,
+        "done",
+    )
+}
+
+fn sequence_responses_reasoning_item(
+    events: &mut Vec<Value>,
+    request_id: &str,
+    sequence_counter: &mut i64,
+    config: &Map<String, Value>,
+    item: &Map<String, Value>,
+    output_index: i64,
+) -> Result<(), String> {
+    let item_id = read_required_item_string(item, "id", "reasoning")?;
+    push_output_item_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.output_item.added",
+        Value::Object(item.clone()),
+        output_index,
+        "added",
+    )?;
+
+    let summary = item.get("summary").unwrap_or(&Value::Null);
+    let normalized_summary = normalize_responses_sse_reasoning_summary(summary)?;
+    if let Some(entries) = normalized_summary.as_array() {
+        for (summary_index, entry) in entries.iter().enumerate() {
+            let text = entry
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Responses reasoning summary entry missing text".to_string())?;
+            let summary_index = i64::try_from(summary_index)
+                .map_err(|_| "Responses reasoning summary index overflow".to_string())?;
+            let data = build_responses_sse_reasoning_summary_payload(
+                "part_added",
+                output_index,
+                item_id,
+                summary_index,
+                text,
+            )?;
+            push_responses_sse_event(
+                events,
+                request_id,
+                sequence_counter,
+                config,
+                "response.reasoning_summary_part.added",
+                data,
+            )?;
+            let chunks = build_responses_sse_text_chunks(text, Some(read_config_i64(config, "chunkSize", 0)))?;
+            for chunk in chunks {
+                let data = build_responses_sse_reasoning_summary_payload(
+                    "text_delta",
+                    output_index,
+                    item_id,
+                    summary_index,
+                    &chunk,
+                )?;
+                push_responses_sse_event(
+                    events,
+                    request_id,
+                    sequence_counter,
+                    config,
+                    "response.reasoning_summary_text.delta",
+                    data,
+                )?;
+            }
+            let data = build_responses_sse_reasoning_summary_payload(
+                "text_done",
+                output_index,
+                item_id,
+                summary_index,
+                text,
+            )?;
+            push_responses_sse_event(
+                events,
+                request_id,
+                sequence_counter,
+                config,
+                "response.reasoning_summary_text.done",
+                data,
+            )?;
+            let data = build_responses_sse_reasoning_summary_payload(
+                "part_done",
+                output_index,
+                item_id,
+                summary_index,
+                text,
+            )?;
+            push_responses_sse_event(
+                events,
+                request_id,
+                sequence_counter,
+                config,
+                "response.reasoning_summary_part.done",
+                data,
+            )?;
+        }
+    }
+
+    if let Some(content) = item.get("content") {
+        let Some(content) = content.as_array() else {
+            return Err("Invalid Responses reasoning content: expected array".to_string());
+        };
+        for (content_index, content_entry) in content.iter().enumerate() {
+            let Some(content_entry) = content_entry.as_object() else {
+                return Err("Invalid Responses reasoning content: expected object".to_string());
+            };
+            let content_type = content_entry
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Invalid Responses reasoning content: missing type".to_string())?;
+            let content_index = i64::try_from(content_index)
+                .map_err(|_| "Responses reasoning content index overflow".to_string())?;
+            let (event_type, lifecycle, value) = match content_type {
+                "reasoning_text" => (
+                    "response.reasoning_text.delta",
+                    "text",
+                    content_entry
+                        .get("text")
+                        .cloned()
+                        .ok_or_else(|| "Invalid Responses reasoning_text: missing text".to_string())?,
+                ),
+                "reasoning_signature" => (
+                    "response.reasoning_signature.delta",
+                    "signature",
+                    content_entry
+                        .get("signature")
+                        .cloned()
+                        .ok_or_else(|| {
+                            "Invalid Responses reasoning_signature: missing signature".to_string()
+                        })?,
+                ),
+                "reasoning_image" => (
+                    "response.reasoning_image.delta",
+                    "image",
+                    content_entry
+                        .get("image_url")
+                        .cloned()
+                        .ok_or_else(|| {
+                            "Invalid Responses reasoning_image: missing image_url".to_string()
+                        })?,
+                ),
+                other => {
+                    return Err(format!(
+                        "Unsupported Responses reasoning content type: {}",
+                        other
+                    ))
+                }
+            };
+            let data = build_responses_sse_reasoning_delta_payload(
+                lifecycle,
+                output_index,
+                item_id,
+                content_index,
+                value,
+            )?;
+            push_responses_sse_event(
+                events,
+                request_id,
+                sequence_counter,
+                config,
+                event_type,
+                data,
+            )?;
+        }
+    }
+
+    push_output_item_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        "response.output_item.done",
+        Value::Object(item.clone()),
+        output_index,
+        "done",
+    )
+}
+
+pub fn build_responses_sse_event_sequence_json(input_json: String) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        format!(
+            "Failed to parse Responses SSE event sequence JSON: {}",
+            error
+        )
+    })?;
+    let Some(input) = input.as_object() else {
+        return Err("Responses SSE event sequence expected object".to_string());
+    };
+    let response = input
+        .get("response")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Responses SSE event sequence missing response".to_string())?;
+    let request_id = input
+        .get("request_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Responses SSE event sequence missing request_id".to_string())?;
+    let config = input
+        .get("config")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+
+    let status = response
+        .get("status")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Invalid Responses response: missing status".to_string())?;
+    let output_items = read_response_output_items(response)?;
+    let response_value = Value::Object(response.clone());
+    let mut events = Vec::new();
+    let mut sequence_counter = 0_i64;
+
+    push_response_event(
+        &mut events,
+        request_id,
+        &mut sequence_counter,
+        &config,
+        "response.created",
+        response_value.clone(),
+        "in_progress",
+        "start",
+        None,
+    )?;
+    push_response_event(
+        &mut events,
+        request_id,
+        &mut sequence_counter,
+        &config,
+        "response.in_progress",
+        response_value.clone(),
+        "in_progress",
+        "start",
+        None,
+    )?;
+
+    for (output_index, item) in output_items.iter().enumerate() {
+        let Some(item) = item.as_object() else {
+            return Err("Invalid Responses output item: expected object".to_string());
+        };
+        let output_index =
+            i64::try_from(output_index).map_err(|_| "Responses output index overflow".to_string())?;
+        let item_type = item
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "Invalid Responses output item: missing type".to_string())?;
+        match item_type {
+            "message" => sequence_responses_message_item(
+                &mut events,
+                request_id,
+                &mut sequence_counter,
+                &config,
+                item,
+                output_index,
+            )?,
+            "function_call" => sequence_responses_function_call_item(
+                &mut events,
+                request_id,
+                &mut sequence_counter,
+                &config,
+                item,
+                output_index,
+            )?,
+            "function_call_output" => sequence_responses_function_call_output_item(
+                &mut events,
+                request_id,
+                &mut sequence_counter,
+                &config,
+                item,
+                output_index,
+            )?,
+            "reasoning" => sequence_responses_reasoning_item(
+                &mut events,
+                request_id,
+                &mut sequence_counter,
+                &config,
+                item,
+                output_index,
+            )?,
+            other => return Err(format!("Unknown output item type: {}", other)),
+        }
+    }
+
+    if status == "requires_action" {
+        let required_action = response
+            .get("required_action")
+            .cloned()
+            .ok_or_else(|| "Responses requires_action response missing required_action".to_string())?;
+        push_response_event(
+            &mut events,
+            request_id,
+            &mut sequence_counter,
+            &config,
+            "response.required_action",
+            response_value.clone(),
+            status,
+            "required_action",
+            Some(required_action),
+        )?;
+    }
+    push_response_event(
+        &mut events,
+        request_id,
+        &mut sequence_counter,
+        &config,
+        "response.completed",
+        response_value.clone(),
+        status,
+        "completed",
+        None,
+    )?;
+    push_response_event(
+        &mut events,
+        request_id,
+        &mut sequence_counter,
+        &config,
+        "response.done",
+        response_value,
+        status,
+        "done",
+        None,
+    )?;
+
+    serde_json::to_string(&events).map_err(|error| {
+        format!(
+            "Failed to serialize Responses SSE event sequence JSON: {}",
+            error
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2532,5 +3247,176 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("Responses reasoning delta payload missing value"));
+    }
+
+    fn sequence_event_types(output: &str) -> Vec<String> {
+        let parsed: Value = serde_json::from_str(output).unwrap();
+        parsed
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["type"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn builds_responses_sse_event_sequence_for_text_response() {
+        let output = build_responses_sse_event_sequence_json(
+            json!({
+                "request_id": "req_responses_sequence_text",
+                "config": {
+                    "enableTimestampGeneration": false,
+                    "includeSequenceNumbers": true,
+                    "chunkSize": 0
+                },
+                "response": {
+                    "id": "resp_text",
+                    "object": "response",
+                    "created_at": 1781149537,
+                    "status": "completed",
+                    "model": "gpt-test",
+                    "output": [{
+                        "id": "msg_1",
+                        "type": "message",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "hello" }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            sequence_event_types(&output),
+            vec![
+                "response.created",
+                "response.in_progress",
+                "response.output_item.added",
+                "response.content_part.added",
+                "response.output_text.delta",
+                "response.output_text.done",
+                "response.content_part.done",
+                "response.output_item.done",
+                "response.completed",
+                "response.done"
+            ]
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed[4]["data"]["delta"], json!("hello"));
+        assert_eq!(parsed[4]["data"]["type"], json!("response.output_text.delta"));
+        assert_eq!(parsed[4]["data"]["sequence_number"], json!(4));
+    }
+
+    #[test]
+    fn builds_responses_sse_event_sequence_for_function_call() {
+        let output = build_responses_sse_event_sequence_json(
+            json!({
+                "request_id": "req_responses_sequence_function",
+                "config": {
+                    "enableTimestampGeneration": false,
+                    "includeSequenceNumbers": true,
+                    "chunkSize": 0
+                },
+                "response": {
+                    "id": "resp_function",
+                    "object": "response",
+                    "created_at": 1781149537,
+                    "status": "completed",
+                    "model": "gpt-test",
+                    "output": [{
+                        "id": "fc_1",
+                        "type": "function_call",
+                        "status": "completed",
+                        "call_id": "call_1",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            sequence_event_types(&output),
+            vec![
+                "response.created",
+                "response.in_progress",
+                "response.output_item.added",
+                "response.function_call_arguments.delta",
+                "response.function_call_arguments.done",
+                "response.output_item.done",
+                "response.completed",
+                "response.done"
+            ]
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed[4]["data"]["name"], json!("exec_command"));
+    }
+
+    #[test]
+    fn builds_responses_sse_event_sequence_for_reasoning_summary() {
+        let output = build_responses_sse_event_sequence_json(
+            json!({
+                "request_id": "req_responses_sequence_reasoning",
+                "config": {
+                    "enableTimestampGeneration": false,
+                    "includeSequenceNumbers": true,
+                    "chunkSize": 0
+                },
+                "response": {
+                    "id": "resp_reasoning",
+                    "object": "response",
+                    "created_at": 1781149537,
+                    "status": "completed",
+                    "model": "gpt-test",
+                    "output": [{
+                        "id": "rs_1",
+                        "type": "reasoning",
+                        "summary": [{ "type": "summary_text", "text": "summary" }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            sequence_event_types(&output),
+            vec![
+                "response.created",
+                "response.in_progress",
+                "response.output_item.added",
+                "response.reasoning_summary_part.added",
+                "response.reasoning_summary_text.delta",
+                "response.reasoning_summary_text.done",
+                "response.reasoning_summary_part.done",
+                "response.output_item.done",
+                "response.completed",
+                "response.done"
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_responses_sse_event_sequence_missing_status() {
+        let err = build_responses_sse_event_sequence_json(
+            json!({
+                "request_id": "req_responses_sequence_missing_status",
+                "response": {
+                    "id": "resp_missing_status",
+                    "object": "response",
+                    "created_at": 1781149537,
+                    "model": "gpt-test",
+                    "output": []
+                }
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Invalid Responses response: missing status"));
     }
 }

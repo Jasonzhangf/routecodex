@@ -89,7 +89,7 @@ export async function runHubPipeline(
         },
         input.entryEndpoint
       );
-    } catch {
+    } catch (err) { console.warn('[executor-pipeline] createSnapshotRecorder failed (non-blocking):', err);
       stageRecorder = undefined;
     }
   }
