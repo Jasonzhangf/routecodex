@@ -4,6 +4,14 @@ import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-ce
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
+    buildServertoolMatchSkippedProgressEventWithNative: jest.fn(({ skipReason }) => ({
+      flowId: 'none',
+      tool: 'none',
+      stage: 'match',
+      result: `skipped_${skipReason}`,
+      message: `skipped (${skipReason})`,
+      step: 0
+    })),
     normalizeServertoolProgressFlowIdWithNative: jest.fn(({ value }) =>
       typeof value === 'string' && value.trim() ? value.trim() : 'none'
     ),
@@ -78,6 +86,9 @@ describe('progress-log-block fail-fast behavior', () => {
     expect(source).toContain('normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })');
     expect(source).toContain('export function appendServertoolMatchSkippedProgressEvent(');
     expect(source).toContain('readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext');
+    expect(source).toContain('buildServertoolMatchSkippedProgressEventWithNative({');
+    expect(source).not.toContain("result: 'skipped_' + args.skipReason");
+    expect(source).not.toContain("message: 'skipped (' + args.skipReason + ')'");
   });
 
   test('match skipped progress event reads protocol in progress log owner', async () => {
@@ -108,6 +119,12 @@ describe('progress-log-block fail-fast behavior', () => {
         providerProtocol: 'openai-responses'
       })
     );
+    const { buildServertoolMatchSkippedProgressEventWithNative } = await import(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js'
+    );
+    expect(buildServertoolMatchSkippedProgressEventWithNative).toHaveBeenCalledWith({
+      skipReason: 'passthrough'
+    });
   });
 
   test('console logging failures are not converted to non-blocking warnings', async () => {

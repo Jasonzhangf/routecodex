@@ -2,6 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import {
+  buildServertoolMatchSkippedProgressEventWithNative,
   normalizeServertoolProgressFlowIdWithNative,
   normalizeServertoolProgressResultWithNative,
   normalizeServertoolProgressTokenWithNative,
@@ -234,14 +235,17 @@ export function appendServertoolMatchSkippedProgressEvent(args: {
   if (!providerProtocol) {
     throw new Error('Servertool progress logger requires metadata center runtime_control.providerProtocol');
   }
+  const event = buildServertoolMatchSkippedProgressEventWithNative({
+    skipReason: args.skipReason
+  });
   appendServerToolProgressFileEvent({
     requestId: args.requestId,
-    flowId: 'none',
-    tool: 'none',
-    stage: 'match',
-    result: 'skipped_' + args.skipReason,
-    message: 'skipped (' + args.skipReason + ')',
-    step: 0,
+    flowId: event.flowId,
+    tool: event.tool,
+    stage: event.stage,
+    result: event.result,
+    message: event.message,
+    step: event.step,
     entryEndpoint: args.entryEndpoint,
     providerProtocol
   });

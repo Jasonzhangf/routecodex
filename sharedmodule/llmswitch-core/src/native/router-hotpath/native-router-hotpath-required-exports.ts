@@ -267,6 +267,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "normalizeServertoolProgressResultJson",
   "normalizeServertoolProgressTokenJson",
   "normalizeServertoolProgressFlowIdJson",
+  "buildServertoolMatchSkippedProgressEventJson",
   "planServertoolToolCallDispatchJson",
   "planServertoolOutcomeJson",
   "planServertoolAutoHookQueuesJson",

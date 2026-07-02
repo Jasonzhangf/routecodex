@@ -4118,6 +4118,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'pub fn normalize_servertool_progress_result_json',
     'pub fn normalize_servertool_progress_token_json',
     'pub fn normalize_servertool_progress_flow_id_json',
+    'pub fn build_servertool_match_skipped_progress_event_json',
   ]) {
     assertContains(
       'servertool-flow-presentation-rust-owner',
@@ -4133,6 +4134,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'normalizeServertoolProgressResultJson',
     'normalizeServertoolProgressTokenJson',
     'normalizeServertoolProgressFlowIdJson',
+    'buildServertoolMatchSkippedProgressEventJson',
   ]) {
     assertContains(
       'servertool-flow-presentation-required-export',
@@ -4148,6 +4150,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'normalizeServertoolProgressResultWithNative',
     'normalizeServertoolProgressTokenWithNative',
     'normalizeServertoolProgressFlowIdWithNative',
+    'buildServertoolMatchSkippedProgressEventWithNative',
   ]) {
     assertContains(
       'servertool-flow-presentation-native-bridge',
@@ -4165,6 +4168,8 @@ function checkServertoolFlowPresentationRustOwner() {
   for (const keyword of [
     'extra.flowId.trim()',
     'flowId.trim()',
+    "result: 'skipped_' + args.skipReason",
+    "message: 'skipped (' + args.skipReason + ')'",
   ]) {
     if (progressLogShell.includes(keyword)) {
       fail(

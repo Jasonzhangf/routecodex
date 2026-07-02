@@ -301,6 +301,18 @@ fn normalize_progress_result(message: &str) -> String {
     }
 }
 
+fn build_match_skipped_progress_event(skip_reason: &str) -> Value {
+    let reason = skip_reason.trim();
+    json!({
+        "flowId": "none",
+        "tool": "none",
+        "stage": "match",
+        "result": format!("skipped_{reason}"),
+        "message": format!("skipped ({reason})"),
+        "step": 0
+    })
+}
+
 fn build_builtin_handler_entry_plan(document: &Value, name: &str) -> Value {
     let Some(canonical) = normalize_servertool_name(Some(&Value::String(name.to_string()))) else {
         return json!({ "action": "return_none" });
@@ -1025,6 +1037,22 @@ pub fn normalize_servertool_progress_flow_id_json(input_json: String) -> NapiRes
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi]
+pub fn build_servertool_match_skipped_progress_event_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let skip_reason = read_trimmed_string(input.get("skipReason")).unwrap_or_default();
+    if skip_reason.is_empty() {
+        return Err(napi::Error::from_reason(
+            "skipReason is required for match skipped progress event".to_string(),
+        ));
+    }
+    let output = build_match_skipped_progress_event(&skip_reason);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn resolve_servertool_followup_flow_profile(flow_id: &str) -> Value {
     let normalized_flow_id = flow_id.trim();
     if normalized_flow_id.is_empty() {
@@ -1072,10 +1100,11 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
 #[cfg(test)]
 mod tests {
     use super::{
-        build_servertool_dispatch_plan_input_json, build_servertool_outcome_plan_input_json,
-        get_default_servertool_skeleton_document_json, normalize_servertool_progress_flow_id_json,
-        normalize_servertool_progress_result_json, normalize_servertool_progress_token_json,
-        normalize_servertool_registration_spec_json,
+        build_servertool_dispatch_plan_input_json,
+        build_servertool_match_skipped_progress_event_json,
+        build_servertool_outcome_plan_input_json, get_default_servertool_skeleton_document_json,
+        normalize_servertool_progress_flow_id_json, normalize_servertool_progress_result_json,
+        normalize_servertool_progress_token_json, normalize_servertool_registration_spec_json,
         plan_servertool_builtin_auto_handler_entries_json,
         plan_servertool_builtin_handler_entry_json, plan_servertool_builtin_handler_names_json,
         plan_servertool_builtin_handler_record_entries_json, plan_servertool_followup_runtime_json,
@@ -1555,6 +1584,23 @@ mod tests {
             normalize_servertool_progress_flow_id_json(json!({ "value": "   " }).to_string())
                 .expect("empty progress flow id");
         assert_eq!(empty_flow_id, "\"none\"");
+
+        let skipped = build_servertool_match_skipped_progress_event_json(
+            json!({ "skipReason": " passthrough " }).to_string(),
+        )
+        .expect("match skipped progress event");
+        let skipped_value: Value = serde_json::from_str(&skipped).expect("parse skipped event");
+        assert_eq!(
+            skipped_value,
+            json!({
+                "flowId": "none",
+                "tool": "none",
+                "stage": "match",
+                "result": "skipped_passthrough",
+                "message": "skipped (passthrough)",
+                "step": 0
+            })
+        );
     }
 
     #[test]
