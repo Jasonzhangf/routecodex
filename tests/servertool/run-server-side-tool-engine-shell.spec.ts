@@ -80,6 +80,10 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).toContain('planServertoolEnginePrepassActionWithNative');
     expect(source).toContain('switch (entryPreflight.action)');
     expect(source).toContain('switch (enginePrepassAction.action)');
+    expect(source).toContain('prepassResult');
+    expect(source).toContain('return enginePrepassAction.result;');
+    expect(source).not.toContain('return prepassResult;');
+    expect(source).not.toContain('native engine prepass requested result but prepass result was empty');
     expect(source).not.toContain('switch (responseStagePrePass.action)');
     expect(source).not.toContain('const entryPreflightAction = entryPreflight.action');
     expect(source).not.toContain('const entryContextAction = entryContext.action');
@@ -190,7 +194,8 @@ describe('run-server-side-tool-engine-shell', () => {
       result: { mode: 'passthrough', finalChatResponse: { early: true } }
     });
     planServertoolEnginePrepassActionWithNative.mockReturnValue({
-      action: 'return_prepass_result'
+      action: 'return_prepass_result',
+      result: { mode: 'passthrough', finalChatResponse: { early: true } }
     });
 
     await expect(
@@ -203,7 +208,8 @@ describe('run-server-side-tool-engine-shell', () => {
       } as any)
     ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { early: true } });
     expect(planServertoolEnginePrepassActionWithNative).toHaveBeenCalledWith({
-      hasPrepassResult: true
+      hasPrepassResult: true,
+      prepassResult: { mode: 'passthrough', finalChatResponse: { early: true } }
     });
     expect(runServertoolExecutionStage).not.toHaveBeenCalled();
   });
@@ -242,7 +248,8 @@ describe('run-server-side-tool-engine-shell', () => {
       } as any)
     ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { executed: true } });
     expect(planServertoolEnginePrepassActionWithNative).toHaveBeenCalledWith({
-      hasPrepassResult: false
+      hasPrepassResult: false,
+      prepassResult: null
     });
     expect(runServertoolExecutionStage).toHaveBeenCalled();
   });

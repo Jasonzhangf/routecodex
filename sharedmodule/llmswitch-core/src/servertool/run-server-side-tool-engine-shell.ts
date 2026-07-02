@@ -39,14 +39,12 @@ export async function orchestrateServertoolEngine(
   });
   const prepassResult = 'result' in responseStagePrePass ? responseStagePrePass.result : null;
   const enginePrepassAction = planServertoolEnginePrepassActionWithNative({
-    hasPrepassResult: prepassResult != null
+    hasPrepassResult: prepassResult != null,
+    prepassResult
   });
   switch (enginePrepassAction.action) {
     case 'return_prepass_result':
-      if (prepassResult == null) {
-        throw new Error('[servertool] native engine prepass requested result but prepass result was empty');
-      }
-      return prepassResult;
+      return enginePrepassAction.result;
     case 'continue_to_execution':
       break;
     default:

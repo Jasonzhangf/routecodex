@@ -3403,6 +3403,7 @@ export interface ServertoolEntryContextPlan {
 
 export interface ServertoolEnginePrepassActionPlan {
   action: 'return_prepass_result' | 'continue_to_execution';
+  result?: ServerSideToolEngineResult;
 }
 
 export function planServertoolEntryContextWithNative(input: {
@@ -3446,6 +3447,7 @@ export function planServertoolEntryContextWithNative(input: {
 
 export function planServertoolEnginePrepassActionWithNative(input: {
   hasPrepassResult: boolean;
+  prepassResult?: ServerSideToolEngineResult | null;
 }): ServertoolEnginePrepassActionPlan {
   const capability = 'planServertoolEnginePrepassActionJson';
   const fn = readNativeFunction(capability);
@@ -3466,6 +3468,29 @@ export function planServertoolEnginePrepassActionWithNative(input: {
     record.action !== 'continue_to_execution'
   ) {
     throw new Error('planServertoolEnginePrepassActionJson native returned invalid action');
+  }
+  if (record.action === 'return_prepass_result') {
+    const result = record.result;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      throw new Error('planServertoolEnginePrepassActionJson native returned invalid result');
+    }
+    const resultRecord = result as Record<string, unknown>;
+    if (resultRecord.mode !== 'passthrough' && resultRecord.mode !== 'tool_flow') {
+      throw new Error('planServertoolEnginePrepassActionJson native returned invalid result mode');
+    }
+    if (!resultRecord.finalChatResponse || typeof resultRecord.finalChatResponse !== 'object' || Array.isArray(resultRecord.finalChatResponse)) {
+      throw new Error('planServertoolEnginePrepassActionJson native returned invalid result finalChatResponse');
+    }
+    if (resultRecord.execution !== undefined && (!resultRecord.execution || typeof resultRecord.execution !== 'object' || Array.isArray(resultRecord.execution))) {
+      throw new Error('planServertoolEnginePrepassActionJson native returned invalid result execution');
+    }
+    if (resultRecord.metadataWritePlan !== undefined && (!resultRecord.metadataWritePlan || typeof resultRecord.metadataWritePlan !== 'object' || Array.isArray(resultRecord.metadataWritePlan))) {
+      throw new Error('planServertoolEnginePrepassActionJson native returned invalid result metadataWritePlan');
+    }
+    return {
+      action: record.action,
+      result: resultRecord as unknown as ServerSideToolEngineResult
+    };
   }
   return {
     action: record.action

@@ -2389,7 +2389,11 @@ fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
 fn plans_servertool_engine_prepass_action_via_servertool_core_bridge() {
     let return_result = plan_servertool_engine_prepass_action_json(
         &serde_json::json!({
-            "hasPrepassResult": true
+            "hasPrepassResult": true,
+            "prepassResult": {
+                "mode": "passthrough",
+                "finalChatResponse": { "id": "prepass" }
+            }
         })
         .to_string(),
     )
@@ -2400,10 +2404,18 @@ fn plans_servertool_engine_prepass_action_via_servertool_core_bridge() {
         return_result_value["action"],
         serde_json::json!("return_prepass_result")
     );
+    assert_eq!(
+        return_result_value["result"],
+        serde_json::json!({
+            "mode": "passthrough",
+            "finalChatResponse": { "id": "prepass" }
+        })
+    );
 
     let continue_execution = plan_servertool_engine_prepass_action_json(
         &serde_json::json!({
-            "hasPrepassResult": false
+            "hasPrepassResult": false,
+            "prepassResult": null
         })
         .to_string(),
     )

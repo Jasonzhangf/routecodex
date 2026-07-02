@@ -438,15 +438,18 @@ describe('servertool CLI native bridge', () => {
   it('uses Rust-owned server-side-tool engine prepass action planning', () => {
     expect(
       planServertoolEnginePrepassActionWithNative({
-        hasPrepassResult: true
+        hasPrepassResult: true,
+        prepassResult: { mode: 'passthrough', finalChatResponse: { id: 'prepass' } }
       })
     ).toEqual({
-      action: 'return_prepass_result'
+      action: 'return_prepass_result',
+      result: { mode: 'passthrough', finalChatResponse: { id: 'prepass' } }
     });
 
     expect(
       planServertoolEnginePrepassActionWithNative({
-        hasPrepassResult: false
+        hasPrepassResult: false,
+        prepassResult: null
       })
     ).toEqual({
       action: 'continue_to_execution'

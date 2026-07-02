@@ -3826,6 +3826,7 @@ function checkServertoolEntryPreflightRustOwner() {
     'pub struct ServertoolEnginePrepassActionInput',
     'pub struct ServertoolEnginePrepassActionPlan',
     'pub fn plan_servertool_engine_prepass_action',
+    'pub prepass_result: Option<serde_json::Value>',
   ]) {
     assertContains('servertool-engine-prepass-action-rust-owner', RUST_SERVERTOOL_ENGINE_PREPASS_ACTION_CONTRACT, rustEnginePrepass, needle);
   }
