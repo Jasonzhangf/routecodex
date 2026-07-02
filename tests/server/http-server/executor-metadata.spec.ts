@@ -46,12 +46,24 @@ describe('executor metadata session daemon extraction', () => {
       },
       'seed previous attempt provider protocol'
     );
+    center.writeRuntimeControl(
+      'retryProviderKey',
+      'provider.first',
+      {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'preserves providerProtocol across retry attempts while releasing provider pins',
+        stage: 'test_setup'
+      },
+      'seed stale retry provider pin'
+    );
 
     const retryMetadata = decorateMetadataForAttempt(initialMetadata, 2, new Set(['provider.first']));
 
     expect(MetadataCenter.read(retryMetadata)).toBe(center);
     expect(center.readRuntimeControl().providerProtocol).toBe('openai-responses');
+    expect(center.readRuntimeControl().retryProviderKey).toBeUndefined();
     expect(buildMetadataCenterRustSnapshot(retryMetadata).runtimeControl?.providerProtocol).toBe('openai-responses');
+    expect(buildMetadataCenterRustSnapshot(retryMetadata).runtimeControl?.retryProviderKey).toBeUndefined();
   });
 
   it('extracts sessionDaemonId from apikey bearer suffix', () => {

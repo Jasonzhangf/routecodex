@@ -1,3 +1,11 @@
+# 2026-07-02: priority retry provider pin release
+
+- Symptom: priority/provider-error retry could reselect the same failed provider even after `excludedProviderKeys` was set.
+- Root cause: retry attempt metadata released `preselectedRoute` but kept request-scoped `runtime_control.retryProviderKey`; Rust VR reads `retryProviderKey` as a forced target, so stale pins could override exclusion and force the failed provider back into selection.
+- Fix: `decorateMetadataForAttempt()` now releases `runtime_control.retryProviderKey` together with `preselectedRoute` on retry attempts; `providerProtocol` is preserved.
+- Evidence: focused red/green `executor-metadata.spec.ts -t "preserves providerProtocol across retry attempts while releasing provider pins"` PASS; `retry-execution-plan.spec.ts` PASS 16/16; `tsc -p tsconfig.json --noEmit` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS for changed priority files.
+- Remaining gap: no live 5555 replay has been run in this slice; current evidence is code/test/gate only.
+
 # 2026-07-02: 5520 GPT forwarder routing update
 
 - User request: temporarily remove `ykk` from 5520 GPT routes; make `gpt-5.5` priority `cc -> asxs -> XL -> 1token`; make mini mainly `asxs -> XL`.

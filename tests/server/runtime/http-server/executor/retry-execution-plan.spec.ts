@@ -278,6 +278,46 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
+  it('does not treat a singleton observed priority routePool as the last provider when default pool remains available', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const error = Object.assign(new Error('HTTP 502: upstream failed'), {
+      statusCode: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: upstream failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'primary.key1.gpt-5.5',
+      runtimeKey: 'primary.key1',
+      logicalRequestChainKey: 'req-priority-singleton-observed-pool',
+      logicalChainRetryLimitStageRequestId: 'req-priority-singleton-observed-pool',
+      routePool: ['primary.key1.gpt-5.5'],
+      defaultTierAvailable: true,
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      isStreamingRequest: true
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(plan.defaultPoolAvailable).toBe(true);
+    expect(plan.mayProject).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual(['primary.key1.gpt-5.5']);
+  });
+
   it('allows bounded same-provider retry when non-stream recoverable failure is already the last provider', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
