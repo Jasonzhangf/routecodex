@@ -5,7 +5,7 @@ import type {
 } from './types.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
-import { planServertoolResponseStageRuntimeActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { finalizeServertoolResponseStageWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 
 export async function finalizeServertoolResponseStage(args: {
@@ -23,22 +23,9 @@ export async function finalizeServertoolResponseStage(args: {
     excludeAutoHookIds: args.excludeAutoHookIds,
     responseStageGatePlan: args.responseStageGatePlan
   });
-  const finalizeRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
+  return finalizeServertoolResponseStageWithNative({
     responseStageGatePlan: args.responseStageGatePlan,
     baseObject: args.baseObject,
-    autoHookEvaluated: true,
-    hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result',
-    autoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'
-      ? responseStageAutoHook.result
-      : null
+    responseStageAutoHookResult: responseStageAutoHook
   });
-  switch (finalizeRuntimeAction.action) {
-    case 'return_auto_hook_result':
-      return finalizeRuntimeAction.finalizeResult;
-    case 'return_passthrough_bypass':
-    case 'return_passthrough_no_auto_hook_result':
-      return finalizeRuntimeAction.finalizeResult;
-    default:
-      throw new Error('[servertool] invalid response-stage finalize action');
-  }
 }

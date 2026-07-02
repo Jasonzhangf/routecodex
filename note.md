@@ -1,3 +1,10 @@
+# 2026-07-03: servertool response-stage prepass/finalize switches moved to native helpers
+
+- Slice: `response-stage-prepass-shell.ts` no longer switches over `prepassRuntimeAction.action` or `responseStageAutoHook.action`; it delegates initial and post-auto-hook prepass decisions to `resolveServertoolResponseStagePrepassInitialDecisionWithNative()` / `resolveServertoolResponseStagePrepassAfterAutoHookWithNative()`. `response-stage-finalize-shell.ts` no longer switches over `finalizeRuntimeAction.action`; it delegates final result projection to `finalizeServertoolResponseStageWithNative()`.
+- Gate: `response-stage-prepass-shell.spec.ts`, `response-stage-finalize-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` now require the new native helper path and forbid the old TS response-stage runtime-action switch/projection markers.
+- Evidence: focused Jest `response-stage-prepass-shell + response-stage-finalize-shell + servertool-active-orchestration-audit + servertool-cli-native-bridge` PASS 86/86; sharedmodule tsc PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; scoped `git diff --check` PASS.
+- Remaining gap: this closes one Phase 1 response-stage TS switch slice only. Other servertool native action switches still need classification, and Hub Pipeline/VR/aggregate live closeout remain open.
+
 # 2026-07-03: servertool postflight metadata snapshot cast removed
 
 - Slice: `engine-postflight-shell.ts` no longer casts `runtimeMetadataSnapshot?.metadataCenterSnapshot` to `Record<string, unknown>` before stopless CLI projection. `buildStoplessAutoCliProjectionFromEngineWithNative()` now accepts the snapshot carrier as `unknown`, so the TS shell only forwards the MetadataCenter snapshot to the native/Rust owner.

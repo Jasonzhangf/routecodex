@@ -498,6 +498,33 @@ export type ServertoolResponseStageRuntimeActionPlan =
       finalizeResult: ServertoolResponseStageAutoHookResult;
     };
 
+export type ServertoolResponseStagePrepassShellDecision =
+  | {
+      action: 'run_auto_hooks';
+    }
+  | {
+      action: 'return_prepass_result';
+      result: {
+        action: 'continue_to_execution';
+        responseStageGatePlan: NativeServertoolResponseStageGate;
+      };
+    };
+
+export type ServertoolResponseStagePrepassAfterAutoHookDecision =
+  | {
+      action: 'return_prepass_result';
+      result:
+        | {
+            action: 'continue_to_execution';
+            responseStageGatePlan: NativeServertoolResponseStageGate;
+          }
+        | {
+            action: 'return_result';
+            responseStageGatePlan: NativeServertoolResponseStageGate;
+            result: ServertoolResponseStageAutoHookResult;
+          };
+    };
+
 export interface ServertoolResponseStageOrchestrationOutputPlan {
   returnAction: 'return_executed_payload' | 'return_original_payload';
   recordExecuted: boolean;
@@ -3246,6 +3273,98 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
     };
   }
   throw new Error('planServertoolResponseStageRuntimeActionJson native returned unhandled action');
+}
+
+export function resolveServertoolResponseStagePrepassInitialDecisionWithNative(input: {
+  responseStageGatePlan: NativeServertoolResponseStageGate;
+}): ServertoolResponseStagePrepassShellDecision {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  });
+  switch (action.action) {
+    case 'run_auto_hooks':
+      return { action: 'run_auto_hooks' };
+    case 'return_passthrough_no_auto_hook_result':
+      return {
+        action: 'return_prepass_result',
+        result: action.prepassResult
+      };
+    default:
+      throw new Error('[servertool] invalid response-stage prepass action');
+  }
+}
+
+export function resolveServertoolResponseStagePrepassAfterAutoHookWithNative(input: {
+  responseStageGatePlan: NativeServertoolResponseStageGate;
+  responseStageAutoHookResult:
+    | { action: 'return_auto_hook_result'; result: ServertoolResponseStageAutoHookResult }
+    | { action: 'continue_without_result' | 'return_passthrough_bypass' };
+}): ServertoolResponseStagePrepassAfterAutoHookDecision {
+  switch (input.responseStageAutoHookResult.action) {
+    case 'return_auto_hook_result': {
+      const action = planServertoolResponseStageRuntimeActionWithNative({
+        responseStageGatePlan: input.responseStageGatePlan,
+        autoHookEvaluated: true,
+        hasAutoHookResult: true,
+        autoHookResult: input.responseStageAutoHookResult.result
+      });
+      if (action.action !== 'return_auto_hook_result') {
+        throw new Error('[servertool] invalid response-stage prepass auto-hook post action');
+      }
+      return {
+        action: 'return_prepass_result',
+        result: action.prepassResult
+      };
+    }
+    case 'continue_without_result':
+    case 'return_passthrough_bypass': {
+      const action = planServertoolResponseStageRuntimeActionWithNative({
+        responseStageGatePlan: input.responseStageGatePlan,
+        autoHookEvaluated: true,
+        hasAutoHookResult: false
+      });
+      if (
+        action.action !== 'return_passthrough_bypass' &&
+        action.action !== 'return_passthrough_no_auto_hook_result'
+      ) {
+        throw new Error('[servertool] invalid response-stage prepass post action');
+      }
+      return {
+        action: 'return_prepass_result',
+        result: action.prepassResult
+      };
+    }
+    default:
+      throw new Error('[servertool] invalid response-stage prepass auto-hook action');
+  }
+}
+
+export function finalizeServertoolResponseStageWithNative(input: {
+  responseStageGatePlan: NativeServertoolResponseStageGate;
+  baseObject: JsonObject;
+  responseStageAutoHookResult:
+    | { action: 'return_auto_hook_result'; result: ServertoolResponseStageAutoHookResult }
+    | { action: 'continue_without_result' | 'return_passthrough_bypass' };
+}): ServerSideToolEngineResult {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
+    autoHookEvaluated: true,
+    hasAutoHookResult: input.responseStageAutoHookResult.action === 'return_auto_hook_result',
+    autoHookResult: input.responseStageAutoHookResult.action === 'return_auto_hook_result'
+      ? input.responseStageAutoHookResult.result
+      : null
+  });
+  switch (action.action) {
+    case 'return_auto_hook_result':
+    case 'return_passthrough_bypass':
+    case 'return_passthrough_no_auto_hook_result':
+      return action.finalizeResult;
+    default:
+      throw new Error('[servertool] invalid response-stage finalize action');
+  }
 }
 
 export function planServertoolResponseStageOrchestrationOutputWithNative(input: {

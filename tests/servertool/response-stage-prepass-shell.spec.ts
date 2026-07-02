@@ -2,6 +2,61 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageGateWithNative = jest.fn();
 const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
+const resolveServertoolResponseStagePrepassInitialDecisionWithNative = jest.fn((input: any) => {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  }) as any;
+  if (action.action === 'run_auto_hooks') {
+    return { action: 'run_auto_hooks' };
+  }
+  if (action.action === 'return_passthrough_no_auto_hook_result') {
+    return {
+      action: 'return_prepass_result',
+      result: action.prepassResult
+    };
+  }
+  throw new Error('[servertool] invalid response-stage prepass action');
+});
+const resolveServertoolResponseStagePrepassAfterAutoHookWithNative = jest.fn((input: any) => {
+  if (input.responseStageAutoHookResult.action === 'return_auto_hook_result') {
+    const action = planServertoolResponseStageRuntimeActionWithNative({
+      responseStageGatePlan: input.responseStageGatePlan,
+      autoHookEvaluated: true,
+      hasAutoHookResult: true,
+      autoHookResult: input.responseStageAutoHookResult.result
+    }) as any;
+    if (action.action !== 'return_auto_hook_result') {
+      throw new Error('[servertool] invalid response-stage prepass auto-hook post action');
+    }
+    return {
+      action: 'return_prepass_result',
+      result: action.prepassResult
+    };
+  }
+  if (
+    input.responseStageAutoHookResult.action === 'continue_without_result' ||
+    input.responseStageAutoHookResult.action === 'return_passthrough_bypass'
+  ) {
+    const action = planServertoolResponseStageRuntimeActionWithNative({
+      responseStageGatePlan: input.responseStageGatePlan,
+      autoHookEvaluated: true,
+      hasAutoHookResult: false
+    }) as any;
+    if (
+      action.action !== 'return_passthrough_bypass' &&
+      action.action !== 'return_passthrough_no_auto_hook_result'
+    ) {
+      throw new Error('[servertool] invalid response-stage prepass post action');
+    }
+    return {
+      action: 'return_prepass_result',
+      result: action.prepassResult
+    };
+  }
+  throw new Error('[servertool] invalid response-stage prepass auto-hook action');
+});
 const runServertoolResponseStageAutoHookPass = jest.fn();
 
 jest.unstable_mockModule(
@@ -15,6 +70,8 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
     planServertoolResponseStageRuntimeActionWithNative,
+    resolveServertoolResponseStagePrepassInitialDecisionWithNative,
+    resolveServertoolResponseStagePrepassAfterAutoHookWithNative,
     inspectStopGatewaySignalWithNative: jest.fn(() => ({ reason: 'test' })),
     normalizeStopMessageCompareContextWithNative: jest.fn(() => ({ source: 'test' }))
   })
@@ -230,10 +287,12 @@ describe('response-stage-prepass-shell', () => {
       'utf8'
     );
 
-    expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
     expect(source).not.toContain("prepassRuntimeAction.action !== 'run_auto_hooks'");
-    expect(source).toContain('switch (prepassRuntimeAction.action)');
-    expect(source).toContain('switch (responseStageAutoHook.action)');
+    expect(source).not.toContain('switch (prepassRuntimeAction.action)');
+    expect(source).not.toContain('switch (responseStageAutoHook.action)');
+    expect(source).not.toContain('planServertoolResponseStageRuntimeActionWithNative({');
+    expect(source).toContain('resolveServertoolResponseStagePrepassInitialDecisionWithNative({');
+    expect(source).toContain('resolveServertoolResponseStagePrepassAfterAutoHookWithNative({');
     expect(source).not.toContain('autoHookResult as ServerSideToolEngineResult');
     expect(source).not.toContain('responseStageGatePlan.responseHookMatched !== true');
     expect(source).not.toContain('responseHookMatched !== true');

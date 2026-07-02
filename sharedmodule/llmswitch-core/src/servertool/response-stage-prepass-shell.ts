@@ -8,7 +8,10 @@ import {
   planServertoolResponseStageGateWithNative,
   type NativeServertoolResponseStageGate
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { planServertoolResponseStageRuntimeActionWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  resolveServertoolResponseStagePrepassAfterAutoHookWithNative,
+  resolveServertoolResponseStagePrepassInitialDecisionWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
@@ -34,19 +37,12 @@ export async function runServertoolResponseStagePrePass(args: {
     )
   });
 
-  const prepassRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-    responseStageGatePlan,
-    autoHookEvaluated: false,
-    hasAutoHookResult: false
+  const prepassDecision = resolveServertoolResponseStagePrepassInitialDecisionWithNative({
+    responseStageGatePlan
   });
 
-  switch (prepassRuntimeAction.action) {
-    case 'run_auto_hooks':
-      break;
-    case 'return_passthrough_no_auto_hook_result':
-      return prepassRuntimeAction.prepassResult;
-    default:
-      throw new Error('[servertool] invalid response-stage prepass action');
+  if (prepassDecision.action === 'return_prepass_result') {
+    return prepassDecision.result;
   }
 
   const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
@@ -56,37 +52,8 @@ export async function runServertoolResponseStagePrePass(args: {
     excludeAutoHookIds: args.excludeAutoHookIds,
     responseStageGatePlan
   });
-  switch (responseStageAutoHook.action) {
-    case 'return_auto_hook_result':
-      {
-        const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-          responseStageGatePlan,
-          autoHookEvaluated: true,
-          hasAutoHookResult: true,
-          autoHookResult: responseStageAutoHook.result
-        });
-        if (postAutoHookRuntimeAction.action !== 'return_auto_hook_result') {
-          throw new Error('[servertool] invalid response-stage prepass auto-hook post action');
-        }
-        return postAutoHookRuntimeAction.prepassResult;
-      }
-    case 'continue_without_result':
-    case 'return_passthrough_bypass':
-      {
-        const postAutoHookRuntimeAction = planServertoolResponseStageRuntimeActionWithNative({
-          responseStageGatePlan,
-          autoHookEvaluated: true,
-          hasAutoHookResult: false
-        });
-        if (
-          postAutoHookRuntimeAction.action !== 'return_passthrough_bypass' &&
-          postAutoHookRuntimeAction.action !== 'return_passthrough_no_auto_hook_result'
-        ) {
-          throw new Error('[servertool] invalid response-stage prepass post action');
-        }
-        return postAutoHookRuntimeAction.prepassResult;
-      }
-    default:
-      throw new Error('[servertool] invalid response-stage prepass auto-hook action');
-  }
+  return resolveServertoolResponseStagePrepassAfterAutoHookWithNative({
+    responseStageGatePlan,
+    responseStageAutoHookResult: responseStageAutoHook
+  }).result;
 }

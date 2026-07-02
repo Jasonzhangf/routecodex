@@ -2,6 +2,25 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const runServertoolResponseStageAutoHookPass = jest.fn();
 const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
+const finalizeServertoolResponseStageWithNative = jest.fn((input: any) => {
+  const action = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
+    autoHookEvaluated: true,
+    hasAutoHookResult: input.responseStageAutoHookResult.action === 'return_auto_hook_result',
+    autoHookResult: input.responseStageAutoHookResult.action === 'return_auto_hook_result'
+      ? input.responseStageAutoHookResult.result
+      : null
+  }) as any;
+  if (
+    action.action === 'return_auto_hook_result' ||
+    action.action === 'return_passthrough_bypass' ||
+    action.action === 'return_passthrough_no_auto_hook_result'
+  ) {
+    return action.finalizeResult;
+  }
+  throw new Error('[servertool] invalid response-stage finalize action');
+});
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.js',
@@ -13,7 +32,8 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
-    planServertoolResponseStageRuntimeActionWithNative
+    planServertoolResponseStageRuntimeActionWithNative,
+    finalizeServertoolResponseStageWithNative
   })
 );
 
@@ -175,16 +195,18 @@ describe('response-stage-finalize-shell', () => {
     expect(source).not.toContain('autoHookResult == null');
     expect(source).not.toContain('autoHookResult as ServerSideToolEngineResult');
     expect(source).not.toContain('native response-stage finalize requested auto-hook result but result was empty');
-    expect(source).toContain('switch (finalizeRuntimeAction.action)');
-    expect(source).toContain("hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'");
-    expect(source).toContain('autoHookResult: responseStageAutoHook.action ===');
+    expect(source).not.toContain('switch (finalizeRuntimeAction.action)');
+    expect(source).not.toContain("hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'");
+    expect(source).not.toContain('autoHookResult: responseStageAutoHook.action ===');
     expect(source).toContain('baseObject: args.baseObject');
     expect(source).not.toContain('return responseStageAutoHook.result');
     expect(source).not.toContain('return finalizeRuntimeAction.passthroughResult');
-    expect(source).toContain('return finalizeRuntimeAction.finalizeResult');
+    expect(source).not.toContain('return finalizeRuntimeAction.finalizeResult');
     expect(source).not.toContain('mode: finalizeRuntimeAction.resultMode');
     expect(source).not.toContain("return { mode: 'passthrough', finalChatResponse: args.baseObject };");
-    expect(source).toContain('planServertoolResponseStageRuntimeActionWithNative({');
+    expect(source).not.toContain('planServertoolResponseStageRuntimeActionWithNative({');
+    expect(source).toContain('finalizeServertoolResponseStageWithNative({');
+    expect(source).toContain('responseStageAutoHookResult: responseStageAutoHook');
   });
 
   test('fails fast for unknown finalize native runtime action', async () => {
