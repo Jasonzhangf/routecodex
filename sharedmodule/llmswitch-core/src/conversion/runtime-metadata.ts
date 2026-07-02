@@ -7,7 +7,10 @@ import {
 
 export type RuntimeMetadataCarrier = Record<string, unknown> & { __rt?: JsonObject };
 
-const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+import { METADATA_CENTER_SYMBOL } from './hub/metadata-center-runtime-control-writer.js';
+
+// re-export for consumers that need it
+export { METADATA_CENTER_SYMBOL };
 
 function preserveMetadataCenterBinding(
   source: Record<string, unknown>,

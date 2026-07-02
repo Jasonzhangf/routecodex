@@ -1,3 +1,4 @@
+import { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL } from '../metadata-center-runtime-control-writer.js';
 import {
   advanceTiming,
   clearHubStageTimingState,
@@ -17,8 +18,8 @@ import {
 
 // feature_id: hub.stage_timing_observation
 
-const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
-const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
+
+
 
 type MetadataCenterLike = {
   writeDebugSnapshot?: (

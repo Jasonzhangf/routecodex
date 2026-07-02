@@ -99,7 +99,7 @@ type HubPipelineProviderProtocol =
   | "anthropic-messages"
   | "gemini-chat";
 
-const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+import { METADATA_CENTER_SYMBOL } from '../metadata-center-runtime-control-writer.js';
 
 function preserveMetadataCenterBinding(source: Record<string, unknown>, target: Record<string, unknown>): void {
   const center = Reflect.get(source, METADATA_CENTER_SYMBOL);

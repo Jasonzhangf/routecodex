@@ -5,7 +5,7 @@ import { normalizeSnapshotStagePayloadWithNative } from '../../native/router-hot
 
 // feature_id: snapshot.stage_contract
 
-const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+import { METADATA_CENTER_SYMBOL } from './metadata-center-runtime-control-writer.js';
 
 type MetadataCenterLike = {
   readRequestTruth?: () => Record<string, unknown> | undefined;
