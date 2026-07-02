@@ -52,4 +52,56 @@ describe('resolveRequestExecutorPipelineAttempt excluded provider guard', () => 
 
     expect(Array.from(excludedProviderKeys)).toEqual([providerKey]);
   });
+
+  it('fails fast when VR reselects an excluded provider even with alternatives remaining', () => {
+    const providerKey = 'primary.key1.gpt-5.5';
+    const alternativeProviderKey = 'secondary.key1.gpt-5.5';
+    const excludedProviderKeys = new Set<string>([providerKey]);
+    const lastError = Object.assign(new Error('HTTP 502: upstream failed'), {
+      code: 'HTTP_502',
+      statusCode: 502
+    });
+
+    expect(() => resolveRequestExecutorPipelineAttempt({
+      inputRequestId: 'req-excluded-provider-reselected-with-alternative',
+      providerRequestId: 'provider-req-excluded-provider-reselected-with-alternative',
+      attempt: 2,
+      metadataForAttempt: {},
+      pipelineResult: {
+        providerPayload: { model: 'gpt-5.5', messages: [] },
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: providerKey
+        },
+        routingDecision: {
+          routeName: 'tools/gateway-priority-5555-priority-tools',
+          providerProtocol: 'openai-chat',
+          pool: [providerKey, alternativeProviderKey],
+          routePool: [providerKey, alternativeProviderKey]
+        },
+        processMode: 'chat',
+        metadata: {}
+      },
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-req-excluded-provider-reselected-with-alternative',
+      clientAbortSignal: undefined,
+      initialRoutePool: [providerKey, alternativeProviderKey],
+      excludedProviderKeys,
+      lastError,
+      throwIfClientAbortSignalAborted: () => undefined,
+      logStage: () => undefined,
+      extractRetryErrorSnapshot: () => ({
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: upstream failed'
+      }),
+      hubStartedAtMs: Date.now(),
+      pipelineLabel: 'hub.pipeline'
+    })).toThrow('Virtual router reselected excluded provider primary.key1.gpt-5.5');
+
+    expect(Array.from(excludedProviderKeys)).toEqual([providerKey]);
+  });
 });

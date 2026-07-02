@@ -230,23 +230,21 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       attempt: args.attempt,
       hasAlternativeCandidate
     });
-    if (!hasAlternativeCandidate) {
-      throw Object.assign(
-        new Error(`Virtual router reselected excluded provider ${target.providerKey} without an alternative`),
-        {
-          code: 'ERR_EXCLUDED_PROVIDER_RESELECTED',
-          requestId: args.inputRequestId,
-          providerKey: target.providerKey,
-          excluded: Array.from(args.excludedProviderKeys),
-          attempt: args.attempt
-        }
-      );
-    } else {
-      return {
-        kind: 'retry_next_attempt',
-        initialRoutePool
-      };
-    }
+    throw Object.assign(
+      new Error(
+        hasAlternativeCandidate
+          ? `Virtual router reselected excluded provider ${target.providerKey} while alternatives remain`
+          : `Virtual router reselected excluded provider ${target.providerKey} without an alternative`
+      ),
+      {
+        code: 'ERR_EXCLUDED_PROVIDER_RESELECTED',
+        requestId: args.inputRequestId,
+        providerKey: target.providerKey,
+        excluded: Array.from(args.excludedProviderKeys),
+        attempt: args.attempt,
+        hasAlternativeCandidate
+      }
+    );
   }
 
   const metadataCenter = MetadataCenter.read(mergedMetadata);
