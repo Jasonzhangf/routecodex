@@ -388,6 +388,47 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(plan.excludedCurrentProvider).toBe(true);
   });
 
+  it('excludes current provider when default pool is available even if current route pool only contains current provider', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const error = Object.assign(new Error('HTTP 502: upstream failed'), {
+      statusCode: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: upstream failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'primary.key1.gpt-5.5',
+      runtimeKey: 'primary.key1',
+      logicalRequestChainKey: 'req-default-pool-current-only',
+      logicalChainRetryLimitStageRequestId: 'req-default-pool-current-only',
+      routePool: ['primary.key1.gpt-5.5'],
+      defaultTierAvailable: true,
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn()
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.excludedCurrentProvider).toBe(true);
+    expect(plan.routePoolRemainingAfterExclusion).toEqual([]);
+    expect(plan.defaultPoolAvailable).toBe(true);
+    expect(plan.policyExhausted).toBe(false);
+    expect(plan.mayProject).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual(['primary.key1.gpt-5.5']);
+  });
+
   it('excludes current provider for recoverable HTTP 502 as soon as alternatives exist', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {

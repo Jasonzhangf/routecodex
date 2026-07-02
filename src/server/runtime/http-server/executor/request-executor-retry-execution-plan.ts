@@ -258,6 +258,11 @@ export async function resolveProviderRetryExecutionPlan(args: {
       if (args.providerKey) {
         args.excludedProviderKeys.add(args.providerKey);
       }
+      const defaultPoolGate = resolveProviderRetryExecutionPlanExhaustionGate({
+        routePool: args.routePool,
+        excludedProviderKeys: args.excludedProviderKeys,
+        defaultPoolAvailable: true,
+      });
       const retrySwitchPlan = {
         switchAction: 'exclude_and_reroute',
         decisionLabel: 'exclude_and_reroute',
@@ -269,10 +274,10 @@ export async function resolveProviderRetryExecutionPlan(args: {
         excludedCurrentProvider: Boolean(args.providerKey),
         retrySwitchPlan,
         retryExecutionPolicyReason: nativeExecutionPolicy.reason,
-        routePoolRemainingAfterExclusion: gate.routePoolRemainingAfterExclusion,
-        defaultPoolAvailable: gate.defaultPoolAvailable,
-        policyExhausted: gate.policyExhausted,
-        mayProject: gate.mayProject,
+        routePoolRemainingAfterExclusion: defaultPoolGate.routePoolRemainingAfterExclusion,
+        defaultPoolAvailable: defaultPoolGate.defaultPoolAvailable,
+        policyExhausted: defaultPoolGate.policyExhausted,
+        mayProject: defaultPoolGate.mayProject,
       };
     }
     if (suppressCurrentOnlyExclusion) {

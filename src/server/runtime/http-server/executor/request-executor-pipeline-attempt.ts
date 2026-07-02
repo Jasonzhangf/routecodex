@@ -231,7 +231,6 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       hasAlternativeCandidate
     });
     if (!hasAlternativeCandidate) {
-      args.excludedProviderKeys.delete(target.providerKey);
       if (args.lastError) {
         throw args.lastError;
       }
