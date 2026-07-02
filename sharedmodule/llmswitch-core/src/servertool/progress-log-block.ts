@@ -2,6 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import {
+  buildServertoolAutoHookTraceProgressEventWithNative,
   buildServertoolMatchSkippedProgressEventWithNative,
   normalizeServertoolProgressFlowIdWithNative,
   normalizeServertoolProgressResultWithNative,
@@ -139,15 +140,15 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     reason: string;
     flowId?: string;
   }): void => {
-    const reasonToken = normalizeServertoolProgressTokenWithNative({ value: event.reason });
+    const progressEvent = buildServertoolAutoHookTraceProgressEventWithNative(event);
     appendServerToolProgressFileEvent({
       requestId: args.requestId,
-      flowId: event.flowId || `hook:${event.hookId}`,
-      tool: event.hookId,
-      stage: 'hook',
-      result: `${event.result}_${reasonToken || 'unknown'}`,
-      message: `${event.result} (${event.reason}) queue=${event.queue}[${event.queueIndex}/${event.queueTotal}] phase=${event.phase} priority=${event.priority}`,
-      step: 2,
+      flowId: progressEvent.flowId,
+      tool: progressEvent.tool,
+      stage: progressEvent.stage,
+      result: progressEvent.result,
+      message: progressEvent.message,
+      step: progressEvent.step,
       entryEndpoint: args.entryEndpoint,
       providerProtocol
     });

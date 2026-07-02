@@ -4119,6 +4119,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'pub fn normalize_servertool_progress_token_json',
     'pub fn normalize_servertool_progress_flow_id_json',
     'pub fn build_servertool_match_skipped_progress_event_json',
+    'pub fn build_servertool_auto_hook_trace_progress_event_json',
   ]) {
     assertContains(
       'servertool-flow-presentation-rust-owner',
@@ -4135,6 +4136,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'normalizeServertoolProgressTokenJson',
     'normalizeServertoolProgressFlowIdJson',
     'buildServertoolMatchSkippedProgressEventJson',
+    'buildServertoolAutoHookTraceProgressEventJson',
   ]) {
     assertContains(
       'servertool-flow-presentation-required-export',
@@ -4151,6 +4153,7 @@ function checkServertoolFlowPresentationRustOwner() {
     'normalizeServertoolProgressTokenWithNative',
     'normalizeServertoolProgressFlowIdWithNative',
     'buildServertoolMatchSkippedProgressEventWithNative',
+    'buildServertoolAutoHookTraceProgressEventWithNative',
   ]) {
     assertContains(
       'servertool-flow-presentation-native-bridge',
@@ -4168,6 +4171,9 @@ function checkServertoolFlowPresentationRustOwner() {
   for (const keyword of [
     'extra.flowId.trim()',
     'flowId.trim()',
+    'const reasonToken = normalizeServertoolProgressTokenWithNative({ value: event.reason })',
+    'result: `${event.result}_${reasonToken ||',
+    'message: `${event.result} (${event.reason}) queue=',
     "result: 'skipped_' + args.skipReason",
     "message: 'skipped (' + args.skipReason + ')'",
   ]) {

@@ -4,6 +4,14 @@ import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-ce
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
   () => ({
+    buildServertoolAutoHookTraceProgressEventWithNative: jest.fn((event) => ({
+      flowId: event.flowId || `hook:${event.hookId}`,
+      tool: event.hookId,
+      stage: 'hook',
+      result: `${event.result}_native_token`,
+      message: 'native auto-hook trace message',
+      step: 2
+    })),
     buildServertoolMatchSkippedProgressEventWithNative: jest.fn(({ skipReason }) => ({
       flowId: 'none',
       tool: 'none',
@@ -82,11 +90,14 @@ describe('progress-log-block fail-fast behavior', () => {
     expect(source).toContain('normalizeServertoolProgressFlowIdWithNative({ value: flowId })');
     expect(source).toContain('resolveServertoolProgressStageWithNative({ step, message })');
     expect(source).toContain('normalizeServertoolProgressResultWithNative({ message })');
-    expect(source).toContain('normalizeServertoolProgressTokenWithNative({ value: event.reason })');
     expect(source).toContain('normalizeServertoolProgressTokenWithNative({ value: compareContext.reason })');
     expect(source).toContain('export function appendServertoolMatchSkippedProgressEvent(');
     expect(source).toContain('readProviderProtocolFromAnyBoundMetadataCenter(args.adapterContext');
+    expect(source).toContain('buildServertoolAutoHookTraceProgressEventWithNative(event)');
     expect(source).toContain('buildServertoolMatchSkippedProgressEventWithNative({');
+    expect(source).not.toContain('const reasonToken = normalizeServertoolProgressTokenWithNative({ value: event.reason })');
+    expect(source).not.toContain('result: `${event.result}_${reasonToken ||');
+    expect(source).not.toContain('message: `${event.result} (${event.reason}) queue=');
     expect(source).not.toContain("result: 'skipped_' + args.skipReason");
     expect(source).not.toContain("message: 'skipped (' + args.skipReason + ')'");
   });

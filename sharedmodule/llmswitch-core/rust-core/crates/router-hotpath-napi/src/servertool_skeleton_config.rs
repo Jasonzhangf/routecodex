@@ -313,6 +313,46 @@ fn build_match_skipped_progress_event(skip_reason: &str) -> Value {
     })
 }
 
+fn build_auto_hook_trace_progress_event(input: &Value) -> Value {
+    let hook_id = read_trimmed_string(input.get("hookId")).unwrap_or_default();
+    let phase = read_trimmed_string(input.get("phase")).unwrap_or_default();
+    let queue = read_trimmed_string(input.get("queue")).unwrap_or_default();
+    let result = read_trimmed_string(input.get("result")).unwrap_or_default();
+    let reason = input
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let reason_token = normalize_progress_token(&reason);
+    let reason_token = if reason_token.is_empty() {
+        "unknown".to_string()
+    } else {
+        reason_token
+    };
+    let flow_id =
+        read_trimmed_string(input.get("flowId")).unwrap_or_else(|| format!("hook:{hook_id}"));
+    let queue_index = input
+        .get("queueIndex")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let queue_total = input
+        .get("queueTotal")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let priority = input
+        .get("priority")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    json!({
+        "flowId": flow_id,
+        "tool": hook_id,
+        "stage": "hook",
+        "result": format!("{result}_{reason_token}"),
+        "message": format!("{result} ({reason}) queue={queue}[{queue_index}/{queue_total}] phase={phase} priority={priority}"),
+        "step": 2
+    })
+}
+
 fn build_builtin_handler_entry_plan(document: &Value, name: &str) -> Value {
     let Some(canonical) = normalize_servertool_name(Some(&Value::String(name.to_string()))) else {
         return json!({ "action": "return_none" });
@@ -1053,6 +1093,23 @@ pub fn build_servertool_match_skipped_progress_event_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi]
+pub fn build_servertool_auto_hook_trace_progress_event_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    for key in ["hookId", "phase", "queue", "result", "reason"] {
+        if read_trimmed_string(input.get(key)).is_none() {
+            return Err(napi::Error::from_reason(format!(
+                "{key} is required for auto-hook trace progress event"
+            )));
+        }
+    }
+    let output = build_auto_hook_trace_progress_event(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn resolve_servertool_followup_flow_profile(flow_id: &str) -> Value {
     let normalized_flow_id = flow_id.trim();
     if normalized_flow_id.is_empty() {
@@ -1100,6 +1157,7 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
 #[cfg(test)]
 mod tests {
     use super::{
+        build_servertool_auto_hook_trace_progress_event_json,
         build_servertool_dispatch_plan_input_json,
         build_servertool_match_skipped_progress_event_json,
         build_servertool_outcome_plan_input_json, get_default_servertool_skeleton_document_json,
@@ -1599,6 +1657,35 @@ mod tests {
                 "result": "skipped_passthrough",
                 "message": "skipped (passthrough)",
                 "step": 0
+            })
+        );
+
+        let auto_hook = build_servertool_auto_hook_trace_progress_event_json(
+            json!({
+                "hookId": "hook_reasoning",
+                "phase": "post",
+                "priority": 100,
+                "queue": "A_optional",
+                "queueIndex": 1,
+                "queueTotal": 2,
+                "result": "match",
+                "reason": "Matched Stop",
+                "flowId": "flow_hook"
+            })
+            .to_string(),
+        )
+        .expect("auto hook progress event");
+        let auto_hook_value: Value =
+            serde_json::from_str(&auto_hook).expect("parse auto hook event");
+        assert_eq!(
+            auto_hook_value,
+            json!({
+                "flowId": "flow_hook",
+                "tool": "hook_reasoning",
+                "stage": "hook",
+                "result": "match_matched_stop",
+                "message": "match (Matched Stop) queue=A_optional[1/2] phase=post priority=100",
+                "step": 2
             })
         );
     }
