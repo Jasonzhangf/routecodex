@@ -3,6 +3,14 @@ import { describe, expect, it } from '@jest/globals';
 import { ResponsesJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.js';
 import type { ResponsesResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
+/**
+ * Parse SSE event type from wire-format string: "event: X\ndata: ...\n\n"
+ */
+function parseSseType(sseChunk: string): string | null {
+  const match = sseChunk.match(/^event: (\S+)/m);
+  return match ? match[1] : null;
+}
+
 function buildLongTextResponse(): ResponsesResponse {
   return {
     id: 'resp_backpressure_terminal',
@@ -54,10 +62,15 @@ describe('Responses JSON to SSE backpressure', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const stats = sseStream.getStats();
-    expect(stats.eventTypes['response.completed']).toBe(1);
-    expect(stats.eventTypes['response.done']).toBe(1);
+    // Consume stream to verify terminal events
+    const events: string[] = [];
+    for await (const event of sseStream) {
+      // Thin shell serializes immediately to SSE wire format strings
+      events.push(typeof event === 'string' ? event : String(event));
+    }
 
-    sseStream.resume();
+    // Assert terminal SSE events exist in the wire-format output
+    expect(events.filter((e: string) => parseSseType(e) === 'response.completed').length).toBe(1);
+    expect(events.filter((e: string) => parseSseType(e) === 'response.done').length).toBe(1);
   });
 });
