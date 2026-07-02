@@ -1,3 +1,9 @@
+# 2026-07-02: provider-request replay snapshot capture is explicit-only
+- Provider-request replay artifacts are no longer blanket-rejected by provider/debug snapshot writer, but they remain excluded from default snapshots; full provider wire body may be persisted only through explicit `--snap-stages provider-request` or force-local failure replay capture.
+- `src/providers/core/runtime/http-request-executor.ts` captures the final `PreparedHttpRequest` body, and router-direct captures request replay artifacts before direct provider send plus force-captures request payload on failure snapshots.
+- Verified slice: focused Jest `snapshot-writer.error-spill + local-mirror + queue + release-gating + router-direct-failure-snapshot + http-request-executor.snapshot-entry-port` PASS 17/17; `tsc -p tsconfig.json` PASS; `verify:architecture-snapshot-stage-contract` PASS; `verify:architecture-snapshot-stage-owners` PASS; `build:base` PASS; `git diff --check` PASS.
+- Known unrelated gap: `tests/providers/core/runtime/protocol-http-providers.unit.test.ts` currently fails at suite load due missing mapped `transport/oauth-recovery-handler.js` when added to the focused command; it was excluded from this verified snapshot slice.
+
 # 2026-07-02: servertool auto-hook caller queue-result cast removed
 - `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts` no longer casts `queueResult as ServerToolHandlerResult` after native finalization; `return_result` now uses an explicit `queueResult == null` fail-fast guard and then reads the narrowed result directly.
 - `tests/servertool/servertool-auto-hook-trace.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` forbid the cast marker and require direct `queueResult.*` reads plus null guard.
