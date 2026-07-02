@@ -1,3 +1,9 @@
+# 2026-07-02: servertool response-stage payload cast removed
+
+- Slice: `response-stage-orchestration-shell.ts` now passes `options.payload` directly into `runServerToolOrchestrationShell` without `as JsonObject`.
+- Gate: `tests/servertool/response-stage-orchestration-shell.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` now forbid the cast marker and require the direct thin-shell call.
+- Evidence: focused Jest `response-stage-orchestration-shell + servertool-active-orchestration-audit` PASS 50/50; `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool handler error payload cast removed
 
 - Slice: `native-chat-process-servertool-orchestration-semantics.ts` now types `buildServertoolHandlerErrorToolOutputPayloadWithNative()` as `JsonObject`; `execution-queue-shell.ts` consumes the payload directly without `as JsonObject`.

@@ -5664,6 +5664,7 @@ function checkServertoolRustOutcomeCloseout() {
     "if (gateRuntimeAction.action === 'return_passthrough_bypass')",
     'String(gateRuntimeAction.action)',
     'String(outputPlan.returnAction)',
+    'chat: options.payload as JsonObject',
   ]) {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
@@ -5683,6 +5684,7 @@ function checkServertoolRustOutcomeCloseout() {
     'detectProviderResponseShapeWithNative',
     'const orchestration = await runServerToolOrchestrationShell(',
     'runServerToolOrchestrationShell',
+    'chat: options.payload',
     'payload: options.payload',
     'executed: false',
   ]) {

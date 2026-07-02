@@ -74,7 +74,7 @@ export async function runServertoolResponseStageOrchestrationShell(
   const orchestrationStart = Date.now();
   const orchestration = await runServerToolOrchestrationShell(
     {
-      chat: options.payload as JsonObject,
+      chat: options.payload,
       adapterContext: options.adapterContext,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint,

@@ -573,6 +573,7 @@ const TARGETS = [
       'String(gateRuntimeAction.action)',
       'String(outputPlan.returnAction)',
       'if (orchestration.executed)',
+      'chat: options.payload as JsonObject',
     ],
     required: [
       'const gatePlan = planServertoolResponseStageGateWithNative({',
@@ -749,6 +750,7 @@ const TARGETS = [
     ],
     required: [
       "return {",
+      'chat: options.payload',
       'payload: options.payload',
       'executed: false',
     ],

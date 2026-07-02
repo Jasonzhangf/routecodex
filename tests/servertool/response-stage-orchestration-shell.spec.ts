@@ -100,6 +100,8 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain("gatePlan.nextAction === 'bypass'");
     expect(source).not.toContain("if (gateRuntimeAction.action === 'return_passthrough_bypass')");
     expect(source).not.toContain('if (orchestration.executed)');
+    expect(source).not.toContain('chat: options.payload as JsonObject');
+    expect(source).toContain('chat: options.payload');
     expect(source).toContain('switch (gateRuntimeAction.action)');
     expect(source).toContain("case 'return_passthrough_bypass'");
     expect(source).toContain("case 'run_auto_hooks'");
