@@ -2292,23 +2292,6 @@ pub fn build_responses_sse_event_sequence_json(input_json: String) -> Result<Str
         }
     }
 
-    if status == "requires_action" {
-        let required_action = response
-            .get("required_action")
-            .cloned()
-            .ok_or_else(|| "Responses requires_action response missing required_action".to_string())?;
-        push_response_event(
-            &mut events,
-            request_id,
-            &mut sequence_counter,
-            &config,
-            "response.required_action",
-            response_value.clone(),
-            status,
-            "required_action",
-            Some(required_action),
-        )?;
-    }
     push_response_event(
         &mut events,
         request_id,

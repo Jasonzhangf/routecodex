@@ -14,6 +14,7 @@ describe('HTTP Responses client tool contract', () => {
         ? {
             id: 'resp_tool_resolved',
             object: 'response',
+            created_at: 1781149537,
             status: 'completed',
             model: 'gpt-5.5',
             tool_outputs: [
@@ -33,6 +34,7 @@ describe('HTTP Responses client tool contract', () => {
         : {
             id: 'resp_tool_pending',
             object: 'response',
+            created_at: 1781149537,
             status: 'completed',
             model: 'gpt-5.5',
             output: [
