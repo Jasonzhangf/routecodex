@@ -1,3 +1,9 @@
+# 2026-07-02: servertool response-stage prepass adapterContext casts removed
+
+- Slice: `response-stage-prepass-shell.ts` now passes `args.options.adapterContext` directly to `planServertoolResponseStageGateWithNative` and `readRuntimeControlFromAnyBoundMetadataCenter`; native wrapper / carrier own unknown-object narrowing.
+- Gate: `response-stage-prepass-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `args.options.adapterContext as Record<string, unknown>` marker.
+- Evidence: focused Jest `response-stage-prepass-shell + servertool-active-orchestration-audit` PASS 49/49; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool engine preflight adapterContext cast removed
 
 - Slice: `engine-preflight-shell.ts` now passes `args.adapterContext` directly into `planServertoolEnginePreflightWithNative`; the native wrapper already accepts `adapterContext?: unknown`, so the TS `as Record<string, unknown>` escape is gone.
@@ -21,6 +27,14 @@
 - Slice: `dispatch-preparation-shell.ts` now passes `args.options.adapterContext` directly into `readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter`; the carrier reader accepts `unknown` and performs the object narrowing internally.
 - Gate: `dispatch-preparation-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old `args.options.adapterContext as Record<string, unknown>` marker.
 - Evidence: focused Jest `dispatch-preparation-shell + servertool-active-orchestration-audit` PASS 48/48; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
+# 2026-07-02: direct SSE provider snapshot entryPort fixed after hook clone
+
+- Symptom after 0.90.3509: `/v1/responses` direct stream succeeded, but live log still emitted `[provider-snapshot] writeProviderSnapshot(sse):req_... failed ... entryPort required for stage=provider-response`.
+- Root cause: router-direct attached provider runtime metadata to `requestPayloadWithCarrier`, then `applyDirectRouteHooks()` cloned the payload during model override (`{ ...result }`), dropping the non-enumerable provider runtime symbol before `processIncomingDirect()`. ResponsesProvider then created a local `req_...` context without runtime port truth.
+- Fix: `router-direct-pipeline.ts` reattaches the runtime carrier to the final `payloadToSend` after direct hooks; `responses-provider.ts` now also copies runtime requestId and MetadataCenter-backed port truth into provider context for direct snapshot/SSE capture.
+- Verification: focused direct/provider snapshot Jest passed; `tsc --noEmit` passed; snapshot/direct architecture gates passed; global install `0.90.3510`; `routecodex restart --port 5520`; `/health` ready; live `/v1/responses` stream returned `routecodex-smoke-5520-3510` with `[DONE]`; new log slice after line 112538 had `entryPort required` count 0 and `UPSTREAM_STREAM_IDLE_TIMEOUT` count 0.
+- Sample: `~/.rcc/codex-samples/openai-responses/ports/5520/openai-responses-router-gpt-5.4-20260702T130633526-448423-785/provider-response*.json` has `meta.entryPort=5520` and `providerKey=cc.key1.gpt-5.5`.
 
 # 2026-07-02: servertool auto-hook trace cast removed
 
