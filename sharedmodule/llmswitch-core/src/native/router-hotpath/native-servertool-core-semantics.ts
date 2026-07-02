@@ -161,6 +161,21 @@ export interface AutoHookRuntimeAttemptPlan {
   errorMessage?: string;
 }
 
+export type AutoHookRuntimeAttemptDecision =
+  | {
+      action: 'return_result';
+      traceEvent: AutoHookTraceEventPlan;
+    }
+  | {
+      action: 'continue_queue';
+      traceEvent: AutoHookTraceEventPlan;
+    }
+  | {
+      action: 'rethrow_error';
+      traceEvent: AutoHookTraceEventPlan;
+      errorMessage?: string;
+    };
+
 export type AutoHookCallerFinalizationPlan =
   | {
       action: 'return_result';
@@ -186,6 +201,23 @@ export type AutoHookCallerFinalizationPlan =
       returnResult: false;
       continueNextQueue: false;
       returnNull: true;
+    };
+
+export type AutoHookCallerFinalizationDecision =
+  | {
+      action: 'return_result';
+      result: {
+        mode: 'tool_flow';
+        finalChatResponse: JsonObject;
+        execution: NativeServerToolExecution;
+        metadataWritePlan?: JsonObject;
+      };
+    }
+  | {
+      action: 'continue_next_queue';
+    }
+  | {
+      action: 'return_null';
     };
 
 export type AutoHookCallerResultProjectionPlan = {
@@ -2313,6 +2345,41 @@ export function planAutoHookRuntimeAttemptWithNative(input: {
   };
 }
 
+export function resolveAutoHookRuntimeAttemptDecisionWithNative(input: {
+  hookId: string;
+  phase: string;
+  priority: number;
+  queue: string;
+  queueIndex: number;
+  queueTotal: number;
+  hasPlannedResult?: boolean;
+  hasMaterializedResult?: boolean;
+  error?: unknown;
+  materializedFlowId?: string;
+}): AutoHookRuntimeAttemptDecision {
+  const plan = planAutoHookRuntimeAttemptWithNative(input);
+  switch (plan.action) {
+    case 'return_result':
+      return {
+        action: 'return_result',
+        traceEvent: plan.traceEvent
+      };
+    case 'continue_queue':
+      return {
+        action: 'continue_queue',
+        traceEvent: plan.traceEvent
+      };
+    case 'rethrow_error':
+      return {
+        action: 'rethrow_error',
+        traceEvent: plan.traceEvent,
+        ...(plan.errorMessage ? { errorMessage: plan.errorMessage } : {})
+      };
+    default:
+      throw new Error('[servertool] invalid auto-hook attempt action');
+  }
+}
+
 function encodeAutoHookRuntimeAttemptInput(input: {
   hookId: string;
   phase: string;
@@ -2435,6 +2502,35 @@ export function planAutoHookCallerFinalizationWithNative(input: {
     continueNextQueue: false,
     returnNull: true
   };
+}
+
+export function resolveAutoHookCallerFinalizationDecisionWithNative(input: {
+  resultPresent: boolean;
+  metadataWritePlanPresent?: boolean;
+  chatResponse?: JsonObject;
+  execution?: NativeServerToolExecution;
+  metadataWritePlan?: JsonObject;
+  queueIndex: number;
+  queueTotal: number;
+}): AutoHookCallerFinalizationDecision {
+  const plan = planAutoHookCallerFinalizationWithNative(input);
+  switch (plan.action) {
+    case 'return_result':
+      return {
+        action: 'return_result',
+        result: plan.result
+      };
+    case 'continue_next_queue':
+      return {
+        action: 'continue_next_queue'
+      };
+    case 'return_null':
+      return {
+        action: 'return_null'
+      };
+    default:
+      throw new Error('[servertool] invalid auto-hook caller finalization action');
+  }
 }
 
 export function planAutoHookCallerResultProjectionWithNative(input: {

@@ -26,7 +26,7 @@ function normalizeMockAutoHookError(error: any): string {
   return error === undefined ? '' : 'unknown';
 }
 
-const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
+const resolveAutoHookRuntimeAttemptDecisionWithNativeMock = jest.fn((input: any) => {
   const flowId =
     typeof input?.materializedFlowId === 'string' && input.materializedFlowId.trim()
       ? input.materializedFlowId.trim()
@@ -81,7 +81,7 @@ const planAutoHookRuntimeAttemptWithNativeMock = jest.fn((input: any) => {
   };
 });
 
-const planAutoHookCallerFinalizationWithNativeMock = jest.fn((input: any) => {
+const resolveAutoHookCallerFinalizationDecisionWithNativeMock = jest.fn((input: any) => {
   if (input?.resultPresent) {
     return {
       action: 'return_result',
@@ -115,8 +115,8 @@ jest.unstable_mockModule(
       }
       return planned;
     }),
-    planAutoHookRuntimeAttemptWithNative: planAutoHookRuntimeAttemptWithNativeMock,
-    planAutoHookCallerFinalizationWithNative: planAutoHookCallerFinalizationWithNativeMock,
+    resolveAutoHookRuntimeAttemptDecisionWithNative: resolveAutoHookRuntimeAttemptDecisionWithNativeMock,
+    resolveAutoHookCallerFinalizationDecisionWithNative: resolveAutoHookCallerFinalizationDecisionWithNativeMock,
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(async (input: any) => {
       const hook = registryHooks.find(
         (entry) => entry.id === input?.name && entry.execution.kind === 'builtin'
@@ -184,9 +184,9 @@ beforeAll(async () => {
 
 beforeEach(() => {
   registryHooks.length = 0;
-  planAutoHookRuntimeAttemptWithNativeMock.mockClear();
-  planAutoHookCallerFinalizationWithNativeMock.mockClear();
-  planAutoHookRuntimeAttemptWithNativeMock.mockImplementation((input: any) => {
+  resolveAutoHookRuntimeAttemptDecisionWithNativeMock.mockClear();
+  resolveAutoHookCallerFinalizationDecisionWithNativeMock.mockClear();
+  resolveAutoHookRuntimeAttemptDecisionWithNativeMock.mockImplementation((input: any) => {
     const flowId =
       typeof input?.materializedFlowId === 'string' && input.materializedFlowId.trim()
         ? input.materializedFlowId.trim()
@@ -240,7 +240,7 @@ beforeEach(() => {
       }
     };
   });
-  planAutoHookCallerFinalizationWithNativeMock.mockImplementation((input: any) => {
+  resolveAutoHookCallerFinalizationDecisionWithNativeMock.mockImplementation((input: any) => {
     if (input?.resultPresent) {
       return {
         action: 'return_result',
@@ -470,10 +470,10 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('result?.execution != null && typeof result.execution.flowId');
     expect(callerSource).toContain('if (result == null)');
     expect(callerSource).toContain('return result;');
-    expect(callerSource).toContain('switch (attemptPlan.action)');
+    expect(callerSource).not.toContain('switch (attemptPlan.action)');
     expect(callerSource).not.toContain('attemptPlan as { action: unknown }');
     expect(callerSource).not.toContain('attemptPlan.traceEvent as ServerToolAutoHookTraceEvent');
-    expect(callerSource).toContain('args.options.onAutoHookTrace?.(attemptPlan.traceEvent);');
+    expect(callerSource).toContain('args.options.onAutoHookTrace?.(attemptDecision.traceEvent);');
     expect(callerSource).not.toContain('switch (attemptPlan.returnResult)');
     expect(callerSource).not.toContain('if (planned) {');
     expect(callerSource).not.toContain('if (attemptPlan.returnResult)');
@@ -483,8 +483,8 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).toContain('chatResponse: queueResult?.chatResponse');
     expect(callerSource).toContain('execution: queueResult?.execution');
     expect(callerSource).toContain('metadataWritePlan: queueResult?.metadataWritePlan');
-    expect(callerSource).toContain('return finalizationPlan.result;');
-    expect(callerSource).toContain('switch (finalizationPlan.action)');
+    expect(callerSource).toContain('return finalizationDecision.result;');
+    expect(callerSource).not.toContain('switch (finalizationPlan.action)');
     expect(callerSource).not.toContain('if (queueResult == null)');
     expect(callerSource).not.toContain('const resultProjectionPlan = planAutoHookCallerResultProjectionWithNative({');
     expect(callerSource).not.toContain('mode: finalizationPlan.resultMode');
@@ -549,7 +549,7 @@ describe('servertool auto hook trace', () => {
       })
     ).rejects.toThrow('boom-from-auto-hook');
 
-    expect(planAutoHookRuntimeAttemptWithNativeMock).toHaveBeenCalledWith(
+    expect(resolveAutoHookRuntimeAttemptDecisionWithNativeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         hookId: 'vision_auto',
         error: expect.any(Error)
@@ -603,7 +603,7 @@ describe('servertool auto hook trace', () => {
         __testHandler: async () => null
       }
     });
-    planAutoHookRuntimeAttemptWithNativeMock.mockReturnValue({
+    resolveAutoHookRuntimeAttemptDecisionWithNativeMock.mockReturnValue({
       action: 'unknown_attempt_action',
       traceEvent: {
         hookId: 'vision_auto',
@@ -640,7 +640,7 @@ describe('servertool auto hook trace', () => {
         __testHandler: async () => null
       }
     });
-    planAutoHookCallerFinalizationWithNativeMock.mockReturnValue({
+    resolveAutoHookCallerFinalizationDecisionWithNativeMock.mockReturnValue({
       action: 'unknown_finalization_action'
     });
     const options = createOptions([]);

@@ -9,8 +9,8 @@ import { listAutoServerToolHooks } from './registry-orchestration-shell.js';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
 import {
   materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult,
-  planAutoHookCallerFinalizationWithNative,
-  planAutoHookRuntimeAttemptWithNative,
+  resolveAutoHookCallerFinalizationDecisionWithNative,
+  resolveAutoHookRuntimeAttemptDecisionWithNative,
   runStoplessBuiltinHandlerForRuntimeWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
@@ -67,19 +67,28 @@ async function runAutoHookExecutionQueue(args: {
         runtimeMetadata: args.contextBase.runtimeMetadata ?? null
       });
     } catch (error) {
-      const attemptPlan = planAutoHookRuntimeAttemptWithNative({
+      const attemptDecision = resolveAutoHookRuntimeAttemptDecisionWithNative({
         ...traceBase,
         error
       });
-      args.options.onAutoHookTrace?.(attemptPlan.traceEvent);
-      throw error;
+      args.options.onAutoHookTrace?.(attemptDecision.traceEvent);
+      if (attemptDecision.action === 'rethrow_error') {
+        throw error;
+      }
+      if (attemptDecision.action === 'return_result') {
+        throw new Error('[servertool] invalid auto-hook attempt result action without materialized result');
+      }
+      if (attemptDecision.action !== 'continue_queue') {
+        throw new Error('[servertool] invalid auto-hook attempt action');
+      }
+      continue;
     }
 
     const result = planned != null
       ? await materializeServertoolPlannedResult(planned, args.options)
       : null;
 
-    const attemptPlan = planAutoHookRuntimeAttemptWithNative({
+    const attemptDecision = resolveAutoHookRuntimeAttemptDecisionWithNative({
       ...traceBase,
       hasPlannedResult: planned != null,
       hasMaterializedResult: result != null,
@@ -87,22 +96,21 @@ async function runAutoHookExecutionQueue(args: {
         ? { materializedFlowId: result.execution.flowId }
         : {})
     });
-    args.options.onAutoHookTrace?.(attemptPlan.traceEvent);
+    args.options.onAutoHookTrace?.(attemptDecision.traceEvent);
 
-    switch (attemptPlan.action) {
-      case 'return_result':
-        if (result == null) {
-          throw new Error('[servertool] invalid auto-hook attempt result action without materialized result');
-        }
-        return result;
-      case 'continue_queue':
-        continue;
-      case 'rethrow_error':
-        throw new Error(
-          `[servertool] native auto-hook attempt requested rethrow after successful handler execution: ${hook.id}`
-        );
-      default:
-        throw new Error('[servertool] invalid auto-hook attempt action');
+    if (attemptDecision.action === 'return_result') {
+      if (result == null) {
+        throw new Error('[servertool] invalid auto-hook attempt result action without materialized result');
+      }
+      return result;
+    }
+    if (attemptDecision.action === 'rethrow_error') {
+      throw new Error(
+        `[servertool] native auto-hook attempt requested rethrow after successful handler execution: ${hook.id}`
+      );
+    }
+    if (attemptDecision.action !== 'continue_queue') {
+      throw new Error('[servertool] invalid auto-hook attempt action');
     }
   }
 
@@ -130,7 +138,7 @@ export async function runServertoolAutoHookCaller(args: {
       options: args.options,
       contextBase: args.contextBase
     });
-    const finalizationPlan = planAutoHookCallerFinalizationWithNative({
+    const finalizationDecision = resolveAutoHookCallerFinalizationDecisionWithNative({
       resultPresent: queueResult != null,
       metadataWritePlanPresent: queueResult?.metadataWritePlan != null,
       chatResponse: queueResult?.chatResponse,
@@ -139,16 +147,14 @@ export async function runServertoolAutoHookCaller(args: {
       queueIndex: queueIndex + 1,
       queueTotal: queueOrder.length
     });
-    switch (finalizationPlan.action) {
-      case 'return_result': {
-        return finalizationPlan.result;
-      }
-      case 'continue_next_queue':
-        continue;
-      case 'return_null':
-        return null;
-      default:
-        throw new Error('[servertool] invalid auto-hook caller finalization action');
+    if (finalizationDecision.action === 'return_result') {
+      return finalizationDecision.result;
+    }
+    if (finalizationDecision.action === 'return_null') {
+      return null;
+    }
+    if (finalizationDecision.action !== 'continue_next_queue') {
+      throw new Error('[servertool] invalid auto-hook caller finalization action');
     }
   }
 

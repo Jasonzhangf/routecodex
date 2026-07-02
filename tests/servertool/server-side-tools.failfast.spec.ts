@@ -102,6 +102,11 @@ jest.unstable_mockModule(
         ? 'return_builtin'
         : 'return_none'
     })),
+    resolveServertoolRegistryHandlerWithNative: jest.fn((input: any) => {
+      const name = String(input?.name ?? '').trim().toLowerCase();
+      const entry = builtinHandlers.find((handler: any) => String(handler?.name ?? '').trim().toLowerCase() === name);
+      return entry ?? null;
+    }),
     planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn((input: any) =>
       Array.isArray(input?.hooks)
         ? input.hooks.map((hook: any, sourceIndex: number) => ({
@@ -223,6 +228,32 @@ jest.unstable_mockModule(
     readServertoolEntryBaseObjectWithNative: jest.fn((value: any) =>
       value && typeof value === 'object' && !Array.isArray(value) ? value : null
     ),
+    resolveServertoolEntryPreflightWithNative: jest.fn((input: any) => {
+      const base = input?.baseObject;
+      const plan = planServertoolEntryPreflightWithNativeMock({
+        chatResponse: input?.chatResponse,
+        hasBaseObject: base != null,
+        adapterClientDisconnected: input?.adapterClientDisconnected === true,
+      });
+      if (plan.action === 'return_passthrough_non_object_chat') {
+        return { action: 'return_result', result: plan.passthroughResult };
+      }
+      if (plan.action === 'throw_client_disconnected') {
+        return {
+          action: 'throw_error',
+          errorPlan: {
+            code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+            category: 'CLIENT_DISCONNECTED',
+            status: 499,
+            message: 'CLIENT_RESPONSE_CLOSED',
+            details: {
+              requestId: String(input?.requestId ?? '')
+            },
+          },
+        };
+      }
+      return { action: 'continue_to_tool_flow' };
+    }),
     isServertoolClientExecCliProjectionToolCallWithNative: jest.fn((input: any) => {
       const executionMode = typeof input?.executionMode === 'string' ? input.executionMode.trim() : '';
       return executionMode === 'client_exec_cli_projection';
@@ -372,7 +403,7 @@ jest.unstable_mockModule(
         }
       }
     })),
-    planAutoHookRuntimeAttemptWithNative: jest.fn((input: any) => ({
+    resolveAutoHookRuntimeAttemptDecisionWithNative: jest.fn((input: any) => ({
       action: input?.message ? 'rethrow_error' : input?.hasMaterializedResult === true ? 'return_result' : 'continue_queue',
       returnResult: !input?.message && input?.hasMaterializedResult === true,
       continueQueue: !input?.message && input?.hasMaterializedResult !== true,
@@ -389,7 +420,7 @@ jest.unstable_mockModule(
         ...(typeof input?.materializedFlowId === 'string' ? { flowId: input.materializedFlowId } : {})
       }
     })),
-    planAutoHookCallerFinalizationWithNative: jest.fn((input: any) => {
+    resolveAutoHookCallerFinalizationDecisionWithNative: jest.fn((input: any) => {
       if (input?.resultPresent) {
         return {
           action: 'return_result',
@@ -410,6 +441,46 @@ jest.unstable_mockModule(
       }
       return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
     }),
+    resolveServertoolResponseStagePrepassInitialDecisionWithNative: jest.fn(() => ({
+      action: 'run_auto_hooks'
+    })),
+    resolveServertoolResponseStagePrepassAfterAutoHookWithNative: jest.fn((input: any) => ({
+      action: 'return_prepass_result',
+      result: {
+        action: 'continue_to_execution',
+        responseStageGatePlan: input?.responseStageGatePlan
+      }
+    })),
+    resolveServertoolRunEngineEntryPreflightDecisionWithNative: jest.fn((input: any) =>
+      input?.entryPreflight?.action === 'return_result'
+        ? {
+            action: 'return_result',
+            result: input.entryPreflight.result
+          }
+        : {
+            action: 'continue',
+            baseObject: input?.entryPreflight?.baseObject
+          }
+    ),
+    resolveServertoolRunEnginePrepassDecisionWithNative: jest.fn((input: any) =>
+      input?.hasPrepassResult === true
+        ? {
+            action: 'return_result',
+            result: input.prepassResult
+          }
+        : { action: 'continue_to_execution' }
+    ),
+    resolveServertoolResponseStageAutoHookPreDecisionWithNative: jest.fn(() => ({
+      action: 'run_auto_hooks'
+    })),
+    resolveServertoolResponseStageAutoHookPostDecisionWithNative: jest.fn((input: any) => ({
+      action: 'return_pass_result',
+      result: input?.autoHookResult ?? null
+    })),
+    finalizeServertoolResponseStageWithNative: jest.fn((input: any) => ({
+      mode: 'passthrough',
+      finalChatResponse: input?.baseObject ?? {}
+    })),
     extractTextFromChatLikeWithNative: jest.fn(() => ''),
     buildClientExecCliProjectionOutputWithNative: jest.fn(() => ({})),
     buildClientVisibleProjectionShellWithNative: jest.fn((input: any) => input?.base ?? {}),
@@ -588,6 +659,10 @@ jest.unstable_mockModule(
           entries: []
         }
       ]
+    })),
+    resolveServertoolRegistryHandlerWithNative: jest.fn((input: any) => ({
+      action: 'return_entry',
+      entry: input?.entry
     })),
     runServertoolOrchestrationMutationWithNative: jest.fn((input: any) => {
       const op = String(input?.op ?? '').trim();
