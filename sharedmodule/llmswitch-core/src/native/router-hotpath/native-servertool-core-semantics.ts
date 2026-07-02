@@ -392,6 +392,11 @@ export type ServertoolEngineSkipPlan =
   | {
       action: 'return_skipped_passthrough' | 'return_skipped_no_execution';
       skipReason: string;
+      triggerResult: string;
+      shellResult: {
+        chat: JsonObject;
+        executed: false;
+      };
     }
   | {
       action: 'continue_matched_flow';
@@ -2670,6 +2675,7 @@ function parseServertoolEngineTriggerLogStopCompare(value: unknown): ServertoolE
 export function planServertoolEngineSkipWithNative(input: {
   engineMode: string;
   hasExecution: boolean;
+  finalChatResponse: JsonObject;
 }): ServertoolEngineSkipPlan {
   const capability = 'planServertoolEngineSkipJson';
   const fn = readNativeFunction(capability);
@@ -2699,9 +2705,27 @@ export function planServertoolEngineSkipWithNative(input: {
     if (typeof record.skipReason !== 'string' || !/\S/.test(record.skipReason)) {
       throw new Error('planServertoolEngineSkipJson native returned skipped action without skipReason');
     }
+    if (typeof record.triggerResult !== 'string' || !/\S/.test(record.triggerResult)) {
+      throw new Error('planServertoolEngineSkipJson native returned skipped action without triggerResult');
+    }
+    if (!record.shellResult || typeof record.shellResult !== 'object' || Array.isArray(record.shellResult)) {
+      throw new Error('planServertoolEngineSkipJson native returned skipped action without shellResult');
+    }
+    const shellResult = record.shellResult as Record<string, unknown>;
+    if (!shellResult.chat || typeof shellResult.chat !== 'object' || Array.isArray(shellResult.chat)) {
+      throw new Error('planServertoolEngineSkipJson native returned invalid shellResult chat');
+    }
+    if (shellResult.executed !== false) {
+      throw new Error('planServertoolEngineSkipJson native returned invalid shellResult executed flag');
+    }
     return {
       action: record.action,
-      skipReason: record.skipReason
+      skipReason: record.skipReason,
+      triggerResult: record.triggerResult,
+      shellResult: {
+        chat: shellResult.chat as JsonObject,
+        executed: false
+      }
     };
   }
   return {

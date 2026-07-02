@@ -192,7 +192,8 @@ export async function runServerToolOrchestrationShell(
   });
   const engineSkipPlan = planServertoolEngineSkipWithNative({
     engineMode: engineResult.mode,
-    hasExecution: engineResult.execution != null
+    hasExecution: engineResult.execution != null,
+    finalChatResponse: engineResult.finalChatResponse
   });
   switch (engineSkipPlan.action) {
     case 'return_skipped_passthrough':
@@ -200,7 +201,7 @@ export async function runServerToolOrchestrationShell(
       const skipReason = engineSkipPlan.skipReason;
       runTriggerObservationPlan({
         stopSignal,
-        result: `skipped_${skipReason}`,
+        result: engineSkipPlan.triggerResult,
         logStopEntry,
         logStopCompare
       });
@@ -212,10 +213,7 @@ export async function runServerToolOrchestrationShell(
         stageRecorder: options.stageRecorder,
         adapterContext: options.adapterContext
       });
-      return {
-        chat: engineResult.finalChatResponse,
-        executed: false
-      };
+      return engineSkipPlan.shellResult;
     }
     case 'continue_matched_flow':
       break;

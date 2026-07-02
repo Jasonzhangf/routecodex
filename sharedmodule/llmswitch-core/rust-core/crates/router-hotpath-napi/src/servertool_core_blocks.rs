@@ -2807,7 +2807,8 @@ fn plans_servertool_engine_skip_via_servertool_core_bridge() {
     let passthrough = plan_servertool_engine_skip_json(
         &serde_json::json!({
             "engineMode": "passthrough",
-            "hasExecution": false
+            "hasExecution": false,
+            "finalChatResponse": { "id": "passthrough" }
         })
         .to_string(),
     )
@@ -2818,11 +2819,23 @@ fn plans_servertool_engine_skip_via_servertool_core_bridge() {
         passthrough_value["action"],
         serde_json::json!("return_skipped_passthrough")
     );
+    assert_eq!(
+        passthrough_value["triggerResult"],
+        serde_json::json!("skipped_passthrough")
+    );
+    assert_eq!(
+        passthrough_value["shellResult"],
+        serde_json::json!({
+            "chat": { "id": "passthrough" },
+            "executed": false
+        })
+    );
 
     let no_execution = plan_servertool_engine_skip_json(
         &serde_json::json!({
             "engineMode": "tool_flow",
-            "hasExecution": false
+            "hasExecution": false,
+            "finalChatResponse": { "id": "no_execution" }
         })
         .to_string(),
     )
@@ -2832,6 +2845,17 @@ fn plans_servertool_engine_skip_via_servertool_core_bridge() {
     assert_eq!(
         no_execution_value["action"],
         serde_json::json!("return_skipped_no_execution")
+    );
+    assert_eq!(
+        no_execution_value["triggerResult"],
+        serde_json::json!("skipped_no_execution")
+    );
+    assert_eq!(
+        no_execution_value["shellResult"],
+        serde_json::json!({
+            "chat": { "id": "no_execution" },
+            "executed": false
+        })
     );
 }
 

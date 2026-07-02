@@ -457,27 +457,40 @@ describe('servertool CLI native bridge', () => {
     expect(
       planServertoolEngineSkipWithNative({
         engineMode: 'passthrough',
-        hasExecution: false
+        hasExecution: false,
+        finalChatResponse: { id: 'passthrough' }
       })
     ).toEqual({
       action: 'return_skipped_passthrough',
-      skipReason: 'passthrough'
+      skipReason: 'passthrough',
+      triggerResult: 'skipped_passthrough',
+      shellResult: {
+        chat: { id: 'passthrough' },
+        executed: false
+      }
     });
 
     expect(
       planServertoolEngineSkipWithNative({
         engineMode: 'tool_flow',
-        hasExecution: false
+        hasExecution: false,
+        finalChatResponse: { id: 'no_execution' }
       })
     ).toEqual({
       action: 'return_skipped_no_execution',
-      skipReason: 'no_execution'
+      skipReason: 'no_execution',
+      triggerResult: 'skipped_no_execution',
+      shellResult: {
+        chat: { id: 'no_execution' },
+        executed: false
+      }
     });
 
     expect(
       planServertoolEngineSkipWithNative({
         engineMode: 'tool_flow',
-        hasExecution: true
+        hasExecution: true,
+        finalChatResponse: { id: 'matched' }
       })
     ).toEqual({
       action: 'continue_matched_flow'

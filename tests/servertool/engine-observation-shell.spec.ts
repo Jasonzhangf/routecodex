@@ -361,9 +361,13 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("runtimeControl && typeof runtimeControl === 'object'");
     expect(source).toContain("runtimeControl != null && typeof runtimeControl === 'object'");
     expect(source).toContain('hasExecution: engineResult.execution != null');
+    expect(source).toContain('finalChatResponse: engineResult.finalChatResponse');
     expect(source).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
     expect(source).not.toContain('engineSkipPlan.skipReason as string');
     expect(source).toContain('const skipReason = engineSkipPlan.skipReason;');
+    expect(source).toContain('result: engineSkipPlan.triggerResult');
+    expect(source).toContain('return engineSkipPlan.shellResult;');
+    expect(source).not.toContain('result: `skipped_${skipReason}`');
     expect(source).toContain('planServertoolTimeoutErrorWithNative({');
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan(');
     expect(source).toContain('recordServertoolEngineMatchSkipped({');
