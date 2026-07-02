@@ -1176,9 +1176,9 @@ export function buildServertoolHandlerErrorToolOutputPayloadWithNative(input: {
   toolName: string;
   message: string;
   retryable?: boolean;
-}): Record<string, unknown> {
+}): JsonObject {
   const capability = 'buildServertoolHandlerErrorToolOutputPayloadJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  const fail = (reason?: string) => failNativeRequired<JsonObject>(capability, reason);
   try {
     if (isNativeDisabledByEnv()) {
       return fail('native disabled');
@@ -1195,7 +1195,7 @@ export function buildServertoolHandlerErrorToolOutputPayloadWithNative(input: {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return fail('invalid payload');
     }
-    return parsed as Record<string, unknown>;
+    return parsed as JsonObject;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

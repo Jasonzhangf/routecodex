@@ -1,3 +1,9 @@
+# 2026-07-02: servertool handler error payload cast removed
+
+- Slice: `native-chat-process-servertool-orchestration-semantics.ts` now types `buildServertoolHandlerErrorToolOutputPayloadWithNative()` as `JsonObject`; `execution-queue-shell.ts` consumes the payload directly without `as JsonObject`.
+- Gate: `execution-queue-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old handler-error payload cast marker and require direct native wrapper output.
+- Evidence: focused Jest `execution-queue-shell + servertool-active-orchestration-audit` PASS 49/49; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
+
 # 2026-07-02: servertool noop response cast removed
 
 - Slice: `native-chat-process-servertool-orchestration-semantics.ts` now types `NativeServertoolNoopOutcome.chatResponse` as `JsonObject`; `execution-queue-shell.ts` consumes `noopResult.chatResponse` directly without `as JsonObject`.

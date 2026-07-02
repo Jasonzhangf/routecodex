@@ -109,7 +109,7 @@ export async function runServertoolIoExecutionQueue(args: {
           toolCallId: toolCall.id,
           toolName: toolCall.name,
           message: errorEffectPlan.handlerErrorMessage
-        }) as JsonObject;
+        });
         replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
         executionState = appendServertoolExecutedRecordWithNative({
           state: executionState,
