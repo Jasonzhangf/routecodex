@@ -201,6 +201,114 @@ describe('responses handler virtual-router empty-pool guard', () => {
     }
   });
 
+  it('reroutes HTTP /v1/responses after primary provider 503 instead of retrying the same provider', async () => {
+    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
+    const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
+    const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
+    const providerCalls: string[] = [];
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey?: string) => artifacts.targetRuntime?.[providerKey ?? '']?.runtimeKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => {
+        if (runtimeKey === 'primary.key1') {
+          return {
+            runtimeKey: 'primary.key1',
+            providerId: 'primary',
+            providerType: 'openai',
+            providerFamily: 'openai',
+            providerProtocol: 'openai-responses',
+            runtime: { runtimeKey: 'primary.key1' },
+            instance: {
+              initialize: async () => undefined,
+              cleanup: async () => undefined,
+              processIncoming: async () => {
+                providerCalls.push('primary');
+                throw Object.assign(new Error('HTTP 503: primary temporarily unavailable'), {
+                  statusCode: 503,
+                  code: 'HTTP_503'
+                });
+              }
+            }
+          };
+        }
+        if (runtimeKey === 'secondary.key1') {
+          return {
+            runtimeKey: 'secondary.key1',
+            providerId: 'secondary',
+            providerType: 'openai',
+            providerFamily: 'openai',
+            providerProtocol: 'openai-responses',
+            runtime: { runtimeKey: 'secondary.key1' },
+            instance: {
+              initialize: async () => undefined,
+              cleanup: async () => undefined,
+              processIncoming: async () => {
+                providerCalls.push('secondary');
+                return {
+                  status: 200,
+                  data: {
+                    id: 'resp_ok_503_reroute',
+                    object: 'response',
+                    status: 'completed',
+                    model: 'gpt-test',
+                    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok_from_secondary_503' }] }]
+                  }
+                };
+              }
+            }
+          };
+        }
+        return undefined;
+      },
+      getHandleByProviderKey: () => undefined,
+      disposeAll: async () => undefined,
+      initialize: async () => undefined
+    };
+    const executor = new HubRequestExecutor({
+      runtimeManager,
+      getHubPipeline: () => pipeline as any,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: async () => undefined
+        }
+      }),
+      logStage: () => undefined,
+      stats: new StatsManager()
+    } as any);
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/responses', (req, res) =>
+      handleResponses(req, res, {
+        executePipeline: async (input) => executor.execute(input),
+        errorHandling: null
+      })
+    );
+
+    const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    const previousBase = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '4';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/responses`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: 'gpt-test', input: 'hi' })
+        });
+        const text = await response.text();
+        expect(response.status).toBe(200);
+        expect(text).toContain('ok_from_secondary_503');
+        expect(providerCalls).toEqual(['primary', 'secondary']);
+      });
+    } finally {
+      pipeline.dispose();
+      if (previousAttempts === undefined) delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      else process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
+      if (previousBase === undefined) delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+      else process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = previousBase;
+    }
+  });
+
   it('blocks and retries singleton empty pool instead of surfacing PROVIDER_NOT_AVAILABLE', async () => {
     const logStages: Array<{ stage: string; details: Record<string, unknown> }> = [];
     let pipelineCalls = 0;
