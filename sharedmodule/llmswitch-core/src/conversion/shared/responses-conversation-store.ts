@@ -537,9 +537,10 @@ class ResponsesConversationStore {
         routingPolicyGroup: args.routingPolicyGroup
       });
       throw new ProviderProtocolError('Responses conversation request context missing for response capture', {
-        code: 'MALFORMED_RESPONSE',
+        code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
         protocol: 'openai-responses',
         providerType: 'responses',
+        category: 'INTERNAL_ERROR',
         details: {
           context: 'responses-conversation-store.recordResponse',
           reason: 'missing_request_context',

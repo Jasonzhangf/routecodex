@@ -31,7 +31,7 @@ describe('http-error-mapper public payload leak guard', () => {
     });
   });
 
-  it('masks provider diagnostics from upstream 400 payloads', () => {
+  it('projects upstream 400 diagnostics while stripping provider identity', () => {
     const mapped = mapErrorToHttp({
       message: 'HTTP 400: {"error":{"message":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"bad_request_error\\",\\"message\\":\\"Error from provider (MiniMax): invalid params, tool result id not found (2013)\\",\\"http_code\\":\\"400\\"},\\"request_id\\":\\"066c94854d8da9b51651e2d687289e42\\"}","code":"HTTP_400"}}',
       code: 'HTTP_400',
@@ -52,7 +52,7 @@ describe('http-error-mapper public payload leak guard', () => {
     const publicJson = JSON.stringify(mapped.body);
     expect(mapped.status).toBe(400);
     expect(mapped.body.error).toMatchObject({
-      message: 'Upstream rejected the request',
+      message: 'invalid params, tool result id not found (2013)',
       code: 'HTTP_400',
       request_id: 'openai-responses-provider-20260601T184003969-246178-1902'
     });
@@ -60,7 +60,6 @@ describe('http-error-mapper public payload leak guard', () => {
     expect(publicJson).not.toContain('minimax');
     expect(publicJson).not.toContain('provider_key');
     expect(publicJson).not.toContain('upstream_message');
-    expect(publicJson).not.toContain('tool result id not found');
   });
 
   it('projects upstream 401 provider payload to public stage-log summary', () => {
@@ -78,11 +77,10 @@ describe('http-error-mapper public payload leak guard', () => {
 
     const summary = mapErrorToPublicLogSummary(err);
 
-    expect(summary).toBe('Upstream provider error');
+    expect(summary).toBe('Upstream authentication failed');
     expect(summary).not.toContain('Invalid token');
     expect(summary).not.toContain('202606071512468498407098268d9d6mBARM7HT');
     expect(summary).not.toContain('new_api_error');
-    expect(summary).not.toContain('HTTP_401');
   });
 
   it('projects upstream 403 quota payload to public stage-log summary', () => {
@@ -100,10 +98,38 @@ describe('http-error-mapper public payload leak guard', () => {
 
     const summary = mapErrorToPublicLogSummary(err);
 
-    expect(summary).toBe('Upstream provider error');
-    expect(summary).not.toContain('余额和订阅额度均不足');
+    expect(summary).toBe('余额和订阅额度均不足，请充值后再使用');
     expect(summary).not.toContain('permission_error');
-    expect(summary).not.toContain('insufficient_quota');
-    expect(summary).not.toContain('HTTP_403');
+  });
+
+  it('projects responses store missing request context as internal error, not upstream malformed response', () => {
+    const err = Object.assign(
+      new Error('Responses conversation request context missing for response capture'),
+      {
+        name: 'ProviderProtocolError',
+        code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+        category: 'INTERNAL_ERROR',
+        requestId: 'openai-responses-minimax.key1-MiniMax-M2.7-20260703T101714468-452766-5128',
+        details: {
+          context: 'responses-conversation-store.recordResponse',
+          reason: 'missing_request_context',
+          responseId: '06964e875079af9ba32e0c523db4805a',
+        },
+      }
+    );
+
+    const mapped = mapErrorToHttp(err);
+    const summary = mapErrorToPublicLogSummary(err, 'Upstream provider error');
+
+    expect(mapped.status).toBe(500);
+    expect(mapped.body.error).toMatchObject({
+      message: 'Responses conversation request context missing for response capture',
+      code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+      internalCode: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+      request_id: 'openai-responses-provider-20260703T101714468-452766-5128',
+    });
+    expect(summary).toBe('Responses conversation request context missing for response capture');
+    expect(summary).not.toContain('Upstream provider error');
+    expect(summary).not.toContain('MALFORMED_RESPONSE');
   });
 });

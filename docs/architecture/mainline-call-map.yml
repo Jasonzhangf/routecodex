@@ -926,15 +926,15 @@ chains:
       - step_id: chat-sse-01
         from_node: HubRespOutbound04ClientSemantic
         to_node: ServerRespOutbound05ClientFrame
-        caller_symbol: processResponseToSseWithFunctions
+        caller_symbol: convertResponseToJsonToSse
         caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
-        callee_symbol: buildChatSseEventSequenceWithNative
-        callee_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts
+        callee_symbol: buildChatSseStreamWithNative
+        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
         owner_feature_id: sse.chat_stream_projection
         semantic_input: "validated ChatCompletionResponse plus request-scoped ChatJsonToSseContext"
         semantic_output: "ordered ChatSseEvent stream for role/content/reasoning/tool-call/finish/done frames"
         status: anchored
-        note: "TS `sequenceResponse` is a thin wrapper around native `buildChatSseEventSequenceWithNative`; Rust `build_chat_sse_event_sequence_json` owns event ordering and fail-fast validation. The adjacent encode edge may project frames only. It must not synthesize fallback error frames for malformed response semantics; encode failures surface through the stream error path."
+        note: "TS `convertResponseToJsonToSse` is a thin stream IO wrapper around native `buildChatSseStreamWithNative`; Rust `build_chat_sse_stream_json` owns event ordering, usage, and fail-fast validation. The adjacent encode edge may project frames only. It must not synthesize fallback error frames for malformed response semantics; encode failures surface through the stream error path."
       - step_id: chat-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed

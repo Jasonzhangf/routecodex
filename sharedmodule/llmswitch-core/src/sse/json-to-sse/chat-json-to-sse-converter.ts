@@ -11,7 +11,8 @@ import type {
   ChatCompletionResponse,
   ChatJsonToSseOptions,
   ChatSseEventStream,
-  ChatSseEvent
+  ChatSseEvent,
+  ChatEventStats
 } from '../types/index.js';
 import { createChatStreamWriter } from '../shared/writer.js';
 import { buildChatSseStreamWithNative } from '../../native/router-hotpath/native-chat-sse-event-payload.js';
@@ -37,7 +38,7 @@ export class ChatJsonToSseConverterRefactored {
           stream.destroy(error);
         }
       }
-    }) as ChatSseEventStream;
+    }) as unknown as ChatSseEventStream;
 
     (async () => {
       try {
@@ -74,12 +75,19 @@ export class ChatJsonToSseConverterRefactored {
   }
 }
 
-function streamEventStats(stream: PassThrough): Record<string, unknown> {
+function streamEventStats(stream: PassThrough): ChatEventStats {
   return {
+    totalChunks: 0,
+    totalTokens: 0,
+    totalChoices: 0,
+    totalToolCalls: 0,
     totalEvents: 0,
     eventTypes: {},
     startTime: Date.now(),
-    errorCount: 0
+    tokenRate: 0,
+    chunkRate: 0,
+    errorCount: 0,
+    retryCount: 0
   };
 }
 

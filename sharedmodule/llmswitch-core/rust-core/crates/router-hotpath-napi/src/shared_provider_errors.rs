@@ -28,7 +28,9 @@ struct ProviderProtocolErrorOutput {
 fn infer_category(code: &str) -> String {
     match code {
         "TOOL_PROTOCOL_ERROR" => "TOOL_ERROR".to_string(),
-        "SERVERTOOL_TIMEOUT" | "SERVERTOOL_HANDLER_FAILED" => "INTERNAL_ERROR".to_string(),
+        "SERVERTOOL_TIMEOUT" | "SERVERTOOL_HANDLER_FAILED" | "RESPONSES_STORE_MISSING_REQUEST_CONTEXT" => {
+            "INTERNAL_ERROR".to_string()
+        }
         "SSE_DECODE_ERROR"
         | "MALFORMED_RESPONSE"
         | "MALFORMED_REQUEST"
@@ -59,4 +61,32 @@ pub fn build_provider_protocol_error_json(input_json: String) -> NapiResult<Stri
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!("Failed to serialize provider error output: {}", e))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responses_store_missing_request_context_is_internal_error() {
+        let raw = build_provider_protocol_error_json(
+            serde_json::json!({
+                "message": "Responses conversation request context missing for response capture",
+                "code": "RESPONSES_STORE_MISSING_REQUEST_CONTEXT",
+                "protocol": "openai-responses",
+                "providerType": "responses",
+                "details": {
+                    "reason": "missing_request_context"
+                }
+            })
+            .to_string(),
+        )
+        .expect("provider protocol error json should build");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&raw).expect("provider protocol error json should parse");
+
+        assert_eq!(parsed["code"], "RESPONSES_STORE_MISSING_REQUEST_CONTEXT");
+        assert_eq!(parsed["category"], "INTERNAL_ERROR");
+        assert_eq!(parsed["details"]["reason"], "missing_request_context");
+    }
 }

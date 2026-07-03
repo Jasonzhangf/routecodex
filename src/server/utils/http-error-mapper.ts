@@ -127,6 +127,132 @@ type RawErrorPayload = {
   };
 };
 
+type PublicUpstreamError = {
+  message?: string;
+  code?: string;
+  status?: number;
+};
+
+const SENSITIVE_UPSTREAM_MESSAGE_PATTERNS = [
+  /invalid\s+token/i,
+  /api[_ -]?key/i,
+  /bearer\s+[a-z0-9._~+/=-]+/i,
+  /authorization/i,
+  /secret/i,
+  /token\s*[:=]/i,
+  /key\s*[:=]/i,
+];
+
+function normalizePublicUpstreamError(args: {
+  status: number;
+  baseMessage: string;
+  effectiveUpstreamMessage?: string;
+  upstreamMessage?: string;
+  upstreamCode?: string;
+  effectiveCode?: string;
+  sourceCode?: string;
+}): PublicUpstreamError {
+  const rawCode = extractString(args.upstreamCode) || extractString(args.effectiveCode) || extractString(args.sourceCode);
+  const code = normalizePublicUpstreamCode(rawCode);
+  const rawMessage =
+    extractString(args.effectiveUpstreamMessage)
+    || extractString(args.upstreamMessage)
+    || extractMessageFromHttpText(args.baseMessage);
+  const message = normalizePublicUpstreamMessage({
+    status: args.status,
+    message: rawMessage,
+    code,
+  });
+  return {
+    ...(message ? { message } : {}),
+    ...(code ? { code } : {}),
+    status: args.status,
+  };
+}
+
+function normalizePublicUpstreamCode(code?: string): string | undefined {
+  const raw = extractString(code);
+  if (!raw) {
+    return undefined;
+  }
+  if (raw === 'upstream_error') {
+    return undefined;
+  }
+  return raw;
+}
+
+function normalizePublicUpstreamMessage(args: {
+  status: number;
+  message?: string;
+  code?: string;
+}): string | undefined {
+  const raw = extractString(args.message);
+  if (!raw) {
+    return undefined;
+  }
+  if (args.status === 401 && isSensitiveUpstreamMessage(raw)) {
+    return 'Upstream authentication failed';
+  }
+  return sanitizePublicUpstreamMessage(raw);
+}
+
+function isSensitiveUpstreamMessage(message: string): boolean {
+  return SENSITIVE_UPSTREAM_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function sanitizePublicUpstreamMessage(message: string): string {
+  return message
+    .replace(/^Error from provider \([^)]+\):\s*/i, '')
+    .replace(/^Error from provider:\s*/i, '')
+    .trim();
+}
+
+function extractMessageFromHttpText(value?: string): string | undefined {
+  const text = extractString(value);
+  if (!text) {
+    return undefined;
+  }
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace <= firstBrace) {
+    const withoutPrefix = text.replace(/^HTTP\s+\d{3}\s*:\s*/i, '').trim();
+    return withoutPrefix && withoutPrefix !== text ? withoutPrefix : undefined;
+  }
+  const candidate = text.slice(firstBrace, lastBrace + 1);
+  if (candidate.length > 200_000) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+    return extractErrorMessageFromUnknown(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+function extractErrorMessageFromUnknown(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const errorNode = record.error;
+  if (typeof errorNode === 'string') {
+    return extractString(errorNode);
+  }
+  if (errorNode && typeof errorNode === 'object' && !Array.isArray(errorNode)) {
+    const errorRecord = errorNode as Record<string, unknown>;
+    const message = extractString(errorRecord.message);
+    if (message) {
+      return message;
+    }
+    const nested = extractErrorMessageFromUnknown(errorRecord);
+    if (nested) {
+      return nested;
+    }
+  }
+  return extractString(record.message);
+}
+
 function tryExtractNestedJsonErrorMessage(raw?: string): { message?: string; requestId?: string; type?: string } | null {
   if (!raw || typeof raw !== 'string') {
     return null;
@@ -237,6 +363,15 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   const effectiveUpstreamMessage = nestedJson?.message || upstreamMessage;
   const effectiveCode = upstream.code || extractString(error.code) || 'upstream_error';
   const sourceCode = extractString(error.code);
+  const publicUpstream = normalizePublicUpstreamError({
+    status,
+    baseMessage,
+    effectiveUpstreamMessage,
+    upstreamMessage,
+    upstreamCode,
+    effectiveCode,
+    sourceCode,
+  });
   const toolName = extractString(error.toolName) || extractString(error.details?.toolName);
   const validationReason =
     extractString(error.validationReason) || extractString(error.details?.validationReason);
@@ -268,6 +403,17 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     });
   }
 
+  if (normalizedCode === 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT') {
+    return formatPayload(500, {
+      message: baseMessage || 'Responses conversation request context missing for response capture',
+      code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+      internalCode: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+      request_id: requestId,
+      ...validationFields,
+      ...detailField
+    });
+  }
+
   if (isClientDisconnectHttpProjectionCandidate(error)) {
     throw new ClientDisconnectHttpProjectionError(requestId);
   }
@@ -281,7 +427,7 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   ) {
     return formatPayload(504, {
       message: 'Upstream request timed out',
-      code: upstreamCode || effectiveCode || 'gateway_timeout',
+      code: sourceCode || upstreamCode || effectiveCode || 'gateway_timeout',
       request_id: requestId,
       ...validationFields,
       ...detailField
@@ -309,9 +455,9 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
 
   if (status === 401 || status === 403) {
     return formatPayload(502, {
-      message: upstreamMessage || 'Upstream provider error',
-      code: 'upstream_error',
-      internalCode: upstreamCode || effectiveCode || 'upstream_401_403',
+      message: publicUpstream.message || 'Upstream provider error',
+      code: publicUpstream.code || 'upstream_error',
+      upstream_status: status,
       ...validationFields,
       ...detailField
     });
@@ -338,8 +484,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       });
     }
     return formatPayload(status, {
-      message: 'Upstream rejected the request',
-      code: upstreamCode || effectiveCode || 'upstream_client_error',
+      message: publicUpstream.message || 'Upstream rejected the request',
+      code: publicUpstream.code || 'upstream_client_error',
       request_id: requestId,
       ...validationFields,
       ...detailField
@@ -360,7 +506,8 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
       || 'internal_provider_response_error';
     return formatPayload(502, {
       message: 'Internal provider response error',
-      code: internalCode,
+      code: sourceCode || internalCode,
+      internalCode,
       request_id: requestId,
       ...validationFields,
       ...detailField
@@ -368,9 +515,10 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   }
 
   return formatPayload(502, {
-    message: 'Upstream provider error',
-    code: upstreamCode || effectiveCode || 'upstream_error',
+    message: publicUpstream.message || 'Upstream provider error',
+    code: publicUpstream.code || 'upstream_error',
     request_id: requestId,
+    ...(typeof publicUpstream.status === 'number' ? { upstream_status: publicUpstream.status } : {}),
     ...validationFields,
     ...detailField
   });
@@ -466,11 +614,20 @@ export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): s
     throw err;
   }
   const message = projected.body.error.message;
-  if (projected.body.error.code === 'upstream_error') {
+  if (projected.body.error.code === 'upstream_error' && message === 'Upstream provider error') {
     const internalCode = projected.body.error.internalCode;
     return internalCode ? `${message} (internal: ${internalCode})` : (message || 'Upstream provider error');
   }
-  if (fallback !== undefined && projected.status !== 401 && projected.status !== 403 && projected.status !== 429) {
+  if (projected.body.error.internalCode) {
+    return message || projected.body.error.internalCode;
+  }
+  if (
+    fallback !== undefined
+    && projected.status !== 401
+    && projected.status !== 403
+    && projected.status !== 429
+    && !projected.body.error.upstream_status
+  ) {
     return fallback;
   }
   return message || fallback || 'Upstream provider error';

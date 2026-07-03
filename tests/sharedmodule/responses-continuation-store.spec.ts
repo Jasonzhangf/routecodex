@@ -69,6 +69,35 @@ describe('responses conversation store plain continuation restore', () => {
     } catch {}
   });
 
+  it('reports missing response request context as local store error, not malformed upstream response', () => {
+    expect(() => recordResponsesResponse({
+      requestId: track('req-resp-store-missing-context'),
+      providerKey: 'minimax.key1.MiniMax-M2.7',
+      sessionId: 'sess-missing-context',
+      conversationId: 'conv-missing-context',
+      matchedPort: null,
+      response: {
+        id: 'resp-missing-context',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'done' }]
+          }
+        ]
+      }
+    })).toThrow(expect.objectContaining({
+      name: 'ProviderProtocolError',
+      code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+      category: 'INTERNAL_ERROR',
+      details: expect.objectContaining({
+        reason: 'missing_request_context',
+        requestId: 'req-resp-store-missing-context',
+        responseId: 'resp-missing-context'
+      })
+    }));
+  });
+
   it('restores previous_response_id by session scope when incoming input replays the exact prefix', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-1'),
