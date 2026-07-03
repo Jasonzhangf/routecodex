@@ -128,11 +128,7 @@ fn dispatch_runtime_event(
     }
 }
 
-fn mirror_runtime_event(
-    core: &mut VirtualRouterEngineCore,
-    event: &Value,
-    kind: RuntimeEventKind,
-) {
+fn mirror_runtime_event(core: &mut VirtualRouterEngineCore, event: &Value, kind: RuntimeEventKind) {
     match kind {
         RuntimeEventKind::Error => core.mirror_provider_error_in_memory(event),
         RuntimeEventKind::Success => core.mirror_provider_success_in_memory(event),
@@ -538,7 +534,8 @@ mod tests {
         fs::create_dir_all(&session_dir).unwrap();
         let provider_key = "primary.key1.gpt-test";
         let first = build_registered_identity_core_for_group(provider_key, "gateway_priority_5555");
-        let second = build_registered_identity_core_for_group(provider_key, "gateway_priority_5555");
+        let second =
+            build_registered_identity_core_for_group(provider_key, "gateway_priority_5555");
 
         with_session_dir_override(session_dir.to_str(), || {
             report_provider_error(&json!({

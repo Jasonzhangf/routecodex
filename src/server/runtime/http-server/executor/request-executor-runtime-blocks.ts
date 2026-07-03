@@ -246,6 +246,7 @@ export function logProviderRetrySwitchCompact(args: {
     && (
       !hasMeaningfulStructuredReason(args)
       || externalErrorSource === 'external_transport'
+      || isProviderSwitchBusinessOrClientError(args)
     );
   const hasStructuredErrorIdentity =
     typeof args.statusCode === 'number'
@@ -327,6 +328,28 @@ function hasMeaningfulStructuredReason(args: {
     || typeof args.upstreamStatus === 'number'
     || Boolean(args.catalogCode)
     || Boolean(args.catalogKey);
+}
+
+function isProviderSwitchBusinessOrClientError(args: {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  catalogKey?: string;
+}): boolean {
+  if (args.statusCode === 400) {
+    return true;
+  }
+  const codes = [args.errorCode, args.upstreamCode, args.catalogKey]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim().toUpperCase());
+  return codes.some((code) => (
+    code.includes('INVALID')
+    || code.includes('MISSING_REQUIRED')
+    || code.includes('AUTHENTICATION')
+    || code.includes('API_KEY')
+    || code.includes('QUOTA')
+    || code.includes('BUSINESS')
+  ));
 }
 
 function resolveProviderSwitchExternalErrorSource(args: {

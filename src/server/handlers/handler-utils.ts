@@ -230,13 +230,19 @@ function extractErrorLogFields(error: unknown, summary: string): {
     ?? (typeof responseError?.upstreamCode === 'number' ? String(responseError.upstreamCode) : undefined)
     ?? (typeof responseError?.upstream_code === 'number' ? String(responseError.upstream_code) : undefined);
 
+  const rawMetaText =
+    readTrimmedString(bag.rawErrorSnippet)
+    ?? readTrimmedString(bag.rawError);
   const fromText = parseFieldFromText(summary);
-  const resolvedErrorCode = errorCode ?? fromText.errorCode;
-  const resolvedUpstreamCode = upstreamCode ?? fromText.upstreamCode;
+  const fromRawMetaText = rawMetaText ? parseFieldFromText(rawMetaText) : {};
+  const resolvedErrorCode = errorCode ?? fromText.errorCode ?? fromRawMetaText.errorCode;
+  const resolvedUpstreamCode = upstreamCode ?? fromText.upstreamCode ?? fromRawMetaText.upstreamCode;
   const resolvedStatusCode =
     typeof statusCode === 'number'
       ? statusCode
-      : (typeof fromText.statusCode === 'number' ? fromText.statusCode : undefined);
+      : (typeof fromText.statusCode === 'number'
+          ? fromText.statusCode
+          : (typeof fromRawMetaText.statusCode === 'number' ? fromRawMetaText.statusCode : undefined));
   const catalogCode =
     readTrimmedString(bag.catalogCode)
     ?? readTrimmedString(details?.catalogCode)
@@ -436,15 +442,11 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const resolvedId = formatRequestId(requestId);
   const formatted = formatErrorForConsole(error);
   const rawMeta = extractRawErrorMeta(error);
-  const rawSnippet = rawMeta?.rawErrorSnippet;
   const responseDataShell = extractCodeOnlyResponseDataShell(error);
-  const summaryFromRaw = shouldUseRawSnippetAsSummary(rawSnippet, formatted.text)
-    ? String(rawSnippet)
-    : formatted.text;
   const summary =
     responseDataShell && isCodeOnlyShellError(responseDataShell) && formatted.text.trim()
       ? formatted.text
-      : summaryFromRaw;
+      : formatted.text;
   const publicSummary = resolvePrimaryErrorLogSummary(error, summary);
   const extractedFields = extractErrorLogFields(error, summary);
   const internalLogFields = resolveInternalDebugErrorLogFields({ error, summary });
@@ -487,21 +489,6 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
 
 function resolvePrimaryErrorLogSummary(error: unknown, fallback: string): string {
   return mapErrorToPublicLogSummary(error, fallback);
-}
-
-function shouldUseRawSnippetAsSummary(rawSnippet: string | undefined, fallbackText: string): boolean {
-  if (!rawSnippet || typeof rawSnippet !== 'string') {
-    return false;
-  }
-  const trimmed = rawSnippet.trim();
-  if (!trimmed) {
-    return false;
-  }
-  if (!isCodeOnlyShellError(trimmed)) {
-    return true;
-  }
-  // code-only shell error loses diagnostics; prefer richer normalized text.
-  return !fallbackText || !fallbackText.trim();
 }
 
 function extractCodeOnlyResponseDataShell(error: unknown): string | undefined {

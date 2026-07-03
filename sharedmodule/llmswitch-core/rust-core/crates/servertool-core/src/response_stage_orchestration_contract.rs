@@ -89,7 +89,7 @@ pub fn materialize_servertool_response_stage_orchestration_output(
     );
 
     match plan.return_action {
-            ServertoolResponseStageOrchestrationReturnAction::ReturnExecutedPayload => {
+        ServertoolResponseStageOrchestrationReturnAction::ReturnExecutedPayload => {
             let mut shell_result = serde_json::json!({
                 "payload": input.executed_payload.clone(),
                 "executed": plan.record_executed

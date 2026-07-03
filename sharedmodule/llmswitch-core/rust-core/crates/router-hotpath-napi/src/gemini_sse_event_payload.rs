@@ -396,7 +396,6 @@ pub fn build_gemini_sse_event_sequence_json(input_json: String) -> Result<String
     })
 }
 
-
 pub fn build_gemini_sse_stream_json(input_json: String) -> Result<String, String> {
     let events_json = build_gemini_sse_event_sequence_json(input_json.clone())?;
     let events: Vec<Value> = serde_json::from_str(&events_json)
@@ -407,7 +406,8 @@ pub fn build_gemini_sse_stream_json(input_json: String) -> Result<String, String
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let mut event_types: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut event_types: std::collections::BTreeMap<String, i64> =
+        std::collections::BTreeMap::new();
     let mut error_count: i64 = 0;
     let error_names = ["gemini.error"];
     for event in &events {
@@ -440,7 +440,8 @@ pub fn build_gemini_sse_stream_json(input_json: String) -> Result<String, String
         "events": events,
         "stats": stats,
     });
-    serde_json::to_string(&output).map_err(|error| format!("Failed to serialize gemini SSE stream JSON: {}", error))
+    serde_json::to_string(&output)
+        .map_err(|error| format!("Failed to serialize gemini SSE stream JSON: {}", error))
 }
 
 #[cfg(test)]

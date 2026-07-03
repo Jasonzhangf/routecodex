@@ -2,7 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   inspectResponsesSseBlockForProviderRateLimit,
-  isResponsesSseAdvisoryRateLimitsBlock
+  isResponsesSseAdvisoryRateLimitsBlock,
+  isResponsesSseTerminalBlock
 } from '../../../../src/providers/core/runtime/responses-sse-error-guard.js';
 
 describe('responses SSE error guard', () => {
@@ -29,5 +30,57 @@ describe('responses SSE error guard', () => {
 
     expect(result).toBeNull();
     expect(isResponsesSseAdvisoryRateLimitsBlock(block)).toBe(true);
+  });
+
+  it.each([
+    [
+      'response.completed event',
+      [
+        'event: response.completed',
+        'data: {"type":"response.completed","response":{"status":"completed"}}',
+        '',
+      ].join('\n')
+    ],
+    [
+      'response.done event',
+      [
+        'event: response.done',
+        'data: {"type":"response.done","response":{"status":"completed"}}',
+        '',
+      ].join('\n')
+    ],
+    [
+      'requires_action event',
+      [
+        'event: response.requires_action',
+        'data: {"type":"response.requires_action","response":{"status":"requires_action"}}',
+        '',
+      ].join('\n')
+    ],
+    [
+      'data-only done sentinel',
+      [
+        'data: [DONE]',
+        '',
+      ].join('\n')
+    ],
+    [
+      'data-only completed type',
+      [
+        'data: {"type":"response.completed","response":{"status":"completed"}}',
+        '',
+      ].join('\n')
+    ],
+  ])('treats %s as Responses stream terminal transport', (_name, block) => {
+    expect(isResponsesSseTerminalBlock(block)).toBe(true);
+  });
+
+  it('does not treat ordinary delta frames as terminal transport', () => {
+    const block = [
+      'data: {"type":"response.output_text.delta","delta":"hello"}',
+      '',
+    ].join('\n');
+
+    expect(isResponsesSseTerminalBlock(block)).toBe(false);
   });
 });

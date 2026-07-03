@@ -28,9 +28,9 @@ struct ProviderProtocolErrorOutput {
 fn infer_category(code: &str) -> String {
     match code {
         "TOOL_PROTOCOL_ERROR" => "TOOL_ERROR".to_string(),
-        "SERVERTOOL_TIMEOUT" | "SERVERTOOL_HANDLER_FAILED" | "RESPONSES_STORE_MISSING_REQUEST_CONTEXT" => {
-            "INTERNAL_ERROR".to_string()
-        }
+        "SERVERTOOL_TIMEOUT"
+        | "SERVERTOOL_HANDLER_FAILED"
+        | "RESPONSES_STORE_MISSING_REQUEST_CONTEXT" => "INTERNAL_ERROR".to_string(),
         "SSE_DECODE_ERROR"
         | "MALFORMED_RESPONSE"
         | "MALFORMED_REQUEST"

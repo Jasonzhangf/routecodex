@@ -9,7 +9,7 @@ import { writeRuntimeInstance, updateRuntimeInstanceStatus } from '../../utils/r
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import { detectUserConfigFormat, parseUserConfigText } from '../../config/user-config-codec.js';
-import { describeHealthProbeFailure, probeRouteCodexHealth } from '../../utils/http-health-probe.js';
+import { probeRouteCodexHealth } from '../../utils/http-health-probe.js';
 import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
@@ -49,6 +49,24 @@ function logStartNonBlocking(
   try {
     const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
     ctx.logger.warning(`[start] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
+function logStartHealthProbeNonBlocking(
+  ctx: StartCommandContext,
+  stage: string,
+  result: Awaited<ReturnType<typeof probeRouteCodexHealth>>,
+  details: Record<string, unknown> = {}
+): void {
+  if (result.ok) {
+    return;
+  }
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    const statusSuffix = typeof result.status === 'number' ? ` status=${result.status}` : '';
+    ctx.logger.warning(`[start] ${stage} probe=${result.kind}${statusSuffix}${detailSuffix}`);
   } catch {
     // Never throw from non-blocking logging.
   }
@@ -780,10 +798,9 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             }
           }
           if (lastProbe && !lastProbe.ok) {
-            logStartNonBlocking(ctx, 'child_health_probe', describeHealthProbeFailure(lastProbe), {
+            logStartHealthProbeNonBlocking(ctx, 'child_health_probe', lastProbe, {
               port: resolvedPort,
-              kind: lastProbe.kind,
-              status: lastProbe.status
+              kind: lastProbe.kind
             });
           }
           return false;

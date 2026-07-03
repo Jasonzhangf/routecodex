@@ -222,10 +222,8 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerKey: providerA,
       runtimeKey: 'runtime:A',
       providerType: 'responses',
-      providerFamily: 'openai',
-      providerId: 'tab',
       providerProtocol: 'openai-responses',
-      processIncoming: async () => { return { status: 429, data: { error: { message: 'rate limited' } } }; }
+      processIncoming: async () => ({ status: 429, data: { error: { message: 'rate limited' } } }),
     });
     attachProviderHandle(server, {
       providerKey: providerB,
@@ -363,7 +361,7 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       providerFamily: 'deep',
       providerId: 'demo-web',
       providerProtocol: 'openai-responses',
-      processIncoming: async () => { return { status: 502, data: { error: { message: 'upstream bad gateway' } } }; }
+      processIncoming: async () => ({ status: 502, data: { error: { message: 'upstream bad gateway' } } }),
     });
     attachProviderHandle(server, {
       providerKey: providerB,

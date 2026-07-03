@@ -55,7 +55,10 @@ mod tests {
                 "finalChatResponse": { "id": "prepass" }
             })),
         });
-        assert_eq!(plan.action, ServertoolEnginePrepassAction::ReturnPrepassResult);
+        assert_eq!(
+            plan.action,
+            ServertoolEnginePrepassAction::ReturnPrepassResult
+        );
         assert_eq!(
             plan.result,
             Some(serde_json::json!({
@@ -71,7 +74,10 @@ mod tests {
             has_prepass_result: false,
             prepass_result: None,
         });
-        assert_eq!(plan.action, ServertoolEnginePrepassAction::ContinueToExecution);
+        assert_eq!(
+            plan.action,
+            ServertoolEnginePrepassAction::ContinueToExecution
+        );
         assert_eq!(plan.result, None);
     }
 }

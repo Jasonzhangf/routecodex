@@ -57,7 +57,7 @@ describe('http-error-mapper 499 client-disconnect suppression', () => {
       providerKey: 'p.q.model',
     });
     expect(payloadWithoutMarker.status).toBe(400);
-    expect(payloadWithoutMarker.body.error.message).toBe('Upstream rejected the request');
+    expect(payloadWithoutMarker.body.error.message).toBe('bad params');
 
     const payload = mapErrorToHttp({
       message: 'HTTP 400: bad params',
@@ -68,6 +68,6 @@ describe('http-error-mapper 499 client-disconnect suppression', () => {
       details: { policyExhausted: true },
     });
     expect(payload.status).toBe(400);
-    expect(payload.body.error.message).toBe('Upstream rejected the request');
+    expect(payload.body.error.message).toBe('bad params');
   });
 });

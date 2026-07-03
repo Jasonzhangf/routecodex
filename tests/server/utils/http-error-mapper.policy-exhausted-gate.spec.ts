@@ -80,7 +80,7 @@ describe('http-error-mapper policy-exhausted gate', () => {
       details: { policyExhausted: true, upstreamCode: 'HTTP_400', upstreamMessage: 'model not found' },
     }));
     expect(payload.status).toBe(400);
-    expect(payload.body.error.message).toBe('Upstream rejected the request');
+    expect(payload.body.error.message).toBe('model not found');
   });
 
   it('[reverse] special_400 always projects regardless of exhaustion', () => {

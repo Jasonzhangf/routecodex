@@ -46,6 +46,28 @@ function readStatusCodeCandidate(value: unknown): number | undefined {
   return undefined;
 }
 
+function decodeJsonStringFragment(value: string): string {
+  try {
+    return JSON.parse(`"${value.replace(/"/g, '\\"')}"`) as string;
+  } catch {
+    return value.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+}
+
+function extractProviderErrorFieldFromText(text: string, field: 'message' | 'code' | 'type'): string | undefined {
+  const matches = Array.from(
+    text.matchAll(new RegExp(`['"]${field}['"]\\s*:\\s*(?:(?:"|\\\\")([^"\\\\]*(?:\\\\.[^"\\\\]*)*)(?:"|\\\\")|'([^']*)')`, 'gi'))
+  );
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const candidate = matches[index]?.[1] ?? matches[index]?.[2];
+    const normalized = typeof candidate === 'string' ? decodeJsonStringFragment(candidate).trim() : '';
+    if (normalized && normalized.toLowerCase() !== 'null') {
+      return normalized;
+    }
+  }
+  return undefined;
+}
+
 export type HubStageTopEntry = {
   stage: string;
   totalMs: number;
@@ -159,7 +181,14 @@ export function extractRetrySnapshotFromText(text: string): Partial<RetryErrorSn
     ?? (typeof parsedError?.upstream_code === 'number' ? String(parsedError.upstream_code) : undefined)
     ?? (typeof parsed?.upstreamCode === 'number' ? String(parsed.upstreamCode) : undefined)
     ?? (typeof parsed?.upstream_code === 'number' ? String(parsed.upstream_code) : undefined);
-  const reasonFromJson = readString(parsedError?.message) ?? readString(parsed?.message);
+  const jsonReason = readString(parsedError?.message) ?? readString(parsed?.message);
+  const nestedReasonFromJson = jsonReason ? extractProviderErrorFieldFromText(jsonReason, 'message') : undefined;
+  const nestedReasonFromText = extractProviderErrorFieldFromText(text, 'message');
+  const nestedCodeFromJson = jsonReason ? extractProviderErrorFieldFromText(jsonReason, 'code') : undefined;
+  const nestedCodeFromText = extractProviderErrorFieldFromText(text, 'code');
+  const nestedTypeFromJson = jsonReason ? extractProviderErrorFieldFromText(jsonReason, 'type') : undefined;
+  const nestedTypeFromText = extractProviderErrorFieldFromText(text, 'type');
+  const reasonFromJson = nestedReasonFromJson ?? nestedReasonFromText ?? jsonReason;
 
   const statusFromRegex = (() => {
     const match = text.match(/\b(?:HTTP\s+)?(\d{3})\b/i);
@@ -180,7 +209,11 @@ export function extractRetrySnapshotFromText(text: string): Partial<RetryErrorSn
     ...(typeof statusFromJson === 'number'
       ? { statusCode: statusFromJson }
       : (typeof statusFromRegex === 'number' ? { statusCode: statusFromRegex } : {})),
-    ...(errorCodeFromJson ? { errorCode: errorCodeFromJson } : (errorCodeFromRegex ? { errorCode: errorCodeFromRegex } : {})),
+    ...(errorCodeFromJson
+      ? { errorCode: errorCodeFromJson }
+      : (nestedCodeFromJson ?? nestedCodeFromText ?? nestedTypeFromJson ?? nestedTypeFromText ?? errorCodeFromRegex
+          ? { errorCode: nestedCodeFromJson ?? nestedCodeFromText ?? nestedTypeFromJson ?? nestedTypeFromText ?? errorCodeFromRegex }
+          : {})),
     ...(upstreamCodeFromJson
       ? { upstreamCode: upstreamCodeFromJson }
       : (upstreamCodeFromRegex ? { upstreamCode: upstreamCodeFromRegex } : {})),

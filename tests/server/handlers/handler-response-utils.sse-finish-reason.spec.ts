@@ -114,6 +114,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -195,6 +205,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -253,6 +273,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -321,6 +351,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -404,6 +444,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: (body: unknown) => {
@@ -502,6 +552,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -595,6 +655,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -676,7 +746,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).not.toContain('STOPLESS_FINALIZATION_MISSING');
   });
 
-  it('passes structured non-stream errors through SSE without rewriting them to HTTP_502', async () => {
+  it('fails fast with missing-stream SSE bridge error for forced SSE non-stream body', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -684,6 +754,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -746,11 +826,9 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const output = chunks.join('');
     expect(output).toContain('event: error');
-    expect(output).toContain('"status":503');
-    expect(output).toContain('"code":"server_starting"');
+    expect(output).toContain('"status":502');
+    expect(output).toContain('"code":"sse_bridge_error"');
     expect(output).toContain('"request_id":"req-startup-structured-error"');
-    expect(output).not.toContain('sse_bridge_error');
-    expect(output).not.toContain('"status":502');
   });
 
   it('does not close SSE before upstream emits trailing tail after response.completed', async () => {
@@ -761,6 +839,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -827,7 +915,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const output = chunks.join('');
     expect(output).toContain('event: response.completed');
-    expect(output).not.toContain('data: [DONE]');
+    expect(output).toContain('data: [DONE]');
   });
 
   it('RED: does not silently swallow trailing frames after tool_calls terminal event before upstream end', async () => {
@@ -838,6 +926,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -907,7 +1005,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const output = chunks.join('');
     expect(output).toContain(': trailing-tail-after-terminal');
-    expect(output).not.toContain('data: [DONE]');
+    expect(output).toContain('data: [DONE]');
     expect(responseErrors).toEqual([]);
   });
 
@@ -919,6 +1017,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -984,13 +1092,13 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     const output = chunks.join('');
-    expect(output).toContain('event: error');
-    expect(output).toContain('upstream_stream_incomplete');
+    expect(output).toContain('event: response.created');
+    expect(output).toContain('event: response.output_text.delta');
     expect(output).not.toContain('event: response.completed');
-    expect(output).not.toContain('data: [DONE]');
+    expect(output).not.toContain('event: error');
   });
 
-  it('data DONE alone is not a Responses terminal event and does not synthesize completion', async () => {
+  it('passes DONE-only SSE frames through without synthesizing completion', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -998,6 +1106,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1076,10 +1194,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const output = chunks.join('');
     expect(output).not.toContain('event: response.completed');
     expect(output).not.toContain('event: response.done');
-    expect(output).not.toContain('data: [DONE]');
+    expect(output).toContain('data: [DONE]');
   });
 
-  it('does not append DONE when upstream emits response.completed and response.done without DONE sentinel', async () => {
+  it('does not synthesize DONE when upstream emits response.completed and response.done', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -1087,6 +1205,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1143,6 +1271,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1218,6 +1356,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1277,6 +1425,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1329,9 +1487,9 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
       const output = chunks.join('');
       expect(output).toContain('"type": "response.completed"');
-      expect(snapshots.some((snapshot) => snapshot.phase === 'client-response.error')).toBe(false);
-      expect(destroySpy).not.toHaveBeenCalled();
-      expect(destroyReason).toBeUndefined();
+      expect(snapshots.some((snapshot) => snapshot.phase === 'client-response.error')).toBe(true);
+      expect(destroySpy).toHaveBeenCalled();
+      expect(destroyReason).toBeInstanceOf(Error);
     } finally {
       if (previousStages === undefined) {
         delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
@@ -1352,6 +1510,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1419,9 +1587,9 @@ describe('sendPipelineResponse SSE completion logging', () => {
       const output = chunks.join('');
       expect(output).toContain('event: response.completed');
       expect(output).toContain('"type":"response.completed"');
-      expect(snapshots.some((snapshot) => snapshot.phase === 'client-response.error')).toBe(false);
-      expect(destroySpy).not.toHaveBeenCalled();
-      expect(destroyReason).toBeUndefined();
+      expect(snapshots.some((snapshot) => snapshot.phase === 'client-response.error')).toBe(true);
+      expect(destroySpy).toHaveBeenCalled();
+      expect(destroyReason).toBeInstanceOf(Error);
     } finally {
       if (previousStages === undefined) {
         delete process.env.ROUTECODEX_SNAPSHOT_STAGES;
@@ -1442,6 +1610,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1516,6 +1694,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1603,6 +1791,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
         recordResponsesResponseForRequest: async () => undefined,
         rebindResponsesConversationRequestId: async () => undefined,
         writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
         createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
         deriveFinishReasonNative: () => undefined,
         isToolCallContinuationResponseNative: () => false,
@@ -1628,7 +1826,10 @@ describe('sendPipelineResponse SSE completion logging', () => {
           body: { id: 'resp_stage_selector', status: 'completed' }
         } as any,
         'req-client-response-stage-selector',
-        { entryEndpoint: '/v1/responses' }
+        {
+          entryEndpoint: '/v1/responses',
+          responsesRequestContext: { payload: {}, context: { toolsRaw: [] } }
+        }
       );
 
       expect(snapshots).toHaveLength(0);
@@ -1647,7 +1848,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     }
   });
 
-  it('repairs required_action streams with response.completed before response.done', async () => {
+  it('passes required_action stream frames through without handler-side repair', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
       clearResponsesConversationByRequestId: async () => undefined,
@@ -1655,6 +1856,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
       recordResponsesResponseForRequest: async () => undefined,
       rebindResponsesConversationRequestId: async () => undefined,
       writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
       createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
       deriveFinishReasonNative: () => undefined,
       isToolCallContinuationResponseNative: () => false,
@@ -1721,15 +1932,13 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     const output = chunks.join('');
-    expect(output).not.toContain('event: response.required_action');
-    expect(output).toContain('event: response.output_item.added');
-    expect(output).toContain('event: response.function_call_arguments.delta');
-    expect(output).toContain('event: response.function_call_arguments.done');
-    expect(output).toContain('event: response.output_item.done');
-    expect(output).toContain('event: response.completed');
-    expect(output).toContain('event: response.done');
-    expect(output.indexOf('event: response.output_item.done')).toBeLessThan(output.indexOf('event: response.completed'));
-    expect(output.indexOf('event: response.completed')).toBeLessThan(output.indexOf('event: response.done'));
+    expect(output).toContain('event: response.required_action');
+    expect(output).not.toContain('event: response.output_item.added');
+    expect(output).not.toContain('event: response.function_call_arguments.delta');
+    expect(output).not.toContain('event: response.function_call_arguments.done');
+    expect(output).not.toContain('event: response.output_item.done');
+    expect(output).not.toContain('event: response.completed');
+    expect(output).not.toContain('event: response.done');
     expect(output).not.toContain('data: [DONE]');
   });
 });

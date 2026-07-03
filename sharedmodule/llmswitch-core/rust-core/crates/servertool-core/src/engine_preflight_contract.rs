@@ -207,7 +207,9 @@ mod tests {
             has_synthetic_control_text: false,
             stop_signal_observed: true,
             chat: Some(serde_json::json!({ "id": "chat-continue" })),
-            stop_signal: Some(serde_json::json!({ "observed": true, "reason": "stop_schema_missing" })),
+            stop_signal: Some(
+                serde_json::json!({ "observed": true, "reason": "stop_schema_missing" }),
+            ),
             stopless_disabled_on_direct_route: Some(false),
             adapter_context: None,
         });

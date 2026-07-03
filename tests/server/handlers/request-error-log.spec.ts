@@ -201,12 +201,11 @@ describe('logRequestError diagnostics', () => {
       logRequestError('/v1/responses', 'req_401_public_summary', err);
 
       const rendered = errorSpy.mock.calls.map((call) => String(call[0] ?? '')).join('\n');
-      expect(rendered).toContain('Upstream provider error');
+      expect(rendered).toContain('Upstream authentication failed');
       expect(rendered).toContain('status=401');
       expect(rendered).toContain('code=HTTP_401');
       expect(rendered).toContain('catalogCode=401.1002');
       expect(rendered).toContain('catalogKey=INVALID_ACCESS_TOKEN');
-      expect(rendered).not.toContain('Upstream authentication failed');
       expect(rendered).not.toContain('Invalid token');
       expect(rendered).not.toContain('202606071512468498407098268d9d6mBARM7HT');
       expect(rendered).not.toContain('new_api_error');
@@ -236,13 +235,12 @@ describe('logRequestError diagnostics', () => {
       logRequestError('/v1/responses', 'req_403_public_summary', err);
 
       const rendered = errorSpy.mock.calls.map((call) => String(call[0] ?? '')).join('\n');
-      expect(rendered).toContain('Upstream provider error');
+      expect(rendered).toContain('余额和订阅额度均不足，请充值后再使用');
       expect(rendered).toContain('status=403');
       expect(rendered).toContain('code=HTTP_403');
       expect(rendered).toContain('catalogCode=429.2000');
       expect(rendered).toContain('catalogKey=INSUFFICIENT_QUOTA');
       expect(rendered).not.toContain('Upstream authentication failed');
-      expect(rendered).not.toContain('余额和订阅额度均不足');
       expect(rendered).not.toContain('permission_error');
     } finally {
       if (previousVerbose === undefined) {

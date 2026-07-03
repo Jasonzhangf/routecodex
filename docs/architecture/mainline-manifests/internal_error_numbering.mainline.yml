@@ -1,0 +1,37 @@
+lifecycle_id: internal_error_numbering.mainline
+summary: RouteCodex-owned internal debug errors are assigned stable `500-1xx/2xx/3xx` codes, projected only to debug artifacts, linked to external errors without wrapping them, and guarded from default client/provider payload leakage.
+owner_feature_id: debug.internal_error_numbering
+owner_module: src/debug/internal-error
+entrypoint:
+  node_id: IntErrNum01SourceObserved
+  wiki_page: docs/architecture/wiki/internal-error-numbering-mainline-source.md
+  call_map_chain_id: internal_error_numbering.mainline
+node_ids:
+  - IntErrNum01SourceObserved
+  - IntErrNum02ModuleBlockResolved
+  - IntErrNum03SubcodeAssigned
+  - IntErrNum04EnvelopeBuilt
+  - IntErrNum05DebugArtifactProjected
+  - IntErrNum06ExternalLinked
+  - IntErrNum07ClientBoundaryPreserved
+step_ids:
+  - ien-01
+  - ien-02
+  - ien-03
+  - ien-04
+  - ien-05
+  - ien-06
+edge_status_counts:
+  anchored: 6
+  partial: 0
+  binding_pending: 0
+  total: 6
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: internal_error_numbering.mainline
+  min_function_feature: debug.internal_error_numbering
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

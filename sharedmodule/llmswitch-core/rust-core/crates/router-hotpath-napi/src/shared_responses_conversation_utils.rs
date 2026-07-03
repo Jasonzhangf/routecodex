@@ -1,5 +1,7 @@
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
-use crate::shared_json_utils::{read_optional_bool, read_string_array_command, read_trimmed_string, read_workdir_from_args};
+use crate::shared_json_utils::{
+    read_optional_bool, read_string_array_command, read_trimmed_string, read_workdir_from_args,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -1160,7 +1162,6 @@ fn clone_array(value: Option<&Value>) -> Vec<Value> {
 fn clone_optional_array(value: Option<&Value>) -> Option<Vec<Value>> {
     value.and_then(Value::as_array).cloned()
 }
-
 
 fn stringify_responses_tool_output(value: Option<&Value>) -> String {
     match value {
@@ -2358,7 +2359,10 @@ pub fn plan_responses_handler_entry_json(
 }
 
 fn read_metadata_center_section<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
-    if let Some(center) = context.as_object().and_then(|row| row.get("__metadataCenter")) {
+    if let Some(center) = context
+        .as_object()
+        .and_then(|row| row.get("__metadataCenter"))
+    {
         if let Some(section) = center.as_object().and_then(|row| row.get(key)) {
             return Some(section);
         }
@@ -2369,7 +2373,10 @@ fn read_metadata_center_section<'a>(context: &'a Value, key: &str) -> Option<&'a
         }
     }
     let metadata = context.as_object().and_then(|row| row.get("metadata"))?;
-    if let Some(center) = metadata.as_object().and_then(|row| row.get("__metadataCenter")) {
+    if let Some(center) = metadata
+        .as_object()
+        .and_then(|row| row.get("__metadataCenter"))
+    {
         if let Some(section) = center.as_object().and_then(|row| row.get(key)) {
             return Some(section);
         }
@@ -2378,13 +2385,11 @@ fn read_metadata_center_section<'a>(context: &'a Value, key: &str) -> Option<&'a
 }
 
 fn read_request_truth_field<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
-    read_metadata_center_section(context, "requestTruth")
-        .and_then(|row| row.get(key))
+    read_metadata_center_section(context, "requestTruth").and_then(|row| row.get(key))
 }
 
 fn read_runtime_control_field<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
-    read_metadata_center_section(context, "runtimeControl")
-        .and_then(|row| row.get(key))
+    read_metadata_center_section(context, "runtimeControl").and_then(|row| row.get(key))
 }
 
 fn read_optional_object<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
@@ -2392,10 +2397,17 @@ fn read_optional_object<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 }
 
 fn read_optional_u32(value: &Value, key: &str) -> Option<u32> {
-    value.as_object()
+    value
+        .as_object()
         .and_then(|row| row.get(key))
         .and_then(Value::as_f64)
-        .and_then(|n| if n.is_finite() && n >= 0.0 { Some(n as u32) } else { None })
+        .and_then(|n| {
+            if n.is_finite() && n >= 0.0 {
+                Some(n as u32)
+            } else {
+                None
+            }
+        })
 }
 
 #[napi_derive::napi]
@@ -2410,34 +2422,61 @@ pub fn publish_responses_record_plan_json(
         .map_err(|e| napi::Error::from_reason(format!("invalid response JSON: {e}")))?;
     let context: Value = serde_json::from_str(&context_json)
         .map_err(|e| napi::Error::from_reason(format!("invalid context JSON: {e}")))?;
-    let runtime_state_write: Value = serde_json::from_str(&runtime_state_write_json)
-        .unwrap_or(Value::Null);
+    let runtime_state_write: Value =
+        serde_json::from_str(&runtime_state_write_json).unwrap_or(Value::Null);
 
-    let session_id = read_request_truth_field(&context, "sessionId")
-        .and_then(|v| read_trimmed_string(Some(v)));
+    let session_id =
+        read_request_truth_field(&context, "sessionId").and_then(|v| read_trimmed_string(Some(v)));
     let conversation_id = read_request_truth_field(&context, "conversationId")
         .and_then(|v| read_trimmed_string(Some(v)));
     let matched_port = read_request_truth_field(&context, "matchedPort")
         .and_then(|v| v.as_f64())
-        .and_then(|n| if n.is_finite() && n >= 0.0 { Some(n as u32) } else { None });
+        .and_then(|n| {
+            if n.is_finite() && n >= 0.0 {
+                Some(n as u32)
+            } else {
+                None
+            }
+        });
     let routing_policy_group = read_request_truth_field(&context, "routingPolicyGroup")
         .and_then(|v| read_trimmed_string(Some(v)));
     let route_hint = read_runtime_control_field(&context, "routeHint")
         .and_then(|v| read_trimmed_string(Some(v)));
+    let response_request_id = response
+        .as_object()
+        .and_then(|row| row.get("request_id"))
+        .and_then(|v| read_trimmed_string(Some(v)));
+    let entry_request_id = response_request_id
+        .or_else(|| {
+            read_request_truth_field(&context, "requestId")
+                .and_then(|v| read_trimmed_string(Some(v)))
+        })
+        .or_else(|| {
+            read_request_truth_field(&context, "entryRequestId")
+                .and_then(|v| read_trimmed_string(Some(v)))
+        })
+        .or_else(|| {
+            read_request_truth_field(&context, "originalRequestId")
+                .and_then(|v| read_trimmed_string(Some(v)))
+        })
+        .unwrap_or_else(|| request_id.clone());
 
     let usage = read_optional_object(&runtime_state_write, "usage");
     let provider_key = usage
         .and_then(|row| row.get("providerKey"))
         .and_then(|v| read_trimmed_string(Some(v)));
-    let keep_for_submit_tool_outputs = read_optional_bool(read_optional_object(&runtime_state_write, "keepForSubmitToolOutputs"));
+    let keep_for_submit_tool_outputs = read_optional_bool(read_optional_object(
+        &runtime_state_write,
+        "keepForSubmitToolOutputs",
+    ));
 
-    let should_record = entry_endpoint == "/v1/responses"
-        || entry_endpoint == "/v1/responses.submit_tool_outputs";
+    let should_record =
+        entry_endpoint == "/v1/responses" || entry_endpoint == "/v1/responses.submit_tool_outputs";
     let has_scope = session_id.is_some() || conversation_id.is_some();
 
     let record_args = if should_record && has_scope {
         serde_json::json!({
-            "requestId": request_id,
+            "requestId": entry_request_id,
             "response": response,
             "sessionId": session_id.clone().unwrap_or_default(),
             "conversationId": conversation_id.clone().unwrap_or_default(),
@@ -2455,7 +2494,7 @@ pub fn publish_responses_record_plan_json(
 
     let finalize_args = if should_record && has_scope {
         serde_json::json!({
-            "requestId": request_id,
+            "requestId": entry_request_id,
             "keepForSubmitToolOutputs": keep_for_submit_tool_outputs.unwrap_or(false),
         })
     } else {
@@ -2486,6 +2525,7 @@ mod tests {
     use super::{
         build_stop_hook_guidance_text_from_output, convert_responses_output_to_input_items,
         materialize_responses_continuation_payload, plan_responses_handler_entry,
+        publish_responses_record_plan_json,
         prepare_responses_conversation_entry, restore_responses_continuation_payload,
         resume_responses_conversation_payload,
     };
@@ -2508,6 +2548,101 @@ mod tests {
 
         assert_eq!(planned["mode"], json!("scope_materialize"));
         assert_eq!(planned["payload"]["input"][0]["call_id"], json!("call_1"));
+    }
+
+    #[test]
+    fn publish_responses_record_plan_uses_request_truth_request_id() {
+        let planned: Value = serde_json::from_str(
+            &publish_responses_record_plan_json(
+                "openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103"
+                    .to_string(),
+                serde_json::to_string(&json!({
+                    "id": "resp_record_truth_1",
+                    "object": "response",
+                    "status": "completed",
+                    "output": []
+                }))
+                .unwrap(),
+                serde_json::to_string(&json!({
+                    "requestTruth": {
+                        "requestId": "openai-responses-router-gpt-5.5-20260703T120957051-453706-103",
+                        "sessionId": "sess_record_truth",
+                        "conversationId": "conv_record_truth",
+                        "matchedPort": 5555,
+                        "routingPolicyGroup": "gateway-priority-5555"
+                    },
+                    "runtimeControl": {
+                        "routeHint": "thinking"
+                    }
+                }))
+                .unwrap(),
+                serde_json::to_string(&json!({
+                    "usage": {
+                        "providerKey": "orangeai.key1.glm-5.2"
+                    },
+                    "keepForSubmitToolOutputs": true
+                }))
+                .unwrap(),
+                "/v1/responses".to_string(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            planned["recordArgs"]["requestId"],
+            json!("openai-responses-router-gpt-5.5-20260703T120957051-453706-103")
+        );
+        assert_eq!(
+            planned["finalizeArgs"]["requestId"],
+            json!("openai-responses-router-gpt-5.5-20260703T120957051-453706-103")
+        );
+        assert_eq!(planned["recordArgs"]["matchedPort"], json!(5555));
+        assert_eq!(
+            planned["recordArgs"]["routingPolicyGroup"],
+            json!("gateway-priority-5555")
+        );
+    }
+
+    #[test]
+    fn publish_responses_record_plan_prefers_response_request_id_over_rebound_provider_id() {
+        let planned: Value = serde_json::from_str(
+            &publish_responses_record_plan_json(
+                "openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103"
+                    .to_string(),
+                serde_json::to_string(&json!({
+                    "id": "resp_record_truth_2",
+                    "object": "response",
+                    "request_id": "openai-responses-router-gpt-5.5-20260703T120957051-453706-103",
+                    "status": "completed",
+                    "output": []
+                }))
+                .unwrap(),
+                serde_json::to_string(&json!({
+                    "requestTruth": {
+                        "requestId": "openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103",
+                        "sessionId": "sess_record_truth",
+                        "conversationId": "conv_record_truth"
+                    },
+                    "runtimeControl": {}
+                }))
+                .unwrap(),
+                serde_json::to_string(&json!({}))
+                    .unwrap(),
+                "/v1/responses".to_string(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            planned["recordArgs"]["requestId"],
+            json!("openai-responses-router-gpt-5.5-20260703T120957051-453706-103")
+        );
+        assert_eq!(
+            planned["finalizeArgs"]["requestId"],
+            json!("openai-responses-router-gpt-5.5-20260703T120957051-453706-103")
+        );
     }
 
     #[test]

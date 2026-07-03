@@ -1167,7 +1167,10 @@ mod tests {
                 .expect("responses payload");
 
         assert_eq!(result["status"], "requires_action");
-        assert_eq!(result["output_text"], "阶段完成：已定位 stopless 投影问题。");
+        assert_eq!(
+            result["output_text"],
+            "阶段完成：已定位 stopless 投影问题。"
+        );
         assert_eq!(result["output"][0]["type"], "message");
         assert_eq!(result["output"][0]["content"][0]["type"], "output_text");
         assert_eq!(
@@ -1175,22 +1178,18 @@ mod tests {
             "阶段完成：已定位 stopless 投影问题。"
         );
         assert_eq!(result["output"][1]["type"], "function_call");
-        assert!(
-            !result["output"]
-                .as_array()
-                .unwrap_or(&Vec::new())
-                .iter()
-                .any(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
-        );
-        assert!(
-            !result["output"]
-                .as_array()
-                .unwrap_or(&Vec::new())
-                .iter()
-                .any(|item| {
-                    item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                })
-        );
+        assert!(!result["output"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .any(|item| item.get("type").and_then(Value::as_str) == Some("reasoning")));
+        assert!(!result["output"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("function_call_output")
+            }));
     }
 
     #[test]

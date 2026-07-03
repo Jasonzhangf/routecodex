@@ -2345,7 +2345,6 @@ pub fn build_responses_sse_event_sequence_json(input_json: String) -> Result<Str
     })
 }
 
-
 /// Build full Responses SSE stream (events + stats) for the converter shell.
 pub fn build_responses_sse_stream_json(input_json: String) -> Result<String, String> {
     let events_json = build_responses_sse_event_sequence_json(input_json.clone())?;
@@ -2358,7 +2357,8 @@ pub fn build_responses_sse_stream_json(input_json: String) -> Result<String, Str
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let mut event_types: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut event_types: std::collections::BTreeMap<String, i64> =
+        std::collections::BTreeMap::new();
     let mut error_count: i64 = 0;
     for event in &events {
         let event_type = event
@@ -2388,9 +2388,8 @@ pub fn build_responses_sse_stream_json(input_json: String) -> Result<String, Str
         "events": events,
         "stats": stats,
     });
-    serde_json::to_string(&output).map_err(|error| {
-        format!("Failed to serialize Responses SSE stream JSON: {}", error)
-    })
+    serde_json::to_string(&output)
+        .map_err(|error| format!("Failed to serialize Responses SSE stream JSON: {}", error))
 }
 
 #[cfg(test)]

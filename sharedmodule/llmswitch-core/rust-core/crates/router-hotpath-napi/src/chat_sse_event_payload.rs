@@ -1299,7 +1299,6 @@ pub fn build_chat_json_from_sse_json(input_json: String) -> Result<String, Strin
     })
 }
 
-
 /// Build the full Chat SSE event stream (events + stats) for the converter shell.
 pub fn build_chat_sse_stream_json(input_json: String) -> Result<String, String> {
     let events_json = build_chat_sse_event_sequence_json(input_json.clone())?;
@@ -1311,7 +1310,8 @@ pub fn build_chat_sse_stream_json(input_json: String) -> Result<String, String> 
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let mut event_types: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut event_types: std::collections::BTreeMap<String, i64> =
+        std::collections::BTreeMap::new();
     let mut error_count: i64 = 0;
     for event in &events {
         let event_type = event
@@ -1331,10 +1331,7 @@ pub fn build_chat_sse_stream_json(input_json: String) -> Result<String, String> 
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let created = response
-        .get("created")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
+    let created = response.get("created").and_then(Value::as_i64).unwrap_or(0);
     let model = response
         .get("model")
         .and_then(Value::as_str)
@@ -1355,9 +1352,8 @@ pub fn build_chat_sse_stream_json(input_json: String) -> Result<String, String> 
         "events": events,
         "stats": stats,
     });
-    serde_json::to_string(&output).map_err(|error| {
-        format!("Failed to serialize Chat SSE stream JSON: {}", error)
-    })
+    serde_json::to_string(&output)
+        .map_err(|error| format!("Failed to serialize Chat SSE stream JSON: {}", error))
 }
 
 fn chrono_or_now() -> i64 {

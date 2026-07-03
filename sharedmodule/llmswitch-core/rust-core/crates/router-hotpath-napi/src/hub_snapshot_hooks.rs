@@ -21,6 +21,8 @@ const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS: usize = 50;
 const DEFAULT_ERRORSAMPLE_KEEP_RECENT_FILES: usize = 50;
 const SNAPSHOT_DROP_LOG_THROTTLE_MS: i64 = 5_000;
 const PAYLOAD_CONTRACT_ERRORSAMPLE_STAGE_PREFIX: &str = "errorsample.payload_contract_error.";
+const SNAPSHOT_PROVIDER_REQUEST_BODY_DISABLED: &str =
+    "[hub_snapshot_hooks] provider-request body snapshots are disabled";
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -1022,7 +1024,7 @@ fn write_snapshot_file(
     if is_disabled_provider_request_body_snapshot(options.stage.as_str()) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "[hub_snapshot_hooks] provider-request body snapshots are disabled",
+            SNAPSHOT_PROVIDER_REQUEST_BODY_DISABLED,
         ));
     }
     let root = root_override
@@ -1068,9 +1070,10 @@ fn write_snapshot_file(
     let meta_payload =
         build_runtime_metadata_payload(&options, group_request_token.as_str(), entry_port);
     if let Err(e) = upsert_runtime_metadata_file(&meta_path, &meta_payload) {
+        let kind = e.kind();
         eprintln!(
-            "[hub_snapshot_hooks] Failed to write runtime metadata {:?}: {}",
-            meta_path, e
+            "[hub_snapshot_hooks] runtime metadata write skipped path={:?} kind={:?}",
+            meta_path, kind
         );
     }
 
@@ -1106,6 +1109,11 @@ fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
         return;
     }
     if let Err(e) = write_snapshot_file(&normal, None) {
+        if e.kind() == std::io::ErrorKind::InvalidInput
+            && e.to_string() == SNAPSHOT_PROVIDER_REQUEST_BODY_DISABLED
+        {
+            return;
+        }
         eprintln!(
             "[hub_snapshot_hooks] Failed to write snapshot for stage {}: {}",
             normal.stage, e
@@ -1808,17 +1816,33 @@ mod tests {
         let result = normalize_snapshot_stage_payload_json(stage, input.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         let obj = parsed.as_object().unwrap();
-        assert!(obj.contains_key("messages"), "chat envelope should keep messages: {:?}", obj);
-        assert!(obj.contains_key("meta"), "chat envelope should produce meta snapshot");
+        assert!(
+            obj.contains_key("messages"),
+            "chat envelope should keep messages: {:?}",
+            obj
+        );
+        assert!(
+            obj.contains_key("meta"),
+            "chat envelope should produce meta snapshot"
+        );
         assert_eq!(obj["messages"][0]["content"], "hello");
         // Ensure model/stream were filtered out by normalization
-        assert!(!obj.contains_key("model"), "model should be filtered: {:?}", obj);
-        assert!(!obj.contains_key("stream"), "stream should be filtered: {:?}", obj);
+        assert!(
+            !obj.contains_key("model"),
+            "model should be filtered: {:?}",
+            obj
+        );
+        assert!(
+            !obj.contains_key("stream"),
+            "stream should be filtered: {:?}",
+            obj
+        );
     }
 
     #[test]
     fn normalize_snapshot_stage_payload_json_echo_req_inbound_non_chat_envelope_passthrough() {
-        let input = r#"{"model":"gpt-4","messages":[{"role":"user","content":"hello"}],"stream":true}"#;
+        let input =
+            r#"{"model":"gpt-4","messages":[{"role":"user","content":"hello"}],"stream":true}"#;
         let stage = "req_inbound_stage2_semantic_map".to_string();
         let result = normalize_snapshot_stage_payload_json(stage, input.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
@@ -1870,9 +1894,12 @@ mod tests {
             "runtimeMetadata": {"foo": "bar"}
         }"#;
         let result = write_snapshot_via_hooks_json(input.to_string());
-        assert!(result.is_ok(), "write_snapshot_via_hooks_json should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "write_snapshot_via_hooks_json should succeed: {:?}",
+            result.err()
+        );
         let parsed: bool = serde_json::from_str(&result.unwrap()).unwrap();
         assert!(parsed, "should return true");
     }
-
 }

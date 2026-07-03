@@ -163,7 +163,10 @@ pub fn plan_servertool_response_stage_runtime_action(
                 "action": "return_auto_hook_result",
                 "result": auto_hook_result.clone()
             })),
-            prepass_result: Some(build_prepass_return_result(&input, auto_hook_result.clone())),
+            prepass_result: Some(build_prepass_return_result(
+                &input,
+                auto_hook_result.clone(),
+            )),
             finalize_result: Some(auto_hook_result),
             skip_reason: None,
         };

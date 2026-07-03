@@ -95,11 +95,24 @@ export function buildResponsesSseIncompleteError(message = 'stream closed before
   return error;
 }
 
-export function isResponsesSseCompletedBlock(block: string): boolean {
+export function isResponsesSseTerminalBlock(block: string): boolean {
   const parsed = parseResponsesSseFrame(block);
   const type = pickString(parsed.data?.type);
+  if (!parsed.data && parsed.eventName === undefined && block
+    .split(/\r?\n/)
+    .some((line) => line.trim() === 'data: [DONE]')) {
+    return true;
+  }
   return parsed.eventName === 'response.completed'
-    || type === 'response.completed';
+    || parsed.eventName === 'response.done'
+    || parsed.eventName === 'response.requires_action'
+    || type === 'response.completed'
+    || type === 'response.done'
+    || type === 'response.requires_action';
+}
+
+export function isResponsesSseCompletedBlock(block: string): boolean {
+  return isResponsesSseTerminalBlock(block);
 }
 
 export function inspectResponsesSseBlockForProviderRateLimit(block: string): { code?: string; message: string } | null {

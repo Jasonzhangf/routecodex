@@ -24,4 +24,23 @@ describe('request-executor retry snapshot guard', () => {
       warnSpy.mockRestore();
     }
   });
+
+  it('extracts nested upstream 400 message and code from wrapped provider error text', () => {
+    const upstreamReason = "400: {'upstream_status': 400, 'upstream_request_id': '61d6fab5-e187-4a17-8c03-508042424fbd', 'error': {'error': {'message': \"Missing required parameter: 'input[2].content[0].text'.\", 'type': 'invalid_request_error', 'param': 'input[2].content[0].text', 'code': 'missing_required_parameter'}}}";
+    const snapshot = __requestExecutorTestables.extractRetryErrorSnapshot({
+      statusCode: 400,
+      message: `HTTP 400: ${JSON.stringify({
+        error: {
+          code: null,
+          message: upstreamReason,
+          param: null,
+          type: 'server_error'
+        }
+      })}`
+    });
+
+    expect(snapshot.statusCode).toBe(400);
+    expect(snapshot.errorCode).toBe('missing_required_parameter');
+    expect(snapshot.reason).toBe("Missing required parameter: 'input[2].content[0].text'.");
+  });
 });

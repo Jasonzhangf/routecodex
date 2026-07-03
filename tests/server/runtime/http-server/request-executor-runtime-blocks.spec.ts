@@ -122,6 +122,36 @@ describe('request-executor-runtime-blocks', () => {
     }
   });
 
+  test('prints compact upstream reason for structured HTTP 400 provider switches', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      logProviderRetrySwitchCompact({
+        requestId: 'openai-responses-router-gpt-5.4-20260703T123937204-453972-369',
+        attempt: 1,
+        maxAttempts: 6,
+        nextAttempt: 2,
+        providerKey: 'asxs.crsa.gpt-5.5',
+        reason: "Missing required parameter: 'input[2].content[0].text'.",
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'exclude_and_reroute',
+        retryExecutionPolicyReason: 'existing_exclusion',
+        stage: 'provider.send',
+        statusCode: 400,
+        errorCode: 'missing_required_parameter',
+        providerSwitchLogState: new Map(),
+        throttleMs: 5000
+      });
+
+      const line = warnSpy.mock.calls.map((call) => String(call[0] ?? '')).find((value) => value.includes('[provider-switch]'));
+      expect(line).toContain('status=400');
+      expect(line).toContain('code=missing_required_parameter');
+      expect(line).toContain('reason="Missing required parameter:');
+      expect(line).toContain('input[2].content[0].text');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test('does not bypass provider response conversion for chat.completion business-error bodies', () => {
     expect(shouldBypassProviderResponseConversion({
       status: 200,
