@@ -2,7 +2,7 @@
 
 import { parseToolArgsJson } from './args-json.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
-import { validateApplyPatchArgumentsWithNative } from '../native/router-hotpath/native-chat-process-governance-semantics.js';
+import { validateApplyPatchArgumentsNative } from '../../../../src/modules/llmswitch/bridge/native-exports.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -175,7 +175,7 @@ export function validateToolCall(
           : typeof argsString === 'string'
             ? argsString
             : rawArgsAny;
-      const validation = validateApplyPatchArgumentsWithNative(applyPatchArgsSource);
+      const validation = validateApplyPatchArgumentsNative(applyPatchArgsSource);
       if (!validation.ok) {
         return {
           ok: false,

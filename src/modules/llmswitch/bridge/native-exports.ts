@@ -1041,6 +1041,20 @@ export function detectRetryableEmptyAssistantResponseNative(
   return parsed === null ? null : (parsed as { reason: string; marker: string });
 }
 
+
+export function validateApplyPatchArgumentsNative(applyPatchArgsSource: unknown): {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  normalizedArguments?: unknown;
+} {
+  const fn = getRouterHotpathJsonBindingSync().validateApplyPatchArgumentsJson as
+    ((argsJson: string) => string) | undefined;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] validateApplyPatchArgumentsJson not available');
+  }
+  return JSON.parse(fn(JSON.stringify(applyPatchArgsSource ?? null)));
+}
 export function classifyEmptyResponseSignalNative(
   stage: string,
   body: unknown

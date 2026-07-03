@@ -618,6 +618,14 @@ export function detectRetryableEmptyAssistantResponseNative(body, requestSemanti
     return parsed === null ? null : parsed;
 }
 
+
+export function validateApplyPatchArgumentsNative(applyPatchArgsSource) {
+    const fn = getRouterHotpathJsonBindingSync().validateApplyPatchArgumentsJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] validateApplyPatchArgumentsJson not available');
+    }
+    return JSON.parse(fn(JSON.stringify(applyPatchArgsSource ?? null)));
+}
 export function classifyEmptyResponseSignalNative(stage, body) {
     const fn = getChatProcessNodeResultSemantics().classifyEmptyResponseSignalJson;
     if (typeof fn !== 'function') {
