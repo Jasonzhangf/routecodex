@@ -589,6 +589,52 @@ export function isEmptyClientResponsePayloadNative(body) {
     }
     return Boolean(fn(JSON.stringify(body ?? null)));
 }
+
+export function hasRequestedToolsInSemanticsNative(requestSemantics) {
+    const fn = getChatProcessNodeResultSemantics().hasRequestedToolsInSemanticsJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] hasRequestedToolsInSemanticsJson not available');
+    }
+    return Boolean(fn(JSON.stringify(requestSemantics ?? null)));
+}
+
+export function isRequiredToolCallTurnNative(requestSemantics) {
+    const fn = getChatProcessNodeResultSemantics().isRequiredToolCallTurnJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] isRequiredToolCallTurnJson not available');
+    }
+    return Boolean(fn(JSON.stringify(requestSemantics ?? null)));
+}
+
+export function isToolResultFollowupTurnNative(requestSemantics) {
+    const fn = getChatProcessNodeResultSemantics().isToolResultFollowupTurnJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] isToolResultFollowupTurnJson not available');
+    }
+    return Boolean(fn(JSON.stringify(requestSemantics ?? null)));
+}
+
+export function isProviderNativeResumeContinuationNative(requestSemantics) {
+    const fn = getChatProcessNodeResultSemantics().isProviderNativeResumeContinuationJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] isProviderNativeResumeContinuationJson not available');
+    }
+    return Boolean(fn(JSON.stringify(requestSemantics ?? null)));
+}
+
+export function detectRetryableEmptyAssistantResponseNative(body, requestSemantics) {
+    const fn = getChatProcessNodeResultSemantics().detectRetryableEmptyAssistantResponseJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] detectRetryableEmptyAssistantResponseJson not available');
+    }
+    const raw = fn(JSON.stringify(body ?? null), JSON.stringify(requestSemantics ?? null));
+    if (!raw) {
+        return null;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed === null ? null : parsed;
+}
+
 export function classifyEmptyResponseSignalNative(stage, body) {
     const fn = getChatProcessNodeResultSemantics().classifyEmptyResponseSignalJson;
     if (typeof fn !== 'function') {

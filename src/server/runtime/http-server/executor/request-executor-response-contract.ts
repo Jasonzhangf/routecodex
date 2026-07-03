@@ -1,20 +1,8 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
-import { importCoreDist } from '../../../../modules/llmswitch/bridge/module-loader.js';
+import { detectRetryableEmptyAssistantResponseNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
 
-type NativeChatProcessNodeResultSemanticsModule = {
-  detectRetryableEmptyAssistantResponseWithNative?: (body: unknown, requestSemantics?: Record<string, unknown>) => PayloadContractSignal | null;
-};
 
-let cachedNativeSemanticsPromise: Promise<NativeChatProcessNodeResultSemanticsModule> | null = null;
 
-async function getNativeSemantics(): Promise<NativeChatProcessNodeResultSemanticsModule> {
-  if (!cachedNativeSemanticsPromise) {
-    cachedNativeSemanticsPromise = importCoreDist<NativeChatProcessNodeResultSemanticsModule>(
-      'native/router-hotpath/native-chat-process-node-result-semantics'
-    );
-  }
-  return cachedNativeSemanticsPromise;
-}
 
 type ProviderSnapshotWriteArgs = {
   phase:
@@ -102,9 +90,7 @@ export async function detectRetryableEmptyAssistantResponse(
   if (bodyHasVisibleAssistantPayload(body)) {
     return null;
   }
-  const fn = (await getNativeSemantics()).detectRetryableEmptyAssistantResponseWithNative;
-  if (typeof fn !== 'function') throw new Error('[response-contract] detectRetryableEmptyAssistantResponseWithNative unavailable');
-  return fn(body, requestSemantics);
+  return detectRetryableEmptyAssistantResponseNative(body, requestSemantics);
 }
 
 function valueHasNonEmptyPayloadContent(value: unknown): boolean {

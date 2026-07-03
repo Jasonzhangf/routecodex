@@ -62,6 +62,11 @@ type NativeSharedConversionSemantics = {
 
 type NativeChatProcessNodeResultSemantics = {
   deriveFinishReasonJson?: (bodyJson: string) => string;
+  hasRequestedToolsInSemanticsJson?: (requestSemanticsJson: string) => boolean;
+  isRequiredToolCallTurnJson?: (requestSemanticsJson: string) => boolean;
+  isToolResultFollowupTurnJson?: (requestSemanticsJson: string) => boolean;
+  isProviderNativeResumeContinuationJson?: (requestSemanticsJson: string) => boolean;
+  detectRetryableEmptyAssistantResponseJson?: (bodyJson: string, requestSemanticsJson: string) => string;
   isToolCallContinuationResponseJson?: (bodyJson: string) => boolean;
   isEmptyClientResponsePayloadJson?: (bodyJson: string) => boolean;
   classifyEmptyResponseSignalJson?: (stage: string, bodyJson: string) => string;
@@ -1001,6 +1006,55 @@ export function isEmptyClientResponsePayloadNative(body: unknown): boolean {
     throw new Error('[llmswitch-bridge] isEmptyClientResponsePayloadJson not available');
   }
   return Boolean(fn(JSON.stringify(body ?? null)));
+}
+
+
+export function hasRequestedToolsInSemanticsNative(requestSemantics?: Record<string, unknown>): boolean {
+  const fn = getChatProcessNodeResultSemantics().hasRequestedToolsInSemanticsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] hasRequestedToolsInSemanticsJson not available');
+  }
+  return Boolean(fn(JSON.stringify(requestSemantics ?? null)));
+}
+
+export function isRequiredToolCallTurnNative(requestSemantics?: Record<string, unknown>): boolean {
+  const fn = getChatProcessNodeResultSemantics().isRequiredToolCallTurnJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] isRequiredToolCallTurnJson not available');
+  }
+  return Boolean(fn(JSON.stringify(requestSemantics ?? null)));
+}
+
+export function isToolResultFollowupTurnNative(requestSemantics?: Record<string, unknown>): boolean {
+  const fn = getChatProcessNodeResultSemantics().isToolResultFollowupTurnJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] isToolResultFollowupTurnJson not available');
+  }
+  return Boolean(fn(JSON.stringify(requestSemantics ?? null)));
+}
+
+export function isProviderNativeResumeContinuationNative(requestSemantics?: Record<string, unknown>): boolean {
+  const fn = getChatProcessNodeResultSemantics().isProviderNativeResumeContinuationJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] isProviderNativeResumeContinuationJson not available');
+  }
+  return Boolean(fn(JSON.stringify(requestSemantics ?? null)));
+}
+
+export function detectRetryableEmptyAssistantResponseNative(
+  body: unknown,
+  requestSemantics?: Record<string, unknown>
+): { reason: string; marker: string } | null {
+  const fn = getChatProcessNodeResultSemantics().detectRetryableEmptyAssistantResponseJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] detectRetryableEmptyAssistantResponseJson not available');
+  }
+  const raw = fn(JSON.stringify(body ?? null), JSON.stringify(requestSemantics ?? null));
+  if (!raw) {
+    return null;
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  return parsed === null ? null : (parsed as { reason: string; marker: string });
 }
 
 export function classifyEmptyResponseSignalNative(
