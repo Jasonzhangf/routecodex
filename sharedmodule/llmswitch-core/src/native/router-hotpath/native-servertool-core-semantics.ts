@@ -5213,6 +5213,32 @@ export function buildServertoolPostflightObservationSummaryWithNative(input: {
   return parsed as Record<string, unknown>;
 }
 
+export function resolveServertoolEngineMatchHitWithNative(input: {
+  execution: unknown;
+}): { flowId: string } {
+  const capability = 'resolveServertoolEngineMatchHitJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native unavailable`);
+  }
+  const raw = fn(JSON.stringify(input));
+  if (typeof raw !== 'string') {
+    if (raw && typeof raw === 'object' && typeof (raw as { message?: unknown }).message === 'string') {
+      throw new Error((raw as { message: string }).message);
+    }
+    throw new Error(`${capability} native returned non-string: ${typeof raw}`);
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid match hit output`);
+  }
+  const flowId = (parsed as Record<string, unknown>).flowId;
+  if (typeof flowId !== 'string' || flowId.length === 0) {
+    throw new Error(`${capability} native returned invalid flowId`);
+  }
+  return { flowId };
+}
+
 export function createServertoolExecutionLoopStateWithNative(): NativeServertoolExecutionLoopState {
   const capability = 'createServertoolExecutionLoopStateJson';
   const fn = readNativeFunction(capability);

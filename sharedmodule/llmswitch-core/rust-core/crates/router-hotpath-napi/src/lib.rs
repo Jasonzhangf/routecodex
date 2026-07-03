@@ -1651,6 +1651,12 @@ pub fn build_servertool_postflight_observation_summary_json(
 }
 
 #[napi]
+pub fn resolve_servertool_engine_match_hit_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::resolve_servertool_engine_match_hit_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_handler_materialization_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_handler_materialization_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))

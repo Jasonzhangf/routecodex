@@ -2,6 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import type { ServerToolExecution } from './types.js';
 import { appendServertoolMatchSkippedProgressEvent } from './progress-log-block.js';
+import { resolveServertoolEngineMatchHitWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export function recordServertoolEngineMatchSkipped(args: {
   requestId: string;
@@ -29,10 +30,9 @@ export function recordServertoolEngineMatchHit(args: {
   execution: ServerToolExecution;
   stageRecorder?: StageRecorder;
 }): string {
-  const flowId = args.execution.flowId;
-  if (typeof flowId !== 'string' || !flowId.trim()) {
-    throw new Error('Servertool match hit requires execution.flowId');
-  }
+  const { flowId } = resolveServertoolEngineMatchHitWithNative({
+    execution: args.execution
+  });
   args.stageRecorder?.record('servertool.match', {
     matched: true,
     flowId,

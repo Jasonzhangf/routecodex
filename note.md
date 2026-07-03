@@ -24702,3 +24702,11 @@ Complete SSE rustification status (34 TS files):
 - Rust owner already existed in `hub_pipeline_lib::effect_plan`: `projectMetadataWritePlanToRuntimeControlWritePlanJson` owns learnedNote/null filtering and empty projection -> null.
 - Gate: `engine-observation-shell.spec.ts` and `servertool-active-orchestration-audit.spec.ts` forbid the old TS projector call and `Object.keys(runtimeControl).length`, and require the write-plan native wrapper.
 - Evidence: focused Jest `engine-observation-shell + servertool-active-orchestration-audit` PASS 54/54; `verify:servertool-rust-only` PASS; sharedmodule `tsc` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `verify:architecture-review-surface-light` PASS; scoped `git diff --check` PASS.
+
+# 2026-07-03: servertool match-hit flowId validation moved to Rust
+
+- Slice: `engine-observation-shell.ts` no longer reads `args.execution.flowId` or trims/validates it in TS. TS now calls `resolveServertoolEngineMatchHitWithNative()` and only records the stageRecorder event.
+- Rust owner: `servertool_core_blocks.rs` exports `resolveServertoolEngineMatchHitJson`; Rust trims valid flow ids and fail-fast errors with `Servertool match hit requires execution.flowId` when missing/blank.
+- Gate: `engine-observation-shell.spec.ts` and `verify-servertool-rust-only.mjs` forbid local `const flowId = args.execution.flowId` / `flowId.trim()` in the TS observation shell and require the native resolver.
+- Evidence: Rust test `resolves_servertool_engine_match_hit_flow_id` PASS; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; focused Jest `engine-observation-shell` PASS 9/9; direct native binding check for `resolveServertoolEngineMatchHitJson` PASS; `verify:servertool-rust-only` PASS; `verify:architecture-mainline-call-map` PASS; `verify:architecture-review-surface-light` PASS; scoped `git diff --check` PASS.
+- Current unrelated blockers: `verify:function-map-compile-gate` fails on missing `sse.event_type_validation` source anchor from unrelated SSE dirty work; sharedmodule `tsc` fails on unrelated dirty `hub-pipeline.ts` SSE converter options and `provider-response.ts` `sseCodec` declaration order.

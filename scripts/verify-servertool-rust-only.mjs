@@ -7063,6 +7063,21 @@ function checkServertoolMatchLoggingFailFast() {
       'engine-observation-shell.ts must not fallback missing execution.flowId to unknown'
     );
   }
+  if (
+    observationShellSource.includes('const flowId = args.execution.flowId') ||
+    observationShellSource.includes('flowId.trim()')
+  ) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'engine-observation-shell.ts must delegate match-hit flowId validation to native'
+    );
+  }
+  if (!observationShellSource.includes('resolveServertoolEngineMatchHitWithNative({')) {
+    fail(
+      'servertool-match-log-fail-fast',
+      'engine-observation-shell.ts must call native match-hit flowId resolver'
+    );
+  }
   if (observationShellSource.includes("args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution'")) {
     fail(
       'servertool-match-log-fail-fast',

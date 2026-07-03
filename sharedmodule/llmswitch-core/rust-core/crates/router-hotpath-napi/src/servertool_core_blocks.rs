@@ -712,6 +712,20 @@ pub fn build_servertool_postflight_observation_summary_json(
         .map_err(|e| format!("serialize servertool postflight observation summary: {e}"))
 }
 
+pub fn resolve_servertool_engine_match_hit_json(input_json: &str) -> Result<String, String> {
+    let input: serde_json::Value = serde_json::from_str(input_json)
+        .map_err(|e| format!("deserialize servertool engine match hit input: {e}"))?;
+    let flow_id = input
+        .get("execution")
+        .and_then(|execution| execution.get("flowId"))
+        .and_then(|flow_id| flow_id.as_str())
+        .map(str::trim)
+        .filter(|flow_id| !flow_id.is_empty())
+        .ok_or_else(|| "Servertool match hit requires execution.flowId".to_string())?;
+    serde_json::to_string(&serde_json::json!({ "flowId": flow_id }))
+        .map_err(|e| format!("serialize servertool engine match hit output: {e}"))
+}
+
 pub fn plan_servertool_handler_materialization_json(input_json: &str) -> Result<String, String> {
     let input: execution_handler_contract::ServertoolHandlerMaterializationInput =
         serde_json::from_str(input_json)
@@ -2633,6 +2647,30 @@ fn builds_servertool_postflight_observation_summary_via_servertool_core_bridge()
         parsed["followup"]["injectionOps"],
         serde_json::json!(["append"])
     );
+}
+
+#[test]
+fn resolves_servertool_engine_match_hit_flow_id_via_native_bridge() {
+    let output = resolve_servertool_engine_match_hit_json(
+        &serde_json::json!({
+            "execution": {
+                "flowId": " flow_match_hit "
+            }
+        })
+        .to_string(),
+    )
+    .expect("match hit output");
+    let parsed: serde_json::Value = serde_json::from_str(&output).expect("parse match hit output");
+    assert_eq!(parsed["flowId"], serde_json::json!("flow_match_hit"));
+
+    let error = resolve_servertool_engine_match_hit_json(
+        &serde_json::json!({
+            "execution": {}
+        })
+        .to_string(),
+    )
+    .expect_err("missing flow id must fail");
+    assert_eq!(error, "Servertool match hit requires execution.flowId");
 }
 
 #[test]

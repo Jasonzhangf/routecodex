@@ -48,6 +48,9 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('[servertool][non-blocking]');
     expect(source).not.toContain('export function createServertoolObservation(');
     expect(source).not.toContain('createServertoolProgressLogger({');
+    expect(source).toContain('resolveServertoolEngineMatchHitWithNative({');
+    expect(source).not.toContain('const flowId = args.execution.flowId');
+    expect(source).not.toContain('flowId.trim()');
     expect(source).toContain('appendServertoolMatchSkippedProgressEvent({');
     expect(source).not.toContain('appendServerToolProgressFileEvent({');
     expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
