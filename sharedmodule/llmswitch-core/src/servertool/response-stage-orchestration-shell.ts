@@ -10,6 +10,7 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   materializeServertoolResponseStageOrchestrationOutputWithNative,
+  extractServertoolResponseStageOrchestrationShellResultWithNative,
   resolveServertoolResponseStageOrchestrationGateDecisionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
@@ -96,5 +97,5 @@ export async function runServertoolResponseStageOrchestrationShell(
     'HubRespChatProcess03Governed.servertool_orchestration',
     output.recordEvent
   );
-  return output.shellResult;
+  return extractServertoolResponseStageOrchestrationShellResultWithNative(output);
 }

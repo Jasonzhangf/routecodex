@@ -688,6 +688,9 @@ export interface ServertoolResponseStageOrchestrationMaterializedOutput {
   recordEvent: JsonObject;
 }
 
+export type ServertoolResponseStageOrchestrationShellResult =
+  ServertoolResponseStageOrchestrationMaterializedOutput['shellResult'];
+
 export type ServertoolEntryPreflightPlan =
   | {
       action: 'return_passthrough_non_object_chat';
@@ -4061,6 +4064,12 @@ export function materializeServertoolResponseStageOrchestrationOutputWithNative(
       ? { flowId: record.flowId.trim() }
       : {})
   };
+}
+
+export function extractServertoolResponseStageOrchestrationShellResultWithNative(
+  output: ServertoolResponseStageOrchestrationMaterializedOutput
+): ServertoolResponseStageOrchestrationShellResult {
+  return output.shellResult;
 }
 
 export function planServertoolEntryPreflightWithNative(input: {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 const planServertoolResponseStageGateWithNative = jest.fn();
 const resolveServertoolResponseStageOrchestrationGateDecisionWithNative = jest.fn();
 const materializeServertoolResponseStageOrchestrationOutputWithNative = jest.fn();
+const extractServertoolResponseStageOrchestrationShellResultWithNative = jest.fn((output: any) => output.shellResult);
 const detectProviderResponseShapeWithNative = jest.fn(() => 'chat_completion');
 const readRuntimeControlFromAnyBoundMetadataCenter = jest.fn(() => ({}));
 const runServerToolOrchestrationShell = jest.fn();
@@ -19,6 +20,7 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
     materializeServertoolResponseStageOrchestrationOutputWithNative,
+    extractServertoolResponseStageOrchestrationShellResultWithNative,
     resolveServertoolResponseStageOrchestrationGateDecisionWithNative
   })
 );
@@ -131,6 +133,8 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).toContain('resolveServertoolResponseStageOrchestrationGateDecisionWithNative({');
     expect(source).toContain("if (gateDecision.action === 'return_passthrough_bypass')");
     expect(source).toContain('materializeServertoolResponseStageOrchestrationOutputWithNative({');
+    expect(source).toContain('extractServertoolResponseStageOrchestrationShellResultWithNative(output)');
+    expect(source).not.toContain('return output.shellResult');
   });
 
   test('returns native skipReason without TS fallback or whitelist filtering', async () => {
@@ -227,6 +231,15 @@ describe('response-stage-orchestration-shell', () => {
       inputShape: 'chat_completion',
       outputShape: 'chat_completion'
     });
+    expect(extractServertoolResponseStageOrchestrationShellResultWithNative).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shellResult: {
+          payload: { id: 'resp_executed' },
+          executed: true,
+          flowId: 'flow_executed'
+        }
+      })
+    );
     expect(stageRecorder.record).toHaveBeenCalledWith(
       'HubRespChatProcess03Governed.servertool_orchestration',
       expect.objectContaining({
@@ -279,6 +292,14 @@ describe('response-stage-orchestration-shell', () => {
       inputShape: 'chat_completion',
       outputShape: undefined
     });
+    expect(extractServertoolResponseStageOrchestrationShellResultWithNative).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shellResult: {
+          payload: { id: 'resp_original' },
+          executed: false
+        }
+      })
+    );
     expect(stageRecorder.record).toHaveBeenCalledWith(
       'HubRespChatProcess03Governed.servertool_orchestration',
       expect.objectContaining({

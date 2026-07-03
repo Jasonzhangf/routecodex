@@ -5859,7 +5859,7 @@ function checkServertoolRustOutcomeCloseout() {
     'chat: options.payload',
     'adapterContext: options.adapterContext',
     'output.recordEvent',
-    'return output.shellResult',
+    'extractServertoolResponseStageOrchestrationShellResultWithNative(output)',
   ]) {
     if (!responseStageOrchestrationShell.includes(marker)) {
       fail(

@@ -522,6 +522,7 @@ jest.unstable_mockModule(
             recordExecuted: false
           }
     ),
+    extractServertoolResponseStageOrchestrationShellResultWithNative: jest.fn((output: any) => output?.shellResult),
     planServertoolHookScheduleWithNative: jest.fn((input: any) => ({
       events: (input?.hooks ?? []).map((hook: any) => ({
         hookId: hook.id,
