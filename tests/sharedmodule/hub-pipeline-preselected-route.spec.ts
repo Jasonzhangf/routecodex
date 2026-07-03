@@ -2,11 +2,54 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockRunHubPipelineLibWithNative = jest.fn();
+const mockBuildRequestStageMetadataDispatchWithNative = jest.fn((input: {
+  sourceMetadata: Record<string, unknown>;
+  requestTruth: Record<string, unknown>;
+  continuationContext: Record<string, unknown>;
+  runtimeControl: Record<string, unknown>;
+  providerProtocol: string;
+  excludedProviderKeys?: unknown;
+}) => {
+  const metadata = { ...input.sourceMetadata };
+  delete metadata.__rt;
+  delete metadata.__metadataCenter;
+  metadata.runtime_control = {
+    ...(
+      input.sourceMetadata.runtime_control
+      && typeof input.sourceMetadata.runtime_control === 'object'
+      && !Array.isArray(input.sourceMetadata.runtime_control)
+        ? input.sourceMetadata.runtime_control as Record<string, unknown>
+        : {}
+    ),
+    ...input.runtimeControl,
+  };
+  const runtimeControlSnapshot = {
+    ...input.runtimeControl,
+    ...(input.providerProtocol.trim() ? { providerProtocol: input.providerProtocol.trim() } : {}),
+  };
+  const snapshot: Record<string, unknown> = {
+    ...(Object.keys(input.requestTruth).length > 0 ? { requestTruth: input.requestTruth } : {}),
+    ...(Object.keys(input.continuationContext).length > 0 ? { continuationContext: input.continuationContext } : {}),
+    ...(Object.keys(runtimeControlSnapshot).length > 0 ? { runtimeControl: runtimeControlSnapshot } : {}),
+  };
+  const excludedProviderKeys = Array.isArray(input.excludedProviderKeys)
+    ? input.excludedProviderKeys.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim())
+    : [];
+  if (excludedProviderKeys.length > 0) {
+    snapshot.excludedProviderKeys = excludedProviderKeys;
+  }
+  return {
+    metadata,
+    metadataCenterSnapshot: Object.keys(snapshot).length > 0 ? snapshot : null,
+  };
+});
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
   () => ({
     runHubPipelineLibWithNative: mockRunHubPipelineLibWithNative,
+    buildRequestStageMetadataDispatchWithNative: mockBuildRequestStageMetadataDispatchWithNative,
+    projectMetadataWritePlanToRuntimeControlWithNative: jest.fn(({ plan }: { plan: Record<string, unknown> }) => plan),
   })
 );
 

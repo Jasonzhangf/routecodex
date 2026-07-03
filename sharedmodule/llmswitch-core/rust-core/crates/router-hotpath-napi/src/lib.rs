@@ -722,6 +722,11 @@ pub fn resolve_provider_protocol_json(input_json: String) -> NapiResult<String> 
     hub_pipeline_blocks::napi_bindings::resolve_provider_protocol_json(input_json)
 }
 
+#[napi(js_name = "buildRequestStageMetadataDispatchJson")]
+pub fn build_request_stage_metadata_dispatch_json(input_json: String) -> NapiResult<String> {
+    hub_pipeline_blocks::napi_bindings::build_request_stage_metadata_dispatch_json(input_json)
+}
+
 #[napi(js_name = "projectMetadataWritePlanToRuntimeControlJson")]
 pub fn project_metadata_write_plan_to_runtime_control_json(
     input_json: String,

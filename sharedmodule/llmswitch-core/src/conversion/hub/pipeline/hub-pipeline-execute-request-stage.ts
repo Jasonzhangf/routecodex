@@ -5,31 +5,15 @@ import type {
   HubPipelineResult,
   NormalizedRequest,
 } from "./hub-pipeline.js";
-import { runHubPipelineLibWithNative } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import {
+  buildRequestStageMetadataDispatchWithNative,
+  runHubPipelineLibWithNative
+} from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 import { applyNativeRuntimeControlWritePlan, readRuntimeControlFromBoundMetadataCenter, readRequestTruthFromBoundMetadataCenter, readContinuationContextFromBoundMetadataCenter } from "../metadata-center-runtime-control-writer.js";
 
 
 
-
-function readRuntimeControlPayload(metadata: Record<string, unknown>): Record<string, unknown> {
-  return metadata.runtime_control && typeof metadata.runtime_control === 'object' && !Array.isArray(metadata.runtime_control)
-    ? { ...(metadata.runtime_control as Record<string, unknown>) }
-    : {};
-}
-
-
-
-
-function stripLegacyMetadataResidue(metadata: Record<string, unknown>): Record<string, unknown> {
-  const omittedKeys = new Set([
-    `__${'rt'}`,
-    `__${'metadataCenter'}`,
-  ]);
-  return Object.fromEntries(
-    Object.entries(metadata).filter(([key]) => !omittedKeys.has(key)),
-  );
-}
 
 const REQUEST_STAGE_RUNTIME_CONTROL_WRITER = {
   module: 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
@@ -59,48 +43,6 @@ function syncRequestStageRuntimeControlToMetadataCenter(args: {
   });
 }
 
-function buildMetadataCenterSnapshot(args: {
-  requestTruth: Record<string, unknown>;
-  continuationContext: Record<string, unknown>;
-  runtimeControl: Record<string, unknown>;
-  providerProtocol: string;
-  excludedProviderKeys?: unknown;
-}): {
-  requestTruth?: Record<string, unknown>;
-  continuationContext?: Record<string, unknown>;
-  runtimeControl?: Record<string, unknown>;
-  excludedProviderKeys?: string[];
-} | undefined {
-  const requestTruth = Object.keys(args.requestTruth).length > 0 ? { ...args.requestTruth } : undefined;
-  const continuationContext = Object.keys(args.continuationContext).length > 0
-    ? { ...args.continuationContext }
-    : undefined;
-  const runtimeControl = Object.keys(args.runtimeControl).length > 0 ? { ...args.runtimeControl } : undefined;
-  const providerProtocol = typeof args.providerProtocol === 'string' && args.providerProtocol.trim()
-    ? args.providerProtocol.trim()
-    : undefined;
-  const runtimeControlSnapshot = runtimeControl || providerProtocol
-    ? {
-        ...(runtimeControl ?? {}),
-        ...(providerProtocol ? { providerProtocol } : {}),
-      }
-    : undefined;
-  const excludedProviderKeys = Array.isArray(args.excludedProviderKeys)
-    ? args.excludedProviderKeys
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      .map((value) => value.trim())
-    : undefined;
-  if (!requestTruth && !continuationContext && !runtimeControlSnapshot && !excludedProviderKeys?.length) {
-    return undefined;
-  }
-  return {
-    ...(requestTruth ? { requestTruth } : {}),
-    ...(continuationContext ? { continuationContext } : {}),
-    ...(runtimeControlSnapshot ? { runtimeControl: runtimeControlSnapshot } : {}),
-    ...(excludedProviderKeys?.length ? { excludedProviderKeys } : {}),
-  };
-}
-
 // feature_id: hub.request_stage_pipeline_bridge
 export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
   normalized: NormalizedRequest;
@@ -110,28 +52,17 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
 }): Promise<HubPipelineResult> {
   const { normalized, config } = args;
   const entryMode = args.entryMode ?? "request_stage";
-  const runtimeControlPayload = readRuntimeControlPayload(normalized.metadata);
   const requestTruthPayload = readRequestTruthFromBoundMetadataCenter(normalized.metadata);
   const continuationContextPayload = readContinuationContextFromBoundMetadataCenter(normalized.metadata);
   const metadataCenterRuntimeControl = readRuntimeControlFromBoundMetadataCenter(normalized.metadata);
-  const mergedRuntimeControl = {
-    ...runtimeControlPayload,
-    ...metadataCenterRuntimeControl,
-  };
-  const metadataBase = stripLegacyMetadataResidue(normalized.metadata);
-  const metadataCenterSnapshot = buildMetadataCenterSnapshot({
+  const metadataDispatch = buildRequestStageMetadataDispatchWithNative({
+    sourceMetadata: normalized.metadata,
     requestTruth: requestTruthPayload,
     continuationContext: continuationContextPayload,
     runtimeControl: metadataCenterRuntimeControl,
     providerProtocol: normalized.providerProtocol,
     excludedProviderKeys: normalized.metadata.excludedProviderKeys,
   });
-  const metadata = {
-    ...metadataBase,
-    runtime_control: {
-      ...mergedRuntimeControl,
-    },
-  } as Record<string, unknown>;
 
   const nativePlan = runHubPipelineLibWithNative({
     config: {
@@ -145,8 +76,8 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
       entryEndpoint: normalized.entryEndpoint,
       providerProtocol: normalized.providerProtocol,
       payload: normalized.payload,
-      metadata,
-      ...(metadataCenterSnapshot ? { metadataCenterSnapshot } : {}),
+      metadata: metadataDispatch.metadata,
+      ...(metadataDispatch.metadataCenterSnapshot ? { metadataCenterSnapshot: metadataDispatch.metadataCenterSnapshot } : {}),
       stream: normalized.stream,
       processMode: normalized.processMode,
       direction: normalized.direction,

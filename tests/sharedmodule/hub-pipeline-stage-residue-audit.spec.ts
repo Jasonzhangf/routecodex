@@ -1736,6 +1736,7 @@ describe('hub pipeline stage residue audit', () => {
       const source = fs.readFileSync(path.join(pipelineRoot, relativePath), 'utf8');
       if (relativePath === 'hub-pipeline-execute-request-stage.ts') {
         expect(source).toContain('runHubPipelineLibWithNative');
+        expect(source).toContain('buildRequestStageMetadataDispatchWithNative');
       }
       const matches = collectMatches(source, [
         { label: 'requires request stage hooks', pattern: /requireRequestStageHooks/ },
@@ -1762,6 +1763,8 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'legacy __metadataCenter fallback residue', pattern: /__metadataCenter/ },
       { label: 'legacy __rt read/write residue', pattern: /metadata\.__rt|__rt\s*=/ },
       { label: 'legacy runtime whitelist helper residue', pattern: /projectLegacyRuntimeControlWhitelist|readRuntimeMetadataControl/ },
+      { label: 'TS request-stage legacy metadata stripper residue', pattern: /stripLegacyMetadataResidue|Object\.entries\(metadata\)/ },
+      { label: 'TS request-stage metadata snapshot builder residue', pattern: /buildMetadataCenterSnapshot|runtimeControlSnapshot|excludedProviderKeys\s*=\s*Array\.isArray/ },
     ]);
 
     expect(findings).toEqual([]);

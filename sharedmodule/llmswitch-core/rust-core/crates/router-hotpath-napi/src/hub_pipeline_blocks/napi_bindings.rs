@@ -3,6 +3,119 @@ use serde_json::Value;
 use super::protocol::resolve_provider_protocol_from_metadata_snapshot;
 use crate::metadata_center::{build_metadata_center_from_snapshot, MetadataCenterReader};
 
+fn as_object_map(value: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
+    value.and_then(Value::as_object)
+}
+
+fn non_empty_object(value: Option<&Value>) -> Option<Value> {
+    let object = as_object_map(value)?;
+    if object.is_empty() {
+        None
+    } else {
+        Some(Value::Object(object.clone()))
+    }
+}
+
+fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
+    value?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn normalize_string_array(value: Option<&Value>) -> Option<Value> {
+    let array = value?.as_array()?;
+    let normalized: Vec<Value> = array
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| Value::String(value.to_string()))
+        .collect();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(Value::Array(normalized))
+    }
+}
+
+pub fn build_request_stage_metadata_dispatch(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "Rust request-stage metadata dispatch input must be object".to_string())?;
+    let source_metadata = row
+        .get("sourceMetadata")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Rust request-stage metadata dispatch missing sourceMetadata".to_string())?;
+    let mut metadata_base = source_metadata.clone();
+    metadata_base.remove("__rt");
+    metadata_base.remove("__metadataCenter");
+
+    let runtime_control_payload = source_metadata
+        .get("runtime_control")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let metadata_center_runtime_control = row
+        .get("runtimeControl")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut merged_runtime_control = runtime_control_payload;
+    for (key, value) in metadata_center_runtime_control.iter() {
+        merged_runtime_control.insert(key.clone(), value.clone());
+    }
+    metadata_base.insert(
+        "runtime_control".to_string(),
+        Value::Object(merged_runtime_control),
+    );
+
+    let provider_protocol = read_trimmed_string(row.get("providerProtocol"));
+    let mut snapshot = serde_json::Map::new();
+    if let Some(request_truth) = non_empty_object(row.get("requestTruth")) {
+        snapshot.insert("requestTruth".to_string(), request_truth);
+    }
+    if let Some(continuation_context) = non_empty_object(row.get("continuationContext")) {
+        snapshot.insert("continuationContext".to_string(), continuation_context);
+    }
+    let mut snapshot_runtime_control = metadata_center_runtime_control;
+    if let Some(provider_protocol) = provider_protocol {
+        snapshot_runtime_control.insert(
+            "providerProtocol".to_string(),
+            Value::String(provider_protocol),
+        );
+    }
+    if !snapshot_runtime_control.is_empty() {
+        snapshot.insert(
+            "runtimeControl".to_string(),
+            Value::Object(snapshot_runtime_control),
+        );
+    }
+    if let Some(excluded_provider_keys) = normalize_string_array(row.get("excludedProviderKeys")) {
+        snapshot.insert("excludedProviderKeys".to_string(), excluded_provider_keys);
+    }
+
+    Ok(serde_json::json!({
+        "metadata": Value::Object(metadata_base),
+        "metadataCenterSnapshot": if snapshot.is_empty() { Value::Null } else { Value::Object(snapshot) }
+    }))
+}
+
+pub fn build_request_stage_metadata_dispatch_json(input_json: String) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid request-stage metadata dispatch JSON: {error}"
+        ))
+    })?;
+    let output = build_request_stage_metadata_dispatch(&value).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize request-stage metadata dispatch failed: {error}"
+        ))
+    })
+}
+
 fn has_declared_apply_patch_tool(payload: &Value) -> bool {
     let Some(root) = payload.as_object() else {
         return false;
@@ -133,6 +246,71 @@ pub fn resolve_provider_protocol_json(input_json: String) -> napi::Result<String
 #[cfg(test)]
 mod responses_direct_route_decision_tests {
     use super::*;
+
+    #[test]
+    fn builds_request_stage_metadata_dispatch_in_rust() {
+        let output = build_request_stage_metadata_dispatch(&serde_json::json!({
+            "sourceMetadata": {
+                "requestId": "req-1",
+                "__rt": { "preselectedRoute": { "target": "legacy" } },
+                "__metadataCenter": { "private": true },
+                "runtime_control": {
+                    "preselectedRoute": { "target": "payload" },
+                    "retryProviderKey": "payload.retry"
+                },
+                "excludedProviderKeys": [" provider.a ", "", 9, "provider.b"]
+            },
+            "requestTruth": { "sessionId": "sess-1" },
+            "continuationContext": { "responsesResume": { "responseId": "resp-1" } },
+            "runtimeControl": {
+                "retryProviderKey": "center.retry"
+            },
+            "providerProtocol": " openai-responses ",
+            "excludedProviderKeys": [" provider.a ", "", 9, "provider.b"]
+        }))
+        .unwrap();
+
+        assert!(output["metadata"].get("__rt").is_none());
+        assert!(output["metadata"].get("__metadataCenter").is_none());
+        assert_eq!(
+            output["metadata"]["runtime_control"]["preselectedRoute"],
+            serde_json::json!({ "target": "payload" })
+        );
+        assert_eq!(
+            output["metadata"]["runtime_control"]["retryProviderKey"],
+            serde_json::json!("center.retry")
+        );
+        assert_eq!(
+            output["metadataCenterSnapshot"],
+            serde_json::json!({
+                "requestTruth": { "sessionId": "sess-1" },
+                "continuationContext": { "responsesResume": { "responseId": "resp-1" } },
+                "runtimeControl": {
+                    "retryProviderKey": "center.retry",
+                    "providerProtocol": "openai-responses"
+                },
+                "excludedProviderKeys": ["provider.a", "provider.b"]
+            })
+        );
+    }
+
+    #[test]
+    fn request_stage_metadata_dispatch_omits_empty_snapshot() {
+        let output = build_request_stage_metadata_dispatch(&serde_json::json!({
+            "sourceMetadata": {
+                "requestId": "req-1"
+            },
+            "requestTruth": {},
+            "continuationContext": {},
+            "runtimeControl": {},
+            "providerProtocol": "",
+            "excludedProviderKeys": []
+        }))
+        .unwrap();
+
+        assert_eq!(output["metadata"]["runtime_control"], serde_json::json!({}));
+        assert_eq!(output["metadataCenterSnapshot"], Value::Null);
+    }
 
     #[test]
     fn direct_decision_does_not_relay_responses_reasoning_content() {

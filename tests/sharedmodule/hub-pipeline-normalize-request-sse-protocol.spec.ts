@@ -5,6 +5,41 @@ import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-ce
 
 const resolveSseProtocolWithNative = jest.fn();
 const extractModelHintFromMetadataWithNative = jest.fn(() => 'gpt-test');
+const buildRequestStageMetadataDispatchWithNative = jest.fn((input: {
+  sourceMetadata: Record<string, unknown>;
+  runtimeControl: Record<string, unknown>;
+  requestTruth: Record<string, unknown>;
+  continuationContext: Record<string, unknown>;
+  providerProtocol: string;
+  excludedProviderKeys?: unknown;
+}) => {
+  const metadata = { ...input.sourceMetadata };
+  delete metadata.__rt;
+  delete metadata.__metadataCenter;
+  metadata.runtime_control = {
+    ...(
+      input.sourceMetadata.runtime_control
+      && typeof input.sourceMetadata.runtime_control === 'object'
+      && !Array.isArray(input.sourceMetadata.runtime_control)
+        ? input.sourceMetadata.runtime_control as Record<string, unknown>
+        : {}
+    ),
+    ...input.runtimeControl,
+  };
+  const runtimeControl = {
+    ...input.runtimeControl,
+    ...(input.providerProtocol.trim() ? { providerProtocol: input.providerProtocol.trim() } : {}),
+  };
+  const snapshot = {
+    ...(Object.keys(input.requestTruth).length > 0 ? { requestTruth: input.requestTruth } : {}),
+    ...(Object.keys(input.continuationContext).length > 0 ? { continuationContext: input.continuationContext } : {}),
+    ...(Object.keys(runtimeControl).length > 0 ? { runtimeControl } : {}),
+  };
+  return {
+    metadata,
+    metadataCenterSnapshot: Object.keys(snapshot).length > 0 ? snapshot : null,
+  };
+});
 const runHubPipelineLibWithNative = jest.fn((input: Record<string, any>) => ({
   requestId: input.request.requestId,
   success: true,
@@ -50,6 +85,8 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
   () => ({
     runHubPipelineLibWithNative,
+    buildRequestStageMetadataDispatchWithNative,
+    projectMetadataWritePlanToRuntimeControlWithNative: jest.fn(({ plan }: { plan: Record<string, unknown> }) => plan),
   }),
 );
 
@@ -61,6 +98,26 @@ jest.unstable_mockModule(
       updateDeps: jest.fn(),
       registerProviderRuntimeIngress: jest.fn(),
       unregisterProviderRuntimeIngress: jest.fn(),
+    }),
+  }),
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
+  () => ({
+    ensureRuntimeMetadata: jest.fn((carrier: Record<string, unknown>) => {
+      const existing = carrier.__rt;
+      if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+        return existing;
+      }
+      carrier.__rt = {};
+      return carrier.__rt as Record<string, unknown>;
+    }),
+    readRuntimeMetadata: jest.fn((carrier: Record<string, unknown>) => {
+      const existing = carrier.__rt;
+      return existing && typeof existing === 'object' && !Array.isArray(existing)
+        ? existing as Record<string, unknown>
+        : {};
     }),
   }),
 );

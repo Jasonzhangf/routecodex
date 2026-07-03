@@ -88,6 +88,11 @@ export type ProviderProtocolPlan = {
   providerProtocol: string;
 };
 
+export type RequestStageMetadataDispatchPlan = {
+  metadata: Record<string, unknown>;
+  metadataCenterSnapshot?: Record<string, unknown> | null;
+};
+
 function readServertoolRuntimeErrorCode(value: unknown): ProviderProtocolErrorCode | null {
   if (value === 'SERVERTOOL_FOLLOWUP_FAILED' || value === 'SERVERTOOL_HANDLER_FAILED') {
     return value;
@@ -488,6 +493,30 @@ export function projectMetadataWritePlanToRuntimeControlWithNative(input: {
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
   const raw = callNativeJsonString(capability, input);
   return parseRecord(raw, 'parseMetadataWritePlanRuntimeControlProjection') ?? fail('invalid payload');
+}
+
+export function buildRequestStageMetadataDispatchWithNative(input: {
+  sourceMetadata: Record<string, unknown>;
+  requestTruth: Record<string, unknown>;
+  continuationContext: Record<string, unknown>;
+  runtimeControl: Record<string, unknown>;
+  providerProtocol: string;
+  excludedProviderKeys?: unknown;
+}): RequestStageMetadataDispatchPlan {
+  const capability = 'buildRequestStageMetadataDispatchJson';
+  const fail = (reason?: string) => failNativeRequired<RequestStageMetadataDispatchPlan>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, input), 'parseRequestStageMetadataDispatch');
+  if (!parsed || !parsed.metadata || typeof parsed.metadata !== 'object' || Array.isArray(parsed.metadata)) {
+    return fail('invalid payload');
+  }
+  const snapshot = parsed.metadataCenterSnapshot;
+  if (snapshot !== undefined && snapshot !== null && (typeof snapshot !== 'object' || Array.isArray(snapshot))) {
+    return fail('invalid payload');
+  }
+  return {
+    metadata: parsed.metadata as Record<string, unknown>,
+    metadataCenterSnapshot: snapshot as Record<string, unknown> | null | undefined,
+  };
 }
 
 export function runHubPipelineOrchestrationWithNative(input: HubPipelineInput): HubPipelineOutput {
