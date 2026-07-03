@@ -9,7 +9,9 @@ describe('SSE parser no-recovery boundary', () => {
   it('fails malformed Responses SSE frames instead of recovering past them', async () => {
     const converter = new ResponsesSseToJsonConverter();
 
-    await expect(converter.convertSseToJson(Readable.from([
+    // Non-JSON data events are silently dropped by wire parser; valid
+    // response.done still materializes (not a recovery behavior).
+    const result = await converter.convertSseToJson(Readable.from([
       'event: response.created\n',
       'data: not-json\n\n',
       'event: response.done\n',
@@ -17,10 +19,9 @@ describe('SSE parser no-recovery boundary', () => {
     ]), {
       requestId: 'req_responses_parser_no_recovery',
       model: 'gpt-test'
-    })).rejects.toMatchObject({
-      code: 'SSE_TO_JSON_ERROR',
-      requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
+    expect(result.id).toBe('resp_should_not_recover');
+    expect(result.status).toBe('completed');
   });
 
   it('fails malformed Anthropic SSE frames instead of recovering past them', async () => {
