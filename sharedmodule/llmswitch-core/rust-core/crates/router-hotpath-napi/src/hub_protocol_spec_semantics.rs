@@ -653,6 +653,23 @@ fn strip_openai_responses_client_tool_search_items(payload: &mut Map<String, Val
     });
 }
 
+fn is_lmstudio_responses_compat_profile(profile: Option<&str>) -> bool {
+    matches!(
+        profile.map(|value| value.trim().to_ascii_lowercase()),
+        Some(value) if value == "responses:lmstudio" || value == "chat:lmstudio"
+    )
+}
+
+fn ensure_lmstudio_responses_text_format(payload: &mut Map<String, Value>) {
+    let Some(Value::Object(text)) = payload.get_mut("text") else {
+        return;
+    };
+    if text.get("format").is_some() {
+        return;
+    }
+    text.insert("format".to_string(), serde_json::json!({ "type": "text" }));
+}
+
 fn default_allowlists_for_input() -> HubProtocolAllowlists {
     let allowlists = build_default_allowlists();
     HubProtocolAllowlists {
@@ -701,6 +718,9 @@ fn apply_provider_outbound_policy(
     if protocol == "openai-responses" {
         normalize_openai_responses_input_items(&mut payload);
         strip_openai_responses_client_tool_search_items(&mut payload);
+        if is_lmstudio_responses_compat_profile(compatibility_profile) {
+            ensure_lmstudio_responses_text_format(&mut payload);
+        }
     }
     if !spec.provider_outbound.enforce_enabled {
         return payload;
@@ -953,6 +973,9 @@ pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult
         if protocol == "openai-responses" {
             normalize_openai_responses_input_items(&mut payload);
             strip_openai_responses_client_tool_search_items(&mut payload);
+            if is_lmstudio_responses_compat_profile(input.compatibility_profile.as_deref()) {
+                ensure_lmstudio_responses_text_format(&mut payload);
+            }
         }
         assert_no_provider_wire_internal_carrier(&Value::Object(payload.clone()), "$")
             .map_err(napi::Error::from_reason)?;
@@ -1487,6 +1510,30 @@ mod tests {
         assert!(tools[0].get("parameters").is_none());
         assert!(tools[0].get("strict").is_none());
         assert!(tools[0].get("function").is_none());
+    }
+
+    #[test]
+    fn sanitize_provider_outbound_payload_adds_lmstudio_responses_text_format() {
+        let input = serde_json::json!({
+            "protocol": "openai-responses",
+            "compatibilityProfile": "responses:lmstudio",
+            "enforceLayout": false,
+            "payload": {
+                "model": "ornith-1.0-397b",
+                "stream": true,
+                "text": { "verbosity": "high" },
+                "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "ping" }] }]
+            }
+        });
+
+        let output: Value = serde_json::from_str(
+            &sanitize_provider_outbound_payload_json(input.to_string()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            output["text"],
+            serde_json::json!({ "verbosity": "high", "format": { "type": "text" } })
+        );
     }
 
     #[test]

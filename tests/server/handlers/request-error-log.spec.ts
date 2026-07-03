@@ -43,6 +43,47 @@ describe('logRequestError diagnostics', () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('internalCode=500-210'));
   });
 
+  it('does not collapse unstructured local runtime errors to generic upstream wording', () => {
+    const err = new Error(
+      'Rust HubPipeline request path failed: DIRECT_PAYLOAD_CONTRACT_ERROR: openai-responses provider wire input[3] function_call_output must not include content; use output only'
+    );
+
+    logRequestError('/v1/responses', 'req_unstructured_local_runtime_error', err);
+
+    const firstLine = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(firstLine).toContain('Rust HubPipeline request path failed');
+    expect(firstLine).toContain('function_call_output must not include content');
+    expect(firstLine).not.toContain('failed: Upstream provider error');
+  });
+
+  it('marks generic upstream errors without structured cause as unclassified', () => {
+    const err = new Error('Upstream provider error');
+
+    logRequestError('/v1/responses', 'req_generic_upstream_no_fields', err);
+
+    const firstLine = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(firstLine).toContain('Unclassified error: Upstream provider error');
+    expect(firstLine).toContain('missing status/code');
+  });
+
+  it('prints provider route and stage fields when present on the error object', () => {
+    const err: any = new Error('HTTP 502: upstream stream ended before final frame');
+    err.statusCode = 502;
+    err.code = 'UPSTREAM_STREAM_INCOMPLETE';
+    err.upstreamCode = 'UPSTREAM_STREAM_INCOMPLETE';
+    err.providerKey = 'cc.key1.gpt-5.5-anyint';
+    err.routeName = 'longcontext';
+    err.requestExecutorProviderErrorStage = 'provider.send';
+
+    logRequestError('/v1/responses', 'req_provider_route_stage_fields', err);
+
+    const firstLine = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(firstLine).toContain('provider=cc.key1.gpt-5.5-anyint');
+    expect(firstLine).toContain('route=longcontext');
+    expect(firstLine).toContain('stage=provider.send');
+    expect(firstLine).toContain('code=UPSTREAM_STREAM_INCOMPLETE');
+  });
+
   it('prints internalCode for RouteCodex-owned virtual-router retry route failures', () => {
     const err: any = new Error(
       'Rust HubPipeline explicit provider retry VR route failed: VIRTUAL_ROUTER_ERROR:PROVIDER_NOT_AVAILABLE:No available providers after applying routing instructions'
@@ -93,7 +134,9 @@ describe('logRequestError diagnostics', () => {
     logRequestError('/v1/responses', 'req_fake_status_294', err);
 
     const rendered = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(rendered).toContain('Unclassified error');
     expect(rendered).toContain('Upstream provider error');
+    expect(rendered).toContain('missing status/code');
     expect(rendered).not.toContain('status=294');
     expect(rendered).not.toMatch(/\bstatus=\d{3}\b/);
   });

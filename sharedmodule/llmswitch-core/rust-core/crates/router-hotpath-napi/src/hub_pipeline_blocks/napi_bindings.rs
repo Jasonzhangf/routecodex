@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 use super::protocol::{
-    resolve_hub_pipeline_request_provider_protocol, resolve_provider_protocol_from_metadata_snapshot,
+    resolve_hub_pipeline_request_provider_protocol,
+    resolve_provider_protocol_from_metadata_snapshot,
 };
 use crate::metadata_center::{build_metadata_center_from_snapshot, MetadataCenterReader};
 
@@ -39,9 +40,7 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
     let metadata = row
         .get("metadata")
         .and_then(Value::as_object)
-        .ok_or_else(|| {
-            "Rust HubPipeline materialized request plan missing metadata".to_string()
-        })?;
+        .ok_or_else(|| "Rust HubPipeline materialized request plan missing metadata".to_string())?;
     let provider_protocol = read_trimmed_string(row.get("providerProtocol")).ok_or_else(|| {
         "Rust HubPipeline materialized request plan missing providerProtocol".to_string()
     })?;
@@ -56,8 +55,8 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let endpoint = read_trimmed_string(metadata.get("endpoint")).unwrap_or(request_endpoint);
-    let entry_endpoint = read_trimmed_string(metadata.get("entryEndpoint"))
-        .unwrap_or_else(|| endpoint.clone());
+    let entry_endpoint =
+        read_trimmed_string(metadata.get("entryEndpoint")).unwrap_or_else(|| endpoint.clone());
     let direction = match read_trimmed_lower_string(metadata.get("direction")).as_deref() {
         Some("response") => "response",
         _ => "request",
@@ -102,7 +101,10 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
     );
     output_metadata.insert("stream".to_string(), Value::Bool(stream));
     output_metadata.insert("processMode".to_string(), Value::String("chat".to_string()));
-    output_metadata.insert("direction".to_string(), Value::String(direction.to_string()));
+    output_metadata.insert(
+        "direction".to_string(),
+        Value::String(direction.to_string()),
+    );
     output_metadata.insert("stage".to_string(), Value::String(stage.to_string()));
     output_metadata.remove("__hubEntry");
     output_metadata.remove("__hubPolicyOverride");
@@ -112,13 +114,22 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
     let mut output = serde_json::Map::new();
     output.insert("endpoint".to_string(), Value::String(endpoint));
     output.insert("entryEndpoint".to_string(), Value::String(entry_endpoint));
-    output.insert("providerProtocol".to_string(), Value::String(provider_protocol));
+    output.insert(
+        "providerProtocol".to_string(),
+        Value::String(provider_protocol),
+    );
     output.insert("metadata".to_string(), Value::Object(output_metadata));
     output.insert("processMode".to_string(), Value::String("chat".to_string()));
-    output.insert("direction".to_string(), Value::String(direction.to_string()));
+    output.insert(
+        "direction".to_string(),
+        Value::String(direction.to_string()),
+    );
     output.insert("stage".to_string(), Value::String(stage.to_string()));
     output.insert("stream".to_string(), Value::Bool(stream));
-    output.insert("disableSnapshots".to_string(), Value::Bool(disable_snapshots));
+    output.insert(
+        "disableSnapshots".to_string(),
+        Value::Bool(disable_snapshots),
+    );
     if let Some(value) = hub_entry_mode {
         output.insert("hubEntryMode".to_string(), value);
     }
@@ -233,7 +244,9 @@ pub fn build_provider_response_metadata_snapshot(input: &Value) -> Result<Value,
         if let Some(request_truth) = optional_non_empty_object(row.get("requestTruth")) {
             snapshot.insert("requestTruth".to_string(), request_truth);
         }
-        if let Some(continuation_context) = optional_non_empty_object(row.get("continuationContext")) {
+        if let Some(continuation_context) =
+            optional_non_empty_object(row.get("continuationContext"))
+        {
             snapshot.insert("continuationContext".to_string(), continuation_context);
         }
         if let Some(runtime_control) = optional_non_empty_object(row.get("runtimeControl")) {
@@ -244,9 +257,11 @@ pub fn build_provider_response_metadata_snapshot(input: &Value) -> Result<Value,
         } else {
             Value::Object(snapshot)
         }
-    } else if let Some(direct) = optional_non_empty_object(row.get("directMetadataCenterSnapshot")) {
+    } else if let Some(direct) = optional_non_empty_object(row.get("directMetadataCenterSnapshot"))
+    {
         direct
-    } else if let Some(nested) = optional_non_empty_object(row.get("nestedMetadataCenterSnapshot")) {
+    } else if let Some(nested) = optional_non_empty_object(row.get("nestedMetadataCenterSnapshot"))
+    {
         nested
     } else {
         Value::Null
@@ -473,8 +488,8 @@ pub fn resolve_hub_pipeline_request_provider_protocol_json(
             "invalid HubPipeline request providerProtocol resolver JSON: {error}"
         ))
     })?;
-    let output = resolve_hub_pipeline_request_provider_protocol(&input)
-        .map_err(napi::Error::from_reason)?;
+    let output =
+        resolve_hub_pipeline_request_provider_protocol(&input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::from_reason(format!(
             "serialize HubPipeline request providerProtocol resolver failed: {error}"
@@ -556,15 +571,24 @@ mod responses_direct_route_decision_tests {
 
         assert_eq!(output["endpoint"], serde_json::json!("/v1/responses"));
         assert_eq!(output["entryEndpoint"], serde_json::json!("/v1/responses"));
-        assert_eq!(output["providerProtocol"], serde_json::json!("openai-responses"));
+        assert_eq!(
+            output["providerProtocol"],
+            serde_json::json!("openai-responses")
+        );
         assert_eq!(output["processMode"], serde_json::json!("chat"));
         assert_eq!(output["direction"], serde_json::json!("response"));
         assert_eq!(output["stage"], serde_json::json!("outbound"));
         assert_eq!(output["stream"], serde_json::json!(true));
         assert_eq!(output["disableSnapshots"], serde_json::json!(true));
         assert_eq!(output["hubEntryMode"], serde_json::json!("chat_process"));
-        assert_eq!(output["policyOverride"], serde_json::json!({ "mode": "strict" }));
-        assert_eq!(output["shadowCompare"], serde_json::json!({ "enabled": true }));
+        assert_eq!(
+            output["policyOverride"],
+            serde_json::json!({ "mode": "strict" })
+        );
+        assert_eq!(
+            output["shadowCompare"],
+            serde_json::json!({ "enabled": true })
+        );
         assert_eq!(output["metadata"]["keep"], serde_json::json!("value"));
         assert!(output["metadata"].get("__hubEntry").is_none());
         assert!(output["metadata"].get("__hubPolicyOverride").is_none());

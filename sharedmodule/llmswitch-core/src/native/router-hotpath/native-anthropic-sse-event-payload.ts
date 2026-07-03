@@ -108,6 +108,8 @@ export function buildAnthropicSseStreamWithNative(
 }
 export function buildAnthropicSseEventSequenceWithNative(input: {
   response: unknown;
+  requestId?: string;
+  model?: string;
   config?: Record<string, unknown>;
 }): AnthropicSseEventSequenceNativeEvent[] {
   const capability = 'buildAnthropicSseEventSequenceJson';

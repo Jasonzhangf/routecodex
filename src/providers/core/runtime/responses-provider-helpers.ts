@@ -6,11 +6,9 @@ import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 
 export type ResponsesStreamingMode = 'auto' | 'always' | 'never';
-export type ResponsesProcessMode = 'responses' | 'chat';
 
 export type ResponsesProviderConfig = {
   streaming?: ResponsesStreamingMode;
-  process?: ResponsesProcessMode;
 };
 
 export type SubmitToolOutputsPayload = {
@@ -66,17 +64,6 @@ function parseStreamingMode(value: unknown): ResponsesStreamingMode {
   return 'auto';
 }
 
-function parseProcessMode(value: unknown): ResponsesProcessMode | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const lowered = value.trim().toLowerCase();
-  if (lowered === 'chat' || lowered === 'responses') {
-    return lowered;
-  }
-  return undefined;
-}
-
 export function extractResponsesConfig(config: UnknownObject): ResponsesProviderConfig {
   const container = isRecord(config) ? (config as Record<string, unknown>) : {};
   const providerConfig = isRecord(container.config)
@@ -91,7 +78,6 @@ export function extractResponsesConfig(config: UnknownObject): ResponsesProvider
     return {};
   }
   return {
-    process: 'process' in responsesCfg ? parseProcessMode(responsesCfg.process) : undefined,
     streaming: 'streaming' in responsesCfg ? parseStreamingMode(responsesCfg.streaming) : undefined
   };
 }

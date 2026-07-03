@@ -18,9 +18,6 @@ import {
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
 import {
-  buildResponsesPayloadFromChatNative,
-  convertResponsesRequestToChatNative,
-  createResponsesJsonToSseConverter,
   createResponsesSseToJsonConverter,
   sanitizeProviderOutboundPayload
 } from '../../../modules/llmswitch/bridge.js';

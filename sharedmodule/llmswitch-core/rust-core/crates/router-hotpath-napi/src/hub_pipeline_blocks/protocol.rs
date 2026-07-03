@@ -59,13 +59,13 @@ pub(crate) fn resolve_provider_protocol_from_metadata_snapshot(
     }))
 }
 
-pub(crate) fn resolve_hub_pipeline_request_provider_protocol(input: &Value) -> Result<Value, String> {
-    let root = input
-        .as_object()
-        .ok_or_else(|| "HubPipeline providerProtocol resolver input must be an object".to_string())?;
-    let runtime_control = root
-        .get("runtimeControl")
-        .and_then(Value::as_object);
+pub(crate) fn resolve_hub_pipeline_request_provider_protocol(
+    input: &Value,
+) -> Result<Value, String> {
+    let root = input.as_object().ok_or_else(|| {
+        "HubPipeline providerProtocol resolver input must be an object".to_string()
+    })?;
+    let runtime_control = root.get("runtimeControl").and_then(Value::as_object);
     let provider_protocol = runtime_control
         .and_then(|row| row.get("providerProtocol"))
         .and_then(Value::as_str)

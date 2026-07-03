@@ -1337,6 +1337,49 @@ mod alias_tests {
     }
 
     #[test]
+    fn provider_bootstrap_defaults_lmstudio_responses_to_responses_lmstudio_profile() {
+        let providers = json!({
+            "lmstudio": {
+                "id": "lmstudio",
+                "enabled": true,
+                "type": "responses",
+                "baseURL": "http://127.0.0.1:1234/v1",
+                "auth": {
+                    "type": "apikey",
+                    "apiKey": "lm-studio"
+                },
+                "models": {
+                    "ornith-1.0-397b": {
+                        "supportsStreaming": true,
+                        "maxContext": 131072
+                    }
+                }
+            }
+        });
+
+        let providers_bootstrap =
+            bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
+        let providers_bootstrap_json: Value = serde_json::from_str(&providers_bootstrap).unwrap();
+        let profiles = bootstrap_virtual_router_provider_profiles_json(
+            json!(["lmstudio.key1.ornith-1.0-397b"]).to_string(),
+            providers_bootstrap_json["aliasIndex"].to_string(),
+            providers_bootstrap_json["modelIndex"].to_string(),
+            providers_bootstrap_json["runtimeEntries"].to_string(),
+        )
+        .unwrap();
+        let output: Value = serde_json::from_str(&profiles).unwrap();
+
+        assert_eq!(
+            output["profiles"]["lmstudio.key1.ornith-1.0-397b"]["compatibilityProfile"],
+            json!("responses:lmstudio")
+        );
+        assert_eq!(
+            output["targetRuntime"]["lmstudio.key1.ornith-1.0-397b"]["compatibilityProfile"],
+            json!("responses:lmstudio")
+        );
+    }
+
+    #[test]
     fn provider_bootstrap_rejects_removed_oauth_and_account_auth() {
         let oauth_provider = json!({
             "P": {
@@ -1400,6 +1443,9 @@ fn resolve_compatibility_profile(
             .unwrap_or_default()
     )
     .to_lowercase();
+    if normalized_id == "lmstudio" && provider_type.contains("responses") {
+        return Ok("responses:lmstudio".to_string());
+    }
     Ok("compat:passthrough".to_string())
 }
 

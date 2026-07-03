@@ -988,7 +988,6 @@ pub fn build_provider_sse_stream_read_error_descriptor_json(
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
-
 pub fn build_responses_json_from_sse_json(input_json: String) -> Result<String, String> {
     let input: Value = serde_json::from_str(&input_json)
         .map_err(|error| format!("Failed to parse input JSON: {}", error))?;
@@ -999,7 +998,10 @@ pub fn build_responses_json_from_sse_json(input_json: String) -> Result<String, 
     let payload = materialize_openai_responses_sse_body_text(body_text)?;
     // Detect incomplete stream: missing response.done or response.completed terminal
     let payload_obj = payload.as_object().unwrap();
-    let status = payload_obj.get("status").and_then(Value::as_str).unwrap_or("");
+    let status = payload_obj
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let saw_terminal = body_text.contains("response.done")
         || body_text.contains("response.completed")
         || body_text.contains("response.cancelled")
@@ -1022,7 +1024,10 @@ pub fn build_responses_json_from_sse_json(input_json: String) -> Result<String, 
         })),
     };
     serde_json::to_string(&envelope).map_err(|error| {
-        format!("Failed to serialize Responses SSE decode envelope: {}", error)
+        format!(
+            "Failed to serialize Responses SSE decode envelope: {}",
+            error
+        )
     })
 }
 #[cfg(test)]

@@ -196,6 +196,15 @@ function normalizePublicUpstreamMessage(args: {
   return sanitizePublicUpstreamMessage(raw);
 }
 
+function isGenericUpstreamProviderMessage(message?: string): boolean {
+  if (typeof message !== 'string') {
+    return false;
+  }
+  const normalized = message.trim().toLowerCase();
+  return normalized === 'upstream provider error'
+    || /\bfailed:\s*upstream provider error$/.test(normalized);
+}
+
 function isSensitiveUpstreamMessage(message: string): boolean {
   return SENSITIVE_UPSTREAM_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
 }
@@ -205,6 +214,78 @@ function sanitizePublicUpstreamMessage(message: string): string {
     .replace(/^Error from provider \([^)]+\):\s*/i, '')
     .replace(/^Error from provider:\s*/i, '')
     .trim();
+}
+
+function sanitizePublicPlainErrorMessage(message?: string): string | undefined {
+  const raw = extractString(message);
+  if (!raw) {
+    return undefined;
+  }
+  const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() ?? '';
+  const withoutErrorPrefix = firstLine.replace(/^[A-Z][A-Za-z0-9_.-]*Error:\s*/, '').trim();
+  const normalized = sanitizePublicUpstreamMessage(withoutErrorPrefix || firstLine);
+  if (!normalized || isSensitiveUpstreamMessage(normalized)) {
+    return undefined;
+  }
+  return normalized.length > 320 ? `${normalized.slice(0, 317)}...` : normalized;
+}
+
+function buildUnclassifiedLocalErrorMessage(message?: string): string {
+  const normalized = sanitizePublicPlainErrorMessage(message);
+  if (!normalized) {
+    return 'Unclassified error (message hidden)';
+  }
+  if (isGenericUpstreamProviderMessage(normalized)) {
+    return 'Unclassified error: Upstream provider error (missing status/code)';
+  }
+  return normalized;
+}
+
+function hasUpstreamProjectionEvidence(args: {
+  error: RawErrorPayload;
+  statusFromErr?: number;
+  upstream: { code?: string; message?: string; status?: number };
+  sourceCode?: string;
+  effectiveCode?: string;
+}): boolean {
+  if (typeof args.statusFromErr === 'number' || typeof args.upstream.status === 'number') {
+    return true;
+  }
+  if (extractString(args.upstream.code) || extractString(args.upstream.message)) {
+    return true;
+  }
+  const responseError = args.error.response?.data?.error;
+  if (responseError && typeof responseError === 'object') {
+    return true;
+  }
+  const details = args.error.details;
+  if (
+    details
+    && (
+      typeof details.status === 'number'
+      || extractString(details.upstreamCode)
+      || extractString(details.upstreamMessage)
+    )
+  ) {
+    return true;
+  }
+  const code = (extractString(args.sourceCode) || extractString(args.effectiveCode) || '').trim().toUpperCase();
+  if (!code) {
+    return false;
+  }
+  if (code === 'UPSTREAM_ERROR') {
+    return false;
+  }
+  return code.startsWith('HTTP_')
+    || code.startsWith('UPSTREAM_')
+    || code === 'PROVIDER_BUSINESS_ERROR'
+    || code === 'PROVIDER_NOT_AVAILABLE'
+    || code === 'ECONNRESET'
+    || code === 'ECONNREFUSED'
+    || code === 'ETIMEDOUT'
+    || code === 'EPIPE'
+    || code === 'UND_ERR_SOCKET'
+    || code === 'UND_ERR_CONNECT_TIMEOUT';
 }
 
 function extractMessageFromHttpText(value?: string): string | undefined {
@@ -363,6 +444,13 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   const effectiveUpstreamMessage = nestedJson?.message || upstreamMessage;
   const effectiveCode = upstream.code || extractString(error.code) || 'upstream_error';
   const sourceCode = extractString(error.code);
+  const hasUpstreamEvidence = hasUpstreamProjectionEvidence({
+    error,
+    statusFromErr,
+    upstream,
+    sourceCode,
+    effectiveCode,
+  });
   const publicUpstream = normalizePublicUpstreamError({
     status,
     baseMessage,
@@ -428,6 +516,16 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
     return formatPayload(504, {
       message: 'Upstream request timed out',
       code: sourceCode || upstreamCode || effectiveCode || 'gateway_timeout',
+      request_id: requestId,
+      ...validationFields,
+      ...detailField
+    });
+  }
+
+  if (!hasUpstreamEvidence) {
+    return formatPayload(500, {
+      message: buildUnclassifiedLocalErrorMessage(baseMessage),
+      code: sourceCode || 'INTERNAL_ERROR',
       request_id: requestId,
       ...validationFields,
       ...detailField
@@ -616,7 +714,14 @@ export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): s
   const message = projected.body.error.message;
   if (projected.body.error.code === 'upstream_error' && message === 'Upstream provider error') {
     const internalCode = projected.body.error.internalCode;
-    return internalCode ? `${message} (internal: ${internalCode})` : (message || 'Upstream provider error');
+    if (internalCode) {
+      return `${message} (internal: ${internalCode})`;
+    }
+    const fallbackSummary = sanitizePublicPlainErrorMessage(fallback);
+    if (fallbackSummary && !isGenericUpstreamProviderMessage(fallbackSummary)) {
+      return fallbackSummary;
+    }
+    return 'Unclassified error: Upstream provider error (missing status/code)';
   }
   if (projected.body.error.internalCode) {
     return message || projected.body.error.internalCode;
@@ -627,6 +732,7 @@ export function mapErrorToPublicLogSummary(error: unknown, fallback?: string): s
     && projected.status !== 403
     && projected.status !== 429
     && !projected.body.error.upstream_status
+    && (!message || isGenericUpstreamProviderMessage(message))
   ) {
     return fallback;
   }

@@ -108,6 +108,8 @@ export function buildGeminiSseStreamWithNative(
 }
 export function buildGeminiSseEventSequenceWithNative(input: {
   response: unknown;
+  requestId?: string;
+  model?: string;
   config?: Record<string, unknown>;
 }): GeminiSseEventSequenceNativeEvent[] {
   const capability = 'buildGeminiSseEventSequenceJson';

@@ -101,7 +101,6 @@ export {
   injectMcpToolsForResponsesJson,
   sanitizeProviderOutboundPayload,
   convertResponsesRequestToChatNative,
-  buildResponsesPayloadFromChatNative,
   evaluateResponsesDirectRouteDecisionNative,
   hasDeclaredApplyPatchToolNative,
   projectSseErrorEventPayloadNative,

@@ -1,0 +1,22 @@
+{
+  "id": "responses:lmstudio",
+  "protocol": "openai-responses",
+  "request": {
+    "mappings": [
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
+      {
+        "action": "lmstudio_responses_text_format"
+      },
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      }
+    ]
+  },
+  "response": {
+    "mappings": []
+  }
+}

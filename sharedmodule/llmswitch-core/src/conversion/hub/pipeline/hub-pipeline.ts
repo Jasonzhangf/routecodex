@@ -4,11 +4,11 @@ import {
   createVirtualRouterRuntime,
   type VirtualRouterRuntime
 } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
-import {
-  defaultSseCodecRegistry,
-  type SseProtocol,
-} from "../../../sse/registry/sse-codec-registry.js";
 import { executeRequestStagePipeline } from "./hub-pipeline-execute-request-stage.js";
+import { ChatSseToJsonConverter } from "../../../sse/sse-to-json/chat-sse-to-json-converter.js";
+import { ResponsesSseToJsonConverter } from "../../../sse/sse-to-json/responses-sse-to-json-converter.js";
+import { AnthropicSseToJsonConverter } from "../../../sse/sse-to-json/anthropic-sse-to-json-converter.js";
+import { GeminiSseToJsonConverter } from "../../../sse/sse-to-json/gemini-sse-to-json-converter.js";
 import { clearHubStageTiming } from "./hub-stage-timing.js";
 import {
   buildHubPipelineMaterializedRequestPlanWithNative,
@@ -150,13 +150,26 @@ async function convertSsePayloadToJson(
   const protocol = resolveSseProtocolWithNative(
     context.metadata,
     context.providerProtocol,
-  ) as SseProtocol;
-  const codec = defaultSseCodecRegistry.get(protocol);
-  const result = await codec.convertSseToJson(stream, {
-    requestId: context.requestId,
-    model: extractModelHintFromMetadataWithNative(context.metadata),
-    direction: "request",
-  });
+  );
+  const requestId = context.requestId;
+  const model = extractModelHintFromMetadataWithNative(context.metadata);
+  let result: unknown;
+  switch (protocol) {
+    case "openai-chat":
+      result = await new ChatSseToJsonConverter().convertSseToJson(stream, { requestId, model });
+      break;
+    case "openai-responses":
+      result = await new ResponsesSseToJsonConverter().convertSseToJson(stream, { requestId, model });
+      break;
+    case "anthropic-messages":
+      result = await new AnthropicSseToJsonConverter().convertSseToJson(stream, { requestId, model });
+      break;
+    case "gemini-chat":
+      result = await new GeminiSseToJsonConverter().convertSseToJson(stream, { requestId, model });
+      break;
+    default:
+      throw new Error("Unsupported SSE protocol: " + protocol);
+  }
   if (!isRecord(result)) {
     throw new Error("SSE conversion returned empty payload");
   }

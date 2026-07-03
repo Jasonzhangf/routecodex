@@ -574,7 +574,6 @@ pub fn build_responses_json_from_sse_json_bridge(input_json: String) -> NapiResu
         .map_err(napi::Error::from_reason)
 }
 
-
 #[napi(js_name = "updateResponsesContractProbeFromSseChunkJson")]
 pub fn update_responses_contract_probe_from_sse_chunk_json_bridge(
     chunk_json: String,
@@ -737,9 +736,7 @@ pub fn build_request_stage_metadata_dispatch_json(input_json: String) -> NapiRes
 }
 
 #[napi(js_name = "buildHubPipelineMaterializedRequestPlanJson")]
-pub fn build_hub_pipeline_materialized_request_plan_json(
-    input_json: String,
-) -> NapiResult<String> {
+pub fn build_hub_pipeline_materialized_request_plan_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_blocks::napi_bindings::build_hub_pipeline_materialized_request_plan_json(
         input_json,
     )

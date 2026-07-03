@@ -11,7 +11,7 @@ pub(super) fn signature_cache_test_guard() -> MutexGuard<'static, ()> {
         .expect("signature cache test lock poisoned")
 }
 
+mod adapter_context;
 mod core;
 mod req_profiles;
 mod resp_profiles;
-mod adapter_context;

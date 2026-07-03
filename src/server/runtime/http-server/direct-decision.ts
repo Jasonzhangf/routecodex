@@ -50,6 +50,7 @@ export interface DirectRetryPlanLike {
   retrySwitchPlan?: { switchAction?: string } | null | undefined;
   excludedCurrentProvider?: boolean;
   allowRetryBeyondAttemptBudget?: boolean;
+  routePoolRemainingAfterExclusion?: string[];
   defaultPoolAvailable?: boolean;
   mayProject?: boolean;
 }
@@ -68,6 +69,26 @@ function newExcluded(excluded: ReadonlySet<string>, key: string): Set<string> {
   const next = new Set(excluded);
   next.add(key);
   return next;
+}
+
+function countRemainingRouteCandidates(pool: ReadonlyArray<string>, excluded: ReadonlySet<string>): number {
+  let count = 0;
+  for (const candidate of pool) {
+    const key = typeof candidate === 'string' ? candidate.trim() : '';
+    if (key && !excluded.has(key)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function readPlanRemainingRouteCandidateCount(plan: DirectRetryPlanLike): number | undefined {
+  if (!Array.isArray(plan.routePoolRemainingAfterExclusion)) {
+    return undefined;
+  }
+  return plan.routePoolRemainingAfterExclusion.filter((candidate) => (
+    typeof candidate === 'string' && candidate.trim().length > 0
+  )).length;
 }
 
 function rethrowDecision(error: unknown, excluded: ReadonlySet<string>): DirectRetryDecision {
@@ -128,12 +149,21 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     return rethrowDecision(error, excludedProviderKeys);
   }
 
-  // Forward: ErrorErr05 owns whether provider switching is legal. Router-direct
-  // must not re-decide from its observed route pool, which may be only the
-  // selected priority tier rather than the full configured candidate set.
   const excluded = retryExecutionPlan.excludedCurrentProvider
     ? newExcluded(excludedProviderKeys, providerKey)
     : new Set(excludedProviderKeys);
+  const remainingCandidates =
+    readPlanRemainingRouteCandidateCount(retryExecutionPlan)
+    ?? countRemainingRouteCandidates(args.pool, excluded);
+  if (remainingCandidates <= 0) {
+    if (
+      retryExecutionPlan.defaultPoolAvailable === true
+      && retryExecutionPlan.mayProject !== true
+    ) {
+      return requestRerouteDecision(error, excludedProviderKeys, excluded);
+    }
+    return rethrowDecision(error, excludedProviderKeys);
+  }
   return requestRerouteDecision(error, excludedProviderKeys, excluded);
 }
 

@@ -14,7 +14,7 @@ use crate::virtual_router_engine::error::{
 };
 use crate::virtual_router_engine::features::RoutingFeatures;
 use crate::virtual_router_engine::instructions::RoutingInstructionState;
-use crate::virtual_router_engine::provider_registry::ProviderRegistry;
+use crate::virtual_router_engine::provider_registry::{ProviderProfile, ProviderRegistry};
 use crate::virtual_router_engine::routing::{
     build_route_queue, default_pool_supports_capability, extract_excluded_provider_keys,
     extract_key_alias, extract_provider_id, filter_candidates_by_state,
@@ -267,6 +267,82 @@ fn build_route_execution_pool_for_decision(
         }
     }
     expanded
+}
+
+fn is_responses_same_protocol_direct_profile(profile: &ProviderProfile) -> bool {
+    profile.provider_type.trim() == "responses"
+        || profile
+            .provider_protocol
+            .trim()
+            .eq_ignore_ascii_case("openai-responses")
+        || profile
+            .outbound_profile
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| value.eq_ignore_ascii_case("openai-responses"))
+}
+
+fn provider_allows_custom_tool_payload(
+    provider_registry: &ProviderRegistry,
+    provider_key: &str,
+) -> bool {
+    if provider_registry.has_capability(provider_key, "custom_tool") {
+        return true;
+    }
+    provider_registry
+        .get(provider_key)
+        .map(is_responses_same_protocol_direct_profile)
+        .unwrap_or(false)
+}
+
+fn target_allows_custom_tool_payload(
+    key: &str,
+    provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&crate::virtual_router_engine::forwarder::ForwarderRegistry>,
+) -> bool {
+    if crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(key) {
+        return forwarder_registry
+            .and_then(|registry| registry.get(key))
+            .map(|entry| {
+                entry.targets.iter().any(|target| {
+                    !target.disabled
+                        && provider_allows_custom_tool_payload(
+                            provider_registry,
+                            &target.provider_key,
+                        )
+                })
+            })
+            .unwrap_or(false);
+    }
+    provider_allows_custom_tool_payload(provider_registry, key)
+}
+
+fn filter_pools_by_custom_tool_payload_support(
+    pools: &[crate::virtual_router_engine::routing::RoutePoolTier],
+    provider_registry: &ProviderRegistry,
+    forwarder_registry: Option<&crate::virtual_router_engine::forwarder::ForwarderRegistry>,
+) -> Vec<crate::virtual_router_engine::routing::RoutePoolTier> {
+    let mut out = Vec::new();
+    for pool in pools {
+        if pool.targets.is_empty() {
+            continue;
+        }
+        let targets = pool
+            .targets
+            .iter()
+            .filter(|key| {
+                target_allows_custom_tool_payload(key, provider_registry, forwarder_registry)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if targets.is_empty() {
+            continue;
+        }
+        let mut next = pool.clone();
+        next.targets = targets;
+        out.push(next);
+    }
+    out
 }
 
 fn preserve_priority_context_candidates(
@@ -624,11 +700,10 @@ impl VirtualRouterEngineCore {
                 }
             }
             if custom_tool_required {
-                let capability_filtered = filter_pools_by_capability_with_forwarders(
+                let capability_filtered = filter_pools_by_custom_tool_payload_support(
                     &pools,
                     &self.provider_registry,
                     Some(&self.forwarder_registry),
-                    "custom_tool",
                 );
                 if capability_filtered.is_empty() {
                     continue;
@@ -968,9 +1043,7 @@ impl VirtualRouterEngineCore {
             |provider_key: &str| selectable_real_keys.contains(provider_key),
             |provider_key: &str| {
                 if custom_tool_required
-                    && !self
-                        .provider_registry
-                        .has_capability(provider_key, "custom_tool")
+                    && !provider_allows_custom_tool_payload(&self.provider_registry, provider_key)
                 {
                     return false;
                 }
@@ -2183,6 +2256,148 @@ mod tests {
 
         assert_eq!(selected.provider_key, "mini.key1.gpt-5.4-mini");
         assert_eq!(selected.route_used, DEFAULT_ROUTE);
+    }
+
+    #[test]
+    fn custom_tool_payload_keeps_responses_direct_forwarder_target() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "lmstudio.key1.ornith-1.0-397b".to_string(),
+            json!({
+                "providerKey": "lmstudio.key1.ornith-1.0-397b",
+                "providerType": "responses",
+                "providerProtocol": "openai-responses",
+                "outboundProfile": "openai-responses",
+                "modelId": "ornith-1.0-397b",
+                "enabled": true,
+                "modelCapabilities": {
+                    "ornith-1.0-397b": ["text"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.lmstudio.ornith-1.0-397b".to_string(),
+            json!({
+                "forwarderId": "fwd.lmstudio.ornith-1.0-397b",
+                "protocol": "openai",
+                "modelId": "ornith-1.0-397b",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "stickyKey": "none",
+                "targets": [
+                    { "providerKey": "lmstudio.key1.ornith-1.0-397b", "priority": 1, "disabled": false }
+                ]
+            }),
+        );
+        let provider_keys = core
+            .provider_registry
+            .list_keys()
+            .into_iter()
+            .collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+        let routing = Map::from_iter([(
+            "thinking".to_string(),
+            Value::Array(vec![json!({
+                "id": "thinking-lmstudio",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["fwd.lmstudio.ornith-1.0-397b"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "thinking".to_string(),
+            confidence: 1.0,
+            reasoning: "thinking:user-input".to_string(),
+            candidates: vec!["thinking".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_tools: true,
+            has_custom_tool_declared: true,
+            latest_message_from_user: true,
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("responses direct provider should receive custom tool payload");
+
+        assert_eq!(selected.provider_key, "lmstudio.key1.ornith-1.0-397b");
+        assert_eq!(selected.route_used, "thinking");
+    }
+
+    #[test]
+    fn custom_tool_payload_still_rejects_non_responses_target_without_capability() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "plain.key1.gpt-5.5".to_string(),
+            json!({
+                "providerKey": "plain.key1.gpt-5.5",
+                "providerType": "openai",
+                "providerProtocol": "openai-chat",
+                "outboundProfile": "openai-chat",
+                "modelId": "gpt-5.5",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.5": ["text"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([(
+            "thinking".to_string(),
+            Value::Array(vec![json!({
+                "id": "thinking-plain",
+                "priority": 100,
+                "mode": "priority",
+                "targets": ["plain.key1.gpt-5.5"]
+            })]),
+        )]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let classification = ClassificationResult {
+            route_name: "thinking".to_string(),
+            confidence: 1.0,
+            reasoning: "thinking:user-input".to_string(),
+            candidates: vec!["thinking".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_tools: true,
+            has_custom_tool_declared: true,
+            latest_message_from_user: true,
+            ..RoutingFeatures::default()
+        };
+        let err = core
+            .select_provider(
+                "thinking",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect_err("non-responses target without custom_tool must stay unavailable");
+
+        assert!(err.contains("PROVIDER_NOT_AVAILABLE"));
     }
 
     #[test]

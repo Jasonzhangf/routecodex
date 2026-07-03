@@ -2447,14 +2447,13 @@ pub fn publish_responses_record_plan_json(
         .and_then(|row| row.get("request_id"))
         .and_then(|v| read_trimmed_string(Some(v)));
     let entry_request_id = response_request_id
-        .or_else(|| Some(request_id.clone()))
+        .or_else(|| {
+            read_request_truth_field(&context, "requestId")
+                .and_then(|v| read_trimmed_string(Some(v)))
+        })
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
             read_request_truth_field(&context, "entryRequestId")
-                .and_then(|v| read_trimmed_string(Some(v)))
-        })
-        .or_else(|| {
-            read_request_truth_field(&context, "requestId")
                 .and_then(|v| read_trimmed_string(Some(v)))
         })
         .or_else(|| {
@@ -2527,9 +2526,8 @@ mod tests {
     use super::{
         build_stop_hook_guidance_text_from_output, convert_responses_output_to_input_items,
         materialize_responses_continuation_payload, plan_responses_handler_entry,
-        publish_responses_record_plan_json,
-        prepare_responses_conversation_entry, restore_responses_continuation_payload,
-        resume_responses_conversation_payload,
+        prepare_responses_conversation_entry, publish_responses_record_plan_json,
+        restore_responses_continuation_payload, resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
 

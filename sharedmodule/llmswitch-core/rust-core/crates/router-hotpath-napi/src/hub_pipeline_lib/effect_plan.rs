@@ -375,9 +375,9 @@ pub fn resolve_provider_response_post_servertool_effect_json(
 }
 
 pub fn project_metadata_write_plan_to_runtime_control(input: &Value) -> Result<Value, String> {
-    let record = input
-        .as_object()
-        .ok_or_else(|| "Rust HubPipeline metadata write plan projector missing input".to_string())?;
+    let record = input.as_object().ok_or_else(|| {
+        "Rust HubPipeline metadata write plan projector missing input".to_string()
+    })?;
     let plan = record
         .get("plan")
         .and_then(Value::as_object)
@@ -402,8 +402,8 @@ pub fn project_metadata_write_plan_to_runtime_control_json(
             "invalid metadata write plan projector JSON: {error}"
         ))
     })?;
-    let output = project_metadata_write_plan_to_runtime_control(&value)
-        .map_err(napi::Error::from_reason)?;
+    let output =
+        project_metadata_write_plan_to_runtime_control(&value).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::from_reason(format!(
             "serialize metadata write plan projector failed: {error}"
@@ -458,7 +458,9 @@ pub fn build_request_stage_native_result_plan(input: &Value) -> Result<Value, St
     let native_plan = record
         .get("nativePlan")
         .and_then(Value::as_object)
-        .ok_or_else(|| "Rust HubPipeline request-stage result planner missing nativePlan".to_string())?;
+        .ok_or_else(|| {
+            "Rust HubPipeline request-stage result planner missing nativePlan".to_string()
+        })?;
     let entry_mode = record
         .get("entryMode")
         .and_then(Value::as_str)
@@ -556,11 +558,15 @@ pub fn build_request_stage_hub_pipeline_result(input: &Value) -> Result<Value, S
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing requestId".to_string())?;
+        .ok_or_else(|| {
+            "Rust HubPipeline request-stage result builder missing requestId".to_string()
+        })?;
     let result_plan = record
         .get("resultPlan")
         .and_then(Value::as_object)
-        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing resultPlan".to_string())?;
+        .ok_or_else(|| {
+            "Rust HubPipeline request-stage result builder missing resultPlan".to_string()
+        })?;
     let entry_mode = record
         .get("entryMode")
         .and_then(Value::as_str)
@@ -568,24 +574,35 @@ pub fn build_request_stage_hub_pipeline_result(input: &Value) -> Result<Value, S
         .unwrap_or("request_stage");
 
     if result_plan.get("ok").and_then(Value::as_bool) != Some(true) {
-        return Err("Rust HubPipeline request-stage result builder requires ok resultPlan".to_string());
+        return Err(
+            "Rust HubPipeline request-stage result builder requires ok resultPlan".to_string(),
+        );
     }
 
     let provider_payload = result_plan
         .get("providerPayload")
         .filter(|value| value.is_object())
-        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing providerPayload".to_string())?;
+        .ok_or_else(|| {
+            "Rust HubPipeline request-stage result builder missing providerPayload".to_string()
+        })?;
     let metadata = result_plan
         .get("metadata")
         .and_then(Value::as_object)
-        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing metadata".to_string())?;
+        .ok_or_else(|| {
+            "Rust HubPipeline request-stage result builder missing metadata".to_string()
+        })?;
     let diagnostics = result_plan
         .get("diagnostics")
         .filter(|value| value.is_array())
-        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing diagnostics".to_string())?;
+        .ok_or_else(|| {
+            "Rust HubPipeline request-stage result builder missing diagnostics".to_string()
+        })?;
 
     let mut output = Map::new();
-    output.insert("requestId".to_string(), Value::String(request_id.to_string()));
+    output.insert(
+        "requestId".to_string(),
+        Value::String(request_id.to_string()),
+    );
     output.insert("providerPayload".to_string(), provider_payload.clone());
     if let Some(target) = metadata.get("target") {
         output.insert("target".to_string(), target.clone());
@@ -594,7 +611,10 @@ pub fn build_request_stage_hub_pipeline_result(input: &Value) -> Result<Value, S
         output.insert("routingDecision".to_string(), routing_decision.clone());
     }
     if let Some(routing_diagnostics) = metadata.get("routingDiagnostics") {
-        output.insert("routingDiagnostics".to_string(), routing_diagnostics.clone());
+        output.insert(
+            "routingDiagnostics".to_string(),
+            routing_diagnostics.clone(),
+        );
     }
     output.insert("metadata".to_string(), Value::Object(metadata.clone()));
     output.insert("nodeResults".to_string(), diagnostics.clone());
@@ -648,8 +668,7 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_request_stage_hub_pipeline_result,
-        build_request_stage_native_result_plan,
+        build_request_stage_hub_pipeline_result, build_request_stage_native_result_plan,
         normalize_provider_response_effect_plan, plan_provider_response_servertool_runtime_actions,
         project_metadata_write_plan_to_runtime_control,
         project_metadata_write_plan_to_runtime_control_write_plan,
@@ -987,7 +1006,10 @@ mod tests {
         assert_eq!(output["target"]["providerKey"], json!("key1"));
         assert_eq!(output["routingDecision"]["routeName"], json!("thinking"));
         assert_eq!(output["routingDiagnostics"]["reason"], json!("selected"));
-        assert_eq!(output["metadata"]["runtime_control"]["providerProtocol"], json!("openai-responses"));
+        assert_eq!(
+            output["metadata"]["runtime_control"]["providerProtocol"],
+            json!("openai-responses")
+        );
         assert_eq!(output["nodeResults"][0]["id"], json!("node-1"));
         assert_eq!(output["standardizedRequest"]["messages"], json!([]));
     }

@@ -397,7 +397,6 @@ export type RequestExecutorDeps = {
   };
   getHubPipeline(routingPolicyGroup?: string): HubPipeline | null;
   getRoutingTiers?(routingPolicyGroup: string, routeName: string): Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
-  getRoutingTargetAliases?(routingPolicyGroup: string, routeName: string): Record<string, string[]>;
   getModuleDependencies(): ModuleDependencies;
   executeNestedInput?: (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
@@ -878,11 +877,6 @@ export class HubRequestExecutor implements RequestExecutor {
           && typeof routingPolicyGroupForAttempt === 'string'
             ? this.deps.getRoutingTiers?.(routingPolicyGroupForAttempt, 'default') ?? []
             : [];
-        const routeTargetAliasesForAttempt =
-          typeof routeNameForAttempt === 'string'
-          && typeof routingPolicyGroupForAttempt === 'string'
-            ? this.deps.getRoutingTargetAliases?.(routingPolicyGroupForAttempt, routeNameForAttempt) ?? {}
-            : {};
         const resolvedPipelineAttempt = resolveRequestExecutorPipelineAttempt({
           inputRequestId: input.requestId,
           providerRequestId,
@@ -895,7 +889,6 @@ export class HubRequestExecutor implements RequestExecutor {
           initialRoutePool,
           routeTiersForAttempt,
           defaultRouteTiersForAttempt,
-          routeTargetAliasesForAttempt,
           excludedProviderKeys,
           lastError,
           throwIfClientAbortSignalAborted,
@@ -928,7 +921,6 @@ export class HubRequestExecutor implements RequestExecutor {
           }),
           routePool: routePoolForAttempt,
           excludedProviderKeys,
-          targetAliases: routeTargetAliasesForAttempt,
         });
         const routingDecisionForAttempt = pipelineResult.routingDecision as Record<string, unknown> | undefined;
         const routePoolIsAuthoritativeForAttempt = resolveRoutePoolAuthoritativeForRetry({

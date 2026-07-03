@@ -170,6 +170,10 @@ function extractErrorLogFields(error: unknown, summary: string): {
   upstreamCode?: string;
   catalogCode?: string;
   catalogKey?: string;
+  providerKey?: string;
+  providerType?: string;
+  routeName?: string;
+  stage?: string;
   externalSource?: 'external_transport';
   reason?: string;
 } {
@@ -251,6 +255,22 @@ function extractErrorLogFields(error: unknown, summary: string): {
     readTrimmedString(bag.catalogKey)
     ?? readTrimmedString(details?.catalogKey)
     ?? readTrimmedString(details?.catalog_key);
+  const providerKey =
+    readTrimmedString(bag.providerKey)
+    ?? readTrimmedString(details?.providerKey)
+    ?? readTrimmedString(responseError?.providerKey);
+  const providerType =
+    readTrimmedString(bag.providerType)
+    ?? readTrimmedString(details?.providerType)
+    ?? readTrimmedString(responseError?.providerType);
+  const routeName =
+    readTrimmedString(bag.routeName)
+    ?? readTrimmedString(details?.routeName)
+    ?? readTrimmedString(responseError?.routeName);
+  const stage =
+    readTrimmedString(bag.requestExecutorProviderErrorStage)
+    ?? readTrimmedString(details?.requestExecutorProviderErrorStage)
+    ?? readTrimmedString(details?.source);
   const externalSource = resolveExternalErrorSource({
     errorCode: resolvedErrorCode,
     upstreamCode: resolvedUpstreamCode,
@@ -265,6 +285,10 @@ function extractErrorLogFields(error: unknown, summary: string): {
     ...(resolvedUpstreamCode ? { upstreamCode: resolvedUpstreamCode } : {}),
     ...(catalogCode ? { catalogCode } : {}),
     ...(catalogKey ? { catalogKey } : {}),
+    ...(providerKey ? { providerKey } : {}),
+    ...(providerType ? { providerType } : {}),
+    ...(routeName ? { routeName } : {}),
+    ...(stage ? { stage } : {}),
     ...(externalSource ? { externalSource } : {}),
     ...(reason ? { reason } : {})
   };
@@ -461,6 +485,10 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
     fields.upstreamCode ? `upstreamCode=${fields.upstreamCode}` : undefined,
     fields.catalogCode ? `catalogCode=${fields.catalogCode}` : undefined,
     fields.catalogKey ? `catalogKey=${fields.catalogKey}` : undefined,
+    fields.providerKey ? `provider=${fields.providerKey}` : undefined,
+    fields.providerType ? `providerType=${fields.providerType}` : undefined,
+    fields.routeName ? `route=${fields.routeName}` : undefined,
+    fields.stage ? `stage=${fields.stage}` : undefined,
     fields.externalSource ? `source=${fields.externalSource}` : undefined,
     fields.reason ? `reason=${JSON.stringify(fields.reason)}` : undefined,
   ]

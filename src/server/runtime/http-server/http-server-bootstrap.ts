@@ -546,8 +546,6 @@ export interface RoutingPolicyGroupRouteTier {
   backup?: boolean;
 }
 
-export type RoutingTargetAliasMap = Record<string, string[]>;
-
 function readRoutingPolicyGroupsNode(userConfig: UnknownObject): Record<string, unknown> | null {
   const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
   if (vr && typeof vr.routingPolicyGroups === 'object' && !Array.isArray(vr.routingPolicyGroups)) {
@@ -590,96 +588,6 @@ function collectRoutingTierTargets(entry: Record<string, unknown>): string[] {
   pushTarget(entry.target);
   pushTarget(entry.provider);
   return targets;
-}
-
-function readVirtualRouterForwarders(userConfig: UnknownObject): Record<string, unknown> | null {
-  const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
-  return vr && vr.forwarders && typeof vr.forwarders === 'object' && !Array.isArray(vr.forwarders)
-    ? (vr.forwarders as Record<string, unknown>)
-    : null;
-}
-
-function collectForwarderProviderKeyAliases(args: {
-  forwarderId: string;
-  forwarders: Record<string, unknown> | null;
-  knownProviderKeys: string[];
-}): string[] {
-  const forwarderNode = args.forwarders?.[args.forwarderId];
-  if (!forwarderNode || typeof forwarderNode !== 'object' || Array.isArray(forwarderNode)) {
-    return [];
-  }
-  const forwarder = forwarderNode as Record<string, unknown>;
-  const model =
-    typeof forwarder.modelId === 'string' && forwarder.modelId.trim()
-      ? forwarder.modelId.trim()
-      : typeof forwarder.model === 'string' && forwarder.model.trim()
-        ? forwarder.model.trim()
-        : '';
-  const targets = Array.isArray(forwarder.targets) ? forwarder.targets : [];
-  const aliases: string[] = [];
-  const push = (value: unknown): void => {
-    if (typeof value !== 'string') {
-      return;
-    }
-    const trimmed = value.trim();
-    if (trimmed && !aliases.includes(trimmed)) {
-      aliases.push(trimmed);
-    }
-  };
-  for (const target of targets) {
-    if (!target || typeof target !== 'object' || Array.isArray(target)) {
-      continue;
-    }
-    const row = target as Record<string, unknown>;
-    if (row.disabled === true) {
-      continue;
-    }
-    push(row.providerKey);
-    const providerId = typeof row.providerId === 'string' && row.providerId.trim()
-      ? row.providerId.trim()
-      : '';
-    if (!providerId) {
-      continue;
-    }
-    const providerIdPrefix = `${providerId.toLowerCase()}.`;
-    const modelSuffix = model ? `.${model.toLowerCase()}` : '';
-    for (const providerKey of args.knownProviderKeys) {
-      const normalized = providerKey.trim();
-      const lowered = normalized.toLowerCase();
-      if (!lowered.startsWith(providerIdPrefix)) {
-        continue;
-      }
-      if (modelSuffix && !lowered.endsWith(modelSuffix)) {
-        continue;
-      }
-      push(normalized);
-    }
-  }
-  return aliases;
-}
-
-export function buildRoutingTargetAliasMap(
-  userConfig: UnknownObject,
-  targets: string[],
-  knownProviderKeys: string[] = [],
-): RoutingTargetAliasMap {
-  const forwarders = readVirtualRouterForwarders(userConfig);
-  const aliasMap: RoutingTargetAliasMap = {};
-  for (const target of targets) {
-    if (typeof target !== 'string' || !target.trim() || !target.trim().startsWith('fwd.')) {
-      continue;
-    }
-    const normalized = target.trim();
-    const aliases = collectForwarderProviderKeyAliases({
-      forwarderId: normalized,
-      forwarders,
-      knownProviderKeys,
-    });
-    if (aliases.length > 0) {
-      aliasMap[normalized] = aliases;
-    }
-  }
-  return aliasMap;
 }
 
 export function extractProviderKeysForRoutingGroup(

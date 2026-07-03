@@ -418,7 +418,6 @@ fn normalize_exec_command_guard(value: Option<&Value>) -> Option<ExecCommandGuar
     })
 }
 
-
 fn normalize_web_search(
     value: Option<&Value>,
     routing_source: &Map<String, Value>,

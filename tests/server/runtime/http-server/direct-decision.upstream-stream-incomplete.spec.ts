@@ -56,6 +56,7 @@ describe('direct-decision upstream_stream_incomplete', () => {
           reason: 'recoverable',
         },
         excludedCurrentProvider: true,
+        routePoolRemainingAfterExclusion: ['cc.key1.gpt-5.4-mini'],
       },
     }));
     expect(decision.action).toBe('request_reroute');

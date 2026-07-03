@@ -1,8 +1,5 @@
 import type { Readable } from 'node:stream';
-import {
-  defaultSseCodecRegistry,
-  type SseProtocol,
-} from '../../../sse/registry/sse-codec-registry.js';
+import type { SseProtocol } from '../../../sse/types/index.js';
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { JsonObject } from '../types/json.js';
 import type { StageRecorder } from '../format-adapters/index.js';
@@ -27,6 +24,10 @@ import {
   finalizeResponsesConversationRequestRetention,
 } from '../../shared/responses-conversation-store.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
+import { ChatJsonToSseConverter } from "../../../sse/json-to-sse/chat-json-to-sse-converter.js";
+import { ResponsesJsonToSseConverter } from "../../../sse/json-to-sse/responses-json-to-sse-converter.js";
+import { AnthropicJsonToSseConverter } from "../../../sse/json-to-sse/anthropic-json-to-sse-converter.js";
+import { GeminiJsonToSseConverter } from "../../../sse/json-to-sse/gemini-json-to-sse-converter.js";
 import {
   resolveProviderResponseContextSignals,
   type ProviderProtocol
@@ -444,10 +445,26 @@ export async function convertProviderResponse(
       ? hubRespOutbound04ClientSemantic
       : streamPipe.payload;
   hubRespOutbound04ClientSemantic = streamClientSemantic;
-  const codec = defaultSseCodecRegistry.get(streamPipe.codec);
-  logHubStageTiming(requestId, 'resp_outbound.stage2_codec_stream', 'start', { clientProtocol: streamPipe.codec });
-  const stream = await codec.convertJsonToSse(hubRespOutbound04ClientSemantic, { requestId: streamPipe.requestId });
-  logHubStageTiming(requestId, 'resp_outbound.stage2_codec_stream', 'completed', { clientProtocol: streamPipe.codec });
+  const sseCodec = streamPipe.codec as string;
+  logHubStageTiming(requestId, 'resp_outbound.stage2_codec_stream', 'start', { clientProtocol: sseCodec });
+  let stream: Readable;
+  switch (sseCodec) {
+    case "openai-chat":
+      stream = await new ChatJsonToSseConverter().convertResponseToJsonToSse(hubRespOutbound04ClientSemantic as any, { requestId: streamPipe.requestId, model: "" }) as unknown as Readable;
+      break;
+    case "openai-responses":
+      stream = await new ResponsesJsonToSseConverter().convertResponseToJsonToSse(hubRespOutbound04ClientSemantic as any, { requestId: streamPipe.requestId, model: "" }) as unknown as Readable;
+      break;
+    case "anthropic-messages":
+      stream = await new AnthropicJsonToSseConverter().convertResponseToJsonToSse(hubRespOutbound04ClientSemantic as any, { requestId: streamPipe.requestId, model: "" }) as unknown as Readable;
+      break;
+    case "gemini-chat":
+      stream = await new GeminiJsonToSseConverter().convertResponseToJsonToSse(hubRespOutbound04ClientSemantic as any, { requestId: streamPipe.requestId, model: "" }) as unknown as Readable;
+      break;
+    default:
+      throw new Error("Unsupported SSE protocol: " + sseCodec);
+  }
+  logHubStageTiming(requestId, 'resp_outbound.stage2_codec_stream', 'completed', { clientProtocol: sseCodec });
   recordStage(options.stageRecorder, 'chat_process.resp.stage9.client_remap', hubRespOutbound04ClientSemantic);
   recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
     passthrough: false,

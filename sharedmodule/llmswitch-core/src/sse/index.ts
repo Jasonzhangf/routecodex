@@ -16,12 +16,4 @@ export * from './shared/utils.js';
 // 类型导出
 export * from './types/index.js';
 
-export {
-  defaultSseCodecRegistry,
-  SseCodecRegistry,
-  type SseCodec,
-  type SseProtocol,
-  type JsonToSseContext,
-  type SseToJsonContext,
-  type NormalizeSseContext
-} from './registry/sse-codec-registry.js';
+

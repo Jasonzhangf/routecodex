@@ -9,46 +9,13 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   reportProviderSuccessToRouterPolicy: async () => {},
   writeSnapshotViaHooks: async () => {},
   convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
-    request: {
-      model: payload.model,
-      messages: [
-        { role: 'user', content: 'hello lmstudio' }
-      ],
-      tools: payload.tools
-    },
-    context: {
-      requestId: 'req_lmstudio_chat_compat'
-    }
-  }),
-  buildResponsesPayloadFromChatNative: (payload: Record<string, unknown>, context?: Record<string, unknown>) => ({
-    id: context?.requestId ?? 'resp_lmstudio_chat_compat',
-    object: 'response',
-    status: 'completed',
-    model: payload?.data && typeof payload.data === 'object'
-      ? (payload.data as Record<string, unknown>).model
-      : 'ornith-1.0-397b',
-    output: [
-      {
-        id: 'msg_lmstudio_chat_compat',
-        type: 'message',
-        role: 'assistant',
-        status: 'completed',
-        content: [{ type: 'output_text', text: 'ok' }]
-      }
-    ]
+    messages: payload.messages ?? [],
+    tools: payload.tools
   }),
   sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) =>
     JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>,
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
-  }),
-  createResponsesJsonToSseConverter: async () => ({
-    convertResponseToJsonToSse: async () => Readable.from([
-      'event: response.completed\n',
-      `data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`,
-      'event: response.done\n',
-      `data: ${JSON.stringify({ type: 'response.done', response: { status: 'completed' } })}\n\n`
-    ])
   })
 }), { virtual: true });
 
@@ -434,83 +401,6 @@ describe('ResponsesProvider direct passthrough', () => {
       stream: true
     });
     expect(capturedBody.response_id).toBeUndefined();
-  });
-
-  test('direct process=chat posts LM Studio compat request to chat completions and returns Responses SSE', async () => {
-    const config: OpenAIStandardConfig = {
-      id: 'test-responses-direct-lmstudio-chat-compat',
-      type: 'responses-http-provider',
-      config: {
-        providerType: 'responses',
-        providerId: 'lmstudio',
-        compatibilityProfile: 'chat:lmstudio',
-        responses: { process: 'chat', streaming: 'auto' },
-        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
-        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
-      }
-    } as unknown as OpenAIStandardConfig;
-
-    const provider = new ResponsesProvider(config, emptyDeps) as any;
-    provider.isInitialized = true;
-    provider.snapshotPhase = async () => {};
-    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
-    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
-
-    let capturedEndpoint: string | undefined;
-    let capturedBody: any;
-    provider.httpClient = {
-      post: async (endpoint: string, body: any) => {
-        capturedEndpoint = endpoint;
-        capturedBody = body;
-        return {
-          data: {
-            id: 'chatcmpl_lmstudio_compat',
-            object: 'chat.completion',
-            model: body.model,
-            choices: [
-              { index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }
-            ]
-          },
-          status: 200,
-          statusText: 'OK',
-          headers: {}
-        };
-      },
-      postStream: async () => {
-        throw new Error('unexpected /responses stream call');
-      }
-    };
-
-    const inbound = {
-      model: 'gpt-5.5',
-      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
-      stream: true
-    } as any;
-    attachProviderRuntimeMetadata(inbound, {
-      requestId: 'req_lmstudio_direct_chat_compat',
-      providerId: 'lmstudio',
-      providerKey: 'lmstudio.key1.ornith-1.0-397b',
-      target: { modelId: 'ornith-1.0-397b' },
-      metadata: {
-        entryEndpoint: '/v1/responses',
-        __responsesDirectPassthrough: true
-      }
-    });
-
-    const result = await provider.sendRequestInternal(inbound) as { sseStream: NodeJS.ReadableStream };
-    let sseText = '';
-    for await (const chunk of result.sseStream as AsyncIterable<Buffer | string>) {
-      sseText += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
-    }
-
-    expect(capturedEndpoint).toBe('/chat/completions');
-    expect(capturedBody).toMatchObject({
-      model: 'ornith-1.0-397b',
-      messages: [{ role: 'user', content: 'hello lmstudio' }],
-      stream: false
-    });
-    expect(sseText).toContain('event: response.completed');
-    expect(sseText).toContain('event: response.done');
   });
 
   test('keeps direct Responses transport idle watchdog behind semantic stream watchdogs', async () => {

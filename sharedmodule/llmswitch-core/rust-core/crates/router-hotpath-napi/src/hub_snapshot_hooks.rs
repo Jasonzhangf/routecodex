@@ -283,10 +283,7 @@ fn resolve_snapshot_folder(endpoint: &str) -> String {
 }
 
 fn read_metadata_center_request_truth(snapshot: Option<&Value>) -> Option<&Map<String, Value>> {
-    snapshot?
-        .as_object()?
-        .get("requestTruth")?
-        .as_object()
+    snapshot?.as_object()?.get("requestTruth")?.as_object()
 }
 
 fn resolve_snapshot_recorder_entry_port(snapshot: Option<&Value>) -> Option<i64> {
@@ -1501,16 +1498,25 @@ pub fn build_snapshot_recorder_write_options(input: SnapshotRecorderWriteOptions
     let group_request_id = resolve_snapshot_recorder_group_request_id(input.context.as_ref());
     let runtime_metadata = resolve_snapshot_recorder_runtime_metadata(input.context);
     let mut output = Map::new();
-    output.insert("endpoint".to_string(), Value::String(input.endpoint.clone()));
+    output.insert(
+        "endpoint".to_string(),
+        Value::String(input.endpoint.clone()),
+    );
     output.insert("stage".to_string(), Value::String(input.stage));
     output.insert("requestId".to_string(), Value::String(input.request_id));
     output.insert("data".to_string(), input.data);
-    output.insert("verbosity".to_string(), Value::String("verbose".to_string()));
+    output.insert(
+        "verbosity".to_string(),
+        Value::String("verbose".to_string()),
+    );
     if let Some(provider_key) = input.provider_key {
         output.insert("providerKey".to_string(), Value::String(provider_key));
     }
     if let Some(group_request_id) = group_request_id {
-        output.insert("groupRequestId".to_string(), Value::String(group_request_id));
+        output.insert(
+            "groupRequestId".to_string(),
+            Value::String(group_request_id),
+        );
     }
     output.insert(
         "entryProtocol".to_string(),
@@ -1527,12 +1533,13 @@ pub fn build_snapshot_recorder_write_options(input: SnapshotRecorderWriteOptions
 
 #[napi]
 pub fn build_snapshot_recorder_write_options_json(input_json: String) -> NapiResult<String> {
-    let input: SnapshotRecorderWriteOptionsInput = serde_json::from_str(&input_json).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to parse snapshot recorder write options input: {}",
-            e
-        ))
-    })?;
+    let input: SnapshotRecorderWriteOptionsInput =
+        serde_json::from_str(&input_json).map_err(|e| {
+            napi::Error::from_reason(format!(
+                "Failed to parse snapshot recorder write options input: {}",
+                e
+            ))
+        })?;
     let output = build_snapshot_recorder_write_options(input);
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
@@ -2008,10 +2015,16 @@ mod tests {
         let output = build_snapshot_recorder_write_options(input);
 
         assert_eq!(output["endpoint"], serde_json::json!("/v1/messages"));
-        assert_eq!(output["entryProtocol"], serde_json::json!("anthropic-messages"));
+        assert_eq!(
+            output["entryProtocol"],
+            serde_json::json!("anthropic-messages")
+        );
         assert_eq!(output["entryPort"], serde_json::json!(5555));
         assert_eq!(output["groupRequestId"], serde_json::json!("client_req_1"));
-        assert_eq!(output["runtimeMetadata"]["runtime"], serde_json::json!("meta"));
+        assert_eq!(
+            output["runtimeMetadata"]["runtime"],
+            serde_json::json!("meta")
+        );
         assert_eq!(output["providerKey"], serde_json::json!("provider.key1"));
     }
 }

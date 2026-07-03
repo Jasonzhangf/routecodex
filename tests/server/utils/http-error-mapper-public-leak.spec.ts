@@ -132,4 +132,52 @@ describe('http-error-mapper public payload leak guard', () => {
     expect(summary).not.toContain('Upstream provider error');
     expect(summary).not.toContain('MALFORMED_RESPONSE');
   });
+
+  it('does not project local unstructured errors as upstream provider failures', () => {
+    const err = new Error(
+      'Rust HubPipeline request path failed: DIRECT_PAYLOAD_CONTRACT_ERROR: openai-responses provider wire input[3] function_call_output must not include content; use output only'
+    );
+
+    const mapped = mapErrorToHttp(err);
+    const summary = mapErrorToPublicLogSummary(err, 'Upstream provider error');
+
+    expect(mapped.status).toBe(500);
+    expect(mapped.body.error).toMatchObject({
+      message:
+        'Rust HubPipeline request path failed: DIRECT_PAYLOAD_CONTRACT_ERROR: openai-responses provider wire input[3] function_call_output must not include content; use output only',
+      code: 'INTERNAL_ERROR',
+    });
+    expect(summary).toContain('Rust HubPipeline request path failed');
+    expect(summary).not.toBe('Upstream provider error');
+  });
+
+  it('marks generic upstream provider errors without status or code as unclassified', () => {
+    const err = new Error('Upstream provider error');
+
+    const mapped = mapErrorToHttp(err);
+    const summary = mapErrorToPublicLogSummary(err, 'Upstream provider error');
+
+    expect(mapped.status).toBe(500);
+    expect(mapped.body.error).toMatchObject({
+      message: 'Unclassified error: Upstream provider error (missing status/code)',
+      code: 'INTERNAL_ERROR',
+    });
+    expect(summary).toBe('Unclassified error: Upstream provider error (missing status/code)');
+  });
+
+  it('marks wrapped generic final failure lines without status or code as unclassified', () => {
+    const err = new Error(
+      'request openai-responses-router-gpt-5.4-20260703T140813700-454502-899 failed: Upstream provider error'
+    );
+
+    const mapped = mapErrorToHttp(err);
+    const summary = mapErrorToPublicLogSummary(err, 'Upstream provider error');
+
+    expect(mapped.status).toBe(500);
+    expect(mapped.body.error).toMatchObject({
+      message: 'Unclassified error: Upstream provider error (missing status/code)',
+      code: 'INTERNAL_ERROR',
+    });
+    expect(summary).toBe('Unclassified error: Upstream provider error (missing status/code)');
+  });
 });

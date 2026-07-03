@@ -198,10 +198,9 @@ pub fn build_native_req_outbound_compat_adapter_context_json(
         serde_json::from_str(&input_json)
             .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
 
-    let output = build_native_req_outbound_compat_adapter_context(
-        input.metadata_center_snapshot.as_ref(),
-    )
-    .map_err(napi::Error::from_reason)?;
+    let output =
+        build_native_req_outbound_compat_adapter_context(input.metadata_center_snapshot.as_ref())
+            .map_err(napi::Error::from_reason)?;
 
     serialize_adapter_context_without_nulls(&output)
 }

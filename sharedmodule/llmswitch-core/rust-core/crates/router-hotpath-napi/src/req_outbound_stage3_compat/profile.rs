@@ -44,7 +44,7 @@ pub(super) fn is_responses_crs_profile(profile: &str) -> bool {
 }
 
 pub(super) fn is_lmstudio_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:lmstudio")
+    profile_matches(profile, "chat:lmstudio") || profile_matches(profile, "responses:lmstudio")
 }
 
 pub(super) fn is_minimax_profile(profile: &str) -> bool {

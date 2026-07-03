@@ -81,6 +81,43 @@ describe('direct-passthrough-payload', () => {
     expect(decision.reason).toBe('servertool_followup_requires_hub_relay');
   });
 
+  it('passes only stop-message control fields to native direct route decision', () => {
+    const body = {
+      model: 'gpt-5.5',
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'describe this image' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
+          ],
+        },
+      ],
+    };
+    const runtimeControl: Record<string, unknown> = {
+      stopMessageEnabled: true,
+      stopMessageExcludeDirect: false,
+    };
+    runtimeControl.self = runtimeControl;
+    const metadata: Record<string, unknown> = {
+      metadataCenterSnapshot: {
+        runtimeControl,
+      },
+    };
+    metadata.self = metadata;
+
+    const decision = evaluateDirectRouteDecision({
+      payload: body,
+      metadata,
+      inboundProtocol: 'openai-responses',
+      applyPatchMode: 'client',
+    });
+
+    expect(decision.providerWireValid).toBe(true);
+    expect(decision.requiresHubRelay).toBe(true);
+    expect(decision.reason).toBe('servertool_followup_requires_hub_relay');
+  });
+
   it('fails fast when direct payload is not an object', () => {
     expect(() => requireDirectPassthroughPayloadObject(null)).toThrow(
       'provider-runtime-error: direct passthrough payload must be an object',
