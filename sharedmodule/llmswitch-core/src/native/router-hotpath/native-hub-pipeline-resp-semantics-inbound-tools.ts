@@ -24,6 +24,44 @@ import type {
   RespInboundSseErrorDescriptor
 } from './native-hub-pipeline-resp-semantics-types.js';
 
+export function buildResponsesJsonFromSseJsonWithNative(input: {
+  bodyText: string;
+}): Record<string, unknown> {
+  const capability = 'buildResponsesJsonFromSseJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? { bodyText: '' });
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const envelope = parsed;
+    if (!envelope || typeof envelope !== 'object') {
+      return fail('missing envelope');
+    }
+    const payload = envelope.payload as Record<string, unknown> | undefined;
+    if (!payload || typeof payload !== 'object') {
+      return fail('missing payload');
+    }
+    return payload;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+
 export function buildOpenAIChatResponseFromAnthropicMessageWithNative(
   payload: Record<string, unknown>,
   requestId?: string

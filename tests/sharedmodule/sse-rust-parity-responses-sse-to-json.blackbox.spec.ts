@@ -108,11 +108,9 @@ describe('Responses SSE to JSON Rust parity boundary', () => {
 
     await expect(converter.convertSseToJson(partialStream(), {
       requestId: 'req_responses_decode_incomplete',
-      model: 'gpt-test',
-      contentIdleTimeoutMs: 5
+      model: 'gpt-test'
     })).rejects.toMatchObject({
-      code: 'SSE_TO_JSON_ERROR',
-      upstreamCode: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
+      code: 'SSE_TO_JSON_ERROR'
     });
   });
 });

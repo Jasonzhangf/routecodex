@@ -988,6 +988,43 @@ pub fn build_provider_sse_stream_read_error_descriptor_json(
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
+
+pub fn build_responses_json_from_sse_json(input_json: String) -> Result<String, String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| format!("Failed to parse input JSON: {}", error))?;
+    let body_text = input
+        .get("bodyText")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "buildResponsesJsonFromSseJson missing bodyText".to_string())?;
+    let payload = materialize_openai_responses_sse_body_text(body_text)?;
+    // Detect incomplete stream: missing response.done or response.completed terminal
+    let payload_obj = payload.as_object().unwrap();
+    let status = payload_obj.get("status").and_then(Value::as_str).unwrap_or("");
+    let saw_terminal = body_text.contains("response.done")
+        || body_text.contains("response.completed")
+        || body_text.contains("response.cancelled")
+        || body_text.contains("response.failed");
+    if !saw_terminal && status != "requires_action" && !body_text.trim().is_empty() {
+        return Err("OpenAI Responses SSE stream ended before terminal event".to_string());
+    }
+    let model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let envelope = FormatEnvelope {
+        format: "openai-responses".to_string(),
+        version: "v1".to_string(),
+        payload,
+        metadata: Some(serde_json::json!({
+            "model": model,
+            "extracted_at": "responses_sse_rust_decode"
+        })),
+    };
+    serde_json::to_string(&envelope).map_err(|error| {
+        format!("Failed to serialize Responses SSE decode envelope: {}", error)
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1175,7 +1212,11 @@ mod tests {
 
         let result = parse_resp_format_envelope(input).unwrap();
         assert!(result.envelope.payload.get("metadata").is_none());
-        assert!(!result.envelope.payload.to_string().contains("must-not-leak"));
+        assert!(!result
+            .envelope
+            .payload
+            .to_string()
+            .contains("must-not-leak"));
     }
 
     #[test]
@@ -1650,7 +1691,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         // Not an SSE marker → passthrough
         assert_eq!(parsed["id"], "resp_1");
-        assert!(parsed.get("mode").is_none(), "non-SSE payload should have no mode");
+        assert!(
+            parsed.get("mode").is_none(),
+            "non-SSE payload should have no mode"
+        );
     }
 
     #[test]
@@ -1678,7 +1722,8 @@ mod tests {
             "code": "SSE_READ_TIMEOUT",
             "upstream_code": "UPSTREAM_TIMEOUT"
         }"#;
-        let result = build_provider_sse_stream_read_error_descriptor_json(input.to_string()).unwrap();
+        let result =
+            build_provider_sse_stream_read_error_descriptor_json(input.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed["code"], "SSE_DECODE_ERROR");
         assert_eq!(parsed["upstreamCode"], "SSE_READ_TIMEOUT");
@@ -1691,5 +1736,4 @@ mod tests {
         let result = build_provider_sse_stream_read_error_descriptor_json("".to_string());
         assert!(result.is_err(), "empty input should fail");
     }
-
 }
