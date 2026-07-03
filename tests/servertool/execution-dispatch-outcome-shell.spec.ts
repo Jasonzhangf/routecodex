@@ -40,6 +40,30 @@ const planServertoolNoopExecutionLoopEffectWithNative = jest.fn((input: any) =>
   })
 );
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
+const applyServertoolExecutionLoopInitialDecisionWithNative = jest.fn((decision: any, application: any) => {
+  if (decision?.action === 'skip_non_tool_call_handler') {
+    return application.skipNonToolCallHandler();
+  }
+  if (decision?.action === 'throw_dispatch_spec_mismatch') {
+    return application.throwDispatchSpecMismatch();
+  }
+  if (decision?.action === 'continue_to_handler') {
+    return application.continueToHandler();
+  }
+  throw new Error('[servertool] invalid execution loop initial action');
+});
+const applyServertoolExecutionLoopResultDecisionWithNative = jest.fn((decision: any, application: any) => {
+  if (decision?.action === 'apply_materialized_result') {
+    return application.applyMaterializedResult();
+  }
+  if (decision?.action === 'apply_handler_error_tool_output') {
+    return application.applyHandlerErrorToolOutput();
+  }
+  if (decision?.action === 'continue_without_effect') {
+    return application.continueWithoutEffect();
+  }
+  throw new Error('[servertool] invalid execution loop result action');
+});
 const resolveServertoolExecutionLoopInitialDecisionWithNative = jest.fn((input: any) => {
   const plan = planServertoolExecutionLoopRuntimeActionWithNative({
     ...input,
@@ -112,6 +136,8 @@ jest.unstable_mockModule(
     planServertoolExecutionLoopRuntimeActionWithNative,
     resolveServertoolExecutionLoopInitialDecisionWithNative,
     resolveServertoolExecutionLoopResultDecisionWithNative,
+    applyServertoolExecutionLoopInitialDecisionWithNative,
+    applyServertoolExecutionLoopResultDecisionWithNative,
     planServertoolExecutionOutcomeRuntimeActionWithNative,
     createServertoolExecutionLoopStateWithNative,
     appendServertoolExecutedRecordWithNative,
@@ -220,6 +246,10 @@ describe('execution queue dispatch runtime', () => {
     expect(source).not.toContain('switch (resultLoopActionPlan.action)');
     expect(source).toContain('resolveServertoolExecutionLoopInitialDecisionWithNative');
     expect(source).toContain('resolveServertoolExecutionLoopResultDecisionWithNative');
+    expect(source).toContain('applyServertoolExecutionLoopInitialDecisionWithNative');
+    expect(source).toContain('applyServertoolExecutionLoopResultDecisionWithNative');
+    expect(source).not.toContain('initialLoopDecision.action');
+    expect(source).not.toContain('resultLoopDecision.action');
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).toContain('planServertoolHandlerErrorExecutionLoopEffectWithNative');
     expect(source).toContain('planServertoolNoopExecutionLoopEffectWithNative');

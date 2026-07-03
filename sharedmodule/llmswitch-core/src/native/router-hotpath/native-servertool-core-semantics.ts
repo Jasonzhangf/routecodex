@@ -537,6 +537,18 @@ export type ServertoolExecutionLoopResultDecision =
       action: 'continue_without_effect';
     };
 
+export type ServertoolExecutionLoopInitialDecisionApplication<T> = {
+  skipNonToolCallHandler: () => T;
+  throwDispatchSpecMismatch: () => T;
+  continueToHandler: () => T;
+};
+
+export type ServertoolExecutionLoopResultDecisionApplication<T> = {
+  applyMaterializedResult: () => T;
+  applyHandlerErrorToolOutput: () => T;
+  continueWithoutEffect: () => T;
+};
+
 function parseNativeJson(capability: string, raw: unknown): unknown {
   if (typeof raw !== 'string') {
     throw new Error(`native ${capability} returned non-string: ${typeof raw}`);
@@ -3403,6 +3415,38 @@ export function resolveServertoolExecutionLoopResultDecisionWithNative(input: {
   }
   if (plan.action === 'continue_without_effect') {
     return { action: 'continue_without_effect' };
+  }
+  throw new Error('[servertool] invalid execution loop result action');
+}
+
+export function applyServertoolExecutionLoopInitialDecisionWithNative<T>(
+  decision: ServertoolExecutionLoopInitialDecision,
+  application: ServertoolExecutionLoopInitialDecisionApplication<T>
+): T {
+  if (decision.action === 'skip_non_tool_call_handler') {
+    return application.skipNonToolCallHandler();
+  }
+  if (decision.action === 'throw_dispatch_spec_mismatch') {
+    return application.throwDispatchSpecMismatch();
+  }
+  if (decision.action === 'continue_to_handler') {
+    return application.continueToHandler();
+  }
+  throw new Error('[servertool] invalid execution loop initial action');
+}
+
+export function applyServertoolExecutionLoopResultDecisionWithNative<T>(
+  decision: ServertoolExecutionLoopResultDecision,
+  application: ServertoolExecutionLoopResultDecisionApplication<T>
+): T {
+  if (decision.action === 'apply_materialized_result') {
+    return application.applyMaterializedResult();
+  }
+  if (decision.action === 'apply_handler_error_tool_output') {
+    return application.applyHandlerErrorToolOutput();
+  }
+  if (decision.action === 'continue_without_effect') {
+    return application.continueWithoutEffect();
   }
   throw new Error('[servertool] invalid execution loop result action');
 }
