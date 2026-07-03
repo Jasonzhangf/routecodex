@@ -41,6 +41,25 @@ const mockBuildRequestStageNativeResultPlanWithNative = jest.fn((input: {
       : {})
   };
 });
+const mockBuildRequestStageHubPipelineResultWithNative = jest.fn((input: {
+  requestId: string;
+  resultPlan: Record<string, any>;
+  entryMode: 'request_stage' | 'chat_process';
+}) => {
+  const metadata = input.resultPlan.metadata ?? {};
+  return {
+    requestId: input.requestId,
+    providerPayload: input.resultPlan.providerPayload,
+    ...(metadata.target ? { target: metadata.target } : {}),
+    ...(metadata.routingDecision ? { routingDecision: metadata.routingDecision } : {}),
+    ...(metadata.routingDiagnostics ? { routingDiagnostics: metadata.routingDiagnostics } : {}),
+    metadata,
+    nodeResults: input.resultPlan.diagnostics ?? [],
+    ...(input.entryMode !== 'chat_process' && input.resultPlan.standardizedRequest
+      ? { standardizedRequest: input.resultPlan.standardizedRequest }
+      : {})
+  };
+});
 const mockBuildRequestStageMetadataDispatchWithNative = jest.fn((input: {
   sourceMetadata: Record<string, unknown>;
   requestTruth: Record<string, unknown>;
@@ -88,6 +107,7 @@ jest.unstable_mockModule(
   () => ({
     runHubPipelineLibWithNative: mockRunHubPipelineLibWithNative,
     buildRequestStageMetadataDispatchWithNative: mockBuildRequestStageMetadataDispatchWithNative,
+    buildRequestStageHubPipelineResultWithNative: mockBuildRequestStageHubPipelineResultWithNative,
     buildRequestStageNativeResultPlanWithNative: mockBuildRequestStageNativeResultPlanWithNative,
     buildRequestStageRuntimeControlWritePlanWithNative: mockBuildRequestStageRuntimeControlWritePlanWithNative,
     projectMetadataWritePlanToRuntimeControlWithNative: jest.fn(({ plan }: { plan: Record<string, unknown> }) => plan),
@@ -174,6 +194,7 @@ describe('HubPipeline preselected route ownership', () => {
     mockRunHubPipelineLibWithNative.mockReset();
     mockBuildRequestStageRuntimeControlWritePlanWithNative.mockClear();
     mockBuildRequestStageNativeResultPlanWithNative.mockClear();
+    mockBuildRequestStageHubPipelineResultWithNative.mockClear();
     mockRunHubPipelineLibWithNative.mockReturnValue(createNativeSuccess());
   });
 

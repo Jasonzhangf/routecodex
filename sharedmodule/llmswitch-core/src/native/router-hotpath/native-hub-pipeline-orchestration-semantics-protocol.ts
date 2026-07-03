@@ -131,6 +131,19 @@ export type RequestStageNativeResultPlan = {
   };
 };
 
+export type RequestStageHubPipelineResultPlan = {
+  requestId: string;
+  providerPayload?: Record<string, unknown>;
+  standardizedRequest?: Record<string, unknown>;
+  entryOriginRequest?: Record<string, unknown>;
+  processedRequest?: Record<string, unknown>;
+  routingDecision?: Record<string, unknown>;
+  routingDiagnostics?: Record<string, unknown>;
+  target?: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  nodeResults: Array<Record<string, unknown>>;
+};
+
 export type MetadataWritePlanRuntimeControlWritePlan = {
   runtimeControl?: Record<string, unknown> | null;
 };
@@ -744,6 +757,29 @@ export function buildRequestStageNativeResultPlanWithNative(input: {
       ? { standardizedRequest: parsed.standardizedRequest as Record<string, unknown> }
       : {}),
   };
+}
+
+export function buildRequestStageHubPipelineResultWithNative(input: {
+  requestId: string;
+  resultPlan: RequestStageNativeResultPlan;
+  entryMode: 'request_stage' | 'chat_process';
+}): RequestStageHubPipelineResultPlan {
+  const capability = 'buildRequestStageHubPipelineResultJson';
+  const fail = (reason?: string) => failNativeRequired<RequestStageHubPipelineResultPlan>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, input), 'parseRequestStageHubPipelineResult');
+  if (!parsed) {
+    return fail('invalid payload');
+  }
+  if (typeof parsed.requestId !== 'string' || !parsed.requestId.trim()) {
+    return fail('invalid payload');
+  }
+  if (!parsed.metadata || typeof parsed.metadata !== 'object' || Array.isArray(parsed.metadata)) {
+    return fail('invalid payload');
+  }
+  if (!Array.isArray(parsed.nodeResults)) {
+    return fail('invalid payload');
+  }
+  return parsed as RequestStageHubPipelineResultPlan;
 }
 
 export function runHubPipelineOrchestrationWithNative(input: HubPipelineInput): HubPipelineOutput {

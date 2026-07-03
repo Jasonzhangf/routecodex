@@ -7,6 +7,7 @@ import type {
 } from "./hub-pipeline.js";
 import {
   buildRequestStageMetadataDispatchWithNative,
+  buildRequestStageHubPipelineResultWithNative,
   buildRequestStageNativeResultPlanWithNative,
   buildRequestStageRuntimeControlWritePlanWithNative,
   runHubPipelineLibWithNative
@@ -104,24 +105,14 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     sourceMetadata: normalized.metadata,
     outputMetadata,
   });
-  const providerPayload = resultPlan.providerPayload as Record<string, unknown>;
-
   attachHubStageTopSummary({
     requestId: normalized.id,
     metadata: outputMetadata,
   });
 
-  const result: HubPipelineResult = {
+  return buildRequestStageHubPipelineResultWithNative({
     requestId: normalized.id,
-    providerPayload,
-    target: outputMetadata.target as HubPipelineResult['target'],
-    routingDecision: outputMetadata.routingDecision as HubPipelineResult['routingDecision'],
-    routingDiagnostics: outputMetadata.routingDiagnostics as HubPipelineResult['routingDiagnostics'],
-    metadata: outputMetadata,
-    nodeResults: resultPlan.diagnostics as unknown as HubPipelineNodeResult[],
-  };
-  if (entryMode !== "chat_process") {
-    result.standardizedRequest = resultPlan.standardizedRequest as unknown as HubPipelineResult['standardizedRequest'];
-  }
-  return result;
+    resultPlan,
+    entryMode,
+  }) as unknown as HubPipelineResult;
 }

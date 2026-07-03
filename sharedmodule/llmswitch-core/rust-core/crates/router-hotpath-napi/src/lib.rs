@@ -764,6 +764,11 @@ pub fn build_request_stage_native_result_plan_json(input_json: String) -> NapiRe
     hub_pipeline_lib::effect_plan::build_request_stage_native_result_plan_json(input_json)
 }
 
+#[napi(js_name = "buildRequestStageHubPipelineResultJson")]
+pub fn build_request_stage_hub_pipeline_result_json(input_json: String) -> NapiResult<String> {
+    hub_pipeline_lib::effect_plan::build_request_stage_hub_pipeline_result_json(input_json)
+}
+
 #[napi(js_name = "projectMetadataWritePlanToRuntimeControlJson")]
 pub fn project_metadata_write_plan_to_runtime_control_json(
     input_json: String,

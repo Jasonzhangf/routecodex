@@ -5,6 +5,20 @@ import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-ce
 
 const resolveSseProtocolWithNative = jest.fn();
 const extractModelHintFromMetadataWithNative = jest.fn(() => 'gpt-test');
+const buildHubPipelineMaterializedRequestPlanWithNative = jest.fn((input: Record<string, any>) => {
+  const metadata = input.metadata ?? {};
+  return {
+    endpoint: input.endpoint,
+    entryEndpoint: metadata.entryEndpoint ?? input.endpoint,
+    providerProtocol: metadata.providerProtocol,
+    metadata,
+    processMode: 'chat',
+    direction: metadata.direction ?? 'request',
+    stage: metadata.stage ?? 'inbound',
+    stream: input.payloadStream === true,
+    disableSnapshots: false,
+  };
+});
 const buildRequestStageMetadataDispatchWithNative = jest.fn((input: {
   sourceMetadata: Record<string, unknown>;
   runtimeControl: Record<string, unknown>;
@@ -99,6 +113,25 @@ const buildRequestStageNativeResultPlanWithNative = jest.fn((input: {
       : {})
   };
 });
+const buildRequestStageHubPipelineResultWithNative = jest.fn((input: {
+  requestId: string;
+  resultPlan: Record<string, any>;
+  entryMode: 'request_stage' | 'chat_process';
+}) => {
+  const metadata = input.resultPlan.metadata ?? {};
+  return {
+    requestId: input.requestId,
+    providerPayload: input.resultPlan.providerPayload,
+    ...(metadata.target ? { target: metadata.target } : {}),
+    ...(metadata.routingDecision ? { routingDecision: metadata.routingDecision } : {}),
+    ...(metadata.routingDiagnostics ? { routingDiagnostics: metadata.routingDiagnostics } : {}),
+    metadata,
+    nodeResults: input.resultPlan.diagnostics ?? [],
+    ...(input.entryMode !== 'chat_process' && input.resultPlan.standardizedRequest
+      ? { standardizedRequest: input.resultPlan.standardizedRequest }
+      : {})
+  };
+});
 
 const convertSseToJson = jest.fn(async () => ({ model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] }));
 const getCodec = jest.fn(() => ({ convertSseToJson }));
@@ -117,6 +150,7 @@ jest.unstable_mockModule(
   () => ({
     resolveSseProtocolWithNative,
     extractModelHintFromMetadataWithNative,
+    buildHubPipelineMaterializedRequestPlanWithNative,
     resolveHubPipelineRequestProviderProtocolWithNative: jest.fn(({
       providerProtocol,
       runtimeControl
@@ -136,6 +170,7 @@ jest.unstable_mockModule(
   () => ({
     runHubPipelineLibWithNative,
     buildRequestStageMetadataDispatchWithNative,
+    buildRequestStageHubPipelineResultWithNative,
     buildRequestStageNativeResultPlanWithNative,
     buildRequestStageRuntimeControlWritePlanWithNative,
     projectMetadataWritePlanToRuntimeControlWithNative: jest.fn(({ plan }: { plan: Record<string, unknown> }) => plan),

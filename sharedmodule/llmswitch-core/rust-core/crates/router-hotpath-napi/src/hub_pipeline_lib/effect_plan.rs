@@ -547,6 +547,87 @@ pub fn build_request_stage_native_result_plan_json(input_json: String) -> napi::
     })
 }
 
+pub fn build_request_stage_hub_pipeline_result(input: &Value) -> Result<Value, String> {
+    let record = input
+        .as_object()
+        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing input".to_string())?;
+    let request_id = record
+        .get("requestId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing requestId".to_string())?;
+    let result_plan = record
+        .get("resultPlan")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing resultPlan".to_string())?;
+    let entry_mode = record
+        .get("entryMode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("request_stage");
+
+    if result_plan.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err("Rust HubPipeline request-stage result builder requires ok resultPlan".to_string());
+    }
+
+    let provider_payload = result_plan
+        .get("providerPayload")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing providerPayload".to_string())?;
+    let metadata = result_plan
+        .get("metadata")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing metadata".to_string())?;
+    let diagnostics = result_plan
+        .get("diagnostics")
+        .filter(|value| value.is_array())
+        .ok_or_else(|| "Rust HubPipeline request-stage result builder missing diagnostics".to_string())?;
+
+    let mut output = Map::new();
+    output.insert("requestId".to_string(), Value::String(request_id.to_string()));
+    output.insert("providerPayload".to_string(), provider_payload.clone());
+    if let Some(target) = metadata.get("target") {
+        output.insert("target".to_string(), target.clone());
+    }
+    if let Some(routing_decision) = metadata.get("routingDecision") {
+        output.insert("routingDecision".to_string(), routing_decision.clone());
+    }
+    if let Some(routing_diagnostics) = metadata.get("routingDiagnostics") {
+        output.insert("routingDiagnostics".to_string(), routing_diagnostics.clone());
+    }
+    output.insert("metadata".to_string(), Value::Object(metadata.clone()));
+    output.insert("nodeResults".to_string(), diagnostics.clone());
+    if entry_mode != "chat_process" {
+        if let Some(standardized_request) = result_plan
+            .get("standardizedRequest")
+            .filter(|value| value.is_object())
+        {
+            output.insert(
+                "standardizedRequest".to_string(),
+                standardized_request.clone(),
+            );
+        }
+    }
+
+    Ok(Value::Object(output))
+}
+
+pub fn build_request_stage_hub_pipeline_result_json(input_json: String) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid request-stage HubPipeline result JSON: {error}"
+        ))
+    })?;
+    let output =
+        build_request_stage_hub_pipeline_result(&value).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize request-stage HubPipeline result failed: {error}"
+        ))
+    })
+}
+
 pub fn plan_provider_response_servertool_runtime_actions_json(
     input_json: String,
 ) -> napi::Result<String> {
@@ -567,6 +648,7 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
 #[cfg(test)]
 mod tests {
     use super::{
+        build_request_stage_hub_pipeline_result,
         build_request_stage_native_result_plan,
         normalize_provider_response_effect_plan, plan_provider_response_servertool_runtime_actions,
         project_metadata_write_plan_to_runtime_control,
@@ -876,6 +958,56 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("chat_process path returned invalid provider payload"));
+    }
+
+    #[test]
+    fn request_stage_hub_pipeline_result_projects_metadata_edges() {
+        let output = build_request_stage_hub_pipeline_result(&json!({
+            "requestId": "req_result",
+            "entryMode": "request_stage",
+            "resultPlan": {
+                "ok": true,
+                "providerPayload": { "model": "gpt-5.5" },
+                "metadata": {
+                    "target": { "providerKey": "key1" },
+                    "routingDecision": { "routeName": "thinking" },
+                    "routingDiagnostics": { "reason": "selected" },
+                    "runtime_control": { "providerProtocol": "openai-responses" }
+                },
+                "diagnostics": [
+                    { "id": "node-1", "success": true, "metadata": {} }
+                ],
+                "standardizedRequest": { "messages": [] }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(output["requestId"], json!("req_result"));
+        assert_eq!(output["providerPayload"]["model"], json!("gpt-5.5"));
+        assert_eq!(output["target"]["providerKey"], json!("key1"));
+        assert_eq!(output["routingDecision"]["routeName"], json!("thinking"));
+        assert_eq!(output["routingDiagnostics"]["reason"], json!("selected"));
+        assert_eq!(output["metadata"]["runtime_control"]["providerProtocol"], json!("openai-responses"));
+        assert_eq!(output["nodeResults"][0]["id"], json!("node-1"));
+        assert_eq!(output["standardizedRequest"]["messages"], json!([]));
+    }
+
+    #[test]
+    fn request_stage_hub_pipeline_result_omits_standardized_request_for_chat_process_entry() {
+        let output = build_request_stage_hub_pipeline_result(&json!({
+            "requestId": "req_result",
+            "entryMode": "chat_process",
+            "resultPlan": {
+                "ok": true,
+                "providerPayload": { "model": "gpt-5.5" },
+                "metadata": {},
+                "diagnostics": [],
+                "standardizedRequest": { "messages": [] }
+            }
+        }))
+        .unwrap();
+
+        assert!(output.get("standardizedRequest").is_none());
     }
 
     #[test]
