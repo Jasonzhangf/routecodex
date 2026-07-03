@@ -26,6 +26,26 @@ const buildServertoolHandlerErrorToolOutputPayloadWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
+const resolveServertoolExecutionLoopInitialDecisionWithNative = jest.fn((input: any) => {
+  const plan = planServertoolExecutionLoopRuntimeActionWithNative({
+    ...input,
+    hasMaterializedResult: false,
+    hasHandlerError: false
+  });
+  if (plan?.action === 'continue_without_effect') {
+    return { action: 'continue_to_handler' };
+  }
+  return plan;
+});
+const resolveServertoolExecutionLoopResultDecisionWithNative = jest.fn((input: any) => {
+  const plan = planServertoolExecutionLoopRuntimeActionWithNative({
+    hasHandlerEntry: true,
+    triggerMode: input?.triggerMode,
+    hasMaterializedResult: input?.hasMaterializedResult,
+    hasHandlerError: input?.hasHandlerError
+  });
+  return plan;
+});
 const planServertoolExecutionOutcomeRuntimeActionWithNative = jest.fn();
 const planServertoolOutcomeWithNative = jest.fn();
 const buildServertoolOutcomePlanInputWithNative = jest.fn((input: any) => input);
@@ -74,6 +94,8 @@ jest.unstable_mockModule(
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
+    resolveServertoolExecutionLoopInitialDecisionWithNative,
+    resolveServertoolExecutionLoopResultDecisionWithNative,
     planServertoolExecutionOutcomeRuntimeActionWithNative,
     createServertoolExecutionLoopStateWithNative,
     appendServertoolExecutedRecordWithNative,
@@ -178,8 +200,10 @@ describe('execution queue dispatch runtime', () => {
     expect(source).not.toContain("if (initialLoopActionPlan.action === 'throw_dispatch_spec_mismatch')");
     expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_materialized_result')");
     expect(source).not.toContain("if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')");
-    expect(source).toContain('switch (initialLoopActionPlan.action)');
-    expect(source).toContain('switch (resultLoopActionPlan.action)');
+    expect(source).not.toContain('switch (initialLoopActionPlan.action)');
+    expect(source).not.toContain('switch (resultLoopActionPlan.action)');
+    expect(source).toContain('resolveServertoolExecutionLoopInitialDecisionWithNative');
+    expect(source).toContain('resolveServertoolExecutionLoopResultDecisionWithNative');
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).not.toContain('errorEffectPlan.handlerErrorMessage as string');
     expect(source).toContain('message: errorEffectPlan.handlerErrorMessage');

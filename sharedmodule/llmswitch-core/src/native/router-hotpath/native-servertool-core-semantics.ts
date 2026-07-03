@@ -527,6 +527,28 @@ export interface ServertoolExecutionLoopRuntimeActionPlan {
     | 'continue_without_effect';
 }
 
+export type ServertoolExecutionLoopInitialDecision =
+  | {
+      action: 'skip_non_tool_call_handler';
+    }
+  | {
+      action: 'throw_dispatch_spec_mismatch';
+    }
+  | {
+      action: 'continue_to_handler';
+    };
+
+export type ServertoolExecutionLoopResultDecision =
+  | {
+      action: 'apply_materialized_result';
+    }
+  | {
+      action: 'apply_handler_error_tool_output';
+    }
+  | {
+      action: 'continue_without_effect';
+    };
+
 function parseNativeJson(capability: string, raw: unknown): unknown {
   if (typeof raw !== 'string') {
     throw new Error(`native ${capability} returned non-string: ${typeof raw}`);
@@ -3337,6 +3359,52 @@ export function planServertoolExecutionLoopRuntimeActionWithNative(input: {
   return {
     action: record.action
   };
+}
+
+export function resolveServertoolExecutionLoopInitialDecisionWithNative(input: {
+  hasHandlerEntry: boolean;
+  triggerMode?: string;
+  nativeExecutionMode?: string;
+  tsExecutionMode?: string;
+}): ServertoolExecutionLoopInitialDecision {
+  const plan = planServertoolExecutionLoopRuntimeActionWithNative({
+    ...input,
+    hasMaterializedResult: false,
+    hasHandlerError: false
+  });
+  if (plan.action === 'skip_non_tool_call_handler') {
+    return { action: 'skip_non_tool_call_handler' };
+  }
+  if (plan.action === 'throw_dispatch_spec_mismatch') {
+    return { action: 'throw_dispatch_spec_mismatch' };
+  }
+  if (plan.action === 'continue_without_effect') {
+    return { action: 'continue_to_handler' };
+  }
+  throw new Error('[servertool] invalid execution loop initial action');
+}
+
+export function resolveServertoolExecutionLoopResultDecisionWithNative(input: {
+  triggerMode?: string;
+  hasMaterializedResult: boolean;
+  hasHandlerError: boolean;
+}): ServertoolExecutionLoopResultDecision {
+  const plan = planServertoolExecutionLoopRuntimeActionWithNative({
+    hasHandlerEntry: true,
+    triggerMode: input.triggerMode,
+    hasMaterializedResult: input.hasMaterializedResult,
+    hasHandlerError: input.hasHandlerError
+  });
+  if (plan.action === 'apply_materialized_result') {
+    return { action: 'apply_materialized_result' };
+  }
+  if (plan.action === 'apply_handler_error_tool_output') {
+    return { action: 'apply_handler_error_tool_output' };
+  }
+  if (plan.action === 'continue_without_effect') {
+    return { action: 'continue_without_effect' };
+  }
+  throw new Error('[servertool] invalid execution loop result action');
 }
 
 export function planServertoolExecutionLoopEffectWithNative(input: {

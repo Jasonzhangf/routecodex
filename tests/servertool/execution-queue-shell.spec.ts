@@ -8,6 +8,26 @@ const buildServertoolHandlerErrorToolOutputPayloadWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
+const resolveServertoolExecutionLoopInitialDecisionWithNative = jest.fn((input: any) => {
+  const plan = planServertoolExecutionLoopRuntimeActionWithNative({
+    ...input,
+    hasMaterializedResult: false,
+    hasHandlerError: false
+  });
+  if (plan?.action === 'continue_without_effect') {
+    return { action: 'continue_to_handler' };
+  }
+  return plan;
+});
+const resolveServertoolExecutionLoopResultDecisionWithNative = jest.fn((input: any) => {
+  const plan = planServertoolExecutionLoopRuntimeActionWithNative({
+    hasHandlerEntry: true,
+    triggerMode: input?.triggerMode,
+    hasMaterializedResult: input?.hasMaterializedResult,
+    hasHandlerError: input?.hasHandlerError
+  });
+  return plan;
+});
 const runStoplessBuiltinHandlerForRuntimeWithNative = jest.fn();
 const createServertoolProviderProtocolErrorFromPlanWithNative = jest.fn((plan: any) => {
   const error = new Error(String(plan?.message ?? '[servertool] error')) as Error & {
@@ -38,6 +58,8 @@ jest.unstable_mockModule(
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
+    resolveServertoolExecutionLoopInitialDecisionWithNative,
+    resolveServertoolExecutionLoopResultDecisionWithNative,
     createServertoolExecutionLoopStateWithNative,
     appendServertoolExecutedRecordWithNative,
     runStoplessBuiltinHandlerForRuntimeWithNative
@@ -183,9 +205,10 @@ describe('execution-queue-shell', () => {
     );
 
     expect(source).toContain('runServertoolIoExecutionQueue');
-    expect(source).toContain('planServertoolExecutionLoopRuntimeActionWithNative');
-    expect(source).toContain('switch (initialLoopActionPlan.action)');
-    expect(source).toContain('switch (resultLoopActionPlan.action)');
+    expect(source).toContain('resolveServertoolExecutionLoopInitialDecisionWithNative');
+    expect(source).toContain('resolveServertoolExecutionLoopResultDecisionWithNative');
+    expect(source).not.toContain('switch (initialLoopActionPlan.action)');
+    expect(source).not.toContain('switch (resultLoopActionPlan.action)');
     expect(source).not.toContain('const initialLoopAction = initialLoopActionPlan.action');
     expect(source).not.toContain('const resultLoopAction = resultLoopActionPlan.action');
     expect(source).not.toContain("if (initialLoopActionPlan.action === 'skip_non_tool_call_handler')");

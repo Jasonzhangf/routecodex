@@ -2752,7 +2752,13 @@ function checkServertoolExecutionDispatchRustOwner() {
     'servertool-execution-queue-shell-owner',
     TS_EXECUTION_QUEUE_SHELL,
     executionQueueShell,
-    'planServertoolExecutionLoopRuntimeActionWithNative'
+    'resolveServertoolExecutionLoopInitialDecisionWithNative'
+  );
+  assertContains(
+    'servertool-execution-queue-shell-owner',
+    TS_EXECUTION_QUEUE_SHELL,
+    executionQueueShell,
+    'resolveServertoolExecutionLoopResultDecisionWithNative'
   );
   assertContains(
     'servertool-execution-queue-shell-owner',
@@ -2801,6 +2807,9 @@ function checkServertoolExecutionDispatchRustOwner() {
     "if (resultLoopActionPlan.action === 'apply_handler_error_tool_output')",
     'const initialLoopAction = initialLoopActionPlan.action',
     'const resultLoopAction = resultLoopActionPlan.action',
+    'planServertoolExecutionLoopRuntimeActionWithNative',
+    'switch (initialLoopActionPlan.action)',
+    'switch (resultLoopActionPlan.action)',
     'String(initialLoopActionPlan.action)',
     'String(resultLoopActionPlan.action)',
     'Boolean(entry)',
@@ -2858,8 +2867,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     'replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse)',
     'const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({',
     'base: args.baseForExecution',
-    'switch (initialLoopActionPlan.action)',
-    'switch (resultLoopActionPlan.action)',
+    'resolveServertoolExecutionLoopInitialDecisionWithNative',
+    'resolveServertoolExecutionLoopResultDecisionWithNative',
     'toolCall: errorEffectPlan.toolCall',
     'execution: errorEffectPlan.execution',
     'toolCall: noopEffectPlan.toolCall',
@@ -2958,7 +2967,10 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-loop-runtime-action-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_loop_runtime_action_json'],
     ['servertool-execution-loop-runtime-action-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionLoopRuntimeActionJson'],
     ['servertool-execution-loop-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionLoopRuntimeActionWithNative'],
-    ['servertool-execution-loop-runtime-action-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'planServertoolExecutionLoopRuntimeActionWithNative'],
+    ['servertool-execution-loop-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'resolveServertoolExecutionLoopInitialDecisionWithNative'],
+    ['servertool-execution-loop-runtime-action-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'resolveServertoolExecutionLoopResultDecisionWithNative'],
+    ['servertool-execution-loop-runtime-action-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'resolveServertoolExecutionLoopInitialDecisionWithNative'],
+    ['servertool-execution-loop-runtime-action-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'resolveServertoolExecutionLoopResultDecisionWithNative'],
     ['servertool-execution-outcome-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT, rustExecutionOutcomeRuntimeAction, 'feature_id: hub.servertool_execution_outcome_runtime_action_contract'],
     ['servertool-execution-outcome-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT, rustExecutionOutcomeRuntimeAction, 'pub fn plan_servertool_execution_outcome_runtime_action'],
     ['servertool-execution-outcome-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_OUTCOME_RUNTIME_ACTION_CONTRACT, rustExecutionOutcomeRuntimeAction, 'pub fn plan_servertool_execution_outcome_materialization'],
