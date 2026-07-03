@@ -1,3 +1,12 @@
+# 2026-07-03: Responses request context capture survives provider wire rewrite
+
+- Symptom after error-code fix: live `/v1/responses` still failed with `RESPONSES_STORE_MISSING_REQUEST_CONTEXT` after VR selected `orangeai[key1].glm-5.2`; request started as router id but response record used provider-enhanced id.
+- Verified root cause: `HubRequestExecutor` captured Responses conversation context after Hub had rewritten `input.body` to provider wire shape (`data/messages`), while `resolveResponsesConversationRequestCaptureArgsForChatProcessEntry()` only knew how to build context from Responses entry payload (`input/tools`) or debug context snapshots. When no context snapshot existed, capture returned `null`; later provider-id rebind had no entry to move, so response record missed request context.
+- Fix: `RouteCodexHttpServer.buildHubPipelineInput()` now preserves the original entry body as request-scoped `__raw_request_body` when replacing `body` with `hubBody`; request-executor capture reads that raw entry payload before falling back to current provider wire body.
+- Red/green evidence: new focused Jest `captures Responses request context from raw entry payload after Hub rewrites body to provider wire shape` failed with `args=null`, then passed after the fix.
+- Verification: focused capture Jest PASS 3/3; `verify:function-map-compile-gate` PASS; root `tsc --noEmit` PASS; `build:base` PASS; global install `0.90.3527`; `routecodex restart --port 5555` PASS; `/health` reports `0.90.3527`; live `/v1/responses` first turn returned `requires_action` with no new `RESPONSES_STORE_MISSING_REQUEST_CONTEXT` / `record.missing_request_context`; live `submit_tool_outputs` continuation returned `status=completed`, `output_text=OK`, and no new missing-context logs.
+- Known unrelated gaps observed while verifying: full `request-executor.metadata-center.contract.spec.ts` still has an existing providerProtocol retry assertion failure; full `responses-continuation-store.spec.ts` still has existing RED cases around duplicate pending call batches and third stopless guidance. These were not introduced by this capture fix and remain outside this slice.
+
 # 2026-07-03: responses store missing context uses internal error code
 
 - Symptom: `/v1/responses` response capture could log `record.missing_request_context`, then surface as `Upstream provider error (code=MALFORMED_RESPONSE)`, hiding the true local continuation/store context failure.

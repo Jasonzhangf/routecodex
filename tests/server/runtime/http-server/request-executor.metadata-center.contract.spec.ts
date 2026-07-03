@@ -402,6 +402,72 @@ describe('request-executor metadata center contract', () => {
     });
   });
 
+  it('captures Responses request context from raw entry payload after Hub rewrites body to provider wire shape', () => {
+    const rawInput = [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'continue' }] }
+    ];
+    const rawTools = [{ type: 'function', name: 'exec_command' }];
+    const metadata: Record<string, unknown> = {
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      portScope: '5555',
+      __raw_request_body: {
+        model: 'gpt-5.5',
+        input: rawInput,
+        tools: rawTools
+      }
+    };
+    const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth(
+      'requestId',
+      'req_wire_shape_capture_1',
+      {
+        module: 'test',
+        symbol: 'captures Responses request context from raw entry payload after Hub rewrites body to provider wire shape',
+        stage: 'test'
+      },
+      'test request id'
+    );
+    center.writeRequestTruth(
+      'sessionId',
+      'sess_wire_shape_capture_1',
+      {
+        module: 'test',
+        symbol: 'captures Responses request context from raw entry payload after Hub rewrites body to provider wire shape',
+        stage: 'test'
+      },
+      'test session id'
+    );
+
+    const args = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry({
+      input: {
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_wire_shape_capture_1',
+        body: {
+          data: {
+            model: 'glm-5.2',
+            messages: [{ role: 'user', content: 'continue' }]
+          }
+        }
+      },
+      metadata,
+      providerKey: 'orangeai.key1.glm-5.2'
+    });
+
+    expect(args).toMatchObject({
+      requestId: 'req_wire_shape_capture_1',
+      payload: expect.objectContaining({ model: 'gpt-5.5' }),
+      context: {
+        input: rawInput,
+        toolsRaw: rawTools
+      },
+      sessionId: 'sess_wire_shape_capture_1',
+      matchedPort: 5555,
+      providerKey: 'orangeai.key1.glm-5.2',
+      entryKind: 'responses',
+      routingPolicyGroup: 'gateway_priority_5555'
+    });
+  });
+
   it('reads matchedPort from raw metadata port fields instead of MetadataCenter request truth', () => {
     const metadata: Record<string, unknown> = {
       entryPort: 5555,

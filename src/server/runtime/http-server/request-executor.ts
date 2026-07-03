@@ -176,6 +176,10 @@ function readContextSnapshot(metadata: Record<string, unknown>): Record<string, 
   return readRecord(metadata.contextSnapshot) ?? readRecord(metadata.responsesContext);
 }
 
+function readRawEntryPayload(metadata: Record<string, unknown>): Record<string, unknown> | undefined {
+  return readRecord(metadata.__raw_request_body);
+}
+
 function buildResponsesRequestContextFromOriginalPayload(
   payload: Record<string, unknown>
 ): Record<string, unknown> | undefined {
@@ -232,7 +236,9 @@ export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntr
   if (!shouldCaptureResponsesConversationForEntry(args.input.entryEndpoint)) {
     return null;
   }
-  const payload = readRecord(args.input.body);
+  const currentPayload = readRecord(args.input.body);
+  const rawEntryPayload = readRawEntryPayload(args.metadata);
+  const payload = rawEntryPayload ?? currentPayload;
   const context = payload
     ? readContextSnapshot(args.metadata) ?? buildResponsesRequestContextFromOriginalPayload(payload)
     : undefined;

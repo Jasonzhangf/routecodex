@@ -1082,9 +1082,20 @@ export class RouteCodexHttpServer {
       return input;
     }
     const { hubBody, ...withoutHubBody } = input;
+    const metadata =
+      input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+        ? {
+            ...input.metadata,
+            __raw_request_body:
+              Object.prototype.hasOwnProperty.call(input.metadata, '__raw_request_body')
+                ? input.metadata.__raw_request_body
+                : input.body,
+          }
+        : { __raw_request_body: input.body };
     return {
       ...withoutHubBody,
       body: hubBody,
+      metadata,
     };
   }
 
