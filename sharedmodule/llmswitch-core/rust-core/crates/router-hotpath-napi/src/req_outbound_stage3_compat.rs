@@ -66,6 +66,13 @@ pub struct CompatResult {
     pub native_applied: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeReqOutboundCompatAdapterContextBuilderInput {
+    #[serde(default)]
+    metadata_center_snapshot: Option<Value>,
+}
+
 pub(crate) mod gemini;
 mod glm;
 mod lmstudio;
@@ -110,6 +117,93 @@ pub fn run_resp_inbound_stage3_compat_json(input_json: String) -> napi::Result<S
 
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+fn read_trimmed_string(source: Option<&Value>, key: &str) -> Option<String> {
+    source
+        .and_then(|value| value.as_object())
+        .and_then(|row| row.get(key))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn read_object<'a>(source: Option<&'a Value>, key: &str) -> Option<&'a Value> {
+    source
+        .and_then(|value| value.as_object())
+        .and_then(|row| row.get(key))
+        .filter(|value| value.is_object())
+}
+
+fn build_native_req_outbound_compat_adapter_context(
+    metadata_center_snapshot: Option<&Value>,
+) -> Result<AdapterContext, String> {
+    let runtime_control = read_object(metadata_center_snapshot, "runtimeControl");
+    let request_truth = read_object(metadata_center_snapshot, "requestTruth");
+    let provider_observation = read_object(metadata_center_snapshot, "providerObservation");
+    let target = read_object(provider_observation, "target");
+
+    let provider_protocol = read_trimmed_string(runtime_control, "providerProtocol").ok_or_else(|| {
+        "Native req outbound compat adapter context requires metadata center runtime_control.providerProtocol"
+            .to_string()
+    })?;
+
+    Ok(AdapterContext {
+        compatibility_profile: read_trimmed_string(provider_observation, "compatibilityProfile"),
+        provider_protocol: Some(provider_protocol),
+        request_id: read_trimmed_string(request_truth, "requestId"),
+        entry_endpoint: read_trimmed_string(request_truth, "entryEndpoint"),
+        route_id: read_trimmed_string(runtime_control, "routeId"),
+        rt: None,
+        captured_chat_request: None,
+        deepseek: None,
+        anthropic_thinking: None,
+        estimated_input_tokens: None,
+        model_id: read_trimmed_string(provider_observation, "assignedModelId")
+            .or_else(|| read_trimmed_string(provider_observation, "modelId")),
+        client_model_id: read_trimmed_string(provider_observation, "clientModelId"),
+        original_model_id: None,
+        provider_id: read_trimmed_string(target, "providerId")
+            .or_else(|| read_trimmed_string(target, "id")),
+        provider_key: read_trimmed_string(provider_observation, "providerKey"),
+        runtime_key: None,
+        client_request_id: read_trimmed_string(request_truth, "clientRequestId"),
+        group_request_id: None,
+        session_id: read_trimmed_string(request_truth, "sessionId"),
+        conversation_id: read_trimmed_string(request_truth, "conversationId"),
+    })
+}
+
+fn serialize_adapter_context_without_nulls(output: &AdapterContext) -> napi::Result<String> {
+    let mut value = serde_json::to_value(output).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to serialize adapter context: {}", e))
+    })?;
+    if let Some(row) = value.as_object_mut() {
+        row.retain(|_, value| !value.is_null());
+    }
+    serde_json::to_string(&value)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+#[napi_derive::napi(js_name = "buildNativeReqOutboundCompatAdapterContextJson")]
+pub fn build_native_req_outbound_compat_adapter_context_json(
+    input_json: String,
+) -> napi::Result<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+
+    let input: NativeReqOutboundCompatAdapterContextBuilderInput =
+        serde_json::from_str(&input_json)
+            .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+
+    let output = build_native_req_outbound_compat_adapter_context(
+        input.metadata_center_snapshot.as_ref(),
+    )
+    .map_err(napi::Error::from_reason)?;
+
+    serialize_adapter_context_without_nulls(&output)
 }
 
 #[napi_derive::napi]

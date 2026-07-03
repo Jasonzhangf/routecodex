@@ -399,6 +399,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "readRuntimeMetadataJson",
   "ensureRuntimeMetadataJson",
   "cloneRuntimeMetadataJson",
+  "buildNativeReqOutboundCompatAdapterContextJson",
   "runReqOutboundStage3CompatJson",
   "runRespInboundStage3CompatJson",
   "runHubPipelineJson",

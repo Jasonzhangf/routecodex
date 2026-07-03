@@ -110,6 +110,35 @@ export function runRespInboundStage3CompatWithNative(
   }
 }
 
+export function buildNativeReqOutboundCompatAdapterContextWithNative(input: {
+  metadataCenterSnapshot?: unknown;
+}): NativeReqOutboundCompatAdapterContextInput {
+  const capability = 'buildNativeReqOutboundCompatAdapterContextJson';
+  const fail = (reason?: string) => failNativeRequired<NativeReqOutboundCompatAdapterContextInput>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return throwNativeExecutionError(capability, 'json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return throwNativeExecutionError(capability, 'empty result');
+    }
+    const parsed = parseRecord(raw);
+    return (parsed as NativeReqOutboundCompatAdapterContextInput | null)
+      ?? throwNativeExecutionError(capability, 'invalid payload');
+  } catch (error) {
+    return rethrowNativeStageError(capability, error);
+  }
+}
+
 export function applyClaudeThinkingToolSchemaCompatWithNative(
   payload: JsonObject
 ): JsonObject {

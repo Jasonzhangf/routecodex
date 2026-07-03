@@ -35,6 +35,8 @@ for (const required of [
 for (const required of [
   'runReqOutboundStage3CompatJson',
   'runReqOutboundStage3CompatWithNative',
+  'buildNativeReqOutboundCompatAdapterContextJson',
+  'buildNativeReqOutboundCompatAdapterContextWithNative',
 ]) {
   if (!nativeReqOutboundBridge.includes(required) && !requiredExports.includes(required) && !compatEngine.includes(required)) {
     failures.push(`native request compat bridge missing: ${required}`);
@@ -43,9 +45,8 @@ for (const required of [
 
 for (const required of [
   'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
-  'metadataCenterSnapshot?.runtimeControl',
-  'metadataCenterSnapshot?.requestTruth',
-  'metadataCenterSnapshot?.providerObservation',
+  'metadataCenterSnapshot',
+  'buildNativeReqOutboundCompatAdapterContextWithNative',
 ]) {
   if (!nativeAdapterContext.includes(required)) {
     failures.push(`native adapter context must read req-outbound control from MetadataCenter only: ${required}`);
@@ -72,6 +73,12 @@ for (const forbidden of [
   "readRecord('anthropicThinkingConfig')",
   "readRecord('anthropicThinkingBudgets')",
   "readNumber('estimatedInputTokens')",
+  'runtimeControl?.providerProtocol',
+  'metadataCenterSnapshot?.runtimeControl',
+  'metadataCenterSnapshot?.requestTruth',
+  'metadataCenterSnapshot?.providerObservation',
+  'const readStringFrom =',
+  "readStringFrom(target, 'providerId')",
 ]) {
   if (nativeAdapterContext.includes(forbidden)) {
     failures.push(`native adapter context must not read flat adapterContext shadow: ${forbidden}`);

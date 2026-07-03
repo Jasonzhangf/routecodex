@@ -14,3 +14,4 @@ pub(super) fn signature_cache_test_guard() -> MutexGuard<'static, ()> {
 mod core;
 mod req_profiles;
 mod resp_profiles;
+mod adapter_context;
