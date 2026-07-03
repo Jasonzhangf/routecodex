@@ -116,6 +116,29 @@ describe('cli port command', () => {
     expect(out.join('\n')).toContain('"routeName":"default"');
   });
 
+  it('rejects removed provider probe flag for virtual router status', async () => {
+    const err: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createPortCommand(program, {
+      defaultPort: 5555,
+      createSpinner: async () => createStubSpinner(),
+      fetch: async () => createFetchResponse({ ok: true }),
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      sleep: async () => {},
+      log: () => {},
+      error: (line) => err.push(line),
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync(['node', 'routecodex', 'port', 'status', '5520', '--probe'], { from: 'node' })
+    ).rejects.toThrow("unknown option '--probe'");
+  });
+
   it('dry-runs virtual router decisions via HTTP thin shell', async () => {
     const out: string[] = [];
     const err: string[] = [];

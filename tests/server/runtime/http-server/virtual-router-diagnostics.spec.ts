@@ -71,6 +71,45 @@ describe('http virtual router diagnostics', () => {
     });
   });
 
+  it('ignores removed provider probe query on virtual router status', async () => {
+    const status = {
+      routes: {
+        default: {
+          pools: [{ routeName: 'default', poolId: 'default-primary' }]
+        }
+      }
+    };
+    const virtualRouter = {
+      getStatus: () => status,
+      diagnoseRoute: () => ({ ok: true })
+    };
+    const app = express();
+    app.use(express.json({ limit: '1mb' }));
+    registerHttpRoutes({
+      app,
+      config: { server: { host: '127.0.0.1', port: 0 } } as any,
+      buildHandlerContext: () => ({}) as any,
+      getPipelineReady: () => true,
+      getHubPipeline: () => ({ getVirtualRouter: () => virtualRouter }),
+      handleError: async () => undefined,
+      getServerId: () => 'routecodex:5520'
+    });
+
+    const { server, port } = await listen(app);
+    openedServers.push(server);
+
+    const response = await fetch(`http://127.0.0.1:${port}/_routecodex/diagnostics/virtual-router/status?probe=1`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      ok: true,
+      serverId: 'routecodex:5520',
+      localPort: port,
+      virtualRouter: status
+    });
+    expect(body).not.toHaveProperty('providerProbe');
+  });
+
   it('projects Rust VR dry-run diagnostics without re-running selection in TS', async () => {
     const diagnostics = {
       ok: true,

@@ -81,6 +81,24 @@ function logRestartNonBlocking(
   }
 }
 
+function logRestartHealthProbeNonBlocking(
+  ctx: RestartCommandContext,
+  stage: string,
+  result: RouteCodexHealthProbeResult | null,
+  details: Record<string, unknown> = {}
+): void {
+  if (!result || result.ok) {
+    return;
+  }
+  try {
+    const detailSuffix = Object.keys(details).length ? ` details=${JSON.stringify(details)}` : '';
+    const statusSuffix = typeof result.status === 'number' ? ` status=${result.status}` : '';
+    ctx.logger.info(`[restart] ${stage} probe=${result.kind}${statusSuffix}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function parseConfigPortHost(config: any): { port: number; host: string } {
   const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
   const host = (config?.httpserver?.host ?? config?.server?.host ?? config?.host ?? LOCAL_HOSTS.LOCALHOST);
@@ -470,11 +488,10 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
         break;
       }
       if (probe.kind !== 'starting') {
-        logRestartNonBlocking(ctx, 'resolve_targets.health_probe', describeHealthProbeFailure(probe), {
+        logRestartHealthProbeNonBlocking(ctx, 'resolve_targets.health_probe', probe, {
           host: h,
           port,
-          kind: probe.kind,
-          status: probe.status
+          kind: probe.kind
         });
       }
     }
@@ -532,11 +549,10 @@ async function waitForRestart(ctx: RestartCommandContext, host: string, port: nu
       sawEndpointUnavailable = true;
       samePidHealthyStreak = 0;
       if (probe?.kind !== 'starting') {
-        logRestartNonBlocking(ctx, 'wait_for_restart.health_probe', describeHealthProbeFailure(probe || { ok: false, kind: 'network_error' }), {
+        logRestartHealthProbeNonBlocking(ctx, 'wait_for_restart.health_probe', probe || { ok: false, kind: 'network_error' }, {
           host: probeHosts[0] || host,
           port,
-          kind: probe?.kind,
-          status: probe?.status
+          kind: probe?.kind
         });
       }
       await ctx.sleep(sawNewPid ? 250 : 150);
