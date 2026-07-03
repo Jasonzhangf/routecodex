@@ -14,6 +14,25 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
   () => ({
     executeHubPipelineWithNative: executeHubPipelineWithNativeMock,
+    buildProviderResponseMetadataSnapshotWithNative: jest.fn(({
+      hasBoundMetadataCenter,
+      requestTruth,
+      continuationContext,
+      runtimeControl,
+      directMetadataCenterSnapshot,
+      nestedMetadataCenterSnapshot,
+    }: {
+      hasBoundMetadataCenter: boolean;
+      requestTruth: Record<string, unknown>;
+      continuationContext: Record<string, unknown>;
+      runtimeControl: Record<string, unknown>;
+      directMetadataCenterSnapshot?: Record<string, unknown> | null;
+      nestedMetadataCenterSnapshot?: Record<string, unknown> | null;
+    }) => ({
+      metadataCenterSnapshot: hasBoundMetadataCenter
+        ? { requestTruth, continuationContext, runtimeControl }
+        : directMetadataCenterSnapshot ?? nestedMetadataCenterSnapshot ?? null
+    })),
     normalizeProviderResponseEffectPlanWithNative: normalizeProviderResponseEffectPlanWithNativeMock,
     planProviderResponseServertoolRuntimeActionsWithNative: jest.fn(() => ({
       executionPlans: [],

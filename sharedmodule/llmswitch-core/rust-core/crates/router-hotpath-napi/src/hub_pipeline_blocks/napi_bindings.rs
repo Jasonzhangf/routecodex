@@ -102,6 +102,68 @@ pub fn build_request_stage_metadata_dispatch(input: &Value) -> Result<Value, Str
     }))
 }
 
+fn optional_non_empty_object(value: Option<&Value>) -> Option<Value> {
+    let object = value?.as_object()?;
+    if object.is_empty() {
+        None
+    } else {
+        Some(Value::Object(object.clone()))
+    }
+}
+
+pub fn build_provider_response_metadata_snapshot(input: &Value) -> Result<Value, String> {
+    let row = input.as_object().ok_or_else(|| {
+        "Rust provider-response metadata snapshot input must be object".to_string()
+    })?;
+    let has_bound_metadata_center = row
+        .get("hasBoundMetadataCenter")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let metadata_center_snapshot = if has_bound_metadata_center {
+        let mut snapshot = serde_json::Map::new();
+        if let Some(request_truth) = optional_non_empty_object(row.get("requestTruth")) {
+            snapshot.insert("requestTruth".to_string(), request_truth);
+        }
+        if let Some(continuation_context) = optional_non_empty_object(row.get("continuationContext")) {
+            snapshot.insert("continuationContext".to_string(), continuation_context);
+        }
+        if let Some(runtime_control) = optional_non_empty_object(row.get("runtimeControl")) {
+            snapshot.insert("runtimeControl".to_string(), runtime_control);
+        }
+        if snapshot.is_empty() {
+            Value::Null
+        } else {
+            Value::Object(snapshot)
+        }
+    } else if let Some(direct) = optional_non_empty_object(row.get("directMetadataCenterSnapshot")) {
+        direct
+    } else if let Some(nested) = optional_non_empty_object(row.get("nestedMetadataCenterSnapshot")) {
+        nested
+    } else {
+        Value::Null
+    };
+
+    Ok(serde_json::json!({
+        "metadataCenterSnapshot": metadata_center_snapshot
+    }))
+}
+
+pub fn build_provider_response_metadata_snapshot_json(input_json: String) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid provider-response metadata snapshot JSON: {error}"
+        ))
+    })?;
+    let output =
+        build_provider_response_metadata_snapshot(&value).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize provider-response metadata snapshot failed: {error}"
+        ))
+    })
+}
+
 pub fn build_request_stage_metadata_dispatch_json(input_json: String) -> napi::Result<String> {
     let value: Value = serde_json::from_str(&input_json).map_err(|error| {
         napi::Error::from_reason(format!(
@@ -310,6 +372,68 @@ mod responses_direct_route_decision_tests {
 
         assert_eq!(output["metadata"]["runtime_control"], serde_json::json!({}));
         assert_eq!(output["metadataCenterSnapshot"], Value::Null);
+    }
+
+    #[test]
+    fn provider_response_metadata_snapshot_prefers_bound_center_families() {
+        let output = build_provider_response_metadata_snapshot(&serde_json::json!({
+            "hasBoundMetadataCenter": true,
+            "requestTruth": { "requestId": "req-center" },
+            "continuationContext": {},
+            "runtimeControl": { "providerProtocol": "anthropic-messages" },
+            "directMetadataCenterSnapshot": {
+                "runtimeControl": { "providerProtocol": "openai-chat" }
+            },
+            "nestedMetadataCenterSnapshot": {
+                "runtimeControl": { "providerProtocol": "openai-responses" }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            output["metadataCenterSnapshot"],
+            serde_json::json!({
+                "requestTruth": { "requestId": "req-center" },
+                "runtimeControl": { "providerProtocol": "anthropic-messages" }
+            })
+        );
+    }
+
+    #[test]
+    fn provider_response_metadata_snapshot_uses_direct_then_nested_carrier_without_center() {
+        let direct = build_provider_response_metadata_snapshot(&serde_json::json!({
+            "hasBoundMetadataCenter": false,
+            "requestTruth": { "requestId": "ignored" },
+            "runtimeControl": { "providerProtocol": "ignored" },
+            "directMetadataCenterSnapshot": {
+                "runtimeControl": { "providerProtocol": "direct" }
+            },
+            "nestedMetadataCenterSnapshot": {
+                "runtimeControl": { "providerProtocol": "nested" }
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            direct["metadataCenterSnapshot"],
+            serde_json::json!({
+                "runtimeControl": { "providerProtocol": "direct" }
+            })
+        );
+
+        let nested = build_provider_response_metadata_snapshot(&serde_json::json!({
+            "hasBoundMetadataCenter": false,
+            "directMetadataCenterSnapshot": {},
+            "nestedMetadataCenterSnapshot": {
+                "runtimeControl": { "providerProtocol": "nested" }
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            nested["metadataCenterSnapshot"],
+            serde_json::json!({
+                "runtimeControl": { "providerProtocol": "nested" }
+            })
+        );
     }
 
     #[test]

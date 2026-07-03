@@ -9,6 +9,7 @@ import type { StageRecorder } from '../format-adapters/index.js';
 import { recordStage } from '../pipeline/stages/utils.js';
 import {
   executeHubPipelineWithNative,
+  buildProviderResponseMetadataSnapshotWithNative,
   normalizeProviderResponseEffectPlanWithNative,
   planProviderResponseServertoolRuntimeActionsWithNative,
   resolveProviderProtocolWithNative,
@@ -71,19 +72,17 @@ function readProviderResponseRequestId(context: AdapterContext): string {
 
 function readMetadataCenterSnapshotForRust(context: AdapterContext): Record<string, unknown> | null {
   const contextRecord = context as unknown as Record<string, unknown>;
-  if (readBoundMetadataCenter(contextRecord)) {
-    return {
-      requestTruth: readRequestTruthFromBoundMetadataCenter(contextRecord),
-      continuationContext: readContinuationContextFromBoundMetadataCenter(contextRecord),
-      runtimeControl: readRuntimeControlFromBoundMetadataCenter(contextRecord),
-    };
-  }
   const direct = asRecord(contextRecord.metadataCenterSnapshot);
-  if (direct) {
-    return direct;
-  }
   const nestedMetadata = asRecord(contextRecord.metadata);
-  return nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) ?? null : null;
+  const snapshotPlan = buildProviderResponseMetadataSnapshotWithNative({
+    hasBoundMetadataCenter: Boolean(readBoundMetadataCenter(contextRecord)),
+    requestTruth: readRequestTruthFromBoundMetadataCenter(contextRecord),
+    continuationContext: readContinuationContextFromBoundMetadataCenter(contextRecord),
+    runtimeControl: readRuntimeControlFromBoundMetadataCenter(contextRecord),
+    directMetadataCenterSnapshot: direct ?? null,
+    nestedMetadataCenterSnapshot: nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) ?? null : null,
+  });
+  return snapshotPlan.metadataCenterSnapshot ?? null;
 }
 
 

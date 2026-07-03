@@ -93,6 +93,10 @@ export type RequestStageMetadataDispatchPlan = {
   metadataCenterSnapshot?: Record<string, unknown> | null;
 };
 
+export type ProviderResponseMetadataSnapshotPlan = {
+  metadataCenterSnapshot?: Record<string, unknown> | null;
+};
+
 function readServertoolRuntimeErrorCode(value: unknown): ProviderProtocolErrorCode | null {
   if (value === 'SERVERTOOL_FOLLOWUP_FAILED' || value === 'SERVERTOOL_HANDLER_FAILED') {
     return value;
@@ -515,6 +519,29 @@ export function buildRequestStageMetadataDispatchWithNative(input: {
   }
   return {
     metadata: parsed.metadata as Record<string, unknown>,
+    metadataCenterSnapshot: snapshot as Record<string, unknown> | null | undefined,
+  };
+}
+
+export function buildProviderResponseMetadataSnapshotWithNative(input: {
+  hasBoundMetadataCenter: boolean;
+  requestTruth: Record<string, unknown>;
+  continuationContext: Record<string, unknown>;
+  runtimeControl: Record<string, unknown>;
+  directMetadataCenterSnapshot?: Record<string, unknown> | null;
+  nestedMetadataCenterSnapshot?: Record<string, unknown> | null;
+}): ProviderResponseMetadataSnapshotPlan {
+  const capability = 'buildProviderResponseMetadataSnapshotJson';
+  const fail = (reason?: string) => failNativeRequired<ProviderResponseMetadataSnapshotPlan>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, input), 'parseProviderResponseMetadataSnapshot');
+  if (!parsed) {
+    return fail('invalid payload');
+  }
+  const snapshot = parsed.metadataCenterSnapshot;
+  if (snapshot !== undefined && snapshot !== null && (typeof snapshot !== 'object' || Array.isArray(snapshot))) {
+    return fail('invalid payload');
+  }
+  return {
     metadataCenterSnapshot: snapshot as Record<string, unknown> | null | undefined,
   };
 }
