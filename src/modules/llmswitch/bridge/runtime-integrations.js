@@ -225,29 +225,27 @@ export async function resetResponsesConversationStateForRestartSimulation() {
     }
     fn();
 }
-let cachedResponsesSseToJsonConverterFactory = null;
-let cachedResponsesJsonToSseConverterFactory = null;
-export async function createResponsesSseToJsonConverter() {
-    if (!cachedResponsesSseToJsonConverterFactory) {
-        const mod = await importCoreDist("sse/sse-to-json/index");
-        const Ctor = mod.ResponsesSseToJsonConverter;
-        if (typeof Ctor !== "function") {
-            throw new Error("[llmswitch-bridge] ResponsesSseToJsonConverter not available");
-        }
-        cachedResponsesSseToJsonConverterFactory = () => new Ctor();
+let cachedNativeSseRuntimeModule = null;
+async function getNativeSseRuntimeModule() {
+    if (!cachedNativeSseRuntimeModule) {
+        cachedNativeSseRuntimeModule = await importCoreDist("native/router-hotpath/native-sse-runtime");
     }
-    return cachedResponsesSseToJsonConverterFactory();
+    return cachedNativeSseRuntimeModule;
 }
-export async function createResponsesJsonToSseConverter() {
-    if (!cachedResponsesJsonToSseConverterFactory) {
-        const mod = await importCoreDist("sse/json-to-sse/index");
-        const Ctor = mod.ResponsesJsonToSseConverter;
-        if (typeof Ctor !== "function") {
-            throw new Error("[llmswitch-bridge] ResponsesJsonToSseConverter not available");
-        }
-        cachedResponsesJsonToSseConverterFactory = () => new Ctor();
+export async function buildResponsesJsonFromSseStreamWithNative(input) {
+    const mod = await getNativeSseRuntimeModule();
+    if (typeof mod.collectSseBodyText !== "function" ||
+        typeof mod.buildJsonFromSseWithNative !== "function") {
+        throw new Error("[llmswitch-bridge] native SSE runtime decode helpers not available");
     }
-    return cachedResponsesJsonToSseConverterFactory();
+    const bodyText = await mod.collectSseBodyText(input.stream);
+    return mod.buildJsonFromSseWithNative({
+        protocol: "openai-responses",
+        bodyText,
+        requestId: input.requestId,
+        model: input.model,
+        config: input.config ?? {},
+    });
 }
 let cachedProviderRuntimeIngress = null;
 async function getProviderRuntimeIngress() {
@@ -274,16 +272,12 @@ export async function preloadCriticalBridgeRuntimeModules() {
         throw new Error("[llmswitch-bridge] preload failed: responses conversation helpers not available");
     }
     loaded.push("conversion/shared/responses-conversation-store");
-    const sseToJsonModule = await importCoreDist("sse/sse-to-json/index");
-    if (typeof sseToJsonModule.ResponsesSseToJsonConverter !== "function") {
-        throw new Error("[llmswitch-bridge] preload failed: ResponsesSseToJsonConverter not available");
+    const nativeSseRuntimeModule = await getNativeSseRuntimeModule();
+    if (typeof nativeSseRuntimeModule.collectSseBodyText !== "function" ||
+        typeof nativeSseRuntimeModule.buildJsonFromSseWithNative !== "function") {
+        throw new Error("[llmswitch-bridge] preload failed: native SSE runtime decode helpers not available");
     }
-    loaded.push("sse/sse-to-json/index");
-    const jsonToSseModule = await importCoreDist("sse/json-to-sse/index");
-    if (typeof jsonToSseModule.ResponsesJsonToSseConverter !== "function") {
-        throw new Error("[llmswitch-bridge] preload failed: ResponsesJsonToSseConverter not available");
-    }
-    loaded.push("sse/json-to-sse/index");
+    loaded.push("native/router-hotpath/native-sse-runtime");
     const ingressModule = await getProviderRuntimeIngress();
     if (typeof ingressModule.reportProviderErrorToRouterPolicy !== "function" ||
         typeof ingressModule.reportProviderSuccessToRouterPolicy !== "function") {

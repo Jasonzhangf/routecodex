@@ -1110,7 +1110,6 @@ verification:
       - tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts
     integration:
       - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
-      - sharedmodule/llmswitch-core/scripts/tests/loop-rt-responses.mjs
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
       - npm run verify:hub-response-responses-chat-projection
@@ -1289,6 +1288,111 @@ verification:
       - "Validation must prove request-side tool governance, stop hook contract injection, and final request semantic return to `HubReqChatProcess03Governed` stay Rust-owned."
       - "Validation must also prove the TS req-process surface remains native-wrapper-only and does not regrow message/tool/metadata rewrite logic."
       - "The currently anchored closeout edge for this module is `ServertoolReqHook04RequestFinalized -> HubReqChatProcess03Governed`; additional upstream request-hook edges may remain pending until their exact caller/callee bindings are proven."
+
+  - feature_id: servertool.followup_orchestration
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs
+    contract:
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+      - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
+    integration:
+      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+      - tests/servertool/response-stage-orchestration-shell.spec.ts
+      - tests/servertool/stopless-cli-continuation.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run build:base
+    notes:
+      - "Stage A locks chat_servertool_orchestration.rs as the current Rust owner; TS servertool shells are forbidden from owning semantic decisions."
+
+  - feature_id: conversion.shared.anthropic
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_response_helper.rs
+    contract:
+      - tests/sharedmodule/anthropic-tool-schema-stability.spec.ts
+      - tests/sharedmodule/provider-compat-anthropic.spec.ts
+      - tests/sharedmodule/provider-normalization-anthropic-thinking.spec.ts
+    integration:
+      - tests/sharedmodule/anthropic-image-mapping.spec.ts
+      - tests/sharedmodule/anthropic-tool-choice-shape-regression.spec.ts
+    smoke:
+      - npm run verify:anthropic-roundtrip
+      - npm run verify:hub-response-anthropic-native
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Anthropic/OpenAI message and tool-schema normalization must remain in anthropic_openai_codec.rs; TS anthropic shared utils are forbidden semantic owners."
+
+  - feature_id: conversion.responses.store
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts
+    contract:
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
+    integration:
+      - tests/modules/llmswitch/bridge/responses-openai-bridge.spec.ts
+      - tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts
+    smoke:
+      - npm run verify:responses-history-protocol-contract
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run build:base
+    notes:
+      - "Continuation save/restore and scope isolation must be keyed by entry protocol, continuationOwner, and conversation/session scope in Rust."
+
+  - feature_id: hub.req_chatprocess.tool_governance
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
+      - tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/stopless-cli-continuation.spec.ts
+    smoke:
+      - cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Request-side text tool harvest, tool injection, and payload sanitization must stay in req_process_stage1_tool_governance Rust blocks."
+
+  - feature_id: hub.resp_chatprocess.tool_governance
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks
+    contract:
+      - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - tests/servertool/response-stage-orchestration-shell.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    smoke:
+      - cargo test -p router-hotpath-napi resp_process_stage1_tool_governance --lib -- --nocapture
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Response-side harvest, apply_patch reversal, and internal tool stripping must stay in resp_process_stage1_tool_governance Rust blocks."
 
   - feature_id: hub.chat_process_session_usage
     change_risk: medium
@@ -1975,10 +2079,9 @@ verification:
       - "Shared tool normalization is verified under `responses.function_tool_normalization`."
       - "Shared parameters normalization is verified under `responses.tool_parameters_normalization`."
 
-  - feature_id: sse.codec_registry_surface
+  - feature_id: sse.public_ts_lib_surface
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts
       - sharedmodule/llmswitch-core/src/sse/index.ts
     contract:
       - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
@@ -1990,13 +2093,33 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Registry is dispatch-only; no payload repair, hidden protocol fallback, provider policy, or metadata mutation."
+      - "Public TS library forwards only to unified Rust/NAPI dispatch and is forbidden for runtime imports."
+
+  - feature_id: sse.runtime_rust_dispatch
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+    contract:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
+    integration: []
+    smoke:
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi sse_runtime_dispatch --lib -- --nocapture
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Hub Pipeline and provider-response must call unified Rust/NAPI SSE runtime dispatch directly and must not import `src/sse/**`."
 
   - feature_id: sse.stream_parse_boundary
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
     contract:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration: []
@@ -2006,16 +2129,17 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "TS parser wrapper may only call native parser helpers and maintain stream buffering."
+      - "SSE parser semantics are Rust-owned; TS runtime may only marshal unified native calls and transport bytes."
 
   - feature_id: sse.event_type_validation
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
-      - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
     contract:
-      - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
-      - tests/sharedmodule/sse-parser-no-recovery.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
     integration: []
     smoke:
       - npm run verify:sse-architecture-boundary
@@ -2028,11 +2152,11 @@ verification:
   - feature_id: sse.responses_decode_projection
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
     contract:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
-      - tests/sharedmodule/responses-sse-decode-no-ts-wire-synthesis.spec.ts
-      - tests/sharedmodule/responses-sse-native-materialize.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     integration: []
     smoke:
@@ -2046,9 +2170,6 @@ verification:
   - feature_id: sse.responses_encode_projection
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts
-      - sharedmodule/llmswitch-core/src/sse/shared/writer.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
     contract:
@@ -2067,47 +2188,38 @@ verification:
   - feature_id: sse.chat_stream_projection
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
     contract:
-      - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
-      - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
-      - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
-      - tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration: []
     smoke:
       - cargo test -p router-hotpath-napi chat_sse_event_payload --lib -- --nocapture
-      - node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts --runInBand
+      - npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
     notes:
-      - "Chat JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
-      - "Chat SSE->JSON decode aggregation must stay native/Rust-owned; focused parity must prove incomplete streams fail fast and TS converter remains a native-backed IO shell."
+      - "Chat JSON->SSE sequence ordering must stay native/Rust-owned through unified dispatch."
+      - "Chat SSE->JSON decode aggregation must stay native/Rust-owned; focused parity must prove incomplete streams fail fast without TS converter ownership."
       - "Chat stream projection preserves stream shape; provider health, route policy, and Hub tool governance remain outside SSE."
 
   - feature_id: sse.anthropic_gemini_stream_projection
     change_risk: medium
     unit:
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_sse_event_payload.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs
     contract:
-      - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
-      - tests/sharedmodule/sse-rust-parity-anthropic-sse.blackbox.spec.ts
-      - tests/sharedmodule/sse-rust-parity-gemini-sse.blackbox.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     integration: []
     smoke:
@@ -2117,10 +2229,10 @@ verification:
       - npm run build:base
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners."
-      - "Anthropic JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
-      - "Anthropic SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned; focused parity must prove TS converter and native decoder output/error behavior match."
-      - "Gemini JSON->SSE sequence ordering must stay native/Rust-owned; focused parity must prove TS sequencer and native sequence output match."
-      - "Gemini SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned; focused parity must prove TS converter and native decoder output/error behavior match."
+      - "Anthropic JSON->SSE sequence ordering must stay native/Rust-owned through unified dispatch."
+      - "Anthropic SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned without TS converter ownership."
+      - "Gemini JSON->SSE sequence ordering must stay native/Rust-owned through unified dispatch."
+      - "Gemini SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned without TS converter ownership."
 
   - feature_id: error.pipeline_contract
     change_risk: high

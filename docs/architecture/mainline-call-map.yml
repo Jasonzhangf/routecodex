@@ -926,75 +926,142 @@ chains:
       - step_id: chat-sse-01
         from_node: HubRespOutbound04ClientSemantic
         to_node: ServerRespOutbound05ClientFrame
-        caller_symbol: convertResponseToJsonToSse
-        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
-        callee_symbol: buildChatSseStreamWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
+        caller_symbol: buildSseFramesFromJsonWithNative
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+        callee_symbol: build_sse_frames_from_json_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.chat_stream_projection
         semantic_input: "validated ChatCompletionResponse plus request-scoped ChatJsonToSseContext"
         semantic_output: "ordered ChatSseEvent stream for role/content/reasoning/tool-call/finish/done frames"
         status: anchored
-        note: "TS `convertResponseToJsonToSse` is a thin stream IO wrapper around native `buildChatSseStreamWithNative`; Rust `build_chat_sse_stream_json` owns event ordering, usage, and fail-fast validation. The adjacent encode edge may project frames only. It must not synthesize fallback error frames for malformed response semantics; encode failures surface through the stream error path."
+        note: "TS native bridge `buildSseFramesFromJsonWithNative` only marshals JSON and frames; Rust `sse_runtime_dispatch::build_sse_frames_from_json_json` dispatches `openai-chat` to the chat SSE event owner for ordering, usage, and fail-fast validation. The adjacent encode edge may project frames only. It must not synthesize fallback error frames for malformed response semantics; encode failures surface through the stream error path."
       - step_id: chat-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed
-        caller_symbol: convertSseToJson
-        caller_file: sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts
-        callee_symbol: buildChatJsonFromSseWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
+        caller_symbol: buildJsonFromSseWithNative
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+        callee_symbol: build_json_from_sse_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.chat_stream_projection
         semantic_input: "OpenAI Chat provider SSE body text or ChatSseEvent stream plus request-scoped model/request id"
         semantic_output: "final ChatCompletionResponse with aggregated content/reasoning/tool/function deltas and strict terminal [DONE] validation"
         status: anchored
-        note: "TS `ChatSseToJsonConverter` is a stream IO/timeout shell; Rust `build_chat_json_from_sse_json` owns SSE parse/materialize, usage normalization, tool/function argument aggregation, and incomplete stream fail-fast."
+        note: "TS native bridge `buildJsonFromSseWithNative` only marshals raw SSE body text; Rust `sse_runtime_dispatch::build_json_from_sse_json` dispatches `openai-chat` to the chat SSE event owner for parse/materialize, usage normalization, tool/function argument aggregation, and incomplete stream fail-fast."
       - step_id: anthropic-sse-01
         from_node: HubRespOutbound04ClientSemantic
         to_node: ServerRespOutbound05ClientFrame
-        caller_symbol: convertResponseToJsonToSse
-        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts
-        callee_symbol: buildAnthropicSseStreamFramesWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
+        caller_symbol: buildSseFramesFromJsonWithNative
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+        callee_symbol: build_sse_frames_from_json_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "validated Anthropic message response plus request-scoped AnthropicJsonToSseOptions"
         semantic_output: "ordered AnthropicSseEvent stream for message/content/reasoning/tool/stop frames"
         status: anchored
-        note: "TS `AnthropicJsonToSseConverter.convertResponseToJsonToSse` is a thin stream IO wrapper around native `buildAnthropicSseStreamFramesWithNative`; Rust `build_anthropic_sse_stream_json` owns Anthropic JSON->SSE event ordering, reasoning projection, chunking, and fail-fast validation."
+        note: "TS native bridge `buildSseFramesFromJsonWithNative` only marshals JSON and frames; Rust `sse_runtime_dispatch::build_sse_frames_from_json_json` dispatches `anthropic-messages` to the Anthropic SSE event owner for JSON->SSE event ordering, reasoning projection, chunking, and fail-fast validation."
       - step_id: anthropic-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed
-        caller_symbol: convertSseToJson
-        caller_file: sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts
-        callee_symbol: buildAnthropicJsonFromSseWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
+        caller_symbol: buildJsonFromSseWithNative
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+        callee_symbol: build_json_from_sse_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "Anthropic provider SSE body text plus request-scoped model/request id and reasoning options"
         semantic_output: "final AnthropicMessageResponse with aggregated text/reasoning/tool blocks, usage, stop reason, and strict message_stop validation"
         status: anchored
-        note: "TS `AnthropicSseToJsonConverter` is a stream IO/timeout shell; Rust `build_anthropic_json_from_sse_json` owns SSE parse/materialize, reasoning projection, tool input materialization, and incomplete stream fail-fast."
+        note: "TS native bridge `buildJsonFromSseWithNative` only marshals raw SSE body text; Rust `sse_runtime_dispatch::build_json_from_sse_json` dispatches `anthropic-messages` to the Anthropic SSE event owner for parse/materialize, reasoning projection, tool input materialization, and incomplete stream fail-fast."
       - step_id: gemini-sse-01
         from_node: HubRespOutbound04ClientSemantic
         to_node: ServerRespOutbound05ClientFrame
-        caller_symbol: convertResponseToJsonToSse
-        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
-        callee_symbol: buildGeminiSseStreamFramesWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
+        caller_symbol: buildSseFramesFromJsonWithNative
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+        callee_symbol: build_sse_frames_from_json_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "validated Gemini response plus request-scoped GeminiJsonToSseOptions"
         semantic_output: "ordered GeminiSseEvent stream for part and done frames"
         status: anchored
-        note: "TS `GeminiJsonToSseConverter.convertResponseToJsonToSse` is a thin stream IO wrapper around native `buildGeminiSseStreamFramesWithNative`; Rust `build_gemini_sse_stream_json` owns Gemini JSON->SSE event ordering, reasoning projection, and fail-fast validation."
+        note: "TS native bridge `buildSseFramesFromJsonWithNative` only marshals JSON and frames; Rust `sse_runtime_dispatch::build_sse_frames_from_json_json` dispatches `gemini-chat` to the Gemini SSE event owner for JSON->SSE event ordering, reasoning projection, and fail-fast validation."
       - step_id: gemini-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed
-        caller_symbol: convertSseToJson
-        caller_file: sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
-        callee_symbol: buildGeminiJsonFromSseWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
+        caller_symbol: buildJsonFromSseWithNative
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+        callee_symbol: build_json_from_sse_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "Gemini provider SSE body text plus request-scoped model/request id and reasoning options"
         semantic_output: "final GeminiResponse with aggregated text/reasoning parts, candidate done metadata, prompt feedback, usage metadata, model version, and strict done validation"
         status: anchored
-        note: "TS `GeminiSseToJsonConverter` is a stream IO shell; Rust `build_gemini_json_from_sse_json` owns SSE parse/materialize, data/done validation, reasoning projection, and incomplete stream fail-fast."
+        note: "TS native bridge `buildJsonFromSseWithNative` only marshals raw SSE body text; Rust `sse_runtime_dispatch::build_json_from_sse_json` dispatches `gemini-chat` to the Gemini SSE event owner for parse/materialize, data/done validation, reasoning projection, and incomplete stream fail-fast."
+
+  - chain_id: stage_a.p0_rust_migration.mainline
+    summary: "Stage A locks P0 Rust migration owner boundaries before implementation: servertool followup orchestration, Anthropic conversion, Responses continuation store, and request/response Chat Process tool governance."
+    entry_contract:
+      node: StageAOwnerBoundary
+      owner_doc: docs/goal-prompts/2026-07-03-rust-hub-pipeline-migration.md
+    edges:
+      - step_id: stage-a-p0-01
+        from_node: HubRespChatProcess03Governed
+        to_node: ServertoolOutcome
+        caller_symbol: run_servertool_response_stage_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+        callee_symbol: plan_servertool_outcome_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+        owner_feature_id: servertool.followup_orchestration
+        semantic_input: "post-Chat-Process governed response and servertool runtime context"
+        semantic_output: "servertool outcome/followup plan before client projection"
+        status: anchored
+        note: "TS servertool shells may execute IO from native plans, but followup/orchestration semantics must remain Rust-owned."
+      - step_id: stage-a-p0-02
+        from_node: AnthropicChatInbound
+        to_node: OpenAiChatCanonical
+        caller_symbol: build_openai_chat_from_anthropic_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+        callee_symbol: map_chat_tools_to_anthropic_tools
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+        owner_feature_id: conversion.shared.anthropic
+        semantic_input: "Anthropic messages payload with tools, content blocks, tool_use, tool_result, and thinking blocks"
+        semantic_output: "canonical OpenAI chat request/response semantics with normalized tool schema and message history"
+        status: anchored
+        note: "TS anthropic shared utility files are forbidden from owning protocol conversion semantics."
+      - step_id: stage-a-p0-03
+        from_node: HubRespChatProcess03Governed
+        to_node: ResponsesContinuationStore
+        caller_symbol: prepare_responses_conversation_entry_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+        callee_symbol: restore_responses_continuation_payload_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+        owner_feature_id: conversion.responses.store
+        semantic_input: "Responses request/response continuation truth and scope data"
+        semantic_output: "persisted/restored continuation payload isolated by entry protocol, continuation owner, and conversation/session scope"
+        status: anchored
+        note: "resp_outbound, SSE, handler, and adapter layers are forbidden from reconstructing continuation history."
+      - step_id: stage-a-p0-04
+        from_node: HubReqInbound02Standardized
+        to_node: HubReqChatProcess03Governed
+        caller_symbol: apply_req_process_tool_governance
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+        callee_symbol: apply_req_process_tool_governance_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+        owner_feature_id: hub.req_chatprocess.tool_governance
+        semantic_input: "standardized request payload before Chat Process request governance"
+        semantic_output: "request payload after request-side tool governance, tool injection, and sanitization"
+        status: anchored
+        note: "native-chat-process-governance-semantics.ts is a host wrapper only and must not own request payload semantics."
+      - step_id: stage-a-p0-05
+        from_node: HubRespInbound02Parsed
+        to_node: HubRespChatProcess03Governed
+        caller_symbol: govern_response_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+        callee_symbol: strip_orphan_function_calls_tag_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+        owner_feature_id: hub.resp_chatprocess.tool_governance
+        semantic_input: "parsed provider response before response-side Chat Process governance"
+        semantic_output: "response payload after text tool harvest, apply_patch reversal, and internal tool stripping"
+        status: anchored
+        note: "response outbound projection must not own tool harvest or patch reversal semantics."
 
 shared_multi_reference_functions:
   - function_id: native.responses_context_capture

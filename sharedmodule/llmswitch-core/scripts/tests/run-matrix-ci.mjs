@@ -89,7 +89,6 @@ async function main() {
   // 1) loopbacks (single-protocol)
   for (const [label, file] of [
     ['looprt:chat', 'scripts/tests/loop-rt-chat.mjs'],
-    ['looprt:responses', 'scripts/tests/loop-rt-responses.mjs'],
     ['looprt:anthropic', 'scripts/tests/loop-rt-anthropic.mjs'],
     ['looprt:gemini', 'scripts/tests/loop-rt-gemini.mjs']
   ]) {
@@ -98,8 +97,6 @@ async function main() {
 
   results.push(await run('anthropic:response-regression', 'scripts/tests/anthropic-response-regression.mjs'));
 
-  // 1b) protocol bridge matrix (JSON + SSE, codex samples)
-  results.push(await run('matrix:bridge', 'scripts/tests/protocol-bridge-matrix.mjs'));
   // 1b.1) codex-samples provider-response 回归（tool_call_id 形状 + 配对）
   results.push(await run('matrix:codex-samples', 'scripts/tests/codex-matrix-regression.mjs'));
   // 1b.1.1) responses: preserve call_* tool ids when present (LM Studio compat)
@@ -120,9 +117,6 @@ async function main() {
   // 1c.1.1.1) coverage boosts (pure, deterministic)
   results.push(await run('matrix:coverage-openai-message-normalize', 'scripts/tests/coverage-openai-message-normalize.mjs'));
   results.push(await run('matrix:coverage-sticky-pool', 'scripts/tests/coverage-sticky-pool-via-router.mjs'));
-  results.push(await run('matrix:coverage-responses-sse-parser-lmstudio-no-event', 'scripts/tests/responses-sse-parser-lmstudio-no-event.mjs'));
-  results.push(await run('matrix:coverage-responses-sse-terminated-salvage', 'scripts/tests/responses-sse-to-json-terminated-salvage.mjs'));
-  results.push(await run('matrix:coverage-responses-sse-missing-terminator', 'scripts/tests/responses-sse-missing-terminator.mjs'));
   results.push(await run('matrix:coverage-compat-lmstudio-tool-call-ids', 'scripts/tests/compat-lmstudio-tool-call-ids.mjs'));
   results.push(await run('matrix:coverage-hub-req-outbound-compat', 'scripts/tests/coverage-hub-req-outbound-compat.mjs'));
   results.push(await run('matrix:anthropic-usage-input-output-regression', 'scripts/tests/anthropic-usage-input-output-regression.mjs'));
@@ -131,7 +125,6 @@ async function main() {
   results.push(await run('matrix:anthropic-sse-stop-sequence', 'scripts/tests/anthropic-sse-stop-sequence.mjs'));
   results.push(await run('matrix:anthropic-sse-terminated-salvage', 'scripts/tests/anthropic-sse-to-json-terminated-salvage.mjs'));
   results.push(await run('matrix:openai-chat-json-text-body', 'scripts/tests/openai-chat-json-text-body.mjs'));
-  results.push(await run('matrix:coverage-chat-sse-openai-no-event', 'scripts/tests/chat-sse-to-json-openai-no-event.mjs'));
   results.push(await run('matrix:coverage-instruction-target', 'scripts/tests/coverage-instruction-target.mjs'));
   results.push(await run('matrix:coverage-guidance-augment', 'scripts/tests/coverage-guidance-augment.mjs'));
   results.push(
@@ -154,8 +147,6 @@ async function main() {
     })
   );
   results.push(await run('matrix:coverage-bridge-protocol-blackbox', 'scripts/tests/coverage-bridge-protocol-blackbox.mjs'));
-  // 1d) responses provider response chain
-  results.push(await run('matrix:responses-chain', 'scripts/tests/hub-response-chain.mjs'));
   // 1d.1) hard-order guard: provider -> compat -> inbound -> chat_process -> outbound -> client
   results.push(await run('matrix:provider-response-chain-order', 'scripts/tests/provider-response-chain-order.mjs'));
   // 1e) virtual-router pool mode (round-robin vs priority)

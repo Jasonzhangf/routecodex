@@ -2,18 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const sseRoot = path.join(root, 'sharedmodule/llmswitch-core/src/sse');
 const functionMap = fs.readFileSync(path.join(root, 'docs/architecture/function-map.yml'), 'utf8');
 const verificationMap = fs.readFileSync(path.join(root, 'docs/architecture/verification-map.yml'), 'utf8');
-
-const requiredFeatures = [
-  'sse.codec_registry_surface',
-  'sse.stream_parse_boundary',
-  'sse.responses_decode_projection',
-  'sse.responses_encode_projection',
-  'sse.chat_stream_projection',
-  'sse.anthropic_gemini_stream_projection',
-];
 
 const failures = [];
 
@@ -22,14 +12,16 @@ function read(relPath) {
 }
 
 function listFiles(dir) {
+  const abs = path.join(root, dir);
+  if (!fs.existsSync(abs)) return [];
   const out = [];
-  const stack = [dir];
+  const stack = [abs];
   while (stack.length > 0) {
     const current = stack.pop();
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const next = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === 'dist' || entry.name === 'node_modules') continue;
+        if (entry.name === 'dist' || entry.name === 'node_modules' || entry.name === 'target') continue;
         stack.push(next);
       } else if (/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
         out.push(next);
@@ -39,814 +31,157 @@ function listFiles(dir) {
   return out;
 }
 
-for (const featureId of requiredFeatures) {
+for (const featureId of [
+  'sse.runtime_rust_dispatch',
+  'sse.stream_parse_boundary',
+  'sse.event_type_validation',
+  'sse.chat_stream_projection',
+  'sse.responses_encode_projection',
+  'sse.responses_decode_projection',
+  'sse.anthropic_gemini_stream_projection',
+]) {
   const marker = `feature_id: ${featureId}`;
   if (!functionMap.includes(marker)) failures.push(`function-map missing ${marker}`);
   if (!verificationMap.includes(marker)) failures.push(`verification-map missing ${marker}`);
 }
 
-const sourceFiles = listFiles(sseRoot);
-const sourceByRel = new Map(
-  sourceFiles.map((file) => [path.relative(root, file).split(path.sep).join('/'), fs.readFileSync(file, 'utf8')])
-);
-
-for (const featureId of requiredFeatures) {
-  const anchor = `feature_id: ${featureId}`;
-  const hits = [...sourceByRel.entries()].filter(([, source]) => source.includes(anchor));
-  if (hits.length === 0) failures.push(`SSE source anchor missing for ${featureId}`);
-}
-
-const registry = read('sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts');
-for (const forbidden of [
-  "from '../index.js'",
-  'export type SseStreamLike = any',
-  'export type SseStreamInput = any',
-  "return 'unknown'",
-  "?? 'unknown'",
-  'fallback?: string',
+const rustDispatchPath = 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs';
+const rustDispatch = read(rustDispatchPath);
+for (const required of [
+  'feature_id: sse.runtime_rust_dispatch',
+  'pub fn build_sse_frames_from_json_json',
+  'pub fn build_json_from_sse_json',
+  'fn normalize_protocol',
+  '"openai-chat"',
+  '"openai-responses"',
+  '"anthropic-messages"',
+  '"gemini-chat"',
+  'Unsupported SSE protocol',
 ]) {
-  if (registry.includes(forbidden)) {
-    failures.push(`SSE registry must not expose any stream alias: ${forbidden}`);
-  }
-}
-
-const sseIndex = read('sharedmodule/llmswitch-core/src/sse/index.ts');
-for (const forbidden of [
-  'createChatConverters(',
-  'createResponsesConverters(',
-  'createAnthropicConverters(',
-  'createGeminiConverters(',
-  'async roundTrip(',
-  'export const chatConverters =',
-  'export const responsesConverters =',
-  'export const anthropicConverters =',
-  'export const geminiConverters =',
-]) {
-  if (sseIndex.includes(forbidden)) {
-    failures.push(`SSE index public surface must stay barrel-only: ${forbidden}`);
-  }
-}
-
-for (const relPath of [
-  'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts',
-  'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
-]) {
-  const runtimeSource = read(relPath);
-  if (runtimeSource.includes('sse/index.js')) {
-    failures.push(`${relPath}: runtime must import SSE registry owner directly, not public sse/index.js`);
-  }
-}
-
-const writer = read('sharedmodule/llmswitch-core/src/sse/shared/writer.ts');
-for (const forbidden of [
-  'ignore and fallback',
-  'response.unknown',
-  '临时实现',
-  '仅用于避免编译错误',
-  'private writeQueue',
-  'private isWriting',
-  'timeoutMs?:',
-  'timeoutMs: config.timeoutMs',
-  'this.config.onError(error as Error);\n    }\n  }\n\n  /**\n   * 处理背压',
-  'this.config.onError(error as Error);\n    }\n  }\n\n  /**\n   * 同步写入事件数组',
-]) {
-  if (writer.includes(forbidden)) {
-    failures.push(`SSE writer retains fallback serializer marker: ${forbidden}`);
-  }
-}
-
-const registrySurface = read('sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts');
-for (const forbidden of [
-  'resumeToolOutputs?:',
-  'resumeToolOutputs: context.resumeToolOutputs',
-  'ResponsesFunctionCallOutputItem',
-]) {
-  if (registrySurface.includes(forbidden)) {
-    failures.push(`SSE registry must not own continuation/tool-output replay semantics: ${forbidden}`);
-  }
-}
-
-const retiredResponsesSerializerPath =
-  'sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts';
-if (fs.existsSync(path.join(root, retiredResponsesSerializerPath))) {
-  failures.push(`${retiredResponsesSerializerPath} must stay physically deleted; Responses wire codec is Rust-owned`);
-}
-
-const responsesEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts');
-for (const forbidden of [
-  'function createResponsePayload(',
-  'function normalizeUsage(',
-  'function normalizeReasoningSummaryEntries(',
-  'function normalizeReasoningSummaryField(',
-  'const TEXT_CHUNK_BOUNDARY',
-  'function getChunkSize(',
-  'function chunkText(',
-  'StringUtils.chunkString(',
-  'basePayload.output = []',
-  'const itemDescriptor: Record<string, unknown>',
-  'output_index: context.outputIndexCounter,',
-  '...(outputItem as any)',
-  'const partDescriptor: Record<string, unknown>',
-  'item_id: outputItemId,',
-  'content_index: contentIndex,',
-  '(content as any).annotations',
-  '(content as any).logprobs',
-  'logprobs: []',
-  'call_id: functionCall.call_id',
-  'arguments: functionCall.arguments',
-  'if (item.arguments) {',
-  'if (!functionCall.arguments) return;',
-  "part: { type: 'summary_text'",
-  'delta: content.text',
-  'signature: content.signature',
-  'image_url: content.image_url',
-  'item_id: reasoning.id',
-  'content: ResponsesContent | undefined',
-  '? buildResponsesSseContentPartEventPayloadWithNative(',
-  'summary: normalizeReasoningSummaryFieldWithNative',
-  'data: {\n        ...delta\n      }',
-  'data: {\n        ...done\n      }',
-  'data: {\n        ...payload\n      }',
-  'data: {\n        ...partAdded\n      }',
-  'data: {\n        ...textDone\n      }',
-  'data: {\n        ...partDone\n      }',
-  "type: 'internal_error'",
-  "code: 'generation_error'",
-  'created_at: response.created_at ?? Math.floor(Date.now() / 1000)',
-  'response.created_at ?? Math.floor(Date.now() / 1000)',
-  "import { TimeUtils } from '../../shared/utils.js';",
-  'function getNextSequenceNumber(',
-  'function createBaseEvent(',
-  'prompt_tokens',
-  'completion_tokens',
-  'cache_read_input_tokens',
-  'function collapseWhitespace(',
-  'function stripReasoningLinePrefix(',
-  'function compactReasoningSummaryBody(',
-  'function normalizeReasoningSummaryText(',
-  'if (!text) return;',
-  'if (!chunk) continue;',
-  '**Thinking**',
-]) {
-  if (responsesEventGenerator.includes(forbidden)) {
-    failures.push(`Responses SSE generator must not keep usage/reasoning compatibility marker: ${forbidden}`);
-  }
-}
-
-const responsesJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts');
-for (const forbidden of [
-  'private validateResponse(',
-  'Invalid ResponsesResponse: missing required fields',
-  'Invalid ResponsesResponse: object must be "response"',
-  'Invalid ResponsesResponse: output must be an array',
-  'responsesRequest: {} as any',
-  'outputItemStates: new Map()',
-  'CONTEXT_TTL_MS',
-  'MAX_CONTEXTS',
-  'pruneResponsesContexts(',
-  'private contexts = new Map<string, ResponsesJsonToSseContext>()',
-  'getContext(requestId: string)',
-  'clearContext(requestId: string)',
-  'getActiveContexts(): Map<string, ResponsesJsonToSseContext>',
-  'DEFAULT_RESPONSES_CONVERSION_CONFIG',
-  'private config =',
-  'constructor(config?',
-  'getConfig: () =>',
-  'this.config.defaultChunkSize',
-  'this.config.defaultDelayMs',
-  'context.options.chunkSize ||',
-  'context.options.delayMs ||',
-  'messageEventsCount',
-  'outputItemsCount',
-  'contentPartsCount',
-  'deltaEventsCount',
-  'reasoningEventsCount',
-  'functionCallEventsCount',
-]) {
-  if (responsesJsonToSseConverter.includes(forbidden)) {
-    failures.push(`Responses JSON->SSE converter must not keep dead context state: ${forbidden}`);
-  }
-}
-
-const responsesSseTypes = read('sharedmodule/llmswitch-core/src/sse/types/responses-types.ts');
-for (const forbidden of [
-  'interface ResponsesConversionConfig',
-  'DEFAULT_RESPONSES_CONVERSION_CONFIG',
-  'resumeToolOutputs?:',
-  'outputItemsCount: number',
-  'contentPartsCount: number',
-  'deltaEventsCount: number',
-  'reasoningEventsCount: number',
-  'functionCallEventsCount: number',
-  'messageEventsCount: number',
-]) {
-  if (responsesSseTypes.includes(forbidden)) {
-    failures.push(`Responses SSE types must not keep dead conversion config surface: ${forbidden}`);
-  }
-}
-
-const responsesSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts');
-for (const forbidden of [
-  'serializeEventToSSE(',
-  "const type = typeof event.type === 'string' ? event.type : 'data';",
-  "const data = event.data ? JSON.stringify(event.data) : '';",
-  'event: ${type}\\ndata: ${data}\\n\\n',
-  'private config:',
-  'constructor(config?',
-  'this.config.enableEventValidation',
-  'this.config.enableSequenceValidation',
-  'private contexts = new Map<string, SseToResponsesJsonContext>()',
-  'this.contexts.set(',
-  'getContext(requestId: string)',
-  'clearContext(requestId: string)',
-  'getActiveContexts(): Map<string, SseToResponsesJsonContext>',
-  'private resolveSseFailureMetadata(',
-  "normalized.includes('context window')",
-  "normalized.includes('stream incomplete')",
-  "normalized.includes('terminated')",
-  "return { upstreamCode: errorCode || 'SSE_TO_JSON_ERROR', statusCode: 502, retryable: true };",
-  'messageEventsCount',
-  'outputItemsCount',
-  'contentPartsCount',
-  'deltaEventsCount',
-  'reasoningEventsCount',
-  'functionCallEventsCount',
-]) {
-  if (responsesSseToJsonConverter.includes(forbidden)) {
-    failures.push(`Responses SSE decode must not synthesize wire frames in TS: ${forbidden}`);
-  }
-}
-
-const anthropicSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts');
-for (const forbidden of [
-  'private resolveSseFailureMetadata(',
-  "normalized.includes('upstream_stream_idle_timeout')",
-  "normalized.includes('stream incomplete')",
-  "normalized.includes('terminated')",
-  "return { upstreamCode: errorCode || 'ANTHROPIC_SSE_TO_JSON_FAILED', statusCode: 502, retryable: true };",
-]) {
-  if (anthropicSseToJsonConverter.includes(forbidden)) {
-    failures.push(`Anthropic SSE decode must not synthesize provider failure metadata in TS: ${forbidden}`);
-  }
-}
-
-const sseTypesIndex = read('sharedmodule/llmswitch-core/src/sse/types/index.ts');
-for (const forbidden of [
-  'DEFAULT_RESPONSES_CONVERSION_CONFIG',
-]) {
-  if (sseTypesIndex.includes(forbidden)) {
-    failures.push(`SSE type barrel must not export dead Responses conversion config: ${forbidden}`);
-  }
-}
-
-const responsesSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts');
-for (const forbidden of [
-  'function validateResponse(',
-  'Invalid response: missing required fields',
-  'Invalid response: missing or invalid output array',
-  'enableValidation: boolean',
-  'if (!config.enableValidation) return',
-  'if (config.enableValidation) {',
-  'function normalizeResponseOutput(',
-  'suppressReasoningFromContent: hasExplicitReasoning',
-  'function canonicalizeResponsesEventPayload(',
-  'data: {\n      type: event.type,',
-  'sequence_number: event.sequenceNumber',
-  'Responses event payload type mismatch: event=',
-  'enableRecovery: boolean',
-  'enableRecovery: true',
-  'if (config.enableRecovery) {',
-  'yield buildErrorEvent(error as Error, context, config);',
-  'buildErrorEvent',
-  'export function createResponsesSequencer(',
-  'getConfig(): ResponsesSequencerConfig',
-  'const finalConfig = { ...DEFAULT_RESPONSES_SEQUENCER_CONFIG, ...config };',
-  'enableDelay: boolean',
-  'async function* withDelay(',
-  'await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs))',
-  'await new Promise(resolve => setTimeout(resolve, config.chunkDelayMs * 2))',
-  'maxOutputItems: number',
-  'maxContentParts: number',
-  'Too many output items:',
-  'Too many content parts:',
-  'submittedToolOutputs?:',
-  'submittedToolOutputs: undefined',
-  'config.submittedToolOutputs',
-  'const submittedOutputs =',
-  'planResponsesSseErrorRecoveryWithNative',
-  'shouldEmitResponseError',
-  'responseError = error instanceof Error',
-]) {
-  if (responsesSequencer.includes(forbidden)) {
-    failures.push(`Responses sequencer must not locally canonicalize SSE payload semantics: ${forbidden}`);
-  }
-}
-
-const responsesEventPayloadWrapper = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts');
-for (const forbidden of [
-  'buildResponsesSseErrorPayloadWithNative',
-  'planResponsesSseErrorRecoveryWithNative',
-  'parseNativeRecoveryPlan',
-  'buildResponsesSseErrorPayloadJson',
-  'planResponsesSseErrorRecoveryJson',
-]) {
-  if (responsesEventPayloadWrapper.includes(forbidden)) {
-    failures.push(`Responses SSE native wrapper must not expose error synthesis/recovery helper: ${forbidden}`);
+  if (!rustDispatch.includes(required)) {
+    failures.push(`${rustDispatchPath}: missing Rust runtime dispatch marker ${required}`);
   }
 }
 for (const forbidden of [
-  'contentPart?: unknown',
-  '...(contentPart !== undefined ? { content_part: contentPart } : {})',
+  'unwrap_or("openai-chat")',
+  'unwrap_or("openai-responses")',
+  'unwrap_or("responses")',
+  'unwrap_or("chat")',
+  'unknown" => Ok',
 ]) {
-  if (responsesEventPayloadWrapper.includes(forbidden)) {
-    failures.push(`Responses SSE native wrapper must not allow TS to synthesize partless content_part events: ${forbidden}`);
+  if (rustDispatch.includes(forbidden)) {
+    failures.push(`${rustDispatchPath}: Rust SSE dispatch must not default/fallback protocol: ${forbidden}`);
   }
 }
 
-const responsesOutputNormalizer = read('sharedmodule/llmswitch-core/src/sse/shared/responses-output-normalizer.ts');
-for (const forbidden of [
-  'normalizeMessageContentParts(',
-  'const baseId =',
-  'suppressReasoningFromContent',
-  'extraReasoning',
-  '`${baseId}_reasoning`',
-  "return reasoning ? [reasoning, message] : [message]",
+const nativeBridgePath = 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts';
+const nativeBridge = read(nativeBridgePath);
+for (const required of [
+  'feature_id: sse.runtime_rust_dispatch',
+  'buildSseFramesFromJsonWithNative',
+  'buildJsonFromSseWithNative',
+  'buildReadableFromSseFrames',
+  'collectSseBodyText',
+  'readNativeFunction',
+  'buildSseFramesFromJsonJson',
+  'buildJsonFromSseJson',
 ]) {
-  if (responsesOutputNormalizer.includes(forbidden)) {
-    failures.push(`Responses output normalizer must not own message/reasoning split semantics in TS: ${forbidden}`);
+  if (!nativeBridge.includes(required)) {
+    failures.push(`${nativeBridgePath}: missing native bridge marker ${required}`);
   }
-}
-
-const chatEventGenerator = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts');
-for (const forbidden of [
-  "import { TimeUtils } from '../../shared/utils.js';",
-  'timestamp: TimeUtils.now()',
-  'sequenceNumber: 0',
-  "type: 'internal_error'",
-  "code: 'generation_error'",
-  "delta: { role: role as 'user' | 'system' | 'assistant' | 'tool' }",
-  'delta: { content }',
-  'delta: { reasoning, reasoning_content: reasoning }',
-  'function: { arguments: args }',
-  "arguments: ''",
-  'function normalizeChatUsage(',
-  'const normalizedUsage = normalizeChatUsage(usage);',
-  'delta: {},\n      logprobs: null,\n      finish_reason: finishReason',
-  'id: context.responseId ?? context.requestId',
-  'created: context.created ?? (config.enableTimestampGeneration ? Math.floor(TimeUtils.now() / 1000) : 0)',
-  'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return undefined;\n  }',
-  'if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {\n    return undefined;\n  }',
-  'record.input_tokens',
-  'record.output_tokens',
-  'record.promptTokens',
-  'record.completionTokens',
-  'record.inputTokens',
-  'record.outputTokens',
-  'record.totalTokens',
-  '(promptTokens ?? 0) + (completionTokens ?? 0)',
-  'if (!args) return;',
-]) {
-  if (chatEventGenerator.includes(forbidden)) {
-    failures.push(`Chat SSE generator must not synthesize response id/created/usage truth: ${forbidden}`);
-  }
-}
-
-const chatSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts');
-for (const forbidden of [
-  'yield buildErrorEvent(error as Error, context, config);',
-  'buildErrorEvent,',
-  'buildErrorEvent(',
-  'if (toolCall.function?.arguments) {',
-  "if (!('finish_reason' in choice)) {",
-  "message.tool_calls ? 'tool_calls' : 'stop'",
-  '(choice as any).finish_reason ||',
-]) {
-  if (chatSequencer.includes(forbidden)) {
-    failures.push(`Chat SSE sequencer must not silently synthesize malformed chat terminal semantics: ${forbidden}`);
-  }
-}
-
-const chatJsonToSseConverter = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts');
-for (const forbidden of [
-  'CONTEXT_TTL_MS',
-  'MAX_CONTEXTS',
-  'pruneChatContexts(',
-  'private contexts = new Map<string, ChatJsonToSseContext>()',
-  'getContext(requestId: string)',
-  'clearContext(requestId: string)',
-  'getActiveContexts(): Map<string, ChatJsonToSseContext>',
-  'DEFAULT_CHAT_CONVERSION_CONFIG',
-  'private config',
-  'constructor(config?',
-  'this.config',
-  'getConfig:',
-]) {
-  if (chatJsonToSseConverter.includes(forbidden)) {
-    failures.push(`Chat JSON->SSE converter must not keep dead context state: ${forbidden}`);
-  }
-}
-
-const chatTypes = read('sharedmodule/llmswitch-core/src/sse/types/chat-types.ts');
-for (const forbidden of [
-  'interface ChatConversionConfig',
-  'DEFAULT_CHAT_CONVERSION_CONFIG',
-  'getConfig(): ChatConversionConfig',
-]) {
-  if (chatTypes.includes(forbidden)) {
-    failures.push(`Chat SSE types must not expose converter-level config surface: ${forbidden}`);
-  }
-}
-
-const sharedOwnerFiles = [
-  'sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts',
-  'sharedmodule/llmswitch-core/src/sse/shared/writer.ts',
-  'sharedmodule/llmswitch-core/src/sse/shared/utils.ts',
-];
-
-for (const relPath of sharedOwnerFiles) {
-  const source = read(relPath);
-  for (const providerSpecific of ['deepseek', 'glm', 'lmstudio', 'minimax', 'qwen', 'kimi', 'siliconflow']) {
-    if (source.toLowerCase().includes(providerSpecific)) {
-      failures.push(`${relPath}: shared SSE owner must not contain provider-specific branch marker "${providerSpecific}"`);
-    }
-  }
-}
-
-const sharedUtils = read('sharedmodule/llmswitch-core/src/sse/shared/utils.ts');
-for (const forbidden of [
-  'safeStringify',
-  'safeParse',
-  'isValidJson',
-  'static truncate',
-  'static random',
-  'export class ValidationUtils',
-  'export class IdUtils',
-  'isTimeoutError',
-  'isNetworkError',
-]) {
-  if (sharedUtils.includes(forbidden)) {
-    failures.push(`SSE shared utils resurrects dead fallback/helper wrapper: ${forbidden}`);
-  }
-}
-
-const sseParser = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts');
-if (sseParser.includes('enableEventRecovery: true')) {
-  failures.push('SSE parser default must not enable event recovery');
-}
-
-const retiredAnthropicResponseBuilderPath =
-  'sharedmodule/llmswitch-core/src/sse/sse-to-json/builders/anthropic-response-builder.ts';
-if (fs.existsSync(path.join(root, retiredAnthropicResponseBuilderPath))) {
-  failures.push(`${retiredAnthropicResponseBuilderPath} must stay physically deleted; Anthropic SSE decode is Rust-owned`);
-}
-
-for (const [relPath, source] of [
-  [
-    'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
-    read('sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts')
-  ],
-  [
-    'sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts',
-    read('sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts')
-  ],
-]) {
-  for (const forbidden of [
-    'private config =',
-    'constructor(config?',
-    'this.config = { ...this.config, ...config }',
-    'this.config.defaultChunkSize',
-    'this.config.defaultDelayMs',
-    'this.config.chunkDelayMs',
-    'this.config.reasoningMode',
-    'this.config.reasoningTextPrefix',
-    'enableEventValidation: true',
-    'strictMode: false',
-    'enableStrictValidation: this.config.enableEventValidation',
-    'DEFAULT_ANTHROPIC_CONVERSION_CONFIG',
-    'DEFAULT_GEMINI_CONVERSION_CONFIG',
-  ]) {
-    if (source.includes(forbidden)) {
-      failures.push(`${relPath}: protocol SSE->JSON converter must not keep converter-level config truth: ${forbidden}`);
-    }
-  }
-}
-
-const anthropicEventSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/anthropic-event-serializer.ts');
-for (const forbidden of [
-  ": 'message')",
-  "event.type ||\n    (typeof (payload as Record<string, unknown>)?.type === 'string'",
-]) {
-  if (anthropicEventSerializer.includes(forbidden)) {
-    failures.push(`Anthropic SSE serializer must not synthesize fallback event types: ${forbidden}`);
-  }
-}
-
-const anthropicSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts');
-for (const forbidden of [
-  "response.stop_reason ?? 'end_turn'",
-  'timestamp: Date.now()',
-  "if (!block || typeof block !== 'object') continue;",
-  "block.text ?? ''",
-  "const data = typeof block.data === 'string' ? block.data : '';",
-  'if (!data.trim().length) {\n            continue;\n          }',
-  'response.content || []',
-  'block.input ?? {}',
-  'JSON.stringify(input ?? {})',
-  'if (!chunk) continue',
-]) {
-  if (anthropicSequencer.includes(forbidden)) {
-    failures.push(`Anthropic SSE sequencer must not synthesize fallback/event envelope truth: ${forbidden}`);
-  }
-}
-if (!anthropicSequencer.includes('Invalid Anthropic tool_result block: missing tool_use_id')) {
-  failures.push('Anthropic SSE sequencer must fail fast when tool_result.tool_use_id is missing');
-}
-
-for (const [relPath, source] of [
-  [
-    'sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts',
-    read('sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts')
-  ],
-  [
-    'sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts',
-    read('sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts')
-  ],
-]) {
-  for (const forbidden of [
-    'private contexts = new Map',
-    'this.contexts.set(',
-    'this.contexts.delete(',
-    'private config =',
-    'constructor(config?',
-    'this.config = { ...this.config, ...config }',
-    'this.config.defaultChunkSize',
-    'this.config.defaultDelayMs',
-    'this.config.chunkDelayMs',
-    'this.config.reasoningMode',
-    'this.config.reasoningTextPrefix',
-    'DEFAULT_ANTHROPIC_CONVERSION_CONFIG',
-    'DEFAULT_GEMINI_CONVERSION_CONFIG',
-  ]) {
-    if (source.includes(forbidden)) {
-      failures.push(`${relPath}: protocol JSON->SSE converter must not keep dead context state: ${forbidden}`);
-    }
-  }
-}
-
-const providerResponseShell = read('sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
-for (const forbidden of [
-  "options.context.requestId || 'unknown'",
-  'effectPlan: { effects: Array.isArray(effects) ? effects : [] }',
-  'servertoolRuntimeActions: [], streamPipe: null, runtimeStateWrite: null, stoplessMetadataCenterWrite: null',
-  'Array.isArray(args.runtimeEffects.servertoolRuntimeActions)\n    ? args.runtimeEffects.servertoolRuntimeActions\n    : []',
-  'outboundEffect.runtimeEffects.streamPipe.codec as SseProtocol',
-  ': hubRespOutbound04ClientSemantic;'
-]) {
-  if (providerResponseShell.includes(forbidden)) {
-    failures.push(`Provider response shell must not synthesize empty native effect plan truth: ${forbidden}`);
-  }
-}
-
-const geminiEventSerializer = read('sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts');
-for (const forbidden of [
-  "event.event ?? event.type ?? 'gemini.data'",
-]) {
-  if (geminiEventSerializer.includes(forbidden)) {
-    failures.push(`Gemini SSE serializer must not synthesize fallback event types: ${forbidden}`);
-  }
-}
-
-const geminiSequencer = read('sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts');
-for (const forbidden of [
-  'parts.filter((part): part is GeminiContentPart => Boolean(part))',
-  'sequenceNumber: 0',
-  'timestamp: Date.now()',
-  'Array.isArray(response.candidates) ? response.candidates : []',
-  'candidates[candidateIndex] || {}',
-  'if (!part) return;',
-  "if (!part || typeof part !== 'object') {\n    return [part];\n  }",
-  'return [];',
-]) {
-  if (geminiSequencer.includes(forbidden)) {
-    failures.push(`Gemini SSE sequencer must not synthesize fallback event truth: ${forbidden}`);
-  }
-}
-
-const geminiSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts');
-for (const forbidden of [
-  'if (!part || typeof part !== \'object\') {\n      return [part];\n    }',
-  'if (!entry || typeof entry.index !== \'number\') continue;',
-  'typeof payload?.candidateIndex === \'number\' ? payload.candidateIndex : 0',
-  'typeof payload?.role === \'string\' ? payload.role : \'model\'',
-  'if (Array.isArray(donePayload?.candidates))',
-]) {
-  if (geminiSseToJsonConverter.includes(forbidden)) {
-    failures.push(`Gemini SSE decode must not pass malformed data parts through: ${forbidden}`);
-  }
-}
-
-const providerNeutralProjectionFiles = [
-  'sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts',
-  'sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts',
-  'sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts',
-  'sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts',
-  'sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts',
-  'sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts',
-  'sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts',
-  'sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts',
-  'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts',
-  'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts',
-  'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts',
-];
-
-for (const relPath of providerNeutralProjectionFiles) {
-  const source = read(relPath);
-  for (const providerSpecific of ['deepseek', 'glm', 'lmstudio', 'minimax', 'qwen', 'kimi', 'siliconflow']) {
-    if (source.toLowerCase().includes(providerSpecific)) {
-      failures.push(`${relPath}: provider-neutral SSE projection must not contain provider-specific marker "${providerSpecific}"`);
-    }
-  }
-  for (const forbidden of [
-    'enableEventRecovery: true',
-    'enableEventRecovery: !this.config.strictMode',
-    'tryMaterializeFinalResponse',
-    'getSalvageResult',
-    'const salvaged =',
-    'return salvaged',
-    'best effort',
-    'Ignore non-JSON lines so valid partial frames can still be recovered.',
-    '忽略解析错误',
-    'keep raw payload only',
-    'const fallback = { input_tokens: 0, output_tokens: 0, total_tokens: 0 }',
-    "response.status ?? 'requires_action'",
-    "response.status ?? 'completed'",
-    'if (!content.text) continue;',
-    'if (!text) return;',
-    'const contents = Array.isArray(reasoning.content) ? reasoning.content : [];',
-    'normalizeResponsesSseReasoningSummaryWithNative(reasoning.summary) ?? []',
-    'if (!text) continue;',
-    '&& !!content.text',
-    'if (isTextContent && content.text)',
-    "args = '{}'",
-    'return String(raw)',
-    "outputItemState.arguments = '{}'",
-    'logResponseBuilderNonBlocking',
-    'fallbackCode',
-    'fallbackMessage',
-    "fallback = 'model'",
-    "return String(input ?? '')",
-    'response.id || `msg_${requestId}`',
-    "response.role || 'assistant'",
-    "role: messageBuilder.role || 'assistant'",
-    'block.id || `call_${requestId}_${index}`',
-    'context.currentResponse.id || `chat_${context.requestId}`',
-    'context.currentResponse.created || Math.floor(Date.now() / 1000)',
-    'call_${Math.random().toString(36).slice(2, 10)}',
-    'JSON.stringify(fc?.arguments ?? {})',
-    "typeof fc?.id === 'string' ? fc.id : `call_${Math.random().toString(36).slice(2, 10)}`",
-    "role: typeof d.role === 'string' ? d.role : 'assistant'",
-    "const et = (event && (event.event || event.type)) || 'unknown'",
-    'syntheticResponse',
-    'syntheticIndex',
-    "id: `${context.requestId}-input-${inputIndex}`",
-    'message_placeholder_',
-    'createResponseBuilder(',
-  ]) {
-    if (source.includes(forbidden)) {
-      failures.push(`${relPath}: provider-neutral SSE projection must not salvage partial streams into successful responses: ${forbidden}`);
-    }
-  }
-}
-
-const chatSseToJsonConverter = read('sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts');
-if (!chatSseToJsonConverter.includes('buildChatJsonFromSseWithNative')) {
-  failures.push('Chat SSE decode converter must call native buildChatJsonFromSseWithNative');
 }
 for (const forbidden of [
-  'normalizeMessageReasoningTools',
-  'normalizeChatMessageContent',
-  'dispatchReasoning',
-  'processSseEvent(',
-  'processChatChunk(',
-  'processChoice(',
-  'processDelta(',
-  'processToolCallDelta(',
-  'normalizeReasoning(',
-  'buildPartialResponse(',
-  'finalizeResponse(',
-  'parseSseChunk(',
-  'function normalizeChatUsage(usage: unknown): ChatUsage | null',
-  'function normalizeChatUsage(usage: unknown): ChatUsage | undefined',
-  'function readNonNegativeInteger(',
-  'if (!usage || typeof usage !== \'object\' || Array.isArray(usage)) {\n    return null;\n  }',
-  'if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) {\n    return null;\n  }',
-  "id: context.currentResponse.id || ''",
-  'created: context.currentResponse.created || 0',
-  "message: choice.message || { role: 'assistant', content: '' }",
-  'const normalizedUsage = normalizeChatUsage(chunk.usage);',
-  'const directUsage = normalizeChatUsage(_context.currentResponse.usage);',
-  "if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {\n          continue;\n        }",
+  '../../../sse/',
+  '../../sse/',
+  '../sse/',
+  'new ChatJsonToSseConverter',
+  'new ResponsesJsonToSseConverter',
+  'new AnthropicJsonToSseConverter',
+  'new GeminiJsonToSseConverter',
+  'new ChatSseToJsonConverter',
+  'new ResponsesSseToJsonConverter',
+  'new AnthropicSseToJsonConverter',
+  'new GeminiSseToJsonConverter',
+  'defaultSseCodecRegistry',
 ]) {
-  if (chatSseToJsonConverter.includes(forbidden)) {
-    failures.push(`Chat SSE decode must not synthesize missing response truth: ${forbidden}`);
+  if (nativeBridge.includes(forbidden)) {
+    failures.push(`${nativeBridgePath}: native bridge must not import/use TS SSE runtime wrapper: ${forbidden}`);
   }
 }
 
-for (const forbidden of [
-  'convertRequestToJsonToSse(',
-  'processRequestToSseWithFunctions',
-  'createRequestContext(request:',
-  'sequenceRequest(request, context.requestId)',
+const lib = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');
+for (const required of [
+  'mod sse_runtime_dispatch;',
+  'buildJsonFromSseJson',
+  'buildSseFramesFromJsonJson',
 ]) {
-  if (responsesJsonToSseConverter.includes(forbidden)) {
-    failures.push(`Responses JSON->SSE must not synthesize request payloads into response SSE: ${forbidden}`);
+  if (!lib.includes(required)) failures.push(`router-hotpath lib.rs missing ${required}`);
+}
+
+const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
+for (const required of [
+  '"buildSseFramesFromJsonJson"',
+  '"buildJsonFromSseJson"',
+]) {
+  if (!requiredExports.includes(required)) {
+    failures.push(`native required exports missing ${required}`);
   }
 }
 
-for (const forbidden of [
-  'convertRequestToJsonToSse(',
-  'processRequestToSseWithFunctions',
-  'createRequestContext(request:',
+for (const runtimeRoot of [
+  'sharedmodule/llmswitch-core/src/conversion/hub',
+  'src/server',
+  'sharedmodule/llmswitch-core/src/runtime',
+  'sharedmodule/llmswitch-core/src/servertool',
 ]) {
-  if (chatJsonToSseConverter.includes(forbidden)) {
-    failures.push(`Chat JSON->SSE must not synthesize request payloads into response SSE: ${forbidden}`);
-  }
-}
-
-for (const forbidden of [
-  'sequenceChatRequest(',
-  'sequenceRequest(request',
-  'yield* sequenceChatRequest',
-]) {
-  if (chatSequencer.includes(forbidden)) {
-    failures.push(`Chat sequencer must not expose request-to-SSE response synthesis: ${forbidden}`);
-  }
-}
-
-const forbiddenFrameKeys = [
-  'metadata',
-  '__rt',
-  'runtimeMetadata',
-  'metaCarrier',
-  'errorCarrier',
-  'snapshot',
-  'debug',
-];
-
-for (const [relPath, source] of sourceByRel.entries()) {
-  for (const forbidden of [
-    '/* noop */',
-    '/* ignore */',
-    'Never throw from non-blocking logging',
-    'non-blocking',
-    'logChatJsonToSseNonBlocking',
-    'catch {}',
-    '} catch {',
-    'message_placeholder_',
-    'createResponseBuilder(',
-  ]) {
-    if (source.includes(forbidden)) {
-      failures.push(`${relPath}: SSE runtime must not contain silent failure marker: ${forbidden}`);
-    }
-  }
-
-  if (!relPath.includes('/json-to-sse/') && !relPath.includes('/shared/')) continue;
-  const lines = source.split('\n');
-  lines.forEach((line, index) => {
-    if (!/data:\s*\$?\{?|JSON\.stringify|payload\.|frame\./.test(line)) return;
-    for (const key of forbiddenFrameKeys) {
-      const keyPattern = new RegExp(`['"\`]${key}['"\`]|\\.${key}\\b`);
-      if (keyPattern.test(line)) {
-        failures.push(`${relPath}:${index + 1}: SSE frame projection references forbidden internal key "${key}"`);
+  for (const file of listFiles(runtimeRoot)) {
+    const rel = path.relative(root, file).split(path.sep).join('/');
+    const source = fs.readFileSync(file, 'utf8');
+    for (const forbidden of [
+      'sse/json-to-sse',
+      'sse/sse-to-json',
+      'sse/registry',
+      'sse/index.js',
+      'defaultSseCodecRegistry',
+      'new ChatJsonToSseConverter',
+      'new ResponsesJsonToSseConverter',
+      'new AnthropicJsonToSseConverter',
+      'new GeminiJsonToSseConverter',
+      'new ChatSseToJsonConverter',
+      'new ResponsesSseToJsonConverter',
+      'new AnthropicSseToJsonConverter',
+      'new GeminiSseToJsonConverter',
+    ]) {
+      if (source.includes(forbidden)) {
+        failures.push(`${rel}: runtime must not import/use TS SSE runtime wrapper: ${forbidden}`);
       }
     }
-  });
+  }
 }
 
-const retiredPaths = [
-  'sharedmodule/llmswitch-core/src/sse/types/conversion-context.ts',
-  'sharedmodule/llmswitch-core/src/sse/types/stream-state.ts',
-  'sharedmodule/llmswitch-core/src/sse/types/utility-types.ts',
-  'sharedmodule/llmswitch-core/src/sse/shared/constants.ts',
-  'sharedmodule/llmswitch-core/src/sse/shared/serializers/base-serializer.ts',
-  'sharedmodule/llmswitch-core/src/sse/shared/serializers/chat-event-serializer.ts',
-  'sharedmodule/llmswitch-core/src/sse/shared/serializers/index.ts',
-  'sharedmodule/llmswitch-core/src/sse/shared/serializers/types.ts',
-];
-
-for (const relPath of retiredPaths) {
-  if (fs.existsSync(path.join(root, relPath))) {
-    failures.push(`retired SSE wrapper/path resurrected: ${relPath}`);
+const sseIndexPath = 'sharedmodule/llmswitch-core/src/sse/index.ts';
+if (fs.existsSync(path.join(root, sseIndexPath))) {
+  const sseIndex = read(sseIndexPath);
+  for (const forbidden of [
+    'defaultSseCodecRegistry',
+    'createChatConverters(',
+    'createResponsesConverters(',
+    'createAnthropicConverters(',
+    'createGeminiConverters(',
+    'async roundTrip(',
+  ]) {
+    if (sseIndex.includes(forbidden)) {
+      failures.push(`${sseIndexPath}: public SSE lib must not expose registry/factory runtime semantics: ${forbidden}`);
+    }
   }
 }
 
 if (failures.length > 0) {
   console.error('[verify:sse-architecture-boundary] failed');
-  failures.slice(0, 120).forEach((failure) => console.error(`- ${failure}`));
-  if (failures.length > 120) console.error(`- ... ${failures.length - 120} more`);
+  for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
 
 console.log('[verify:sse-architecture-boundary] ok');
-console.log(`- checked SSE features: ${requiredFeatures.length}`);
-console.log(`- checked SSE source files: ${sourceFiles.length}`);
+console.log('- SSE runtime dispatch is Rust-owned');
+console.log('- runtime roots do not import TS SSE wrapper paths');

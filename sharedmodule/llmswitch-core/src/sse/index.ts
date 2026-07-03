@@ -1,18 +1,33 @@
-// feature_id: sse.codec_registry_surface
+// feature_id: sse.public_ts_lib_surface
+import {
+  buildJsonFromSseWithNative,
+  buildReadableFromSseFrames,
+  buildSseFramesFromJsonWithNative,
+  collectSseBodyText,
+  type NativeSseFramesInput,
+  type NativeSseFramesOutput,
+  type NativeSseJsonInput,
+  type NativeSseRuntimeProtocol,
+} from '../native/router-hotpath/native-sse-runtime.js';
+
 export const sseCodecPublicSurfaceFeatureAnchor = true;
 
-// Chat协议转换器
-export { ChatJsonToSseConverter } from './json-to-sse/index.js';
-export { ChatSseToJsonConverter } from './sse-to-json/index.js';
+export function jsonToSseFrames(input: NativeSseFramesInput): NativeSseFramesOutput {
+  return buildSseFramesFromJsonWithNative(input);
+}
 
-// Responses协议转换器
-export { ResponsesJsonToSseConverter } from './json-to-sse/index.js';
-export { ResponsesSseToJsonConverter } from './sse-to-json/index.js';
-// Gemini协议转换器
-export { GeminiJsonToSseConverter } from './json-to-sse/index.js';
-export { GeminiSseToJsonConverter } from './sse-to-json/index.js';
+export function sseToJson(input: NativeSseJsonInput): Record<string, unknown> {
+  return buildJsonFromSseWithNative(input);
+}
 
-// 共享工具导出
-// 类型导出
-export * from './types/index.js';
+export {
+  collectSseBodyText,
+  buildReadableFromSseFrames,
+};
 
+export type {
+  NativeSseFramesInput,
+  NativeSseFramesOutput,
+  NativeSseJsonInput,
+  NativeSseRuntimeProtocol,
+};

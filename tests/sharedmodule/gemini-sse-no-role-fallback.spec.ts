@@ -1,7 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { buildGeminiSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.js';
-import type { GeminiResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
+import { buildGeminiSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-gemini-sse-event-payload.js';
+
+type GeminiResponse = {
+  candidates?: unknown[];
+};
 
 describe('gemini SSE no-fallback boundary', () => {
   it('emits explicit Gemini data events for valid content parts', async () => {

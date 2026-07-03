@@ -19,7 +19,7 @@ import {
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
 import {
-  createResponsesSseToJsonConverter,
+  buildResponsesJsonFromSseStreamWithNative,
   sanitizeProviderOutboundPayload
 } from '../../../modules/llmswitch/bridge.js';
 import type { HttpClient } from '../utils/http-client.js';
@@ -53,14 +53,6 @@ import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'> & Partial<Pick<HttpClient, 'postStreamOrResponse'>>;
-type ResponsesSseConverter = {
-  convertSseToJson(stream: unknown, options: {
-    requestId: string;
-    model: string;
-    noContentTimeoutMs?: number;
-    contentIdleTimeoutMs?: number;
-  }): Promise<unknown>;
-};
 
 const buildProviderSseStreamConfig = (context: ProviderContext): {
   idleTimeoutMs?: number;
@@ -854,12 +846,14 @@ export class ResponsesProvider extends HttpTransportProvider {
       })
       : stream;
 
-    const converter = await this.loadResponsesSseConverter();
-    const json = await converter.convertSseToJson(streamForHost, {
+    const json = await buildResponsesJsonFromSseStreamWithNative({
+      stream: streamForHost,
       requestId: context.requestId,
       model: typeof body.model === 'string' ? body.model : 'unknown',
-      noContentTimeoutMs: this.resolveNoContentTimeoutMs(context),
-      contentIdleTimeoutMs: this.resolveContentIdleTimeoutMs(context)
+      config: {
+        noContentTimeoutMs: this.resolveNoContentTimeoutMs(context),
+        contentIdleTimeoutMs: this.resolveContentIdleTimeoutMs(context)
+      }
     });
     if (!captureSse) {
       await this.snapshotPhase(
@@ -1013,10 +1007,6 @@ export class ResponsesProvider extends HttpTransportProvider {
       enforceLayout: options?.enforceLayout,
       payload: body,
     });
-  }
-
-  private async loadResponsesSseConverter(): Promise<ResponsesSseConverter> {
-    return await createResponsesSseToJsonConverter();
   }
 
   private resolveNoContentTimeoutMs(context: ProviderContext): number | undefined {

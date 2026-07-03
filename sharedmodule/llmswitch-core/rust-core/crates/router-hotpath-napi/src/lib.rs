@@ -103,6 +103,7 @@ mod shared_tool_call_id_manager;
 mod shared_tool_mapping;
 mod shared_tooling;
 mod snapshot_tool_failures;
+mod sse_runtime_dispatch;
 mod stop_message_auto_blocks;
 mod stopless_auto_handler_bridge;
 mod streaming_tool_extractor;
@@ -573,6 +574,11 @@ pub fn parse_resp_format_envelope_json_bridge(input_json: String) -> NapiResult<
 pub fn build_responses_json_from_sse_json_bridge(input_json: String) -> NapiResult<String> {
     hub_resp_inbound_format_parse::build_responses_json_from_sse_json(input_json)
         .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "buildJsonFromSseJson")]
+pub fn build_json_from_sse_json_bridge(input_json: String) -> NapiResult<String> {
+    sse_runtime_dispatch::build_json_from_sse_json(input_json).map_err(napi::Error::from_reason)
 }
 
 #[napi(js_name = "updateResponsesContractProbeFromSseChunkJson")]
@@ -1499,6 +1505,16 @@ pub fn plan_servertool_engine_orchestration_preflight_action_json(
 }
 
 #[napi]
+pub fn plan_servertool_engine_orchestration_preflight_application_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_engine_orchestration_preflight_application_json(
+        &input_json,
+    )
+    .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_engine_runtime_action_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_engine_runtime_action_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1513,6 +1529,12 @@ pub fn plan_servertool_engine_trigger_observation_json(input_json: String) -> Na
 #[napi]
 pub fn plan_servertool_engine_skip_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_engine_skip_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_engine_skip_application_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_engine_skip_application_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -1573,6 +1595,16 @@ pub fn plan_servertool_response_stage_orchestration_output_json(
 }
 
 #[napi]
+pub fn plan_servertool_response_stage_orchestration_gate_application_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_response_stage_orchestration_gate_application_json(
+        &input_json,
+    )
+    .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn materialize_servertool_response_stage_orchestration_output_json(
     input_json: String,
 ) -> NapiResult<String> {
@@ -1589,6 +1621,20 @@ pub fn plan_servertool_entry_preflight_json(input_json: String) -> NapiResult<St
 }
 
 #[napi]
+pub fn plan_servertool_entry_preflight_application_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_entry_preflight_application_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_run_engine_entry_preflight_application_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_run_engine_entry_preflight_application_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn plan_servertool_entry_context_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_entry_context_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
@@ -1597,6 +1643,14 @@ pub fn plan_servertool_entry_context_json(input_json: String) -> NapiResult<Stri
 #[napi]
 pub fn plan_servertool_engine_prepass_action_json(input_json: String) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_engine_prepass_action_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_run_engine_prepass_application_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_run_engine_prepass_application_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
 }
 
@@ -2292,6 +2346,12 @@ pub fn build_responses_sse_event_sequence_json(input_json: String) -> NapiResult
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildSseFramesFromJsonJson")]
+pub fn build_sse_frames_from_json_json_bridge(input_json: String) -> NapiResult<String> {
+    sse_runtime_dispatch::build_sse_frames_from_json_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "ResponsesSseStreamJson")]
 pub fn build_responses_sse_stream_json_bridge(input_json: String) -> NapiResult<String> {
     responses_sse_event_payload::build_responses_sse_stream_json(input_json)
@@ -2714,26 +2774,38 @@ pub fn report_provider_success_to_router_policy_json_bridge(
 #[napi(js_name = "resetProviderRuntimeIngressForTestsJson")]
 
 pub fn reset_provider_runtime_ingress_for_tests_json_bridge() -> NapiResult<String> {
+    #[napi(js_name = "buildStopMessageMarkerParseLogJson")]
+    pub fn build_stop_message_marker_parse_log_json_bridge(
+        request_json: String,
+        metadata_json: String,
+        parsed_kinds_json: String,
+        stop_scope: Option<String>,
+    ) -> napi::Result<String> {
+        crate::virtual_router_engine::virtual_router_host_effects::build_stop_message_marker_parse_log_json(request_json, metadata_json, parsed_kinds_json, stop_scope)
+    }
 
-#[napi(js_name = "buildStopMessageMarkerParseLogJson")]
-pub fn build_stop_message_marker_parse_log_json_bridge(request_json: String, metadata_json: String, parsed_kinds_json: String, stop_scope: Option<String>) -> napi::Result<String> {
-    crate::virtual_router_engine::virtual_router_host_effects::build_stop_message_marker_parse_log_json(request_json, metadata_json, parsed_kinds_json, stop_scope)
-}
+    #[napi(js_name = "formatStopMessageStatusLabelJson")]
+    pub fn format_stop_message_status_label_json_bridge(
+        snapshot_json: Option<String>,
+        scope: Option<String>,
+        force_show: bool,
+    ) -> napi::Result<String> {
+        crate::virtual_router_engine::virtual_router_host_effects::format_stop_message_status_label_json(snapshot_json, scope, force_show)
+    }
 
-#[napi(js_name = "formatStopMessageStatusLabelJson")]
-pub fn format_stop_message_status_label_json_bridge(snapshot_json: Option<String>, scope: Option<String>, force_show: bool) -> napi::Result<String> {
-    crate::virtual_router_engine::virtual_router_host_effects::format_stop_message_status_label_json(snapshot_json, scope, force_show)
-}
+    #[napi(js_name = "emitStopMessageMarkerParseLogJson")]
+    pub fn emit_stop_message_marker_parse_log_json_bridge(
+        log_json: Option<String>,
+    ) -> napi::Result<()> {
+        crate::virtual_router_engine::virtual_router_host_effects::emit_stop_message_marker_parse_log_json(log_json)
+    }
 
-#[napi(js_name = "emitStopMessageMarkerParseLogJson")]
-pub fn emit_stop_message_marker_parse_log_json_bridge(log_json: Option<String>) -> napi::Result<()> {
-    crate::virtual_router_engine::virtual_router_host_effects::emit_stop_message_marker_parse_log_json(log_json)
-}
-
-#[napi(js_name = "cleanStopMessageMarkersInPlaceJson")]
-pub fn clean_stop_message_markers_in_place_json_bridge(request_json: String) -> napi::Result<String> {
-    crate::virtual_router_engine::virtual_router_host_effects::clean_stop_message_markers_in_place_json(request_json)
-}
+    #[napi(js_name = "cleanStopMessageMarkersInPlaceJson")]
+    pub fn clean_stop_message_markers_in_place_json_bridge(
+        request_json: String,
+    ) -> napi::Result<String> {
+        crate::virtual_router_engine::virtual_router_host_effects::clean_stop_message_markers_in_place_json(request_json)
+    }
     virtual_router_engine::provider_runtime_ingress::reset_for_tests();
     Ok("true".to_string())
 }

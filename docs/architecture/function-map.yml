@@ -1947,7 +1947,6 @@ owners:
       - tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts
       - tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts
       - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
-      - sharedmodule/llmswitch-core/scripts/tests/loop-rt-responses.mjs
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     required_gates:
       - npm run verify:hub-response-responses-chat-projection
@@ -3555,38 +3554,76 @@ owners:
     notes:
       - "CLI surface is dispatch only; must not own business logic. All actions go through http-server or manager modules."
 
-  - feature_id: sse.codec_registry_surface
+  - feature_id: sse.public_ts_lib_surface
     status: active
-    summary: "SSE public barrel dispatch surface; no payload repair or provider policy"
+    summary: "SSE public TS library surface forwarding only to Rust/NAPI runtime dispatch"
     owner_kind: server_projection
-    owner_scope: "file-scoped SSE public barrel dispatch surface; no payload repair or provider policy"
+    owner_scope: "file-scoped public TS library only; forbidden for Hub Pipeline, provider-response, server runtime, provider runtime, and Virtual Router imports"
     owner_module: sharedmodule/llmswitch-core/src/sse/index.ts
     canonical_types:
-      - JsonToSseContext
-      - SseToJsonContext
+      - NativeSseRuntimeProtocol
+      - NativeSseFramesInput
+      - NativeSseJsonInput
     canonical_builders:
       - sseCodecPublicSurfaceFeatureAnchor
+      - jsonToSseFrames
+      - sseToJson
     allowed_paths:
       - sharedmodule/llmswitch-core/src/sse/index.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/index.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/index.ts
-      - docs/goals/sse-function-map-architecture-closeout-plan.md
+      - docs/goals/sse-runtime-rust-only-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
-      - src/server/runtime/http-server/executor
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
+      - src/server
+      - sharedmodule/llmswitch-core/src/conversion/hub
+      - sharedmodule/llmswitch-core/src/runtime
+      - sharedmodule/llmswitch-core/src/servertool
     forbidden_mentions_allowlist:
-      - JsonToSseContext
-      - SseToJsonContext
+      - NativeSseRuntimeProtocol
     required_tests:
       - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
       - tests/sharedmodule/sse-stream-mode-native.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
-    migration_target: ts
+    migration_target: ts_public_lib
     notes:
-      - "Public barrel exports explicit converter classes only; it must not repair payloads, infer provider policy, mutate metadata, or provide fallback protocol selection."
+      - "Public TS SSE library may only forward to unified Rust/NAPI runtime dispatch; Hub runtime must not import it."
+
+  - feature_id: sse.runtime_rust_dispatch
+    status: active
+    summary: "Rust-owned unified SSE runtime dispatch for Hub Pipeline JSON->SSE and SSE->JSON"
+    owner_kind: rust_ssot
+    owner_scope: "Rust-only runtime dispatch; TS runtime may only call native bridge and must not use src/sse public library or protocol-specific converter wrappers"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
+    canonical_types:
+      - SseRuntimeInput
+      - NativeSseRuntimeProtocol
+    canonical_builders:
+      - build_sse_frames_from_json_json
+      - build_json_from_sse_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - docs/goals/sse-runtime-rust-only-closeout-plan.md
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json
+      - sharedmodule/llmswitch-core/src/sse/registry
+      - src/providers/core/runtime
+      - src/server
+      - sharedmodule/llmswitch-core/src/conversion/hub
+    forbidden_mentions_allowlist:
+      - NativeSseRuntimeProtocol
+    required_tests:
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
+    required_gates:
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Protocol dispatch, unknown-protocol fail-fast, JSON->SSE frames, and SSE->JSON materialization are Rust-owned through unified NAPI dispatch."
 
   - feature_id: sse.stream_parse_boundary
     status: active
@@ -3634,15 +3671,16 @@ owners:
       - infer_sse_event_type_from_data
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
-      - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/handlers
       - sharedmodule/llmswitch-core/src/conversion/hub/response
     required_tests:
-      - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
-      - tests/sharedmodule/sse-parser-no-recovery.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
@@ -3653,20 +3691,22 @@ owners:
   - feature_id: sse.responses_decode_projection
     status: active
     summary: "OpenAI Responses SSE event stream to Responses JSON projection"
-    owner_kind: server_projection
-    owner_scope: "file-scoped OpenAI Responses SSE event stream to Responses JSON projection"
-    owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
+    owner_kind: rust_ssot
+    owner_scope: "Rust-owned OpenAI Responses SSE event stream to Responses JSON projection; TS may only marshal native calls"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
     canonical_types:
       - ResponsesSseEvent
       - ResponsesResponse
       - SseToResponsesJsonOptions
     canonical_builders:
-      - ResponsesSseToJsonConverter
+      - build_responses_json_from_sse_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
       - src/providers/core/runtime/responses-provider.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json
       - src/server/runtime/http-server/executor
       - src/server/handlers
       - sharedmodule/llmswitch-core/src/conversion/hub/response
@@ -3674,36 +3714,34 @@ owners:
       - ResponsesResponse
     required_tests:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
-      - tests/sharedmodule/responses-sse-decode-no-ts-wire-synthesis.spec.ts
-      - tests/sharedmodule/responses-sse-native-materialize.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Decode projection is owned by the native materializer behind responses-sse-to-json-converter.ts; it may aggregate provider SSE into Responses JSON and surface decode failures, but it must not own provider retry/reroute policy, Hub tool governance, or client frame repair."
+      - "Decode projection is owned by the native materializer in Rust; it may aggregate provider SSE into Responses JSON and surface decode failures, but it must not own provider retry/reroute policy, Hub tool governance, or client frame repair."
 
   - feature_id: sse.responses_encode_projection
     status: active
     summary: "Responses JSON to ordered client-visible Responses SSE event projection"
-    owner_kind: server_projection
-    owner_scope: "Responses JSON to ordered client-visible Responses SSE event projection"
-    owner_module: sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
+    owner_kind: rust_ssot
+    owner_scope: "Rust-owned Responses JSON to ordered client-visible Responses SSE event projection; TS may only marshal native calls and transport frames"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
     canonical_types:
       - ResponsesSseEvent
       - ResponsesJsonToSseOptions
     canonical_builders:
-      - ResponsesJsonToSseConverter
+      - build_responses_sse_stream_frames_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.ts
-      - sharedmodule/llmswitch-core/src/sse/shared/writer.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
       - src/server/handlers/handler-response-utils.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse
+      - sharedmodule/llmswitch-core/src/sse/shared/writer.ts
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
@@ -3716,7 +3754,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Encode projection emits client protocol frames only. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden."
+      - "Encode projection emits client protocol frames only through the Rust native owner. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden."
 
   - feature_id: sse.chat_stream_projection
     status: active
@@ -3732,34 +3770,27 @@ owners:
       - build_chat_sse_event_sequence_json
       - build_chat_json_from_sse_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/chat.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
-      - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
-      - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
-      - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
-      - tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/process
     required_tests:
-      - tests/sharedmodule/chat-json-to-sse-context-no-dead-state.spec.ts
-      - tests/sharedmodule/chat-sse-usage-roundtrip.spec.ts
-      - tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts
-      - tests/sharedmodule/sse-rust-parity-chat-sse-to-json.blackbox.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Chat JSON->SSE role/content/reasoning/tool/finish/done ordering is Rust-owned through `build_chat_sse_event_sequence_json`; TS sequencer may only call native and yield events."
-      - "Chat SSE->JSON event aggregation, usage normalization, tool/function delta accumulation, and incomplete stream detection are Rust-owned through `build_chat_json_from_sse_json`; TS converter may only collect stream bytes/events and call native."
+      - "Chat JSON->SSE role/content/reasoning/tool/finish/done ordering is Rust-owned through `build_chat_sse_event_sequence_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
+      - "Chat SSE->JSON event aggregation, usage normalization, tool/function delta accumulation, and incomplete stream detection are Rust-owned through `build_chat_json_from_sse_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
       - "Chat stream projection may preserve stream shape; it must not own provider health, route policy, or Hub tool governance."
 
   - feature_id: sse.anthropic_gemini_stream_projection
@@ -3779,28 +3810,21 @@ owners:
       - build_gemini_sse_event_sequence_json
       - build_gemini_json_from_sse_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/gemini-sse-to-json-converter.ts
-      - sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
-      - sharedmodule/llmswitch-core/src/sse/shared/serializers/anthropic-event-serializer.ts
-      - sharedmodule/llmswitch-core/src/sse/shared/serializers/gemini-event-serializer.ts
-      - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
-      - tests/sharedmodule/sse-rust-parity-anthropic-sse.blackbox.spec.ts
-      - tests/sharedmodule/sse-rust-parity-gemini-sse.blackbox.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/process
     required_tests:
-      - tests/sharedmodule/anthropic-gemini-json-to-sse-context-no-dead-state.spec.ts
-      - tests/sharedmodule/sse-rust-parity-anthropic-sse.blackbox.spec.ts
-      - tests/sharedmodule/sse-rust-parity-gemini-sse.blackbox.spec.ts
+      - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - tests/sharedmodule/provider-streaming-capability.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
@@ -3808,10 +3832,10 @@ owners:
     migration_target: rust
     notes:
       - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners; shared registry/writer must not learn provider-specific branches."
-      - "Anthropic JSON->SSE message/content/reasoning/tool/stop event ordering is Rust-owned through `build_anthropic_sse_event_sequence_json`; `anthropic-sequencer.ts` may only call native and yield events with optional delay."
-      - "Anthropic SSE->JSON event parsing, content aggregation, reasoning projection, tool input materialization, and incomplete stream fail-fast behavior are Rust-owned through `build_anthropic_json_from_sse_json`; `anthropic-sse-to-json-converter.ts` may only collect stream bytes, call native, and attach decode stats."
-      - "Gemini JSON->SSE part/done event ordering and reasoning projection are Rust-owned through `build_gemini_sse_event_sequence_json`; `gemini-sequencer.ts` may only call native and yield events with optional delay."
-      - "Gemini SSE->JSON data/done parse, text/reasoning aggregation, done metadata materialization, and malformed/missing-done fail-fast behavior are Rust-owned through `build_gemini_json_from_sse_json`; `gemini-sse-to-json-converter.ts` may only collect stream bytes and call native."
+      - "Anthropic JSON->SSE message/content/reasoning/tool/stop event ordering is Rust-owned through `build_anthropic_sse_event_sequence_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
+      - "Anthropic SSE->JSON event parsing, content aggregation, reasoning projection, tool input materialization, and incomplete stream fail-fast behavior are Rust-owned through `build_anthropic_json_from_sse_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
+      - "Gemini JSON->SSE part/done event ordering and reasoning projection are Rust-owned through `build_gemini_sse_event_sequence_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
+      - "Gemini SSE->JSON data/done parse, text/reasoning aggregation, done metadata materialization, and malformed/missing-done fail-fast behavior are Rust-owned through `build_gemini_json_from_sse_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
 
   - feature_id: error.pipeline_contract
     status: active
@@ -4027,3 +4051,149 @@ owners:
       - "`web_search_direct` is separate provider-native search capability and is required before direct/builtin search rewrite or direct search route activation."
       - "MiniMax Token Plan search is `web_search` non-direct unless a live upstream probe proves provider-native search can mix with normal tools and return real results."
       - "TS catalog/provider-sdk files may only declare or serialize capability/config data; they must not reimplement tool governance or route qualification."
+
+  - feature_id: servertool.followup_orchestration
+    status: active
+    summary: "Orchestration logic for server-side tools followup"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped rust owner for servertool server-side tool followup lifecycle"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+    canonical_types:
+      - ServerToolOrchestrationState
+    canonical_builders:
+      - stage_a_servertool_followup_orchestration_owner_boundary
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/servertool/*
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+      - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "TS layer only thin wrappers; all semantics must live in Rust crate per ARCH-OWN-1."
+
+  - feature_id: conversion.shared.anthropic
+    status: active
+    summary: "Anthropic OpenAI chat protocol normalization and tool schema mapping"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped rust owner for conversion type anthropic messages"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+    canonical_types:
+      - ConvertedOpenAiChat
+      - CanonicalAnthropicMessage
+    canonical_builders:
+      - stage_a_conversion_shared_anthropic_owner_boundary
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_response_helper.rs
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils.ts
+      - sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-tool-schema.ts
+      - sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+      - tests/sharedmodule/anthropic-tool-schema-stability.spec.ts
+      - tests/sharedmodule/provider-compat-anthropic.spec.ts
+      - tests/sharedmodule/provider-normalization-anthropic-thinking.spec.ts
+    required_gates:
+      - npm run verify:anthropic-roundtrip
+      - npm run verify:hub-response-anthropic-native
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Anthropic protocol normalization forbidden in TS per ARCH-CNV-4."
+
+  - feature_id: conversion.responses.store
+    status: active
+    summary: "Responses conversation store and continuation management"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped rust owner for responses conversation store"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+    canonical_types:
+      - ResponsesConversationEntry
+      - ContinuationLookupResult
+    canonical_builders:
+      - stage_a_conversion_responses_store_owner_boundary
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+      - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
+    required_gates:
+      - npm run verify:responses-history-protocol-contract
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "Continuation scope isolation (entry_protocol + continuationOwner + conversation_scope) must be in Rust per ARCH-CNV-5."
+
+  - feature_id: hub.req_chatprocess.tool_governance
+    status: active
+    summary: "Harvest text tool calls from request side and sanitize payloads"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped rust owner for request side text tool governance and sanitization"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+    canonical_types:
+      - ToolGovernanceInput
+      - ToolGovernanceOutput
+    canonical_builders:
+      - stage_a_req_chatprocess_tool_governance_owner_boundary
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks.rs
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
+      - tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "Text tools sanitization must land in Rust per ARCH-HUB-3."
+
+  - feature_id: hub.resp_chatprocess.tool_governance
+    status: active
+    summary: "Harvest tool results, reverse apply_patch, strip internal tools"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped rust owner for response side governed tool result harvest and reversals"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+    canonical_types:
+      - RespToolGovernanceInput
+      - RespToolGovernanceOutput
+    canonical_builders:
+      - stage_a_resp_chatprocess_tool_governance_owner_boundary
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks.rs
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+      - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "Reverse patching and internal tool stripping must be in Rust per ARCH-HUB-3."

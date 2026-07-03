@@ -2,7 +2,7 @@ lifecycle_id: sse.chat_stream_projection.mainline
 summary: Chat JSON response projection into client-visible SSE frames and Chat
   provider SSE decode into final Chat JSON; malformed semantics fail fast
   instead of being synthesized into successful frames/responses.
-owner_feature_id: sse.chat_stream_projection
+owner_feature_id: sse.anthropic_gemini_stream_projection
 entrypoint:
   node_id: HubRespOutbound04ClientSemantic
   wiki_page: null
@@ -25,6 +25,34 @@ edges:
     to_node: HubRespInbound02Parsed
     status: anchored
     owner_feature_id: sse.chat_stream_projection
+    binding_pending: null
+    split_binding_id: null
+  - step_id: anthropic-sse-01
+    from_node: HubRespOutbound04ClientSemantic
+    to_node: ServerRespOutbound05ClientFrame
+    status: anchored
+    owner_feature_id: sse.anthropic_gemini_stream_projection
+    binding_pending: null
+    split_binding_id: null
+  - step_id: anthropic-sse-02
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    status: anchored
+    owner_feature_id: sse.anthropic_gemini_stream_projection
+    binding_pending: null
+    split_binding_id: null
+  - step_id: gemini-sse-01
+    from_node: HubRespOutbound04ClientSemantic
+    to_node: ServerRespOutbound05ClientFrame
+    status: anchored
+    owner_feature_id: sse.anthropic_gemini_stream_projection
+    binding_pending: null
+    split_binding_id: null
+  - step_id: gemini-sse-02
+    from_node: ProviderRespInbound01Raw
+    to_node: HubRespInbound02Parsed
+    status: anchored
+    owner_feature_id: sse.anthropic_gemini_stream_projection
     binding_pending: null
     split_binding_id: null
 verification:

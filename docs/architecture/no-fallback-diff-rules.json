@@ -652,26 +652,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/sse/shared/serializers/responses-event-serializer.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/shared/common-utils.ts",
       "textContains": ""
     },
@@ -1613,16 +1593,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/sse/shared/utils.ts",
       "textContains": ""
     },
     {

@@ -133,15 +133,14 @@ const buildRequestStageHubPipelineResultWithNative = jest.fn((input: {
   };
 });
 
-const convertSseToJson = jest.fn(async () => ({ model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] }));
-const getCodec = jest.fn(() => ({ convertSseToJson }));
+const buildJsonFromSseWithNative = jest.fn(() => ({ model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] }));
+const collectSseBodyText = jest.fn(async () => 'event: message\ndata: {}\n\n');
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.js',
   () => ({
-    defaultSseCodecRegistry: {
-      get: getCodec,
-    },
+    buildJsonFromSseWithNative,
+    collectSseBodyText,
   }),
 );
 
@@ -236,9 +235,9 @@ describe('hub pipeline request materialization sse protocol matrix', () => {
   ] as const;
 
   for (const entry of matrix) {
-    it(`uses ${entry.protocol} codec path and passes canonical payload into Rust total pipeline`, async () => {
+    it(`uses ${entry.protocol} native SSE runtime path and passes canonical payload into Rust total pipeline`, async () => {
       resolveSseProtocolWithNative.mockReturnValueOnce(entry.protocol);
-      convertSseToJson.mockResolvedValueOnce({
+      buildJsonFromSseWithNative.mockReturnValueOnce({
         model: 'gpt-test',
         messages: [{ role: 'user', content: `hi:${entry.protocol}` }],
       });
@@ -258,7 +257,13 @@ describe('hub pipeline request materialization sse protocol matrix', () => {
       } as any);
 
       expect(resolveSseProtocolWithNative).toHaveBeenCalled();
-      expect(getCodec).toHaveBeenCalledWith(entry.protocol);
+      expect(collectSseBodyText).toHaveBeenCalled();
+      expect(buildJsonFromSseWithNative).toHaveBeenCalledWith(expect.objectContaining({
+        protocol: entry.protocol,
+        bodyText: 'event: message\ndata: {}\n\n',
+        requestId: `req_${entry.protocol}`,
+        model: 'gpt-test',
+      }));
       expect(runHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
         request: expect.objectContaining({
           requestId: `req_${entry.protocol}`,
@@ -285,7 +290,7 @@ describe('hub pipeline request materialization sse protocol matrix', () => {
 
   it('passes provider protocol through MetadataCenter snapshot during SSE request materialization', async () => {
     resolveSseProtocolWithNative.mockReturnValueOnce('openai-responses');
-    convertSseToJson.mockResolvedValueOnce({
+    buildJsonFromSseWithNative.mockReturnValueOnce({
       model: 'gpt-test',
       input: [
         {

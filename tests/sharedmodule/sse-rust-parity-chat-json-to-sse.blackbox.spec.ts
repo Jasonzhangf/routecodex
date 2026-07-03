@@ -2,8 +2,11 @@ import { describe, expect, it } from '@jest/globals';
 import path from "path";
 import fs from 'node:fs';
 
-import { buildChatSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.js';
-import type { ChatCompletionResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
+import { buildChatSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-chat-sse-event-payload.js';
+
+type ChatCompletionResponse = Record<string, unknown> & {
+  model: string;
+};
 
 async function collectEvents(response: ChatCompletionResponse): Promise<any[]> {
   return buildChatSseEventSequenceWithNative({ response, requestId: 'req_chat_sse_parity', config: { enableTimestampGeneration: false, includeSequenceNumbers: true, chunkDelayMs: 0, reasoningMode: 'channel' } });

@@ -88,12 +88,12 @@ export declare function materializeLatestResponsesContinuationByScope(args: {
 export declare function clearAllResponsesConversationState(): Promise<void>;
 export declare function clearUnresolvedResponsesConversationRequests(): Promise<number>;
 export declare function resetResponsesConversationStateForRestartSimulation(): Promise<void>;
-export declare function createResponsesSseToJsonConverter(): Promise<{
-    convertSseToJson(stream: unknown, options: AnyRecord): Promise<unknown>;
-}>;
-export declare function createResponsesJsonToSseConverter(): Promise<{
-    convertResponseToJsonToSse(payload: unknown, options: AnyRecord): Promise<unknown>;
-}>;
+export declare function buildResponsesJsonFromSseStreamWithNative(input: {
+    stream: AsyncIterable<string | Buffer>;
+    requestId: string;
+    model: string;
+    config?: AnyRecord;
+}): Promise<unknown>;
 export declare function preloadCriticalBridgeRuntimeModules(): Promise<{
     loaded: string[];
 }>;

@@ -3794,26 +3794,15 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(filePath)).toBe(false);
   });
 
-  it('SSE shared utils must not expose retired zero-consumer public helpers', () => {
+  it('SSE shared utils must have been physically deleted', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/sse/shared/utils.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'imports stream primitive only used by retired helper', pattern: /import\s+\{[^}]*\bReadable\b[^}]*\}\s+from\s+['"]stream['"]/ },
-      { label: 'exports retired object helper namespace', pattern: /export\s+class\s+ObjectUtils\b/ },
-      { label: 'exports retired array helper namespace', pattern: /export\s+class\s+ArrayUtils\b/ },
-      { label: 'exports retired stream helper namespace', pattern: /export\s+class\s+StreamUtils\b/ },
-      { label: 'exports retired regex helper constants', pattern: /export\s+const\s+REGEX_PATTERNS\b/ },
-      { label: 'exports retired performance helper namespace', pattern: /export\s+class\s+PerformanceUtils\b/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('SSE public barrel must not expose retired bidirectional facade', () => {
     const repoRoot = process.cwd();
     const files = [
       'sharedmodule/llmswitch-core/src/sse/index.ts',
-      'sharedmodule/llmswitch-core/src/sse/README-RESPONSES.md',
     ];
     const findings: string[] = [];
 
@@ -4227,7 +4216,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('Object.keys(runtimeControlProjected)');
     expect(source).not.toContain('return direct;');
     expect(source).not.toContain('return nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) ?? null : null;');
-    expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');
+    expect(source).toContain('buildSseFramesFromJsonWithNative');
+    expect(source).toContain('buildReadableFromSseFrames(frameResult.frames)');
     expect(findings).toEqual([]);
   });
 
