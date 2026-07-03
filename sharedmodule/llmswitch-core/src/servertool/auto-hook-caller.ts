@@ -72,13 +72,13 @@ async function runAutoHookExecutionQueue(args: {
         error
       });
       args.options.onAutoHookTrace?.(attemptDecision.traceEvent);
-      if (attemptDecision.action === 'rethrow_error') {
+      if (attemptDecision.rethrowError) {
         throw error;
       }
-      if (attemptDecision.action === 'return_result') {
+      if (attemptDecision.returnResult) {
         throw new Error('[servertool] invalid auto-hook attempt result action without materialized result');
       }
-      if (attemptDecision.action !== 'continue_queue') {
+      if (!attemptDecision.continueQueue) {
         throw new Error('[servertool] invalid auto-hook attempt action');
       }
       continue;
@@ -98,18 +98,18 @@ async function runAutoHookExecutionQueue(args: {
     });
     args.options.onAutoHookTrace?.(attemptDecision.traceEvent);
 
-    if (attemptDecision.action === 'return_result') {
+    if (attemptDecision.returnResult) {
       if (result == null) {
         throw new Error('[servertool] invalid auto-hook attempt result action without materialized result');
       }
       return result;
     }
-    if (attemptDecision.action === 'rethrow_error') {
+    if (attemptDecision.rethrowError) {
       throw new Error(
         `[servertool] native auto-hook attempt requested rethrow after successful handler execution: ${hook.id}`
       );
     }
-    if (attemptDecision.action !== 'continue_queue') {
+    if (!attemptDecision.continueQueue) {
       throw new Error('[servertool] invalid auto-hook attempt action');
     }
   }
@@ -147,13 +147,16 @@ export async function runServertoolAutoHookCaller(args: {
       queueIndex: queueIndex + 1,
       queueTotal: queueOrder.length
     });
-    if (finalizationDecision.action === 'return_result') {
+    if (finalizationDecision.returnResult) {
+      if (finalizationDecision.result == null) {
+        throw new Error('[servertool] invalid auto-hook caller finalization result disposition');
+      }
       return finalizationDecision.result;
     }
-    if (finalizationDecision.action === 'return_null') {
+    if (finalizationDecision.returnNull) {
       return null;
     }
-    if (finalizationDecision.action !== 'continue_next_queue') {
+    if (!finalizationDecision.continueNextQueue) {
       throw new Error('[servertool] invalid auto-hook caller finalization action');
     }
   }
