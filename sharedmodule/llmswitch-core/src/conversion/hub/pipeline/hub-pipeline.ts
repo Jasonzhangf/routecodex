@@ -11,6 +11,7 @@ import {
 import { executeRequestStagePipeline } from "./hub-pipeline-execute-request-stage.js";
 import { clearHubStageTiming } from "./hub-stage-timing.js";
 import {
+  buildHubPipelineMaterializedRequestPlanWithNative,
   extractModelHintFromMetadataWithNative,
   resolveHubPipelineRequestProviderProtocolWithNative,
   resolveSseProtocolWithNative,
@@ -109,10 +110,6 @@ function preserveMetadataCenterBinding(source: Record<string, unknown>, target: 
   }
 }
 
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
 function readProviderProtocol(metadata: Record<string, unknown>): HubPipelineProviderProtocol {
   return resolveHubPipelineRequestProviderProtocolWithNative({
     providerProtocol: metadata.providerProtocol,
@@ -171,47 +168,36 @@ function buildMaterializedRequest(args: {
   endpoint: string;
   payload: Record<string, unknown>;
   metadata: Record<string, unknown>;
+  providerProtocol: HubPipelineProviderProtocol;
+  payloadStream: boolean;
   externalStageRecorder?: StageRecorder;
 }): NormalizedRequest {
-  const endpoint = readString(args.metadata.endpoint) ?? args.endpoint;
-  const entryEndpoint = readString(args.metadata.entryEndpoint) ?? endpoint;
-  const providerProtocol = readProviderProtocol(args.metadata) as ProviderProtocol;
-  const direction = args.metadata.direction === "response" ? "response" : "request";
-  const stage = args.metadata.stage === "outbound" ? "outbound" : "inbound";
-  const hubEntryRaw = readString(args.metadata.__hubEntry);
-  const hubEntryMode = hubEntryRaw && ["chat_process", "chat-process", "chatprocess"].includes(hubEntryRaw.toLowerCase())
-    ? "chat_process" as const
-    : undefined;
-  const policyOverride = isRecord(args.metadata.__hubPolicyOverride)
-    ? args.metadata.__hubPolicyOverride
-    : undefined;
-  const shadowCompare = isRecord(args.metadata.__hubShadowCompare)
-    ? args.metadata.__hubShadowCompare
-    : undefined;
-  const disableSnapshots = args.metadata.__disableHubSnapshots === true;
-  const metadata = { ...args.metadata };
+  const plan = buildHubPipelineMaterializedRequestPlanWithNative({
+    endpoint: args.endpoint,
+    providerProtocol: args.providerProtocol,
+    metadata: args.metadata,
+    payload: args.payload,
+    payloadStream: args.payloadStream,
+  });
+  const metadata = { ...plan.metadata };
   preserveMetadataCenterBinding(args.metadata, metadata);
-  delete metadata.__hubEntry;
-  delete metadata.__hubPolicyOverride;
-  delete metadata.__hubShadowCompare;
-  delete metadata.__disableHubSnapshots;
   ensureRuntimeMetadata(metadata);
   return {
     id: args.id,
-    endpoint,
-    entryEndpoint,
-    providerProtocol,
+    endpoint: plan.endpoint,
+    entryEndpoint: plan.entryEndpoint,
+    providerProtocol: plan.providerProtocol as ProviderProtocol,
     payload: args.payload,
     metadata,
-    ...(policyOverride ? { policyOverride: policyOverride as NormalizedRequest["policyOverride"] } : {}),
-    ...(shadowCompare ? { shadowCompare: shadowCompare as NormalizedRequest["shadowCompare"] } : {}),
-    disableSnapshots,
+    ...(plan.policyOverride ? { policyOverride: plan.policyOverride as NormalizedRequest["policyOverride"] } : {}),
+    ...(plan.shadowCompare ? { shadowCompare: plan.shadowCompare as NormalizedRequest["shadowCompare"] } : {}),
+    disableSnapshots: plan.disableSnapshots,
     ...(args.externalStageRecorder ? { externalStageRecorder: args.externalStageRecorder } : {}),
-    processMode: "chat",
-    direction,
-    stage,
-    stream: args.metadata.stream === true,
-    ...(hubEntryMode ? { hubEntryMode } : {}),
+    processMode: plan.processMode,
+    direction: plan.direction,
+    stage: plan.stage,
+    stream: plan.stream,
+    ...(plan.hubEntryMode ? { hubEntryMode: plan.hubEntryMode } : {}),
   };
 }
 
@@ -233,23 +219,15 @@ async function materializeHubPipelineRequest(request: HubPipelineRequest): Promi
   if (!payload) {
     throw new Error("HubPipeline requires JSON object payload");
   }
-  const stream = Boolean(metadataRecord.stream === true || payload.stream === true || streamCandidate);
-  const materializedMetadata: Record<string, unknown> = {
-    ...metadataRecord,
-    endpoint: request.endpoint,
-    entryEndpoint: readString(metadataRecord.entryEndpoint) ?? request.endpoint,
-    providerProtocol,
-    stream,
-    processMode: "chat",
-    direction: metadataRecord.direction === "response" ? "response" : "request",
-    stage: metadataRecord.stage === "outbound" ? "outbound" : "inbound",
-  };
+  const materializedMetadata: Record<string, unknown> = { ...metadataRecord };
   preserveMetadataCenterBinding(metadataRecord, materializedMetadata);
   return buildMaterializedRequest({
     id,
     endpoint: request.endpoint,
     payload,
     metadata: materializedMetadata,
+    providerProtocol,
+    payloadStream: Boolean(streamCandidate),
     externalStageRecorder,
   });
 }

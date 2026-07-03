@@ -4260,6 +4260,35 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('hub pipeline materialized request control plan must stay native-owned', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const nativeWrapperPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+    );
+    const nativeWrapperSource = fs.readFileSync(nativeWrapperPath, 'utf8');
+    const requiredExportsPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+    );
+    const requiredExportsSource = fs.readFileSync(requiredExportsPath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'TS owns hubEntry mode alias decision', pattern: /__hubEntry|chat-process|chatprocess/ },
+      { label: 'TS owns hub policy override extraction', pattern: /__hubPolicyOverride/ },
+      { label: 'TS owns hub shadow compare extraction', pattern: /__hubShadowCompare/ },
+      { label: 'TS owns hub snapshot disable extraction', pattern: /__disableHubSnapshots/ },
+      { label: 'TS owns direction normalization', pattern: /direction:\s*metadataRecord\.direction|direction:\s*args\.metadata\.direction|metadataRecord\.direction\s*===\s*["']response["']/ },
+      { label: 'TS owns stage normalization', pattern: /stage:\s*metadataRecord\.stage|stage:\s*args\.metadata\.stage|metadataRecord\.stage\s*===\s*["']outbound["']/ },
+      { label: 'TS owns processMode materialization', pattern: /processMode:\s*["']chat["']/ },
+    ]);
+
+    expect(source).toContain('buildHubPipelineMaterializedRequestPlanWithNative');
+    expect(nativeWrapperSource).toContain('buildHubPipelineMaterializedRequestPlanWithNative');
+    expect(requiredExportsSource).toContain('buildHubPipelineMaterializedRequestPlanJson');
+    expect(findings).toEqual([]);
+  });
+
   it('provider response orchestration must not grow duplicate V2 owner', () => {
     const duplicateFiles = [
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_response_orchestration_v2.rs',

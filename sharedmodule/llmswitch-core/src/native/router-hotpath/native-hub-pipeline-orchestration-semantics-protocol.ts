@@ -93,6 +93,21 @@ export type RequestStageMetadataDispatchPlan = {
   metadataCenterSnapshot?: Record<string, unknown> | null;
 };
 
+export type HubPipelineMaterializedRequestPlan = {
+  endpoint: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  metadata: Record<string, unknown>;
+  processMode: 'chat';
+  direction: 'request' | 'response';
+  stage: 'inbound' | 'outbound';
+  stream: boolean;
+  disableSnapshots: boolean;
+  hubEntryMode?: 'chat_process';
+  policyOverride?: Record<string, unknown>;
+  shadowCompare?: Record<string, unknown>;
+};
+
 export type ProviderResponseMetadataSnapshotPlan = {
   metadataCenterSnapshot?: Record<string, unknown> | null;
 };
@@ -571,6 +586,65 @@ export function buildRequestStageMetadataDispatchWithNative(input: {
   return {
     metadata: parsed.metadata as Record<string, unknown>,
     metadataCenterSnapshot: snapshot as Record<string, unknown> | null | undefined,
+  };
+}
+
+export function buildHubPipelineMaterializedRequestPlanWithNative(input: {
+  endpoint: string;
+  providerProtocol: string;
+  metadata: Record<string, unknown>;
+  payload: Record<string, unknown>;
+  payloadStream: boolean;
+}): HubPipelineMaterializedRequestPlan {
+  const capability = 'buildHubPipelineMaterializedRequestPlanJson';
+  const fail = (reason?: string) => failNativeRequired<HubPipelineMaterializedRequestPlan>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, input), 'parseHubPipelineMaterializedRequestPlan');
+  if (!parsed || !parsed.metadata || typeof parsed.metadata !== 'object' || Array.isArray(parsed.metadata)) {
+    return fail('invalid payload');
+  }
+  const endpoint = typeof parsed.endpoint === 'string' ? parsed.endpoint : '';
+  const entryEndpoint = typeof parsed.entryEndpoint === 'string' ? parsed.entryEndpoint : '';
+  const providerProtocol = typeof parsed.providerProtocol === 'string' ? parsed.providerProtocol : '';
+  const processMode = parsed.processMode;
+  const direction = parsed.direction;
+  const stage = parsed.stage;
+  if (!endpoint || !entryEndpoint || !providerProtocol || processMode !== 'chat') {
+    return fail('invalid payload');
+  }
+  if (direction !== 'request' && direction !== 'response') {
+    return fail('invalid payload');
+  }
+  if (stage !== 'inbound' && stage !== 'outbound') {
+    return fail('invalid payload');
+  }
+  if (typeof parsed.stream !== 'boolean' || typeof parsed.disableSnapshots !== 'boolean') {
+    return fail('invalid payload');
+  }
+  const hubEntryMode = parsed.hubEntryMode === 'chat_process' ? 'chat_process' : undefined;
+  if (parsed.hubEntryMode !== undefined && hubEntryMode === undefined) {
+    return fail('invalid payload');
+  }
+  const policyOverride = parsed.policyOverride;
+  if (policyOverride !== undefined && (typeof policyOverride !== 'object' || policyOverride === null || Array.isArray(policyOverride))) {
+    return fail('invalid payload');
+  }
+  const shadowCompare = parsed.shadowCompare;
+  if (shadowCompare !== undefined && (typeof shadowCompare !== 'object' || shadowCompare === null || Array.isArray(shadowCompare))) {
+    return fail('invalid payload');
+  }
+  return {
+    endpoint,
+    entryEndpoint,
+    providerProtocol,
+    metadata: parsed.metadata as Record<string, unknown>,
+    processMode,
+    direction,
+    stage,
+    stream: parsed.stream,
+    disableSnapshots: parsed.disableSnapshots,
+    ...(hubEntryMode ? { hubEntryMode } : {}),
+    ...(policyOverride ? { policyOverride: policyOverride as Record<string, unknown> } : {}),
+    ...(shadowCompare ? { shadowCompare: shadowCompare as Record<string, unknown> } : {}),
   };
 }
 

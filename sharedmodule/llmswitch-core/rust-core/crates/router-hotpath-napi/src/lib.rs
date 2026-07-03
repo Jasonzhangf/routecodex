@@ -736,6 +736,15 @@ pub fn build_request_stage_metadata_dispatch_json(input_json: String) -> NapiRes
     hub_pipeline_blocks::napi_bindings::build_request_stage_metadata_dispatch_json(input_json)
 }
 
+#[napi(js_name = "buildHubPipelineMaterializedRequestPlanJson")]
+pub fn build_hub_pipeline_materialized_request_plan_json(
+    input_json: String,
+) -> NapiResult<String> {
+    hub_pipeline_blocks::napi_bindings::build_hub_pipeline_materialized_request_plan_json(
+        input_json,
+    )
+}
+
 #[napi(js_name = "buildProviderResponseMetadataSnapshotJson")]
 pub fn build_provider_response_metadata_snapshot_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_blocks::napi_bindings::build_provider_response_metadata_snapshot_json(input_json)
