@@ -12,7 +12,6 @@ export { GeminiJsonToSseConverter } from './json-to-sse/index.js';
 export { GeminiSseToJsonConverter } from './sse-to-json/index.js';
 
 // 共享工具导出
-export * from './shared/utils.js';
 // 类型导出
 export * from './types/index.js';
 

@@ -67,6 +67,7 @@ import {
   requireDirectPassthroughPayloadObject,
   evaluateDirectRouteDecision,
 } from './direct-passthrough-payload.js';
+import { buildDirectProviderRuntimeMetadata } from './direct-runtime-metadata.js';
 import {
   annotateAsHostPayloadContractError,
   buildDirectPayloadContractError,
@@ -1922,12 +1923,12 @@ export class RouteCodexHttpServer {
         runtimeKey,
         model: typeof target.modelId === 'string' ? target.modelId : undefined,
       },
-      metadata: {
-        ...(metadataForHub ?? {}),
-        ...(directProviderHandle.providerProtocol === 'openai-responses'
-          ? { __responsesDirectPassthrough: true }
-          : {}),
-      },
+      metadata: buildDirectProviderRuntimeMetadata({
+        metadata: metadataForHub,
+        entryEndpoint: input.entryEndpoint,
+        localPort: portConfig.port,
+        providerProtocol: directProviderHandle.providerProtocol,
+      }),
       compatibilityProfile: directProviderHandle.runtime?.compatibilityProfile,
       abortSignal: getClientConnectionAbortSignal(metadataForHub),
     });
@@ -2551,14 +2552,14 @@ export class RouteCodexHttpServer {
             providerProtocol: handle.providerProtocol,
             pipelineId: context.providerKey,
             runtimeKey: this.resolveRuntimeKeyForProviderBinding(context.providerKey, metadata),
-            metadata: {
-              ...(input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+            metadata: buildDirectProviderRuntimeMetadata({
+              metadata: input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
                 ? (input.metadata as Record<string, unknown>)
-                : {}),
-              ...(handle.providerProtocol === 'openai-responses'
-                ? { __responsesDirectPassthrough: true }
-                : {}),
-            },
+                : undefined,
+              entryEndpoint: input.entryEndpoint,
+              localPort: portConfig.port,
+              providerProtocol: handle.providerProtocol,
+            }),
             abortSignal: getClientConnectionAbortSignal(input.metadata),
             compatibilityProfile: handle.runtime?.compatibilityProfile,
           });

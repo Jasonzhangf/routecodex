@@ -3,10 +3,13 @@
 // This anchor file exists for the SSE architecture boundary gate; runtime code
 // must call native wrappers directly instead of restoring TS event generators.
 
-import type { ResponsesSequencerConfig, ResponsesSequencerContext } from '../sequencers/responses-sequencer.js';
+export interface ResponsesEventGeneratorConfig {
+  chunkSize?: number;
+  enableIdGeneration?: boolean;
+  enableTimestampGeneration?: boolean;
+  enableSequenceNumbers?: boolean;
+}
 
-export type ResponsesEventGeneratorConfig = ResponsesSequencerConfig;
-
-export function createDefaultResponsesContext(requestId: string, model: string): ResponsesSequencerContext {
+export function createDefaultResponsesContext(requestId: string, model: string): { requestId: string; model: string } {
   return { requestId, model };
 }
