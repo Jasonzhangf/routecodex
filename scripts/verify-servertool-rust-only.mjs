@@ -2829,6 +2829,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     "String(lastErr ?? 'unknown')",
     "lastErr instanceof Error ? lastErr.message : String",
     'lastErr instanceof Error ? lastErr.message : lastErr',
+    "mode: 'handler_error'",
+    "mode: 'noop'",
     'flowId: noopFlowId',
     'noopFlowId',
     'executedToolCalls: [],',
@@ -2867,6 +2869,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     'replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse)',
     'const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({',
     'base: args.baseForExecution',
+    'planServertoolHandlerErrorExecutionLoopEffectWithNative',
+    'planServertoolNoopExecutionLoopEffectWithNative',
     'resolveServertoolExecutionLoopInitialDecisionWithNative',
     'resolveServertoolExecutionLoopResultDecisionWithNative',
     'toolCall: errorEffectPlan.toolCall',
@@ -2959,7 +2963,10 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-loop-effect-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_loop_effect_json'],
     ['servertool-execution-loop-effect-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionLoopEffectJson'],
     ['servertool-execution-loop-effect-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionLoopEffectWithNative'],
-    ['servertool-execution-loop-effect-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'planServertoolExecutionLoopEffectWithNative'],
+    ['servertool-execution-loop-effect-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolHandlerErrorExecutionLoopEffectWithNative'],
+    ['servertool-execution-loop-effect-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolNoopExecutionLoopEffectWithNative'],
+    ['servertool-execution-loop-effect-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'planServertoolHandlerErrorExecutionLoopEffectWithNative'],
+    ['servertool-execution-loop-effect-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'planServertoolNoopExecutionLoopEffectWithNative'],
     ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'feature_id: hub.servertool_execution_loop_runtime_action_contract'],
     ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'pub fn plan_servertool_execution_loop_runtime_action'],
     ['servertool-execution-loop-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_loop_runtime_action_contract'],
@@ -3480,7 +3487,9 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'result?.execution != null && typeof result.execution.flowId');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'if (result == null)');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'return result;');
-  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, "attemptDecision.action !== 'continue_queue'");
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'if (!attemptDecision.continueQueue)');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'if (attemptDecision.returnResult)');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'if (attemptDecision.rethrowError)');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'const finalizationDecision = resolveAutoHookCallerFinalizationDecisionWithNative({');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'includeAutoHookIds: args.includeAutoHookIds != null ? [...args.includeAutoHookIds] : null');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'excludeAutoHookIds: args.excludeAutoHookIds != null ? [...args.excludeAutoHookIds] : null');
@@ -3491,6 +3500,9 @@ function checkAutoHookExecutionRustOwner() {
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'execution: queueResult?.execution');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'metadataWritePlan: queueResult?.metadataWritePlan');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'return finalizationDecision.result;');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'if (finalizationDecision.result == null)');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'if (finalizationDecision.returnNull)');
+  assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'if (!finalizationDecision.continueNextQueue)');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'invalid auto-hook attempt action');
   assertContains('servertool-auto-hook-execution-thin-shell', `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`, autoHookCaller, 'invalid auto-hook caller finalization action');
   for (const keyword of [
@@ -3521,6 +3533,12 @@ function checkAutoHookExecutionRustOwner() {
     'const finalizationPlan = planAutoHookCallerFinalizationWithNative({',
     'switch (finalizationPlan.action)',
     'return finalizationPlan.result;',
+    "attemptDecision.action === 'rethrow_error'",
+    "attemptDecision.action === 'return_result'",
+    "attemptDecision.action !== 'continue_queue'",
+    "finalizationDecision.action === 'return_result'",
+    "finalizationDecision.action === 'return_null'",
+    "finalizationDecision.action !== 'continue_next_queue'",
     'planned as any',
     'const queueResultForReturn = queueResult as ServerToolHandlerResult',
     'const toolFlowResult: ServerSideToolEngineResult = {',

@@ -161,20 +161,13 @@ export interface AutoHookRuntimeAttemptPlan {
   errorMessage?: string;
 }
 
-export type AutoHookRuntimeAttemptDecision =
-  | {
-      action: 'return_result';
-      traceEvent: AutoHookTraceEventPlan;
-    }
-  | {
-      action: 'continue_queue';
-      traceEvent: AutoHookTraceEventPlan;
-    }
-  | {
-      action: 'rethrow_error';
-      traceEvent: AutoHookTraceEventPlan;
-      errorMessage?: string;
-    };
+export interface AutoHookRuntimeAttemptDecision {
+  traceEvent: AutoHookTraceEventPlan;
+  returnResult: boolean;
+  continueQueue: boolean;
+  rethrowError: boolean;
+  errorMessage?: string;
+}
 
 export type AutoHookCallerFinalizationPlan =
   | {
@@ -203,22 +196,17 @@ export type AutoHookCallerFinalizationPlan =
       returnNull: true;
     };
 
-export type AutoHookCallerFinalizationDecision =
-  | {
-      action: 'return_result';
-      result: {
-        mode: 'tool_flow';
-        finalChatResponse: JsonObject;
-        execution: NativeServerToolExecution;
-        metadataWritePlan?: JsonObject;
-      };
-    }
-  | {
-      action: 'continue_next_queue';
-    }
-  | {
-      action: 'return_null';
-    };
+export interface AutoHookCallerFinalizationDecision {
+  returnResult: boolean;
+  continueNextQueue: boolean;
+  returnNull: boolean;
+  result?: {
+    mode: 'tool_flow';
+    finalChatResponse: JsonObject;
+    execution: NativeServerToolExecution;
+    metadataWritePlan?: JsonObject;
+  };
+}
 
 export type AutoHookCallerResultProjectionPlan = {
   result: {
@@ -2400,18 +2388,24 @@ export function resolveAutoHookRuntimeAttemptDecisionWithNative(input: {
   switch (plan.action) {
     case 'return_result':
       return {
-        action: 'return_result',
-        traceEvent: plan.traceEvent
+        traceEvent: plan.traceEvent,
+        returnResult: true,
+        continueQueue: false,
+        rethrowError: false
       };
     case 'continue_queue':
       return {
-        action: 'continue_queue',
-        traceEvent: plan.traceEvent
+        traceEvent: plan.traceEvent,
+        returnResult: false,
+        continueQueue: true,
+        rethrowError: false
       };
     case 'rethrow_error':
       return {
-        action: 'rethrow_error',
         traceEvent: plan.traceEvent,
+        returnResult: false,
+        continueQueue: false,
+        rethrowError: true,
         ...(plan.errorMessage ? { errorMessage: plan.errorMessage } : {})
       };
     default:
@@ -2556,16 +2550,22 @@ export function resolveAutoHookCallerFinalizationDecisionWithNative(input: {
   switch (plan.action) {
     case 'return_result':
       return {
-        action: 'return_result',
+        returnResult: true,
+        continueNextQueue: false,
+        returnNull: false,
         result: plan.result
       };
     case 'continue_next_queue':
       return {
-        action: 'continue_next_queue'
+        returnResult: false,
+        continueNextQueue: true,
+        returnNull: false
       };
     case 'return_null':
       return {
-        action: 'return_null'
+        returnResult: false,
+        continueNextQueue: false,
+        returnNull: true
       };
     default:
       throw new Error('[servertool] invalid auto-hook caller finalization action');
@@ -3493,6 +3493,40 @@ export function planServertoolExecutionLoopEffectWithNative(input: {
     };
   }
   return basePlan;
+}
+
+export function planServertoolHandlerErrorExecutionLoopEffectWithNative(input: {
+  toolCall: {
+    id: string;
+    name: string;
+    arguments: string;
+    executionMode?: string;
+    stripAfterExecute?: boolean;
+  };
+  handlerErrorMessage: unknown;
+}): ServertoolExecutionLoopHandlerErrorEffectPlan {
+  return planServertoolExecutionLoopEffectWithNative({
+    mode: 'handler_error',
+    toolCall: input.toolCall,
+    handlerErrorMessage: input.handlerErrorMessage
+  });
+}
+
+export function planServertoolNoopExecutionLoopEffectWithNative(input: {
+  toolCall: {
+    id: string;
+    name: string;
+    arguments: string;
+    executionMode?: string;
+    stripAfterExecute?: boolean;
+  };
+  noopOutcome: unknown;
+}): ServertoolExecutionLoopEffectBasePlan {
+  return planServertoolExecutionLoopEffectWithNative({
+    mode: 'noop',
+    toolCall: input.toolCall,
+    noopOutcome: input.noopOutcome
+  });
 }
 
 function encodeServertoolExecutionLoopEffectInput(input: unknown): Record<string, unknown> {

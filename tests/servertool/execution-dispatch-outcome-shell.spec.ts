@@ -25,6 +25,20 @@ const createServertoolProviderProtocolErrorFromPlanWithNative = jest.fn((plan: a
 const buildServertoolHandlerErrorToolOutputPayloadWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
+const planServertoolHandlerErrorExecutionLoopEffectWithNative = jest.fn((input: any) =>
+  planServertoolExecutionLoopEffectWithNative({
+    mode: 'handler_error',
+    toolCall: input?.toolCall,
+    handlerErrorMessage: input?.handlerErrorMessage
+  })
+);
+const planServertoolNoopExecutionLoopEffectWithNative = jest.fn((input: any) =>
+  planServertoolExecutionLoopEffectWithNative({
+    mode: 'noop',
+    toolCall: input?.toolCall,
+    noopOutcome: input?.noopOutcome
+  })
+);
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
 const resolveServertoolExecutionLoopInitialDecisionWithNative = jest.fn((input: any) => {
   const plan = planServertoolExecutionLoopRuntimeActionWithNative({
@@ -93,6 +107,8 @@ jest.unstable_mockModule(
     createServertoolProviderProtocolErrorFromPlanWithNative,
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionLoopEffectWithNative,
+    planServertoolHandlerErrorExecutionLoopEffectWithNative,
+    planServertoolNoopExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
     resolveServertoolExecutionLoopInitialDecisionWithNative,
     resolveServertoolExecutionLoopResultDecisionWithNative,
@@ -205,6 +221,10 @@ describe('execution queue dispatch runtime', () => {
     expect(source).toContain('resolveServertoolExecutionLoopInitialDecisionWithNative');
     expect(source).toContain('resolveServertoolExecutionLoopResultDecisionWithNative');
     expect(source).toContain('handlerErrorMessage: lastErr');
+    expect(source).toContain('planServertoolHandlerErrorExecutionLoopEffectWithNative');
+    expect(source).toContain('planServertoolNoopExecutionLoopEffectWithNative');
+    expect(source).not.toContain("mode: 'handler_error'");
+    expect(source).not.toContain("mode: 'noop'");
     expect(source).not.toContain('errorEffectPlan.handlerErrorMessage as string');
     expect(source).toContain('message: errorEffectPlan.handlerErrorMessage');
   });
@@ -383,8 +403,7 @@ describe('execution queue dispatch runtime', () => {
         })
       }
     ]);
-    expect(planServertoolExecutionLoopEffectWithNative).toHaveBeenCalledWith({
-      mode: 'handler_error',
+    expect(planServertoolHandlerErrorExecutionLoopEffectWithNative).toHaveBeenCalledWith({
       toolCall: {
         id: 'call_fail_1',
         name: 'failfast_test_tool',
@@ -549,8 +568,7 @@ describe('execution queue dispatch runtime', () => {
       baseForExecution: { id: 'chatcmpl-base' } as any
     });
 
-    expect(planServertoolExecutionLoopEffectWithNative).toHaveBeenCalledWith({
-      mode: 'noop',
+    expect(planServertoolNoopExecutionLoopEffectWithNative).toHaveBeenCalledWith({
       toolCall: {
         id: 'call_continue_1',
         name: 'continue_execution',

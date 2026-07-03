@@ -7,6 +7,20 @@ const appendServertoolExecutedRecordWithNative = jest.fn();
 const buildServertoolHandlerErrorToolOutputPayloadWithNative = jest.fn();
 const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
+const planServertoolHandlerErrorExecutionLoopEffectWithNative = jest.fn((input: any) =>
+  planServertoolExecutionLoopEffectWithNative({
+    mode: 'handler_error',
+    toolCall: input?.toolCall,
+    handlerErrorMessage: input?.handlerErrorMessage
+  })
+);
+const planServertoolNoopExecutionLoopEffectWithNative = jest.fn((input: any) =>
+  planServertoolExecutionLoopEffectWithNative({
+    mode: 'noop',
+    toolCall: input?.toolCall,
+    noopOutcome: input?.noopOutcome
+  })
+);
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
 const resolveServertoolExecutionLoopInitialDecisionWithNative = jest.fn((input: any) => {
   const plan = planServertoolExecutionLoopRuntimeActionWithNative({
@@ -57,6 +71,8 @@ jest.unstable_mockModule(
     createServertoolProviderProtocolErrorFromPlanWithNative,
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionLoopEffectWithNative,
+    planServertoolHandlerErrorExecutionLoopEffectWithNative,
+    planServertoolNoopExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
     resolveServertoolExecutionLoopInitialDecisionWithNative,
     resolveServertoolExecutionLoopResultDecisionWithNative,
@@ -218,6 +234,10 @@ describe('execution-queue-shell', () => {
     expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
     expect(source).not.toContain('errorEffectPlan.handlerErrorMessage as string');
     expect(source).toContain('message: errorEffectPlan.handlerErrorMessage');
+    expect(source).toContain('planServertoolHandlerErrorExecutionLoopEffectWithNative');
+    expect(source).toContain('planServertoolNoopExecutionLoopEffectWithNative');
+    expect(source).not.toContain("mode: 'handler_error'");
+    expect(source).not.toContain("mode: 'noop'");
     expect(source).not.toContain("String(lastErr ?? 'unknown')");
     expect(source).not.toContain("lastErr instanceof Error ? lastErr.message : String");
     expect(source).not.toContain('lastErr instanceof Error ? lastErr.message : lastErr');
@@ -380,8 +400,7 @@ describe('execution-queue-shell', () => {
       hasMaterializedResult: false,
       hasHandlerError: true
     });
-    expect(planServertoolExecutionLoopEffectWithNative).toHaveBeenCalledWith({
-      mode: 'handler_error',
+    expect(planServertoolHandlerErrorExecutionLoopEffectWithNative).toHaveBeenCalledWith({
       toolCall: {
         id: 'call-falsy-error',
         name: 'web_search',

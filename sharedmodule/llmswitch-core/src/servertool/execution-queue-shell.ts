@@ -8,10 +8,11 @@ import {
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
   planServertoolExecutionDispatchErrorWithNative,
-  planServertoolExecutionLoopEffectWithNative,
   appendServertoolExecutedRecordWithNative,
   createServertoolExecutionLoopStateWithNative,
   materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult,
+  planServertoolHandlerErrorExecutionLoopEffectWithNative,
+  planServertoolNoopExecutionLoopEffectWithNative,
   resolveServertoolExecutionLoopInitialDecisionWithNative,
   resolveServertoolExecutionLoopResultDecisionWithNative,
   runStoplessBuiltinHandlerForRuntimeWithNative,
@@ -90,8 +91,7 @@ export async function runServertoolIoExecutionQueue(args: {
       continue;
     }
     if (resultLoopDecision.action === 'apply_handler_error_tool_output') {
-      const errorEffectPlan = planServertoolExecutionLoopEffectWithNative({
-        mode: 'handler_error',
+      const errorEffectPlan = planServertoolHandlerErrorExecutionLoopEffectWithNative({
         toolCall: {
           id: toolCall.id,
           name: toolCall.name,
@@ -130,8 +130,7 @@ export async function runServertoolIoExecutionQueue(args: {
 
     replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse);
 
-    const noopEffectPlan = planServertoolExecutionLoopEffectWithNative({
-      mode: 'noop',
+    const noopEffectPlan = planServertoolNoopExecutionLoopEffectWithNative({
       toolCall: {
         id: toolCall.id,
         name: toolCall.name,
