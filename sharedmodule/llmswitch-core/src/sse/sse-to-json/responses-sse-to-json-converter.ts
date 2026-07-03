@@ -17,6 +17,7 @@ import type {
 import { ErrorUtils } from '../shared/utils.js';
 import { createSseParser } from './parsers/sse-parser.js';
 import { parseRespFormatEnvelopeWithNative } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { RESPONSES_SSE_EVENT_TYPES } from './shared/sse-event-validator.js';
 
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
 const DEFAULT_PRE_ANCHOR_IDLE_TIMEOUT_MS = 45_000;
@@ -49,7 +50,8 @@ export class ResponsesSseToJsonConverterRefactored {
     try {
       const parser = createSseParser({
         enableStrictValidation: true,
-        enableEventRecovery: false
+        enableEventRecovery: false,
+        allowedEventTypes: new Set(RESPONSES_SSE_EVENT_TYPES)
       });
 
       const readableStream = this.createReadableStream(sseStream);
