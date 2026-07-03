@@ -1,3 +1,5 @@
+import { projectMetadataWritePlanToRuntimeControlWithNative } from '../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
 
@@ -141,12 +143,5 @@ export function applyNativeRuntimeControlWritePlan(args: {
 export function projectNativeMetadataWritePlanToRuntimeControl(
   plan: Record<string, unknown>
 ): Record<string, unknown> {
-  const runtimeControl: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(plan)) {
-    if (key === 'learnedNote' || value === undefined || value === null) {
-      continue;
-    }
-    runtimeControl[key] = value;
-  }
-  return runtimeControl;
+  return projectMetadataWritePlanToRuntimeControlWithNative({ plan });
 }

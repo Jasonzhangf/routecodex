@@ -23,6 +23,11 @@ jest.unstable_mockModule(
     }) => ({
       providerProtocol: metadataCenterSnapshot?.runtimeControl?.providerProtocol
     })),
+    projectMetadataWritePlanToRuntimeControlWithNative: jest.fn(({ plan }: {
+      plan: Record<string, unknown>;
+    }) => Object.fromEntries(
+      Object.entries(plan).filter(([key, value]) => key !== 'learnedNote' && value !== null && value !== undefined)
+    )),
     resolveProviderResponsePostServertoolEffectWithNative: jest.fn(({
       currentPayload,
       orchestrationPayload,

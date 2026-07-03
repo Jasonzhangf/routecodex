@@ -374,6 +374,43 @@ pub fn resolve_provider_response_post_servertool_effect_json(
     })
 }
 
+pub fn project_metadata_write_plan_to_runtime_control(input: &Value) -> Result<Value, String> {
+    let record = input
+        .as_object()
+        .ok_or_else(|| "Rust HubPipeline metadata write plan projector missing input".to_string())?;
+    let plan = record
+        .get("plan")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Rust HubPipeline metadata write plan projector missing plan".to_string())?;
+    let mut runtime_control = Map::new();
+
+    for (key, value) in plan {
+        if key == "learnedNote" || value.is_null() {
+            continue;
+        }
+        runtime_control.insert(key.clone(), value.clone());
+    }
+
+    Ok(Value::Object(runtime_control))
+}
+
+pub fn project_metadata_write_plan_to_runtime_control_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid metadata write plan projector JSON: {error}"
+        ))
+    })?;
+    let output = project_metadata_write_plan_to_runtime_control(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize metadata write plan projector failed: {error}"
+        ))
+    })
+}
+
 pub fn plan_provider_response_servertool_runtime_actions_json(
     input_json: String,
 ) -> napi::Result<String> {
@@ -395,7 +432,7 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
 mod tests {
     use super::{
         normalize_provider_response_effect_plan, plan_provider_response_servertool_runtime_actions,
-        resolve_provider_response_post_servertool_effect,
+        project_metadata_write_plan_to_runtime_control, resolve_provider_response_post_servertool_effect,
     };
     use serde_json::{json, Value};
 
@@ -607,5 +644,37 @@ mod tests {
         assert_eq!(output["payload"], json!({ "id": "current" }));
         assert_eq!(output["stage"], json!("unchanged"));
         assert_eq!(output["shouldProjectClientSemantic"], json!(false));
+    }
+
+    #[test]
+    fn projects_metadata_write_plan_to_runtime_control_in_rust() {
+        let output = project_metadata_write_plan_to_runtime_control(&json!({
+            "plan": {
+                "servertool": true,
+                "providerProtocol": "openai-chat",
+                "learnedNote": { "ignored": true },
+                "nullField": null,
+                "nested": { "keep": true }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "servertool": true,
+                "providerProtocol": "openai-chat",
+                "nested": { "keep": true }
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_non_object_metadata_write_plan() {
+        let error = project_metadata_write_plan_to_runtime_control(&json!({
+            "plan": ["bad"]
+        }))
+        .unwrap_err();
+        assert!(error.contains("missing plan"));
     }
 }

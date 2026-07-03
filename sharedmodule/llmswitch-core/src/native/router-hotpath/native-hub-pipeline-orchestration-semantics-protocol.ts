@@ -434,6 +434,14 @@ function parseProviderProtocolPlan(raw: string): ProviderProtocolPlan | null {
   return { providerProtocol: row.providerProtocol.trim() };
 }
 
+function parseRecord(raw: string, stage: string): Record<string, unknown> | null {
+  const parsed = parseJson(stage, raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export function normalizeProviderResponseEffectPlanWithNative(
   effectPlan: { effects: Array<Record<string, unknown>> }
 ): ProviderResponseRuntimeEffectPlan {
@@ -471,6 +479,15 @@ export function resolveProviderProtocolWithNative(input: {
   const fail = (reason?: string) => failNativeRequired<ProviderProtocolPlan>(capability, reason);
   const raw = callNativeJsonString(capability, input);
   return parseProviderProtocolPlan(raw) ?? fail('invalid payload');
+}
+
+export function projectMetadataWritePlanToRuntimeControlWithNative(input: {
+  plan: Record<string, unknown>;
+}): Record<string, unknown> {
+  const capability = 'projectMetadataWritePlanToRuntimeControlJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  const raw = callNativeJsonString(capability, input);
+  return parseRecord(raw, 'parseMetadataWritePlanRuntimeControlProjection') ?? fail('invalid payload');
 }
 
 export function runHubPipelineOrchestrationWithNative(input: HubPipelineInput): HubPipelineOutput {

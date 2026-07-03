@@ -4209,12 +4209,26 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('planProviderResponseServertoolRuntimeActionsWithNative');
     expect(source).toContain('resolveProviderResponsePostServertoolEffectWithNative');
     expect(source).toContain('resolveProviderProtocolWithNative');
+    expect(source).toContain('projectNativeMetadataWritePlanToRuntimeControl');
     expect(source).toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(source).not.toContain('if (orchestration.executed)');
     expect(source).not.toContain('actionPlan.executionPlans.some');
     expect(source).not.toContain('runtimeControl.providerProtocol');
     expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');
+    expect(findings).toEqual([]);
+  });
+
+  it('metadata write plan runtime-control projection must stay native-owned', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'filters learnedNote in TS metadata write projector', pattern: /key\s*===\s*['"]learnedNote['"]/ },
+      { label: 'filters null values in TS metadata write projector', pattern: /value\s*===\s*null/ },
+      { label: 'iterates write plan entries in TS metadata write projector', pattern: /Object\.entries\(plan\)/ },
+    ]);
+
+    expect(source).toContain('projectMetadataWritePlanToRuntimeControlWithNative');
     expect(findings).toEqual([]);
   });
 

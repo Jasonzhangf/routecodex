@@ -3657,14 +3657,14 @@ owners:
     status: active
     summary: "OpenAI Responses SSE event stream to Responses JSON projection"
     owner_kind: server_projection
-    owner_scope: "OpenAI Responses SSE event stream to Responses JSON projection"
+    owner_scope: "file-scoped OpenAI Responses SSE event stream to Responses JSON projection"
     owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
     canonical_types:
       - ResponsesSseEvent
       - ResponsesResponse
       - SseToResponsesJsonOptions
     canonical_builders:
-      - materializeFinalResponse
+      - ResponsesSseToJsonConverter
     allowed_paths:
       - sharedmodule/llmswitch-core/src/sse/sse-to-json/responses-sse-to-json-converter.ts
       - src/providers/core/runtime/responses-provider.ts
