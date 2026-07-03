@@ -11,6 +11,7 @@ import {
   executeHubPipelineWithNative,
   normalizeProviderResponseEffectPlanWithNative,
   planProviderResponseServertoolRuntimeActionsWithNative,
+  resolveProviderProtocolWithNative,
   resolveProviderResponsePostServertoolEffectWithNative,
   type ProviderResponseRuntimeEffectPlan,
 } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
@@ -100,20 +101,6 @@ function writeRustStopGatewayContextToMetadataCenter(args: {
     reason: args.reason
   });
   ensureRuntimeMetadata(args.metadata).stopGatewayContext = args.stopGatewayContext as JsonObject;
-}
-
-function readProviderProtocolWithinCore(args: {
-  metadata?: Record<string, unknown>;
-}): ProviderProtocol {
-  const runtimeControl = readRuntimeControlFromBoundMetadataCenter(args.metadata);
-  const providerProtocol =
-    typeof runtimeControl.providerProtocol === 'string' && runtimeControl.providerProtocol.trim()
-      ? runtimeControl.providerProtocol.trim()
-      : undefined;
-  if (!providerProtocol) {
-    throw new Error('Provider response conversion requires metadata center runtime_control.providerProtocol');
-  }
-  return providerProtocol as ProviderProtocol;
 }
 
 interface ProviderResponseConversionOptions {
@@ -378,15 +365,15 @@ export async function convertProviderResponse(
   options: ProviderResponseConversionOptions
 ): Promise<ProviderResponseConversionResult> {
   const requestId = readProviderResponseRequestId(options.context);
-  const providerProtocol = readProviderProtocolWithinCore({
-    metadata: options.context as Record<string, unknown> | undefined
-  });
+  const metadataCenterSnapshot = readMetadataCenterSnapshotForRust(options.context);
+  const providerProtocol = resolveProviderProtocolWithNative({
+    metadataCenterSnapshot
+  }).providerProtocol as ProviderProtocol;
 
   // Step 1: Materialize provider SSE payload via canonical Rust owner.
   const providerResponseMaterialized = await materializeProviderResponseSsePayload(options.providerResponse);
 
   // Step 2: Run Rust HubPipeline response path (normalize, govern, outbound)
-  const metadataCenterSnapshot = readMetadataCenterSnapshotForRust(options.context);
   const nativeOptions: Parameters<typeof executeHubPipelineWithNative>[0] = {
     config: {},
     request: {

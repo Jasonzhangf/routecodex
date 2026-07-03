@@ -105,6 +105,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildProviderSseStreamReadErrorDescriptorJson",
   "planProviderResponseServertoolRuntimeActionsJson",
   "resolveProviderResponsePostServertoolEffectJson",
+  "resolveProviderProtocolJson",
   "captureReqInboundResponsesContextSnapshotJson",
   "extractReasoningSegmentsJson",
   "detectEmptyAssistantPayloadContractSignalJson",

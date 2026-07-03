@@ -84,6 +84,10 @@ export type ProviderResponsePostServertoolEffectPlan = {
   shouldProjectClientSemantic: boolean;
 };
 
+export type ProviderProtocolPlan = {
+  providerProtocol: string;
+};
+
 function readServertoolRuntimeErrorCode(value: unknown): ProviderProtocolErrorCode | null {
   if (value === 'SERVERTOOL_FOLLOWUP_FAILED' || value === 'SERVERTOOL_HANDLER_FAILED') {
     return value;
@@ -418,6 +422,18 @@ function parseProviderResponsePostServertoolEffectPlan(
   };
 }
 
+function parseProviderProtocolPlan(raw: string): ProviderProtocolPlan | null {
+  const parsed = parseJson('parseProviderProtocolPlan', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  if (typeof row.providerProtocol !== 'string' || !row.providerProtocol.trim()) {
+    return null;
+  }
+  return { providerProtocol: row.providerProtocol.trim() };
+}
+
 export function normalizeProviderResponseEffectPlanWithNative(
   effectPlan: { effects: Array<Record<string, unknown>> }
 ): ProviderResponseRuntimeEffectPlan {
@@ -446,6 +462,15 @@ export function resolveProviderResponsePostServertoolEffectWithNative(input: {
   const fail = (reason?: string) => failNativeRequired<ProviderResponsePostServertoolEffectPlan>(capability, reason);
   const raw = callNativeJsonString(capability, input);
   return parseProviderResponsePostServertoolEffectPlan(raw) ?? fail('invalid payload');
+}
+
+export function resolveProviderProtocolWithNative(input: {
+  metadataCenterSnapshot: Record<string, unknown> | null;
+}): ProviderProtocolPlan {
+  const capability = 'resolveProviderProtocolJson';
+  const fail = (reason?: string) => failNativeRequired<ProviderProtocolPlan>(capability, reason);
+  const raw = callNativeJsonString(capability, input);
+  return parseProviderProtocolPlan(raw) ?? fail('invalid payload');
 }
 
 export function runHubPipelineOrchestrationWithNative(input: HubPipelineInput): HubPipelineOutput {

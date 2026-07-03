@@ -2333,7 +2333,6 @@ describe('hub pipeline stage residue audit', () => {
       'resolveAdapterContextObjectCarriersJson',
       'resolveHubPolicyOverrideJson',
       'resolveHubShadowCompareConfigJson',
-      'resolveProviderProtocolJson',
       'resolveHubClientProtocolJson',
       'resolveSseProtocolFromMetadataJson',
       'resolveOutboundStreamIntentJson',
@@ -2360,7 +2359,6 @@ describe('hub pipeline stage residue audit', () => {
       'resolve_adapter_context_object_carriers_json',
       'resolve_hub_policy_override_json',
       'resolve_hub_shadow_compare_config_json',
-      'resolve_provider_protocol_json',
       'resolve_hub_client_protocol_json',
       'resolve_sse_protocol_from_metadata_json',
       'resolve_outbound_stream_intent_json',
@@ -4210,10 +4208,12 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
     expect(source).toContain('planProviderResponseServertoolRuntimeActionsWithNative');
     expect(source).toContain('resolveProviderResponsePostServertoolEffectWithNative');
+    expect(source).toContain('resolveProviderProtocolWithNative');
     expect(source).toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(source).not.toContain('if (orchestration.executed)');
     expect(source).not.toContain('actionPlan.executionPlans.some');
+    expect(source).not.toContain('runtimeControl.providerProtocol');
     expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');
     expect(findings).toEqual([]);
   });

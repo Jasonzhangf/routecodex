@@ -18,6 +18,24 @@ jest.unstable_mockModule(
     planProviderResponseServertoolRuntimeActionsWithNative: jest.fn(() => ({
       executionPlans: [],
     })),
+    resolveProviderProtocolWithNative: jest.fn(({ metadataCenterSnapshot }: {
+      metadataCenterSnapshot?: { runtimeControl?: Record<string, unknown> } | null;
+    }) => ({
+      providerProtocol: metadataCenterSnapshot?.runtimeControl?.providerProtocol
+    })),
+    resolveProviderResponsePostServertoolEffectWithNative: jest.fn(({
+      currentPayload,
+      orchestrationPayload,
+      orchestrationExecuted
+    }: {
+      currentPayload: Record<string, unknown>;
+      orchestrationPayload: Record<string, unknown>;
+      orchestrationExecuted: boolean;
+    }) => ({
+      payload: orchestrationExecuted ? orchestrationPayload : currentPayload,
+      stage: orchestrationExecuted ? 'HubRespChatProcess03Governed' : 'unchanged',
+      shouldProjectClientSemantic: false,
+    })),
   })
 );
 

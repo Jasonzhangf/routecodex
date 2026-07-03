@@ -1,4 +1,4 @@
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 pub(crate) fn normalize_endpoint(endpoint: &str) -> String {
     let trimmed = endpoint.trim();
@@ -25,6 +25,38 @@ pub(crate) fn resolve_provider_protocol(value: &str) -> Result<String, String> {
         "gemini-chat" | "gemini" | "google-gemini" => Ok("gemini-chat".to_string()),
         _ => Err(format!("Unsupported providerProtocol: {}", value)),
     }
+}
+
+pub(crate) fn resolve_provider_protocol_from_metadata_snapshot(
+    input: &Value,
+) -> Result<Value, String> {
+    let root = input
+        .as_object()
+        .ok_or_else(|| "providerProtocol metadata snapshot input must be an object".to_string())?;
+    let snapshot = root
+        .get("metadataCenterSnapshot")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            "Provider response conversion requires metadata center runtime_control.providerProtocol"
+                .to_string()
+        })?;
+    let runtime_control = snapshot
+        .get("runtimeControl")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            "Provider response conversion requires metadata center runtime_control.providerProtocol"
+                .to_string()
+        })?;
+    let provider_protocol = runtime_control
+        .get("providerProtocol")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            "Provider response conversion requires metadata center runtime_control.providerProtocol"
+                .to_string()
+        })?;
+    Ok(json!({
+        "providerProtocol": resolve_provider_protocol(provider_protocol)?
+    }))
 }
 
 pub(crate) fn resolve_hub_client_protocol(entry_endpoint: &str) -> String {
@@ -118,4 +150,35 @@ pub(crate) fn extract_model_hint_from_metadata(metadata: &Value) -> Option<Strin
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_provider_protocol_from_metadata_center_runtime_control() {
+        let output = resolve_provider_protocol_from_metadata_snapshot(&json!({
+            "metadataCenterSnapshot": {
+                "runtimeControl": {
+                    "providerProtocol": " anthropic "
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(output["providerProtocol"], json!("anthropic-messages"));
+    }
+
+    #[test]
+    fn rejects_missing_metadata_center_provider_protocol() {
+        let error = resolve_provider_protocol_from_metadata_snapshot(&json!({
+            "metadataCenterSnapshot": {
+                "runtimeControl": {}
+            }
+        }))
+        .unwrap_err();
+
+        assert!(error.contains("runtime_control.providerProtocol"));
+    }
 }

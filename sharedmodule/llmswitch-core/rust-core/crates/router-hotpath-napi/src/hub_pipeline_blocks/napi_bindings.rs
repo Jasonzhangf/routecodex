@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use super::protocol::resolve_provider_protocol_from_metadata_snapshot;
 use crate::metadata_center::{build_metadata_center_from_snapshot, MetadataCenterReader};
 
 fn has_declared_apply_patch_tool(payload: &Value) -> bool {
@@ -114,6 +115,19 @@ fn read_trimmed_lower(value: Option<&Value>) -> Option<String> {
     } else {
         Some(text)
     }
+}
+
+pub fn resolve_provider_protocol_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!("invalid providerProtocol resolver JSON: {error}"))
+    })?;
+    let output = resolve_provider_protocol_from_metadata_snapshot(&input)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize providerProtocol resolver failed: {error}"
+        ))
+    })
 }
 
 #[cfg(test)]
