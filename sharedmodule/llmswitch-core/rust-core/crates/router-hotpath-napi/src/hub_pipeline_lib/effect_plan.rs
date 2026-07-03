@@ -443,6 +443,110 @@ pub fn project_metadata_write_plan_to_runtime_control_write_plan_json(
     })
 }
 
+fn request_stage_error_prefix(entry_mode: &str) -> &'static str {
+    if entry_mode == "chat_process" {
+        "Rust HubPipeline chat_process path"
+    } else {
+        "Rust HubPipeline request path"
+    }
+}
+
+pub fn build_request_stage_native_result_plan(input: &Value) -> Result<Value, String> {
+    let record = input
+        .as_object()
+        .ok_or_else(|| "Rust HubPipeline request-stage result planner missing input".to_string())?;
+    let native_plan = record
+        .get("nativePlan")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Rust HubPipeline request-stage result planner missing nativePlan".to_string())?;
+    let entry_mode = record
+        .get("entryMode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("request_stage");
+    let prefix = request_stage_error_prefix(entry_mode);
+
+    if native_plan.get("success").and_then(Value::as_bool) != Some(true) {
+        let native_error = native_plan.get("error").and_then(Value::as_object);
+        let code = native_error
+            .and_then(|row| row.get("code"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("hub_pipeline_request_native_failed");
+        let message = native_error
+            .and_then(|row| row.get("message"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("{prefix} failed"));
+        let mut error = Map::new();
+        error.insert("code".to_string(), Value::String(code.to_string()));
+        error.insert("message".to_string(), Value::String(message));
+        if let Some(details) = native_error.and_then(|row| row.get("details")) {
+            error.insert("details".to_string(), details.clone());
+        }
+        if code == "MALFORMED_REQUEST" {
+            error.insert("status".to_string(), json!(400));
+            error.insert("statusCode".to_string(), json!(400));
+        }
+        return Ok(json!({
+            "ok": false,
+            "error": Value::Object(error)
+        }));
+    }
+
+    let provider_payload = native_plan
+        .get("payload")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| format!("{prefix} returned invalid provider payload"))?;
+    let metadata = native_plan
+        .get("metadata")
+        .filter(|value| value.is_object())
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let diagnostics = native_plan
+        .get("diagnostics")
+        .filter(|value| value.is_array())
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+
+    let mut output = Map::new();
+    output.insert("ok".to_string(), Value::Bool(true));
+    output.insert("providerPayload".to_string(), provider_payload.clone());
+    output.insert("metadata".to_string(), metadata);
+    output.insert("diagnostics".to_string(), diagnostics);
+    if entry_mode != "chat_process" {
+        if let Some(standardized_request) = native_plan
+            .get("standardizedRequest")
+            .filter(|value| value.is_object())
+        {
+            output.insert(
+                "standardizedRequest".to_string(),
+                standardized_request.clone(),
+            );
+        }
+    }
+
+    Ok(Value::Object(output))
+}
+
+pub fn build_request_stage_native_result_plan_json(input_json: String) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid request-stage native result plan JSON: {error}"
+        ))
+    })?;
+    let output =
+        build_request_stage_native_result_plan(&value).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize request-stage native result plan failed: {error}"
+        ))
+    })
+}
+
 pub fn plan_provider_response_servertool_runtime_actions_json(
     input_json: String,
 ) -> napi::Result<String> {
@@ -463,6 +567,7 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
 #[cfg(test)]
 mod tests {
     use super::{
+        build_request_stage_native_result_plan,
         normalize_provider_response_effect_plan, plan_provider_response_servertool_runtime_actions,
         project_metadata_write_plan_to_runtime_control,
         project_metadata_write_plan_to_runtime_control_write_plan,
@@ -735,6 +840,42 @@ mod tests {
         .unwrap();
 
         assert_eq!(output["runtimeControl"], Value::Null);
+    }
+
+    #[test]
+    fn request_stage_result_plan_maps_malformed_request_to_http_400() {
+        let output = build_request_stage_native_result_plan(&json!({
+            "entryMode": "request_stage",
+            "nativePlan": {
+                "success": false,
+                "error": {
+                    "code": "MALFORMED_REQUEST",
+                    "message": "bad request"
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(output["ok"], json!(false));
+        assert_eq!(output["error"]["code"], json!("MALFORMED_REQUEST"));
+        assert_eq!(output["error"]["status"], json!(400));
+        assert_eq!(output["error"]["statusCode"], json!(400));
+    }
+
+    #[test]
+    fn request_stage_result_plan_rejects_invalid_provider_payload() {
+        let error = build_request_stage_native_result_plan(&json!({
+            "entryMode": "chat_process",
+            "nativePlan": {
+                "success": true,
+                "payload": null,
+                "metadata": {},
+                "diagnostics": []
+            }
+        }))
+        .unwrap_err();
+
+        assert!(error.contains("chat_process path returned invalid provider payload"));
     }
 
     #[test]

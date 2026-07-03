@@ -101,6 +101,21 @@ export type RequestStageRuntimeControlWritePlan = {
   runtimeControl?: Record<string, unknown> | null;
 };
 
+export type RequestStageNativeResultPlan = {
+  ok: boolean;
+  providerPayload?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  diagnostics?: Array<Record<string, unknown>>;
+  standardizedRequest?: Record<string, unknown>;
+  error?: {
+    code?: string;
+    message: string;
+    status?: number;
+    statusCode?: number;
+    details?: unknown;
+  };
+};
+
 export type MetadataWritePlanRuntimeControlWritePlan = {
   runtimeControl?: Record<string, unknown> | null;
 };
@@ -597,6 +612,63 @@ export function buildRequestStageRuntimeControlWritePlanWithNative(input: {
   }
   return {
     runtimeControl: runtimeControl as Record<string, unknown> | null | undefined,
+  };
+}
+
+export function buildRequestStageNativeResultPlanWithNative(input: {
+  nativePlan: HubPipelineLibOutput;
+  entryMode: 'request_stage' | 'chat_process';
+}): RequestStageNativeResultPlan {
+  const capability = 'buildRequestStageNativeResultPlanJson';
+  const fail = (reason?: string) => failNativeRequired<RequestStageNativeResultPlan>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, input), 'parseRequestStageNativeResultPlan');
+  if (!parsed) {
+    return fail('invalid payload');
+  }
+  if (parsed.ok === false) {
+    const error = parsed.error;
+    if (!error || typeof error !== 'object' || Array.isArray(error)) {
+      return fail('invalid payload');
+    }
+    const errorRecord = error as Record<string, unknown>;
+    const message = typeof errorRecord.message === 'string' && errorRecord.message.trim()
+      ? errorRecord.message.trim()
+      : '';
+    if (!message) {
+      return fail('invalid payload');
+    }
+    return {
+      ok: false,
+      error: {
+        ...(typeof errorRecord.code === 'string' ? { code: errorRecord.code } : {}),
+        message,
+        ...(typeof errorRecord.status === 'number' ? { status: errorRecord.status } : {}),
+        ...(typeof errorRecord.statusCode === 'number' ? { statusCode: errorRecord.statusCode } : {}),
+        ...(Object.prototype.hasOwnProperty.call(errorRecord, 'details') ? { details: errorRecord.details } : {}),
+      },
+    };
+  }
+  if (parsed.ok !== true) {
+    return fail('invalid payload');
+  }
+  if (!parsed.providerPayload || typeof parsed.providerPayload !== 'object' || Array.isArray(parsed.providerPayload)) {
+    return fail('invalid payload');
+  }
+  const metadata = parsed.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return fail('invalid payload');
+  }
+  if (!Array.isArray(parsed.diagnostics)) {
+    return fail('invalid payload');
+  }
+  return {
+    ok: true,
+    providerPayload: parsed.providerPayload as Record<string, unknown>,
+    metadata: metadata as Record<string, unknown>,
+    diagnostics: parsed.diagnostics as Array<Record<string, unknown>>,
+    ...(parsed.standardizedRequest && typeof parsed.standardizedRequest === 'object' && !Array.isArray(parsed.standardizedRequest)
+      ? { standardizedRequest: parsed.standardizedRequest as Record<string, unknown> }
+      : {}),
   };
 }
 

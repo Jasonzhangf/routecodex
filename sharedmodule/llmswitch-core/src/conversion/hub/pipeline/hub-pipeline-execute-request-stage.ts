@@ -7,6 +7,7 @@ import type {
 } from "./hub-pipeline.js";
 import {
   buildRequestStageMetadataDispatchWithNative,
+  buildRequestStageNativeResultPlanWithNative,
   buildRequestStageRuntimeControlWritePlanWithNative,
   runHubPipelineLibWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
@@ -81,36 +82,29 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
       stage: normalized.stage,
     },
   });
-  if (nativePlan.success !== true) {
-    const errorMessage = entryMode === "chat_process"
-      ? "Rust HubPipeline chat_process path failed"
-      : "Rust HubPipeline request path failed";
-    const error = new Error(nativePlan.error?.message ?? errorMessage) as Error & {
+  const resultPlan = buildRequestStageNativeResultPlanWithNative({
+    nativePlan,
+    entryMode,
+  });
+  if (!resultPlan.ok) {
+    const error = new Error(resultPlan.error?.message ?? 'Rust HubPipeline request path failed') as Error & {
       code?: string;
       status?: number;
       statusCode?: number;
       details?: unknown;
     };
-    error.code = nativePlan.error?.code;
-    error.details = nativePlan.error?.details;
-    if (nativePlan.error?.code === 'MALFORMED_REQUEST') {
-      error.status = 400;
-      error.statusCode = 400;
-    }
+    error.code = resultPlan.error?.code;
+    error.details = resultPlan.error?.details;
+    error.status = resultPlan.error?.status;
+    error.statusCode = resultPlan.error?.statusCode;
     throw error;
   }
-  const outputMetadata = nativePlan.metadata ?? {};
+  const outputMetadata = resultPlan.metadata ?? {};
   syncRequestStageRuntimeControlToMetadataCenter({
     sourceMetadata: normalized.metadata,
     outputMetadata,
   });
-  const providerPayload = nativePlan.payload;
-  if (!providerPayload || typeof providerPayload !== 'object' || Array.isArray(providerPayload)) {
-    const errorMessage = entryMode === "chat_process"
-      ? "Rust HubPipeline chat_process path returned invalid provider payload"
-      : "Rust HubPipeline request path returned invalid provider payload";
-    throw new Error(errorMessage);
-  }
+  const providerPayload = resultPlan.providerPayload as Record<string, unknown>;
 
   attachHubStageTopSummary({
     requestId: normalized.id,
@@ -124,10 +118,10 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
     routingDecision: outputMetadata.routingDecision as HubPipelineResult['routingDecision'],
     routingDiagnostics: outputMetadata.routingDiagnostics as HubPipelineResult['routingDiagnostics'],
     metadata: outputMetadata,
-    nodeResults: nativePlan.diagnostics as unknown as HubPipelineNodeResult[],
+    nodeResults: resultPlan.diagnostics as unknown as HubPipelineNodeResult[],
   };
   if (entryMode !== "chat_process") {
-    result.standardizedRequest = nativePlan.standardizedRequest as unknown as HubPipelineResult['standardizedRequest'];
+    result.standardizedRequest = resultPlan.standardizedRequest as unknown as HubPipelineResult['standardizedRequest'];
   }
   return result;
 }

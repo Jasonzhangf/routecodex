@@ -750,6 +750,11 @@ pub fn build_request_stage_runtime_control_write_plan_json(
     )
 }
 
+#[napi(js_name = "buildRequestStageNativeResultPlanJson")]
+pub fn build_request_stage_native_result_plan_json(input_json: String) -> NapiResult<String> {
+    hub_pipeline_lib::effect_plan::build_request_stage_native_result_plan_json(input_json)
+}
+
 #[napi(js_name = "projectMetadataWritePlanToRuntimeControlJson")]
 pub fn project_metadata_write_plan_to_runtime_control_json(
     input_json: String,

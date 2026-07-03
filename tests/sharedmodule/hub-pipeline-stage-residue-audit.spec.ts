@@ -1761,6 +1761,7 @@ describe('hub pipeline stage residue audit', () => {
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).toContain('buildRequestStageMetadataDispatchWithNative');
     expect(source).toContain('buildRequestStageRuntimeControlWritePlanWithNative');
+    expect(source).toContain('buildRequestStageNativeResultPlanWithNative');
     const findings = collectMatches(source, [
       { label: 'legacy __metadataCenter fallback residue', pattern: /__metadataCenter/ },
       { label: 'legacy __rt read/write residue', pattern: /metadata\.__rt|__rt\s*=/ },
@@ -1768,6 +1769,9 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'TS request-stage legacy metadata stripper residue', pattern: /stripLegacyMetadataResidue|Object\.entries\(metadata\)/ },
       { label: 'TS request-stage metadata snapshot builder residue', pattern: /buildMetadataCenterSnapshot|runtimeControlSnapshot|excludedProviderKeys\s*=\s*Array\.isArray/ },
       { label: 'TS request-stage runtime_control object narrowing residue', pattern: /function\s+asFlatRecord\s*\(|Object\.keys\(runtimeControl\)/ },
+      { label: 'TS request-stage native success discriminator residue', pattern: /nativePlan\.success/ },
+      { label: 'TS request-stage malformed request status projection residue', pattern: /MALFORMED_REQUEST/ },
+      { label: 'TS request-stage provider payload shape validation residue', pattern: /returned invalid provider payload/ },
     ]);
 
     expect(findings).toEqual([]);
