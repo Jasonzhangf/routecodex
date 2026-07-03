@@ -1121,6 +1121,8 @@ pub fn save_routing_instruction_state_json(
     Ok("true".to_string())
 }
 
+
+
 #[napi]
 pub fn merge_stop_message_from_persisted_json(
     existing_json: String,
@@ -2702,11 +2704,57 @@ pub fn report_provider_success_to_router_policy_json_bridge(
 }
 
 #[napi(js_name = "resetProviderRuntimeIngressForTestsJson")]
+
+
 pub fn reset_provider_runtime_ingress_for_tests_json_bridge() -> NapiResult<String> {
     virtual_router_engine::provider_runtime_ingress::reset_for_tests();
     Ok("true".to_string())
 }
 
+#[napi(js_name = "createVirtualRouterHitRecordJson")]
+pub fn create_virtual_router_hit_record_json_bridge(input_json: String) -> napi::Result<String> {
+    crate::virtual_router_hit_log::create_virtual_router_hit_record_json(input_json)
+}
+
+#[napi(js_name = "formatVirtualRouterHitJson")]
+pub fn format_virtual_router_hit_json_bridge(record_json: String, config_json: Option<String>) -> napi::Result<String> {
+    crate::virtual_router_hit_log::format_virtual_router_hit_json(record_json, config_json)
+}
+
+#[napi(js_name = "formatContinuationScopeJson")]
+pub fn format_continuation_scope_json_bridge(scope: Option<String>) -> napi::Result<String> {
+    crate::virtual_router_hit_log::format_continuation_scope_json(scope)
+}
+
+#[napi(js_name = "parseProviderKeyJson")]
+pub fn parse_provider_key_json_bridge(provider_key: String) -> napi::Result<String> {
+    crate::virtual_router_hit_log::parse_provider_key_json(provider_key)
+}
+
+#[napi(js_name = "resolveSessionLogColorKeyJson")]
+pub fn resolve_session_log_color_key_json_bridge(input_json: String) -> napi::Result<String> {
+    crate::virtual_router_hit_log::resolve_session_log_color_key_json(input_json)
+}
+
+#[napi(js_name = "describeTargetProviderJson")]
+pub fn describe_target_provider_json_bridge(provider_key: String, fallback_model_id: Option<String>) -> napi::Result<String> {
+    crate::virtual_router_hit_log::describe_target_provider_json(provider_key, fallback_model_id)
+}
+
+#[napi(js_name = "resolveRouteColorStr")]
+pub fn resolve_route_color_str_bridge(route_name: String) -> String {
+    crate::virtual_router_hit_log::resolve_route_color_str(route_name)
+}
+
+#[napi(js_name = "resolveSessionColorStr")]
+pub fn resolve_session_color_str_bridge(session_id: Option<String>) -> napi::Result<String> {
+    crate::virtual_router_hit_log::resolve_session_color_str(session_id)
+}
+
+#[napi(js_name = "buildHitReasonJson")]
+pub fn build_hit_reason_json_bridge(route_used: String, provider_key: String, classification_reasoning: Option<String>, estimated_tokens: Option<f64>, last_assistant_tool_label: Option<String>) -> napi::Result<String> {
+    crate::virtual_router_hit_log::build_hit_reason_json(route_used, provider_key, classification_reasoning, estimated_tokens, last_assistant_tool_label)
+}
 #[napi(js_name = "classifyProviderFailureJson")]
 pub fn classify_provider_failure_json(
     status_code: Option<u16>,
