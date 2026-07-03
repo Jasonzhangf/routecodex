@@ -81,6 +81,7 @@ export interface NativeCoerceStandardizedRequestOutput {
 export {
   extractModelHintFromMetadataWithNative,
   normalizeHubEndpointWithNative,
+  resolveHubPipelineRequestProviderProtocolWithNative,
   resolveSseProtocolWithNative,
   planProviderResponseServertoolRuntimeActionsWithNative,
   runHubPipelineOrchestrationWithNative

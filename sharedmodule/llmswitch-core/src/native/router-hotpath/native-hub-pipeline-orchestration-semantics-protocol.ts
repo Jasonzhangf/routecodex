@@ -498,6 +498,16 @@ export function resolveProviderProtocolWithNative(input: {
   return parseProviderProtocolPlan(raw) ?? fail('invalid payload');
 }
 
+export function resolveHubPipelineRequestProviderProtocolWithNative(input: {
+  providerProtocol?: unknown;
+  runtimeControl?: Record<string, unknown> | null;
+}): ProviderProtocolPlan {
+  const capability = 'resolveHubPipelineRequestProviderProtocolJson';
+  const fail = (reason?: string) => failNativeRequired<ProviderProtocolPlan>(capability, reason);
+  const raw = callNativeJsonString(capability, input);
+  return parseProviderProtocolPlan(raw) ?? fail('invalid payload');
+}
+
 export function projectMetadataWritePlanToRuntimeControlWithNative(input: {
   plan: Record<string, unknown>;
 }): Record<string, unknown> {

@@ -30,6 +30,40 @@ jest.unstable_mockModule(
   })
 );
 
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.js',
+  () => ({
+    extractModelHintFromMetadataWithNative: jest.fn(() => undefined),
+    resolveHubPipelineRequestProviderProtocolWithNative: jest.fn(({
+      providerProtocol,
+      runtimeControl
+    }: {
+      providerProtocol?: unknown;
+      runtimeControl?: Record<string, unknown> | null;
+    }) => ({
+      providerProtocol: typeof runtimeControl?.providerProtocol === 'string'
+        ? runtimeControl.providerProtocol
+        : providerProtocol
+    })),
+    resolveSseProtocolWithNative: jest.fn((_metadata: unknown, providerProtocol: string) => providerProtocol),
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
+  () => ({
+    ensureRuntimeMetadata: jest.fn((carrier: Record<string, unknown>) => {
+      const existing = carrier.__rt;
+      if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+        return existing;
+      }
+      carrier.__rt = {};
+      return carrier.__rt as Record<string, unknown>;
+    }),
+    readRuntimeMetadata: jest.fn(() => ({})),
+  })
+);
+
 const { HubPipeline } = await import(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.js'
 );

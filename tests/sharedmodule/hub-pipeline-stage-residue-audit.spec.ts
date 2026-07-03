@@ -4243,6 +4243,19 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('hub pipeline request providerProtocol selection must stay native-owned', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'selects providerProtocol from runtimeControl in TS', pattern: /runtimeControl\?\.[\s\n]*providerProtocol/ },
+      { label: 'fallbacks providerProtocol from metadata in TS', pattern: /metadata\.providerProtocol[\s\S]{0,80}\?\?/ },
+      { label: 'throws providerProtocol missing from TS selector', pattern: /HubPipeline requires metadata center runtime_control\.providerProtocol/ },
+    ]);
+
+    expect(source).toContain('resolveHubPipelineRequestProviderProtocolWithNative');
+    expect(findings).toEqual([]);
+  });
+
   it('provider response orchestration must not grow duplicate V2 owner', () => {
     const duplicateFiles = [
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_response_orchestration_v2.rs',

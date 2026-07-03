@@ -12,6 +12,7 @@ import { executeRequestStagePipeline } from "./hub-pipeline-execute-request-stag
 import { clearHubStageTiming } from "./hub-stage-timing.js";
 import {
   extractModelHintFromMetadataWithNative,
+  resolveHubPipelineRequestProviderProtocolWithNative,
   resolveSseProtocolWithNative,
 } from "../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
@@ -113,14 +114,10 @@ function readString(value: unknown): string | undefined {
 }
 
 function readProviderProtocol(metadata: Record<string, unknown>): HubPipelineProviderProtocol {
-  const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(metadata);
-  const providerProtocol =
-    readString(runtimeControl?.providerProtocol)
-    ?? readString(metadata.providerProtocol);
-  if (!providerProtocol) {
-    throw new Error("HubPipeline requires metadata center runtime_control.providerProtocol");
-  }
-  return providerProtocol as HubPipelineProviderProtocol;
+  return resolveHubPipelineRequestProviderProtocolWithNative({
+    providerProtocol: metadata.providerProtocol,
+    runtimeControl: readRuntimeControlFromAnyBoundMetadataCenter(metadata) ?? null,
+  }).providerProtocol as HubPipelineProviderProtocol;
 }
 
 function readStageRecorder(metadata: Record<string, unknown>): StageRecorder | undefined {

@@ -1,6 +1,8 @@
 use serde_json::Value;
 
-use super::protocol::resolve_provider_protocol_from_metadata_snapshot;
+use super::protocol::{
+    resolve_hub_pipeline_request_provider_protocol, resolve_provider_protocol_from_metadata_snapshot,
+};
 use crate::metadata_center::{build_metadata_center_from_snapshot, MetadataCenterReader};
 
 fn as_object_map(value: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
@@ -336,6 +338,23 @@ pub fn resolve_provider_protocol_json(input_json: String) -> napi::Result<String
     serde_json::to_string(&output).map_err(|error| {
         napi::Error::from_reason(format!(
             "serialize providerProtocol resolver failed: {error}"
+        ))
+    })
+}
+
+pub fn resolve_hub_pipeline_request_provider_protocol_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid HubPipeline request providerProtocol resolver JSON: {error}"
+        ))
+    })?;
+    let output = resolve_hub_pipeline_request_provider_protocol(&input)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize HubPipeline request providerProtocol resolver failed: {error}"
         ))
     })
 }
