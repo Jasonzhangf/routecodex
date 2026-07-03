@@ -46,6 +46,66 @@ function parseNativeAnthropicEventSequence(raw: string): AnthropicSseEventSequen
   }
 }
 
+
+
+export interface AnthropicSseStreamNativeInput {
+  response: unknown;
+  requestId?: string;
+  model?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface AnthropicSseStreamNativeOutput {
+  events: Record<string, unknown>[];
+  stats: Record<string, unknown>;
+}
+
+export function buildAnthropicSseStreamWithNative(
+  input: AnthropicSseStreamNativeInput
+): AnthropicSseStreamNativeOutput {
+  const capability = 'AnthropicSseStreamJson';
+  const fail = (reason?: string) => failNative<AnthropicSseStreamNativeOutput>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    const requestId = input.requestId ?? input.model ?? '';
+    inputJson = JSON.stringify({
+      response: input.response,
+      request_id: requestId,
+      model: input.model ?? '',
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Anthropic SSE stream result');
+    }
+    const parsed = JSON.parse(raw) as { events?: unknown[]; stats?: Record<string, unknown> };
+    if (!parsed || !Array.isArray(parsed.events) || !parsed.stats) {
+      return fail('invalid Anthropic SSE stream result');
+    }
+    return {
+      events: parsed.events as Record<string, unknown>[],
+      stats: parsed.stats
+    };
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
 export function buildAnthropicSseEventSequenceWithNative(input: {
   response: unknown;
   config?: Record<string, unknown>;

@@ -117,7 +117,11 @@ fn event_payload<'a>(event_obj: &'a Map<String, Value>) -> &'a Map<String, Value
         .unwrap_or(event_obj)
 }
 
-fn read_required_i64(source: &Map<String, Value>, field: &str, message: &str) -> Result<i64, String> {
+fn read_required_i64(
+    source: &Map<String, Value>,
+    field: &str,
+    message: &str,
+) -> Result<i64, String> {
     source
         .get(field)
         .and_then(Value::as_i64)
@@ -150,7 +154,8 @@ fn merge_gemini_part(parts: &mut Vec<Value>, part: Value) {
     }
     if let Some(reasoning) = part.get("reasoning").and_then(Value::as_str) {
         if let Some(last) = parts.last_mut().and_then(Value::as_object_mut) {
-            if let Some(last_reasoning) = last.get_mut("reasoning").and_then(|value| value.as_str()) {
+            if let Some(last_reasoning) = last.get_mut("reasoning").and_then(|value| value.as_str())
+            {
                 let merged = format!("{}{}", last_reasoning, reasoning);
                 last.insert("reasoning".to_string(), Value::String(merged));
                 return;
@@ -247,13 +252,21 @@ pub fn build_gemini_json_from_sse_json(input_json: String) -> Result<String, Str
     let mut candidate_meta: std::collections::BTreeMap<i64, Map<String, Value>> =
         std::collections::BTreeMap::new();
     for (done_index, entry) in done_candidates.iter().enumerate() {
-        let entry_obj = entry
-            .as_object()
-            .ok_or_else(|| format!("Invalid Gemini done event: invalid candidate at index {}", done_index))?;
+        let entry_obj = entry.as_object().ok_or_else(|| {
+            format!(
+                "Invalid Gemini done event: invalid candidate at index {}",
+                done_index
+            )
+        })?;
         let index = entry_obj
             .get("index")
             .and_then(Value::as_i64)
-            .ok_or_else(|| format!("Invalid Gemini done event: invalid candidate at index {}", done_index))?;
+            .ok_or_else(|| {
+                format!(
+                    "Invalid Gemini done event: invalid candidate at index {}",
+                    done_index
+                )
+            })?;
         candidate_meta.insert(index, entry_obj.clone());
     }
 
@@ -375,8 +388,59 @@ pub fn build_gemini_sse_event_sequence_json(input_json: String) -> Result<String
     done_data.insert("candidates".to_string(), Value::Array(done_candidates));
     events.push(build_gemini_event("gemini.done", Value::Object(done_data)));
 
-    serde_json::to_string(&events)
-        .map_err(|error| format!("Failed to serialize Gemini SSE event sequence JSON: {}", error))
+    serde_json::to_string(&events).map_err(|error| {
+        format!(
+            "Failed to serialize Gemini SSE event sequence JSON: {}",
+            error
+        )
+    })
+}
+
+
+pub fn build_gemini_sse_stream_json(input_json: String) -> Result<String, String> {
+    let events_json = build_gemini_sse_event_sequence_json(input_json.clone())?;
+    let events: Vec<Value> = serde_json::from_str(&events_json)
+        .map_err(|error| format!("Failed to deserialize gemini SSE events: {}", error))?;
+    let input = read_input_object(input_json, "gemini SSE stream")?;
+    let response = input
+        .get("response")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut event_types: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut error_count: i64 = 0;
+    let error_names = ["gemini.error"];
+    for event in &events {
+        let event_type = event
+            .get("event")
+            .or_else(|| event.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Some(et) = event_type {
+            if error_names.iter().any(|n| *n == et.as_str()) {
+                error_count += 1;
+            }
+            *event_types.entry(et).or_insert(0) += 1;
+        }
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let stats = serde_json::json!({
+        "totalEvents": events.len() as i64,
+        "eventTypes": event_types,
+        "errorCount": error_count,
+        "model": response.get("model").and_then(Value::as_str).unwrap_or(""),
+        "startTime": now,
+        "endTime": now,
+        "lastEventTime": now,
+    });
+    let output = serde_json::json!({
+        "events": events,
+        "stats": stats,
+    });
+    serde_json::to_string(&output).map_err(|error| format!("Failed to serialize gemini SSE stream JSON: {}", error))
 }
 
 #[cfg(test)]
@@ -467,7 +531,10 @@ mod tests {
         )
         .unwrap();
         let response: serde_json::Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(response["candidates"][0]["content"]["parts"][0]["text"], "hello world");
+        assert_eq!(
+            response["candidates"][0]["content"]["parts"][0]["text"],
+            "hello world"
+        );
         assert_eq!(response["candidates"][0]["finishReason"], "STOP");
     }
 

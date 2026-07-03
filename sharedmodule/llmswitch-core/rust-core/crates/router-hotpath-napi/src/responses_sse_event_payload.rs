@@ -1653,8 +1653,12 @@ fn next_sequence_envelope(
         })
         .to_string(),
     )?;
-    let envelope: Value = serde_json::from_str(&envelope_raw)
-        .map_err(|error| format!("Failed to parse Responses SSE event envelope output: {}", error))?;
+    let envelope: Value = serde_json::from_str(&envelope_raw).map_err(|error| {
+        format!(
+            "Failed to parse Responses SSE event envelope output: {}",
+            error
+        )
+    })?;
     let Some(envelope) = envelope.as_object() else {
         return Err("Responses SSE event envelope output expected object".to_string());
     };
@@ -1741,7 +1745,14 @@ fn push_response_event(
         lifecycle,
         required_action,
     )?;
-    push_responses_sse_event(events, request_id, sequence_counter, config, event_type, data)
+    push_responses_sse_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        event_type,
+        data,
+    )
 }
 
 fn push_output_item_event(
@@ -1755,7 +1766,14 @@ fn push_output_item_event(
     lifecycle: &str,
 ) -> Result<(), String> {
     let data = build_responses_sse_output_item_event_payload(item, output_index, lifecycle)?;
-    push_responses_sse_event(events, request_id, sequence_counter, config, event_type, data)
+    push_responses_sse_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        event_type,
+        data,
+    )
 }
 
 fn push_content_part_event(
@@ -1777,7 +1795,14 @@ fn push_content_part_event(
         content_index,
         lifecycle,
     )?;
-    push_responses_sse_event(events, request_id, sequence_counter, config, event_type, data)
+    push_responses_sse_event(
+        events,
+        request_id,
+        sequence_counter,
+        config,
+        event_type,
+        data,
+    )
 }
 
 fn push_text_chunks(
@@ -1792,7 +1817,8 @@ fn push_text_chunks(
     text: &str,
     payload_builder: fn(i64, &str, i64, &str) -> Result<Value, String>,
 ) -> Result<(), String> {
-    let chunks = build_responses_sse_text_chunks(text, Some(read_config_i64(config, "chunkSize", 0)))?;
+    let chunks =
+        build_responses_sse_text_chunks(text, Some(read_config_i64(config, "chunkSize", 0)))?;
     for chunk in chunks {
         let data = payload_builder(output_index, item_id, content_index, &chunk)?;
         push_responses_sse_event(
@@ -1924,8 +1950,7 @@ fn sequence_responses_function_call_item(
     let item_id = read_required_item_string(item, "id", "function_call")?;
     let call_id = read_required_item_string(item, "call_id", "function_call")?;
     let name = read_required_item_string(item, "name", "function_call")?;
-    let arguments =
-        read_required_item_string_allow_empty(item, "arguments", "function_call")?;
+    let arguments = read_required_item_string_allow_empty(item, "arguments", "function_call")?;
     push_output_item_event(
         events,
         request_id,
@@ -1936,7 +1961,8 @@ fn sequence_responses_function_call_item(
         output_index,
         "added",
     )?;
-    let chunks = build_responses_sse_text_chunks(arguments, Some(read_config_i64(config, "chunkSize", 0)))?;
+    let chunks =
+        build_responses_sse_text_chunks(arguments, Some(read_config_i64(config, "chunkSize", 0)))?;
     for chunk in chunks {
         let data = build_responses_sse_function_call_arguments_delta_payload(
             output_index,
@@ -2055,7 +2081,10 @@ fn sequence_responses_reasoning_item(
                 "response.reasoning_summary_part.added",
                 data,
             )?;
-            let chunks = build_responses_sse_text_chunks(text, Some(read_config_i64(config, "chunkSize", 0)))?;
+            let chunks = build_responses_sse_text_chunks(
+                text,
+                Some(read_config_i64(config, "chunkSize", 0)),
+            )?;
             for chunk in chunks {
                 let data = build_responses_sse_reasoning_summary_payload(
                     "text_delta",
@@ -2124,30 +2153,23 @@ fn sequence_responses_reasoning_item(
                 "reasoning_text" => (
                     "response.reasoning_text.delta",
                     "text",
-                    content_entry
-                        .get("text")
-                        .cloned()
-                        .ok_or_else(|| "Invalid Responses reasoning_text: missing text".to_string())?,
+                    content_entry.get("text").cloned().ok_or_else(|| {
+                        "Invalid Responses reasoning_text: missing text".to_string()
+                    })?,
                 ),
                 "reasoning_signature" => (
                     "response.reasoning_signature.delta",
                     "signature",
-                    content_entry
-                        .get("signature")
-                        .cloned()
-                        .ok_or_else(|| {
-                            "Invalid Responses reasoning_signature: missing signature".to_string()
-                        })?,
+                    content_entry.get("signature").cloned().ok_or_else(|| {
+                        "Invalid Responses reasoning_signature: missing signature".to_string()
+                    })?,
                 ),
                 "reasoning_image" => (
                     "response.reasoning_image.delta",
                     "image",
-                    content_entry
-                        .get("image_url")
-                        .cloned()
-                        .ok_or_else(|| {
-                            "Invalid Responses reasoning_image: missing image_url".to_string()
-                        })?,
+                    content_entry.get("image_url").cloned().ok_or_else(|| {
+                        "Invalid Responses reasoning_image: missing image_url".to_string()
+                    })?,
                 ),
                 other => {
                     return Err(format!(
@@ -2248,8 +2270,8 @@ pub fn build_responses_sse_event_sequence_json(input_json: String) -> Result<Str
         let Some(item) = item.as_object() else {
             return Err("Invalid Responses output item: expected object".to_string());
         };
-        let output_index =
-            i64::try_from(output_index).map_err(|_| "Responses output index overflow".to_string())?;
+        let output_index = i64::try_from(output_index)
+            .map_err(|_| "Responses output index overflow".to_string())?;
         let item_type = item
             .get("type")
             .and_then(Value::as_str)
@@ -2320,6 +2342,54 @@ pub fn build_responses_sse_event_sequence_json(input_json: String) -> Result<Str
             "Failed to serialize Responses SSE event sequence JSON: {}",
             error
         )
+    })
+}
+
+
+/// Build full Responses SSE stream (events + stats) for the converter shell.
+pub fn build_responses_sse_stream_json(input_json: String) -> Result<String, String> {
+    let events_json = build_responses_sse_event_sequence_json(input_json.clone())?;
+    let events: Vec<Value> = serde_json::from_str(&events_json)
+        .map_err(|error| format!("Failed to deserialize Responses SSE events: {}", error))?;
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| format!("Failed to parse Responses SSE stream input: {}", error))?;
+    let response = input
+        .get("response")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut event_types: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut error_count: i64 = 0;
+    for event in &events {
+        let event_type = event
+            .get("event")
+            .or_else(|| event.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Some(et) = event_type {
+            if et == "response.error" {
+                error_count += 1;
+            }
+            *event_types.entry(et).or_insert(0) += 1;
+        }
+    }
+    let now = current_unix_timestamp_ms().unwrap_or(0);
+    let stats = serde_json::json!({
+        "totalEvents": events.len() as i64,
+        "eventTypes": event_types,
+        "errorCount": error_count,
+        "responseId": response.get("id").and_then(Value::as_str).unwrap_or(""),
+        "model": response.get("model").and_then(Value::as_str).unwrap_or(""),
+        "startTime": now,
+        "endTime": now,
+        "lastEventTime": now,
+    });
+    let output = serde_json::json!({
+        "events": events,
+        "stats": stats,
+    });
+    serde_json::to_string(&output).map_err(|error| {
+        format!("Failed to serialize Responses SSE stream JSON: {}", error)
     })
 }
 
@@ -3288,7 +3358,10 @@ mod tests {
         );
         let parsed: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(parsed[4]["data"]["delta"], json!("hello"));
-        assert_eq!(parsed[4]["data"]["type"], json!("response.output_text.delta"));
+        assert_eq!(
+            parsed[4]["data"]["type"],
+            json!("response.output_text.delta")
+        );
         assert_eq!(parsed[4]["data"]["sequence_number"], json!(4));
     }
 

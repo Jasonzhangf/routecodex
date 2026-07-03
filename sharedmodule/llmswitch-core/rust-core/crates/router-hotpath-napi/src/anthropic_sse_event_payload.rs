@@ -762,6 +762,53 @@ pub fn build_anthropic_json_from_sse_json(input_json: String) -> Result<String, 
         .map_err(|error| format!("Failed to serialize Anthropic SSE decode JSON: {}", error))
 }
 
+
+pub fn build_anthropic_sse_stream_json(input_json: String) -> Result<String, String> {
+    let events_json = build_anthropic_sse_event_sequence_json(input_json.clone())?;
+    let events: Vec<Value> = serde_json::from_str(&events_json)
+        .map_err(|error| format!("Failed to deserialize anthropic SSE events: {}", error))?;
+    let input = read_input_object(input_json, "anthropic SSE stream")?;
+    let response = input
+        .get("response")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut event_types: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut error_count: i64 = 0;
+    let error_names = ["error"];
+    for event in &events {
+        let event_type = event
+            .get("event")
+            .or_else(|| event.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Some(et) = event_type {
+            if error_names.iter().any(|n| *n == et.as_str()) {
+                error_count += 1;
+            }
+            *event_types.entry(et).or_insert(0) += 1;
+        }
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let stats = serde_json::json!({
+        "totalEvents": events.len() as i64,
+        "eventTypes": event_types,
+        "errorCount": error_count,
+        "model": response.get("model").and_then(Value::as_str).unwrap_or(""),
+        "startTime": now,
+        "endTime": now,
+        "lastEventTime": now,
+    });
+    let output = serde_json::json!({
+        "events": events,
+        "stats": stats,
+    });
+    serde_json::to_string(&output).map_err(|error| format!("Failed to serialize anthropic SSE stream JSON: {}", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{build_anthropic_json_from_sse_json, build_anthropic_sse_event_sequence_json};

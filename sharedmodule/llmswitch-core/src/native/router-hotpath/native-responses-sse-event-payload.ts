@@ -100,6 +100,66 @@ function parseNativeResponsesEventSequence(raw: string): ResponsesSseEventSequen
   }
 }
 
+
+
+export interface ResponsesSseStreamNativeInput {
+  response: unknown;
+  requestId?: string;
+  model?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface ResponsesSseStreamNativeOutput {
+  events: Record<string, unknown>[];
+  stats: Record<string, unknown>;
+}
+
+export function buildResponsesSseStreamWithNative(
+  input: ResponsesSseStreamNativeInput
+): ResponsesSseStreamNativeOutput {
+  const capability = 'ResponsesSseStreamJson';
+  const fail = (reason?: string) => failNative<ResponsesSseStreamNativeOutput>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    const requestId = input.requestId ?? input.model ?? '';
+    inputJson = JSON.stringify({
+      response: input.response,
+      request_id: requestId,
+      model: input.model ?? '',
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE stream result');
+    }
+    const parsed = JSON.parse(raw) as { events?: unknown[]; stats?: Record<string, unknown> };
+    if (!parsed || !Array.isArray(parsed.events) || !parsed.stats) {
+      return fail('invalid Responses SSE stream result');
+    }
+    return {
+      events: parsed.events as Record<string, unknown>[],
+      stats: parsed.stats
+    };
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}
 export function buildResponsesSseEventSequenceWithNative(input: {
   response: unknown;
   requestId: string;
