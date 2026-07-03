@@ -603,3 +603,62 @@ export function buildChatSseFinishPayloadWithNative(input: {
     throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
   }
 }
+
+
+export interface ChatSseStreamNativeInput {
+  response: unknown;
+  model: string;
+  requestId: string;
+  config?: Record<string, unknown>;
+}
+
+export interface ChatSseStreamNativeOutput {
+  events: ChatSseEventSequenceNativeEvent[];
+  stats: Record<string, unknown>;
+}
+
+export function buildChatSseStreamWithNative(
+  input: ChatSseStreamNativeInput
+): ChatSseStreamNativeOutput {
+  const capability = 'buildChatSseStreamJson';
+  const fail = (reason?: string) => failNative<ChatSseStreamNativeOutput>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      response: input.response,
+      model: input.model,
+      request_id: input.requestId,
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Chat SSE stream result');
+    }
+    const parsed = JSON.parse(raw) as { events?: unknown[]; stats?: Record<string, unknown> };
+    if (!parsed || !Array.isArray(parsed.events) || !parsed.stats) {
+      return fail('invalid Chat SSE stream result');
+    }
+    return {
+      events: parsed.events as ChatSseEventSequenceNativeEvent[],
+      stats: parsed.stats
+    };
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}

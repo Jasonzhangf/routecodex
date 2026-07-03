@@ -514,7 +514,10 @@ fn read_reasoning_mode(config: &Map<String, Value>) -> &str {
         .unwrap_or("channel")
 }
 
-fn dispatch_reasoning_for_channel(reasoning: Option<String>, config: &Map<String, Value>) -> Option<String> {
+fn dispatch_reasoning_for_channel(
+    reasoning: Option<String>,
+    config: &Map<String, Value>,
+) -> Option<String> {
     let raw = reasoning?;
     let trimmed = raw.trim();
     if trimmed.is_empty() || read_reasoning_mode(config) == "drop" {
@@ -577,9 +580,13 @@ fn push_chat_event(
     Ok(())
 }
 
-fn build_payload_value(input: Value, builder: fn(String) -> Result<String, String>) -> Result<Value, String> {
+fn build_payload_value(
+    input: Value,
+    builder: fn(String) -> Result<String, String>,
+) -> Result<Value, String> {
     let raw = builder(input.to_string())?;
-    serde_json::from_str(&raw).map_err(|error| format!("Failed to parse Chat SSE payload JSON: {}", error))
+    serde_json::from_str(&raw)
+        .map_err(|error| format!("Failed to parse Chat SSE payload JSON: {}", error))
 }
 
 pub fn build_chat_sse_event_sequence_json(input_json: String) -> Result<String, String> {
@@ -680,8 +687,18 @@ pub fn build_chat_sse_event_sequence_json(input_json: String) -> Result<String, 
         normalize_message_reasoning_tools_record(&mut message, "chat_seq_reasoning_1");
     let reasoning_text = cleaned_reasoning
         .or(content_normalization.reasoning_text)
-        .or_else(|| message.get("reasoning_content").and_then(Value::as_str).map(str::to_string))
-        .or_else(|| message.get("reasoning").and_then(Value::as_str).map(str::to_string));
+        .or_else(|| {
+            message
+                .get("reasoning_content")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            message
+                .get("reasoning")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
     let reasoning_for_channel = dispatch_reasoning_for_channel(reasoning_text, &config);
     let tool_calls = message
         .get("tool_calls")
@@ -708,16 +725,24 @@ pub fn build_chat_sse_event_sequence_json(input_json: String) -> Result<String, 
         .get("finish_reason")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| "Invalid ChatCompletionResponse choice: missing finish_reason".to_string())?;
+        .ok_or_else(|| {
+            "Invalid ChatCompletionResponse choice: missing finish_reason".to_string()
+        })?;
 
     let mut events = Vec::new();
     let mut sequence_counter = 0_i64;
     let common = |extra: Value| -> Value {
         let mut row = extra.as_object().cloned().unwrap_or_default();
-        row.insert("response_id".to_string(), Value::String(response_id.to_string()));
+        row.insert(
+            "response_id".to_string(),
+            Value::String(response_id.to_string()),
+        );
         row.insert("created".to_string(), Value::Number(created.into()));
         row.insert("model".to_string(), Value::String(model.to_string()));
-        row.insert("choice_index".to_string(), Value::Number(choice_index.into()));
+        row.insert(
+            "choice_index".to_string(),
+            Value::Number(choice_index.into()),
+        );
         Value::Object(row)
     };
 
@@ -727,7 +752,10 @@ pub fn build_chat_sse_event_sequence_json(input_json: String) -> Result<String, 
         &mut sequence_counter,
         &config,
         "chat_chunk",
-        build_payload_value(common(serde_json::json!({ "role": role })), build_chat_sse_role_delta_payload_json)?,
+        build_payload_value(
+            common(serde_json::json!({ "role": role })),
+            build_chat_sse_role_delta_payload_json,
+        )?,
     )?;
     if let Some(reasoning) = reasoning_for_channel {
         push_chat_event(
@@ -742,7 +770,11 @@ pub fn build_chat_sse_event_sequence_json(input_json: String) -> Result<String, 
             )?,
         )?;
     }
-    if let Some(content) = message.get("content").and_then(Value::as_str).filter(|value| !value.is_empty()) {
+    if let Some(content) = message
+        .get("content")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
         push_chat_event(
             &mut events,
             request_id,
@@ -838,8 +870,12 @@ pub fn build_chat_sse_event_sequence_json(input_json: String) -> Result<String, 
         Value::Null,
     )?;
 
-    serde_json::to_string(&events)
-        .map_err(|error| format!("Failed to serialize Chat SSE event sequence JSON: {}", error))
+    serde_json::to_string(&events).map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE event sequence JSON: {}",
+            error
+        )
+    })
 }
 
 #[derive(Default)]
@@ -1006,10 +1042,13 @@ fn merge_chat_delta(
                 .get("index")
                 .and_then(Value::as_i64)
                 .ok_or_else(|| "Invalid Chat tool call delta: missing index".to_string())?;
-            let entry = builder.tool_calls.entry(index).or_insert_with(|| DecodeToolCallBuilder {
-                tool_type: "function".to_string(),
-                ..Default::default()
-            });
+            let entry = builder
+                .tool_calls
+                .entry(index)
+                .or_insert_with(|| DecodeToolCallBuilder {
+                    tool_type: "function".to_string(),
+                    ..Default::default()
+                });
             if let Some(id) = row.get("id").and_then(Value::as_str) {
                 entry.id = id.to_string();
             }
@@ -1045,7 +1084,10 @@ fn process_chat_decode_chunk(
             "id".to_string(),
             chunk.get("id").cloned().unwrap_or(Value::Null),
         );
-        response.insert("object".to_string(), Value::String("chat.completion".to_string()));
+        response.insert(
+            "object".to_string(),
+            Value::String("chat.completion".to_string()),
+        );
         response.insert(
             "created".to_string(),
             chunk.get("created").cloned().unwrap_or(Value::Null),
@@ -1249,8 +1291,80 @@ pub fn build_chat_json_from_sse_json(input_json: String) -> Result<String, Strin
     if let Some(usage) = usage {
         response.insert("usage".to_string(), usage);
     }
-    serde_json::to_string(&Value::Object(response))
-        .map_err(|error| format!("Failed to serialize Chat SSE decode response JSON: {}", error))
+    serde_json::to_string(&Value::Object(response)).map_err(|error| {
+        format!(
+            "Failed to serialize Chat SSE decode response JSON: {}",
+            error
+        )
+    })
+}
+
+
+/// Build the full Chat SSE event stream (events + stats) for the converter shell.
+pub fn build_chat_sse_stream_json(input_json: String) -> Result<String, String> {
+    let events_json = build_chat_sse_event_sequence_json(input_json.clone())?;
+    let mut events: Vec<Value> = serde_json::from_str(&events_json)
+        .map_err(|error| format!("Failed to deserialize Chat SSE events: {}", error))?;
+    let input = read_input_object(input_json, "Chat SSE stream")?;
+    let response = input
+        .get("response")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut event_types: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut error_count: i64 = 0;
+    for event in &events {
+        let event_type = event
+            .get("event")
+            .or_else(|| event.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Some(et) = event_type {
+            if et == "error" || et == "chat.error" {
+                error_count += 1;
+            }
+            *event_types.entry(et).or_insert(0) += 1;
+        }
+    }
+    let response_id = response
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let created = response
+        .get("created")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let model = response
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let stats = serde_json::json!({
+        "totalEvents": events.len() as i64,
+        "eventTypes": event_types,
+        "errorCount": error_count,
+        "responseId": response_id,
+        "created": created,
+        "model": model,
+        "startTime": chrono_or_now(),
+        "endTime": chrono_or_now(),
+        "lastEventTime": chrono_or_now(),
+    });
+    let output = serde_json::json!({
+        "events": events,
+        "stats": stats,
+    });
+    serde_json::to_string(&output).map_err(|error| {
+        format!("Failed to serialize Chat SSE stream JSON: {}", error)
+    })
+}
+
+fn chrono_or_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

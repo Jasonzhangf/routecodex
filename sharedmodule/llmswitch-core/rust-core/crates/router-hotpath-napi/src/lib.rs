@@ -703,6 +703,13 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
     )
 }
 
+#[napi(js_name = "resolveProviderResponsePostServertoolEffectJson")]
+pub fn resolve_provider_response_post_servertool_effect_json(
+    input_json: String,
+) -> NapiResult<String> {
+    hub_pipeline_lib::effect_plan::resolve_provider_response_post_servertool_effect_json(input_json)
+}
+
 #[napi(js_name = "resolveClientToolFromIndexJson")]
 pub fn resolve_client_tool_from_index_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::resolve_client_tool_from_index_json(input_json)
@@ -2255,6 +2262,13 @@ pub fn build_chat_sse_event_sequence_json(input_json: String) -> NapiResult<Stri
     chat_sse_event_payload::build_chat_sse_event_sequence_json(input_json)
         .map_err(napi::Error::from_reason)
 }
+
+#[napi(js_name = "buildChatSseStreamJson")]
+pub fn build_chat_sse_stream_json_bridge(input_json: String) -> NapiResult<String> {
+    chat_sse_event_payload::build_chat_sse_stream_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 
 #[napi(js_name = "buildChatJsonFromSseJson")]
 pub fn build_chat_json_from_sse_json(input_json: String) -> NapiResult<String> {
