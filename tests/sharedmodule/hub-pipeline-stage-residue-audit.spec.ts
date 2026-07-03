@@ -1101,10 +1101,14 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'restores TS snapshot hotpath trim helper', pattern: /trimSnapshotHotpathPayloadForNative/ },
       { label: 'restores TS snapshot sanitize helper', pattern: /sanitizeSnapshotHotpathPayload|pruneSnapshotHotpathPayload/ },
       { label: 'restores identity snapshot hotpath wrapper', pattern: /return\s+payload\s*;/ },
+      { label: 'restores TS snapshot entry protocol resolver', pattern: /resolveEntryProtocol/ },
+      { label: 'restores TS snapshot entry port resolver', pattern: /resolveEntryPort|Number\.parseInt\(portScope/ },
+      { label: 'restores TS snapshot group request resolver', pattern: /clientRequestId[\s\S]{0,120}groupRequestId/ },
     ]);
 
     expect(findings).toEqual([]);
     expect(source).toContain('normalizeSnapshotStagePayloadWithNative(stage, payload)');
+    expect(source).toContain('buildSnapshotRecorderWriteOptionsWithNative');
   });
 
   it('snapshot stage recorder must only expose factory bridge API', () => {

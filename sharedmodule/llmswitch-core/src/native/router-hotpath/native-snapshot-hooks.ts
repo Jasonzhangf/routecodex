@@ -80,6 +80,36 @@ export function writeSnapshotViaHooksWithNative(options: Record<string, unknown>
   }
 }
 
+export function buildSnapshotRecorderWriteOptionsWithNative(input: Record<string, unknown>): Record<string, unknown> {
+  const capability = 'buildSnapshotRecorderWriteOptionsJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? null);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseJsonValue(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function normalizeSnapshotStagePayloadWithNative(stage: string, payload: unknown): unknown {
   if (payload === undefined || payload === null) {
     return null;

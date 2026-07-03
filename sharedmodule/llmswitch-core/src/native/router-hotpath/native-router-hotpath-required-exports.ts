@@ -428,6 +428,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "sanitizeResponsesFunctionNameJson",
   "shouldRecordSnapshotsJson",
   "writeSnapshotViaHooksJson",
+  "buildSnapshotRecorderWriteOptionsJson",
   "saveRoutingInstructionStateJson",
   "serializeRoutingInstructionStateJson",
   "stripOrphanFunctionCallsTagJson",

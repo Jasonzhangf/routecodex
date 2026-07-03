@@ -40,6 +40,18 @@ struct SnapshotHookOptions {
     runtime_metadata: Option<Value>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotRecorderWriteOptionsInput {
+    endpoint: String,
+    stage: String,
+    request_id: String,
+    data: Value,
+    provider_key: Option<String>,
+    context: Option<Value>,
+    metadata_center_snapshot: Option<Value>,
+}
+
 static SNAPSHOT_WRITER_RUNTIME: OnceLock<Option<SnapshotWriterRuntime>> = OnceLock::new();
 static SNAPSHOT_DROPPED_JOBS: AtomicU64 = AtomicU64::new(0);
 static SNAPSHOT_LAST_DROP_LOG_AT_MS: AtomicI64 = AtomicI64::new(0);
@@ -268,6 +280,32 @@ fn resolve_snapshot_folder(endpoint: &str) -> String {
         return "anthropic-messages".to_string();
     }
     "openai-chat".to_string()
+}
+
+fn read_metadata_center_request_truth(snapshot: Option<&Value>) -> Option<&Map<String, Value>> {
+    snapshot?
+        .as_object()?
+        .get("requestTruth")?
+        .as_object()
+}
+
+fn resolve_snapshot_recorder_entry_port(snapshot: Option<&Value>) -> Option<i64> {
+    let request_truth = read_metadata_center_request_truth(snapshot)?;
+    request_truth.get("portScope").and_then(read_port_value)
+}
+
+fn resolve_snapshot_recorder_group_request_id(context: Option<&Value>) -> Option<String> {
+    let row = context?.as_object()?;
+    read_trimmed_string(row.get("clientRequestId"))
+        .or_else(|| read_trimmed_string(row.get("groupRequestId")))
+}
+
+fn resolve_snapshot_recorder_runtime_metadata(context: Option<Value>) -> Option<Value> {
+    context?
+        .as_object()
+        .and_then(|row| row.get("metadata"))
+        .filter(|value| value.is_object())
+        .cloned()
 }
 
 fn resolve_entry_protocol(options: &SnapshotHookOptions, data: &Value) -> String {
@@ -1458,6 +1496,52 @@ pub fn write_snapshot_via_hooks_json(input_json: String) -> NapiResult<String> {
     })
 }
 
+pub fn build_snapshot_recorder_write_options(input: SnapshotRecorderWriteOptionsInput) -> Value {
+    let entry_port = resolve_snapshot_recorder_entry_port(input.metadata_center_snapshot.as_ref());
+    let group_request_id = resolve_snapshot_recorder_group_request_id(input.context.as_ref());
+    let runtime_metadata = resolve_snapshot_recorder_runtime_metadata(input.context);
+    let mut output = Map::new();
+    output.insert("endpoint".to_string(), Value::String(input.endpoint.clone()));
+    output.insert("stage".to_string(), Value::String(input.stage));
+    output.insert("requestId".to_string(), Value::String(input.request_id));
+    output.insert("data".to_string(), input.data);
+    output.insert("verbosity".to_string(), Value::String("verbose".to_string()));
+    if let Some(provider_key) = input.provider_key {
+        output.insert("providerKey".to_string(), Value::String(provider_key));
+    }
+    if let Some(group_request_id) = group_request_id {
+        output.insert("groupRequestId".to_string(), Value::String(group_request_id));
+    }
+    output.insert(
+        "entryProtocol".to_string(),
+        Value::String(resolve_snapshot_folder(input.endpoint.as_str())),
+    );
+    if let Some(entry_port) = entry_port {
+        output.insert("entryPort".to_string(), Value::from(entry_port));
+    }
+    if let Some(runtime_metadata) = runtime_metadata {
+        output.insert("runtimeMetadata".to_string(), runtime_metadata);
+    }
+    Value::Object(output)
+}
+
+#[napi]
+pub fn build_snapshot_recorder_write_options_json(input_json: String) -> NapiResult<String> {
+    let input: SnapshotRecorderWriteOptionsInput = serde_json::from_str(&input_json).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to parse snapshot recorder write options input: {}",
+            e
+        ))
+    })?;
+    let output = build_snapshot_recorder_write_options(input);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize snapshot recorder write options: {}",
+            e
+        ))
+    })
+}
+
 #[napi]
 pub fn normalize_snapshot_stage_payload_json(
     stage: String,
@@ -1901,5 +1985,33 @@ mod tests {
         );
         let parsed: bool = serde_json::from_str(&result.unwrap()).unwrap();
         assert!(parsed, "should return true");
+    }
+
+    #[test]
+    fn builds_snapshot_recorder_write_options_from_context_and_metadata_center_snapshot() {
+        let input = SnapshotRecorderWriteOptionsInput {
+            endpoint: "/v1/messages".to_string(),
+            stage: "req_inbound".to_string(),
+            request_id: "req_snapshot_recorder".to_string(),
+            data: serde_json::json!({ "ok": true }),
+            provider_key: Some("provider.key1".to_string()),
+            context: Some(serde_json::json!({
+                "clientRequestId": "client_req_1",
+                "groupRequestId": "group_req_1",
+                "metadata": { "runtime": "meta" }
+            })),
+            metadata_center_snapshot: Some(serde_json::json!({
+                "requestTruth": { "portScope": "5555" }
+            })),
+        };
+
+        let output = build_snapshot_recorder_write_options(input);
+
+        assert_eq!(output["endpoint"], serde_json::json!("/v1/messages"));
+        assert_eq!(output["entryProtocol"], serde_json::json!("anthropic-messages"));
+        assert_eq!(output["entryPort"], serde_json::json!(5555));
+        assert_eq!(output["groupRequestId"], serde_json::json!("client_req_1"));
+        assert_eq!(output["runtimeMetadata"]["runtime"], serde_json::json!("meta"));
+        assert_eq!(output["providerKey"], serde_json::json!("provider.key1"));
     }
 }
