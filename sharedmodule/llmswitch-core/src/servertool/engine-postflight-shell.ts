@@ -14,7 +14,7 @@ import {
 } from './metadata-center-carrier.js';
 import {
   applyNativeRuntimeControlWritePlan,
-  projectNativeMetadataWritePlanToRuntimeControl
+  projectNativeMetadataWritePlanToRuntimeControlWritePlan
 } from '../conversion/hub/metadata-center-runtime-control-writer.js';
 
 const SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER = {
@@ -44,11 +44,11 @@ export async function runServertoolEnginePostflight(args: {
 > {
   const { engineResult, runtimeAction, options, flowId, totalSteps } = args;
   if (engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object') {
-    const runtimeControl = projectNativeMetadataWritePlanToRuntimeControl(engineResult.metadataWritePlan);
-    if (Object.keys(runtimeControl).length > 0) {
+    const writePlan = projectNativeMetadataWritePlanToRuntimeControlWritePlan(engineResult.metadataWritePlan);
+    if (writePlan.runtimeControl) {
       applyNativeRuntimeControlWritePlan({
         metadata: options.adapterContext,
-        runtimeControl,
+        runtimeControl: writePlan.runtimeControl,
         writer: SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER,
         reason: 'rust servertool postflight runtime control'
       });

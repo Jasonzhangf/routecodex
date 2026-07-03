@@ -232,6 +232,10 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown>');
     expect(source).not.toContain('runtimeControl ? { runtimeControl } : null');
     expect(source).not.toContain("engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'");
+    expect(source).not.toContain('projectNativeMetadataWritePlanToRuntimeControl(');
+    expect(source).not.toContain('Object.keys(runtimeControl).length');
+    expect(source).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan(engineResult.metadataWritePlan)');
+    expect(source).toContain('if (writePlan.runtimeControl)');
     expect(source).toContain("engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'");
     expect(source).toContain('const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot;');
     expect(source).toContain('metadataCenterSnapshot: metadataCenterSnapshot ?? null');
