@@ -411,6 +411,38 @@ pub fn project_metadata_write_plan_to_runtime_control_json(
     })
 }
 
+pub fn project_metadata_write_plan_to_runtime_control_write_plan(
+    input: &Value,
+) -> Result<Value, String> {
+    let runtime_control = project_metadata_write_plan_to_runtime_control(input)?;
+    let runtime_control = runtime_control
+        .as_object()
+        .filter(|record| !record.is_empty())
+        .map(|record| Value::Object(record.clone()))
+        .unwrap_or(Value::Null);
+
+    Ok(json!({
+        "runtimeControl": runtime_control
+    }))
+}
+
+pub fn project_metadata_write_plan_to_runtime_control_write_plan_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid metadata write plan runtime-control write-plan JSON: {error}"
+        ))
+    })?;
+    let output = project_metadata_write_plan_to_runtime_control_write_plan(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize metadata write plan runtime-control write-plan failed: {error}"
+        ))
+    })
+}
+
 pub fn plan_provider_response_servertool_runtime_actions_json(
     input_json: String,
 ) -> napi::Result<String> {
@@ -432,7 +464,9 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
 mod tests {
     use super::{
         normalize_provider_response_effect_plan, plan_provider_response_servertool_runtime_actions,
-        project_metadata_write_plan_to_runtime_control, resolve_provider_response_post_servertool_effect,
+        project_metadata_write_plan_to_runtime_control,
+        project_metadata_write_plan_to_runtime_control_write_plan,
+        resolve_provider_response_post_servertool_effect,
     };
     use serde_json::{json, Value};
 
@@ -667,6 +701,40 @@ mod tests {
                 "nested": { "keep": true }
             })
         );
+    }
+
+    #[test]
+    fn projects_metadata_write_plan_to_runtime_control_write_plan_in_rust() {
+        let output = project_metadata_write_plan_to_runtime_control_write_plan(&json!({
+            "plan": {
+                "servertool": true,
+                "learnedNote": { "ignored": true },
+                "nullField": null
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            output,
+            json!({
+                "runtimeControl": {
+                    "servertool": true
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn metadata_write_plan_runtime_control_write_plan_omits_empty_projection() {
+        let output = project_metadata_write_plan_to_runtime_control_write_plan(&json!({
+            "plan": {
+                "learnedNote": { "ignored": true },
+                "nullField": null
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(output["runtimeControl"], Value::Null);
     }
 
     #[test]

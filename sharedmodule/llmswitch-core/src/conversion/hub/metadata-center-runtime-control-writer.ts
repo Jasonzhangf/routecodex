@@ -1,4 +1,7 @@
-import { projectMetadataWritePlanToRuntimeControlWithNative } from '../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import {
+  projectMetadataWritePlanToRuntimeControlWithNative,
+  projectMetadataWritePlanToRuntimeControlWritePlanWithNative
+} from '../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
@@ -144,4 +147,10 @@ export function projectNativeMetadataWritePlanToRuntimeControl(
   plan: Record<string, unknown>
 ): Record<string, unknown> {
   return projectMetadataWritePlanToRuntimeControlWithNative({ plan });
+}
+
+export function projectNativeMetadataWritePlanToRuntimeControlWritePlan(
+  plan: Record<string, unknown>
+): { runtimeControl?: Record<string, unknown> | null } {
+  return projectMetadataWritePlanToRuntimeControlWritePlanWithNative({ plan });
 }

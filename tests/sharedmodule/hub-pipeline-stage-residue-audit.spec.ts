@@ -4216,12 +4216,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('planProviderResponseServertoolRuntimeActionsWithNative');
     expect(source).toContain('resolveProviderResponsePostServertoolEffectWithNative');
     expect(source).toContain('resolveProviderProtocolWithNative');
-    expect(source).toContain('projectNativeMetadataWritePlanToRuntimeControl');
+    expect(source).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');
     expect(source).toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(source).not.toContain('if (orchestration.executed)');
     expect(source).not.toContain('actionPlan.executionPlans.some');
     expect(source).not.toContain('runtimeControl.providerProtocol');
+    expect(source).not.toContain('Object.keys(runtimeControlProjected)');
     expect(source).not.toContain('return direct;');
     expect(source).not.toContain('return nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) ?? null : null;');
     expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');
@@ -4238,6 +4239,7 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(source).toContain('projectMetadataWritePlanToRuntimeControlWithNative');
+    expect(source).toContain('projectMetadataWritePlanToRuntimeControlWritePlanWithNative');
     expect(findings).toEqual([]);
   });
 

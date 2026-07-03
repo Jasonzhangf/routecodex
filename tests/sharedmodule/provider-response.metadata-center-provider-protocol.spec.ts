@@ -47,6 +47,16 @@ jest.unstable_mockModule(
     }) => Object.fromEntries(
       Object.entries(plan).filter(([key, value]) => key !== 'learnedNote' && value !== null && value !== undefined)
     )),
+    projectMetadataWritePlanToRuntimeControlWritePlanWithNative: jest.fn(({ plan }: {
+      plan: Record<string, unknown>;
+    }) => {
+      const runtimeControl = Object.fromEntries(
+        Object.entries(plan).filter(([key, value]) => key !== 'learnedNote' && value !== null && value !== undefined)
+      );
+      return {
+        runtimeControl: Object.keys(runtimeControl).length > 0 ? runtimeControl : null
+      };
+    }),
     resolveProviderResponsePostServertoolEffectWithNative: jest.fn(({
       currentPayload,
       orchestrationPayload,

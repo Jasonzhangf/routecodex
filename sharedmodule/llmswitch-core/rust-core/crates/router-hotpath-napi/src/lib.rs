@@ -748,6 +748,15 @@ pub fn project_metadata_write_plan_to_runtime_control_json(
     hub_pipeline_lib::effect_plan::project_metadata_write_plan_to_runtime_control_json(input_json)
 }
 
+#[napi(js_name = "projectMetadataWritePlanToRuntimeControlWritePlanJson")]
+pub fn project_metadata_write_plan_to_runtime_control_write_plan_json(
+    input_json: String,
+) -> NapiResult<String> {
+    hub_pipeline_lib::effect_plan::project_metadata_write_plan_to_runtime_control_write_plan_json(
+        input_json,
+    )
+}
+
 #[napi(js_name = "resolveClientToolFromIndexJson")]
 pub fn resolve_client_tool_from_index_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::resolve_client_tool_from_index_json(input_json)

@@ -101,6 +101,10 @@ export type RequestStageRuntimeControlWritePlan = {
   runtimeControl?: Record<string, unknown> | null;
 };
 
+export type MetadataWritePlanRuntimeControlWritePlan = {
+  runtimeControl?: Record<string, unknown> | null;
+};
+
 function readServertoolRuntimeErrorCode(value: unknown): ProviderProtocolErrorCode | null {
   if (value === 'SERVERTOOL_FOLLOWUP_FAILED' || value === 'SERVERTOOL_HANDLER_FAILED') {
     return value;
@@ -501,6 +505,24 @@ export function projectMetadataWritePlanToRuntimeControlWithNative(input: {
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
   const raw = callNativeJsonString(capability, input);
   return parseRecord(raw, 'parseMetadataWritePlanRuntimeControlProjection') ?? fail('invalid payload');
+}
+
+export function projectMetadataWritePlanToRuntimeControlWritePlanWithNative(input: {
+  plan: Record<string, unknown>;
+}): MetadataWritePlanRuntimeControlWritePlan {
+  const capability = 'projectMetadataWritePlanToRuntimeControlWritePlanJson';
+  const fail = (reason?: string) => failNativeRequired<MetadataWritePlanRuntimeControlWritePlan>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, input), 'parseMetadataWritePlanRuntimeControlWritePlanProjection');
+  if (!parsed) {
+    return fail('invalid payload');
+  }
+  const runtimeControl = parsed.runtimeControl;
+  if (runtimeControl !== undefined && runtimeControl !== null && (typeof runtimeControl !== 'object' || Array.isArray(runtimeControl))) {
+    return fail('invalid payload');
+  }
+  return {
+    runtimeControl: runtimeControl as Record<string, unknown> | null | undefined,
+  };
 }
 
 export function buildRequestStageMetadataDispatchWithNative(input: {

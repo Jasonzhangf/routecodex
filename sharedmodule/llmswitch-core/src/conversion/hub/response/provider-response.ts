@@ -39,7 +39,7 @@ import {
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import {
   applyNativeRuntimeControlWritePlan,
-  projectNativeMetadataWritePlanToRuntimeControl
+  projectNativeMetadataWritePlanToRuntimeControlWritePlan
 } from '../metadata-center-runtime-control-writer.js';
 
 import {
@@ -225,11 +225,11 @@ function executeProviderResponseNativeRuntimeStateEffect(args: {
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
 }): void {
   if (args.runtimeEffects.stoplessMetadataCenterWrite) {
-    const runtimeControlProjected = projectNativeMetadataWritePlanToRuntimeControl(args.runtimeEffects.stoplessMetadataCenterWrite);
-    if (Object.keys(runtimeControlProjected).length > 0) {
+    const writePlan = projectNativeMetadataWritePlanToRuntimeControlWritePlan(args.runtimeEffects.stoplessMetadataCenterWrite);
+    if (writePlan.runtimeControl) {
       applyNativeRuntimeControlWritePlan({
         metadata: args.context as unknown as Record<string, unknown>,
-        runtimeControl: runtimeControlProjected,
+        runtimeControl: writePlan.runtimeControl,
         writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
         reason: 'rust response chatprocess runtime control'
       });
