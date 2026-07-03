@@ -48,9 +48,9 @@ export const DEFAULT_CONFIG = {
 export const DEFAULT_TIMEOUTS = {
   // Provider → upstream (SSE headers/idle)
   PROVIDER_STREAM_HEADERS_CAP_MS: 900_000, // 15 min cap（避免长上下文/工具请求在 provider timeout 前被首头等待提前切断）
-  PROVIDER_STREAM_IDLE_CAP_MS: 300_000,    // 5 min cap（对齐 ds2api content-idle 超时）
-  PROVIDER_STREAM_NO_CONTENT_TIMEOUT_MS: 120_000, // 2 min（对齐 ds2api no-content timeout）
-  PROVIDER_STREAM_CONTENT_IDLE_TIMEOUT_MS: 300_000, // 5 min（对齐 ds2api content-idle timeout）
+  PROVIDER_STREAM_IDLE_CAP_MS: 900_000,    // 15 min cap（对齐 Host -> Client SSE total timeout）
+  PROVIDER_STREAM_NO_CONTENT_TIMEOUT_MS: 900_000, // 15 min（长上下文 prefill 首个语义帧等待）
+  PROVIDER_STREAM_CONTENT_IDLE_TIMEOUT_MS: 900_000, // 15 min（语义帧间隔，与 SSE 总窗口对齐）
 
   // Host → client (SSE bridge)
   HTTP_SSE_TOTAL_MS: 900_000,              // 15 min（避免 servertool followup 超时）
@@ -154,7 +154,7 @@ export const PROVIDER_TIMEOUTS = {
   ANTHROPIC: 300_000,
   GEMINI: 240_000,
   GLM: 240_000,
-  RESPONSES: 240_000
+  RESPONSES: DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS
 } as const;
 
 export const PROVIDER_DEFAULT_MODELS = {
@@ -166,7 +166,7 @@ export const PROVIDER_DEFAULT_MODELS = {
 
 export const SSE_DEFAULT_CAPS = {
   STREAM_HEADERS_CAP_MS: 900_000,
-  STREAM_IDLE_CAP_MS: 300_000,
-  STREAM_NO_CONTENT_TIMEOUT_MS: 120_000,
-  STREAM_CONTENT_IDLE_TIMEOUT_MS: 300_000
+  STREAM_IDLE_CAP_MS: DEFAULT_TIMEOUTS.PROVIDER_STREAM_IDLE_CAP_MS,
+  STREAM_NO_CONTENT_TIMEOUT_MS: DEFAULT_TIMEOUTS.PROVIDER_STREAM_NO_CONTENT_TIMEOUT_MS,
+  STREAM_CONTENT_IDLE_TIMEOUT_MS: DEFAULT_TIMEOUTS.PROVIDER_STREAM_CONTENT_IDLE_TIMEOUT_MS
 } as const;

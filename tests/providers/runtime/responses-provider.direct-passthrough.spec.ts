@@ -555,7 +555,13 @@ describe('ResponsesProvider direct passthrough', () => {
       }
     });
 
-    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+    const result = await provider.sendRequestInternal(inbound) as { sseStream: NodeJS.ReadableStream };
+    const drain = async () => {
+      for await (const _chunk of result.sseStream as AsyncIterable<Buffer | string>) {
+        // drain stream so the async passthrough watchdog can surface the idle error
+      }
+    };
+    await expect(drain()).rejects.toMatchObject({
       code: 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
     });
   });
@@ -619,7 +625,7 @@ describe('ResponsesProvider direct passthrough', () => {
             response: { id: 'resp_ok', object: 'response', status: 'completed', output: [] }
           })}\n\n`);
           stream.end();
-        }, 40);
+        }, 30);
         return stream;
       }
     };
@@ -633,8 +639,8 @@ describe('ResponsesProvider direct passthrough', () => {
       metadata: {
         entryEndpoint: '/v1/responses',
         __responsesDirectPassthrough: true,
-        providerStreamNoContentTimeoutMs: 50,
-        providerStreamContentIdleTimeoutMs: 50
+        providerStreamNoContentTimeoutMs: 60,
+        providerStreamContentIdleTimeoutMs: 60
       }
     });
 

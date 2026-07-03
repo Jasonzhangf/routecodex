@@ -37,8 +37,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       // Monitor成功样本要求此Beta标头，确保上游接受Responses协议
       'OpenAI-Beta': 'responses-2024-12-17'
     },
-    // 默认 Provider 请求超时时间：240s
-    timeout: PROVIDER_TIMEOUTS.OPENAI,
+    // Responses SSE must share the same 15min request window as its semantic stream watchdogs.
+    timeout: PROVIDER_TIMEOUTS.RESPONSES,
     maxRetries: 3
   },
   openai: {

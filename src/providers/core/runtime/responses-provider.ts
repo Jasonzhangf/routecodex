@@ -7,6 +7,7 @@
 
 import { PassThrough, Readable } from 'node:stream';
 
+import { DEFAULT_TIMEOUTS } from '../../../constants/index.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -1046,7 +1047,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     if (typeof profileCandidate === 'number' && Number.isFinite(profileCandidate) && profileCandidate > 0) {
       return Math.floor(profileCandidate);
     }
-    return 120_000;
+    return DEFAULT_TIMEOUTS.PROVIDER_STREAM_NO_CONTENT_TIMEOUT_MS;
   }
 
   private resolveContentIdleTimeoutMs(context: ProviderContext): number | undefined {
@@ -1077,7 +1078,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     if (typeof profileCandidate === 'number' && Number.isFinite(profileCandidate) && profileCandidate > 0) {
       return Math.floor(profileCandidate);
     }
-    return 300_000;
+    return DEFAULT_TIMEOUTS.PROVIDER_STREAM_CONTENT_IDLE_TIMEOUT_MS;
   }
 
   private async reportResponsesFailureIfNeeded(
