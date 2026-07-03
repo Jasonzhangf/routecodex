@@ -1,6 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { createGeminiSequencer } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.js';
 import {
   buildGeminiJsonFromSseWithNative,
   buildGeminiSseEventSequenceWithNative
@@ -37,8 +36,8 @@ describe('Gemini JSON to SSE Rust parity boundary', () => {
       modelVersion: 'gemini-test'
     };
 
-    const sequencer = createGeminiSequencer();
-    const tsEvents = await collectEvents(sequencer.sequenceResponse(response));
+    
+    const tsEvents = await collectEvents(buildGeminiSseEventSequenceWithNative({ response, config: { reasoningMode: 'text', reasoningTextPrefix: '[thought] ' } }));
     const nativeEvents = buildGeminiSseEventSequenceWithNative({
       response,
       config: {
@@ -99,11 +98,7 @@ describe('Gemini JSON to SSE Rust parity boundary', () => {
       ]
     };
 
-    const sequencer = createGeminiSequencer({
-      reasoningMode: 'text',
-      reasoningTextPrefix: '[thought] '
-    });
-    const tsEvents = await collectEvents(sequencer.sequenceResponse(response));
+    const tsEvents = await collectEvents(buildGeminiSseEventSequenceWithNative({ response, config: { reasoningMode: 'text', reasoningTextPrefix: '[thought] ' } }));
     const nativeEvents = buildGeminiSseEventSequenceWithNative({
       response,
       config: {
@@ -132,8 +127,8 @@ describe('Gemini JSON to SSE Rust parity boundary', () => {
       ]
     };
 
-    const sequencer = createGeminiSequencer();
-    await expect(collectEvents(sequencer.sequenceResponse(response))).rejects.toThrow(
+    
+    expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow(
       'Invalid Gemini candidate: missing role'
     );
     expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow(

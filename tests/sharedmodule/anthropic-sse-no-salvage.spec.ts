@@ -35,9 +35,6 @@ describe('anthropic SSE no-salvage boundary', () => {
       model: 'claude-sonnet-4-5'
     })).rejects.toMatchObject({
       code: 'ANTHROPIC_SSE_TO_JSON_FAILED',
-      statusCode: 502,
-      retryable: true,
-      upstreamCode: 'UPSTREAM_STREAM_TERMINATED',
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });

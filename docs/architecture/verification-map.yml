@@ -2011,7 +2011,7 @@ verification:
   - feature_id: sse.event_type_validation
     change_risk: medium
     unit:
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/shared/sse-event-validator.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
       - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
     contract:
       - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts

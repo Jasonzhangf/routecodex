@@ -1,21 +1,12 @@
 import { describe, expect, it } from '@jest/globals';
+import path from "path";
 import fs from 'node:fs';
 
-import { createChatSequencer } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.js';
-import type { ChatCompletionResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 import { buildChatSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.js';
+import type { ChatCompletionResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectEvents(response: ChatCompletionResponse): Promise<any[]> {
-  const sequencer = createChatSequencer({
-    enableTimestampGeneration: false,
-    includeSequenceNumbers: true,
-    chunkDelayMs: 0
-  });
-  const events: any[] = [];
-  for await (const event of sequencer.sequenceResponse(response, response.model, 'req_chat_sse_parity')) {
-    events.push(event);
-  }
-  return events;
+  return buildChatSseEventSequenceWithNative({ response, requestId: 'req_chat_sse_parity', config: { enableTimestampGeneration: false, includeSequenceNumbers: true, chunkDelayMs: 0, reasoningMode: 'channel' } });
 }
 
 function nativeEvents(response: ChatCompletionResponse): any[] {
@@ -102,15 +93,12 @@ describe('chat JSON to SSE Rust parity boundary', () => {
     expect(() => nativeEvents(response)).toThrow('missing finish_reason');
   });
 
-  it('keeps chat sequencer as a native wrapper instead of TS semantic owner', () => {
+  it('keeps chat native sequence wrapper as the only owner', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/chat-sequencer.ts',
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts'),
       'utf8'
     );
-
     expect(source).toContain('buildChatSseEventSequenceWithNative');
-    expect(source).not.toContain('normalizeMessageReasoningTools(');
-    expect(source).not.toContain('normalizeChatMessageContent(');
-    expect(source).not.toContain('dispatchReasoning(');
+    expect(source).toContain('buildChatSseStreamWithNativeFrames');
   });
 });

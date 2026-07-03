@@ -55,6 +55,10 @@ try {
 
   console.log(`[pack-rcc] ✅ tarball ready: ${tarballPath}`);
 
+  run(process.execPath, [path.join(PROJECT_ROOT, 'scripts', 'verify-rcc-release-install.mjs')], {
+    cwd: PROJECT_ROOT
+  });
+
   if (hadDevLink) {
     run('npm', ['run', 'llmswitch:ensure'], {
       cwd: PROJECT_ROOT,

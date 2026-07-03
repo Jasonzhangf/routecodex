@@ -478,25 +478,30 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
     ...extractedFields,
     ...internalLogFields,
   };
-  const fieldSuffix = [
-    typeof fields.statusCode === 'number' ? `status=${fields.statusCode}` : undefined,
-    fields.errorCode ? `code=${fields.errorCode}` : undefined,
-    fields.internalCode ? `internalCode=${fields.internalCode}` : undefined,
-    fields.upstreamCode ? `upstreamCode=${fields.upstreamCode}` : undefined,
-    fields.catalogCode ? `catalogCode=${fields.catalogCode}` : undefined,
-    fields.catalogKey ? `catalogKey=${fields.catalogKey}` : undefined,
-    fields.providerKey ? `provider=${fields.providerKey}` : undefined,
-    fields.providerType ? `providerType=${fields.providerType}` : undefined,
-    fields.routeName ? `route=${fields.routeName}` : undefined,
-    fields.stage ? `stage=${fields.stage}` : undefined,
-    fields.externalSource ? `source=${fields.externalSource}` : undefined,
-    fields.reason ? `reason=${JSON.stringify(fields.reason)}` : undefined,
-  ]
-    .filter((item): item is string => Boolean(item))
-    .join(' ');
+  const codeOnlySummary = fields.errorCode === 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT'
+    ? fields.errorCode
+    : undefined;
+  const fieldSuffix = codeOnlySummary
+    ? ''
+    : [
+        typeof fields.statusCode === 'number' ? `status=${fields.statusCode}` : undefined,
+        fields.errorCode ? `code=${fields.errorCode}` : undefined,
+        fields.internalCode ? `internalCode=${fields.internalCode}` : undefined,
+        fields.upstreamCode ? `upstreamCode=${fields.upstreamCode}` : undefined,
+        fields.catalogCode ? `catalogCode=${fields.catalogCode}` : undefined,
+        fields.catalogKey ? `catalogKey=${fields.catalogKey}` : undefined,
+        fields.providerKey ? `provider=${fields.providerKey}` : undefined,
+        fields.providerType ? `providerType=${fields.providerType}` : undefined,
+        fields.routeName ? `route=${fields.routeName}` : undefined,
+        fields.stage ? `stage=${fields.stage}` : undefined,
+        fields.externalSource ? `source=${fields.externalSource}` : undefined,
+        fields.reason ? `reason=${JSON.stringify(fields.reason)}` : undefined,
+      ]
+        .filter((item): item is string => Boolean(item))
+        .join(' ');
   const timestamp = formatTimestamp();
   const timingSuffix = formatRequestTimingSummary(resolvedId, { terminal: true });
-  const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${publicSummary}${fieldSuffix ? ` (${fieldSuffix})` : ''}${timingSuffix}`;
+  const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${codeOnlySummary ?? publicSummary}${fieldSuffix ? ` (${fieldSuffix})` : ''}${timingSuffix}`;
   console.error(colorizeRequestLog(line, resolvedId, undefined, { isError: true }) || line);
   if (rawMeta && shouldEmitHttpErrorMeta({ rawMeta, fields, publicSummary })) {
     const publicRawMeta = buildPublicRawErrorMeta({

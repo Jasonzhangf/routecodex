@@ -5,7 +5,7 @@
  * 在 /v1/responses 入口下一律走上游 /responses 并使用 SSE（Accept: text/event-stream）。
  */
 
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 
 import { HttpTransportProvider } from './http-transport-provider.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
@@ -294,6 +294,80 @@ async function prepareDirectResponsesSsePassthroughStream(
   let sawTerminalFrame = false;
   let lastSemanticActivityAt = Date.now();
 
+  const processBlock = async (part: string): Promise<Buffer | null> => {
+    const trimmed = part.trim();
+    if (!trimmed || trimmed.startsWith(':')) {
+      return Buffer.from(`${part}\n\n`);
+    }
+    const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
+    if (rateLimitPayload) {
+      if (typeof iterator.return === 'function') {
+        await iterator.return().catch(() => undefined);
+      }
+      throw buildResponsesSseProviderError(rateLimitPayload);
+    }
+    if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
+      return null;
+    }
+    if (isResponsesSseTerminalBlock(part)) {
+      sawTerminalFrame = true;
+    }
+    sawSemanticFrame = true;
+    lastSemanticActivityAt = Date.now();
+    return Buffer.from(`${part}\n\n`);
+  };
+
+  const startStreamingRemainder = (output: PassThrough): void => {
+    let closed = false;
+    output.once('close', () => {
+      closed = true;
+      void iterator.return?.().catch(() => undefined);
+    });
+    void (async () => {
+      try {
+        while (true) {
+          const next = await readDirectResponsesChunkWithSemanticTimeout(
+            iterator,
+            sawSemanticFrame ? options?.contentIdleTimeoutMs : options?.noContentTimeoutMs,
+            lastSemanticActivityAt,
+            sawSemanticFrame ? 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT' : 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
+          );
+          if (next.done) {
+            break;
+          }
+          const chunk = Buffer.isBuffer(next.value)
+            ? next.value
+            : Buffer.from(String(next.value));
+          pending += chunk.toString('utf8');
+          const parts = pending.split(/\r?\n\r?\n/);
+          pending = parts.pop() ?? '';
+          for (const part of parts) {
+            const frame = await processBlock(part);
+            if (frame && !closed) {
+              output.write(frame);
+            }
+          }
+        }
+        if (pending) {
+          const frame = await processBlock(pending);
+          pending = '';
+          if (frame && !closed) {
+            output.write(frame);
+          }
+        }
+        if (!sawTerminalFrame) {
+          output.destroy(buildResponsesSseIncompleteError());
+          return;
+        }
+        if (!closed) {
+          output.end();
+        }
+      } catch (error) {
+        output.destroy(error instanceof Error ? error : new Error(String(error)));
+      }
+    })();
+  };
+
   while (true) {
     const next = await readDirectResponsesChunkWithSemanticTimeout(
       iterator,
@@ -310,44 +384,43 @@ async function prepareDirectResponsesSsePassthroughStream(
     pending += chunk.toString('utf8');
     const parts = pending.split(/\r?\n\r?\n/);
     pending = parts.pop() ?? '';
+    let readyToStream = false;
     for (const part of parts) {
-      const trimmed = part.trim();
-      if (!trimmed || trimmed.startsWith(':')) {
-        bufferedFrames.push(Buffer.from(`${part}\n\n`));
-        continue;
+      const frame = await processBlock(part);
+      if (frame) {
+        bufferedFrames.push(frame);
       }
-      const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
-      if (rateLimitPayload) {
-        if (typeof iterator.return === 'function') {
-          await iterator.return().catch(() => undefined);
-        }
-        throw buildResponsesSseProviderError(rateLimitPayload);
+      readyToStream = readyToStream || sawSemanticFrame;
+    }
+    if (readyToStream) {
+      const output = new PassThrough();
+      for (const frame of bufferedFrames) {
+        output.write(frame);
       }
-      if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
-        continue;
-      }
-      if (isResponsesSseTerminalBlock(part)) {
-        sawTerminalFrame = true;
-      }
-      bufferedFrames.push(Buffer.from(`${part}\n\n`));
-      sawSemanticFrame = true;
-      lastSemanticActivityAt = Date.now();
+      startStreamingRemainder(output);
+      return output;
     }
   }
   if (pending) {
-    bufferedFrames.push(Buffer.from(pending));
-  }
-  if (!sawTerminalFrame) {
-    throw buildResponsesSseIncompleteError();
-  }
-
-  async function* replayAndRead(): AsyncGenerator<Buffer> {
-    for (const chunk of bufferedFrames) {
-      yield chunk;
+    const frame = await processBlock(pending);
+    pending = '';
+    if (frame) {
+      bufferedFrames.push(frame);
     }
   }
-
-  return Readable.from(replayAndRead());
+  if (sawSemanticFrame) {
+    const output = new PassThrough();
+    for (const frame of bufferedFrames) {
+      output.write(frame);
+    }
+    if (!sawTerminalFrame) {
+      output.destroy(buildResponsesSseIncompleteError());
+      return output;
+    }
+    output.end();
+    return output;
+  }
+  throw buildResponsesSseIncompleteError();
 }
 
 // feature_id: responses.direct_tool_shape_contract

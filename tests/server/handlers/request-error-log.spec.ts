@@ -43,6 +43,26 @@ describe('logRequestError diagnostics', () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('internalCode=500-210'));
   });
 
+  it('prints only the error code for responses store missing request context', () => {
+    const err: any = new Error('Responses conversation request context missing for response capture');
+    err.code = 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT';
+    err.providerType = 'responses';
+    err.details = {
+      reason: 'missing_request_context',
+      requestId: 'openai-responses-minimax.key1-MiniMax-M3-20260703T190155633-455538-1935',
+      responseId: '0696c9a8793e5aa01f5e162d645c046b'
+    };
+
+    logRequestError('/v1/responses', 'req_store_missing_context', err);
+
+    const rendered = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(rendered).toContain('failed: RESPONSES_STORE_MISSING_REQUEST_CONTEXT');
+    expect(rendered).not.toContain('Responses conversation request context missing');
+    expect(rendered).not.toContain('providerType=responses');
+    expect(rendered).not.toContain('missing_request_context');
+    expect(rendered).not.toContain('0696c9a8793e5aa01f5e162d645c046b');
+  });
+
   it('does not collapse unstructured local runtime errors to generic upstream wording', () => {
     const err = new Error(
       'Rust HubPipeline request path failed: DIRECT_PAYLOAD_CONTRACT_ERROR: openai-responses provider wire input[3] function_call_output must not include content; use output only'

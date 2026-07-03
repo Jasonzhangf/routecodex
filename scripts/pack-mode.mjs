@@ -128,6 +128,10 @@ function readLocalLlmsVersion() {
 const isDevPkg = args.name === 'routecodex';
 const isRcc = args.name === 'rcc';
 
+function resolveBundledReleaseDependencies(pkg) {
+  return Object.keys(pkg.dependencies || {}).sort();
+}
+
 let hadDevLink = false;
 hadDevLink = isSymlink(llmsPath);
 runEnsureMode('release');
@@ -166,9 +170,11 @@ try {
       exists(localLlmsPkgPath) &&
       String(process.env.RCC_LLMS_INLINE_LOCAL ?? process.env.ROUTECODEX_RCC_INLINE_LOCAL ?? '1').trim() !== '0';
     if (inlineLocalLlmsForRcc) {
-      mutated.bundledDependencies = ['rcc-llmswitch-core'];
-      mutated.bundleDependencies = ['rcc-llmswitch-core'];
+      const bundledReleaseDependencies = resolveBundledReleaseDependencies(original);
+      mutated.bundledDependencies = bundledReleaseDependencies;
+      mutated.bundleDependencies = bundledReleaseDependencies;
       console.log('[pack-mode] inline local rcc-llmswitch-core into rcc tarball');
+      console.log(`[pack-mode] bundle rcc production dependencies: ${bundledReleaseDependencies.join(', ')}`);
     } else {
       mutated.bundledDependencies = [];
       mutated.bundleDependencies = [];

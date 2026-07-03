@@ -2,7 +2,7 @@ import { ProviderProtocolError } from '../provider-protocol-error.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { formatUnknownError, isRecord } from '../../shared/common-utils.js';
+import { isRecord } from '../../shared/common-utils.js';
 import {
   assertResponsesConversationStoreNativeAvailable,
   convertOutputToInputItems,
@@ -528,6 +528,8 @@ class ResponsesConversationStore {
     }
     if (!entry) {
       logResponsesStoreNonBlockingError('record.missing_request_context', new Error('missing_request_context'), {
+        code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+        reason: 'missing_request_context',
         requestId,
         responseId,
         providerKey: args.providerKey,
@@ -1061,11 +1063,19 @@ function logResponsesStoreNonBlockingError(
   }
   responsesWarnAt.set(stage, now);
   try {
-    const detailSuffix =
-      details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-    console.warn(
-      `[responses-store] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
-    );
+    const code =
+      error instanceof ProviderProtocolError
+        ? error.code
+        : typeof details?.code === 'string'
+          ? details.code
+          : 'RESPONSES_STORE_NON_BLOCKING_ERROR';
+    const reason =
+      typeof details?.reason === 'string'
+        ? details.reason
+        : error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : 'unknown';
+    console.warn(`[responses-store] ${stage} failed code=${code} reason=${reason}`);
   } catch {
     // Never throw from non-blocking logging.
   }

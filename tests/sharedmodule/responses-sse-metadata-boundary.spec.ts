@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
+import { buildResponsesSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 
 async function collectEvents(response: any): Promise<any[]> {
   const events: any[] = [];
@@ -10,7 +10,7 @@ async function collectEvents(response: any): Promise<any[]> {
     outputIndexCounter: 0,
     contentIndexCounter: new Map<string, number>()
   };
-  for await (const event of sequenceResponse(response, context as any, {
+  for await (const event of buildResponsesSseEventSequenceWithNative(response, context as any, {
     enableTimestampGeneration: false,
     chunkSize: 256,
     enableRecovery: false,

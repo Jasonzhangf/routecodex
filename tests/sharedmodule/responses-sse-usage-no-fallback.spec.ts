@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { ResponsesJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/responses-json-to-sse-converter.js';
 import { createDefaultResponsesContext } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/event-generators/responses.js';
-import { sequenceResponse } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/responses-sequencer.js';
+import { buildResponsesSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
 import type { ResponsesResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
@@ -179,14 +179,15 @@ describe('responses SSE usage no-fallback boundary', () => {
       usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
     } as unknown as ResponsesResponse;
 
-    await expect(collectEvents(sequenceResponse(
+    expect(() => buildResponsesSseEventSequenceWithNative({
       response,
-      createDefaultResponsesContext('req_validation_disable_invalid_output_item', response.model),
-      {
+      requestId: 'req_validation_disable_invalid_output_item',
+      model: response.model,
+      config: {
         enableTimestampGeneration: false,
         chunkSize: 256,
-        enableValidation: false,
-      } as any
-    ))).rejects.toThrow('Unknown output item type: unknown_item');
+        enableValidation: false
+      }
+    })).toThrow('Unknown output item type: unknown_item');
   });
 });

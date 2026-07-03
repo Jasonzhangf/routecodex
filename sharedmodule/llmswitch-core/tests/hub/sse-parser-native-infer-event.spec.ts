@@ -5,7 +5,12 @@ import {
   parseSseStream,
   parseSseStreamAsync
 } from '../../src/sse/sse-to-json/parsers/sse-parser.js';
-import { RESPONSES_SSE_EVENT_TYPES } from '../../src/sse/sse-to-json/shared/sse-event-validator.js';
+
+const RESPONSES_SSE_EVENT_TYPES = [
+  'message',
+  'response.completed',
+  'response.output_text.delta'
+] as const;
 
 describe('sse parser native infer event type', () => {
   it('infers responses event type from message data payload', () => {

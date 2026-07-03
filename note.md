@@ -1,3 +1,21 @@
+# 2026-07-03: rcc release tarball normal npm install closed
+
+- Root cause: `esbuild` was in root `dependencies` even though runtime code has no `esbuild` import; `pack-mode` bundled all production dependencies, so normal `npm install -g artifacts/pack/rcc-0.90.3533.tgz` ran bundled `esbuild` postinstall and failed with missing `node_modules/esbuild/bin/esbuild`.
+- Fix: moved `esbuild` to `devDependencies`, kept release tarball bundling all true production dependencies, and added `scripts/verify-rcc-release-install.mjs` as a normal npm install gate.
+- Verification: `npm run pack:rcc` rebuilt `artifacts/pack/rcc-0.90.3533.tgz`; packed `package.json` has 26 dependencies and 26 bundled dependencies, no `esbuild`, no repo path; tarball has no `package/node_modules/esbuild` or `@esbuild/*` entries.
+- Normal install evidence: `npm install -g <tarball> --prefix <tmp>` passed, `rcc --version` returned `0.90.3533`, installed `rcc-llmswitch-core` is not a symlink and has `dist`, installed package has no `esbuild`.
+- Real global evidence: `npm install -g artifacts/pack/rcc-0.90.3533.tgz` passed; `/opt/homebrew/lib/node_modules/rcc` is not repo-linked, package JSON has no repo path, bundled dependency count matches prod dependency count, and `rcc --version` returns `0.90.3533`.
+- Durable rule: release install validation must use normal `npm install -g <tgz>` online path; offline/prefer-offline checks cannot prove lifecycle or bundled postinstall behavior.
+
+# 2026-07-03: LM Studio Responses direct replay closed on 4444
+
+- Current truth: `~/.rcc/provider/lmstudio/config.v2.toml` has `[provider] type = "responses"` and `defaultModel = "ornith-1.0-397b"`; this path must stay same-protocol `/v1/responses` direct, not Responses-to-Chat.
+- Old failing sample: `~/.rcc/diag/error-openai-responses-router-gpt-5.5-20260703T143914593-454787-1184.json`.
+- VR evidence: `routecodex port dry-run 4444 --request-json <old requestBody> --json` selected `lmstudio.key1.ornith-1.0-397b`, `providerProtocol=openai-responses`, `compatibilityProfile=responses:lmstudio`, `wouldReturnProviderNotAvailable=false`.
+- Live replay evidence: installed `routecodex/rcc 0.90.3533`, `/health` ready on 4444; replaying the old request with `Accept: text/event-stream` returned HTTP 200 with one `response.completed`, no `event:error`, `created.model=ornith-1.0-397b`, and `created.text.format.type=text`.
+- Server log evidence: `~/.rcc/logs/server-4444.log` request `openai-responses-router-gpt-5.5-20260703T164325715-455233-1630` hit `thinking/gateway-glm-4444-priority-thinking -> lmstudio[key1].ornith-1.0-397b`; usage line completed on `router-direct:thinking`.
+- Remaining caveats: direct snapshot for this stream recorded provider response metadata, not a full provider-request body file; earlier no-`Accept: text/event-stream` curl client-closed and should not be used to claim non-SSE client behavior.
+
 # 2026-07-03: request-stage runtime_control write decision moved to Rust
 
 - Slice: `hub-pipeline-execute-request-stage.ts` no longer narrows `nativePlan.metadata.runtime_control` with local `asFlatRecord` or `Object.keys(runtimeControl)` to decide MetadataCenter writes. TS now calls `buildRequestStageRuntimeControlWritePlanWithNative()` and only applies the returned native write plan.

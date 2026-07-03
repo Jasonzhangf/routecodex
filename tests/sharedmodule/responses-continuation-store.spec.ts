@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,32 +70,45 @@ describe('responses conversation store plain continuation restore', () => {
   });
 
   it('reports missing response request context as local store error, not malformed upstream response', () => {
-    expect(() => recordResponsesResponse({
-      requestId: track('req-resp-store-missing-context'),
-      providerKey: 'minimax.key1.MiniMax-M2.7',
-      sessionId: 'sess-missing-context',
-      conversationId: 'conv-missing-context',
-      matchedPort: null,
-      response: {
-        id: 'resp-missing-context',
-        output: [
-          {
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'done' }]
-          }
-        ]
-      }
-    })).toThrow(expect.objectContaining({
-      name: 'ProviderProtocolError',
-      code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
-      category: 'INTERNAL_ERROR',
-      details: expect.objectContaining({
-        reason: 'missing_request_context',
-        requestId: 'req-resp-store-missing-context',
-        responseId: 'resp-missing-context'
-      })
-    }));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(() => recordResponsesResponse({
+        requestId: track('req-resp-store-missing-context'),
+        providerKey: 'minimax.key1.MiniMax-M2.7',
+        sessionId: 'sess-missing-context',
+        conversationId: 'conv-missing-context',
+        matchedPort: null,
+        response: {
+          id: 'resp-missing-context',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'done' }]
+            }
+          ]
+        }
+      })).toThrow(expect.objectContaining({
+        name: 'ProviderProtocolError',
+        code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+        category: 'INTERNAL_ERROR',
+        details: expect.objectContaining({
+          reason: 'missing_request_context',
+          requestId: 'req-resp-store-missing-context',
+          responseId: 'resp-missing-context'
+        })
+      }));
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[responses-store] record.missing_request_context failed code=RESPONSES_STORE_MISSING_REQUEST_CONTEXT reason=missing_request_context'
+      );
+      const rendered = warnSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(rendered).not.toContain('Error: missing_request_context');
+      expect(rendered).not.toContain('details=');
+      expect(rendered).not.toContain(' at ');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('restores previous_response_id by session scope when incoming input replays the exact prefix', () => {

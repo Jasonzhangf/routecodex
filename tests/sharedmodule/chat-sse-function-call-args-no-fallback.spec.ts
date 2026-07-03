@@ -3,20 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { ChatJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.js';
 import type { ChatCompletionResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
-async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
-  const chunks: string[] = [];
-  for await (const chunk of stream) {
-    chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8'));
-  }
-  return chunks.join('');
-}
 
-async function expectStreamToReject(
-  stream: AsyncIterable<unknown>,
-  message: string
-): Promise<void> {
-  await expect(collectText(stream)).rejects.toThrow(message);
-}
 
 describe('chat SSE function_call arguments no-fallback boundary', () => {
   it('fails missing response id instead of using requestId as chunk id', async () => {
@@ -87,12 +74,15 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
     };
 
     const converter = new ChatJsonToSseConverterRefactored();
-    const stream = await converter.convertResponseToJsonToSse(response, {
-      requestId: 'req_chat_function_call_args_no_fallback',
-      model: response.model
-    });
-
-    await expectStreamToReject(stream, 'Invalid legacy function_call: missing arguments');
+    try {
+      await converter.convertResponseToJsonToSse(response, {
+        requestId: 'req_chat_function_call_args_no_fallback',
+        model: response.model
+      });
+      expect(true).toBe(false); // should have thrown
+    } catch (error: any) {
+      expect(error.message).toContain('Invalid legacy function_call: missing arguments');
+    }
   });
 
   it('fails legacy function_call without an id instead of generating one', async () => {
@@ -116,12 +106,15 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
     };
 
     const converter = new ChatJsonToSseConverterRefactored();
-    const stream = await converter.convertResponseToJsonToSse(response, {
-      requestId: 'req_chat_function_call_missing_id',
-      model: response.model
-    });
-
-    await expectStreamToReject(stream, 'Invalid legacy function_call: missing id');
+    try {
+      await converter.convertResponseToJsonToSse(response, {
+        requestId: 'req_chat_function_call_missing_id',
+        model: response.model
+      });
+      expect(true).toBe(false); // should have thrown
+    } catch (error: any) {
+      expect(error.message).toContain('Invalid legacy function_call: missing id');
+    }
   });
 
   it('fails tool_calls without function arguments instead of emitting tool_call start and terminal frames', async () => {
@@ -148,12 +141,15 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
     };
 
     const converter = new ChatJsonToSseConverterRefactored();
-    const stream = await converter.convertResponseToJsonToSse(response, {
-      requestId: 'req_chat_tool_calls_missing_args',
-      model: response.model
-    });
-
-    await expectStreamToReject(stream, 'Chat SSE tool call args delta payload missing arguments');
+    try {
+      await converter.convertResponseToJsonToSse(response, {
+        requestId: 'req_chat_tool_calls_missing_args',
+        model: response.model
+      });
+      expect(true).toBe(false); // should have thrown
+    } catch (error: any) {
+      expect(error.message).toContain('Chat SSE tool call args delta payload missing arguments');
+    }
   });
 
   it('fails chunk delta without role instead of defaulting to assistant', async () => {
@@ -172,11 +168,14 @@ describe('chat SSE function_call arguments no-fallback boundary', () => {
     };
 
     const converter = new ChatJsonToSseConverterRefactored();
-    const stream = await converter.convertResponseToJsonToSse(response, {
-      requestId: 'req_chat_delta_missing_role',
-      model: response.model
-    });
-
-    await expectStreamToReject(stream, 'Invalid message sequence for role: unknown');
+    try {
+      await converter.convertResponseToJsonToSse(response, {
+        requestId: 'req_chat_delta_missing_role',
+        model: response.model
+      });
+      expect(true).toBe(false); // should have thrown
+    } catch (error: any) {
+      expect(error.message).toContain('Invalid message sequence for role: unknown');
+    }
   });
 });

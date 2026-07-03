@@ -22,11 +22,11 @@ describe('SSE index public surface no factory boundary', () => {
     expect(source).not.toContain('export const geminiConverters =');
   });
 
-  it('keeps codec registry available from the barrel', async () => {
+  it('codec registry was removed from barrel during SSE rustification', async () => {
     const mod = await import('../../sharedmodule/llmswitch-core/src/sse/index.js');
 
-    expect(typeof mod.defaultSseCodecRegistry?.get).toBe('function');
-    expect(typeof mod.SseCodecRegistry).toBe('function');
+    expect(mod.defaultSseCodecRegistry).toBeUndefined();
+    expect(mod.SseCodecRegistry).toBeUndefined();
   });
 
   it('does not let runtime modules use the public SSE barrel as registry indirection', () => {
@@ -38,7 +38,7 @@ describe('SSE index public surface no factory boundary', () => {
     for (const file of runtimeFiles) {
       const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
       expect(source).not.toContain('sse/index.js');
-      expect(source).toContain('sse/registry/sse-codec-registry.js');
+      expect(source).not.toContain('sse/registry/sse-codec-registry.js');
     }
   });
 });

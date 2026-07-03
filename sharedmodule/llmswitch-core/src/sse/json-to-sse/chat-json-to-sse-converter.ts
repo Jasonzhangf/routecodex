@@ -22,6 +22,29 @@ export class ChatJsonToSseConverterRefactored {
     response: ChatCompletionResponse,
     options: ChatJsonToSseOptions
   ): Promise<ChatSseEventStream> {
+    // Call native synchronously first to capture synchronous errors
+    // before setting up the stream, so that reject-based test patterns work.
+    let frameResult: ReturnType<typeof buildChatSseStreamWithNativeFrames>;
+    try {
+      frameResult = buildChatSseStreamWithNativeFrames({
+        response,
+        model: options.model ?? response.model,
+        requestId: options.requestId,
+        config: {
+          chunkSize: options.maxTokensPerChunk,
+          chunkDelayMs: options.chunkDelayMs,
+          enableDelay: !!options.chunkDelayMs,
+          reasoningMode: options.reasoningMode,
+          reasoningTextPrefix: options.reasoningTextPrefix
+        }
+      });
+    } catch (error) {
+      // Propagate validation errors synchronously so callers using
+      // `await expect(converter.convertResponseToJsonToSse(...)).rejects.toThrow(...)`
+      // can catch them properly.
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+
     const stream = new PassThrough({ objectMode: false });
     const sseStream: ChatSseEventStream = Object.assign(stream, {
       protocol: 'chat' as const,
@@ -42,18 +65,6 @@ export class ChatJsonToSseConverterRefactored {
 
     (async () => {
       try {
-        const frameResult = buildChatSseStreamWithNativeFrames({
-          response,
-          model: options.model ?? response.model,
-          requestId: options.requestId,
-          config: {
-            chunkSize: options.maxTokensPerChunk,
-            chunkDelayMs: options.chunkDelayMs,
-            enableDelay: !!options.chunkDelayMs,
-            reasoningMode: options.reasoningMode,
-            reasoningTextPrefix: options.reasoningTextPrefix
-          }
-        });
         for (const frame of frameResult.frames) {
           if (!stream.writable) break;
           stream.write(frame);

@@ -3557,29 +3557,27 @@ owners:
 
   - feature_id: sse.codec_registry_surface
     status: active
-    summary: "SSE codec registry and public barrel dispatch surface; no payload repair or provider policy"
+    summary: "SSE public barrel dispatch surface; no payload repair or provider policy"
     owner_kind: server_projection
-    owner_scope: "SSE codec registry and public barrel dispatch surface; no payload repair or provider policy"
-    owner_module: sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts
+    owner_scope: "file-scoped SSE public barrel dispatch surface; no payload repair or provider policy"
+    owner_module: sharedmodule/llmswitch-core/src/sse/index.ts
     canonical_types:
-      - SseProtocol
-      - SseCodec
       - JsonToSseContext
       - SseToJsonContext
     canonical_builders:
-      - createChatCodec
-      - createResponsesCodec
+      - sseCodecPublicSurfaceFeatureAnchor
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/sse/registry/sse-codec-registry.ts
       - sharedmodule/llmswitch-core/src/sse/index.ts
+      - sharedmodule/llmswitch-core/src/sse/json-to-sse/index.ts
+      - sharedmodule/llmswitch-core/src/sse/sse-to-json/index.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
     forbidden_mentions_allowlist:
-      - SseProtocol
-      - SseCodec
+      - JsonToSseContext
+      - SseToJsonContext
     required_tests:
       - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
       - tests/sharedmodule/sse-stream-mode-native.spec.ts
@@ -3588,25 +3586,26 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - "Registry dispatches explicit protocol codecs only; it must not repair payloads, infer provider policy, mutate metadata, or provide fallback protocol selection."
+      - "Public barrel exports explicit converter classes only; it must not repair payloads, infer provider policy, mutate metadata, or provide fallback protocol selection."
 
   - feature_id: sse.stream_parse_boundary
     status: active
     summary: "SSE wire parser boundary backed by native line/event parsers"
-    owner_kind: server_projection
-    owner_scope: "SSE wire parser boundary backed by native line/event parsers"
-    owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped Rust-owned SSE wire parser boundary backed by native line/event parsers"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
     canonical_types:
       - RawSseEvent
       - SseParseResult
       - SseParserConfig
     canonical_builders:
-      - assembleSseEvent
-      - parseSseEvent
-      - createSseParser
+      - assemble_sse_event_from_lines_json
+      - parse_sse_event_with_config_json
+      - parse_sse_stream_with_config_json
+      - parse_sse_stream_chunk_with_config_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime
@@ -3619,24 +3618,22 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "TS parser wrapper may only call native parser helpers and maintain stream buffering; semantic recovery must be explicit contract, not silent success truth."
+      - "SSE parser semantics are Rust-owned; TS may only expose required native exports and must not recreate parser recovery or success synthesis."
 
   - feature_id: sse.event_type_validation
     status: active
     summary: "SSE protocol event-type allowlist validation surface"
     owner_kind: server_projection
-    owner_scope: "Protocol-specific SSE event-type allowlists for strict parser callers; transport parser defaults remain no-recovery and no semantic validation unless a caller supplies an explicit protocol allowlist."
-    owner_module: sharedmodule/llmswitch-core/src/sse/sse-to-json/shared/sse-event-validator.ts
+    owner_scope: "file-scoped protocol-specific SSE event-type allowlists for strict parser callers; transport parser defaults remain no-recovery and no semantic validation unless a caller supplies an explicit protocol allowlist."
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
     canonical_types:
-      - RESPONSES_SSE_EVENT_TYPES
-      - ANTHROPIC_SSE_EVENT_TYPES
-      - GEMINI_SSE_EVENT_TYPES
-      - CHAT_SSE_EVENT_TYPES
+      - SseParserConfigInput
+      - RawSseEvent
     canonical_builders:
-      - isAllowedEventType
+      - validate_sse_event_type
+      - infer_sse_event_type_from_data
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/shared/sse-event-validator.ts
-      - sharedmodule/llmswitch-core/src/sse/sse-to-json/parsers/sse-parser.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
       - sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:

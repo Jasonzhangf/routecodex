@@ -4,6 +4,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
+// feature_id: sse.event_type_validation
+// Strict SSE event validation is owned by Rust; TS callers may only provide
+// explicit allowed_event_types through parser config.
 fn strip_xssi_prefix(input: &str) -> &str {
     let mut normalized = input.trim_start();
     if let Some(stripped) = normalized.strip_prefix(")]}'") {

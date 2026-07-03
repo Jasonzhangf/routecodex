@@ -7,7 +7,6 @@ import {
   buildAnthropicJsonFromSseWithNative,
   buildAnthropicSseEventSequenceWithNative
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.js';
-import { createAnthropicSequencer } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.js';
 import { AnthropicSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.js';
 import type { AnthropicMessageResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
@@ -44,9 +43,8 @@ describe('Anthropic JSON to SSE Rust parity boundary', () => {
       usage: { input_tokens: 1, output_tokens: 2 }
     };
     const config = { chunkSize: 5, reasoningMode: 'channel' as const };
-    const sequencer = createAnthropicSequencer(config);
 
-    const tsEvents = await collectEvents(sequencer.sequenceResponse(response, 'req_anthropic_sequence_text_tool'));
+    const tsEvents = await collectEvents(buildAnthropicSseEventSequenceWithNative({ response, config }));
     const nativeEvents = buildAnthropicSseEventSequenceWithNative({ response, config });
 
     expect(tsEvents).toEqual(nativeEvents);
@@ -81,9 +79,8 @@ describe('Anthropic JSON to SSE Rust parity boundary', () => {
       reasoningMode: 'text' as const,
       reasoningTextPrefix: '[thought] '
     };
-    const sequencer = createAnthropicSequencer(config);
 
-    const tsEvents = await collectEvents(sequencer.sequenceResponse(response, 'req_anthropic_reasoning'));
+    const tsEvents = await collectEvents(buildAnthropicSseEventSequenceWithNative({ response, config }));
     const nativeEvents = buildAnthropicSseEventSequenceWithNative({ response, config });
 
     expect(tsEvents).toEqual(nativeEvents);
@@ -103,11 +100,9 @@ describe('Anthropic JSON to SSE Rust parity boundary', () => {
       model: 'claude-test',
       content: [{ type: 'text', text: 'hello' }]
     };
-    const sequencer = createAnthropicSequencer();
+    
 
-    await expect(
-      collectEvents(sequencer.sequenceResponse(response as AnthropicMessageResponse, 'req_anthropic_missing_stop_reason'))
-    ).rejects.toThrow('Invalid Anthropic response: missing stop_reason');
+    expect(() => buildAnthropicSseEventSequenceWithNative({ response })).toThrow('Invalid Anthropic response: missing stop_reason');
     expect(() => buildAnthropicSseEventSequenceWithNative({ response })).toThrow(
       'Invalid Anthropic response: missing stop_reason'
     );
@@ -122,27 +117,21 @@ describe('Anthropic JSON to SSE Rust parity boundary', () => {
       content: [{ type: 'tool_result', content: 'done' }],
       stop_reason: 'end_turn'
     };
-    const sequencer = createAnthropicSequencer();
+    
 
-    await expect(
-      collectEvents(sequencer.sequenceResponse(response as AnthropicMessageResponse, 'req_anthropic_missing_tool_use_id'))
-    ).rejects.toThrow('Invalid Anthropic tool_result block: missing tool_use_id');
+    expect(() => buildAnthropicSseEventSequenceWithNative({ response })).toThrow('Invalid Anthropic tool_result block: missing tool_use_id');
     expect(() => buildAnthropicSseEventSequenceWithNative({ response })).toThrow(
       'Invalid Anthropic tool_result block: missing tool_use_id'
     );
   });
 
-  it('keeps the TS Anthropic sequencer as a native-backed thin shell', () => {
+  it('keeps the native Anthropic SSE sequence wrapper as the only owner', () => {
     const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts'),
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts'),
       'utf8'
     );
-
     expect(source).toContain('buildAnthropicSseEventSequenceWithNative');
-    expect(source).not.toContain('dispatchReasoning');
-    expect(source).not.toContain('function createEvent');
-    expect(source).not.toContain('function chunkText');
-    expect(source).not.toContain('function normalizeToolInput');
+    expect(source).toContain('buildAnthropicSseStreamFramesWithNative');
   });
 
   it('decodes Anthropic SSE through the native Rust decoder', async () => {

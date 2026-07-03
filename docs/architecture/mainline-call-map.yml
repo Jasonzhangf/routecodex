@@ -950,15 +950,15 @@ chains:
       - step_id: anthropic-sse-01
         from_node: HubRespOutbound04ClientSemantic
         to_node: ServerRespOutbound05ClientFrame
-        caller_symbol: sequenceResponse
-        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/anthropic-sequencer.ts
-        callee_symbol: buildAnthropicSseEventSequenceWithNative
+        caller_symbol: convertResponseToJsonToSse
+        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/anthropic-json-to-sse-converter.ts
+        callee_symbol: buildAnthropicSseStreamFramesWithNative
         callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "validated Anthropic message response plus request-scoped AnthropicJsonToSseOptions"
         semantic_output: "ordered AnthropicSseEvent stream for message/content/reasoning/tool/stop frames"
         status: anchored
-        note: "TS `createAnthropicSequencer` is a thin wrapper around native `buildAnthropicSseEventSequenceWithNative`; Rust `build_anthropic_sse_event_sequence_json` owns Anthropic JSON->SSE event ordering, reasoning projection, chunking, and fail-fast validation."
+        note: "TS `AnthropicJsonToSseConverter.convertResponseToJsonToSse` is a thin stream IO wrapper around native `buildAnthropicSseStreamFramesWithNative`; Rust `build_anthropic_sse_stream_json` owns Anthropic JSON->SSE event ordering, reasoning projection, chunking, and fail-fast validation."
       - step_id: anthropic-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed
@@ -974,15 +974,15 @@ chains:
       - step_id: gemini-sse-01
         from_node: HubRespOutbound04ClientSemantic
         to_node: ServerRespOutbound05ClientFrame
-        caller_symbol: sequenceResponse
-        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/sequencers/gemini-sequencer.ts
-        callee_symbol: buildGeminiSseEventSequenceWithNative
+        caller_symbol: convertResponseToJsonToSse
+        caller_file: sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts
+        callee_symbol: buildGeminiSseStreamFramesWithNative
         callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "validated Gemini response plus request-scoped GeminiJsonToSseOptions"
         semantic_output: "ordered GeminiSseEvent stream for part and done frames"
         status: anchored
-        note: "TS `createGeminiSequencer` is a thin wrapper around native `buildGeminiSseEventSequenceWithNative`; Rust `build_gemini_sse_event_sequence_json` owns Gemini JSON->SSE event ordering, reasoning projection, and fail-fast validation."
+        note: "TS `GeminiJsonToSseConverter.convertResponseToJsonToSse` is a thin stream IO wrapper around native `buildGeminiSseStreamFramesWithNative`; Rust `build_gemini_sse_stream_json` owns Gemini JSON->SSE event ordering, reasoning projection, and fail-fast validation."
       - step_id: gemini-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed
