@@ -97,6 +97,10 @@ export type ProviderResponseMetadataSnapshotPlan = {
   metadataCenterSnapshot?: Record<string, unknown> | null;
 };
 
+export type RequestStageRuntimeControlWritePlan = {
+  runtimeControl?: Record<string, unknown> | null;
+};
+
 function readServertoolRuntimeErrorCode(value: unknown): ProviderProtocolErrorCode | null {
   if (value === 'SERVERTOOL_FOLLOWUP_FAILED' || value === 'SERVERTOOL_HANDLER_FAILED') {
     return value;
@@ -543,6 +547,24 @@ export function buildProviderResponseMetadataSnapshotWithNative(input: {
   }
   return {
     metadataCenterSnapshot: snapshot as Record<string, unknown> | null | undefined,
+  };
+}
+
+export function buildRequestStageRuntimeControlWritePlanWithNative(input: {
+  outputMetadata: Record<string, unknown>;
+}): RequestStageRuntimeControlWritePlan {
+  const capability = 'buildRequestStageRuntimeControlWritePlanJson';
+  const fail = (reason?: string) => failNativeRequired<RequestStageRuntimeControlWritePlan>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, input), 'parseRequestStageRuntimeControlWritePlan');
+  if (!parsed) {
+    return fail('invalid payload');
+  }
+  const runtimeControl = parsed.runtimeControl;
+  if (runtimeControl !== undefined && runtimeControl !== null && (typeof runtimeControl !== 'object' || Array.isArray(runtimeControl))) {
+    return fail('invalid payload');
+  }
+  return {
+    runtimeControl: runtimeControl as Record<string, unknown> | null | undefined,
   };
 }
 

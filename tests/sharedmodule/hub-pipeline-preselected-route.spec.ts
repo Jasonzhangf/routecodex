@@ -2,6 +2,19 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockRunHubPipelineLibWithNative = jest.fn();
+const mockBuildRequestStageRuntimeControlWritePlanWithNative = jest.fn((input: {
+  outputMetadata: Record<string, unknown>;
+}) => {
+  const runtimeControl = input.outputMetadata.runtime_control;
+  const normalizedRuntimeControl = runtimeControl && typeof runtimeControl === 'object' && !Array.isArray(runtimeControl)
+    ? runtimeControl as Record<string, unknown>
+    : null;
+  return {
+    runtimeControl: normalizedRuntimeControl && Object.keys(normalizedRuntimeControl).length > 0
+      ? normalizedRuntimeControl
+      : null
+  };
+});
 const mockBuildRequestStageMetadataDispatchWithNative = jest.fn((input: {
   sourceMetadata: Record<string, unknown>;
   requestTruth: Record<string, unknown>;
@@ -49,6 +62,7 @@ jest.unstable_mockModule(
   () => ({
     runHubPipelineLibWithNative: mockRunHubPipelineLibWithNative,
     buildRequestStageMetadataDispatchWithNative: mockBuildRequestStageMetadataDispatchWithNative,
+    buildRequestStageRuntimeControlWritePlanWithNative: mockBuildRequestStageRuntimeControlWritePlanWithNative,
     projectMetadataWritePlanToRuntimeControlWithNative: jest.fn(({ plan }: { plan: Record<string, unknown> }) => plan),
   })
 );
@@ -128,6 +142,7 @@ function createNativeSuccess() {
 describe('HubPipeline preselected route ownership', () => {
   beforeEach(() => {
     mockRunHubPipelineLibWithNative.mockReset();
+    mockBuildRequestStageRuntimeControlWritePlanWithNative.mockClear();
     mockRunHubPipelineLibWithNative.mockReturnValue(createNativeSuccess());
   });
 

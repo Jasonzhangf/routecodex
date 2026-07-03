@@ -60,6 +60,19 @@ const runHubPipelineLibWithNative = jest.fn((input: Record<string, any>) => ({
   effectPlan: { effects: [] },
   diagnostics: [],
 }));
+const buildRequestStageRuntimeControlWritePlanWithNative = jest.fn((input: {
+  outputMetadata: Record<string, unknown>;
+}) => {
+  const runtimeControl = input.outputMetadata.runtime_control;
+  const normalizedRuntimeControl = runtimeControl && typeof runtimeControl === 'object' && !Array.isArray(runtimeControl)
+    ? runtimeControl as Record<string, unknown>
+    : null;
+  return {
+    runtimeControl: normalizedRuntimeControl && Object.keys(normalizedRuntimeControl).length > 0
+      ? normalizedRuntimeControl
+      : null
+  };
+});
 
 const convertSseToJson = jest.fn(async () => ({ model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] }));
 const getCodec = jest.fn(() => ({ convertSseToJson }));
@@ -86,6 +99,7 @@ jest.unstable_mockModule(
   () => ({
     runHubPipelineLibWithNative,
     buildRequestStageMetadataDispatchWithNative,
+    buildRequestStageRuntimeControlWritePlanWithNative,
     projectMetadataWritePlanToRuntimeControlWithNative: jest.fn(({ plan }: { plan: Record<string, unknown> }) => plan),
   }),
 );

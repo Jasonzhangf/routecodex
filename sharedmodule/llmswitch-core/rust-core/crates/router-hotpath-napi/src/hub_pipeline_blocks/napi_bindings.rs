@@ -178,6 +178,41 @@ pub fn build_request_stage_metadata_dispatch_json(input_json: String) -> napi::R
     })
 }
 
+pub fn build_request_stage_runtime_control_write_plan(input: &Value) -> Result<Value, String> {
+    let row = input.as_object().ok_or_else(|| {
+        "Rust request-stage runtime-control write plan input must be object".to_string()
+    })?;
+    let runtime_control = row
+        .get("outputMetadata")
+        .and_then(Value::as_object)
+        .and_then(|metadata| metadata.get("runtime_control"))
+        .and_then(Value::as_object)
+        .filter(|runtime_control| !runtime_control.is_empty())
+        .map(|runtime_control| Value::Object(runtime_control.clone()))
+        .unwrap_or(Value::Null);
+
+    Ok(serde_json::json!({
+        "runtimeControl": runtime_control
+    }))
+}
+
+pub fn build_request_stage_runtime_control_write_plan_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid request-stage runtime-control write plan JSON: {error}"
+        ))
+    })?;
+    let output =
+        build_request_stage_runtime_control_write_plan(&value).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize request-stage runtime-control write plan failed: {error}"
+        ))
+    })
+}
+
 fn has_declared_apply_patch_tool(payload: &Value) -> bool {
     let Some(root) = payload.as_object() else {
         return false;
@@ -434,6 +469,45 @@ mod responses_direct_route_decision_tests {
                 "runtimeControl": { "providerProtocol": "nested" }
             })
         );
+    }
+
+    #[test]
+    fn request_stage_runtime_control_write_plan_extracts_non_empty_runtime_control() {
+        let output = build_request_stage_runtime_control_write_plan(&serde_json::json!({
+            "outputMetadata": {
+                "target": { "providerKey": "provider.a" },
+                "runtime_control": {
+                    "stopless": { "flowId": "flow-1" }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            output["runtimeControl"],
+            serde_json::json!({
+                "stopless": { "flowId": "flow-1" }
+            })
+        );
+    }
+
+    #[test]
+    fn request_stage_runtime_control_write_plan_omits_missing_or_empty_runtime_control() {
+        let missing = build_request_stage_runtime_control_write_plan(&serde_json::json!({
+            "outputMetadata": {
+                "target": { "providerKey": "provider.a" }
+            }
+        }))
+        .unwrap();
+        assert_eq!(missing["runtimeControl"], Value::Null);
+
+        let empty = build_request_stage_runtime_control_write_plan(&serde_json::json!({
+            "outputMetadata": {
+                "runtime_control": {}
+            }
+        }))
+        .unwrap();
+        assert_eq!(empty["runtimeControl"], Value::Null);
     }
 
     #[test]

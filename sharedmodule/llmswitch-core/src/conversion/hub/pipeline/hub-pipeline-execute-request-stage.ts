@@ -7,6 +7,7 @@ import type {
 } from "./hub-pipeline.js";
 import {
   buildRequestStageMetadataDispatchWithNative,
+  buildRequestStageRuntimeControlWritePlanWithNative,
   runHubPipelineLibWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { attachHubStageTopSummary } from "./hub-stage-timing.js";
@@ -21,23 +22,19 @@ const REQUEST_STAGE_RUNTIME_CONTROL_WRITER = {
   stage: 'HubReqChatProcess03Governed',
 } as const;
 
-function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-}
-
 function syncRequestStageRuntimeControlToMetadataCenter(args: {
   sourceMetadata: Record<string, unknown>;
   outputMetadata: Record<string, unknown>;
 }): void {
-  const runtimeControl = asFlatRecord(args.outputMetadata.runtime_control);
-  if (!runtimeControl || Object.keys(runtimeControl).length === 0) {
+  const writePlan = buildRequestStageRuntimeControlWritePlanWithNative({
+    outputMetadata: args.outputMetadata,
+  });
+  if (!writePlan.runtimeControl) {
     return;
   }
   applyNativeRuntimeControlWritePlan({
     metadata: args.sourceMetadata,
-    runtimeControl,
+    runtimeControl: writePlan.runtimeControl,
     writer: REQUEST_STAGE_RUNTIME_CONTROL_WRITER,
     reason: 'rust request chatprocess runtime control'
   });

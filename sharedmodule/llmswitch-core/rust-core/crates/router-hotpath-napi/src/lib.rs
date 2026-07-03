@@ -732,6 +732,15 @@ pub fn build_provider_response_metadata_snapshot_json(input_json: String) -> Nap
     hub_pipeline_blocks::napi_bindings::build_provider_response_metadata_snapshot_json(input_json)
 }
 
+#[napi(js_name = "buildRequestStageRuntimeControlWritePlanJson")]
+pub fn build_request_stage_runtime_control_write_plan_json(
+    input_json: String,
+) -> NapiResult<String> {
+    hub_pipeline_blocks::napi_bindings::build_request_stage_runtime_control_write_plan_json(
+        input_json,
+    )
+}
+
 #[napi(js_name = "projectMetadataWritePlanToRuntimeControlJson")]
 pub fn project_metadata_write_plan_to_runtime_control_json(
     input_json: String,

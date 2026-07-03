@@ -108,6 +108,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resolveProviderProtocolJson",
   "buildRequestStageMetadataDispatchJson",
   "buildProviderResponseMetadataSnapshotJson",
+  "buildRequestStageRuntimeControlWritePlanJson",
   "projectMetadataWritePlanToRuntimeControlJson",
   "captureReqInboundResponsesContextSnapshotJson",
   "extractReasoningSegmentsJson",

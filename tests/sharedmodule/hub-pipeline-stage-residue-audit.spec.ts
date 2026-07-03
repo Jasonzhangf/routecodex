@@ -1759,12 +1759,15 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
     );
     const source = fs.readFileSync(filePath, 'utf8');
+    expect(source).toContain('buildRequestStageMetadataDispatchWithNative');
+    expect(source).toContain('buildRequestStageRuntimeControlWritePlanWithNative');
     const findings = collectMatches(source, [
       { label: 'legacy __metadataCenter fallback residue', pattern: /__metadataCenter/ },
       { label: 'legacy __rt read/write residue', pattern: /metadata\.__rt|__rt\s*=/ },
       { label: 'legacy runtime whitelist helper residue', pattern: /projectLegacyRuntimeControlWhitelist|readRuntimeMetadataControl/ },
       { label: 'TS request-stage legacy metadata stripper residue', pattern: /stripLegacyMetadataResidue|Object\.entries\(metadata\)/ },
       { label: 'TS request-stage metadata snapshot builder residue', pattern: /buildMetadataCenterSnapshot|runtimeControlSnapshot|excludedProviderKeys\s*=\s*Array\.isArray/ },
+      { label: 'TS request-stage runtime_control object narrowing residue', pattern: /function\s+asFlatRecord\s*\(|Object\.keys\(runtimeControl\)/ },
     ]);
 
     expect(findings).toEqual([]);
