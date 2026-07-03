@@ -108,6 +108,7 @@ mod stopless_auto_handler_bridge;
 mod streaming_tool_extractor;
 mod tool_harvester;
 mod virtual_router_engine;
+mod virtual_router_hit_log;
 mod virtual_router_stop_message_actions;
 mod virtual_router_stop_message_instruction;
 mod vr_route_04_selection_boundary;
