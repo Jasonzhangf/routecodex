@@ -30,8 +30,10 @@ type MetadataCenterLike = {
   readProviderObservation?: () => Record<string, unknown> | undefined;
 };
 
+type UnknownRecord = Record<string, unknown>;
+
 type BoundMetadataCenterTarget = {
-  target: Record<string, unknown>;
+  target: UnknownRecord;
   center: MetadataCenterLike;
 };
 
@@ -50,13 +52,13 @@ const STOP_MESSAGE_COMPARE_WRITER = {
 
 export type { StopGatewayContext, StopMessageCompareContext };
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+function asRecord(value: unknown): UnknownRecord | undefined {
   return value != null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? value as UnknownRecord
     : undefined;
 }
 
-function readBoundMetadataCenterTarget(metadata: Record<string, unknown>): BoundMetadataCenterTarget | undefined {
+function readBoundMetadataCenterTarget(metadata: UnknownRecord): BoundMetadataCenterTarget | undefined {
   const directCenter = Reflect.get(metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
   if (directCenter && typeof directCenter.writeRuntimeControl === 'function') {
     return { target: metadata, center: directCenter };
@@ -72,7 +74,7 @@ function readBoundMetadataCenterTarget(metadata: Record<string, unknown>): Bound
 }
 
 function writeMetadataCenterSlot(args: {
-  target: Record<string, unknown>;
+  target: UnknownRecord;
   center: MetadataCenterLike;
   family: 'runtime_control';
   key: string;
@@ -126,7 +128,7 @@ export function writeRuntimeControlToBoundMetadataCenter(args: {
 }
 
 function readRuntimeControlFromBoundMetadataCenter(
-  metadata: Record<string, unknown> | undefined
+  metadata: UnknownRecord | undefined
 ): Record<string, unknown> | undefined {
   if (!metadata) {
     return undefined;
