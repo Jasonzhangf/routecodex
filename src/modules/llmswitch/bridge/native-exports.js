@@ -55,7 +55,6 @@ let cachedHubBridgePolicySemantics;
 let cachedHubBridgePolicySemanticsSync;
 let cachedRouterHotpathJsonBindingSync;
 let cachedHubVrNodeContracts;
-let cachedChatProcessNodeResultSemantics;
 let sharedBindingsChecked;
 let respBindingsChecked;
 function buildFailurePolicyModuleFromRouterHotpathBinding(binding) {
@@ -319,23 +318,7 @@ function assertNativeObject(capability, value) {
     return value;
 }
 function getChatProcessNodeResultSemantics() {
-    if (cachedChatProcessNodeResultSemantics !== undefined) {
-        if (!cachedChatProcessNodeResultSemantics) {
-            throw new Error('[llmswitch-bridge] native-chat-process-node-result-semantics not available');
-        }
-        return cachedChatProcessNodeResultSemantics;
-    }
-    try {
-        cachedChatProcessNodeResultSemantics =
-            getRouterHotpathJsonBindingSync();
-    }
-    catch {
-        cachedChatProcessNodeResultSemantics = null;
-    }
-    if (!cachedChatProcessNodeResultSemantics) {
-        throw new Error('[llmswitch-bridge] native-chat-process-node-result-semantics not available');
-    }
-    return cachedChatProcessNodeResultSemantics;
+    return getRouterHotpathJsonBindingSync();
 }
 export async function mapChatToolsToBridgeJson(rawTools) {
     await assertSharedBindings();
