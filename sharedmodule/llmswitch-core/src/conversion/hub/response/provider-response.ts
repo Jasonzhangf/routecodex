@@ -11,6 +11,7 @@ import {
   executeHubPipelineWithNative,
   normalizeProviderResponseEffectPlanWithNative,
   planProviderResponseServertoolRuntimeActionsWithNative,
+  resolveProviderResponsePostServertoolEffectWithNative,
   type ProviderResponseRuntimeEffectPlan,
 } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import {
@@ -208,19 +209,22 @@ async function executeProviderResponseNativeServertoolEffects(args: {
         ...(allowFollowup ? { allowFollowup: true } : {}),
         stageRecorder: args.stageRecorder
       });
-      if (orchestration.executed) {
-        payload = orchestration.payload;
-        stage = 'HubRespChatProcess03Governed';
+      const postServertoolEffect = resolveProviderResponsePostServertoolEffectWithNative({
+        actionPlan,
+        currentPayload: payload,
+        orchestrationPayload: orchestration.payload,
+        orchestrationExecuted: orchestration.executed
+      });
+      payload = postServertoolEffect.payload as JsonObject;
+      stage = postServertoolEffect.stage;
+      if (postServertoolEffect.shouldProjectClientSemantic) {
+        payload = projectPostServertoolHubRespOutbound04ClientSemanticWithNative({
+          payload,
+          entryEndpoint: args.entryEndpoint,
+          requestId: args.requestId,
+          responseSemantics: args.context as unknown as Record<string, unknown>
+        }) as JsonObject;
       }
-    }
-    if (stage === 'HubRespChatProcess03Governed' && actionPlan.executionPlans.some((plan) => plan.projectionStage === 'HubRespChatProcess03Governed')) {
-      payload = projectPostServertoolHubRespOutbound04ClientSemanticWithNative({
-        payload,
-        entryEndpoint: args.entryEndpoint,
-        requestId: args.requestId,
-        responseSemantics: args.context as unknown as Record<string, unknown>
-      }) as JsonObject;
-      stage = 'HubRespChatProcess03Governed';
     }
   }
 

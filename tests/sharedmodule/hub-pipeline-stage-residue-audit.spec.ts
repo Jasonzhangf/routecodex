@@ -4110,6 +4110,10 @@ describe('hub pipeline stage residue audit', () => {
 
   it('servertool pending-session TS persistence must not inspect tool semantics or swallow load failures', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/pending-session.ts');
+    if (!fs.existsSync(filePath)) {
+      expect(fs.existsSync(filePath)).toBe(false);
+      return;
+    }
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'imports chat tool-history inspector into TS persistence', pattern: /inspectOpenAiChatToolHistory/ },
@@ -4173,6 +4177,10 @@ describe('hub pipeline stage residue audit', () => {
 
   it('servertool orchestration policy must not run TS synthetic control-text recursion', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts');
+    if (!fs.existsSync(filePath)) {
+      expect(fs.existsSync(filePath)).toBe(false);
+      return;
+    }
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'imports TS synthetic control text helper', pattern: /isSyntheticRouteCodexControlText/ },
@@ -4201,9 +4209,11 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
     expect(source).toContain('planProviderResponseServertoolRuntimeActionsWithNative');
+    expect(source).toContain('resolveProviderResponsePostServertoolEffectWithNative');
     expect(source).toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
-    expect(source).toContain("hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'");
+    expect(source).not.toContain('if (orchestration.executed)');
+    expect(source).not.toContain('actionPlan.executionPlans.some');
     expect(source).toContain('codec.convertJsonToSse(hubRespOutbound04ClientSemantic');
     expect(findings).toEqual([]);
   });

@@ -78,6 +78,12 @@ export type ProviderResponseServertoolRuntimeActionPlan = {
   error?: ProviderResponseServertoolRuntimeErrorDescriptor | null;
 };
 
+export type ProviderResponsePostServertoolEffectPlan = {
+  payload: Record<string, unknown>;
+  stage: 'HubRespChatProcess03Governed' | 'unchanged';
+  shouldProjectClientSemantic: boolean;
+};
+
 function readServertoolRuntimeErrorCode(value: unknown): ProviderProtocolErrorCode | null {
   if (value === 'SERVERTOOL_FOLLOWUP_FAILED' || value === 'SERVERTOOL_HANDLER_FAILED') {
     return value;
@@ -388,6 +394,30 @@ function parseProviderResponseServertoolRuntimeActionPlan(
   };
 }
 
+function parseProviderResponsePostServertoolEffectPlan(
+  raw: string
+): ProviderResponsePostServertoolEffectPlan | null {
+  const parsed = parseJson('parseProviderResponsePostServertoolEffectPlan', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  if (!row.payload || typeof row.payload !== 'object' || Array.isArray(row.payload)) {
+    return null;
+  }
+  if (row.stage !== 'HubRespChatProcess03Governed' && row.stage !== 'unchanged') {
+    return null;
+  }
+  if (typeof row.shouldProjectClientSemantic !== 'boolean') {
+    return null;
+  }
+  return {
+    payload: row.payload as Record<string, unknown>,
+    stage: row.stage,
+    shouldProjectClientSemantic: row.shouldProjectClientSemantic
+  };
+}
+
 export function normalizeProviderResponseEffectPlanWithNative(
   effectPlan: { effects: Array<Record<string, unknown>> }
 ): ProviderResponseRuntimeEffectPlan {
@@ -404,6 +434,18 @@ export function planProviderResponseServertoolRuntimeActionsWithNative(input: {
   const fail = (reason?: string) => failNativeRequired<ProviderResponseServertoolRuntimeActionPlan>(capability, reason);
   const raw = callNativeJsonString(capability, input);
   return parseProviderResponseServertoolRuntimeActionPlan(raw) ?? fail('invalid payload');
+}
+
+export function resolveProviderResponsePostServertoolEffectWithNative(input: {
+  actionPlan: ProviderResponseServertoolRuntimeActionPlan;
+  currentPayload: Record<string, unknown>;
+  orchestrationPayload: Record<string, unknown>;
+  orchestrationExecuted: boolean;
+}): ProviderResponsePostServertoolEffectPlan {
+  const capability = 'resolveProviderResponsePostServertoolEffectJson';
+  const fail = (reason?: string) => failNativeRequired<ProviderResponsePostServertoolEffectPlan>(capability, reason);
+  const raw = callNativeJsonString(capability, input);
+  return parseProviderResponsePostServertoolEffectPlan(raw) ?? fail('invalid payload');
 }
 
 export function runHubPipelineOrchestrationWithNative(input: HubPipelineInput): HubPipelineOutput {

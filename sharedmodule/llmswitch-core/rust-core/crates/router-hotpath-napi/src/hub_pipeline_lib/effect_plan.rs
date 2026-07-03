@@ -300,6 +300,80 @@ pub fn plan_provider_response_servertool_runtime_actions(input: &Value) -> Resul
     }))
 }
 
+pub fn resolve_provider_response_post_servertool_effect(input: &Value) -> Result<Value, String> {
+    let record = input.as_object().ok_or_else(|| {
+        "Rust HubPipeline post-servertool effect planner missing input".to_string()
+    })?;
+    let action_plan = record
+        .get("actionPlan")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            "Rust HubPipeline post-servertool effect planner missing actionPlan".to_string()
+        })?;
+    let execution_plans = action_plan
+        .get("executionPlans")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "Rust HubPipeline post-servertool effect planner missing executionPlans".to_string()
+        })?;
+    let current_payload = record
+        .get("currentPayload")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| {
+            "Rust HubPipeline post-servertool effect planner missing currentPayload".to_string()
+        })?;
+    let orchestration_payload = record
+        .get("orchestrationPayload")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| {
+            "Rust HubPipeline post-servertool effect planner missing orchestrationPayload"
+                .to_string()
+        })?;
+    let orchestration_executed = record
+        .get("orchestrationExecuted")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            "Rust HubPipeline post-servertool effect planner missing orchestrationExecuted"
+                .to_string()
+        })?;
+
+    let stage = if orchestration_executed {
+        "HubRespChatProcess03Governed"
+    } else {
+        "unchanged"
+    };
+    let should_project_client_semantic = orchestration_executed
+        && execution_plans.iter().any(|plan| {
+            plan.as_object()
+                .and_then(|item| item.get("projectionStage"))
+                .and_then(Value::as_str)
+                == Some("HubRespChatProcess03Governed")
+        });
+
+    Ok(json!({
+        "payload": if orchestration_executed { orchestration_payload } else { current_payload },
+        "stage": stage,
+        "shouldProjectClientSemantic": should_project_client_semantic,
+    }))
+}
+
+pub fn resolve_provider_response_post_servertool_effect_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid post-servertool effect planner JSON: {error}"
+        ))
+    })?;
+    let output = resolve_provider_response_post_servertool_effect(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize post-servertool effect planner failed: {error}"
+        ))
+    })
+}
+
 pub fn plan_provider_response_servertool_runtime_actions_json(
     input_json: String,
 ) -> napi::Result<String> {
@@ -321,6 +395,7 @@ pub fn plan_provider_response_servertool_runtime_actions_json(
 mod tests {
     use super::{
         normalize_provider_response_effect_plan, plan_provider_response_servertool_runtime_actions,
+        resolve_provider_response_post_servertool_effect,
     };
     use serde_json::{json, Value};
 
@@ -488,5 +563,49 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.contains("unsupported action"));
+    }
+
+    #[test]
+    fn resolves_post_servertool_effect_for_executed_projection() {
+        let output = resolve_provider_response_post_servertool_effect(&json!({
+            "actionPlan": {
+                "executionPlans": [{
+                    "payload": { "id": "planned" },
+                    "projectionStage": "HubRespChatProcess03Governed",
+                    "allowFollowup": false
+                }],
+                "error": null
+            },
+            "currentPayload": { "id": "current" },
+            "orchestrationPayload": { "id": "governed" },
+            "orchestrationExecuted": true
+        }))
+        .unwrap();
+
+        assert_eq!(output["payload"], json!({ "id": "governed" }));
+        assert_eq!(output["stage"], json!("HubRespChatProcess03Governed"));
+        assert_eq!(output["shouldProjectClientSemantic"], json!(true));
+    }
+
+    #[test]
+    fn resolves_post_servertool_effect_for_unchanged_payload() {
+        let output = resolve_provider_response_post_servertool_effect(&json!({
+            "actionPlan": {
+                "executionPlans": [{
+                    "payload": { "id": "planned" },
+                    "projectionStage": "HubRespChatProcess03Governed",
+                    "allowFollowup": false
+                }],
+                "error": null
+            },
+            "currentPayload": { "id": "current" },
+            "orchestrationPayload": { "id": "ignored" },
+            "orchestrationExecuted": false
+        }))
+        .unwrap();
+
+        assert_eq!(output["payload"], json!({ "id": "current" }));
+        assert_eq!(output["stage"], json!("unchanged"));
+        assert_eq!(output["shouldProjectClientSemantic"], json!(false));
     }
 }

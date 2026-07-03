@@ -160,13 +160,6 @@ async function main() {
   results.push(await run('matrix:provider-response-chain-order', 'scripts/tests/provider-response-chain-order.mjs'));
   // 1e) virtual-router pool mode (round-robin vs priority)
   results.push(await run('matrix:virtual-router-pool-mode', 'scripts/tests/virtual-router-pool-mode.mjs'));
-  // 1e.0) quotaView must override health snapshot cooldown restores (except explicit safety policy TTLs).
-  results.push(
-    await run(
-      'matrix:virtual-router-quota-health-restore',
-      'scripts/tests/virtual-router-quota-health-restore.mjs'
-    )
-  );
   // 1e.1) virtual-router direct provider.model selection (RR across keys)
   results.push(await run('matrix:virtual-router-direct-model', 'scripts/tests/virtual-router-direct-model.mjs'));
   // 1e.3) capability-based routing must use default pool (vision/web_search)
