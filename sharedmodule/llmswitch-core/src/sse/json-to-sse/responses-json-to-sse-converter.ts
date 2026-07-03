@@ -6,22 +6,20 @@
 
 // feature_id: sse.responses_encode_projection
 // canonical_builder: build_responses_sse_stream_json
-import { PassThrough } from 'stream';
+import { PassThrough } from 'node:stream';
 import type {
   ResponsesResponse,
   ResponsesJsonToSseOptions,
-  ResponsesSseEventStream,
-  ResponsesSseEvent
+  ResponsesSseEventStream
 } from '../types/index.js';
-import { createResponsesStreamWriter } from '../shared/writer.js';
-import { buildResponsesSseStreamWithNative } from '../../native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseStreamFramesWithNative } from '../../native/router-hotpath/native-responses-sse-event-payload.js';
 
 export class ResponsesJsonToSseConverterRefactored {
   async convertResponseToJsonToSse(
     response: ResponsesResponse,
     options: ResponsesJsonToSseOptions
   ): Promise<ResponsesSseEventStream> {
-    const stream = new PassThrough({ objectMode: true });
+    const stream = new PassThrough({ objectMode: false });
     const sseStream: ResponsesSseEventStream = Object.assign(stream, {
       protocol: 'responses' as const,
       direction: 'json_to_sse' as const,
@@ -46,7 +44,7 @@ export class ResponsesJsonToSseConverterRefactored {
 
     (async () => {
       try {
-        const result = buildResponsesSseStreamWithNative({
+        const frameResult = buildResponsesSseStreamFramesWithNative({
           response,
           requestId: options.requestId,
           model: response.model,
@@ -56,16 +54,13 @@ export class ResponsesJsonToSseConverterRefactored {
             includeSequenceNumbers: true
           }
         });
-        const writer = createResponsesStreamWriter(stream, {
-          onEvent: () => undefined,
-          onError: (error) => {
-            if (stream.writable) {
-              stream.destroy(error);
-            }
-          }
-        });
-        await writer.writeResponsesEvents(result.events as unknown as ResponsesSseEvent[]);
-        writer.complete();
+        for (const frame of frameResult.frames) {
+          if (!stream.writable) break;
+          stream.write(frame);
+        }
+        if (stream.writable) {
+          stream.end();
+        }
       } catch (error) {
         if (stream.writable) {
           stream.destroy(error instanceof Error ? error : new Error(String(error)));

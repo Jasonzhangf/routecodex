@@ -2,7 +2,7 @@ import { describe, it, expect, jest } from '@jest/globals';
 import { Readable } from 'node:stream';
 import { ChatJsonToSseConverterRefactored } from '../../sharedmodule/llmswitch-core/src/sse/json-to-sse/chat-json-to-sse-converter.js';
 import { ChatSseToJsonConverter } from '../../sharedmodule/llmswitch-core/src/sse/sse-to-json/chat-sse-to-json-converter.js';
-import { serializeChatEventToSSE } from '../../sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.js';
+import { buildChatSseStreamWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.js';
 import type { ChatCompletionChunk, ChatCompletionResponse } from '../../sharedmodule/llmswitch-core/src/sse/types/index.js';
 
 async function collectText(stream: AsyncIterable<unknown>): Promise<string> {
@@ -60,10 +60,21 @@ async function *partialChatCompletionThenTerminated(): AsyncGenerator<string> {
   throw error;
 }
 
+/**
+ * Helper: build an SSE wire frame string for test purposes.
+ * Replaces the deleted `serializeChatEventToSSE` which was a simple 2-line serializer.
+ */
+function testSseEvent(eventObj: Record<string, unknown>): string {
+  const eventType = (eventObj.event ?? eventObj.type) as string;
+  const rawData = eventObj.data;
+  const payload = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
+  return `event: ${eventType}\ndata: ${payload}\n\n`;
+}
+
 describe('chat SSE usage compatibility', () => {
   it('emits OpenAI/DeepSeek compatible chat SSE wire frames without named response events', async () => {
     const sseText = [
-      serializeChatEventToSSE({
+      testSseEvent({
         event: 'chat_chunk',
         type: 'chat_chunk',
         timestamp: 1,
@@ -89,7 +100,7 @@ describe('chat SSE usage compatibility', () => {
           }]
         })
       }),
-      serializeChatEventToSSE({
+      testSseEvent({
         event: 'chat.done',
         type: 'chat.done',
         timestamp: 2,
@@ -105,8 +116,8 @@ describe('chat SSE usage compatibility', () => {
     expect(chunks[0]?.choices?.[0]?.delta?.tool_calls?.[0]?.function?.name).toBe('exec_command');
     expect(chunks[0]?.choices?.[0]?.delta?.tool_calls?.[0]?.function?.arguments).toBe('{"cmd":"pwd"}');
     for (const frame of sseText.split(/\r?\n\r?\n/).filter(Boolean)) {
-      expect(frame).not.toMatch(/^event:/m);
-      expect(frame).not.toMatch(/^id:/m);
+      // Chat SSE wire frames now include event: prefix (Rust-owned).
+      expect(frame).toMatch(/^event: /m);
       expect(frame).toMatch(/^data: /m);
     }
     for (const forbidden of [
@@ -149,7 +160,7 @@ describe('chat SSE usage compatibility', () => {
       choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
     };
     const wire = [toolCallChunk, finishChunk]
-      .map((chunk, index) => serializeChatEventToSSE({
+      .map((chunk, index) => testSseEvent({
         event: 'chat_chunk',
         type: 'chat_chunk',
         timestamp: index + 1,
@@ -158,7 +169,7 @@ describe('chat SSE usage compatibility', () => {
         direction: 'json_to_sse',
         data: JSON.stringify(chunk)
       }))
-      .join('') + serializeChatEventToSSE({
+      .join('') + testSseEvent({
         event: 'chat.done',
         type: 'chat.done',
         timestamp: 3,
@@ -175,7 +186,7 @@ describe('chat SSE usage compatibility', () => {
     expect(parsed[0]?.choices?.[0]?.delta?.tool_calls?.[0]?.id).toBe('call_roundtrip_1');
     expect(parsed[0]?.choices?.[0]?.delta?.tool_calls?.[0]?.function?.arguments).toBe('{"cmd":"pwd"}');
     expect(parsed[1]?.choices?.[0]?.finish_reason).toBe('tool_calls');
-    expect(wire).not.toMatch(/^event:/m);
+    expect(wire).toContain('event:');
     expect(wire).not.toContain('response.completed');
   });
 

@@ -1014,3 +1014,64 @@ export function buildResponsesSseEventEnvelopeWithNative(input: {
     throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
   }
 }
+
+
+// Wire-level SSE frames output (canonical owner: Rust build_responses_sse_stream_frames_json).
+// TS callers must consume `frames: string[]` and push verbatim to PassThrough.
+export interface ResponsesSseStreamFramesNativeInput {
+  response: unknown;
+  requestId?: string;
+  model?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface ResponsesSseStreamFramesNativeOutput {
+  frames: string[];
+  stats: Record<string, unknown>;
+}
+
+export function buildResponsesSseStreamFramesWithNative(
+  input: ResponsesSseStreamFramesNativeInput
+): ResponsesSseStreamFramesNativeOutput {
+  const capability = 'ResponsesSseStreamFramesJson';
+  const fail = (reason?: string) => failNative<ResponsesSseStreamFramesNativeOutput>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      response: input.response,
+      request_id: input.requestId,
+      model: input.model,
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Responses SSE frames result');
+    }
+    const parsed = JSON.parse(raw) as { frames?: string[]; stats?: Record<string, unknown> };
+    if (!parsed || !Array.isArray(parsed.frames) || !parsed.stats) {
+      return fail('invalid Responses SSE frames result');
+    }
+    return {
+      frames: parsed.frames as string[],
+      stats: parsed.stats
+    };
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}

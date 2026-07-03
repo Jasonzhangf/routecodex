@@ -8,15 +8,14 @@
 // canonical_builder: build_anthropic_sse_stream_json
 import { PassThrough } from 'node:stream';
 import type { AnthropicMessageResponse, AnthropicJsonToSseOptions } from '../types/index.js';
-import { createAnthropicStreamWriter } from '../shared/writer.js';
-import { buildAnthropicSseStreamWithNative } from '../../native/router-hotpath/native-anthropic-sse-event-payload.js';
+import { buildAnthropicSseStreamFramesWithNative } from '../../native/router-hotpath/native-anthropic-sse-event-payload.js';
 
 export class AnthropicJsonToSseConverter {
   async convertResponseToJsonToSse(
     response: AnthropicMessageResponse,
     options: AnthropicJsonToSseOptions
   ): Promise<PassThrough> {
-    const stream = new PassThrough({ objectMode: true });
+    const stream = new PassThrough({ objectMode: false });
     const result = Object.assign(stream, {
       protocol: 'anthropic-messages' as const,
       direction: 'json_to_sse' as const,
@@ -44,8 +43,10 @@ export class AnthropicJsonToSseConverter {
 
     (async () => {
       try {
-        const built = buildAnthropicSseStreamWithNative({
+        const frameResult = buildAnthropicSseStreamFramesWithNative({
           response,
+          requestId: options.requestId,
+          model: response.model,
           config: {
             chunkSize: options.chunkSize,
             chunkDelayMs: options.chunkDelayMs,
@@ -54,16 +55,13 @@ export class AnthropicJsonToSseConverter {
             reasoningTextPrefix: options.reasoningTextPrefix
           }
         });
-        const writer = createAnthropicStreamWriter(stream, {
-          onEvent: () => undefined,
-          onError: (error) => {
-            if (stream.writable) {
-              stream.destroy(error);
-            }
-          }
-        });
-        await writer.writeAnthropicEvents(built.events as unknown as Parameters<typeof writer.writeAnthropicEvents>[0]);
-        writer.complete();
+        for (const frame of frameResult.frames) {
+          if (!stream.writable) break;
+          stream.write(frame);
+        }
+        if (stream.writable) {
+          stream.end();
+        }
       } catch (error) {
         if (stream.writable) {
           stream.destroy(error instanceof Error ? error : new Error(String(error)));

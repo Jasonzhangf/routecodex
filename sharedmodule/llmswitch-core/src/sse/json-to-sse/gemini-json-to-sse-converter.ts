@@ -8,15 +8,14 @@
 // canonical_builder: build_gemini_sse_stream_json
 import { PassThrough } from 'node:stream';
 import type { GeminiResponse, GeminiJsonToSseOptions } from '../types/index.js';
-import { createGeminiStreamWriter } from '../shared/writer.js';
-import { buildGeminiSseStreamWithNative } from '../../native/router-hotpath/native-gemini-sse-event-payload.js';
+import { buildGeminiSseStreamFramesWithNative } from '../../native/router-hotpath/native-gemini-sse-event-payload.js';
 
 export class GeminiJsonToSseConverter {
   async convertResponseToJsonToSse(
     response: GeminiResponse,
     options: GeminiJsonToSseOptions
   ): Promise<PassThrough> {
-    const stream = new PassThrough({ objectMode: true });
+    const stream = new PassThrough({ objectMode: false });
     const result = Object.assign(stream, {
       protocol: 'gemini-chat' as const,
       direction: 'json_to_sse' as const,
@@ -42,24 +41,23 @@ export class GeminiJsonToSseConverter {
 
     (async () => {
       try {
-        const built = buildGeminiSseStreamWithNative({
+        const frameResult = buildGeminiSseStreamFramesWithNative({
           response,
+          requestId: options.requestId,
+          model: response.modelVersion,
           config: {
             chunkDelayMs: options.chunkDelayMs,
             reasoningMode: options.reasoningMode,
             reasoningTextPrefix: options.reasoningTextPrefix
           }
         });
-        const writer = createGeminiStreamWriter(stream, {
-          onEvent: () => undefined,
-          onError: (error) => {
-            if (stream.writable) {
-              stream.destroy(error);
-            }
-          }
-        });
-        await writer.writeGeminiEvents(built.events as unknown as Parameters<typeof writer.writeGeminiEvents>[0]);
-        writer.complete();
+        for (const frame of frameResult.frames) {
+          if (!stream.writable) break;
+          stream.write(frame);
+        }
+        if (stream.writable) {
+          stream.end();
+        }
       } catch (error) {
         if (stream.writable) {
           stream.destroy(error instanceof Error ? error : new Error(String(error)));

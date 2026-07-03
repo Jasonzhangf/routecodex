@@ -167,6 +167,27 @@ describe('request-executor primary exhausted plan bridge', () => {
     })).toBe(true);
   });
 
+  it('[reverse] default tier availability is false when a logical forwarder resolves to the current last provider', () => {
+    const tiers = coreUtilsModule.buildErrorErr05DefaultAvailabilityTiers({
+      routeName: 'thinking',
+      routeTiers: [
+        { id: 'thinking-primary', targets: ['fwd.lmstudio.ornith-1.0-397b'], priority: 200 },
+      ],
+      defaultRouteTiers: [
+        { id: 'default-primary', targets: ['fwd.lmstudio.ornith-1.0-397b'], priority: 100 },
+      ],
+    });
+
+    expect(coreUtilsModule.resolveDefaultTierAvailableForErrorErr05({
+      tiers,
+      routePool: ['lmstudio.key1.ornith-1.0-397b'],
+      excludedProviderKeys: new Set(['lmstudio.key1.ornith-1.0-397b']),
+      targetAliases: {
+        'fwd.lmstudio.ornith-1.0-397b': ['lmstudio.key1.ornith-1.0-397b'],
+      },
+    })).toBe(false);
+  });
+
   it('[forward] ErrorErr05 routing group uses port routingPolicyGroup when metadata is absent', () => {
     expect(coreUtilsModule.resolveErrorErr05RoutingPolicyGroup({
       metadata: {},

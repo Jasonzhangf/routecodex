@@ -662,3 +662,65 @@ export function buildChatSseStreamWithNative(
     throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
   }
 }
+
+// Caller-supplied event-style inputs not allowed here; must round-trip via canonical builder.
+export interface ChatSseStreamFramesNativeInput {
+  response: unknown;
+  model?: string;
+  requestId?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface ChatSseStreamFramesNativeOutput {
+  frames: string[];
+  stats: Record<string, unknown>;
+}
+
+// Wire-level SSE frame output (canonical owner: Rust build_chat_sse_stream_frames_json).
+// TS callers must consume `frames: string[]` and push verbatim to PassThrough;
+// any caller-side re-serialization is forbidden.
+export function buildChatSseStreamWithNativeFrames(
+  input: ChatSseStreamFramesNativeInput
+): ChatSseStreamFramesNativeOutput {
+  const capability = 'buildChatSseStreamFramesJson';
+  const fail = (reason?: string) => failNative<ChatSseStreamFramesNativeOutput>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  let inputJson: string;
+  try {
+    inputJson = JSON.stringify({
+      response: input.response,
+      model: input.model,
+      request_id: input.requestId,
+      config: input.config ?? {}
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty Chat SSE frames result');
+    }
+    const parsed = JSON.parse(raw) as { frames?: string[]; stats?: Record<string, unknown> };
+    if (!parsed || !Array.isArray(parsed.frames) || !parsed.stats) {
+      return fail('invalid Chat SSE frames result');
+    }
+    return {
+      frames: parsed.frames as string[],
+      stats: parsed.stats
+    };
+  } catch (error) {
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown')));
+  }
+}

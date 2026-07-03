@@ -88,6 +88,7 @@ describe('HubRequestExecutor requestId rebind', () => {
       providerFamily: 'gemini',
       providerId: 'mimo1',
       providerProtocol: 'openai-responses',
+      runtime: {},
       instance: {
         processIncoming: processIncoming1,
         cleanup: jest.fn()
@@ -98,6 +99,7 @@ describe('HubRequestExecutor requestId rebind', () => {
       providerFamily: 'gemini',
       providerId: 'mimo2',
       providerProtocol: 'openai-responses',
+      runtime: {},
       instance: {
         processIncoming: processIncoming2,
         cleanup: jest.fn()
@@ -117,7 +119,7 @@ describe('HubRequestExecutor requestId rebind', () => {
         runtimeKey: 'runtime:key1',
         processMode: 'standard'
       },
-      routingDecision: { routeName: 'default', pool: routePool } as any,
+      routingDecision: { routeName: 'default', pool: routePool, providerProtocol: 'openai-responses' } as any,
       processMode: 'standard',
       metadata: {}
     };
@@ -130,7 +132,7 @@ describe('HubRequestExecutor requestId rebind', () => {
         runtimeKey: 'runtime:key2',
         processMode: 'standard'
       },
-      routingDecision: { routeName: 'default', pool: routePool } as any,
+      routingDecision: { routeName: 'default', pool: routePool, providerProtocol: 'openai-responses' } as any,
       processMode: 'standard',
       metadata: {}
     };
@@ -199,6 +201,7 @@ describe('HubRequestExecutor requestId rebind', () => {
       providerFamily: 'openai',
       providerId: 'cc',
       providerProtocol: 'openai-responses',
+      runtime: {},
       instance: {
         processIncoming,
         cleanup: jest.fn()
@@ -214,6 +217,7 @@ describe('HubRequestExecutor requestId rebind', () => {
         runtimeKey: 'runtime:cc',
         processMode: 'chat'
       },
+      routingDecision: { routeName: 'thinking', pool: ['cc.key1.gpt-5.5'], providerProtocol: 'openai-responses' } as any,
       processMode: 'chat',
       metadata: {}
     };

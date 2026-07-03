@@ -2284,6 +2284,12 @@ pub fn build_responses_sse_stream_json_bridge(input_json: String) -> NapiResult<
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "ResponsesSseStreamFramesJson")]
+pub fn build_responses_sse_stream_frames_json_bridge(input_json: String) -> NapiResult<String> {
+    responses_sse_event_payload::build_responses_sse_stream_frames_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "buildResponsesSseEventEnvelopeJson")]
 pub fn build_responses_sse_event_envelope_json(input_json: String) -> NapiResult<String> {
     responses_sse_event_payload::build_responses_sse_event_envelope_json(input_json)
@@ -2349,6 +2355,12 @@ pub fn build_chat_sse_stream_json_bridge(input_json: String) -> NapiResult<Strin
     chat_sse_event_payload::build_chat_sse_stream_json(input_json).map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "buildChatSseStreamFramesJson")]
+pub fn build_chat_sse_stream_frames_json_bridge(input_json: String) -> NapiResult<String> {
+    chat_sse_event_payload::build_chat_sse_stream_frames_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "buildChatJsonFromSseJson")]
 pub fn build_chat_json_from_sse_json(input_json: String) -> NapiResult<String> {
     chat_sse_event_payload::build_chat_json_from_sse_json(input_json)
@@ -2367,6 +2379,12 @@ pub fn build_gemini_sse_stream_json_bridge(input_json: String) -> NapiResult<Str
         .map_err(napi::Error::from_reason)
 }
 
+#[napi(js_name = "GeminiSseStreamFramesJson")]
+pub fn build_gemini_sse_stream_frames_json_bridge(input_json: String) -> NapiResult<String> {
+    gemini_sse_event_payload::build_gemini_sse_stream_frames_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(js_name = "buildGeminiJsonFromSseJson")]
 pub fn napi_build_gemini_json_from_sse_json(input_json: String) -> NapiResult<String> {
     gemini_sse_event_payload::build_gemini_json_from_sse_json(input_json)
@@ -2382,6 +2400,12 @@ pub fn napi_build_anthropic_sse_event_sequence_json(input_json: String) -> NapiR
 #[napi(js_name = "AnthropicSseStreamJson")]
 pub fn build_anthropic_sse_stream_json_bridge(input_json: String) -> NapiResult<String> {
     anthropic_sse_event_payload::build_anthropic_sse_stream_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "AnthropicSseStreamFramesJson")]
+pub fn build_anthropic_sse_stream_frames_json_bridge(input_json: String) -> NapiResult<String> {
+    anthropic_sse_event_payload::build_anthropic_sse_stream_frames_json(input_json)
         .map_err(napi::Error::from_reason)
 }
 

@@ -42,6 +42,7 @@ import {
   shouldLogStageEvent,
   extractProviderKeysForRoutingGroup,
   extractRoutingTiersForRoutingGroupRoute,
+  buildRoutingTargetAliasMap,
 } from './http-server-bootstrap.js';
 import { canonicalizeServerId } from './server-id.js';
 import { StatsManager } from './stats-manager.js';
@@ -571,6 +572,14 @@ export class RouteCodexHttpServer {
       getModuleDependencies: () => this.getModuleDependencies(),
       getRoutingTiers: (routingPolicyGroup, routeName) =>
         extractRoutingTiersForRoutingGroupRoute(this.userConfig, routingPolicyGroup, routeName),
+      getRoutingTargetAliases: (routingPolicyGroup, routeName) => {
+        const tiers = extractRoutingTiersForRoutingGroupRoute(this.userConfig, routingPolicyGroup, routeName);
+        return buildRoutingTargetAliasMap(
+          this.userConfig,
+          tiers.flatMap((tier) => tier.targets),
+          Array.from(this.providerHandles.keys()),
+        );
+      },
       executeNestedInput: (nestedInput) => this.executePortAwarePipeline(
         typeof nestedInput.metadata?.routecodexLocalPort === 'number'
         ? nestedInput.metadata.routecodexLocalPort
@@ -1847,6 +1856,17 @@ export class RouteCodexHttpServer {
             'default',
           )
           : [];
+      const routingTargetAliases =
+        routingDecisionRouteName && routingPolicyGroupForErrorErr05
+          ? buildRoutingTargetAliasMap(
+            this.userConfig,
+            [
+              ...routingDecisionTiers.flatMap((tier) => tier.targets),
+              ...defaultRouteTiers.flatMap((tier) => tier.targets),
+            ],
+            Array.from(this.providerHandles.keys()),
+          )
+          : {};
       const defaultTierAvailableForDecision = resolveDefaultTierAvailableForErrorErr05({
         tiers: buildErrorErr05DefaultAvailabilityTiers({
           routeName: routingDecisionRouteName,
@@ -1855,6 +1875,7 @@ export class RouteCodexHttpServer {
         }),
         routePool: routingDecisionProviderPool,
         excludedProviderKeys: retryState.excludedProviderKeys,
+        targetAliases: routingTargetAliases,
       });
       const routePoolIsAuthoritativeForDecision = resolveRoutePoolAuthoritativeForRetry({
         routingDecision: routingDecision as Record<string, unknown> | undefined,
@@ -2077,6 +2098,17 @@ export class RouteCodexHttpServer {
               'default',
             )
             : [];
+        const routingTargetAliases =
+          routingDecisionRouteName && routingPolicyGroupForErrorErr05
+            ? buildRoutingTargetAliasMap(
+              this.userConfig,
+              [
+                ...routingDecisionTiers.flatMap((tier) => tier.targets),
+                ...defaultRouteTiers.flatMap((tier) => tier.targets),
+              ],
+              Array.from(this.providerHandles.keys()),
+            )
+            : {};
         const defaultTierAvailableForDecision = resolveDefaultTierAvailableForErrorErr05({
           tiers: buildErrorErr05DefaultAvailabilityTiers({
             routeName: routingDecisionRouteName,
@@ -2085,6 +2117,7 @@ export class RouteCodexHttpServer {
           }),
           routePool: routingDecisionProviderPool,
           excludedProviderKeys: retryState.excludedProviderKeys,
+          targetAliases: routingTargetAliases,
         });
         const routePoolIsAuthoritativeForDecision = resolveRoutePoolAuthoritativeForRetry({
           routingDecision: ctx.routingDecision as Record<string, unknown> | undefined,

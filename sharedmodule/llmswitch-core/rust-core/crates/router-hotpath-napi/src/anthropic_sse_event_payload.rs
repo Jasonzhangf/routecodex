@@ -810,6 +810,51 @@ pub fn build_anthropic_sse_stream_json(input_json: String) -> Result<String, Str
         .map_err(|error| format!("Failed to serialize anthropic SSE stream JSON: {}", error))
 }
 
+/// Build wire-level SSE frames for the Anthropic SSE stream.
+pub fn build_anthropic_sse_stream_frames_json(input_json: String) -> Result<String, String> {
+    let stream = build_anthropic_sse_stream_json(input_json)?;
+    let parsed: Value = serde_json::from_str(&stream)
+        .map_err(|error| format!("Failed to parse anthropic SSE stream output: {}", error))?;
+    let events = parsed
+        .get("events")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "anthropic SSE stream missing events array".to_string())?;
+    let stats = parsed
+        .get("stats")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut frames: Vec<String> = Vec::with_capacity(events.len());
+    for event in events {
+        let frame = serialize_anthropic_event_to_wire(event)?;
+        frames.push(frame);
+    }
+    let output = serde_json::json!({
+        "frames": frames,
+        "stats": stats,
+    });
+    serde_json::to_string(&output)
+        .map_err(|error| format!("Failed to serialize anthropic SSE frames JSON: {}", error))
+}
+
+/// Serialize a canonical AnthropicSseEvent to SSE wire format.
+fn serialize_anthropic_event_to_wire(event: &Value) -> Result<String, String> {
+    let event_type = event
+        .get("event")
+        .or_else(|| event.get("type"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Anthropic SSE event missing event/type field".to_string())?;
+    if event_type.trim().is_empty() {
+        return Err("Anthropic SSE event type must be non-empty".to_string());
+    }
+    let payload = match event.get("data") {
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => serde_json::to_string(other)
+            .map_err(|error| format!("Failed to serialize anthropic SSE data: {}", error))?,
+        None => "{}".to_string(),
+    };
+    Ok(format!("event: {}\ndata: {}\n\n", event_type, payload))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{build_anthropic_json_from_sse_json, build_anthropic_sse_event_sequence_json};

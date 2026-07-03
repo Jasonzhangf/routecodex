@@ -2447,12 +2447,14 @@ pub fn publish_responses_record_plan_json(
         .and_then(|row| row.get("request_id"))
         .and_then(|v| read_trimmed_string(Some(v)));
     let entry_request_id = response_request_id
+        .or_else(|| Some(request_id.clone()))
+        .filter(|value| !value.trim().is_empty())
         .or_else(|| {
-            read_request_truth_field(&context, "requestId")
+            read_request_truth_field(&context, "entryRequestId")
                 .and_then(|v| read_trimmed_string(Some(v)))
         })
         .or_else(|| {
-            read_request_truth_field(&context, "entryRequestId")
+            read_request_truth_field(&context, "requestId")
                 .and_then(|v| read_trimmed_string(Some(v)))
         })
         .or_else(|| {

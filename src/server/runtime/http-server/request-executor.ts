@@ -397,6 +397,7 @@ export type RequestExecutorDeps = {
   };
   getHubPipeline(routingPolicyGroup?: string): HubPipeline | null;
   getRoutingTiers?(routingPolicyGroup: string, routeName: string): Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
+  getRoutingTargetAliases?(routingPolicyGroup: string, routeName: string): Record<string, string[]>;
   getModuleDependencies(): ModuleDependencies;
   executeNestedInput?: (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
@@ -789,6 +790,7 @@ export class HubRequestExecutor implements RequestExecutor {
         let cumulativeTrafficWaitMs = 0;
         let cumulativeClientInjectWaitMs = 0;
         let allowPrimaryExhaustedReplayBeyondAttemptBudget = false;
+        let responsesConversationRebindRequestId = providerRequestId;
 
         while (attempt < maxAttempts || allowPrimaryExhaustedReplayBeyondAttemptBudget) {
         attempt += 1;
@@ -876,6 +878,11 @@ export class HubRequestExecutor implements RequestExecutor {
           && typeof routingPolicyGroupForAttempt === 'string'
             ? this.deps.getRoutingTiers?.(routingPolicyGroupForAttempt, 'default') ?? []
             : [];
+        const routeTargetAliasesForAttempt =
+          typeof routeNameForAttempt === 'string'
+          && typeof routingPolicyGroupForAttempt === 'string'
+            ? this.deps.getRoutingTargetAliases?.(routingPolicyGroupForAttempt, routeNameForAttempt) ?? {}
+            : {};
         const resolvedPipelineAttempt = resolveRequestExecutorPipelineAttempt({
           inputRequestId: input.requestId,
           providerRequestId,
@@ -888,6 +895,7 @@ export class HubRequestExecutor implements RequestExecutor {
           initialRoutePool,
           routeTiersForAttempt,
           defaultRouteTiersForAttempt,
+          routeTargetAliasesForAttempt,
           excludedProviderKeys,
           lastError,
           throwIfClientAbortSignalAborted,
@@ -920,6 +928,7 @@ export class HubRequestExecutor implements RequestExecutor {
           }),
           routePool: routePoolForAttempt,
           excludedProviderKeys,
+          targetAliases: routeTargetAliasesForAttempt,
         });
         const routingDecisionForAttempt = pipelineResult.routingDecision as Record<string, unknown> | undefined;
         const routePoolIsAuthoritativeForAttempt = resolveRoutePoolAuthoritativeForRetry({
@@ -1034,11 +1043,13 @@ export class HubRequestExecutor implements RequestExecutor {
           if (providerContext.requestId !== input.requestId) {
             input.requestId = providerContext.requestId;
             if (shouldRebindResponsesConversationForEntry(input.entryEndpoint)) {
+              const rebindSourceRequestId = responsesConversationRebindRequestId;
               try {
-                await rebindResponsesConversationRequestId(previousRequestId, input.requestId);
+                await rebindResponsesConversationRequestId(rebindSourceRequestId, input.requestId);
+                responsesConversationRebindRequestId = input.requestId;
               } catch (error) {
                 logStage('responsesConversation.rebindRequestId.error', input.requestId, {
-                  previousRequestId,
+                  previousRequestId: rebindSourceRequestId,
                   providerKey: target.providerKey,
                   runtimeKey,
                   message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),

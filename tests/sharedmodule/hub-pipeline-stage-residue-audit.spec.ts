@@ -3783,17 +3783,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('chat SSE serializer must not expose retired stream wrapper helper', () => {
+  it('chat SSE serializer must have been physically deleted', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/sse/shared/chat-serializer.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'imports stream wrapper primitives for deleted helper', pattern: /import\s+\{[^}]*\b(?:PassThrough|Readable)\b[^}]*\}\s+from\s+['"]node:stream['"]/ },
-      { label: 'keeps deleted chat SSE text stream wrapper', pattern: /export\s+function\s+toSSETextStream\b/ },
-      { label: 'keeps deleted chat serializer non-blocking logger', pattern: /logChatSerializerNonBlocking\b/ },
-      { label: 'keeps deleted generic chat serializer error frame', pattern: /chat sse serialization failed/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    // Physically deleted as part of SSE rustification closeout (Phase 4).
+    // All wire-serialization logic moved to Rust build_*_sse_stream_frames_json.
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('SSE shared utils must not expose retired zero-consumer public helpers', () => {

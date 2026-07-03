@@ -151,16 +151,6 @@ struct ApplyPatchConfigOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ClockConfigOutput {
-    enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tick_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    include_time_tag: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct ConfigBootstrapOutput {
     classifier: ClassifierConfigOutput,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -168,8 +158,6 @@ struct ConfigBootstrapOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     health: Option<ProviderHealthConfigOutput>,
     context_routing: ContextRoutingConfigOutput,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    clock: Option<ClockConfigOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     web_search: Option<WebSearchConfigOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -199,7 +187,7 @@ pub(crate) fn bootstrap_virtual_router_config_meta_json(
         load_balancing: normalize_load_balancing(section.get("loadBalancing")),
         health: normalize_health(section.get("health")),
         context_routing: normalize_context_routing(section.get("contextRouting")),
-        clock: normalize_clock(section.get("clock")),
+
         web_search: normalize_web_search(section.get("webSearch"), routing_source).map_err(
             |error| napi::Error::from_reason(format_virtual_router_error("CONFIG_ERROR", error)),
         )?,
@@ -430,29 +418,6 @@ fn normalize_exec_command_guard(value: Option<&Value>) -> Option<ExecCommandGuar
     })
 }
 
-fn normalize_clock(value: Option<&Value>) -> Option<ClockConfigOutput> {
-    let record = value.and_then(Value::as_object)?;
-    let enabled = record
-        .get("enabled")
-        .and_then(parse_bool_like)
-        .unwrap_or(true);
-    if !enabled {
-        return None;
-    }
-    let tick_ms = record
-        .get("tickMs")
-        .or_else(|| record.get("tick_ms"))
-        .and_then(normalize_positive_floor_i64);
-    let include_time_tag = record
-        .get("includeTimeTag")
-        .or_else(|| record.get("include_time_tag"))
-        .and_then(parse_bool_like);
-    Some(ClockConfigOutput {
-        enabled: true,
-        tick_ms,
-        include_time_tag,
-    })
-}
 
 fn normalize_web_search(
     value: Option<&Value>,

@@ -271,8 +271,6 @@ export interface ChatJsonToSseOptions {
   requestId: string;
   model: string;
   timeoutMs?: number;
-  enableHeartbeat?: boolean;
-  heartbeatIntervalMs?: number;
   chunkDelayMs?: number;
   includeSystemFingerprint?: boolean;
   includeLogprobs?: boolean;

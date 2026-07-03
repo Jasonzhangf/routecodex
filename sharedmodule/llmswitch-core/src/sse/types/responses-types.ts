@@ -272,8 +272,6 @@ export interface ResponsesJsonToSseOptions {
   requestId: string;
   model: string;
   timeoutMs?: number;
-  enableHeartbeat?: boolean;
-  heartbeatIntervalMs?: number;
   chunkSize?: number;
   includeSequenceNumbers?: boolean;
   includeMetadata?: boolean;

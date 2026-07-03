@@ -1356,6 +1356,56 @@ pub fn build_chat_sse_stream_json(input_json: String) -> Result<String, String> 
         .map_err(|error| format!("Failed to serialize Chat SSE stream JSON: {}", error))
 }
 
+/// Build wire-level SSE frames for the Chat SSE stream.
+/// Returns `{frames: string[], stats}` where each frame is a complete SSE record
+/// terminated by `\n\n`, ready to be pushed verbatim to the client transport.
+pub fn build_chat_sse_stream_frames_json(input_json: String) -> Result<String, String> {
+    let stream = build_chat_sse_stream_json(input_json)?;
+    let parsed: Value = serde_json::from_str(&stream)
+        .map_err(|error| format!("Failed to parse Chat SSE stream output: {}", error))?;
+    let events = parsed
+        .get("events")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Chat SSE stream missing events array".to_string())?;
+    let stats = parsed
+        .get("stats")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut frames: Vec<String> = Vec::with_capacity(events.len());
+    for event in events {
+        let frame = serialize_chat_event_to_wire(event)?;
+        frames.push(frame);
+    }
+    let output = serde_json::json!({
+        "frames": frames,
+        "stats": stats,
+    });
+    serde_json::to_string(&output)
+        .map_err(|error| format!("Failed to serialize Chat SSE frames JSON: {}", error))
+}
+
+/// Serialize a canonical ChatSseEvent to SSE wire format:
+/// `event: <type>\ndata: <payload>\n\n`
+/// payload `data` field may be a JSON string (already serialized) or any JSON value.
+pub fn serialize_chat_event_to_wire(event: &Value) -> Result<String, String> {
+    let event_type = event
+        .get("event")
+        .or_else(|| event.get("type"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Chat SSE event missing event/type field".to_string())?
+        .to_string();
+    if event_type.is_empty() {
+        return Err("Chat SSE event type must be non-empty".to_string());
+    }
+    let data_str = match event.get("data") {
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => serde_json::to_string(other)
+            .map_err(|error| format!("Failed to serialize Chat SSE data: {}", error))?,
+        None => String::new(),
+    };
+    Ok(format!("event: {}\ndata: {}\n\n", event_type, data_str))
+}
+
 fn chrono_or_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

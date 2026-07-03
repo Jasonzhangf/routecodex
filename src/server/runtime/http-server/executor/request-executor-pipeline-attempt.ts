@@ -159,6 +159,7 @@ export function resolveRequestExecutorPipelineAttempt(args: {
   initialRoutePool: string[] | null;
   routeTiersForAttempt?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
   defaultRouteTiersForAttempt?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
+  routeTargetAliasesForAttempt?: Record<string, string[]>;
   excludedProviderKeys: Set<string>;
   lastError: unknown;
   throwIfClientAbortSignalAborted: (abortSignal: AbortSignal | undefined) => void;
@@ -225,6 +226,7 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       }),
       routePool: routePoolForAttempt,
       excludedProviderKeys: args.excludedProviderKeys,
+      targetAliases: args.routeTargetAliasesForAttempt,
     });
     const routePoolIsAuthoritative = resolveRoutePoolAuthoritativeForRetry({
       routingDecision,
@@ -239,6 +241,7 @@ export function resolveRequestExecutorPipelineAttempt(args: {
       routePoolForAttempt,
       routeTiersForAttempt: args.routeTiersForAttempt ?? [],
       defaultTierAvailable,
+      targetAliases: args.routeTargetAliasesForAttempt,
     });
     args.logStage('provider.retry.excluded_target_reselected', args.providerRequestId, {
       providerKey: target.providerKey,

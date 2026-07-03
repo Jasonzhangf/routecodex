@@ -708,8 +708,6 @@ export interface DebugConfiguration {
     path: string;
     maxConnections: number;
     enableCompression: boolean;
-    enableHeartbeat: boolean;
-    heartbeatInterval: number;
   };
   /** REST API configuration */
   restApi: {

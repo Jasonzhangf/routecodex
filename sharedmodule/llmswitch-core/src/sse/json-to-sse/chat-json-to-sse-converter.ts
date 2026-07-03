@@ -6,28 +6,28 @@
 
 // feature_id: sse.chat_stream_projection
 // canonical_builder: build_chat_sse_stream_json
-import { PassThrough } from 'stream';
+import { PassThrough } from 'node:stream';
 import type {
   ChatCompletionResponse,
   ChatJsonToSseOptions,
   ChatSseEventStream,
-  ChatSseEvent,
   ChatEventStats
 } from '../types/index.js';
-import { createChatStreamWriter } from '../shared/writer.js';
-import { buildChatSseStreamWithNative } from '../../native/router-hotpath/native-chat-sse-event-payload.js';
+import {
+  buildChatSseStreamWithNativeFrames
+} from '../../native/router-hotpath/native-chat-sse-event-payload.js';
 
 export class ChatJsonToSseConverterRefactored {
   async convertResponseToJsonToSse(
     response: ChatCompletionResponse,
     options: ChatJsonToSseOptions
   ): Promise<ChatSseEventStream> {
-    const stream = new PassThrough({ objectMode: true });
+    const stream = new PassThrough({ objectMode: false });
     const sseStream: ChatSseEventStream = Object.assign(stream, {
       protocol: 'chat' as const,
       direction: 'json_to_sse' as const,
       requestId: options.requestId,
-      getStats: () => streamEventStats(stream),
+      getStats: () => streamEventStats(),
       complete: () => {
         if (stream.writable) {
           stream.end();
@@ -42,7 +42,7 @@ export class ChatJsonToSseConverterRefactored {
 
     (async () => {
       try {
-        const result = buildChatSseStreamWithNative({
+        const frameResult = buildChatSseStreamWithNativeFrames({
           response,
           model: options.model ?? response.model,
           requestId: options.requestId,
@@ -54,16 +54,13 @@ export class ChatJsonToSseConverterRefactored {
             reasoningTextPrefix: options.reasoningTextPrefix
           }
         });
-        const writer = createChatStreamWriter(stream, {
-          onEvent: () => undefined,
-          onError: (error) => {
-            if (stream.writable) {
-              stream.destroy(error);
-            }
-          }
-        });
-        await writer.writeChatEvents(result.events as ChatSseEvent[]);
-        writer.complete();
+        for (const frame of frameResult.frames) {
+          if (!stream.writable) break;
+          stream.write(frame);
+        }
+        if (stream.writable) {
+          stream.end();
+        }
       } catch (error) {
         if (stream.writable) {
           stream.destroy(error instanceof Error ? error : new Error(String(error)));
@@ -75,7 +72,7 @@ export class ChatJsonToSseConverterRefactored {
   }
 }
 
-function streamEventStats(stream: PassThrough): ChatEventStats {
+function streamEventStats(): ChatEventStats {
   return {
     totalChunks: 0,
     totalTokens: 0,

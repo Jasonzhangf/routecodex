@@ -2392,6 +2392,32 @@ pub fn build_responses_sse_stream_json(input_json: String) -> Result<String, Str
         .map_err(|error| format!("Failed to serialize Responses SSE stream JSON: {}", error))
 }
 
+/// Build wire-level SSE frames for the Responses SSE stream.
+pub fn build_responses_sse_stream_frames_json(input_json: String) -> Result<String, String> {
+    let stream = build_responses_sse_stream_json(input_json)?;
+    let parsed: Value = serde_json::from_str(&stream)
+        .map_err(|error| format!("Failed to parse Responses SSE stream output: {}", error))?;
+    let events = parsed
+        .get("events")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Responses SSE stream missing events array".to_string())?;
+    let stats = parsed
+        .get("stats")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut frames: Vec<String> = Vec::with_capacity(events.len());
+    for event in events {
+        let frame = serialize_responses_sse_event_to_wire(event.clone())?;
+        frames.push(frame);
+    }
+    let output = serde_json::json!({
+        "frames": frames,
+        "stats": stats,
+    });
+    serde_json::to_string(&output)
+        .map_err(|error| format!("Failed to serialize Responses SSE frames JSON: {}", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

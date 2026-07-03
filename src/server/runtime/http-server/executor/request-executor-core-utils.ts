@@ -142,6 +142,7 @@ export function isReselectedExcludedProviderVerifiedLastProvider(args: {
   routePoolForAttempt: string[];
   routeTiersForAttempt?: Array<{ targets: string[]; backup?: boolean }>;
   defaultTierAvailable: boolean;
+  targetAliases?: Record<string, string[]>;
 }): boolean {
   const decisionRoutePool = args.routingDecision?.routePool;
   if (!Array.isArray(decisionRoutePool) || decisionRoutePool.length === 0) {
@@ -153,12 +154,20 @@ export function isReselectedExcludedProviderVerifiedLastProvider(args: {
   if (routePool.length !== 1 || routePool[0] !== args.providerKey) {
     return false;
   }
-  const configuredCandidates = new Set(
-    (args.routeTiersForAttempt ?? [])
-      .flatMap((tier) => Array.isArray(tier.targets) ? tier.targets : [])
-      .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
-      .map((target) => target.trim())
-  );
+  const configuredCandidates = new Set<string>();
+  for (const target of (args.routeTiersForAttempt ?? []).flatMap((tier) => Array.isArray(tier.targets) ? tier.targets : [])) {
+    if (typeof target !== 'string' || !target.trim()) {
+      continue;
+    }
+    const normalized = target.trim();
+    const aliases = args.targetAliases?.[normalized];
+    const candidates = Array.isArray(aliases) && aliases.length > 0 ? aliases : [normalized];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        configuredCandidates.add(candidate.trim());
+      }
+    }
+  }
   return configuredCandidates.size === 1
     && configuredCandidates.has(args.providerKey)
     && args.defaultTierAvailable === false;
@@ -266,6 +275,7 @@ export function resolveDefaultTierAvailableForErrorErr05(args: {
   tiers?: Array<{ targets: string[]; backup?: boolean }>;
   routePool?: string[];
   excludedProviderKeys: Set<string>;
+  targetAliases?: Record<string, string[]>;
 }): boolean {
   const tiers = Array.isArray(args.tiers) ? args.tiers : [];
   const defaultTier = tiers.find((tier) => tier.backup === true);
@@ -277,18 +287,37 @@ export function resolveDefaultTierAvailableForErrorErr05(args: {
       .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
       .map((target) => target.trim())
   );
+  const readCandidates = (target: string): string[] => {
+    const aliases = args.targetAliases?.[target];
+    const raw = Array.isArray(aliases) && aliases.length > 0 ? aliases : [target];
+    const candidates: string[] = [];
+    for (const value of raw) {
+      if (typeof value !== 'string') {
+        continue;
+      }
+      const trimmed = value.trim();
+      if (!trimmed || candidates.includes(trimmed)) {
+        continue;
+      }
+      candidates.push(trimmed);
+    }
+    return candidates;
+  };
   for (const target of defaultTier.targets) {
     if (typeof target !== 'string') {
       continue;
     }
     const normalized = target.trim();
-    if (!normalized || args.excludedProviderKeys.has(normalized)) {
+    if (!normalized) {
       continue;
     }
-    if (routePool.has(normalized)) {
-      continue;
+    const candidates = readCandidates(normalized);
+    for (const candidate of candidates) {
+      if (args.excludedProviderKeys.has(candidate) || routePool.has(candidate)) {
+        continue;
+      }
+      return true;
     }
-    return true;
   }
   return false;
 }

@@ -86,6 +86,7 @@ describe('HubRequestExecutor pre-send failure reroute', () => {
       providerFamily: 'openai',
       providerId: 'p1',
       providerProtocol: 'openai-responses',
+      runtime: {},
       instance: { processIncoming: processIncoming1, cleanup: jest.fn() }
     } as unknown as ProviderHandle;
     const handle2: ProviderHandle = {
@@ -93,6 +94,7 @@ describe('HubRequestExecutor pre-send failure reroute', () => {
       providerFamily: 'openai',
       providerId: 'p2',
       providerProtocol: 'openai-responses',
+      runtime: {},
       instance: { processIncoming: processIncoming2, cleanup: jest.fn() }
     } as unknown as ProviderHandle;
 
@@ -109,7 +111,7 @@ describe('HubRequestExecutor pre-send failure reroute', () => {
         runtimeKey: 'runtime:key1',
         processMode: 'standard'
       },
-      routingDecision: { routeName: 'default', pool: routePool } as any,
+      routingDecision: { routeName: 'default', pool: routePool, providerProtocol: 'openai-responses' } as any,
       processMode: 'standard',
       metadata: {}
     };
@@ -122,7 +124,7 @@ describe('HubRequestExecutor pre-send failure reroute', () => {
         runtimeKey: 'runtime:key2',
         processMode: 'standard'
       },
-      routingDecision: { routeName: 'default', pool: routePool } as any,
+      routingDecision: { routeName: 'default', pool: routePool, providerProtocol: 'openai-responses' } as any,
       processMode: 'standard',
       metadata: {}
     };
@@ -180,5 +182,135 @@ describe('HubRequestExecutor pre-send failure reroute', () => {
     expect((deps.logStage as jest.Mock).mock.calls.some(
       (call) => call[0] === 'provider.runtime_resolve.error' && call[1] === 'rebased_openai.key1.gpt-5.4'
     )).toBe(true);
+  });
+
+  it('rebinds Responses conversation from the last provider id after provider send reroute', async () => {
+    jest.resetModules();
+    mockRebindResponsesConversationRequestId.mockReset();
+    mockRebindResponsesConversationRequestId.mockResolvedValue(undefined);
+
+    const { HubRequestExecutor, __requestExecutorTestables } = await import(
+      '../../../../src/server/runtime/http-server/request-executor.js'
+    );
+    __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
+
+    const processIncoming1 = jest.fn(async () => {
+      throw Object.assign(new Error('fetch failed'), {
+        code: 'ECONNRESET',
+        upstreamCode: 'ECONNRESET',
+        status: 502,
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'provider.send'
+      });
+    });
+    const processIncoming2 = jest.fn(async () => ({ status: 200, body: { id: 'resp_ok' } }));
+    const handle1: ProviderHandle = {
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerId: 'p1',
+      providerProtocol: 'openai-responses',
+      runtime: {},
+      instance: { processIncoming: processIncoming1, cleanup: jest.fn() }
+    } as unknown as ProviderHandle;
+    const handle2: ProviderHandle = {
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerId: 'p2',
+      providerProtocol: 'openai-responses',
+      runtime: {},
+      instance: { processIncoming: processIncoming2, cleanup: jest.fn() }
+    } as unknown as ProviderHandle;
+
+    const provider1 = 'openai.key1.gpt-5.4';
+    const provider2 = 'openai.key2.gpt-5.4';
+    const routePool = [provider1, provider2];
+
+    const firstResult: PipelineExecutionResult = {
+      providerPayload: { model: 'gpt-5.4', input: 'ping1' },
+      target: {
+        providerKey: provider1,
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:key1',
+        processMode: 'standard'
+      },
+      routingDecision: { routeName: 'default', pool: routePool, providerProtocol: 'openai-responses' } as any,
+      processMode: 'standard',
+      metadata: {}
+    };
+    const secondResult: PipelineExecutionResult = {
+      providerPayload: { model: 'gpt-5.4', input: 'ping2' },
+      target: {
+        providerKey: provider2,
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:key2',
+        processMode: 'standard'
+      },
+      routingDecision: { routeName: 'default', pool: routePool, providerProtocol: 'openai-responses' } as any,
+      processMode: 'standard',
+      metadata: {}
+    };
+
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn()
+        .mockResolvedValueOnce(firstResult)
+        .mockResolvedValueOnce(secondResult)
+    };
+
+    const deps = {
+      runtimeManager: {
+        resolveRuntimeKey: jest.fn((providerKey?: string) => (
+          providerKey === provider1 ? 'runtime:key1' : 'runtime:key2'
+        )),
+        getHandleByRuntimeKey: jest.fn((runtimeKey?: string) => (
+          runtimeKey === 'runtime:key1' ? handle1 : handle2
+        ))
+      },
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as unknown as ModuleDependencies),
+      logStage: jest.fn(),
+      stats: {
+        recordRequestStart: jest.fn(),
+        recordCompletion: jest.fn(),
+        bindProvider: jest.fn(),
+        recordToolUsage: jest.fn()
+      }
+    };
+
+    const executor = new HubRequestExecutor(deps as any);
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: { id: 'resp_ok', object: 'response', output: [] }
+    });
+
+    const request: PipelineExecutionInput = {
+      requestId: 'req_provider_send_reroute',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { model: 'gpt-5.4', input: 'ping' },
+      metadata: { stream: false, inboundStream: false }
+    };
+
+    const result = await executor.execute(request);
+
+    expect(result.usageLogInfo?.providerKey).toBe(provider2);
+    expect(processIncoming1).toHaveBeenCalledTimes(1);
+    expect(processIncoming2).toHaveBeenCalledTimes(1);
+    expect(mockRebindResponsesConversationRequestId).toHaveBeenNthCalledWith(
+      1,
+      'req_provider_send_reroute',
+      'rebased_openai.key1.gpt-5.4'
+    );
+    expect(mockRebindResponsesConversationRequestId).toHaveBeenNthCalledWith(
+      2,
+      'rebased_openai.key1.gpt-5.4',
+      'rebased_openai.key2.gpt-5.4'
+    );
   });
 });
