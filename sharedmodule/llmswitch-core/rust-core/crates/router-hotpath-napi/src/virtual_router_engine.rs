@@ -21,6 +21,7 @@ pub(crate) mod rcc_fence;
 pub(crate) mod routing;
 pub(crate) mod routing_state_store;
 mod time_utils;
+pub(crate) mod virtual_router_host_effects;
 
 pub(crate) use engine::{
     evaluate_singleton_route_pool_exhaustion, SingletonRoutePoolExhaustionDecision,

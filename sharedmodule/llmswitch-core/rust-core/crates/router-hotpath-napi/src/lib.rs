@@ -1121,8 +1121,6 @@ pub fn save_routing_instruction_state_json(
     Ok("true".to_string())
 }
 
-
-
 #[napi]
 pub fn merge_stop_message_from_persisted_json(
     existing_json: String,
@@ -1554,6 +1552,16 @@ pub fn plan_servertool_response_stage_runtime_action_json(
 ) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_response_stage_runtime_action_json(&input_json)
         .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_response_stage_prepass_initial_application_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_response_stage_prepass_initial_application_json(
+        &input_json,
+    )
+    .map_err(|e| napi::Error::from_reason(e))
 }
 
 #[napi]
@@ -2705,8 +2713,27 @@ pub fn report_provider_success_to_router_policy_json_bridge(
 
 #[napi(js_name = "resetProviderRuntimeIngressForTestsJson")]
 
-
 pub fn reset_provider_runtime_ingress_for_tests_json_bridge() -> NapiResult<String> {
+
+#[napi(js_name = "buildStopMessageMarkerParseLogJson")]
+pub fn build_stop_message_marker_parse_log_json_bridge(request_json: String, metadata_json: String, parsed_kinds_json: String, stop_scope: Option<String>) -> napi::Result<String> {
+    crate::virtual_router_engine::virtual_router_host_effects::build_stop_message_marker_parse_log_json(request_json, metadata_json, parsed_kinds_json, stop_scope)
+}
+
+#[napi(js_name = "formatStopMessageStatusLabelJson")]
+pub fn format_stop_message_status_label_json_bridge(snapshot_json: Option<String>, scope: Option<String>, force_show: bool) -> napi::Result<String> {
+    crate::virtual_router_engine::virtual_router_host_effects::format_stop_message_status_label_json(snapshot_json, scope, force_show)
+}
+
+#[napi(js_name = "emitStopMessageMarkerParseLogJson")]
+pub fn emit_stop_message_marker_parse_log_json_bridge(log_json: Option<String>) -> napi::Result<()> {
+    crate::virtual_router_engine::virtual_router_host_effects::emit_stop_message_marker_parse_log_json(log_json)
+}
+
+#[napi(js_name = "cleanStopMessageMarkersInPlaceJson")]
+pub fn clean_stop_message_markers_in_place_json_bridge(request_json: String) -> napi::Result<String> {
+    crate::virtual_router_engine::virtual_router_host_effects::clean_stop_message_markers_in_place_json(request_json)
+}
     virtual_router_engine::provider_runtime_ingress::reset_for_tests();
     Ok("true".to_string())
 }
@@ -2717,7 +2744,10 @@ pub fn create_virtual_router_hit_record_json_bridge(input_json: String) -> napi:
 }
 
 #[napi(js_name = "formatVirtualRouterHitJson")]
-pub fn format_virtual_router_hit_json_bridge(record_json: String, config_json: Option<String>) -> napi::Result<String> {
+pub fn format_virtual_router_hit_json_bridge(
+    record_json: String,
+    config_json: Option<String>,
+) -> napi::Result<String> {
     crate::virtual_router_hit_log::format_virtual_router_hit_json(record_json, config_json)
 }
 
@@ -2737,7 +2767,10 @@ pub fn resolve_session_log_color_key_json_bridge(input_json: String) -> napi::Re
 }
 
 #[napi(js_name = "describeTargetProviderJson")]
-pub fn describe_target_provider_json_bridge(provider_key: String, fallback_model_id: Option<String>) -> napi::Result<String> {
+pub fn describe_target_provider_json_bridge(
+    provider_key: String,
+    fallback_model_id: Option<String>,
+) -> napi::Result<String> {
     crate::virtual_router_hit_log::describe_target_provider_json(provider_key, fallback_model_id)
 }
 
@@ -2752,8 +2785,20 @@ pub fn resolve_session_color_str_bridge(session_id: Option<String>) -> napi::Res
 }
 
 #[napi(js_name = "buildHitReasonJson")]
-pub fn build_hit_reason_json_bridge(route_used: String, provider_key: String, classification_reasoning: Option<String>, estimated_tokens: Option<f64>, last_assistant_tool_label: Option<String>) -> napi::Result<String> {
-    crate::virtual_router_hit_log::build_hit_reason_json(route_used, provider_key, classification_reasoning, estimated_tokens, last_assistant_tool_label)
+pub fn build_hit_reason_json_bridge(
+    route_used: String,
+    provider_key: String,
+    classification_reasoning: Option<String>,
+    estimated_tokens: Option<f64>,
+    last_assistant_tool_label: Option<String>,
+) -> napi::Result<String> {
+    crate::virtual_router_hit_log::build_hit_reason_json(
+        route_used,
+        provider_key,
+        classification_reasoning,
+        estimated_tokens,
+        last_assistant_tool_label,
+    )
 }
 #[napi(js_name = "classifyProviderFailureJson")]
 pub fn classify_provider_failure_json(
