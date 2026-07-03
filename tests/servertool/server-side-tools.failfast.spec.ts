@@ -488,6 +488,24 @@ jest.unstable_mockModule(
       flowId: 'servertool_cli_projection'
     })),
     planServertoolExecutionBranchWithNative: planServertoolExecutionBranchWithNativeMock,
+    resolveServertoolPreExecutionBranchDecisionWithNative: jest.fn((input: any) => {
+      const plan = planServertoolExecutionBranchWithNativeMock({
+        executableToolCalls: input?.executableToolCalls,
+        executedToolCallsLen: 0
+      });
+      return plan.action === 'client_exec_cli_projection'
+        ? { action: 'client_exec_cli_projection', projectedToolCall: plan.projectedToolCall }
+        : { action: 'continue_response_stage' };
+    }),
+    resolveServertoolPostExecutionBranchDecisionWithNative: jest.fn((input: any) => {
+      const plan = planServertoolExecutionBranchWithNativeMock({
+        executableToolCalls: input?.executableToolCalls,
+        executedToolCallsLen: input?.executedToolCallsLen
+      });
+      return plan.action === 'resolve_execution_outcome'
+        ? { action: 'resolve_execution_outcome' }
+        : { action: 'continue_response_stage' };
+    }),
     planServertoolEnginePrepassActionWithNative: jest.fn((input: any) => ({
       action: input?.hasPrepassResult === true ? 'return_prepass_result' : 'continue_to_execution'
     })),

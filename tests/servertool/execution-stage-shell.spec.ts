@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const prepareServertoolDispatchStage = jest.fn();
-const planServertoolExecutionBranchWithNative = jest.fn();
+const resolveServertoolPreExecutionBranchDecisionWithNative = jest.fn();
+const resolveServertoolPostExecutionBranchDecisionWithNative = jest.fn();
 const buildServertoolCliProjectionRuntimeBranchWithNative = jest.fn();
 const runServertoolIoExecutionQueue = jest.fn();
 const materializeNativeToolCallExecutionOutcome = jest.fn();
@@ -19,7 +20,8 @@ jest.unstable_mockModule(
   () => ({
     buildServertoolCliProjectionRuntimeBranchWithNative,
     materializeNativeToolCallExecutionOutcomeWithNative: materializeNativeToolCallExecutionOutcome,
-    planServertoolExecutionBranchWithNative
+    resolveServertoolPostExecutionBranchDecisionWithNative,
+    resolveServertoolPreExecutionBranchDecisionWithNative
   })
 );
 
@@ -49,9 +51,12 @@ describe('execution-stage-shell', () => {
         executableToolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}', executionMode: 'guarded' }]
       }
     });
-    planServertoolExecutionBranchWithNative
-      .mockReturnValueOnce({ action: 'continue_response_stage' })
-      .mockReturnValueOnce({ action: 'resolve_execution_outcome' });
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
+      action: 'continue_response_stage'
+    });
+    resolveServertoolPostExecutionBranchDecisionWithNative.mockReturnValue({
+      action: 'resolve_execution_outcome'
+    });
     runServertoolIoExecutionQueue.mockResolvedValue({
       executedToolCalls: [{ toolCall: { id: 'call_1' } }]
     });
@@ -85,7 +90,8 @@ describe('execution-stage-shell', () => {
     );
 
     expect(source).toContain('prepareServertoolDispatchStage');
-    expect(source).toContain('planServertoolExecutionBranchWithNative');
+    expect(source).toContain('resolveServertoolPreExecutionBranchDecisionWithNative');
+    expect(source).toContain('resolveServertoolPostExecutionBranchDecisionWithNative');
     expect(source).toContain('buildServertoolCliProjectionRuntimeBranchWithNative');
     expect(source).not.toContain('mode: branch.resultMode');
     expect(source).not.toContain('finalChatResponse: branch.chatResponse as JsonObject');
@@ -93,12 +99,11 @@ describe('execution-stage-shell', () => {
     expect(source).not.toContain('finalChatResponse: branch.chatResponse');
     expect(source).not.toContain('execution: branch.execution');
     expect(source).toContain('return branch.result');
-    expect(source).toContain('const preExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
-    expect(source).toContain('const postExecutionBranchPlan = planServertoolExecutionBranchWithNative({');
-    expect(source).toContain('switch (preExecutionBranchPlan.action)');
-    expect(source).toContain("case 'continue_response_stage':");
+    expect(source).toContain('const preExecutionBranchDecision = resolveServertoolPreExecutionBranchDecisionWithNative({');
+    expect(source).toContain('const postExecutionBranchDecision = resolveServertoolPostExecutionBranchDecisionWithNative({');
+    expect(source).not.toContain('switch (preExecutionBranchPlan.action)');
+    expect(source).not.toContain('switch (postExecutionBranchPlan.action)');
     expect(source).toContain('invalid pre-execution branch action');
-    expect(source).toContain("case 'continue_response_stage':");
     expect(source).toContain("[servertool] invalid post-execution branch action");
     expect(source).not.toContain('String(preExecutionBranchPlan.action)');
     expect(source).not.toContain('String(postExecutionBranchPlan.action)');
@@ -123,8 +128,8 @@ describe('execution-stage-shell', () => {
   });
 
   test('returns cli projection when pre-execution branch selects it', async () => {
-    planServertoolExecutionBranchWithNative.mockReset();
-    planServertoolExecutionBranchWithNative.mockReturnValue({
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
       action: 'client_exec_cli_projection',
       projectedToolCall: {
         id: 'call_1',
@@ -161,8 +166,8 @@ describe('execution-stage-shell', () => {
   });
 
   test('fails fast when pre-execution branch returns an unknown native action', async () => {
-    planServertoolExecutionBranchWithNative.mockReset();
-    planServertoolExecutionBranchWithNative.mockReturnValue({
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
       action: 'unknown_native_action'
     });
 
@@ -186,14 +191,14 @@ describe('execution-stage-shell', () => {
   });
 
   test('projects executable tool calls directly into the native execution-branch planner', async () => {
-    planServertoolExecutionBranchWithNative.mockReset();
-    planServertoolExecutionBranchWithNative
-      .mockReturnValueOnce({
-        action: 'continue_response_stage'
-      })
-      .mockReturnValueOnce({
-        action: 'resolve_execution_outcome'
-      });
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
+      action: 'continue_response_stage'
+    });
+    resolveServertoolPostExecutionBranchDecisionWithNative.mockReset();
+    resolveServertoolPostExecutionBranchDecisionWithNative.mockReturnValue({
+      action: 'resolve_execution_outcome'
+    });
 
     await runServertoolExecutionStage({
       options: { requestId: 'req-branch-inline' } as any,
@@ -209,11 +214,10 @@ describe('execution-stage-shell', () => {
       responseStageGatePlan: { responseHookMatched: false }
     });
 
-    expect(planServertoolExecutionBranchWithNative).toHaveBeenCalledWith({
+    expect(resolveServertoolPreExecutionBranchDecisionWithNative).toHaveBeenCalledWith({
       executableToolCalls: [
         { id: 'call_1', name: 'web_search', arguments: '{}', executionMode: 'guarded' }
-      ],
-      executedToolCallsLen: 0
+      ]
     });
   });
 
@@ -248,14 +252,14 @@ describe('execution-stage-shell', () => {
   });
 
   test('finalizes response stage only when post-execution branch explicitly continues', async () => {
-    planServertoolExecutionBranchWithNative.mockReset();
-    planServertoolExecutionBranchWithNative
-      .mockReturnValueOnce({
-        action: 'continue_response_stage'
-      })
-      .mockReturnValueOnce({
-        action: 'continue_response_stage'
-      });
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
+      action: 'continue_response_stage'
+    });
+    resolveServertoolPostExecutionBranchDecisionWithNative.mockReset();
+    resolveServertoolPostExecutionBranchDecisionWithNative.mockReturnValue({
+      action: 'continue_response_stage'
+    });
     runServertoolIoExecutionQueue.mockResolvedValueOnce({
       executedToolCalls: []
     });
@@ -289,14 +293,14 @@ describe('execution-stage-shell', () => {
   });
 
   test('fails fast when post-execution branch returns an unknown native action', async () => {
-    planServertoolExecutionBranchWithNative.mockReset();
-    planServertoolExecutionBranchWithNative
-      .mockReturnValueOnce({
-        action: 'continue_response_stage'
-      })
-      .mockReturnValueOnce({
-        action: 'unknown_post_execution_action'
-      });
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
+    resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
+      action: 'continue_response_stage'
+    });
+    resolveServertoolPostExecutionBranchDecisionWithNative.mockReset();
+    resolveServertoolPostExecutionBranchDecisionWithNative.mockReturnValue({
+      action: 'unknown_post_execution_action'
+    });
     runServertoolIoExecutionQueue.mockResolvedValueOnce({
       executedToolCalls: []
     });

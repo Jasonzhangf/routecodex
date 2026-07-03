@@ -378,6 +378,23 @@ export type ServertoolExecutionBranchPlan =
       projectedToolCallIndex?: never;
     };
 
+export type ServertoolPreExecutionBranchDecision =
+  | {
+      action: 'client_exec_cli_projection';
+      projectedToolCall: ServertoolProjectedToolCall;
+    }
+  | {
+      action: 'continue_response_stage';
+    };
+
+export type ServertoolPostExecutionBranchDecision =
+  | {
+      action: 'resolve_execution_outcome';
+    }
+  | {
+      action: 'continue_response_stage';
+    };
+
 export interface ServertoolProjectedToolCall {
   id: string;
   name: string;
@@ -2663,6 +2680,49 @@ export function planServertoolExecutionBranchWithNative(input: {
       ? { projectedToolCallIndex: Number(record.projectedToolCallIndex) }
       : {})
   };
+}
+
+export function resolveServertoolPreExecutionBranchDecisionWithNative(input: {
+  executableToolCalls: Array<{
+    id: string;
+    name: string;
+    arguments?: string;
+    executionMode?: string;
+  }>;
+}): ServertoolPreExecutionBranchDecision {
+  const plan = planServertoolExecutionBranchWithNative({
+    executableToolCalls: input.executableToolCalls,
+    executedToolCallsLen: 0
+  });
+  if (plan.action === 'client_exec_cli_projection') {
+    return {
+      action: 'client_exec_cli_projection',
+      projectedToolCall: plan.projectedToolCall
+    };
+  }
+  if (plan.action === 'continue_response_stage') {
+    return { action: 'continue_response_stage' };
+  }
+  throw new Error('[servertool] invalid pre-execution branch action');
+}
+
+export function resolveServertoolPostExecutionBranchDecisionWithNative(input: {
+  executableToolCalls: Array<{
+    id: string;
+    name: string;
+    arguments?: string;
+    executionMode?: string;
+  }>;
+  executedToolCallsLen: number;
+}): ServertoolPostExecutionBranchDecision {
+  const plan = planServertoolExecutionBranchWithNative(input);
+  if (plan.action === 'resolve_execution_outcome') {
+    return { action: 'resolve_execution_outcome' };
+  }
+  if (plan.action === 'continue_response_stage') {
+    return { action: 'continue_response_stage' };
+  }
+  throw new Error('[servertool] invalid post-execution branch action');
 }
 
 export function planServertoolEnginePreflightWithNative(input: {
