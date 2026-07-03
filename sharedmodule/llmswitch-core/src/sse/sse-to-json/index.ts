@@ -3,7 +3,7 @@
  */
 
 // Chat协议转换器
-export { ChatSseToJsonConverter, defaultChatSseToJsonConverter } from './chat-sse-to-json-converter.js';
+export { ChatSseToJsonConverter } from './chat-sse-to-json-converter.js';
 
 // Responses协议转换器（重构版本）
 export { ResponsesSseToJsonConverterRefactored as ResponsesSseToJsonConverter } from './responses-sse-to-json-converter.js';

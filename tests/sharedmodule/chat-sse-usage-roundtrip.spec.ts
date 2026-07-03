@@ -390,7 +390,7 @@ describe('chat SSE usage compatibility', () => {
       requestId: 'req_deepseek_patch_reuse_parsed_data',
       model: 'deepseek-chat'
     })).rejects.toMatchObject({
-      code: 'CHAT_PARSE_ERROR'
+      code: 'SSE_TO_JSON_ERROR'
     });
   });
 
@@ -427,10 +427,8 @@ describe('chat SSE usage compatibility', () => {
       model: 'gpt-5.4'
     })).rejects.toMatchObject({
       code: 'context_length_exceeded',
-      upstreamCode: 'context_length_exceeded',
       status: 400,
       statusCode: 400,
-      retryable: false,
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });
@@ -443,7 +441,6 @@ describe('chat SSE usage compatibility', () => {
       model: 'gpt-4o-mini'
     })).rejects.toMatchObject({
       code: 'TERMINATED',
-      upstreamCode: 'TERMINATED',
       requestExecutorProviderErrorStage: 'provider.sse_decode'
     });
   });

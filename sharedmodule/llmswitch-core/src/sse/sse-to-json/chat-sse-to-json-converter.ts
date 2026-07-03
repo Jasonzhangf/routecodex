@@ -1,92 +1,31 @@
 /**
  * Chat SSE -> JSON converter thin shell.
- * TS owns: stream IO collect, abort signal, total timeout, error wrapping, stats.
+ * TS owns: stream IO collect, abort signal, error wrapping.
  * Rust owns: SSE decode semantics (frame parse, chunk aggregation, choice projection, usage normalization).
  */
 
 // feature_id: sse.chat_stream_projection
-import { ErrorUtils } from '../shared/utils.js';
 import { buildChatJsonFromSseWithNative } from '../../native/router-hotpath/native-chat-sse-event-payload.js';
 import type {
   ChatCompletionResponse,
   ChatSseEvent,
-  SseToChatJsonOptions,
-  ChatEventStats
+  SseToChatJsonOptions
 } from '../types/index.js';
 
-const DEFAULT_TOTAL_TIMEOUT_MS = 300_000;
-
-type DecodeStats = ChatEventStats & {
-  firstFrameAtMs?: number;
-  lastFrameAtMs?: number;
-  firstContentAtMs?: number;
-  lastContentAtMs?: number;
-};
-
-interface DecodeContext {
-  requestId: string;
-  model: string;
-  options: SseToChatJsonOptions;
-  startTime: number;
-  isCompleted: boolean;
-  eventStats: DecodeStats;
-}
-
-function nowMs(): number {
-  return Date.now();
-}
-
-function isChatSseEvent(value: unknown): value is ChatSseEvent {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value) && 'event' in value);
-}
-
-function eventToWire(event: ChatSseEvent): string {
-  const lines: string[] = [];
-  if (event.event && event.event !== 'chat_chunk') {
-    lines.push(`event: ${event.event}`);
-  }
-  lines.push(`data: ${typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? {})}`);
-  return `${lines.join('\n')}\n\n`;
-}
-
 export class ChatSseToJsonConverter {
-  private readonly stats = new Map<string, DecodeContext>();
-
   async convertSseToJson(
     sseStream: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>,
     options: SseToChatJsonOptions
   ): Promise<ChatCompletionResponse> {
-    const context: DecodeContext = {
-      requestId: options.requestId,
-      model: options.model,
-      options,
-      startTime: nowMs(),
-      isCompleted: false,
-      eventStats: {
-        totalChunks: 0,
-        totalTokens: 0,
-        totalChoices: 0,
-        totalToolCalls: 0,
-        startTime: nowMs(),
-        tokenRate: 0,
-        chunkRate: 0,
-        errorCount: 0,
-        retryCount: 0
-      }
-    };
-    this.stats.set(options.requestId, context);
-
     const abortSignal = options.abortSignal;
     let abortHandler: (() => void) | null = null;
     if (abortSignal && !abortSignal.aborted) {
-      const onAbort = () => { context.isCompleted = true; };
-      abortSignal.addEventListener('abort', onAbort);
-      abortHandler = () => abortSignal.removeEventListener('abort', onAbort);
+      abortSignal.addEventListener('abort', () => {});
+      abortHandler = () => abortSignal.removeEventListener('abort', () => {});
     }
 
     try {
-      // TS collects stream chunks as wire strings; Rust does decode
-      const bodyText = await this.collectBodyText(sseStream, context);
+      const bodyText = await this.collectBodyText(sseStream);
 
       if (abortSignal?.aborted) {
         const reason = (abortSignal as { reason?: unknown }).reason;
@@ -105,17 +44,13 @@ export class ChatSseToJsonConverter {
         }
       }) as unknown as ChatCompletionResponse;
 
-      context.isCompleted = true;
-      context.eventStats.endTime = nowMs();
-      context.eventStats.duration = (context.eventStats.endTime - context.eventStats.startTime) / 1000;
       options.onCompletion?.(response);
       return response;
     } catch (error) {
-      context.eventStats.errorCount++;
       options.onError?.(error as Error);
       throw this.wrapSseError(error, 'SSE to JSON conversion failed');
     } finally {
-      abortHandler?.();
+      if (abortHandler) abortHandler();
     }
   }
 
@@ -129,125 +64,61 @@ export class ChatSseToJsonConverter {
   }
 
   private async collectBodyText(
-    source: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>,
-    context: DecodeContext
+    source: AsyncIterable<ChatSseEvent> | AsyncIterable<string | Buffer>
   ): Promise<string> {
     const chunks: string[] = [];
-    const iterator = source[Symbol.asyncIterator]() as AsyncIterator<ChatSseEvent | string | Buffer>;
-
-    // Total timeout guard
-    const deadline = nowMs() + DEFAULT_TOTAL_TIMEOUT_MS;
-
-    while (true) {
-      const remaining = deadline - nowMs();
-      if (remaining <= 0) {
-        throw this.makeTimeoutError('UPSTREAM_STREAM_TOTAL_TIMEOUT', DEFAULT_TOTAL_TIMEOUT_MS);
+    for await (const chunk of source) {
+      if (typeof chunk === 'string') {
+        chunks.push(chunk);
+      } else if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk.toString());
+      } else if (chunk && typeof (chunk as ChatSseEvent).event === 'string') {
+        const event = chunk as ChatSseEvent;
+        const lines: string[] = [];
+        if (event.event && event.event !== 'chat_chunk') {
+          lines.push(`event: ${event.event}`);
+        }
+        lines.push(`data: ${typeof event.data === 'string' ? event.data : JSON.stringify(event.data ?? {})}`);
+        chunks.push(`${lines.join('\n')}\n\n`);
       }
-      let timer: NodeJS.Timeout | null = null;
-      const next = await Promise.race([
-        iterator.next(),
-        new Promise<IteratorResult<ChatSseEvent | string | Buffer>>((_, reject) => {
-          timer = setTimeout(() => reject(this.makeTimeoutError('UPSTREAM_STREAM_TOTAL_TIMEOUT', remaining)), remaining);
-          timer.unref?.();
-        })
-      ]);
-      if (timer) clearTimeout(timer);
-      if (next.done) break;
-
-      const value = next.value;
-      const text = typeof value === 'string'
-        ? value
-        : Buffer.isBuffer(value)
-          ? value.toString()
-          : isChatSseEvent(value)
-            ? eventToWire(value)
-            : (() => { throw ErrorUtils.createError('Chat SSE decode requires wire string, Buffer, or ChatSseEvent chunks', 'CHAT_PARSE_ERROR', { chunk: value }); })();
-      chunks.push(text);
-      this.updateStatsFromChunkText(context, text);
     }
     return chunks.join('');
   }
 
-  private makeTimeoutError(code: string, timeoutMs: number): Error {
-    const error = new Error(`Upstream stream timeout: no complete frame within ${timeoutMs}ms`) as Error & { code: string };
-    error.code = code;
-    return error;
-  }
-
-  private updateStatsFromChunkText(context: DecodeContext, text: string): void {
-    const now = nowMs();
-    context.eventStats.totalChunks++;
-    context.eventStats.firstFrameAtMs ??= now;
-    context.eventStats.lastFrameAtMs = now;
-    if (text.includes('"content"') || text.includes('"tool_calls"') || text.includes('"function_call"')) {
-      context.eventStats.firstContentAtMs ??= now;
-      context.eventStats.lastContentAtMs = now;
-    }
-  }
-
   private wrapSseError(error: unknown, contextMessage: string): Error {
-    const message = error instanceof Error ? error.message : String(error ?? '');
-
-    // Try to parse native projected payload from error message (original behavior)
-    function parseNativeProjectedError(error: unknown): Record<string, unknown> | null {
-      const msg = error instanceof Error ? error.message : String(error ?? '');
-      const trimmed = msg.trim();
-      if (!trimmed.startsWith('{')) {
-        return null;
-      }
-      try {
-        const parsed = JSON.parse(trimmed);
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-          ? parsed as Record<string, unknown>
-          : null;
-      } catch (parseError) {
-        throw ErrorUtils.wrapError(parseError, 'Invalid native Chat SSE error projection JSON');
-      }
-    }
-
-    const nativeProjected = parseNativeProjectedError(error);
-    const source = nativeProjected ?? (error instanceof Error ? (error as unknown as Record<string, unknown>) : undefined);
-
-    // Extract error code: prefer parsed JSON, then native error.code, then SSE parse heuristic
-    let code: string | undefined;
-    if (typeof source?.code === 'string' && source.code) {
-      code = source.code === 'CHAT_STREAM_ERROR' ? 'SSE_DECODE_ERROR' : source.code;
-    } else if (
-      message.includes('Invalid SSE event type:')
-      || message.includes('Failed to parse Chat SSE frame JSON:')
-      || message.includes('Invalid chat_chunk payload')
-    ) {
-      code = 'CHAT_PARSE_ERROR';
-    }
-
-    const wrapped = ErrorUtils.wrapError(error, contextMessage) as Error & {
-      code?: string; status?: number; statusCode?: number;
-      upstreamCode?: string; retryable?: boolean;
-      requestExecutorProviderErrorStage?: string
-    };
-    if (code) wrapped.code = code;
-    if (source) {
-      wrapped.status = typeof source.statusCode === 'number' ? source.statusCode : (typeof source.status === 'number' ? source.status : 504);
-      wrapped.statusCode = typeof source.statusCode === 'number' ? source.statusCode : wrapped.status;
-      const upstream = typeof source.upstreamCode === 'string' ? source.upstreamCode : code;
-      if (upstream) wrapped.upstreamCode = upstream;
-      if (typeof source.retryable === 'boolean') wrapped.retryable = source.retryable;
-    }
+    const original = error instanceof Error ? error : new Error(String(error ?? 'unknown'));
+    const message = error && typeof error === 'object' && 'message' in (error as object)
+      ? `${contextMessage}: ${(error as Error).message}`
+      : contextMessage;
+    const wrapped = new Error(message) as Error & { code?: string; upstreamCode?: string; status?: number; statusCode?: number; retryable?: boolean; requestExecutorProviderErrorStage?: string };
+    wrapped.code = 'SSE_TO_JSON_ERROR';
     wrapped.requestExecutorProviderErrorStage = 'provider.sse_decode';
+    // Preserve upstream error fields if the native error carries them
+    if (error && typeof error === 'object') {
+      const err = error as Record<string, unknown>;
+      const msg = typeof err.message === 'string' ? err.message : '';
+      // Native errors embed upstream codes in the message: "context_length_exceeded: ..."
+      const knownCodes = ['context_length_exceeded', 'TERMINATED', 'UPSTREAM_STREAM_ERROR'];
+      for (const known of knownCodes) {
+        if (msg.includes(known) || msg === known) {
+          wrapped.code = known;
+          wrapped.upstreamCode = known;
+          if (known === 'context_length_exceeded') {
+            wrapped.status = 400;
+            wrapped.statusCode = 400;
+          }
+          break;
+        }
+      }
+      if (typeof err.code === 'string' && err.code !== 'SSE_TO_JSON_ERROR') {
+        wrapped.upstreamCode = err.code;
+        wrapped.code = err.code;
+      }
+      if (typeof err.status === 'number') wrapped.status = err.status;
+      if (typeof err.statusCode === 'number') wrapped.statusCode = err.statusCode;
+      if (typeof err.retryable === 'boolean') wrapped.retryable = err.retryable;
+      if (typeof err.upstreamCode === 'string') wrapped.upstreamCode = err.upstreamCode;
+    }
     return wrapped;
   }
-
-  getStats(requestId: string): ChatEventStats | undefined {
-    return this.stats.get(requestId)?.eventStats;
-  }
-
-  cleanup(requestId: string): void {
-    this.stats.delete(requestId);
-  }
-
-  cleanupAll(): void {
-    this.stats.clear();
-  }
 }
-
-export const defaultChatSseToJsonConverter = new ChatSseToJsonConverter();
