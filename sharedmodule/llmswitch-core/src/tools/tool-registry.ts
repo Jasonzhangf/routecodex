@@ -2,7 +2,7 @@
 
 import { parseToolArgsJson } from './args-json.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
-import { validateApplyPatchArgumentsNative } from '../../../../src/modules/llmswitch/bridge/native-exports.js';
+import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -105,6 +105,32 @@ const detectForbiddenWrite = (script: string): boolean => {
 
 const isImagePath = (value: unknown): boolean => typeof value === 'string' && /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/i.test(value.trim());
 
+const validateApplyPatchArgumentsWithNative = (applyPatchArgsSource: unknown): ToolValidationResult => {
+  const fn = readNativeFunction('validateApplyPatchArgumentsJson');
+  if (!fn) {
+    throw new Error('[llmswitch-core] validateApplyPatchArgumentsJson not available');
+  }
+  const resultJson = fn(JSON.stringify(applyPatchArgsSource ?? null));
+  if (typeof resultJson !== 'string') {
+    throw new Error('[llmswitch-core] validateApplyPatchArgumentsJson returned non-string result');
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!isRecord(parsed) || typeof parsed.ok !== 'boolean') {
+    throw new Error('[llmswitch-core] validateApplyPatchArgumentsJson returned invalid result');
+  }
+  const reason = typeof parsed.reason === 'string' ? parsed.reason : undefined;
+  const message = typeof parsed.message === 'string' ? parsed.message : undefined;
+  const normalizedArgs = typeof parsed.normalizedArguments === 'string'
+    ? parsed.normalizedArguments
+    : undefined;
+  return {
+    ok: parsed.ok,
+    ...(reason ? { reason } : {}),
+    ...(message ? { message } : {}),
+    ...(normalizedArgs ? { normalizedArgs } : {})
+  };
+};
+
 export interface ToolValidationResult {
   ok: boolean;
   reason?: string;
@@ -175,7 +201,7 @@ export function validateToolCall(
           : typeof argsString === 'string'
             ? argsString
             : rawArgsAny;
-      const validation = validateApplyPatchArgumentsNative(applyPatchArgsSource);
+      const validation = validateApplyPatchArgumentsWithNative(applyPatchArgsSource);
       if (!validation.ok) {
         return {
           ok: false,
@@ -183,7 +209,7 @@ export function validateToolCall(
           message: validation.message
         };
       }
-      return { ok: true, normalizedArgs: validation.normalizedArguments };
+      return { ok: true, normalizedArgs: validation.normalizedArgs };
     }
     case 'exec_command': {
       const guard = options?.execCommandGuard;

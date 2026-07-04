@@ -198,4 +198,51 @@ mod tests {
         .expect_err("unknown protocol must fail");
         assert!(err.contains("Unsupported SSE protocol: unknown-protocol"));
     }
+
+    #[test]
+    fn accepts_snake_case_request_id_for_responses_encode_dispatch() {
+        let output = build_sse_frames_from_json_json(
+            json!({
+                "protocol": "openai-responses",
+                "request_id": "req_responses_snake_dispatch",
+                "response": {
+                    "id": "resp_snake_dispatch",
+                    "object": "response",
+                    "created_at": 1781149537,
+                    "status": "completed",
+                    "model": "gpt-test",
+                    "output": []
+                },
+                "config": {
+                    "enableTimestampGeneration": false,
+                    "includeSequenceNumbers": true
+                }
+            })
+            .to_string(),
+        )
+        .expect("snake_case request_id must reach Responses SSE encoder");
+
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let first_frame = parsed["frames"][0].as_str().unwrap();
+        assert!(
+            first_frame.contains("event: response.created"),
+            "Responses SSE encoder must accept snake_case request_id and emit frames"
+        );
+    }
+
+    #[test]
+    fn accepts_snake_case_body_text_for_responses_decode_dispatch() {
+        let output = build_json_from_sse_json(
+            json!({
+                "protocol": "openai-responses",
+                "body_text": "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_decode\",\"object\":\"response\",\"created_at\":1781149537,\"status\":\"completed\",\"model\":\"gpt-test\",\"output\":[]}}\n\n",
+                "request_id": "req_responses_decode_snake"
+            })
+            .to_string(),
+        )
+        .expect("snake_case body_text must reach Responses SSE decoder");
+
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["id"], json!("resp_decode"));
+    }
 }

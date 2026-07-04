@@ -47,6 +47,20 @@ pub struct ServertoolResponseStageRuntimeActionPlan {
     pub skip_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolResponseStagePrepassInitialApplicationInput {
+    pub decision: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolResponseStagePrepassInitialApplicationPlan {
+    pub run_auto_hook: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+}
+
 fn build_passthrough_result(input: &ServertoolResponseStageRuntimeActionInput) -> Value {
     serde_json::json!({
         "mode": "passthrough",
@@ -197,6 +211,39 @@ pub fn plan_servertool_response_stage_runtime_action(
         prepass_result: Some(build_prepass_continue_result(&input)),
         finalize_result: Some(passthrough_result),
         skip_reason: None,
+    }
+}
+
+pub fn plan_servertool_response_stage_prepass_initial_application(
+    input: ServertoolResponseStagePrepassInitialApplicationInput,
+) -> Result<ServertoolResponseStagePrepassInitialApplicationPlan, String> {
+    let decision = input
+        .decision
+        .as_object()
+        .ok_or_else(|| "response-stage prepass decision must be an object".to_string())?;
+    let action = decision
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "response-stage prepass decision missing action".to_string())?;
+
+    match action {
+        "run_auto_hooks" => Ok(ServertoolResponseStagePrepassInitialApplicationPlan {
+            run_auto_hook: true,
+            result: None,
+        }),
+        "return_prepass_result" => {
+            let result = decision
+                .get("result")
+                .cloned()
+                .ok_or_else(|| "response-stage prepass decision missing result".to_string())?;
+            Ok(ServertoolResponseStagePrepassInitialApplicationPlan {
+                run_auto_hook: false,
+                result: Some(result),
+            })
+        }
+        _ => Err(format!(
+            "invalid response-stage prepass decision action: {action}"
+        )),
     }
 }
 
@@ -486,5 +533,50 @@ mod tests {
             plan.action,
             ServertoolResponseStageRuntimeAction::ReturnAutoHookResult
         );
+    }
+
+    #[test]
+    fn prepass_initial_application_runs_auto_hooks_for_run_action() {
+        let plan = plan_servertool_response_stage_prepass_initial_application(
+            ServertoolResponseStagePrepassInitialApplicationInput {
+                decision: serde_json::json!({ "action": "run_auto_hooks" }),
+            },
+        )
+        .expect("prepass application plan");
+
+        assert!(plan.run_auto_hook);
+        assert_eq!(plan.result, None);
+    }
+
+    #[test]
+    fn prepass_initial_application_returns_native_result() {
+        let result = serde_json::json!({
+            "action": "continue_to_execution",
+            "responseStageGatePlan": { "nextAction": "continue_to_execution" }
+        });
+        let plan = plan_servertool_response_stage_prepass_initial_application(
+            ServertoolResponseStagePrepassInitialApplicationInput {
+                decision: serde_json::json!({
+                    "action": "return_prepass_result",
+                    "result": result
+                }),
+            },
+        )
+        .expect("prepass application plan");
+
+        assert!(!plan.run_auto_hook);
+        assert_eq!(plan.result, Some(result));
+    }
+
+    #[test]
+    fn prepass_initial_application_rejects_unknown_action() {
+        let err = plan_servertool_response_stage_prepass_initial_application(
+            ServertoolResponseStagePrepassInitialApplicationInput {
+                decision: serde_json::json!({ "action": "unknown" }),
+            },
+        )
+        .expect_err("unknown prepass decision must fail");
+
+        assert!(err.contains("invalid response-stage prepass decision action"));
     }
 }

@@ -5,6 +5,7 @@ const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
 const resolveServertoolResponseStagePrepassInitialDecisionWithNative = jest.fn((input: any) => {
   const action = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
     autoHookEvaluated: false,
     hasAutoHookResult: false
   }) as any;
@@ -19,10 +20,20 @@ const resolveServertoolResponseStagePrepassInitialDecisionWithNative = jest.fn((
   }
   throw new Error('[servertool] invalid response-stage prepass action');
 });
+const resolveServertoolResponseStagePrepassInitialApplicationWithNative = jest.fn((input: any) => {
+  if (input.decision.action === 'run_auto_hooks') {
+    return { runAutoHook: true };
+  }
+  if (input.decision.action === 'return_prepass_result') {
+    return { runAutoHook: false, result: input.decision.result };
+  }
+  throw new Error('[servertool] invalid response-stage prepass decision');
+});
 const resolveServertoolResponseStagePrepassAfterAutoHookWithNative = jest.fn((input: any) => {
   if (input.responseStageAutoHookResult.action === 'return_auto_hook_result') {
     const action = planServertoolResponseStageRuntimeActionWithNative({
       responseStageGatePlan: input.responseStageGatePlan,
+      baseObject: input.baseObject,
       autoHookEvaluated: true,
       hasAutoHookResult: true,
       autoHookResult: input.responseStageAutoHookResult.result
@@ -41,6 +52,7 @@ const resolveServertoolResponseStagePrepassAfterAutoHookWithNative = jest.fn((in
   ) {
     const action = planServertoolResponseStageRuntimeActionWithNative({
       responseStageGatePlan: input.responseStageGatePlan,
+      baseObject: input.baseObject,
       autoHookEvaluated: true,
       hasAutoHookResult: false
     }) as any;
@@ -71,6 +83,7 @@ jest.unstable_mockModule(
   () => ({
     planServertoolResponseStageRuntimeActionWithNative,
     resolveServertoolResponseStagePrepassInitialDecisionWithNative,
+    resolveServertoolResponseStagePrepassInitialApplicationWithNative,
     resolveServertoolResponseStagePrepassAfterAutoHookWithNative,
     inspectStopGatewaySignalWithNative: jest.fn(() => ({ reason: 'test' })),
     normalizeStopMessageCompareContextWithNative: jest.fn(() => ({ source: 'test' }))
@@ -139,6 +152,7 @@ describe('response-stage-prepass-shell', () => {
         responseHookRequired: false,
         nextAction: 'continue_to_execution'
       },
+      baseObject: { ok: true },
       autoHookEvaluated: false,
       hasAutoHookResult: false
     });
@@ -207,7 +221,8 @@ describe('response-stage-prepass-shell', () => {
           responseHookMatched: true,
           responseHookRequired: false,
           nextAction: 'run_auto_hooks'
-        }
+        },
+        baseObject: { ok: true }
       })
     );
     expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledTimes(2);
@@ -217,6 +232,7 @@ describe('response-stage-prepass-shell', () => {
         responseHookRequired: false,
         nextAction: 'run_auto_hooks'
       },
+      baseObject: { ok: true },
       autoHookEvaluated: true,
       hasAutoHookResult: true,
       autoHookResult: {
@@ -275,6 +291,7 @@ describe('response-stage-prepass-shell', () => {
         responseHookRequired: false,
         nextAction: 'run_auto_hooks'
       },
+      baseObject: { ok: true },
       autoHookEvaluated: true,
       hasAutoHookResult: false
     });
@@ -292,7 +309,9 @@ describe('response-stage-prepass-shell', () => {
     expect(source).not.toContain('switch (responseStageAutoHook.action)');
     expect(source).not.toContain('planServertoolResponseStageRuntimeActionWithNative({');
     expect(source).toContain('resolveServertoolResponseStagePrepassInitialDecisionWithNative({');
+    expect(source).toContain('resolveServertoolResponseStagePrepassInitialApplicationWithNative({');
     expect(source).toContain('resolveServertoolResponseStagePrepassAfterAutoHookWithNative({');
+    expect(source).not.toContain("prepassDecision.action === 'return_prepass_result'");
     expect(source).not.toContain('autoHookResult as ServerSideToolEngineResult');
     expect(source).not.toContain('responseStageGatePlan.responseHookMatched !== true');
     expect(source).not.toContain('responseHookMatched !== true');

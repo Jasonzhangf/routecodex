@@ -210,6 +210,7 @@ async function handleImageRequest(
 
     logRequestStart(entryEndpoint, requestId, {
       clientRequestId,
+      ...(requestBodyMetadata ?? {}),
       model,
       count,
       responseFormat,

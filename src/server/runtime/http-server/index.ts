@@ -65,7 +65,7 @@ import {
 } from './router-direct-failure-snapshot.js';
 import {
   requireDirectPassthroughPayloadObject,
-  evaluateDirectRouteDecision,
+  findResponsesDirectFunctionCallOutputContentViolation,
 } from './direct-passthrough-payload.js';
 import { buildDirectProviderRuntimeMetadata } from './direct-runtime-metadata.js';
 import {
@@ -383,11 +383,9 @@ function buildRouterDirectFailureError(reason: unknown): Error {
 function isRouterDirectRelayableSkip(reason: unknown): boolean {
   const message = typeof reason === 'string' ? reason.trim().toLowerCase() : '';
   return message.startsWith('protocol mismatch:')
-    || message === 'direct_payload_requires_hub_relay'
     || message === 'client_tools_require_hub_relay'
     || message === 'stopless_servertool_requires_hub_relay'
     || message === 'target_outbound_profile_requires_hub_relay'
-    || message === 'servertool_followup_requires_hub_relay'
     || message === 'relay_owned_responses_continuation';
 }
 
@@ -1599,30 +1597,15 @@ export class RouteCodexHttpServer {
 
     const rawDirectPayload = requireDirectPassthroughPayloadObject(input.body);
     const inboundProtocol = resolveInboundProtocolFromEntryPath(input.entryEndpoint);
-    const applyPatchMode =
-      this.userConfig
-      && typeof this.userConfig === 'object'
-      && 'servertool' in this.userConfig
-      && (this.userConfig as Record<string, unknown>).servertool
-      && typeof (this.userConfig as Record<string, unknown>).servertool === 'object'
-      && (this.userConfig as { servertool?: { apply_patch?: { mode?: unknown } } }).servertool?.apply_patch
-      && typeof (this.userConfig as { servertool?: { apply_patch?: { mode?: unknown } } }).servertool?.apply_patch?.mode === 'string'
-        ? (this.userConfig as { servertool?: { apply_patch?: { mode?: string } } }).servertool?.apply_patch?.mode
-        : undefined;
-    const directRouteDecision = evaluateDirectRouteDecision({
-      payload: rawDirectPayload,
-      metadata: metadataForHub,
-      inboundProtocol,
-      applyPatchMode,
-    });
-    const directRequiresHubRelay = directRouteDecision.requiresHubRelay === true;
-    const directRelayReason = directRouteDecision.reason ?? 'direct_payload_requires_hub_relay';
-    if (!directRouteDecision.providerWireValid && !directRequiresHubRelay) {
+    const directPayloadViolation = inboundProtocol === 'openai-responses'
+      ? findResponsesDirectFunctionCallOutputContentViolation(rawDirectPayload)
+      : undefined;
+    if (directPayloadViolation) {
       throw annotateAsHostPayloadContractError(
         buildDirectPayloadContractError(
-          directRouteDecision.reason ?? 'invalid direct payload',
+          directPayloadViolation,
           {
-            reason: directRouteDecision.reason ?? 'invalid_direct_payload',
+            reason: directPayloadViolation,
             inboundProtocol,
           },
         ),
@@ -1737,23 +1720,6 @@ export class RouteCodexHttpServer {
       return {
         used: false,
         reason: 'relay_owned_responses_continuation',
-        preselectedRoute: {
-          target,
-          decision: routingDecision,
-          diagnostics: routeResult.diagnostics,
-        },
-      };
-    }
-    if (directRequiresHubRelay) {
-      this.logStage('router-direct.skipped', input.requestId, {
-        reason: directRelayReason,
-        inboundProtocol,
-        outboundProfile: targetOutboundProfile,
-        providerKey,
-      });
-      return {
-        used: false,
-        reason: directRelayReason,
         preselectedRoute: {
           target,
           decision: routingDecision,

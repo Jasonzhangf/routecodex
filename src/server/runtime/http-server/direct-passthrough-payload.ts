@@ -1,7 +1,5 @@
 // feature_id: responses.direct_tool_shape_contract
 
-import { evaluateResponsesDirectRouteDecisionNative } from '../../../modules/llmswitch/bridge.js';
-
 export function requireDirectPassthroughPayloadObject(
   body: unknown,
 ): Record<string, unknown> {
@@ -11,58 +9,22 @@ export function requireDirectPassthroughPayloadObject(
   return body as Record<string, unknown>;
 }
 
-function readBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-function buildDirectRouteDecisionMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
-  if (!metadata || typeof metadata !== 'object') {
-    return {};
+export function findResponsesDirectFunctionCallOutputContentViolation(
+  payload: Record<string, unknown>,
+): string | undefined {
+  const input = Array.isArray(payload.input) ? payload.input : undefined;
+  if (!input) {
+    return undefined;
   }
-  const snapshot = metadata.metadataCenterSnapshot;
-  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
-    return {};
+  for (let index = 0; index < input.length; index += 1) {
+    const item = input[index];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const row = item as Record<string, unknown>;
+    if (row.type === 'function_call_output' && Object.prototype.hasOwnProperty.call(row, 'content')) {
+      return `openai-responses provider wire input[${index}] function_call_output must not include content; use output only`;
+    }
   }
-  const runtimeControl = (snapshot as Record<string, unknown>).runtimeControl;
-  if (!runtimeControl || typeof runtimeControl !== 'object' || Array.isArray(runtimeControl)) {
-    return {};
-  }
-  const runtimeControlRecord = runtimeControl as Record<string, unknown>;
-  const stopMessage = runtimeControlRecord.stopMessage;
-  const stopMessageRecord =
-    stopMessage && typeof stopMessage === 'object' && !Array.isArray(stopMessage)
-      ? stopMessage as Record<string, unknown>
-      : undefined;
-  const stopMessageEnabled =
-    readBoolean(runtimeControlRecord.stopMessageEnabled)
-    ?? readBoolean(stopMessageRecord?.enabled);
-  const stopMessageExcludeDirect =
-    readBoolean(runtimeControlRecord.stopMessageExcludeDirect)
-    ?? readBoolean(stopMessageRecord?.excludeDirect);
-  const directRuntimeControl: Record<string, unknown> = {
-    ...(typeof stopMessageEnabled === 'boolean' ? { stopMessageEnabled } : {}),
-    ...(typeof stopMessageExcludeDirect === 'boolean' ? { stopMessageExcludeDirect } : {}),
-  };
-  return Object.keys(directRuntimeControl).length > 0
-    ? { metadataCenterSnapshot: { runtimeControl: directRuntimeControl } }
-    : {};
-}
-
-export function evaluateDirectRouteDecision(input: {
-  payload: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  inboundProtocol: string;
-  applyPatchMode?: string;
-}): {
-  providerWireValid: boolean;
-  requiresHubRelay: boolean;
-  reason?: string;
-  hasDeclaredApplyPatchTool?: boolean;
-} {
-  return evaluateResponsesDirectRouteDecisionNative({
-    payload: input.payload,
-    metadata: buildDirectRouteDecisionMetadata(input.metadata),
-    inboundProtocol: input.inboundProtocol,
-    applyPatchMode: input.applyPatchMode,
-  });
+  return undefined;
 }

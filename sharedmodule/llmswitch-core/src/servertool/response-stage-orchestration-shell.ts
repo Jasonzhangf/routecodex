@@ -11,7 +11,7 @@ import {
 import {
   materializeServertoolResponseStageOrchestrationOutputWithNative,
   extractServertoolResponseStageOrchestrationShellResultWithNative,
-  resolveServertoolResponseStageOrchestrationGateDecisionWithNative
+  resolveServertoolResponseStageOrchestrationGateApplicationWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
@@ -44,12 +44,13 @@ export async function runServertoolResponseStageOrchestrationShell(
     runtimeControl,
     allowFollowup: options.allowFollowup === true
   });
-  const gateDecision = resolveServertoolResponseStageOrchestrationGateDecisionWithNative({
-    responseStageGatePlan: gatePlan
+  const gateApplication = resolveServertoolResponseStageOrchestrationGateApplicationWithNative({
+    responseStageGatePlan: gatePlan,
+    baseObject: options.payload
   });
 
-  if (gateDecision.action === 'return_passthrough_bypass') {
-    const skipReason = gateDecision.skipReason;
+  if (gateApplication.bypass) {
+    const skipReason = gateApplication.skipReason;
     recordStage(options.stageRecorder, 'HubRespChatProcess03Governed.servertool_orchestration', {
       executed: false,
       skipReason,

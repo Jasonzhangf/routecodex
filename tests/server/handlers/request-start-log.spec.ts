@@ -57,4 +57,19 @@ describe('logRequestStart', () => {
     expect(rendered).not.toContain('roleCounts');
     expect(rendered).not.toContain('estimatedTextChars');
   });
+
+  it('registers request start color from session id metadata', async () => {
+    const { resolveSessionAnsiColor } = await import('../../../src/utils/session-log-color.js');
+    const expectedColor = resolveSessionAnsiColor('request-start-session');
+
+    logRequestStart('/v1/responses', 'req-start-session-color', {
+      sessionId: 'request-start-session',
+      clientTmuxSessionId: 'request-start-tmux',
+      inboundStream: true
+    });
+
+    const rendered = String(warnSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(expectedColor).toBeDefined();
+    expect(rendered.startsWith(String(expectedColor))).toBe(true);
+  });
 });

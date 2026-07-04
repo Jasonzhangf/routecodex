@@ -1,3 +1,5 @@
+// feature_id: conversion.shared.anthropic
+// canonical_builder: stage_a_conversion_shared_anthropic_owner_boundary
 use napi::bindgen_prelude::Result as NapiResult;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -12,6 +14,8 @@ use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::normalize_tool_result_text;
+
+pub(crate) fn stage_a_conversion_shared_anthropic_owner_boundary() {}
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

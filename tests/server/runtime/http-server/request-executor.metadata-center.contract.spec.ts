@@ -37,25 +37,31 @@ const mockBridgeModule = {
   importCoreDist: jest.fn(async () => ({}))
 };
 
-const mockNativeExportsModule = {
-  getRouterHotpathJsonBindingSync: jest.fn(() => undefined),
-  resolveProviderResponseRequestSemanticsNative: jest.fn(() => undefined),
-  resolveEntryProtocolFromEndpointNative: jest.fn(() => 'openai-responses'),
-  evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => undefined),
-  planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => undefined),
-  normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => (Array.isArray(value) ? value : [])),
-  mergeObservedRoutePoolChainNative: jest.fn((current: unknown, explicit: unknown) => {
-    const currentList = Array.isArray(current) ? current : [];
-    const explicitList = Array.isArray(explicit) ? explicit : [];
-    return currentList.length > 0 ? currentList : explicitList;
-  }),
-  resolveProviderRetryExecutionPolicyNative: jest.fn(() => undefined),
-  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined)
-};
-
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => mockBridgeModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.ts', () => mockBridgeModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => mockNativeExportsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', async () => {
+  const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.ts');
+  return {
+    ...actual,
+    getRouterHotpathJsonBindingSync: jest.fn(() => undefined),
+    resolveProviderResponseRequestSemanticsNative: jest.fn(() => undefined),
+    resolveEntryProtocolFromEndpointNative: jest.fn(() => 'openai-responses'),
+    hasRequestedToolsInSemanticsNative: jest.fn(() => false),
+    isRequiredToolCallTurnNative: jest.fn(() => false),
+    isToolResultFollowupTurnNative: jest.fn(() => false),
+    isProviderNativeResumeContinuationNative: jest.fn(() => false),
+    evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => undefined),
+    planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => undefined),
+    normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => (Array.isArray(value) ? value : [])),
+    mergeObservedRoutePoolChainNative: jest.fn((current: unknown, explicit: unknown) => {
+      const currentList = Array.isArray(current) ? current : [];
+      const explicitList = Array.isArray(explicit) ? explicit : [];
+      return currentList.length > 0 ? currentList : explicitList;
+    }),
+    resolveProviderRetryExecutionPolicyNative: jest.fn(() => undefined),
+    extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined)
+  };
+});
 
 const ROOT = process.cwd();
 const REQUEST_EXECUTOR_PATH = path.join(ROOT, 'src/server/runtime/http-server/request-executor.ts');
@@ -461,6 +467,63 @@ describe('request-executor metadata center contract', () => {
         toolsRaw: rawTools
       },
       sessionId: 'sess_wire_shape_capture_1',
+      matchedPort: 5555,
+      providerKey: 'orangeai.key1.glm-5.2',
+      entryKind: 'responses',
+      routingPolicyGroup: 'gateway_priority_5555'
+    });
+  });
+
+  it('captures Responses request context with MetadataCenter requestTruth id after provider request id enhancement', () => {
+    const metadata: Record<string, unknown> = {
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      portScope: '5555',
+      __raw_request_body: {
+        model: 'gpt-5.5',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+        tools: [{ type: 'function', name: 'exec_command' }]
+      }
+    };
+    const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth(
+      'requestId',
+      'openai-responses-router-gpt-5.5-20260703T120957051-453706-103',
+      {
+        module: 'test',
+        symbol: 'captures Responses request context with MetadataCenter requestTruth id after provider request id enhancement',
+        stage: 'test'
+      },
+      'test request id'
+    );
+    center.writeRequestTruth(
+      'sessionId',
+      'sess_provider_enhanced_capture_1',
+      {
+        module: 'test',
+        symbol: 'captures Responses request context with MetadataCenter requestTruth id after provider request id enhancement',
+        stage: 'test'
+      },
+      'test session id'
+    );
+
+    const args = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry({
+      input: {
+        entryEndpoint: '/v1/responses',
+        requestId: 'openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103',
+        body: {
+          data: {
+            model: 'glm-5.2',
+            messages: [{ role: 'user', content: 'hi' }]
+          }
+        }
+      },
+      metadata,
+      providerKey: 'orangeai.key1.glm-5.2'
+    });
+
+    expect(args).toMatchObject({
+      requestId: 'openai-responses-router-gpt-5.5-20260703T120957051-453706-103',
+      sessionId: 'sess_provider_enhanced_capture_1',
       matchedPort: 5555,
       providerKey: 'orangeai.key1.glm-5.2',
       entryKind: 'responses',

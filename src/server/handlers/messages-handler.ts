@@ -98,6 +98,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
 
     logRequestStart(entryEndpoint, requestId, {
       clientRequestId,
+      ...(requestBodyMetadata ?? {}),
       inboundStream,
       outboundStream,
       model: inferredModel ?? jsonPayload?.model

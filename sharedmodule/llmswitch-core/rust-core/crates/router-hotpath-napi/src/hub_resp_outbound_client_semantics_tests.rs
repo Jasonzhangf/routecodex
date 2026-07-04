@@ -1361,6 +1361,36 @@ fn project_responses_client_payload_for_client_strips_internal_metadata_fields()
 }
 
 #[test]
+fn project_responses_client_payload_for_client_strips_codex_transcript_tool_call_leak() {
+    let leaked = r#"Assistant requested tool calls: - id=call_00_wpSa0J6o4cVOVh9s20T3294 type=function name=exec_command arguments={"cmd":"cd /Users/fanzhang/Documents/github/routecodex && awk test mod virtual_router_hit_log"}"#;
+    let payload = json!({
+        "id": "resp_codex_tool_leak",
+        "object": "response",
+        "status": "completed",
+        "output_text": leaked,
+        "output": [{
+            "id": "msg_codex_tool_leak",
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{
+                "type": "output_text",
+                "text": leaked
+            }]
+        }]
+    });
+
+    let output = project_responses_client_payload_for_client(&payload, &json!([]), &json!({}));
+    let serialized = serde_json::to_string(&output).expect("serialize output");
+
+    assert!(!serialized.contains("Assistant requested tool calls"));
+    assert!(!serialized.contains("call_00_wpSa0J6o4cVOVh9s20T3294"));
+    assert!(!serialized.contains("virtual_router_hit_log"));
+    assert_eq!(output["output_text"], "");
+    assert_eq!(output["output"][0]["content"][0]["text"], "");
+}
+
+#[test]
 fn project_responses_client_payload_for_client_mixed_message_and_function_calls_uses_standard_requires_action(
 ) {
     let payload = json!({
@@ -1422,6 +1452,37 @@ fn project_responses_client_payload_for_client_mixed_message_and_function_calls_
     assert!(output_items
         .iter()
         .all(|item| item["type"] != Value::String("message".to_string())));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_strips_codex_transcript_tool_call_leak() {
+    let leaked = r#"Assistant requested tool calls: - id=call_00_wpSa0J6o4cVOVh9s20T3294 type=function name=exec_command arguments={"cmd":"cd /Users/fanzhang/Documents/github/routecodex && awk test mod virtual_router_hit_log"}"#;
+    let payload = json!({
+        "type": "response.output_text.delta",
+        "content_index": 0,
+        "output_index": 0,
+        "item_id": "msg_codex_tool_leak",
+        "delta": leaked
+    });
+    let frame = format!(
+        "event: response.output_text.delta\ndata: {}\n\n",
+        serde_json::to_string(&payload).unwrap()
+    );
+
+    let output = project_responses_sse_frame_for_client(
+        &frame,
+        Some("response.output_text.delta"),
+        &payload,
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+
+    let output_frame = output["frame"].as_str().expect("frame");
+    assert!(!output_frame.contains("Assistant requested tool calls"));
+    assert!(!output_frame.contains("call_00_wpSa0J6o4cVOVh9s20T3294"));
+    assert!(!output_frame.contains("virtual_router_hit_log"));
+    assert!(output_frame.contains("\"delta\":\"\""));
 }
 
 #[test]

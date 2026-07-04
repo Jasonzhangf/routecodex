@@ -75,8 +75,8 @@ async function main() {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
-  const { ResponsesSseToJsonConverter } = await import(convPath);
+  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
+  const { collectSseBodyText, sseToJson } = await import(sseLibPath);
 
   const headers = { 'Content-Type':'application/json', 'OpenAI-Beta':'responses-2024-12-17', 'Authorization':`Bearer ${apiKey}`, 'User-Agent': 'RouteCodex/2.0 (+https://github.com/routecodex)'};
   const client = new HttpClient({ baseUrl, timeout:300000 });
@@ -103,13 +103,19 @@ async function main() {
     try {
       const body = { ...tries[i], model, stream:true };
       const stream = await client.postStream(endpoint, body, { ...headers, Accept:'text/event-stream' });
-      const conv = new ResponsesSseToJsonConverter();
       const reqId = `fai_probe_${Date.now()}_${i}`;
-      const json = await conv.convertSseToJson(stream, { requestId: reqId, model:String(model) });
+      const bodyText = await collectSseBodyText(stream);
+      const json = sseToJson({
+        protocol: 'openai-responses',
+        bodyText,
+        requestId: reqId,
+        model: String(model),
+      });
       // success: write golden
       const outdir = path.join(OUT_DIR, reqId);
       ensureDir(outdir);
       fs.writeFileSync(path.join(outdir, 'provider-request.json'), JSON.stringify({ url: baseUrl+endpoint, headers, body }, null, 2));
+      fs.writeFileSync(path.join(outdir, 'provider-response.sse'), bodyText, 'utf-8');
       fs.writeFileSync(path.join(outdir, 'provider-response.json'), JSON.stringify(json, null, 2));
       console.log('[fai-capture] success variant=%d out=%s', i+1, outdir);
       return;

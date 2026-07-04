@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
-  evaluateDirectRouteDecision,
+  findResponsesDirectFunctionCallOutputContentViolation,
   requireDirectPassthroughPayloadObject,
 } from '../../../../src/server/runtime/http-server/direct-passthrough-payload.js';
 
@@ -15,17 +15,10 @@ describe('direct-passthrough-payload', () => {
     };
 
     const resolved = requireDirectPassthroughPayloadObject(body);
-    const decision = evaluateDirectRouteDecision({
-      payload: body,
-      metadata: {},
-      inboundProtocol: 'openai-responses',
-      applyPatchMode: 'direct',
-    });
 
     expect(resolved).toBe(body);
     expect(resolved).toEqual(body);
-    expect(decision.providerWireValid).toBe(true);
-    expect(decision.requiresHubRelay).toBe(false);
+    expect(findResponsesDirectFunctionCallOutputContentViolation(resolved)).toBeUndefined();
   });
 
   it('rejects historical responses tool input content on direct', () => {
@@ -43,45 +36,25 @@ describe('direct-passthrough-payload', () => {
     };
 
     const result = requireDirectPassthroughPayloadObject(body);
-    const decision = evaluateDirectRouteDecision({
-      payload: body,
-      metadata: {},
-      inboundProtocol: 'openai-responses',
-      applyPatchMode: 'direct',
-    });
 
     expect(result).toBe(body);
     expect(result).toEqual(body);
-    expect(decision.providerWireValid).toBe(false);
-    expect(decision.requiresHubRelay).toBe(false);
+    expect(findResponsesDirectFunctionCallOutputContentViolation(result)).toBe(
+      'openai-responses provider wire input[1] function_call_output must not include content; use output only',
+    );
   });
 
-  it('requires hub relay for first-turn responses stopless when direct include is enabled', () => {
+  it('does not evaluate stopless relay decisions in direct payload helper', () => {
     const body = {
       model: 'gpt-5.5',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
     };
 
-    const decision = evaluateDirectRouteDecision({
-      payload: body,
-      metadata: {
-        metadataCenterSnapshot: {
-          runtimeControl: {
-            stopMessageEnabled: true,
-            stopMessageExcludeDirect: false,
-          },
-        },
-      },
-      inboundProtocol: 'openai-responses',
-      applyPatchMode: 'client',
-    });
-
-    expect(decision.providerWireValid).toBe(true);
-    expect(decision.requiresHubRelay).toBe(true);
-    expect(decision.reason).toBe('servertool_followup_requires_hub_relay');
+    expect(requireDirectPassthroughPayloadObject(body)).toBe(body);
+    expect(findResponsesDirectFunctionCallOutputContentViolation(body)).toBeUndefined();
   });
 
-  it('passes only stop-message control fields to native direct route decision', () => {
+  it('keeps cyclic metadata out of direct payload helper', () => {
     const body = {
       model: 'gpt-5.5',
       input: [
@@ -94,28 +67,33 @@ describe('direct-passthrough-payload', () => {
         },
       ],
     };
-    const runtimeControl: Record<string, unknown> = {
-      stopMessageEnabled: true,
-      stopMessageExcludeDirect: false,
-    };
-    runtimeControl.self = runtimeControl;
     const metadata: Record<string, unknown> = {
-      metadataCenterSnapshot: {
-        runtimeControl,
-      },
+      stopMessageEnabled: true,
     };
     metadata.self = metadata;
 
-    const decision = evaluateDirectRouteDecision({
-      payload: body,
-      metadata,
-      inboundProtocol: 'openai-responses',
-      applyPatchMode: 'client',
-    });
+    expect(requireDirectPassthroughPayloadObject(body)).toBe(body);
+    expect(findResponsesDirectFunctionCallOutputContentViolation(body)).toBeUndefined();
+  });
 
-    expect(decision.providerWireValid).toBe(true);
-    expect(decision.requiresHubRelay).toBe(true);
-    expect(decision.reason).toBe('servertool_followup_requires_hub_relay');
+  it('does not stringify cyclic runtime carriers in direct payload helper', () => {
+    const body: Record<string, unknown> = {
+      model: 'gpt-5.5',
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'describe this image' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
+          ],
+        },
+      ],
+      tools: [{ type: 'function', name: 'apply_patch', parameters: { type: 'object' } }],
+    };
+    body.__rt = body;
+
+    expect(requireDirectPassthroughPayloadObject(body)).toBe(body);
+    expect(findResponsesDirectFunctionCallOutputContentViolation(body)).toBeUndefined();
   });
 
   it('fails fast when direct payload is not an object', () => {

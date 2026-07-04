@@ -37,6 +37,81 @@ function assertNoRepoPath(value, label) {
   }
 }
 
+function verifyTarballShape(tarballPath, packageName) {
+  if (!fs.existsSync(tarballPath)) {
+    fail(`tarball missing: ${tarballPath}`);
+  }
+
+  const list = run('tar', ['-tzf', tarballPath]);
+  if (/^package\/node_modules\/(?:esbuild|@esbuild\/)/m.test(list.stdout)) {
+    fail(`${packageName} release tarball unexpectedly contains esbuild packages`);
+  }
+
+  const inspectDir = fs.mkdtempSync(path.join(os.tmpdir(), `${packageName}-release-inspect.`));
+  try {
+    run('tar', ['-xzf', tarballPath, '-C', inspectDir]);
+    const packedPackagePath = path.join(inspectDir, 'package', 'package.json');
+    const packedPackage = readJson(packedPackagePath);
+    const deps = Object.keys(packedPackage.dependencies || {}).sort();
+    const bundled = (packedPackage.bundleDependencies || packedPackage.bundledDependencies || []).slice().sort();
+    const missing = deps.filter((dependency) => !bundled.includes(dependency));
+    if (packedPackage.name !== packageName) fail(`${packageName} packed name mismatch: ${packedPackage.name}`);
+    if (packedPackage.dependencies?.esbuild) fail(`${packageName} packed package has esbuild production dependency`);
+    if (bundled.includes('esbuild')) fail(`${packageName} packed package bundles esbuild`);
+    if (missing.length > 0) fail(`${packageName} packed dependencies missing from bundle: ${missing.join(', ')}`);
+    assertNoRepoPath(JSON.stringify(packedPackage), `${packageName} packed package.json`);
+  } finally {
+    fs.rmSync(inspectDir, { recursive: true, force: true });
+  }
+}
+
+function verifyNormalInstall(tarballPath, packageName, binName, version) {
+  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), `${packageName}-normal-install.`));
+  try {
+    run('npm', ['install', '-g', tarballPath, '--prefix', prefix, '--no-audit', '--no-fund'], {
+      cwd: PROJECT_ROOT,
+      stdio: 'pipe',
+    });
+
+    const binPath = path.join(prefix, 'bin', binName);
+    const versionResult = run(binPath, ['--version'], { cwd: PROJECT_ROOT });
+    if (!versionResult.stdout.includes(version)) {
+      fail(`${packageName} installed ${binName} version mismatch: ${JSON.stringify(versionResult.stdout.trim())}`);
+    }
+
+    const packageDir = path.join(prefix, 'lib', 'node_modules', packageName);
+    const installedPackage = readJson(path.join(packageDir, 'package.json'));
+    const llmsDir = path.join(packageDir, 'node_modules', 'rcc-llmswitch-core');
+    const checks = {
+      packageDirIsSymlink: fs.lstatSync(packageDir).isSymbolicLink(),
+      packageJsonHasRepoPath: JSON.stringify(installedPackage).includes(PROJECT_ROOT),
+      llmsExists: fs.existsSync(llmsDir),
+      llmsIsSymlink: fs.existsSync(llmsDir) ? fs.lstatSync(llmsDir).isSymbolicLink() : true,
+      llmsDistExists: fs.existsSync(path.join(llmsDir, 'dist')),
+      esbuildExists: fs.existsSync(path.join(packageDir, 'node_modules', 'esbuild')),
+    };
+    if (checks.packageDirIsSymlink) fail(`${packageName} installed package is a symlink`);
+    if (checks.packageJsonHasRepoPath) fail(`${packageName} installed package.json leaks repo path`);
+    if (!checks.llmsExists) fail(`${packageName} installed rcc-llmswitch-core is missing`);
+    if (checks.llmsIsSymlink) fail(`${packageName} installed rcc-llmswitch-core must not be a symlink`);
+    if (!checks.llmsDistExists) fail(`${packageName} installed rcc-llmswitch-core/dist is missing`);
+    if (checks.esbuildExists) fail(`${packageName} installed release should not contain esbuild`);
+
+    return {
+      packageName,
+      tarball: tarballPath,
+      prefix,
+      version,
+      dependencies: Object.keys(installedPackage.dependencies || {}).length,
+      bundledDependencies: (installedPackage.bundleDependencies || installedPackage.bundledDependencies || []).length,
+      llmsDistExists: checks.llmsDistExists,
+      esbuildExists: checks.esbuildExists,
+    };
+  } finally {
+    fs.rmSync(prefix, { recursive: true, force: true });
+  }
+}
+
 const rootPackage = readJson(path.join(PROJECT_ROOT, 'package.json'));
 const version = String(rootPackage.version || '').trim();
 if (!version) fail('package.json version is empty');
@@ -45,73 +120,20 @@ if (rootPackage.dependencies?.esbuild) {
   fail('esbuild must stay out of production dependencies; it is a build-time dependency');
 }
 
-const tarballPath = path.join(PROJECT_ROOT, 'artifacts', 'pack', `rcc-${version}.tgz`);
-if (!fs.existsSync(tarballPath)) {
-  fail(`tarball missing: ${tarballPath}`);
+const releasePackages = [
+  { packageName: 'routecodex', binName: 'routecodex', tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `routecodex-${version}.tgz`) },
+  { packageName: 'rcc', binName: 'rcc', tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `rcc-${version}.tgz`) },
+];
+
+const reports = [];
+for (const releasePackage of releasePackages) {
+  verifyTarballShape(releasePackage.tarballPath, releasePackage.packageName);
+  reports.push(verifyNormalInstall(
+    releasePackage.tarballPath,
+    releasePackage.packageName,
+    releasePackage.binName,
+    version
+  ));
 }
 
-const list = run('tar', ['-tzf', tarballPath]);
-if (/^package\/node_modules\/(?:esbuild|@esbuild\/)/m.test(list.stdout)) {
-  fail('release tarball unexpectedly contains esbuild packages');
-}
-
-const inspectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-release-inspect.'));
-try {
-  run('tar', ['-xzf', tarballPath, '-C', inspectDir]);
-  const packedPackagePath = path.join(inspectDir, 'package', 'package.json');
-  const packedPackage = readJson(packedPackagePath);
-  const deps = Object.keys(packedPackage.dependencies || {}).sort();
-  const bundled = (packedPackage.bundleDependencies || packedPackage.bundledDependencies || []).slice().sort();
-  const missing = deps.filter((dependency) => !bundled.includes(dependency));
-  if (packedPackage.name !== 'rcc') fail(`packed name mismatch: ${packedPackage.name}`);
-  if (packedPackage.dependencies?.esbuild) fail('packed package has esbuild production dependency');
-  if (bundled.includes('esbuild')) fail('packed package bundles esbuild');
-  if (missing.length > 0) fail(`packed dependencies missing from bundle: ${missing.join(', ')}`);
-  assertNoRepoPath(JSON.stringify(packedPackage), 'packed package.json');
-} finally {
-  fs.rmSync(inspectDir, { recursive: true, force: true });
-}
-
-const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-normal-install.'));
-try {
-  run('npm', ['install', '-g', tarballPath, '--prefix', prefix, '--no-audit', '--no-fund'], {
-    cwd: PROJECT_ROOT,
-    stdio: 'pipe',
-  });
-
-  const binPath = path.join(prefix, 'bin', 'rcc');
-  const versionResult = run(binPath, ['--version'], { cwd: PROJECT_ROOT });
-  if (!versionResult.stdout.includes(version)) {
-    fail(`installed rcc version mismatch: ${JSON.stringify(versionResult.stdout.trim())}`);
-  }
-
-  const packageDir = path.join(prefix, 'lib', 'node_modules', 'rcc');
-  const installedPackage = readJson(path.join(packageDir, 'package.json'));
-  const llmsDir = path.join(packageDir, 'node_modules', 'rcc-llmswitch-core');
-  const checks = {
-    packageDirIsSymlink: fs.lstatSync(packageDir).isSymbolicLink(),
-    packageJsonHasRepoPath: JSON.stringify(installedPackage).includes(PROJECT_ROOT),
-    llmsExists: fs.existsSync(llmsDir),
-    llmsIsSymlink: fs.existsSync(llmsDir) ? fs.lstatSync(llmsDir).isSymbolicLink() : true,
-    llmsDistExists: fs.existsSync(path.join(llmsDir, 'dist')),
-    esbuildExists: fs.existsSync(path.join(packageDir, 'node_modules', 'esbuild')),
-  };
-  if (checks.packageDirIsSymlink) fail('installed package is a symlink');
-  if (checks.packageJsonHasRepoPath) fail('installed package.json leaks repo path');
-  if (!checks.llmsExists) fail('installed rcc-llmswitch-core is missing');
-  if (checks.llmsIsSymlink) fail('installed rcc-llmswitch-core must not be a symlink');
-  if (!checks.llmsDistExists) fail('installed rcc-llmswitch-core/dist is missing');
-  if (checks.esbuildExists) fail('installed release should not contain esbuild');
-
-  console.log(JSON.stringify({
-    tarball: tarballPath,
-    prefix,
-    version,
-    dependencies: Object.keys(installedPackage.dependencies || {}).length,
-    bundledDependencies: (installedPackage.bundleDependencies || installedPackage.bundledDependencies || []).length,
-    llmsDistExists: checks.llmsDistExists,
-    esbuildExists: checks.esbuildExists,
-  }, null, 2));
-} finally {
-  fs.rmSync(prefix, { recursive: true, force: true });
-}
+console.log(JSON.stringify({ version, packages: reports }, null, 2));

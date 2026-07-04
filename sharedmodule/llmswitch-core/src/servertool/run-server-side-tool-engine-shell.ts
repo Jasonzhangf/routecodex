@@ -8,7 +8,9 @@ import { runServertoolResponseStagePrePass } from './response-stage-prepass-shel
 import { runServertoolExecutionStage } from './execution-stage-shell.js';
 import { resolveServertoolEntryContext } from './entry-context-shell.js';
 import {
+  resolveServertoolRunEngineEntryPreflightApplicationWithNative,
   resolveServertoolRunEngineEntryPreflightDecisionWithNative,
+  resolveServertoolRunEnginePrepassApplicationWithNative,
   resolveServertoolRunEnginePrepassDecisionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
@@ -19,17 +21,20 @@ export async function orchestrateServertoolEngine(
   const entryPreflightDecision = resolveServertoolRunEngineEntryPreflightDecisionWithNative({
     entryPreflight
   });
-  if (entryPreflightDecision.action === 'return_result') {
-    return entryPreflightDecision.result;
+  const entryPreflightApplication = resolveServertoolRunEngineEntryPreflightApplicationWithNative({
+    entryPreflight: entryPreflightDecision
+  });
+  if (entryPreflightApplication.returnResult === true) {
+    return entryPreflightApplication.result;
   }
   const toolCalls = extractToolCallsFromResponseStage(
-    entryPreflightDecision.baseObject,
+    entryPreflightApplication.baseObject,
     options.requestId
   );
   const entryContext = resolveServertoolEntryContext({
     options,
     toolCalls,
-    base: entryPreflightDecision.baseObject
+    base: entryPreflightApplication.baseObject
   });
   const responseStagePrePass = await runServertoolResponseStagePrePass({
     options,
@@ -43,8 +48,11 @@ export async function orchestrateServertoolEngine(
     hasPrepassResult: prepassResult != null,
     prepassResult
   });
-  if (enginePrepassDecision.action === 'return_result') {
-    return enginePrepassDecision.result;
+  const enginePrepassApplication = resolveServertoolRunEnginePrepassApplicationWithNative({
+    decision: enginePrepassDecision
+  });
+  if (enginePrepassApplication.returnResult === true) {
+    return enginePrepassApplication.result;
   }
   return runServertoolExecutionStage({
     options,

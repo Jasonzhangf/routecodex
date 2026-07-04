@@ -4492,6 +4492,39 @@ fn test_govern_response_sanitizes_marker_text_when_structured_tool_calls_already
 }
 
 #[test]
+fn test_govern_response_strips_codex_transcript_tool_call_leak() {
+    let leaked = r#"Assistant requested tool calls: - id=call_00_wpSa0J6o4cVOVh9s20T3294 type=function name=exec_command arguments={"cmd":"cd /Users/fanzhang/Documents/github/routecodex && awk 'NR==1,/^mod virtual_router_engine;$/{print; if($0~/^mod virtual_router_engine;$/){print \"mod virtual_router_hit_log;\"}}' sharedmodule/llmswitch-core/rust-core/crates/router-hotpath"}"#;
+    let input = ToolGovernanceInput {
+        payload: serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": leaked
+                },
+                "finish_reason": "stop"
+            }]
+        }),
+        client_protocol: "openai-chat".to_string(),
+        entry_endpoint: "/v1/chat/completions".to_string(),
+        request_id: "req_codex_transcript_tool_leak".to_string(),
+    };
+
+    let result = govern_response(input).unwrap();
+    let message = &result.governed_payload["choices"][0]["message"];
+    assert!(
+        message.get("content").is_none()
+            || message["content"].is_null()
+            || message["content"]
+                .as_str()
+                .is_some_and(|text| text.is_empty())
+    );
+    let serialized = result.governed_payload.to_string();
+    assert!(!serialized.contains("Assistant requested tool calls"));
+    assert!(!serialized.contains("call_00_wpSa0J6o4cVOVh9s20T3294"));
+    assert!(!serialized.contains("mod virtual_router_hit_log"));
+}
+
+#[test]
 fn test_rcc_heredoc_tail_is_stripped_when_exec_command_runs_bd_cli() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({

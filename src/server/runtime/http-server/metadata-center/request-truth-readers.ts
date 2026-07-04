@@ -10,6 +10,7 @@ function readTrimmedString(value: unknown): string | undefined {
 }
 
 export type RuntimeRequestTruthIdentifiers = {
+  requestId?: string;
   sessionId?: string;
   conversationId?: string;
 };
@@ -173,9 +174,11 @@ export function readRuntimeRequestTruthIdentifiers(
   }
   const center = MetadataCenter.read(metadata);
   const requestTruth = center?.readRequestTruth();
+  const requestId = readTrimmedString(requestTruth?.requestId);
   const sessionId = readTrimmedString(requestTruth?.sessionId);
   const conversationId = readTrimmedString(requestTruth?.conversationId);
   return {
+    ...(requestId ? { requestId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(conversationId ? { conversationId } : {}),
   };

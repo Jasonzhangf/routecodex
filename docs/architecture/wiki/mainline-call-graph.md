@@ -548,12 +548,54 @@ flowchart LR
 
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
-| chat-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `convertResponseToJsonToSse -> buildChatSseStreamWithNative` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
-| chat-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `convertSseToJson -> buildChatJsonFromSseWithNative` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
-| anthropic-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `convertResponseToJsonToSse -> buildAnthropicSseStreamFramesWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
-| anthropic-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `convertSseToJson -> buildAnthropicJsonFromSseWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
-| gemini-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `convertResponseToJsonToSse -> buildGeminiSseStreamFramesWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
-| gemini-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `convertSseToJson -> buildGeminiJsonFromSseWithNative` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+| chat-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `buildSseFramesFromJsonWithNative -> build_sse_frames_from_json_json` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
+| chat-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `buildJsonFromSseWithNative -> build_json_from_sse_json` |  | `sse.chat_stream_projection`<br/>OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas |
+| anthropic-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `buildSseFramesFromJsonWithNative -> build_sse_frames_from_json_json` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+| anthropic-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `buildJsonFromSseWithNative -> build_json_from_sse_json` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+| gemini-sse-01 | `HubRespOutbound04ClientSemantic -> ServerRespOutbound05ClientFrame` | anchored | `buildSseFramesFromJsonWithNative -> build_sse_frames_from_json_json` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+| gemini-sse-02 | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` | anchored | `buildJsonFromSseWithNative -> build_json_from_sse_json` |  | `sse.anthropic_gemini_stream_projection`<br/>Anthropic Messages and Gemini Chat protocol-specific SSE projection owners |
+
+## stage_a.p0_rust_migration.mainline
+
+Stage A locks P0 Rust migration owner boundaries before implementation: servertool followup orchestration, Anthropic conversion, Responses continuation store, and request/response Chat Process tool governance.
+
+Entry contract: `StageAOwnerBoundary` via `docs/goal-prompts/2026-07-03-rust-hub-pipeline-migration.md`
+
+```mermaid
+flowchart LR
+  HubRespInbound02Parsed["HubRespInbound02Parsed"]
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  HubReqInbound02Standardized["HubReqInbound02Standardized"]
+  ResponsesContinuationStore["ResponsesContinuationStore"]
+  OpenAiChatCanonical["OpenAiChatCanonical"]
+  AnthropicChatInbound["AnthropicChatInbound"]
+  ServertoolOutcome["ServertoolOutcome"]
+  HubRespChatProcess03Governed["HubRespChatProcess03Governed"]
+  HubRespChatProcess03Governed -->|stage-a-p0-01| ServertoolOutcome
+  AnthropicChatInbound -->|stage-a-p0-02| OpenAiChatCanonical
+  HubRespChatProcess03Governed -->|stage-a-p0-03| ResponsesContinuationStore
+  HubReqInbound02Standardized -->|stage-a-p0-04| HubReqChatProcess03Governed
+  HubRespInbound02Parsed -->|stage-a-p0-05| HubRespChatProcess03Governed
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubRespChatProcess03Governed anchored;
+  class ServertoolOutcome anchored;
+  class AnthropicChatInbound anchored;
+  class OpenAiChatCanonical anchored;
+  class ResponsesContinuationStore anchored;
+  class HubReqInbound02Standardized anchored;
+  class HubReqChatProcess03Governed anchored;
+  class HubRespInbound02Parsed anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| stage-a-p0-01 | `HubRespChatProcess03Governed -> ServertoolOutcome` | anchored | `run_servertool_response_stage_json -> plan_servertool_outcome_json` |  | `servertool.followup_orchestration`<br/>Orchestration logic for server-side tools followup |
+| stage-a-p0-02 | `AnthropicChatInbound -> OpenAiChatCanonical` | anchored | `build_openai_chat_from_anthropic_json -> map_chat_tools_to_anthropic_tools` |  | `conversion.shared.anthropic`<br/>Anthropic OpenAI chat protocol normalization and tool schema mapping |
+| stage-a-p0-03 | `HubRespChatProcess03Governed -> ResponsesContinuationStore` | anchored | `prepare_responses_conversation_entry_json -> restore_responses_continuation_payload_json` |  | `conversion.responses.store`<br/>Responses conversation store and continuation management |
+| stage-a-p0-04 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `apply_req_process_tool_governance -> apply_req_process_tool_governance_json` |  | `hub.req_chatprocess.tool_governance`<br/>Harvest text tool calls from request side and sanitize payloads |
+| stage-a-p0-05 | `HubRespInbound02Parsed -> HubRespChatProcess03Governed` | anchored | `govern_response_json -> strip_orphan_function_calls_tag_json` |  | `hub.resp_chatprocess.tool_governance`<br/>Harvest tool results, reverse apply_patch, strip internal tools |
 
 ## Shared Multi-Reference Functions
 

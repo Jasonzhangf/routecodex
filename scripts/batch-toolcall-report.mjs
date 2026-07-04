@@ -82,9 +82,9 @@ async function runResponses(providerId) {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
+  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
   const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-  const { ResponsesSseToJsonConverter } = await import(convPath);
+  const { collectSseBodyText, sseToJson } = await import(sseLibPath);
   const { buildChatResponseFromResponses } = await import(bridgePath);
 
   ensureDir(RESP_OUT_DIR);
@@ -96,11 +96,13 @@ async function runResponses(providerId) {
 
   const client = new HttpClient({ baseUrl, timeout: 300000 });
   const stream = await client.postStream(endpoint, body, { ...headers, Accept: 'text/event-stream' });
-  const conv = new ResponsesSseToJsonConverter();
-  const json = await conv.convertSseToJson(stream, {
+  const bodyText = await collectSseBodyText(stream);
+  fs.writeFileSync(sseLog, bodyText, 'utf-8');
+  const json = sseToJson({
+    protocol: 'openai-responses',
+    bodyText,
     requestId: path.basename(base),
     model: String(body.model||'unknown'),
-    onEvent: (evt) => { try { fs.appendFileSync(sseLog, `event: ${evt.type}\n`); fs.appendFileSync(sseLog, `data: ${JSON.stringify(evt.data)}\n\n`); } catch {} }
   });
   fs.writeFileSync(jsonOut, JSON.stringify(json, null, 2));
   const chat = buildChatResponseFromResponses(json);
@@ -145,11 +147,14 @@ async function runAnthropic(providerId='glm-anthropic') {
   }
   const sseText = events.map(ev => `event: ${ev.event}\n`+`data: ${JSON.stringify(ev.data)}\n\n`).join('');
   fs.writeFileSync(sseLog, sseText, 'utf-8');
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/anthropic-sse-to-json-converter.js')).href;
-  const { AnthropicSseToJsonConverter } = await import(convPath);
-  async function* gen(){ yield sseText; }
-  const conv = new AnthropicSseToJsonConverter();
-  const message = await conv.convertSseToJson(gen(), { requestId: path.basename(base) });
+  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
+  const { sseToJson } = await import(sseLibPath);
+  const message = sseToJson({
+    protocol: 'anthropic-messages',
+    bodyText: sseText,
+    requestId: path.basename(base),
+    model,
+  });
   fs.writeFileSync(jsonOut, JSON.stringify(message, null, 2));
   const chatResp = buildOpenAIChatFromAnthropic({ messages: [message] });
   fs.writeFileSync(chatOut, JSON.stringify(chatResp, null, 2));

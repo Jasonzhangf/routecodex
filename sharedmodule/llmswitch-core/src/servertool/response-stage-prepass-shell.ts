@@ -9,6 +9,7 @@ import {
   type NativeServertoolResponseStageGate
 } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
 import {
+  resolveServertoolResponseStagePrepassInitialApplicationWithNative,
   resolveServertoolResponseStagePrepassAfterAutoHookWithNative,
   resolveServertoolResponseStagePrepassInitialDecisionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
@@ -38,11 +39,15 @@ export async function runServertoolResponseStagePrePass(args: {
   });
 
   const prepassDecision = resolveServertoolResponseStagePrepassInitialDecisionWithNative({
-    responseStageGatePlan
+    responseStageGatePlan,
+    baseObject: args.baseObject
   });
 
-  if (prepassDecision.action === 'return_prepass_result') {
-    return prepassDecision.result;
+  const initialApplication = resolveServertoolResponseStagePrepassInitialApplicationWithNative({
+    decision: prepassDecision
+  });
+  if (initialApplication.runAutoHook === false) {
+    return initialApplication.result;
   }
 
   const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
@@ -50,10 +55,12 @@ export async function runServertoolResponseStagePrePass(args: {
     contextBase: args.contextBase,
     includeAutoHookIds: args.includeAutoHookIds,
     excludeAutoHookIds: args.excludeAutoHookIds,
-    responseStageGatePlan
+    responseStageGatePlan,
+    baseObject: args.baseObject
   });
   return resolveServertoolResponseStagePrepassAfterAutoHookWithNative({
     responseStageGatePlan,
+    baseObject: args.baseObject,
     responseStageAutoHookResult: responseStageAutoHook
   }).result;
 }

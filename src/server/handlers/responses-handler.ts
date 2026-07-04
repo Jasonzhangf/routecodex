@@ -14,6 +14,7 @@ import {
   logRequestError,
   captureClientHeaders,
   buildHandlerPipelineMetadata,
+  readRequestBodyMetadata,
 } from './handler-utils.js';
 import {
   buildResponsesConversationPortScopeForHttp,
@@ -195,6 +196,7 @@ export async function handleResponses(
     let payload = (req.body && typeof req.body === 'object'
       ? req.body
       : {}) as ResponsesPayload;
+    const requestBodyMetadata = readRequestBodyMetadata(payload);
     const clientHeaders = captureClientHeaders(req.headers);
     const clientConnectionState = trackClientConnectionState(req, res);
     const acceptsSse = typeof req.headers['accept'] === 'string'
@@ -207,6 +209,7 @@ export async function handleResponses(
         responseIdFromPath: options.responseIdFromPath,
         requestId,
         requestMetadata: {
+          ...(requestBodyMetadata ?? {}),
           clientHeaders,
         },
         portScope: responsesConversationPortScope,
@@ -216,6 +219,7 @@ export async function handleResponses(
       });
     emitRequestStart({
       clientRequestId,
+      ...(requestBodyMetadata ?? {}),
       ...preparedRuntime.streamPlan.requestStartMeta,
       rawInputItems,
       rawInputShape: summarizeResponsesInputShape(payload),

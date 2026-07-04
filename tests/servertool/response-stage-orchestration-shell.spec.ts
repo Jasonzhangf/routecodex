@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageGateWithNative = jest.fn();
-const resolveServertoolResponseStageOrchestrationGateDecisionWithNative = jest.fn();
+const resolveServertoolResponseStageOrchestrationGateApplicationWithNative = jest.fn();
 const materializeServertoolResponseStageOrchestrationOutputWithNative = jest.fn();
 const extractServertoolResponseStageOrchestrationShellResultWithNative = jest.fn((output: any) => output.shellResult);
 const detectProviderResponseShapeWithNative = jest.fn(() => 'chat_completion');
@@ -21,7 +21,7 @@ jest.unstable_mockModule(
   () => ({
     materializeServertoolResponseStageOrchestrationOutputWithNative,
     extractServertoolResponseStageOrchestrationShellResultWithNative,
-    resolveServertoolResponseStageOrchestrationGateDecisionWithNative
+    resolveServertoolResponseStageOrchestrationGateApplicationWithNative
   })
 );
 
@@ -52,8 +52,9 @@ describe('response-stage-orchestration-shell', () => {
       responseHookMatched: false,
       responseHookRequired: false
     });
-    resolveServertoolResponseStageOrchestrationGateDecisionWithNative.mockReturnValue({
-      action: 'run_orchestration'
+    resolveServertoolResponseStageOrchestrationGateApplicationWithNative.mockReturnValue({
+      bypass: false,
+      runOrchestration: true
     });
     materializeServertoolResponseStageOrchestrationOutputWithNative.mockImplementation((input: any) =>
       input?.orchestrationExecuted === true
@@ -130,8 +131,10 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain('options.adapterContext as Record<string, unknown>');
     expect(source).toContain('chat: options.payload');
     expect(source).toContain('adapterContext: options.adapterContext');
-    expect(source).toContain('resolveServertoolResponseStageOrchestrationGateDecisionWithNative({');
-    expect(source).toContain("if (gateDecision.action === 'return_passthrough_bypass')");
+    expect(source).not.toContain("gateDecision.action === 'return_passthrough_bypass'");
+    expect(source).not.toContain(".action === 'return_passthrough_bypass'");
+    expect(source).toContain('resolveServertoolResponseStageOrchestrationGateApplicationWithNative({');
+    expect(source).toContain('if (gateApplication.bypass)');
     expect(source).toContain('materializeServertoolResponseStageOrchestrationOutputWithNative({');
     expect(source).toContain('extractServertoolResponseStageOrchestrationShellResultWithNative(output)');
     expect(source).not.toContain('return output.shellResult');
@@ -146,8 +149,9 @@ describe('response-stage-orchestration-shell', () => {
       responseHookRequired: false,
       skipReason: 'empty_assistant_payload'
     });
-    resolveServertoolResponseStageOrchestrationGateDecisionWithNative.mockReturnValue({
-      action: 'return_passthrough_bypass',
+    resolveServertoolResponseStageOrchestrationGateApplicationWithNative.mockReturnValue({
+      bypass: true,
+      runOrchestration: false,
       skipReason: 'empty_assistant_payload'
     });
 
@@ -173,7 +177,8 @@ describe('response-stage-orchestration-shell', () => {
       })
     );
     expect(runServerToolOrchestrationShell).not.toHaveBeenCalled();
-    expect(resolveServertoolResponseStageOrchestrationGateDecisionWithNative).toHaveBeenCalledWith({
+    expect(resolveServertoolResponseStageOrchestrationGateApplicationWithNative).toHaveBeenCalledWith({
+      baseObject: { id: 'resp_2' },
       responseStageGatePlan: {
         nextAction: 'bypass',
         shouldBypass: true,

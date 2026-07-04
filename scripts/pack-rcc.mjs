@@ -39,21 +39,31 @@ try {
     }
   });
 
+  run(process.execPath, [packScriptPath, '--name', 'routecodex', '--bin', 'routecodex'], {
+    cwd: PROJECT_ROOT
+  });
+
   run(process.execPath, [packScriptPath, '--name', 'rcc', '--bin', 'rcc'], {
     cwd: PROJECT_ROOT
   });
 
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
   const version = String(pkg.version || '').trim();
-  const tarballName = `rcc-${version}.tgz`;
+  const routecodexTarballName = `routecodex-${version}.tgz`;
+  const rccTarballName = `rcc-${version}.tgz`;
   const packOutputDir = ensureRepoPackOutputDir(PROJECT_ROOT);
-  const tarballPath = path.join(packOutputDir, tarballName);
+  const routecodexTarballPath = path.join(packOutputDir, routecodexTarballName);
+  const rccTarballPath = path.join(packOutputDir, rccTarballName);
 
-  if (!fs.existsSync(tarballPath)) {
-    throw new Error(`tarball not found: ${tarballPath}`);
+  if (!fs.existsSync(routecodexTarballPath)) {
+    throw new Error(`tarball not found: ${routecodexTarballPath}`);
+  }
+  if (!fs.existsSync(rccTarballPath)) {
+    throw new Error(`tarball not found: ${rccTarballPath}`);
   }
 
-  console.log(`[pack-rcc] ✅ tarball ready: ${tarballPath}`);
+  console.log(`[pack-rcc] ✅ routecodex tarball ready: ${routecodexTarballPath}`);
+  console.log(`[pack-rcc] ✅ rcc tarball ready: ${rccTarballPath}`);
 
   run(process.execPath, [path.join(PROJECT_ROOT, 'scripts', 'verify-rcc-release-install.mjs')], {
     cwd: PROJECT_ROOT

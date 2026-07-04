@@ -24,6 +24,8 @@ import type {
   RespInboundSseErrorDescriptor
 } from './native-hub-pipeline-resp-semantics-types.js';
 
+// feature_id: sse.responses_decode_projection
+// Rust canonical builder: build_responses_json_from_sse_json
 export function buildResponsesJsonFromSseJsonWithNative(input: {
   bodyText: string;
 }): Record<string, unknown> {

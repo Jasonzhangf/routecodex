@@ -125,7 +125,7 @@ function readLocalLlmsVersion() {
   }
 }
 
-const isDevPkg = args.name === 'routecodex';
+const isRouteCodex = args.name === 'routecodex';
 const isRcc = args.name === 'rcc';
 
 function resolveBundledReleaseDependencies(pkg) {
@@ -140,13 +140,13 @@ const original = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 fs.writeFileSync(backupPath, JSON.stringify(original, null, 2));
 
 try {
-  const inlineLocalLlmsForRcc =
-    isRcc &&
+  const inlineLocalLlmsForRelease =
+    (isRouteCodex || isRcc) &&
     exists(localLlmsPkgPath) &&
     String(process.env.RCC_LLMS_INLINE_LOCAL ?? process.env.ROUTECODEX_RCC_INLINE_LOCAL ?? '1').trim() !== '0';
 
-  if (inlineLocalLlmsForRcc) {
-    // For rcc release packing, inline local llms as a real dependency tree under node_modules
+  if (inlineLocalLlmsForRelease) {
+    // For release packing, inline local llms as a real dependency tree under node_modules
     // so npm pack can bundle it into the tarball (no external registry dependency at install time).
     if (isSymlink(llmsPath)) {
       runNodeScript(linkScriptPath, ['unlink']);
@@ -158,33 +158,33 @@ try {
   mutated.name = args.name;
   mutated.bin = { [args.bin]: 'dist/cli.js' };
   // Ensure description mentions mode
-  const suffix = isRcc ? ' (release)' : ' (dev)';
+  const suffix = (isRcc || isRouteCodex) ? ' (release)' : ' (dev)';
   mutated.description = String(original.description || 'RouteCodex')
     .replace(/\s*\((dev|release)\)$/, '')
     .concat(suffix);
   // Prefer real dependencies over bundled to avoid missing build artifacts (e.g., ajv/dist)
 
-  if (isDevPkg || isRcc) {
-    const inlineLocalLlmsForRcc =
-      isRcc &&
+  if (isRouteCodex || isRcc) {
+    const inlineLocalLlmsForRelease =
+      (isRouteCodex || isRcc) &&
       exists(localLlmsPkgPath) &&
       String(process.env.RCC_LLMS_INLINE_LOCAL ?? process.env.ROUTECODEX_RCC_INLINE_LOCAL ?? '1').trim() !== '0';
-    if (inlineLocalLlmsForRcc) {
+    if (inlineLocalLlmsForRelease) {
       const bundledReleaseDependencies = resolveBundledReleaseDependencies(original);
       mutated.bundledDependencies = bundledReleaseDependencies;
       mutated.bundleDependencies = bundledReleaseDependencies;
-      console.log('[pack-mode] inline local rcc-llmswitch-core into rcc tarball');
-      console.log(`[pack-mode] bundle rcc production dependencies: ${bundledReleaseDependencies.join(', ')}`);
+      console.log(`[pack-mode] inline local rcc-llmswitch-core into ${args.name} tarball`);
+      console.log(`[pack-mode] bundle ${args.name} production dependencies: ${bundledReleaseDependencies.join(', ')}`);
     } else {
       mutated.bundledDependencies = [];
       mutated.bundleDependencies = [];
     }
     const llmsOverride = String(process.env.RCC_LLMS_VERSION || process.env.ROUTECODEX_PACK_LLMS_VERSION || '').trim();
     const localLlmsVersion = readLocalLlmsVersion();
-    const llmsVersion = (isRcc && llmsOverride)
+    const llmsVersion = ((isRcc || isRouteCodex) && llmsOverride)
       ? llmsOverride
       : (localLlmsVersion || original.dependencies?.['rcc-llmswitch-core'] || 'file:sharedmodule/llmswitch-core');
-    if (isRcc && llmsOverride) {
+    if ((isRcc || isRouteCodex) && llmsOverride) {
       console.log(`[pack-mode] using RCC_LLMS_VERSION override: rcc-llmswitch-core=${llmsVersion}`);
     }
     const deps = {

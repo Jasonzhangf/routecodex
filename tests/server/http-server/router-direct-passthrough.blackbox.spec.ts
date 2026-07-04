@@ -544,7 +544,7 @@ describe('router-direct passthrough HTTP blackbox', () => {
     }
   });
 
-  it('HTTP BLACKBOX: stopMessage includeDirect forces /v1/responses same-protocol requests to relay for stopless', async () => {
+  it('HTTP BLACKBOX: stopMessage includeDirect keeps /v1/responses same-protocol requests on direct passthrough', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-router-direct-stopless-relay-'));
     const configPath = path.join(tmp, 'config.json');
     let upstreamPostCount = 0;
@@ -594,7 +594,7 @@ describe('router-direct passthrough HTTP blackbox', () => {
         body: JSON.stringify({
           model: 'gpt-5.5',
           input: [{ role: 'user', content: [{ type: 'input_text', text: '继续执行当前任务' }] }],
-          stream: false,
+          stream: true,
           metadata: { sessionId: 'router-direct-stopless-relay-blackbox' }
         })
       });
@@ -602,11 +602,12 @@ describe('router-direct passthrough HTTP blackbox', () => {
 
       expect(response.status).toBe(200);
       expect(upstreamPostCount).toBe(1);
-      expect(text).toContain('exec_command');
-      expect(text).toContain('routecodex hook run reasoning_stop');
-      expect(text).toContain('stop_message_flow');
-      expect(text).toContain('requires_action');
-      expect(text).not.toContain('direct-json-ok');
+      expect(text).toContain('resp_direct_stopless_relay');
+      expect(text).toContain('阶段完成，但还需要继续执行。');
+      expect(text).not.toContain('exec_command');
+      expect(text).not.toContain('routecodex hook run reasoning_stop');
+      expect(text).not.toContain('stop_message_flow');
+      expect(text).not.toContain('requires_action');
     } finally {
       await server?.stop().catch(() => undefined);
       await closeServer(upstream);

@@ -1,6 +1,26 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolEntryPreflightWithNativeMock = jest.fn();
+const resolveServertoolEntryPreflightApplicationWithNativeMock = jest.fn((input: any) => {
+  if (input.entryPreflight.action === 'throw_error') {
+    return {
+      throwError: true,
+      errorPlan: input.entryPreflight.errorPlan
+    };
+  }
+  if (input.entryPreflight.action === 'return_result') {
+    return {
+      throwError: false,
+      returnResult: true,
+      result: input.entryPreflight.result
+    };
+  }
+  return {
+    throwError: false,
+    returnResult: false,
+    baseObject: input.entryPreflight.baseObject
+  };
+});
 const resolveServertoolEntryPreflightWithNativeMock = jest.fn((input: any) => {
   const plan = planServertoolEntryPreflightWithNativeMock({
     hasBaseObject: input.baseObject != null,
@@ -53,6 +73,7 @@ jest.unstable_mockModule(
   () => ({
     isAdapterClientDisconnectedWithNative: isAdapterClientDisconnectedWithNativeMock,
     planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
+    resolveServertoolEntryPreflightApplicationWithNative: resolveServertoolEntryPreflightApplicationWithNativeMock,
     resolveServertoolEntryPreflightWithNative: resolveServertoolEntryPreflightWithNativeMock,
     readServertoolEntryBaseObjectWithNative: readServertoolEntryBaseObjectWithNativeMock,
     planServertoolClientDisconnectedErrorWithNative: planServertoolClientDisconnectedErrorWithNativeMock
@@ -105,7 +126,10 @@ describe('entry-preflight-shell', () => {
     expect(source).not.toContain('result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }');
     expect(source).toContain('chatResponse: args.options.chatResponse');
     expect(source).not.toContain('result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult');
-    expect(source).toContain('entryPreflightDecision.errorPlan');
+    expect(source).not.toContain("entryPreflightDecision.action === 'throw_error'");
+    expect(source).not.toContain('entryPreflightDecision.errorPlan');
+    expect(source).toContain('resolveServertoolEntryPreflightApplicationWithNative');
+    expect(source).toContain('entryPreflightApplication.errorPlan');
     expect(source).not.toContain("result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }");
     expect(source).not.toContain('const passthroughResult =');
   });

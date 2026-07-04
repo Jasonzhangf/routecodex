@@ -1,6 +1,7 @@
 use serde_json::{Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// feature_id: sse.responses_encode_projection
 fn current_unix_timestamp_ms() -> Result<i64, String> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)

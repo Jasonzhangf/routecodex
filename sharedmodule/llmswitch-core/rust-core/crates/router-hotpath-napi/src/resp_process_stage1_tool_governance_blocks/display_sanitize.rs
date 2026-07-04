@@ -26,7 +26,8 @@ pub(crate) fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
     if lowered.is_empty() {
         return false;
     }
-    lowered.contains("<<rcc_tool_calls")
+    looks_like_codex_tool_call_transcript(normalized.as_str())
+        || lowered.contains("<<rcc_tool_calls")
         || lowered.contains("<function_calls>")
         || lowered.contains("</function_calls>")
         || Regex::new(r#"(?is)<antml\s+function\s*=\s*[\"']calls[\"']\s*>"#)
@@ -49,6 +50,23 @@ pub(crate) fn contains_explicit_tool_wrapper_marker(raw: &str) -> bool {
         || lowered.contains("</invoke>")
         || lowered.contains("<parameter")
         || lowered.contains("</parameter>")
+}
+
+fn looks_like_codex_tool_call_transcript(raw: &str) -> bool {
+    let trimmed = raw.trim_start_matches(|ch: char| {
+        matches!(ch, ' ' | '\t' | '\r' | '\n' | '-' | '•' | '·' | '*')
+    });
+    if !trimmed
+        .to_ascii_lowercase()
+        .starts_with("assistant requested tool calls:")
+    {
+        return false;
+    }
+    Regex::new(
+        r#"(?is)\bid\s*=\s*(?:call|fc)[A-Za-z0-9_.:-]*\b[\s\S]*\btype\s*=\s*function\b[\s\S]*\bname\s*=\s*[A-Za-z0-9_.:-]+\b[\s\S]*\barguments\s*="#,
+    )
+    .map(|re| re.is_match(trimmed))
+    .unwrap_or(false)
 }
 
 use crate::resp_process_stage1_tool_governance_blocks::json_args::try_parse_json_value_lenient;
@@ -277,6 +295,9 @@ pub(crate) fn strip_tool_call_marker_payload(raw: &str) -> String {
     let normalized_raw = normalize_dsml_tool_markup(raw);
     let raw = strip_empty_tool_calls_payload_noise(normalized_raw.as_str());
     if raw.trim().is_empty() {
+        return String::new();
+    }
+    if looks_like_codex_tool_call_transcript(raw.as_str()) {
         return String::new();
     }
     if Regex::new(r#"(?is)^\s*<antml\s+function\s*=\s*[\"']calls[\"']\s*>\s*\[?\s*$"#)

@@ -1,9 +1,3 @@
-export type ResponsesDirectContractDecision = {
-  providerWireValid: boolean;
-  requiresHubRelay?: boolean;
-  reason?: string;
-};
-
 export function buildDirectPayloadContractError(
   message: string,
   details?: Record<string, unknown>,
@@ -48,22 +42,4 @@ export function annotateAsHostPayloadContractError(error: unknown): Error {
     source: 'host.response_contract',
   };
   return contractError;
-}
-
-export function projectResponsesDirectContractDecision(
-  decision: ResponsesDirectContractDecision,
-): void {
-  if (decision.requiresHubRelay) {
-    throw buildDirectPayloadContractError(
-      decision.reason ?? 'requires_hub_relay',
-      { reason: decision.reason ?? 'direct_payload_requires_hub_relay' },
-    );
-  }
-  if (decision.providerWireValid) {
-    return;
-  }
-  throw buildDirectPayloadContractError(
-    decision.reason ?? 'invalid direct payload',
-    { reason: decision.reason ?? 'invalid_direct_payload' },
-  );
 }

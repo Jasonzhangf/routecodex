@@ -21,7 +21,11 @@ import {
   planServertoolExecutionOutcomeMaterializationWithNative,
   planServertoolExecutionOutcomeRuntimeActionWithNative,
   planServertoolEntryPreflightWithNative,
+  resolveServertoolEntryPreflightApplicationWithNative,
+  resolveServertoolRunEngineEntryPreflightApplicationWithNative,
+  resolveServertoolRunEnginePrepassApplicationWithNative,
   planServertoolResponseStageRuntimeActionWithNative,
+  resolveServertoolResponseStagePrepassInitialApplicationWithNative,
   planServertoolRegistryAutoHookDescriptorsWithNative,
   planServertoolRegistryLookupActionWithNative,
   planServertoolRegistryProjectionWithNative
@@ -435,6 +439,75 @@ describe('servertool CLI native bridge', () => {
     });
   });
 
+  it('uses Rust-owned server-side-tool entry preflight application planning', () => {
+    expect(
+      resolveServertoolEntryPreflightApplicationWithNative({
+        entryPreflight: {
+          action: 'return_result',
+          result: {
+            mode: 'passthrough',
+            finalChatResponse: 'raw-chat'
+          }
+        }
+      })
+    ).toEqual({
+      throwError: false,
+      returnResult: true,
+      result: {
+        mode: 'passthrough',
+        finalChatResponse: 'raw-chat'
+      }
+    });
+
+    expect(
+      resolveServertoolEntryPreflightApplicationWithNative({
+        entryPreflight: {
+          action: 'throw_error',
+          errorPlan: {
+            message: 'client disconnected',
+            code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+            category: 'client_disconnect',
+            status: 499
+          } as any
+        }
+      })
+    ).toEqual({
+      throwError: true,
+      errorPlan: {
+        message: 'client disconnected',
+        code: 'SERVERTOOL_CLIENT_DISCONNECTED',
+        category: 'client_disconnect',
+        status: 499
+      }
+    });
+  });
+
+  it('uses Rust-owned run-engine entry preflight application planning', () => {
+    expect(
+      resolveServertoolRunEngineEntryPreflightApplicationWithNative({
+        entryPreflight: {
+          action: 'return_result',
+          result: { mode: 'passthrough', finalChatResponse: { id: 'preflight' } }
+        }
+      })
+    ).toEqual({
+      returnResult: true,
+      result: { mode: 'passthrough', finalChatResponse: { id: 'preflight' } }
+    });
+
+    expect(
+      resolveServertoolRunEngineEntryPreflightApplicationWithNative({
+        entryPreflight: {
+          action: 'continue',
+          baseObject: { id: 'base' }
+        }
+      })
+    ).toEqual({
+      returnResult: false,
+      baseObject: { id: 'base' }
+    });
+  });
+
   it('uses Rust-owned server-side-tool engine prepass action planning', () => {
     expect(
       planServertoolEnginePrepassActionWithNative({
@@ -453,6 +526,28 @@ describe('servertool CLI native bridge', () => {
       })
     ).toEqual({
       action: 'continue_to_execution'
+    });
+  });
+
+  it('uses Rust-owned run-engine prepass application planning', () => {
+    expect(
+      resolveServertoolRunEnginePrepassApplicationWithNative({
+        decision: {
+          action: 'return_result',
+          result: { mode: 'passthrough', finalChatResponse: { id: 'prepass' } }
+        }
+      })
+    ).toEqual({
+      returnResult: true,
+      result: { mode: 'passthrough', finalChatResponse: { id: 'prepass' } }
+    });
+
+    expect(
+      resolveServertoolRunEnginePrepassApplicationWithNative({
+        decision: { action: 'continue_to_execution' }
+      })
+    ).toEqual({
+      returnResult: false
     });
   });
 
@@ -896,6 +991,44 @@ describe('servertool CLI native bridge', () => {
     ).toEqual({
       action: 'return_required_response_hook_empty',
       responseHookName: 'stop_message_auto'
+    });
+  });
+
+  it('uses Rust-owned response-stage prepass initial application planning', () => {
+    expect(
+      resolveServertoolResponseStagePrepassInitialApplicationWithNative({
+        decision: { action: 'run_auto_hooks' }
+      })
+    ).toEqual({
+      runAutoHook: true
+    });
+
+    expect(
+      resolveServertoolResponseStagePrepassInitialApplicationWithNative({
+        decision: {
+          action: 'return_prepass_result',
+          result: {
+            action: 'continue_to_execution',
+            responseStageGatePlan: {
+              shouldBypass: false,
+              nextAction: 'continue_to_execution',
+              responseHookMatched: false,
+              responseHookRequired: false
+            }
+          }
+        }
+      })
+    ).toEqual({
+      runAutoHook: false,
+      result: {
+        action: 'continue_to_execution',
+        responseStageGatePlan: {
+          shouldBypass: false,
+          nextAction: 'continue_to_execution',
+          responseHookMatched: false,
+          responseHookRequired: false
+        }
+      }
     });
   });
 

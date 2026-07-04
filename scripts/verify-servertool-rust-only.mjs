@@ -5639,7 +5639,8 @@ function checkServertoolRustOutcomeCloseout() {
     'createServertoolProviderProtocolErrorFromPlan',
     'readServertoolEntryBaseObjectWithNative(args.options.chatResponse)',
     'chatResponse: args.options.chatResponse',
-    'entryPreflightDecision.errorPlan'
+    'resolveServertoolEntryPreflightApplicationWithNative',
+    'entryPreflightApplication.errorPlan'
   ]) {
     if (!entryPreflightShell.includes(marker)) {
       fail(
@@ -5851,7 +5852,7 @@ function checkServertoolRustOutcomeCloseout() {
   }
   for (const marker of [
     'const gatePlan = planServertoolResponseStageGateWithNative({',
-    'resolveServertoolResponseStageOrchestrationGateDecisionWithNative',
+    'resolveServertoolResponseStageOrchestrationGateApplicationWithNative',
     'materializeServertoolResponseStageOrchestrationOutputWithNative',
     'detectProviderResponseShapeWithNative',
     'const orchestration = await runServerToolOrchestrationShell(',

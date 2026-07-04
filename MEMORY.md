@@ -557,6 +557,12 @@
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`, `tests/servertool/server-side-tools.dispatch-native.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` forbid the deleted wrapper and lock dispatch-preparation to the native input constructor.
 - Verification: focused Jest `server-side-tools.dispatch-native + servertool-active-orchestration-audit`, sharedmodule TS, `verify:servertool-rust-only`, `verify:architecture-mainline-call-map`, and `git diff --check` passed.
 
+# 2026-07-03: Codex `tool_mode=code_mode_only` must not be advertised accidentally
+
+- Verified root cause: advertising `tool_mode: "code_mode_only"` from `/v1/models` for `gpt-5.5` changed Codex tool planning. Codex hides direct nested tools under `ToolMode::CodeModeOnly`, so upstream models can emit tool-call transcripts as ordinary text instead of structured tool calls.
+- Fix rule: do not expose `tool_mode` from RouteCodex model metadata unless intentionally switching the client into code-mode executor semantics. For current Codex direct/native tool behavior, keep model metadata capability fields such as `apply_patch_tool_type: "freeform"`, `experimental_supported_tools`, `supports_parallel_tool_calls`, and `input_modalities`, but omit `tool_mode`.
+- Verification evidence: `routes.invalid-json.spec.ts` passed after removing the expectation; Rust leak regressions passed; `verify:architecture-review-surface-light`, `build:min`, `pack:rcc`, and `verify:rcc-release-install` passed; synchronized global `routecodex/rcc@0.90.3537` installed; live 5555 `/v1/models` has no `tool_mode`; latest 5555 samples and logs contain no tool-call transcript leak markers or missing-context errors after the release startup marker.
+
 # 2026-06-30: servertool engine/response dead carriers removed
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts` no longer carries `effectiveServerToolTimeoutMs`; the engine timeout shell passes a single `serverToolTimeoutMs` truth into `withTimeout()` and timeout error construction.
 - `sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts` no longer accepts explicit `providerProtocol` options; response-stage provider protocol truth stays bound to MetadataCenter runtime_control.
@@ -611,6 +617,12 @@
 - Verification: focused Jest 65/65 passed, sharedmodule `tsc` passed, `verify:servertool-rust-only` passed, `verify:function-map-compile-gate` passed, `verify:architecture-mainline-call-map` passed, `git diff --check` passed.
 - Reusable rule: when a TS shell only forwards a planned materialization input into native ownership, keep the shell narrow and forbid cast-based trust expansion at the call site.
 
+# 2026-07-03: routecodex and rcc release artifacts must be synchronized
+
+- Verified root cause: 5555 runtime consumed global `routecodex`, not global `rcc`; installing only `rcc-0.90.3533.tgz` left `routecodex@0.90.3533` on an older buildTime and allowed the same-version/stale-build split to survive.
+- Fix rule: release closeout must pack, normal-install verify, globally install, and identity-check both `routecodex-<version>.tgz` and `rcc-<version>.tgz`. Compare package root, symlink status, `dist/build-info.js`, bundled `rcc-llmswitch-core`, and command resolution for both CLIs before live validation.
+- Verification evidence: dual tarballs built with identical buildTime `2026-07-03T12:14:43.025Z`; `verify:rcc-release-install` passed normal npm global install checks for both; real global installs passed; 5555 restart and live `/v1/responses` first turn plus `submit_tool_outputs` continuation returned HTTP 200 with no new `RESPONSES_STORE_MISSING_REQUEST_CONTEXT` / `record.missing_request_context` after markers.
+
 # 2026-07-03: LM Studio `/v1/responses` direct path stays Responses direct
 - Verified runtime truth: `~/.rcc/provider/lmstudio/config.v2.toml` uses `[provider] type = "responses"` with `defaultModel = "ornith-1.0-397b"`; LM Studio must not be fixed by converting `/v1/responses` to chat.
 - Verified 4444 route truth on installed `0.90.3533`: exact old failure sample `openai-responses-router-gpt-5.5-20260703T143914593-454787-1184` dry-run selected `lmstudio.key1.ornith-1.0-397b`, `providerProtocol=openai-responses`, `compatibilityProfile=responses:lmstudio`, and `wouldReturnProviderNotAvailable=false`.
@@ -622,3 +634,8 @@
 - Fix rule: build-time packages such as `esbuild` must stay in `devDependencies`; `rcc` release tarball bundles only true production dependencies and must include `rcc-llmswitch-core` as a real package tree, not a symlink or repo path.
 - Gate: `scripts/verify-rcc-release-install.mjs` checks the tarball has no `esbuild`, all production dependencies are bundled, no repo path leaks, and a normal `npm install -g <tgz> --prefix <tmp>` can run `rcc --version`.
 - Verification evidence: packed `rcc-0.90.3533.tgz` has 26 dependencies and 26 bundled dependencies, no `esbuild`; temporary-prefix and real global `npm install -g artifacts/pack/rcc-0.90.3533.tgz` passed, installed `rcc-llmswitch-core/dist` exists, and installed package is not repo-linked.
+
+# 2026-07-03: `/v1/responses` tool-call transcript leaks are client projection bugs
+- Verified root cause: Codex-visible text `Assistant requested tool calls: ... name=exec_command arguments=...` came from RouteCodex client-visible `/v1/responses` output text, confirmed in Codex session JSONL and `~/.rcc/codex-samples/openai-responses/ports/5555/.../client-response.json`.
+- Fix rule: do not treat a green `governResponseJson`/display-sanitize test as closure for `/v1/responses` leaks. The live owner is `hub.response_responses_client_projection`; sanitize only client-visible text fields in Responses client payload/SSE projection and never rewrite structured `function_call.arguments`.
+- Verification evidence: focused Rust leak tests passed 3/3; `verify:hub-response-responses-chat-projection`, native hotpath build, sharedmodule `tsc`, function-map gate, `build:min`, and `pack:rcc` passed; synchronized global `routecodex/rcc@0.90.3536` installed; live 5555 replay `routecodex-tool-leak-live-20260703T210111` returned `response.completed` and `LEAK_PRESENT=0`.

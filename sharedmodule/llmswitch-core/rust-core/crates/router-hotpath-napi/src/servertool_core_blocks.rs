@@ -412,6 +412,23 @@ pub fn plan_servertool_engine_orchestration_preflight_action_json(
     .map_err(|e| format!("serialize servertool engine orchestration preflight action plan: {e}"))
 }
 
+pub fn plan_servertool_engine_orchestration_preflight_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: engine_orchestration_preflight_action_contract::ServertoolEngineOrchestrationPreflightApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool engine orchestration preflight application input: {e}")
+        })?;
+    let plan =
+        engine_orchestration_preflight_action_contract::plan_servertool_engine_orchestration_preflight_application(
+            input,
+        )
+        .map_err(|e| format!("plan servertool engine orchestration preflight application: {e}"))?;
+    serde_json::to_string(&plan).map_err(|e| {
+        format!("serialize servertool engine orchestration preflight application plan: {e}")
+    })
+}
+
 pub fn plan_servertool_engine_runtime_action_json(input_json: &str) -> Result<String, String> {
     let input: engine_runtime_action_contract::ServertoolEngineRuntimeActionInput =
         serde_json::from_str(input_json)
@@ -437,6 +454,16 @@ pub fn plan_servertool_engine_skip_json(input_json: &str) -> Result<String, Stri
             .map_err(|e| format!("deserialize servertool engine skip input: {e}"))?;
     serde_json::to_string(&engine_skip_contract::plan_servertool_engine_skip(input))
         .map_err(|e| format!("serialize servertool engine skip plan: {e}"))
+}
+
+pub fn plan_servertool_engine_skip_application_json(input_json: &str) -> Result<String, String> {
+    let input: engine_skip_contract::ServertoolEngineSkipApplicationInput =
+        serde_json::from_str(input_json)
+            .map_err(|e| format!("deserialize servertool engine skip application input: {e}"))?;
+    let plan = engine_skip_contract::plan_servertool_engine_skip_application(input)
+        .map_err(|e| format!("plan servertool engine skip application: {e}"))?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize servertool engine skip application plan: {e}"))
 }
 
 pub fn plan_servertool_execution_outcome_runtime_action_json(
@@ -509,6 +536,25 @@ pub fn plan_servertool_response_stage_runtime_action_json(
     .map_err(|e| format!("serialize servertool response stage runtime action plan: {e}"))
 }
 
+pub fn plan_servertool_response_stage_prepass_initial_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: response_stage_runtime_action_contract::ServertoolResponseStagePrepassInitialApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool response stage prepass initial application input: {e}")
+        })?;
+    let plan =
+        response_stage_runtime_action_contract::plan_servertool_response_stage_prepass_initial_application(
+            input,
+        )
+        .map_err(|e| {
+            format!("plan servertool response stage prepass initial application: {e}")
+        })?;
+    serde_json::to_string(&plan).map_err(|e| {
+        format!("serialize servertool response stage prepass initial application plan: {e}")
+    })
+}
+
 pub fn plan_servertool_response_stage_orchestration_output_json(
     input_json: &str,
 ) -> Result<String, String> {
@@ -522,6 +568,23 @@ pub fn plan_servertool_response_stage_orchestration_output_json(
         ),
     )
     .map_err(|e| format!("serialize servertool response stage orchestration output plan: {e}"))
+}
+
+pub fn plan_servertool_response_stage_orchestration_gate_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: response_stage_orchestration_contract::ServertoolResponseStageOrchestrationGateApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool response stage orchestration gate application input: {e}")
+        })?;
+    let plan =
+        response_stage_orchestration_contract::plan_servertool_response_stage_orchestration_gate_application(
+            input,
+        )
+        .map_err(|e| format!("plan servertool response stage orchestration gate application: {e}"))?;
+    serde_json::to_string(&plan).map_err(|e| {
+        format!("serialize servertool response stage orchestration gate application plan: {e}")
+    })
 }
 
 pub fn materialize_servertool_response_stage_orchestration_output_json(
@@ -547,6 +610,36 @@ pub fn plan_servertool_entry_preflight_json(input_json: &str) -> Result<String, 
         .map_err(|e| format!("serialize servertool entry preflight plan: {e}"))
 }
 
+pub fn plan_servertool_entry_preflight_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: server_side_tool_entry_contract::ServertoolEntryPreflightApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool entry preflight application input: {e}")
+        })?;
+    let plan = server_side_tool_entry_contract::plan_servertool_entry_preflight_application(input)
+        .map_err(|e| format!("plan servertool entry preflight application: {e}"))?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize servertool entry preflight application plan: {e}"))
+}
+
+pub fn plan_servertool_run_engine_entry_preflight_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: server_side_tool_entry_contract::ServertoolRunEngineEntryPreflightApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool run-engine entry preflight application input: {e}")
+        })?;
+    let plan =
+        server_side_tool_entry_contract::plan_servertool_run_engine_entry_preflight_application(
+            input,
+        )
+        .map_err(|e| format!("plan servertool run-engine entry preflight application: {e}"))?;
+    serde_json::to_string(&plan).map_err(|e| {
+        format!("serialize servertool run-engine entry preflight application plan: {e}")
+    })
+}
+
 pub fn plan_servertool_entry_context_json(input_json: &str) -> Result<String, String> {
     let input: server_side_tool_entry_contract::ServertoolEntryContextInput =
         serde_json::from_str(input_json)
@@ -563,6 +656,20 @@ pub fn plan_servertool_engine_prepass_action_json(input_json: &str) -> Result<St
         &engine_prepass_action_contract::plan_servertool_engine_prepass_action(input),
     )
     .map_err(|e| format!("serialize servertool engine prepass action plan: {e}"))
+}
+
+pub fn plan_servertool_run_engine_prepass_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: engine_prepass_action_contract::ServertoolRunEnginePrepassApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool run-engine prepass application input: {e}")
+        })?;
+    let plan =
+        engine_prepass_action_contract::plan_servertool_run_engine_prepass_application(input)
+            .map_err(|e| format!("plan servertool run-engine prepass application: {e}"))?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize servertool run-engine prepass application plan: {e}"))
 }
 
 pub fn plan_servertool_registry_lookup_action_json(input_json: &str) -> Result<String, String> {
@@ -2400,6 +2507,87 @@ fn plans_servertool_entry_preflight_via_servertool_core_bridge() {
 }
 
 #[test]
+fn plans_servertool_run_engine_entry_preflight_application_via_servertool_core_bridge() {
+    let return_result = plan_servertool_run_engine_entry_preflight_application_json(
+        r#"{"entryPreflight":{"action":"return_result","result":{"mode":"passthrough","finalChatResponse":{"id":"preflight"}}}}"#,
+    )
+    .expect("return entry preflight application");
+    let return_value: serde_json::Value =
+        serde_json::from_str(&return_result).expect("parse return entry preflight application");
+    assert_eq!(return_value["returnResult"], serde_json::json!(true));
+    assert_eq!(
+        return_value["result"]["finalChatResponse"]["id"],
+        serde_json::json!("preflight")
+    );
+
+    let continue_execution = plan_servertool_run_engine_entry_preflight_application_json(
+        r#"{"entryPreflight":{"action":"continue","baseObject":{"id":"base"}}}"#,
+    )
+    .expect("continue entry preflight application");
+    let continue_value: serde_json::Value = serde_json::from_str(&continue_execution)
+        .expect("parse continue entry preflight application");
+    assert_eq!(continue_value["returnResult"], serde_json::json!(false));
+    assert_eq!(
+        continue_value["baseObject"]["id"],
+        serde_json::json!("base")
+    );
+
+    let invalid = plan_servertool_run_engine_entry_preflight_application_json(
+        r#"{"entryPreflight":{"action":"unknown"}}"#,
+    )
+    .expect_err("unknown entry preflight application must fail");
+    assert!(invalid.contains("invalid servertool run-engine entry preflight action"));
+}
+
+#[test]
+fn plans_servertool_entry_preflight_application_via_servertool_core_bridge() {
+    let return_result = plan_servertool_entry_preflight_application_json(
+        r#"{"entryPreflight":{"action":"return_result","result":{"mode":"passthrough","finalChatResponse":"raw-chat"}}}"#,
+    )
+    .expect("return entry preflight application");
+    let return_value: serde_json::Value =
+        serde_json::from_str(&return_result).expect("parse return entry preflight application");
+    assert_eq!(return_value["throwError"], serde_json::json!(false));
+    assert_eq!(return_value["returnResult"], serde_json::json!(true));
+    assert_eq!(
+        return_value["result"]["finalChatResponse"],
+        serde_json::json!("raw-chat")
+    );
+
+    let throw_error = plan_servertool_entry_preflight_application_json(
+        r#"{"entryPreflight":{"action":"throw_error","errorPlan":{"code":"SERVERTOOL_CLIENT_DISCONNECTED"}}}"#,
+    )
+    .expect("throw entry preflight application");
+    let throw_value: serde_json::Value =
+        serde_json::from_str(&throw_error).expect("parse throw entry preflight application");
+    assert_eq!(throw_value["throwError"], serde_json::json!(true));
+    assert_eq!(throw_value["returnResult"], serde_json::json!(false));
+    assert_eq!(
+        throw_value["errorPlan"]["code"],
+        serde_json::json!("SERVERTOOL_CLIENT_DISCONNECTED")
+    );
+
+    let continue_execution = plan_servertool_entry_preflight_application_json(
+        r#"{"entryPreflight":{"action":"continue","baseObject":{"id":"base"}}}"#,
+    )
+    .expect("continue entry preflight application");
+    let continue_value: serde_json::Value = serde_json::from_str(&continue_execution)
+        .expect("parse continue entry preflight application");
+    assert_eq!(continue_value["throwError"], serde_json::json!(false));
+    assert_eq!(continue_value["returnResult"], serde_json::json!(false));
+    assert_eq!(
+        continue_value["baseObject"]["id"],
+        serde_json::json!("base")
+    );
+
+    let invalid = plan_servertool_entry_preflight_application_json(
+        r#"{"entryPreflight":{"action":"unknown"}}"#,
+    )
+    .expect_err("unknown entry preflight application must fail");
+    assert!(invalid.contains("invalid servertool entry preflight decision action"));
+}
+
+#[test]
 fn plans_servertool_engine_prepass_action_via_servertool_core_bridge() {
     let return_result = plan_servertool_engine_prepass_action_json(
         &serde_json::json!({
@@ -2440,6 +2628,35 @@ fn plans_servertool_engine_prepass_action_via_servertool_core_bridge() {
         continue_execution_value["action"],
         serde_json::json!("continue_to_execution")
     );
+}
+
+#[test]
+fn plans_servertool_run_engine_prepass_application_via_servertool_core_bridge() {
+    let return_result = plan_servertool_run_engine_prepass_application_json(
+        r#"{"decision":{"action":"return_result","result":{"mode":"passthrough","finalChatResponse":{"id":"prepass"}}}}"#,
+    )
+    .expect("return run-engine prepass application");
+    let return_value: serde_json::Value =
+        serde_json::from_str(&return_result).expect("parse return run-engine prepass application");
+    assert_eq!(return_value["returnResult"], serde_json::json!(true));
+    assert_eq!(
+        return_value["result"]["finalChatResponse"]["id"],
+        serde_json::json!("prepass")
+    );
+
+    let continue_execution = plan_servertool_run_engine_prepass_application_json(
+        r#"{"decision":{"action":"continue_to_execution"}}"#,
+    )
+    .expect("continue run-engine prepass application");
+    let continue_value: serde_json::Value = serde_json::from_str(&continue_execution)
+        .expect("parse continue run-engine prepass application");
+    assert_eq!(continue_value["returnResult"], serde_json::json!(false));
+    assert!(continue_value.get("result").is_none());
+
+    let invalid =
+        plan_servertool_run_engine_prepass_application_json(r#"{"decision":{"action":"unknown"}}"#)
+            .expect_err("unknown prepass application must fail");
+    assert!(invalid.contains("invalid servertool run-engine prepass decision action"));
 }
 
 #[test]
@@ -2870,6 +3087,45 @@ fn plans_servertool_engine_orchestration_preflight_action_via_servertool_core_br
 }
 
 #[test]
+fn plans_servertool_engine_orchestration_preflight_application_via_servertool_core_bridge() {
+    let early = plan_servertool_engine_orchestration_preflight_application_json(
+        r#"{
+            "actionPlan": { "action": "return_preflight_chat" },
+            "preflightKind": "return_original_chat",
+            "chat": { "id": "early" }
+        }"#,
+    )
+    .expect("early application");
+    let early_value: serde_json::Value = serde_json::from_str(&early).expect("early json");
+    assert_eq!(
+        early_value,
+        serde_json::json!({
+            "returnPreflightChat": true,
+            "continueEngine": false,
+            "chat": { "id": "early" }
+        })
+    );
+
+    let cont = plan_servertool_engine_orchestration_preflight_application_json(
+        r#"{
+            "actionPlan": { "action": "continue_engine" },
+            "preflightKind": "continue",
+            "stopSignal": { "observed": true }
+        }"#,
+    )
+    .expect("continue application");
+    let cont_value: serde_json::Value = serde_json::from_str(&cont).expect("continue json");
+    assert_eq!(
+        cont_value,
+        serde_json::json!({
+            "returnPreflightChat": false,
+            "continueEngine": true,
+            "stopSignal": { "observed": true }
+        })
+    );
+}
+
+#[test]
 fn plans_servertool_engine_skip_via_servertool_core_bridge() {
     let passthrough = plan_servertool_engine_skip_json(
         &serde_json::json!({
@@ -2922,6 +3178,55 @@ fn plans_servertool_engine_skip_via_servertool_core_bridge() {
         serde_json::json!({
             "chat": { "id": "no_execution" },
             "executed": false
+        })
+    );
+}
+
+#[test]
+fn plans_servertool_engine_skip_application_via_servertool_core_bridge() {
+    let skipped = plan_servertool_engine_skip_application_json(
+        r#"{
+            "skipPlan": {
+                "action": "return_skipped_no_execution",
+                "skipReason": "no_execution",
+                "triggerResult": "skipped_no_execution",
+                "shellResult": {
+                    "chat": { "id": "skipped" },
+                    "executed": false
+                }
+            }
+        }"#,
+    )
+    .expect("skipped application");
+    let skipped_value: serde_json::Value = serde_json::from_str(&skipped).expect("skipped json");
+    assert_eq!(
+        skipped_value,
+        serde_json::json!({
+            "returnSkipped": true,
+            "continueMatchedFlow": false,
+            "skipReason": "no_execution",
+            "triggerResult": "skipped_no_execution",
+            "shellResult": {
+                "chat": { "id": "skipped" },
+                "executed": false
+            }
+        })
+    );
+
+    let cont = plan_servertool_engine_skip_application_json(
+        r#"{
+            "skipPlan": {
+                "action": "continue_matched_flow"
+            }
+        }"#,
+    )
+    .expect("continue application");
+    let cont_value: serde_json::Value = serde_json::from_str(&cont).expect("continue json");
+    assert_eq!(
+        cont_value,
+        serde_json::json!({
+            "returnSkipped": false,
+            "continueMatchedFlow": true
         })
     );
 }
@@ -3493,6 +3798,45 @@ fn plans_servertool_response_stage_orchestration_output_via_servertool_core_brid
 }
 
 #[test]
+fn plans_servertool_response_stage_orchestration_gate_application_via_servertool_core_bridge() {
+    let bypass = plan_servertool_response_stage_orchestration_gate_application_json(
+        r#"{
+            "runtimeAction": {
+                "action": "return_passthrough_bypass",
+                "skipReason": " empty_assistant_payload "
+            }
+        }"#,
+    )
+    .expect("bypass gate application");
+    let bypass_value: serde_json::Value = serde_json::from_str(&bypass).expect("bypass json");
+    assert_eq!(
+        bypass_value,
+        serde_json::json!({
+            "bypass": true,
+            "runOrchestration": false,
+            "skipReason": "empty_assistant_payload"
+        })
+    );
+
+    let run = plan_servertool_response_stage_orchestration_gate_application_json(
+        r#"{
+            "runtimeAction": {
+                "action": "run_auto_hooks"
+            }
+        }"#,
+    )
+    .expect("run gate application");
+    let run_value: serde_json::Value = serde_json::from_str(&run).expect("run json");
+    assert_eq!(
+        run_value,
+        serde_json::json!({
+            "bypass": false,
+            "runOrchestration": true
+        })
+    );
+}
+
+#[test]
 fn materializes_servertool_response_stage_orchestration_output_via_servertool_core_bridge() {
     let executed = materialize_servertool_response_stage_orchestration_output_json(
         &serde_json::json!({
@@ -3756,6 +4100,36 @@ fn plans_servertool_engine_runtime_action_via_servertool_core_bridge() {
         stopless_cli_value["projectedFlowId"],
         serde_json::json!("current-flow")
     );
+}
+
+#[test]
+fn plans_servertool_response_stage_prepass_initial_application_via_servertool_core_bridge() {
+    let run_auto_hooks = plan_servertool_response_stage_prepass_initial_application_json(
+        r#"{"decision":{"action":"run_auto_hooks"}}"#,
+    )
+    .expect("run auto-hook application plan");
+    let run_value: serde_json::Value =
+        serde_json::from_str(&run_auto_hooks).expect("parse run auto-hook application plan");
+    assert_eq!(run_value["runAutoHook"], serde_json::json!(true));
+    assert!(run_value.get("result").is_none());
+
+    let return_result = plan_servertool_response_stage_prepass_initial_application_json(
+        r#"{"decision":{"action":"return_prepass_result","result":{"action":"continue_to_execution","responseStageGatePlan":{"shouldBypass":false,"nextAction":"continue_to_execution","responseHookMatched":false,"responseHookRequired":false}}}}"#,
+    )
+    .expect("return result application plan");
+    let return_value: serde_json::Value =
+        serde_json::from_str(&return_result).expect("parse return result application plan");
+    assert_eq!(return_value["runAutoHook"], serde_json::json!(false));
+    assert_eq!(
+        return_value["result"]["action"],
+        serde_json::json!("continue_to_execution")
+    );
+
+    let invalid = plan_servertool_response_stage_prepass_initial_application_json(
+        r#"{"decision":{"action":"unknown"}}"#,
+    )
+    .expect_err("unknown action must fail");
+    assert!(invalid.contains("invalid response-stage prepass decision action"));
 }
 
 #[test]

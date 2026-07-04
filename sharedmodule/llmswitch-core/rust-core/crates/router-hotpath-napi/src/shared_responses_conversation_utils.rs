@@ -1,3 +1,5 @@
+// feature_id: conversion.responses.store
+// canonical_builder: stage_a_conversion_responses_store_owner_boundary
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
 use crate::shared_json_utils::{
     read_optional_bool, read_string_array_command, read_trimmed_string, read_workdir_from_args,
@@ -5,6 +7,8 @@ use crate::shared_json_utils::{
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
+
+pub(crate) fn stage_a_conversion_responses_store_owner_boundary() {}
 
 fn is_shell_like_function_name(name: &str) -> bool {
     matches!(
@@ -2442,15 +2446,8 @@ pub fn publish_responses_record_plan_json(
         .and_then(|v| read_trimmed_string(Some(v)));
     let route_hint = read_runtime_control_field(&context, "routeHint")
         .and_then(|v| read_trimmed_string(Some(v)));
-    let response_request_id = response
-        .as_object()
-        .and_then(|row| row.get("request_id"))
-        .and_then(|v| read_trimmed_string(Some(v)));
-    let entry_request_id = response_request_id
-        .or_else(|| {
-            read_request_truth_field(&context, "requestId")
-                .and_then(|v| read_trimmed_string(Some(v)))
-        })
+    let entry_request_id = read_request_truth_field(&context, "requestId")
+        .and_then(|v| read_trimmed_string(Some(v)))
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
             read_request_truth_field(&context, "entryRequestId")
@@ -2605,7 +2602,7 @@ mod tests {
     }
 
     #[test]
-    fn publish_responses_record_plan_prefers_response_request_id_over_rebound_provider_id() {
+    fn publish_responses_record_plan_uses_request_truth_over_client_response_request_id() {
         let planned: Value = serde_json::from_str(
             &publish_responses_record_plan_json(
                 "openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103"
@@ -2637,11 +2634,11 @@ mod tests {
 
         assert_eq!(
             planned["recordArgs"]["requestId"],
-            json!("openai-responses-router-gpt-5.5-20260703T120957051-453706-103")
+            json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
         );
         assert_eq!(
             planned["finalizeArgs"]["requestId"],
-            json!("openai-responses-router-gpt-5.5-20260703T120957051-453706-103")
+            json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
         );
     }
 

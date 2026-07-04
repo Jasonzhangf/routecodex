@@ -1,0 +1,59 @@
+lifecycle_id: stage_a.p0_rust_migration.mainline
+summary: "Stage A locks P0 Rust migration owner boundaries before
+  implementation: servertool followup orchestration, Anthropic conversion,
+  Responses continuation store, and request/response Chat Process tool
+  governance."
+owner_feature_id: servertool.followup_orchestration
+entrypoint:
+  node_id: HubRespChatProcess03Governed
+  wiki_page: null
+  call_map_chain_id: stage_a.p0_rust_migration.mainline
+node_ids:
+  - AnthropicChatInbound
+  - HubReqChatProcess03Governed
+  - HubReqInbound02Standardized
+  - HubRespChatProcess03Governed
+  - HubRespInbound02Parsed
+  - OpenAiChatCanonical
+  - ResponsesContinuationStore
+  - ServertoolOutcome
+edges:
+  - step_id: stage-a-p0-01
+    from_node: HubRespChatProcess03Governed
+    to_node: ServertoolOutcome
+    status: anchored
+    owner_feature_id: servertool.followup_orchestration
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stage-a-p0-02
+    from_node: AnthropicChatInbound
+    to_node: OpenAiChatCanonical
+    status: anchored
+    owner_feature_id: conversion.shared.anthropic
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stage-a-p0-03
+    from_node: HubRespChatProcess03Governed
+    to_node: ResponsesContinuationStore
+    status: anchored
+    owner_feature_id: conversion.responses.store
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stage-a-p0-04
+    from_node: HubReqInbound02Standardized
+    to_node: HubReqChatProcess03Governed
+    status: anchored
+    owner_feature_id: hub.req_chatprocess.tool_governance
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stage-a-p0-05
+    from_node: HubRespInbound02Parsed
+    to_node: HubRespChatProcess03Governed
+    status: anchored
+    owner_feature_id: hub.resp_chatprocess.tool_governance
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

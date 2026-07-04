@@ -130,18 +130,18 @@ describe('usage logger timing summary', () => {
     expect(resolveLocalDayKey(first)).toBe(resolveLocalDayKey(second));
   });
 
-  it('uses tmux session color for every usage line before request session id', async () => {
+  it('uses request session color for every usage line before tmux id', async () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
     const { resolveSessionAnsiColor } = await import('../../../../../src/utils/session-log-color.js');
 
     const tmuxSessionId = 'tmux-usage-color-stable';
-    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+    const tmuxColor = resolveSessionAnsiColor(tmuxSessionId);
     let requestSessionId = 'usage-per-request-session';
-    for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === expectedColor; index += 1) {
+    for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === tmuxColor; index += 1) {
       requestSessionId = `usage-per-request-session-${index}`;
     }
-    const requestSessionColor = resolveSessionAnsiColor(requestSessionId);
+    const expectedColor = resolveSessionAnsiColor(requestSessionId);
 
     logUsageSummary('req_usage_color', {
       providerKey: 'demo.key1',
@@ -161,12 +161,12 @@ describe('usage logger timing summary', () => {
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
     const renderedLines = rendered.split('\n');
     expect(expectedColor).toBeDefined();
-    expect(requestSessionColor).toBeDefined();
-    expect(requestSessionColor).not.toBe(expectedColor);
+    expect(tmuxColor).toBeDefined();
+    expect(expectedColor).not.toBe(tmuxColor);
     expect(renderedLines.length).toBeGreaterThan(0);
     for (const line of renderedLines) {
       expect(line.startsWith(String(expectedColor))).toBe(true);
-      expect(line.startsWith(String(requestSessionColor))).toBe(false);
+      expect(line.startsWith(String(tmuxColor))).toBe(false);
     }
     expect(renderedLines).toHaveLength(1);
     expect(rendered).toContain('finish_reason=\x1b[97mstop');

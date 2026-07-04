@@ -129,7 +129,12 @@ impl VirtualRouterEngineCore {
 
     pub(crate) fn refresh_provider_health_from_store(&mut self) {
         if let Some(raw) = load_provider_health_state() {
-            self.health_manager.import_persistable_state(&raw, now_ms());
+            let now = now_ms();
+            let pruned_expired = self.health_manager.import_persistable_state(&raw, now);
+            if pruned_expired {
+                let cleaned = self.health_manager.export_persistable_state(now);
+                persist_provider_health_state(&cleaned);
+            }
         }
     }
 

@@ -6,7 +6,17 @@ const resolveServertoolEntryContext = jest.fn();
 const runServertoolResponseStagePrePass = jest.fn();
 const runServertoolExecutionStage = jest.fn();
 const resolveServertoolRunEngineEntryPreflightDecisionWithNative = jest.fn((input: any) => input.entryPreflight);
+const resolveServertoolRunEngineEntryPreflightApplicationWithNative = jest.fn((input: any) =>
+  input.entryPreflight.action === 'return_result'
+    ? { returnResult: true, result: input.entryPreflight.result }
+    : { returnResult: false, baseObject: input.entryPreflight.baseObject }
+);
 const resolveServertoolRunEnginePrepassDecisionWithNative = jest.fn();
+const resolveServertoolRunEnginePrepassApplicationWithNative = jest.fn((input: any) =>
+  input.decision.action === 'return_result'
+    ? { returnResult: true, result: input.decision.result }
+    : { returnResult: false }
+);
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.js',
@@ -47,6 +57,8 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
     resolveServertoolRunEngineEntryPreflightDecisionWithNative,
+    resolveServertoolRunEngineEntryPreflightApplicationWithNative,
+    resolveServertoolRunEnginePrepassApplicationWithNative,
     resolveServertoolRunEnginePrepassDecisionWithNative
   })
 );
@@ -59,9 +71,19 @@ describe('run-server-side-tool-engine-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resolveServertoolRunEngineEntryPreflightDecisionWithNative.mockImplementation((input: any) => input.entryPreflight);
+    resolveServertoolRunEngineEntryPreflightApplicationWithNative.mockImplementation((input: any) =>
+      input.entryPreflight.action === 'return_result'
+        ? { returnResult: true, result: input.entryPreflight.result }
+        : { returnResult: false, baseObject: input.entryPreflight.baseObject }
+    );
     resolveServertoolRunEnginePrepassDecisionWithNative.mockReturnValue({
       action: 'continue_to_execution'
     });
+    resolveServertoolRunEnginePrepassApplicationWithNative.mockImplementation((input: any) =>
+      input.decision.action === 'return_result'
+        ? { returnResult: true, result: input.decision.result }
+        : { returnResult: false }
+    );
   });
 
   test('owns the full engine orchestration chain as a dedicated shell', async () => {
@@ -81,11 +103,15 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain("if (entryContext.action !== 'continue')");
     expect(source).not.toContain("if (responseStagePrePass.action === 'return_result')");
     expect(source).toContain('resolveServertoolRunEngineEntryPreflightDecisionWithNative');
+    expect(source).toContain('resolveServertoolRunEngineEntryPreflightApplicationWithNative');
     expect(source).toContain('resolveServertoolRunEnginePrepassDecisionWithNative');
+    expect(source).toContain('resolveServertoolRunEnginePrepassApplicationWithNative');
+    expect(source).not.toContain("entryPreflightDecision.action === 'return_result'");
+    expect(source).not.toContain("enginePrepassDecision.action === 'return_result'");
     expect(source).not.toContain('switch (entryPreflight.action)');
     expect(source).not.toContain('switch (enginePrepassAction.action)');
     expect(source).toContain('prepassResult');
-    expect(source).toContain('return enginePrepassDecision.result;');
+    expect(source).toContain('return enginePrepassApplication.result;');
     expect(source).not.toContain('return prepassResult;');
     expect(source).not.toContain('native engine prepass requested result but prepass result was empty');
     expect(source).not.toContain('switch (responseStagePrePass.action)');
@@ -218,6 +244,12 @@ describe('run-server-side-tool-engine-shell', () => {
       hasPrepassResult: true,
       prepassResult: { mode: 'passthrough', finalChatResponse: { early: true } }
     });
+    expect(resolveServertoolRunEnginePrepassApplicationWithNative).toHaveBeenCalledWith({
+      decision: {
+        action: 'return_result',
+        result: { mode: 'passthrough', finalChatResponse: { early: true } }
+      }
+    });
     expect(runServertoolExecutionStage).not.toHaveBeenCalled();
   });
 
@@ -257,6 +289,9 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(resolveServertoolRunEnginePrepassDecisionWithNative).toHaveBeenCalledWith({
       hasPrepassResult: false,
       prepassResult: null
+    });
+    expect(resolveServertoolRunEnginePrepassApplicationWithNative).toHaveBeenCalledWith({
+      decision: { action: 'continue_to_execution' }
     });
     expect(runServertoolExecutionStage).toHaveBeenCalled();
   });

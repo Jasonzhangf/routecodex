@@ -3,6 +3,7 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   isAdapterClientDisconnectedWithNative,
   readServertoolEntryBaseObjectWithNative,
+  resolveServertoolEntryPreflightApplicationWithNative,
   resolveServertoolEntryPreflightWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
@@ -21,8 +22,20 @@ export function runServertoolEntryPreflight(args: {
     adapterClientDisconnected: isAdapterClientDisconnectedWithNative(args.options.adapterContext),
     chatResponse: args.options.chatResponse
   });
-  if (entryPreflightDecision.action === 'throw_error') {
-    throw createServertoolProviderProtocolErrorFromPlan(entryPreflightDecision.errorPlan);
+  const entryPreflightApplication = resolveServertoolEntryPreflightApplicationWithNative({
+    entryPreflight: entryPreflightDecision
+  });
+  if (entryPreflightApplication.throwError === true) {
+    throw createServertoolProviderProtocolErrorFromPlan(entryPreflightApplication.errorPlan);
   }
-  return entryPreflightDecision;
+  if (entryPreflightApplication.returnResult === true) {
+    return {
+      action: 'return_result',
+      result: entryPreflightApplication.result
+    };
+  }
+  return {
+    action: 'continue',
+    baseObject: entryPreflightApplication.baseObject
+  };
 }

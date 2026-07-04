@@ -11,7 +11,7 @@ import {
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
-import { colorizeRequestLog, formatHighlightedFinishReasonLabel } from '../utils/request-log-color.js';
+import { colorizeRequestLog, formatHighlightedFinishReasonLabel, registerRequestLogContext } from '../utils/request-log-color.js';
 import { deriveFinishReason } from '../utils/finish-reason.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { formatRequestTimingSummary } from '../utils/stage-logger.js';
@@ -431,7 +431,10 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
       })()
     : '';
   const line = `▶ [${endpoint}] ${timestamp} request ${resolvedId} started${suffix}`;
-  console.warn(colorizeRequestLog(line, resolvedId));
+  if (meta && typeof meta === 'object') {
+    registerRequestLogContext(resolvedId, meta);
+  }
+  console.warn(colorizeRequestLog(line, resolvedId, meta));
 }
 
 export function logRequestComplete(

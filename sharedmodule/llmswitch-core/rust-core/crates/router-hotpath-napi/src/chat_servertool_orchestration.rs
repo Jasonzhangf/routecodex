@@ -1,4 +1,6 @@
 // feature_id: hub.servertool_followup
+// feature_id: servertool.followup_orchestration
+// canonical_builder: stage_a_servertool_followup_orchestration_owner_boundary
 // feature_id: hub.servertool_cli_projection
 // canonical_builder: build_servertool_cli_projection_01_from_hub_resp_chatprocess_03
 use napi::bindgen_prelude::Result as NapiResult;
@@ -20,6 +22,8 @@ use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::shared_json_utils::read_trimmed_string as read_optional_trimmed_string;
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::web_search_mode::{resolve_web_search_execution_mode, WebSearchExecutionMode};
+
+pub(crate) fn stage_a_servertool_followup_orchestration_owner_boundary() {}
 
 pub(crate) fn build_servertool_cli_projection_01_from_hub_resp_chatprocess_03() -> &'static str {
     "routecodex servertool run <toolName> --input-json <json>"

@@ -49,8 +49,7 @@ export {
   resumeLatestResponsesContinuationByScope,
   rebindResponsesConversationRequestId,
   clearUnresolvedResponsesConversationRequests,
-  createResponsesSseToJsonConverter,
-  createResponsesJsonToSseConverter,
+  buildResponsesJsonFromSseStreamWithNative,
   reportProviderErrorToRouterPolicy,
   reportProviderSuccessToRouterPolicy
 } from './runtime-integrations.js';

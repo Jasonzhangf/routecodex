@@ -132,7 +132,7 @@ function main() {
   const shimDirs = resolveShimDirs();
   for (const shimDir of shimDirs) {
     installed.push(writeShim(shimDir, 'routecodex', 'routecodex'));
-    installed.push(writeShim(shimDir, 'rcc', 'routecodex'));
+    installed.push(writeShim(shimDir, 'rcc', 'rcc'));
   }
 
   for (const file of installed.filter(Boolean)) {

@@ -49,6 +49,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
 
     logRequestStart(entryEndpoint, requestId, {
       clientRequestId,
+      ...(requestBodyMetadata ?? {}),
       inboundStream: wantsSSE,
       outboundStream,
       clientAcceptsSse: acceptsSse,

@@ -103,3 +103,13 @@ chains:
       SSE-to-JSON, Gemini JSON-to-SSE, and Gemini SSE-to-JSON projection edges
       are anchored to native/Rust owners; malformed semantics must fail fast
       and must not synthesize fallback error frames.
+  - chain_id: stage_a.p0_rust_migration.mainline
+    expected_total_edges: 5
+    min_anchored_edges: 5
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Stage A P0 Rust migration owner-boundary chain is fully anchored to the
+      Rust/native owners for servertool outcome planning, Anthropic conversion,
+      Responses continuation storage, and request/response Chat Process tool
+      governance.

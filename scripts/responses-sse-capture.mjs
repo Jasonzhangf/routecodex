@@ -106,9 +106,9 @@ async function main() {
   const httpPath = pathToFileURL(path.join(BASEDIR, 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
   const bridgePath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-  const converterPath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
+  const sseLibPath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
   const { buildResponsesRequestFromChat, buildChatResponseFromResponses } = await import(bridgePath);
-  const { ResponsesSseToJsonConverter } = await import(converterPath);
+  const { collectSseBodyText, sseToJson } = await import(sseLibPath);
 
   // headers
   const headers = { 'Content-Type': 'application/json', 'OpenAI-Beta': 'responses-2024-12-17' };
@@ -206,11 +206,13 @@ async function main() {
     fs.writeFileSync(reqOut, JSON.stringify({ url: baseUrl+endpoint, headers, body: respReq }, null, 2));
     const client = new HttpClient({ baseUrl, timeout: 300000 });
     const stream = await client.postStream(endpoint, respReq, { ...headers, Accept: 'text/event-stream' });
-    const converter = new ResponsesSseToJsonConverter();
-    json = await converter.convertSseToJson(stream, {
+    const bodyText = await collectSseBodyText(stream);
+    fs.writeFileSync(sseLog, bodyText, 'utf-8');
+    json = sseToJson({
+      protocol: 'openai-responses',
+      bodyText,
       requestId: path.basename(outBase),
       model: String(respReq.model||'unknown'),
-      onEvent: (evt) => logEvent({ type: evt.type, ...evt })
     });
   }
 

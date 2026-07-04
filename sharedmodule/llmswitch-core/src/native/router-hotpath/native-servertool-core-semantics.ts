@@ -424,14 +424,12 @@ export interface ServertoolEngineOrchestrationPreflightActionPlan {
 }
 
 export type ServertoolEngineOrchestrationPreflightDecision =
-  | {
-      action: 'return_preflight_chat';
-      chat: JsonObject;
-    }
-  | {
-      action: 'continue_engine';
-      stopSignal: unknown;
-    };
+  {
+    returnPreflightChat: boolean;
+    continueEngine: boolean;
+    chat?: JsonObject;
+    stopSignal?: unknown;
+  };
 
 export interface ServertoolEngineRuntimeActionPlan {
   action:
@@ -473,7 +471,8 @@ export type ServertoolEngineSkipPlan =
 
 export type ServertoolEngineSkipDecision =
   | {
-      action: 'return_skipped';
+      returnSkipped: true;
+      continueMatchedFlow: false;
       skipReason: string;
       triggerResult: string;
       shellResult: {
@@ -482,7 +481,8 @@ export type ServertoolEngineSkipDecision =
       };
     }
   | {
-      action: 'continue_matched_flow';
+      returnSkipped: false;
+      continueMatchedFlow: true;
     };
 
 export interface ServertoolExecutionOutcomeRuntimeActionPlan {
@@ -609,14 +609,11 @@ export type ServertoolResponseStageRuntimeActionPlan =
       finalizeResult: ServertoolResponseStageAutoHookResult;
     };
 
-export type ServertoolResponseStageOrchestrationGateDecision =
-  | {
-      action: 'return_passthrough_bypass';
-      skipReason?: string;
-    }
-  | {
-      action: 'run_orchestration';
-    };
+export interface ServertoolResponseStageOrchestrationGateApplicationPlan {
+  bypass: boolean;
+  runOrchestration: boolean;
+  skipReason?: string;
+}
 
 type ServertoolResponseStageAutoHookPassResult = Extract<
   ServertoolResponseStageRuntimeActionPlan,
@@ -629,6 +626,18 @@ export type ServertoolResponseStagePrepassShellDecision =
     }
   | {
       action: 'return_prepass_result';
+      result: {
+        action: 'continue_to_execution';
+        responseStageGatePlan: NativeServertoolResponseStageGate;
+      };
+    };
+
+export type ServertoolResponseStagePrepassInitialApplicationDecision =
+  | {
+      runAutoHook: true;
+    }
+  | {
+      runAutoHook: false;
       result: {
         action: 'continue_to_execution';
         responseStageGatePlan: NativeServertoolResponseStageGate;
@@ -717,6 +726,22 @@ export type ServertoolEntryPreflightDecision =
       baseObject: JsonObject;
     };
 
+export type ServertoolEntryPreflightApplicationDecision =
+  | {
+      throwError: true;
+      errorPlan: ReturnType<typeof planServertoolClientDisconnectedErrorWithNative>;
+    }
+  | {
+      throwError: false;
+      returnResult: true;
+      result: ServerSideToolEngineResult;
+    }
+  | {
+      throwError: false;
+      returnResult: false;
+      baseObject: JsonObject;
+    };
+
 export type ServertoolRunEngineEntryPreflightDecision =
   | {
       action: 'return_result';
@@ -727,6 +752,16 @@ export type ServertoolRunEngineEntryPreflightDecision =
       baseObject: JsonObject;
     };
 
+export type ServertoolRunEngineEntryPreflightApplicationDecision =
+  | {
+      returnResult: true;
+      result: ServerSideToolEngineResult;
+    }
+  | {
+      returnResult: false;
+      baseObject: JsonObject;
+    };
+
 export type ServertoolRunEnginePrepassDecision =
   | {
       action: 'return_result';
@@ -734,6 +769,15 @@ export type ServertoolRunEnginePrepassDecision =
     }
   | {
       action: 'continue_to_execution';
+    };
+
+export type ServertoolRunEnginePrepassApplicationDecision =
+  | {
+      returnResult: true;
+      result: ServerSideToolEngineResult;
+    }
+  | {
+      returnResult: false;
     };
 
 export type ServertoolHandlerMaterializationPlan =
@@ -2879,29 +2923,49 @@ export function resolveServertoolEngineOrchestrationPreflightDecisionWithNative(
     stopSignal?: unknown;
   };
 }): ServertoolEngineOrchestrationPreflightDecision {
-  const action = planServertoolEngineOrchestrationPreflightActionWithNative({
+  const actionPlan = planServertoolEngineOrchestrationPreflightActionWithNative({
     preflightKind: input.preflight.kind
   });
-  switch (action.action) {
-    case 'return_preflight_chat':
-      if (input.preflight.kind === 'continue' || input.preflight.chat == null) {
-        throw new Error('[servertool] invalid engine preflight orchestration action');
-      }
-      return {
-        action: 'return_preflight_chat',
-        chat: input.preflight.chat
-      };
-    case 'continue_engine':
-      if (input.preflight.kind !== 'continue') {
-        throw new Error('[servertool] invalid engine preflight orchestration action');
-      }
-      return {
-        action: 'continue_engine',
-        stopSignal: input.preflight.stopSignal
-      };
-    default:
-      throw new Error('[servertool] invalid engine preflight orchestration action');
+  const capability = 'planServertoolEngineOrchestrationPreflightApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEngineOrchestrationPreflightApplicationJson native unavailable');
   }
+  const resultJson = fn(JSON.stringify({
+    actionPlan,
+    preflightKind: input.preflight.kind,
+    ...(input.preflight.chat !== undefined ? { chat: input.preflight.chat } : {}),
+    ...(input.preflight.stopSignal !== undefined ? { stopSignal: input.preflight.stopSignal } : {})
+  }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEngineOrchestrationPreflightApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEngineOrchestrationPreflightApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.returnPreflightChat !== 'boolean' || typeof record.continueEngine !== 'boolean') {
+    throw new Error('planServertoolEngineOrchestrationPreflightApplicationJson native returned invalid booleans');
+  }
+  if (record.returnPreflightChat === record.continueEngine) {
+    throw new Error('planServertoolEngineOrchestrationPreflightApplicationJson native returned ambiguous plan');
+  }
+  if (record.returnPreflightChat) {
+    if (!record.chat || typeof record.chat !== 'object' || Array.isArray(record.chat)) {
+      throw new Error('planServertoolEngineOrchestrationPreflightApplicationJson native returned invalid chat');
+    }
+    return {
+      returnPreflightChat: true,
+      continueEngine: false,
+      chat: record.chat as JsonObject
+    };
+  }
+  return {
+    returnPreflightChat: false,
+    continueEngine: true,
+    ...(record.stopSignal !== undefined ? { stopSignal: record.stopSignal } : {})
+  };
 }
 
 function parseServertoolEnginePreflightStage(value: unknown, field: string): 'entry' | 'trigger' {
@@ -3176,23 +3240,59 @@ export function resolveServertoolEngineSkipDecisionWithNative(input: {
   hasExecution: boolean;
   finalChatResponse: JsonObject;
 }): ServertoolEngineSkipDecision {
-  const plan = planServertoolEngineSkipWithNative(input);
-  switch (plan.action) {
-    case 'return_skipped_passthrough':
-    case 'return_skipped_no_execution':
-      return {
-        action: 'return_skipped',
-        skipReason: plan.skipReason,
-        triggerResult: plan.triggerResult,
-        shellResult: plan.shellResult
-      };
-    case 'continue_matched_flow':
-      return {
-        action: 'continue_matched_flow'
-      };
-    default:
-      throw new Error('[servertool] invalid engine skip action');
+  const skipPlan = planServertoolEngineSkipWithNative(input);
+  const capability = 'planServertoolEngineSkipApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEngineSkipApplicationJson native unavailable');
   }
+  const resultJson = fn(JSON.stringify({ skipPlan }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEngineSkipApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEngineSkipApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.returnSkipped !== 'boolean' || typeof record.continueMatchedFlow !== 'boolean') {
+    throw new Error('planServertoolEngineSkipApplicationJson native returned invalid booleans');
+  }
+  if (record.returnSkipped === record.continueMatchedFlow) {
+    throw new Error('planServertoolEngineSkipApplicationJson native returned ambiguous plan');
+  }
+  if (record.returnSkipped) {
+    if (typeof record.skipReason !== 'string' || !/\S/.test(record.skipReason)) {
+      throw new Error('planServertoolEngineSkipApplicationJson native returned invalid skipReason');
+    }
+    if (typeof record.triggerResult !== 'string' || !record.triggerResult.trim()) {
+      throw new Error('planServertoolEngineSkipApplicationJson native returned invalid triggerResult');
+    }
+    if (!record.shellResult || typeof record.shellResult !== 'object' || Array.isArray(record.shellResult)) {
+      throw new Error('planServertoolEngineSkipApplicationJson native returned invalid shellResult');
+    }
+    const shellResult = record.shellResult as Record<string, unknown>;
+    if (!shellResult.chat || typeof shellResult.chat !== 'object' || Array.isArray(shellResult.chat)) {
+      throw new Error('planServertoolEngineSkipApplicationJson native returned invalid shellResult.chat');
+    }
+    if (shellResult.executed !== false) {
+      throw new Error('planServertoolEngineSkipApplicationJson native returned invalid shellResult.executed');
+    }
+    return {
+      returnSkipped: true,
+      continueMatchedFlow: false,
+      skipReason: record.skipReason,
+      triggerResult: record.triggerResult,
+      shellResult: {
+        chat: shellResult.chat as JsonObject,
+        executed: false
+      }
+    };
+  }
+  return {
+    returnSkipped: false,
+    continueMatchedFlow: true
+  };
 }
 
 export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
@@ -3790,9 +3890,11 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: {
 
 export function resolveServertoolResponseStagePrepassInitialDecisionWithNative(input: {
   responseStageGatePlan: NativeServertoolResponseStageGate;
+  baseObject: JsonObject;
 }): ServertoolResponseStagePrepassShellDecision {
   const action = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
     autoHookEvaluated: false,
     hasAutoHookResult: false
   });
@@ -3809,29 +3911,91 @@ export function resolveServertoolResponseStagePrepassInitialDecisionWithNative(i
   }
 }
 
-export function resolveServertoolResponseStageOrchestrationGateDecisionWithNative(input: {
+export function resolveServertoolResponseStagePrepassInitialApplicationWithNative(input: {
+  decision: ServertoolResponseStagePrepassShellDecision;
+}): ServertoolResponseStagePrepassInitialApplicationDecision {
+  const capability = 'planServertoolResponseStagePrepassInitialApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolResponseStagePrepassInitialApplicationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolResponseStagePrepassInitialApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolResponseStagePrepassInitialApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.runAutoHook === true) {
+    return { runAutoHook: true };
+  }
+  if (record.runAutoHook === false) {
+    if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
+      throw new Error('planServertoolResponseStagePrepassInitialApplicationJson native returned result-less no-auto-hook plan');
+    }
+    const result = record.result as Record<string, unknown>;
+    if (
+      result.action !== 'continue_to_execution' ||
+      !isNativeServertoolResponseStageGate(result.responseStageGatePlan)
+    ) {
+      throw new Error('planServertoolResponseStagePrepassInitialApplicationJson native returned invalid prepass result');
+    }
+    return {
+      runAutoHook: false,
+      result: {
+        action: 'continue_to_execution',
+        responseStageGatePlan: result.responseStageGatePlan
+      }
+    };
+  }
+  throw new Error('planServertoolResponseStagePrepassInitialApplicationJson native returned invalid runAutoHook');
+}
+
+export function resolveServertoolResponseStageOrchestrationGateApplicationWithNative(input: {
   responseStageGatePlan: NativeServertoolResponseStageGate;
-}): ServertoolResponseStageOrchestrationGateDecision {
-  const action = planServertoolResponseStageRuntimeActionWithNative({
+  baseObject: JsonObject;
+}): ServertoolResponseStageOrchestrationGateApplicationPlan {
+  const runtimeAction = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
     autoHookEvaluated: false,
     hasAutoHookResult: false
   });
-  switch (action.action) {
-    case 'return_passthrough_bypass':
-      return {
-        action: 'return_passthrough_bypass',
-        ...(action.skipReason ? { skipReason: action.skipReason } : {})
-      };
-    case 'run_auto_hooks':
-      return { action: 'run_orchestration' };
-    default:
-      throw new Error('[servertool] invalid response-stage orchestration action');
+  const capability = 'planServertoolResponseStageOrchestrationGateApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolResponseStageOrchestrationGateApplicationJson native unavailable');
   }
+  const resultJson = fn(JSON.stringify({ runtimeAction }));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolResponseStageOrchestrationGateApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolResponseStageOrchestrationGateApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.bypass !== 'boolean' || typeof record.runOrchestration !== 'boolean') {
+    throw new Error('planServertoolResponseStageOrchestrationGateApplicationJson native returned invalid booleans');
+  }
+  if (record.bypass === record.runOrchestration) {
+    throw new Error('planServertoolResponseStageOrchestrationGateApplicationJson native returned ambiguous plan');
+  }
+  if (record.skipReason !== undefined && typeof record.skipReason !== 'string') {
+    throw new Error('planServertoolResponseStageOrchestrationGateApplicationJson native returned invalid skipReason');
+  }
+  return {
+    bypass: record.bypass,
+    runOrchestration: record.runOrchestration,
+    ...(typeof record.skipReason === 'string' ? { skipReason: record.skipReason } : {})
+  };
 }
 
 export function resolveServertoolResponseStagePrepassAfterAutoHookWithNative(input: {
   responseStageGatePlan: NativeServertoolResponseStageGate;
+  baseObject: JsonObject;
   responseStageAutoHookResult:
     | { action: 'return_auto_hook_result'; result: ServertoolResponseStageAutoHookResult }
     | { action: 'continue_without_result' | 'return_passthrough_bypass' };
@@ -3840,6 +4004,7 @@ export function resolveServertoolResponseStagePrepassAfterAutoHookWithNative(inp
     case 'return_auto_hook_result': {
       const action = planServertoolResponseStageRuntimeActionWithNative({
         responseStageGatePlan: input.responseStageGatePlan,
+        baseObject: input.baseObject,
         autoHookEvaluated: true,
         hasAutoHookResult: true,
         autoHookResult: input.responseStageAutoHookResult.result
@@ -3856,6 +4021,7 @@ export function resolveServertoolResponseStagePrepassAfterAutoHookWithNative(inp
     case 'return_passthrough_bypass': {
       const action = planServertoolResponseStageRuntimeActionWithNative({
         responseStageGatePlan: input.responseStageGatePlan,
+        baseObject: input.baseObject,
         autoHookEvaluated: true,
         hasAutoHookResult: false
       });
@@ -3903,9 +4069,11 @@ export function finalizeServertoolResponseStageWithNative(input: {
 
 export function resolveServertoolResponseStageAutoHookPreDecisionWithNative(input: {
   responseStageGatePlan: NativeServertoolResponseStageGate;
+  baseObject: JsonObject;
 }): ServertoolResponseStageAutoHookPreDecision {
   const action = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
     autoHookEvaluated: false,
     hasAutoHookResult: false
   });
@@ -3925,10 +4093,12 @@ export function resolveServertoolResponseStageAutoHookPreDecisionWithNative(inpu
 export function resolveServertoolResponseStageAutoHookPostDecisionWithNative(input: {
   requestId: string;
   responseStageGatePlan: NativeServertoolResponseStageGate;
+  baseObject: JsonObject;
   autoHookResult: ServertoolResponseStageAutoHookResult | null;
 }): ServertoolResponseStageAutoHookPostDecision {
   const action = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
     autoHookEvaluated: true,
     hasAutoHookResult: input.autoHookResult != null,
     autoHookResult: input.autoHookResult
@@ -4176,6 +4346,58 @@ export function resolveServertoolEntryPreflightWithNative(input: {
   }
 }
 
+export function resolveServertoolEntryPreflightApplicationWithNative(input: {
+  entryPreflight: ServertoolEntryPreflightDecision;
+}): ServertoolEntryPreflightApplicationDecision {
+  const capability = 'planServertoolEntryPreflightApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolEntryPreflightApplicationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolEntryPreflightApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolEntryPreflightApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.throwError === true) {
+    if (!record.errorPlan || typeof record.errorPlan !== 'object' || Array.isArray(record.errorPlan)) {
+      throw new Error('planServertoolEntryPreflightApplicationJson native returned invalid errorPlan');
+    }
+    return {
+      throwError: true,
+      errorPlan: record.errorPlan as ReturnType<typeof planServertoolClientDisconnectedErrorWithNative>
+    };
+  }
+  if (record.throwError !== false) {
+    throw new Error('planServertoolEntryPreflightApplicationJson native returned invalid throwError');
+  }
+  if (record.returnResult === true) {
+    if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
+      throw new Error('planServertoolEntryPreflightApplicationJson native returned invalid result');
+    }
+    return {
+      throwError: false,
+      returnResult: true,
+      result: record.result as ServerSideToolEngineResult
+    };
+  }
+  if (record.returnResult === false) {
+    if (!record.baseObject || typeof record.baseObject !== 'object' || Array.isArray(record.baseObject)) {
+      throw new Error('planServertoolEntryPreflightApplicationJson native returned invalid baseObject');
+    }
+    return {
+      throwError: false,
+      returnResult: false,
+      baseObject: record.baseObject as JsonObject
+    };
+  }
+  throw new Error('planServertoolEntryPreflightApplicationJson native returned invalid returnResult');
+}
+
 export function resolveServertoolRunEngineEntryPreflightDecisionWithNative(input: {
   entryPreflight: ServertoolEntryPreflightDecision;
 }): ServertoolRunEngineEntryPreflightDecision {
@@ -4193,6 +4415,44 @@ export function resolveServertoolRunEngineEntryPreflightDecisionWithNative(input
     default:
       throw new Error('[servertool] invalid entry preflight result action');
   }
+}
+
+export function resolveServertoolRunEngineEntryPreflightApplicationWithNative(input: {
+  entryPreflight: ServertoolRunEngineEntryPreflightDecision;
+}): ServertoolRunEngineEntryPreflightApplicationDecision {
+  const capability = 'planServertoolRunEngineEntryPreflightApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolRunEngineEntryPreflightApplicationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolRunEngineEntryPreflightApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolRunEngineEntryPreflightApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.returnResult === true) {
+    if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
+      throw new Error('planServertoolRunEngineEntryPreflightApplicationJson native returned invalid result');
+    }
+    return {
+      returnResult: true,
+      result: record.result as ServerSideToolEngineResult
+    };
+  }
+  if (record.returnResult === false) {
+    if (!record.baseObject || typeof record.baseObject !== 'object' || Array.isArray(record.baseObject)) {
+      throw new Error('planServertoolRunEngineEntryPreflightApplicationJson native returned invalid baseObject');
+    }
+    return {
+      returnResult: false,
+      baseObject: record.baseObject as JsonObject
+    };
+  }
+  throw new Error('planServertoolRunEngineEntryPreflightApplicationJson native returned invalid returnResult');
 }
 
 export interface ServertoolEntryContextPlan {
@@ -4320,6 +4580,38 @@ export function resolveServertoolRunEnginePrepassDecisionWithNative(input: {
     default:
       throw new Error('[servertool] invalid engine prepass action');
   }
+}
+
+export function resolveServertoolRunEnginePrepassApplicationWithNative(input: {
+  decision: ServertoolRunEnginePrepassDecision;
+}): ServertoolRunEnginePrepassApplicationDecision {
+  const capability = 'planServertoolRunEnginePrepassApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolRunEnginePrepassApplicationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolRunEnginePrepassApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolRunEnginePrepassApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.returnResult === true) {
+    if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
+      throw new Error('planServertoolRunEnginePrepassApplicationJson native returned invalid result');
+    }
+    return {
+      returnResult: true,
+      result: record.result as ServerSideToolEngineResult
+    };
+  }
+  if (record.returnResult === false) {
+    return { returnResult: false };
+  }
+  throw new Error('planServertoolRunEnginePrepassApplicationJson native returned invalid returnResult');
 }
 
 export type ServertoolRegistryLookupActionPlan = {

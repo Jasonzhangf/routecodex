@@ -72,8 +72,7 @@ export {
   clearAllResponsesConversationState,
   resetResponsesConversationStateForRestartSimulation,
   clearUnresolvedResponsesConversationRequests,
-  createResponsesSseToJsonConverter,
-  createResponsesJsonToSseConverter,
+  buildResponsesJsonFromSseStreamWithNative,
   reportProviderErrorToRouterPolicy,
   reportProviderSuccessToRouterPolicy
 } from './bridge/runtime-integrations.js';

@@ -989,6 +989,7 @@ pub fn build_provider_sse_stream_read_error_descriptor_json(
 }
 
 pub fn build_responses_json_from_sse_json(input_json: String) -> Result<String, String> {
+    // feature_id: sse.responses_decode_projection
     let input: Value = serde_json::from_str(&input_json)
         .map_err(|error| format!("Failed to parse input JSON: {}", error))?;
     let body_text = input

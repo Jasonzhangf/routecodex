@@ -248,9 +248,10 @@ impl ProviderHealthManager {
         })
     }
 
-    pub(crate) fn import_persistable_state(&mut self, raw: &Value, now_ms: i64) {
+    pub(crate) fn import_persistable_state(&mut self, raw: &Value, now_ms: i64) -> bool {
+        let mut pruned_expired = false;
         let Some(entries) = raw.get("providerCooldowns").and_then(|v| v.as_array()) else {
-            return;
+            return false;
         };
         for entry in entries {
             let Some(provider_key) = entry
@@ -271,6 +272,7 @@ impl ProviderHealthManager {
                         .or_else(|| v.as_f64().map(|value| value.round() as i64))
                 });
             if matches!(cooldown_expires_at, Some(expiry) if expiry <= now_ms) {
+                pruned_expired = true;
                 continue;
             }
             let failure_threshold = self.config.failure_threshold;
@@ -313,6 +315,7 @@ impl ProviderHealthManager {
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty());
         }
+        pruned_expired
     }
 
     fn get_state_mut(&mut self, provider_key: &str) -> &mut ProviderInternalState {
@@ -456,7 +459,8 @@ mod tests {
 
         let mut restored = ProviderHealthManager::new();
         restored.register_providers(&["test-provider".to_string()]);
-        restored.import_persistable_state(&exported, 4_000);
+        let pruned = restored.import_persistable_state(&exported, 4_000);
+        assert!(!pruned);
 
         let state = state_for(&restored, "test-provider");
         assert_eq!(state.state, "tripped");
@@ -489,7 +493,8 @@ mod tests {
 
         let mut restored = ProviderHealthManager::new();
         restored.register_providers(&["test-provider".to_string()]);
-        restored.import_persistable_state(&exported, 2_000);
+        let pruned = restored.import_persistable_state(&exported, 2_000);
+        assert!(!pruned);
 
         let state = state_for(&restored, "test-provider");
         assert_eq!(state.state, "healthy");
@@ -511,11 +516,41 @@ mod tests {
             }]
         });
 
-        restored.import_persistable_state(&raw, 4_000);
+        let pruned = restored.import_persistable_state(&raw, 4_000);
+        assert!(!pruned);
 
         let state = state_for(&restored, "test-provider");
         assert_eq!(state.state, "tripped");
         assert_eq!(state.failure_count, DEFAULT_FAILURE_THRESHOLD);
         assert_eq!(state.cooldown_expires_at, Some(123_000));
+    }
+
+    #[test]
+    fn import_reports_pruned_expired_persisted_cooldown() {
+        let mut restored = ProviderHealthManager::new();
+        restored.register_providers(&["test-provider".to_string()]);
+        let raw = json!({
+            "version": 1,
+            "providerCooldowns": [{
+                "providerKey": "test-provider",
+                "state": "tripped",
+                "failureCount": 3,
+                "cooldownExpiresAt": 4_000i64,
+                "lastFailureAt": 1_000i64,
+                "reason": "expired"
+            }]
+        });
+
+        let pruned = restored.import_persistable_state(&raw, 4_001);
+
+        assert!(pruned);
+        let state = state_for(&restored, "test-provider");
+        assert_eq!(state.state, "healthy");
+        assert_eq!(state.failure_count, 0);
+        assert_eq!(state.cooldown_expires_at, None);
+        assert_eq!(restored.export_persistable_state(4_001), json!({
+            "version": 1,
+            "providerCooldowns": []
+        }));
     }
 }

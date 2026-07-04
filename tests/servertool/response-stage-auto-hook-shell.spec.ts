@@ -5,6 +5,7 @@ const planServertoolRequiredResponseHookEmptyErrorWithNative = jest.fn();
 const resolveServertoolResponseStageAutoHookPreDecisionWithNative = jest.fn((input: any) => {
   const action = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
     autoHookEvaluated: false,
     hasAutoHookResult: false
   }) as any;
@@ -22,6 +23,7 @@ const resolveServertoolResponseStageAutoHookPreDecisionWithNative = jest.fn((inp
 const resolveServertoolResponseStageAutoHookPostDecisionWithNative = jest.fn((input: any) => {
   const action = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: input.responseStageGatePlan,
+    baseObject: input.baseObject,
     autoHookEvaluated: true,
     hasAutoHookResult: input.autoHookResult != null,
     autoHookResult: input.autoHookResult
@@ -134,7 +136,8 @@ describe('response-stage-auto-hook-shell', () => {
         contextBase: {} as any,
         includeAutoHookIds: null,
         excludeAutoHookIds: null,
-        responseStageGatePlan: { responseHookRequired: false }
+        responseStageGatePlan: { responseHookRequired: false },
+        baseObject: { ok: true }
       })
     ).resolves.toEqual({ action: 'return_passthrough_bypass' });
     expect(runServertoolAutoHookCaller).not.toHaveBeenCalled();
@@ -147,7 +150,8 @@ describe('response-stage-auto-hook-shell', () => {
         contextBase: {} as any,
         includeAutoHookIds: null,
         excludeAutoHookIds: null,
-        responseStageGatePlan: { responseHookRequired: false, responseHookName: 'stop_message_auto' }
+        responseStageGatePlan: { responseHookRequired: false, responseHookName: 'stop_message_auto' },
+        baseObject: { ok: true }
       })
     ).resolves.toEqual({
       action: 'return_auto_hook_result',
@@ -202,7 +206,8 @@ describe('response-stage-auto-hook-shell', () => {
         contextBase: {} as any,
         includeAutoHookIds: null,
         excludeAutoHookIds: null,
-        responseStageGatePlan: { responseHookRequired: true, responseHookName: 'stop_message_auto' }
+        responseStageGatePlan: { responseHookRequired: true, responseHookName: 'stop_message_auto' },
+        baseObject: { ok: true }
       })
     ).rejects.toThrow('required hook empty: stop_message_auto');
   });
@@ -218,7 +223,8 @@ describe('response-stage-auto-hook-shell', () => {
         contextBase: {} as any,
         includeAutoHookIds: null,
         excludeAutoHookIds: null,
-        responseStageGatePlan: { responseHookRequired: false }
+        responseStageGatePlan: { responseHookRequired: false },
+        baseObject: { ok: true }
       })
     ).rejects.toThrow('[servertool] invalid response-stage pre auto-hook action');
     expect(runServertoolAutoHookCaller).not.toHaveBeenCalled();
@@ -238,7 +244,8 @@ describe('response-stage-auto-hook-shell', () => {
         contextBase: {} as any,
         includeAutoHookIds: null,
         excludeAutoHookIds: null,
-        responseStageGatePlan: { responseHookRequired: false }
+        responseStageGatePlan: { responseHookRequired: false },
+        baseObject: { ok: true }
       })
     ).rejects.toThrow('[servertool] invalid response-stage post auto-hook action');
     expect(runServertoolAutoHookCaller).toHaveBeenCalledTimes(1);

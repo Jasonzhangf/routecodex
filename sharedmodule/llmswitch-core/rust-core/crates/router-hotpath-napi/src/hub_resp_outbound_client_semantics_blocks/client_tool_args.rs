@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
+use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::strip_tool_markup_for_display_text;
 use crate::shared_tool_mapping::build_flattened_namespace_child_alias;
 
 #[derive(Clone, Debug)]
@@ -751,6 +752,41 @@ fn sanitize_responses_output_item_for_replay_safety(record: &mut Map<String, Val
     }
 }
 
+fn is_client_visible_text_field(record: &Map<String, Value>, key: &str) -> bool {
+    if key == "output_text" {
+        return true;
+    }
+    let record_type = record
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    match key {
+        "text" => matches!(record_type, "output_text" | "response.output_text.done"),
+        "delta" => record_type == "response.output_text.delta",
+        _ => false,
+    }
+}
+
+fn sanitize_client_visible_text_field(
+    record: &Map<String, Value>,
+    key: &str,
+    value: Value,
+) -> Value {
+    if !is_client_visible_text_field(record, key) {
+        return value;
+    }
+    let Value::String(raw) = value else {
+        return value;
+    };
+    let cleaned = strip_tool_markup_for_display_text(raw.as_str());
+    if cleaned == raw {
+        Value::String(raw)
+    } else {
+        Value::String(cleaned)
+    }
+}
+
 fn sanitize_responses_client_payload_for_replay_safety_deep(value: &Value) -> Value {
     match value {
         Value::Array(items) => Value::Array(
@@ -762,12 +798,14 @@ fn sanitize_responses_client_payload_for_replay_safety_deep(value: &Value) -> Va
         Value::Object(record) => {
             let mut out = Map::new();
             for (key, child) in record {
+                let sanitized_child =
+                    sanitize_responses_client_payload_for_replay_safety_deep(child);
                 if key == "metadata" {
                     continue;
                 }
                 out.insert(
                     key.clone(),
-                    sanitize_responses_client_payload_for_replay_safety_deep(child),
+                    sanitize_client_visible_text_field(record, key, sanitized_child),
                 );
             }
             sanitize_responses_output_item_for_replay_safety(&mut out);

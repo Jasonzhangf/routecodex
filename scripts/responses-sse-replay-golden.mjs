@@ -158,17 +158,14 @@ async function readSseFrames(stream) {
 
 async function convertSseFramesToJson(frames, requestId, model) {
   try {
-    const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
+    const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
     const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-    const { ResponsesSseToJsonConverter } = await import(convPath);
+    const { sseToJson } = await import(sseLibPath);
     const { buildChatResponseFromResponses } = await import(bridgePath);
-    const converter = new ResponsesSseToJsonConverter();
-    async function* toChunks() {
-      for (const frame of frames) {
-        yield `${frame}\n\n`;
-      }
-    }
-    const json = await converter.convertSseToJson(toChunks(), {
+    const bodyText = frames.map((frame) => `${frame}\n\n`).join('');
+    const json = sseToJson({
+      protocol: 'openai-responses',
+      bodyText,
       requestId,
       model: typeof model === 'string' && model.length ? model : 'unknown'
     });

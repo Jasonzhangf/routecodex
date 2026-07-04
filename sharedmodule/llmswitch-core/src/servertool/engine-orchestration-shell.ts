@@ -144,9 +144,9 @@ export async function runServerToolOrchestrationShell(
   const preflightDecision = resolveServertoolEngineOrchestrationPreflightDecisionWithNative({
     preflight
   });
-  if (preflightDecision.action === 'return_preflight_chat') {
+  if (preflightDecision.returnPreflightChat) {
     return {
-      chat: preflightDecision.chat,
+      chat: preflightDecision.chat as JsonObject,
       executed: false
     };
   }
@@ -184,7 +184,7 @@ export async function runServerToolOrchestrationShell(
     hasExecution: engineResult.execution != null,
     finalChatResponse: engineResult.finalChatResponse
   });
-  if (engineSkipDecision.action === 'return_skipped') {
+  if (engineSkipDecision.returnSkipped) {
     runTriggerObservationPlan({
       stopSignal,
       result: engineSkipDecision.triggerResult,

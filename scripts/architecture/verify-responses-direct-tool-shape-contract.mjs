@@ -23,12 +23,22 @@ const serverIndex = read('src/server/runtime/http-server/index.ts');
 const directPayloadModule = read('src/server/runtime/http-server/direct-passthrough-payload.ts');
 const pkg = read('package.json');
 
-for (const expected of [
+if (!directPayload.includes('requireDirectPassthroughPayloadObject')) {
+  failures.push('direct payload contract missing invariant: requireDirectPassthroughPayloadObject');
+}
+if (!directPayload.includes('findResponsesDirectFunctionCallOutputContentViolation')) {
+  failures.push('direct payload contract missing invariant: findResponsesDirectFunctionCallOutputContentViolation');
+}
+if (!serverIndex.includes('findResponsesDirectFunctionCallOutputContentViolation')) {
+  failures.push('router direct wire guard missing anchor: findResponsesDirectFunctionCallOutputContentViolation');
+}
+
+for (const forbidden of [
   'evaluateDirectRouteDecision',
   'evaluateResponsesDirectRouteDecisionNative',
 ]) {
-  if (!directPayload.includes(expected)) {
-    failures.push(`direct payload contract missing invariant: ${expected}`);
+  if (directPayload.includes(forbidden)) {
+    failures.push(`direct passthrough must not run route decision helper: ${forbidden}`);
   }
 }
 
@@ -89,14 +99,6 @@ if (directMinimumOverrideSpec && !directMinimumOverrideSpec.includes('expect((ou
 
 if (!pkg.includes('verify:responses-function-tool-normalization-rust-only')) {
   failures.push('package build gate must include compile-time responses function-tool normalization verification');
-}
-
-for (const expected of [
-  'evaluateDirectRouteDecision',
-]) {
-  if (!serverIndex.includes(expected) && !directPayloadModule.includes(expected)) {
-    failures.push(`router direct relay guard missing anchor: ${expected}`);
-  }
 }
 
 if (failures.length > 0) {

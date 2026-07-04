@@ -77,7 +77,8 @@ describe('response-stage-finalize-shell', () => {
 
     expect(runServertoolResponseStageAutoHookPass).toHaveBeenCalledWith(
       expect.objectContaining({
-        responseStageGatePlan
+        responseStageGatePlan,
+        baseObject: { ok: true }
       })
     );
     expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledWith({
@@ -124,7 +125,8 @@ describe('response-stage-finalize-shell', () => {
 
     expect(runServertoolResponseStageAutoHookPass).toHaveBeenCalledWith(
       expect.objectContaining({
-        responseStageGatePlan
+        responseStageGatePlan,
+        baseObject: { ok: true }
       })
     );
     expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledWith({

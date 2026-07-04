@@ -172,6 +172,7 @@ type NativeRouterHotpathJsonBinding = {
 
   // -- provider_response_tool_validation_blocks batch #5 --
   validateCanonicalClientToolCallJson?: (inputJson: string) => string;
+  validateApplyPatchArgumentsJson?: (inputJson: string) => string;
   containsBroadKillCommandJson?: (inputJson: string) => string;
   hasInvalidShellWrapperShapeJson?: (inputJson: string) => string;
 

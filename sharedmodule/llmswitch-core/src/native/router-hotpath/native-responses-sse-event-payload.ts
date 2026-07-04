@@ -6,6 +6,7 @@ import {
   readNativeFunction
 } from './native-hub-pipeline-resp-semantics-shared.js';
 
+// feature_id: sse.responses_encode_projection
 function parseNativeEvent(raw: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(raw);

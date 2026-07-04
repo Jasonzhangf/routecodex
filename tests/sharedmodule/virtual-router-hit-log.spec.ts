@@ -167,14 +167,14 @@ describe('virtual-router hit log', () => {
     expect(line).not.toContain(' sid=');
   });
 
-  it('prefers stable tmux scope over per-request session id for log color key', () => {
+  it('prefers request session id over stable tmux scope for log color key', () => {
     expect(resolveSessionLogColorKey({
       sessionId: 'request-session-a',
       clientTmuxSessionId: 'tmux-session-stable'
-    })).toBe('tmux-session-stable');
+    })).toBe('request-session-a');
     expect(resolveSessionLogColorKey({
       sessionId: 'request-session-b',
       tmux_session_id: 'tmux-session-stable'
-    })).toBe('tmux-session-stable');
+    })).toBe('request-session-b');
   });
 });

@@ -908,11 +908,6 @@ export class HubRequestExecutor implements RequestExecutor {
           providerPayload,
           target
         } = resolvedPipelineAttempt;
-        await captureResponsesConversationRequestContextAtChatProcessEntry({
-          input,
-          metadata: mergedMetadata,
-          providerKey: target.providerKey
-        });
         const defaultTierAvailableForAttempt = resolveDefaultTierAvailableForErrorErr05({
           tiers: buildErrorErr05DefaultAvailabilityTiers({
             routeName: routeNameForAttempt,
@@ -1051,6 +1046,11 @@ export class HubRequestExecutor implements RequestExecutor {
               }
             }
           }
+          await captureResponsesConversationRequestContextAtChatProcessEntry({
+            input,
+            metadata: mergedMetadata,
+            providerKey: target.providerKey
+          });
           logStage('provider.context_resolve.completed', input.requestId, {
             providerKey: target.providerKey,
             runtimeKey,

@@ -189,3 +189,143 @@
 - 删除门禁、定向测试、build 与 smoke 全部通过。
 - 每个节点的 control/data 双接口已稳定分离，metadata 未混入 data 流。
 - 没有 fallback、没有双路径、没有重复实现。
+
+## 9. 2026-07-03 Execution Contract: Full Rustification Goal
+
+本节是当前 `/goal` 的执行真源。目标不是只补 Stage A map，也不是只写审计报告；目标是把 Hub Pipeline / Chat Process / servertool followup orchestration 的剩余 TS 语义逐 slice Rust 化，并用白盒、黑盒、架构 gate、live replay 证明闭环。
+
+### 9.1 P0 Rustification Scope
+
+P0 必须按以下 feature 顺序推进；每个 feature 都必须先查 `function-map.yml`、`mainline-call-map.yml`、`verification-map.yml`，确认唯一 owner、允许路径、禁止路径和最小验证栈。
+
+1. `servertool.followup_orchestration`
+   - Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
+   - TS residue: `sharedmodule/llmswitch-core/src/servertool/**`
+   - Goal: TS 只执行 Rust plan 规定的 IO，不再决定 followup/reentry/stopless/servertool outcome。
+
+2. `hub.req_chatprocess.tool_governance`
+   - Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs`
+   - TS residue: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts`
+   - Goal: tool list 注入、文本工具 harvest、sanitize、servertool/web_search governance 全部 Rust-owned。
+
+3. `hub.resp_chatprocess.tool_governance`
+   - Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs`
+   - TS residue: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts` and `native-chat-process-servertool-orchestration-semantics.ts`
+   - Goal: response tool harvest、apply_patch reversal、internal tool stripping、servertool response governance 全部 Rust-owned。
+
+4. `conversion.responses.store`
+   - Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+   - TS residue: `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
+   - Goal: continuation save/restore、scope isolation、TTL/eviction、owner pin 全部 Rust-owned。
+
+5. `conversion.shared.anthropic`
+   - Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs`
+   - TS residue: `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils*.ts`
+   - Goal: Anthropic/OpenAI message、thinking block、tool schema、tool_use/tool_result normalization 全部 Rust-owned。
+
+### 9.2 Per-Slice Required Loop
+
+每个 P0 slice 必须按同一闭环执行，不能跳步：
+
+1. Owner lock
+   - Query function map / mainline call map / verification map / wiki manifest.
+   - 若 1-2 次查询内无法定位唯一 owner 或唯一相邻边，先补 map/contract，不改实现。
+
+2. Residue inventory
+   - 列出 TS residue 中仍在做语义判定、payload 重写、metadata 读写、tool governance、route/effect/error 决策的函数。
+   - 分类为 `delete now`、`move to Rust`、`thin wrapper`、`IO glue`。
+   - 禁止把 semantic residue 留作双路径。
+
+3. Test design first
+   - 写测试设计到当前 plan 或 feature 对应测试文件注释/fixture。
+   - 必须包含 lifecycle 节点输入输出、success/failure/non-terminal/already-terminal、白盒、模块黑盒、项目黑盒、live replay 样本。
+
+4. Red evidence
+   - 先写最小红测或 failing sample，确认当前实现确实被锁住。
+   - 若红测不红，先修测试设计或改用真实旧样本；禁止直接改实现后再补测试。
+
+5. Rust implementation
+   - 修改唯一 Rust owner。
+   - TS 只做 NAPI/JSON/stream bridge 或外部 IO glue。
+   - Rust path fail-fast；禁止 TS fallback 到旧实现。
+
+6. TS physical deletion / collapse
+   - 被 Rust 接管的 TS semantic helper 必须物理删除或收缩成薄壳。
+   - 删除前确认依赖；删除后跑架构红测防旧路径复活。
+
+7. Green evidence
+   - Rust unit / contract test PASS.
+   - Focused Jest whitebox/contract PASS.
+   - Module blackbox PASS.
+   - Architecture gate PASS.
+   - Build PASS.
+
+8. Live evidence
+   - 若 slice 影响 runtime behavior，必须全局安装、managed restart、`/health`、同入口真实样本或旧失败样本 replay。
+   - 只做单测、build、静态阅读不能宣称闭环完成。
+
+9. Architecture review
+   - 检查是否无 fallback、无双路径、无 metadata/payload 混流、无非相邻转换、无 provider 特例进入 Hub Pipeline。
+   - review 不过则回唯一 owner 修，不得把结果正确当完成。
+
+10. Memory / skill closeout
+   - note.md 记录探索与证据。
+   - 完成后把确证结论追加到 `MEMORY.md`。
+   - 若形成可复用流程或反模式，更新 `.agents/skills/rcc-dev-skills/` 或相关 rustification skill。
+
+### 9.3 Required Whitebox Coverage
+
+每个 slice 至少覆盖：
+
+- Rust owner unit tests: canonical builder/parser/interpreter 的正反样本。
+- Rust error tests: malformed input、missing required field、wrong owner/scope、non-terminal 状态必须显式错误或显式 non-terminal。
+- NAPI bridge tests: TS wrapper 只能透传 Rust output，不解释 semantic branch。
+- Residue audit tests: 禁止旧 TS marker、旧 helper import、旧 action switch、旧 payload rewrite、旧 metadata fallback 复活。
+- Function/mainline/verification map gates: owner、相邻边、required gate、manifest/wiki 同步可解析。
+
+### 9.4 Required Blackbox Coverage
+
+每个 slice 至少覆盖：
+
+- Module blackbox: 从模块公开入口输入真实 payload，验证输出语义与 Rust contract 一致。
+- HTTP blackbox: 使用 `/v1/responses`、`/v1/chat/completions` 或 `/v1/messages` 的同入口样本验证 runtime 行为。
+- Provider/client blackbox: fake provider 或 live provider 证明 upstream payload 和 client response body 不含内部 metadata/debug/control。
+- Error blackbox: provider/runtime/local error 进入 ErrorErr 链，禁止被包装成成功 response 或 TS fallback。
+- Continuation/servertool blackbox: 覆盖 first turn、tool call、submit_tool_outputs/followup、non-terminal、already-terminal、failure。
+
+### 9.5 Stage Gates
+
+每个 slice 的最小 gate 由 `docs/architecture/verification-map.yml` 决定；全局收口必须至少跑：
+
+```bash
+npm run verify:function-map-compile-gate
+npm run verify:architecture-mainline-call-map
+npm run verify:architecture-mainline-manifest-sync
+npm run verify:architecture-mainline-mermaid-sync
+npm run verify:llmswitch-rustification-audit
+npm run verify:servertool-rust-only
+cargo check --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi
+npm run build:base
+```
+
+影响 live runtime 的阶段，还必须补：
+
+```bash
+npm run pack:rcc
+npm run verify:rcc-release-install
+routecodex restart --port <managed-port>
+curl -sS http://127.0.0.1:<managed-port>/health
+```
+
+并重放同入口旧失败样本或真实样本。没有 live replay 证据，只能声明“代码/测试 gate 通过”，不能声明 rustification 闭环完成。
+
+### 9.6 Final DoD
+
+完整 rustification 完成必须同时满足：
+
+- P0 scope 的 TS semantic residue 均已迁入 Rust 或物理删除。
+- 保留 TS 文件均能解释为 NAPI/JSON/stream bridge、Node IO glue、diagnostic/test，不承载业务语义。
+- 白盒、模块黑盒、HTTP/project 黑盒、错误链黑盒、live replay 全部有证据。
+- `function-map.yml`、`mainline-call-map.yml`、`verification-map.yml`、wiki/manifest 与代码 owner 一致。
+- 架构 gate 能阻止旧 TS semantic path、fallback、非相邻转换、metadata payload 泄漏、重复 owner 复活。
+- `MEMORY.md` 和相关 skill 已沉淀确证流程与反模式。

@@ -41,7 +41,6 @@ function expectGpt55CodexContract(model: any): void {
     supports_parallel_tool_calls: true,
     supports_reasoning_summaries: true,
     supports_search_tool: true,
-    tool_mode: 'code_mode_only',
     visibility: 'list',
     web_search_tool_type: 'text_and_image'
   });

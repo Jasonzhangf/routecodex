@@ -21,7 +21,8 @@ export async function finalizeServertoolResponseStage(args: {
     contextBase: args.contextBase,
     includeAutoHookIds: args.includeAutoHookIds,
     excludeAutoHookIds: args.excludeAutoHookIds,
-    responseStageGatePlan: args.responseStageGatePlan
+    responseStageGatePlan: args.responseStageGatePlan,
+    baseObject: args.baseObject
   });
   return finalizeServertoolResponseStageWithNative({
     responseStageGatePlan: args.responseStageGatePlan,

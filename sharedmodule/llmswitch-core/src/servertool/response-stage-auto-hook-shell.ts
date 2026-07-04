@@ -3,6 +3,7 @@ import type {
   ServerSideToolEngineResult,
   ServerToolHandlerContext
 } from './types.js';
+import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   resolveServertoolResponseStageAutoHookPostDecisionWithNative,
   resolveServertoolResponseStageAutoHookPreDecisionWithNative
@@ -22,9 +23,11 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   includeAutoHookIds: Set<string> | null;
   excludeAutoHookIds: Set<string> | null;
   responseStageGatePlan: NativeServertoolResponseStageGate;
+  baseObject: JsonObject;
 }): Promise<ServertoolResponseStageAutoHookPassResult> {
   const preAutoHookDecision = resolveServertoolResponseStageAutoHookPreDecisionWithNative({
-    responseStageGatePlan: args.responseStageGatePlan
+    responseStageGatePlan: args.responseStageGatePlan,
+    baseObject: args.baseObject
   });
   if (preAutoHookDecision.action === 'return_pass_result') {
     return preAutoHookDecision.result;
@@ -39,6 +42,7 @@ export async function runServertoolResponseStageAutoHookPass(args: {
   const postAutoHookDecision = resolveServertoolResponseStageAutoHookPostDecisionWithNative({
     requestId: args.options.requestId,
     responseStageGatePlan: args.responseStageGatePlan,
+    baseObject: args.baseObject,
     autoHookResult
   });
   if (postAutoHookDecision.action === 'throw_required_response_hook_empty') {
