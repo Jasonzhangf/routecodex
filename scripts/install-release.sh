@@ -166,6 +166,7 @@ build_release_project() {
   prepare_dependencies
   (
     cd "$INSTALL_BUILD_ROOT"
+    node scripts/build-core.mjs
     BUILD_MODE=release ROUTECODEX_SKIP_AUTO_BUMP="${ROUTECODEX_SKIP_AUTO_BUMP:-1}" npm run build:min
     node scripts/ensure-cli-executable.mjs
   )

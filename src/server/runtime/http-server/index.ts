@@ -88,6 +88,7 @@ import {
 } from './request-executor.js';
 import { resolveSessionLogColorKey } from '../../../utils/session-log-color.js';
 import {
+  captureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
   isToolCallContinuationResponseNative,
@@ -2148,6 +2149,7 @@ export class RouteCodexHttpServer {
   private async persistOrClearResponsesDirectContinuation(args: {
     requestId?: string;
     entryEndpoint: '/v1/responses' | '/v1/responses.submit_tool_outputs';
+    requestBody?: unknown;
     responseBody: unknown;
     providerKey?: string;
     sessionId?: string;
@@ -2160,6 +2162,26 @@ export class RouteCodexHttpServer {
     if (!keepForSubmitToolOutputs) {
       await clearResponsesConversationByRequestId(args.requestId);
       return;
+    }
+    if (args.requestBody && typeof args.requestBody === 'object' && !Array.isArray(args.requestBody)) {
+      const requestBody = args.requestBody as Record<string, unknown>;
+      const input = Array.isArray(requestBody.input) ? requestBody.input : undefined;
+      const toolsRaw = Array.isArray(requestBody.tools) ? requestBody.tools : undefined;
+      if (input || toolsRaw) {
+        await captureResponsesRequestContextForRequest({
+          requestId: args.requestId,
+          payload: requestBody,
+          context: {
+            ...(input ? { input } : {}),
+            ...(toolsRaw ? { toolsRaw } : {}),
+          },
+          ...(args.providerKey ? { providerKey: args.providerKey } : {}),
+          ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+          ...(args.conversationId ? { conversationId: args.conversationId } : {}),
+          ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
+          entryKind: 'responses',
+        });
+      }
     }
     await recordResponsesResponseForRequest({
       requestId: args.requestId,
@@ -2219,6 +2241,7 @@ export class RouteCodexHttpServer {
         await this.persistOrClearResponsesDirectContinuation({
           requestId: input.requestId,
           entryEndpoint: '/v1/responses',
+          requestBody: input.body,
           responseBody,
           providerKey: auditContext.providerKey,
           sessionId: readSessionIdForUsageLog(inputMetadata),
