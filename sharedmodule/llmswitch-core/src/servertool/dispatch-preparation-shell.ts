@@ -2,8 +2,8 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
 import {
   planServertoolToolCallDispatchWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { buildServertoolDispatchPlanInputWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
+import { buildServertoolDispatchPlanInputWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';

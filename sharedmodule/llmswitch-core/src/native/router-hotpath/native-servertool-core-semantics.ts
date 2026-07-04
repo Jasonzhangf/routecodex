@@ -16,24 +16,25 @@ import {
   parseServertoolDispatchPlanPayload,
   parseServertoolOutcomePlanInputPayload,
   parseServertoolOutcomePlanPayload,
-  parseServertoolResponseStagePayload,
-  type ServertoolResponseStageGatePayload
+  parseServertoolResponseStagePayload
 } from './native-router-hotpath-analysis.js';
+
+import type {
+  ServertoolResponseStageGatePayload,
+  ServertoolResponseStageOutput
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   buildServertoolOutcomePlanInputWithNative,
   planServertoolOutcomeWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
-export type NativeServertoolResponseStageGate = ServertoolResponseStageGatePayload;
-
 // Re-export NAPI wrappers consumed by shell files and orchestration functions
 export {
+  buildServertoolAutoHookTraceProgressEventWithNative,
   buildServertoolCliProjectionExecutionContextWithNative,
   buildServertoolCliProjectionRuntimeBranchWithNative,
-  buildServertoolDispatchPlanInputWithNative,
   buildServertoolHandlerErrorToolOutputPayloadWithNative,
   buildServertoolMatchSkippedProgressEventWithNative,
-  buildServertoolAutoHookTraceProgressEventWithNative,
   buildServertoolStopCompareProgressEventWithNative,
   buildServertoolStopEntryProgressEventWithNative,
   buildServertoolToolOutputPayloadWithNative,
@@ -45,15 +46,16 @@ export {
   extractAssistantFollowupMessageWithNative,
   extractCapturedChatSeedWithNative,
   extractTextFromChatLikeWithNative,
-  formatStopMessageCompareContextWithNative,
   inspectStopGatewaySignalWithNative,
   isAdapterClientDisconnectedWithNative,
   isServertoolClientExecCliProjectionToolCallWithNative,
   normalizeFollowupParametersWithNative,
-  normalizeStopGatewayContextWithNative,
-  normalizeStopMessageCompareContextWithNative,
+  normalizeServertoolProgressFlowIdWithNative,
+  normalizeServertoolProgressResultWithNative,
   normalizeServertoolProgressTokenWithNative,
   normalizeServertoolRegistrationSpecWithNative,
+  normalizeStopGatewayContextWithNative,
+  normalizeStopMessageCompareContextWithNative,
   parseServertoolCliProjectionToolArgumentsWithNative,
   parseServertoolTimeoutMsWithNative,
   planChatWebSearchOperationsWithNative,
@@ -76,11 +78,12 @@ export {
   resolveRuntimeStopMessageStateFromMetadataCenterWithNative,
   resolveRuntimeStopMessageStateWithNative,
   resolveServertoolBuiltinHandlerEntryWithNative,
+  resolveServertoolProgressStageWithNative,
+  resolveServertoolProgressToolNameWithNative,
   resolveServertoolRegisteredNameWithNative,
   resolveServertoolRegistryHandlerWithNative,
   resolveServertoolToolSpecWithNative,
   runServertoolOrchestrationMutationWithNative,
-  runServertoolResponseStageWithNative,
   shouldUseServertoolGoldProgressHighlightWithNative,
   visionBuildAnalysisPayloadWithNative,
   visionBuildPinnedMetadataWithNative,
@@ -95,12 +98,11 @@ export {
   webSearchIsQwenEngineWithNative,
   webSearchLimitHitsWithNative,
   webSearchNormalizeResultCountWithNative,
-  webSearchSanitizeBackendErrorWithNative,
-  normalizeServertoolProgressFlowIdWithNative,
-  normalizeServertoolProgressResultWithNative,
-  resolveServertoolProgressStageWithNative,
-  resolveServertoolProgressToolNameWithNative,
+  webSearchSanitizeBackendErrorWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
+
+export type NativeServertoolResponseStageGate = ServertoolResponseStageGatePayload;
+export type NativeServertoolResponseStage = ServertoolResponseStageOutput;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 export interface StopGatewayContext {

@@ -6,13 +6,13 @@ import {
   buildServertoolMatchSkippedProgressEventWithNative,
   buildServertoolStopCompareProgressEventWithNative,
   buildServertoolStopEntryProgressEventWithNative,
+  formatStopMessageCompareContextWithNative,
   normalizeServertoolProgressFlowIdWithNative,
   normalizeServertoolProgressResultWithNative,
   resolveServertoolProgressStageWithNative,
   resolveServertoolProgressToolNameWithNative,
   shouldUseServertoolGoldProgressHighlightWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
-import { formatStopMessageCompareContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   readProviderProtocolFromAnyBoundMetadataCenter,
   readStopMessageCompareContext
