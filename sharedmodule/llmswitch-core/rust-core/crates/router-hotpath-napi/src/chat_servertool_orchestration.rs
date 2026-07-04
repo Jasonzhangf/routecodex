@@ -1751,6 +1751,7 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
         /// Updated chat response with tool_outputs appended.
         chat_response: Value,
         flow_id: String,
+        followup: Value,
         /// The injected tool output content.
         tool_content: Value,
     }
@@ -1765,9 +1766,14 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
             input.tool_name
         )));
     }
-    let _visible_summary =
+    let visible_summary =
         resolve_continue_execution_visible_summary(input.tool_arguments.as_deref())
             .map_err(napi::Error::from_reason)?;
+    let client_inject_text = if visible_summary.is_empty() {
+        "继续执行".to_string()
+    } else {
+        visible_summary.clone()
+    };
 
     // Build the standard noop tool output content
     let tool_content = serde_json::json!({
@@ -1796,6 +1802,12 @@ pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<Strin
     let output = NoopOutput {
         chat_response,
         flow_id: "continue_execution_flow".to_string(),
+        followup: serde_json::json!({
+            "metadata": {
+                "clientInjectText": client_inject_text,
+                "visibleSummary": visible_summary,
+            }
+        }),
         tool_content,
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))

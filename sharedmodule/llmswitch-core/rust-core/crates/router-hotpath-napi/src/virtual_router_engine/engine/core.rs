@@ -131,8 +131,7 @@ impl VirtualRouterEngineCore {
         if let Some(raw) = load_provider_health_state() {
             let now = now_ms();
             let pruned_expired = self.health_manager.import_persistable_state(&raw, now);
-            let cleared_imported = self.health_manager.clear_imported_persisted_state();
-            if pruned_expired || cleared_imported {
+            if pruned_expired {
                 let cleaned = self.health_manager.export_persistable_state(now);
                 persist_provider_health_state(&cleaned);
             }

@@ -4242,7 +4242,7 @@ mod tests {
     }
 
     #[test]
-    fn forwarder_ignores_unselected_persisted_reprobe_target_under_simple_model() {
+    fn forwarder_preserves_unselected_persisted_cooldown_under_simple_model() {
         use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
         use std::fs;
         use std::path::PathBuf;
@@ -4334,8 +4334,8 @@ mod tests {
             assert!(
                 core.health_manager
                     .cooldown_remaining_ms("cooldown.key1.gpt-test", now_ms())
-                    .is_none(),
-                "cooldown must not survive after export/import noop"
+                    .is_some(),
+                "unselected persisted cooldown must remain truth until expiry or success"
             );
         });
 

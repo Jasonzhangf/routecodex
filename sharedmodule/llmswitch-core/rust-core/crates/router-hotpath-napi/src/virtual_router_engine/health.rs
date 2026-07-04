@@ -28,7 +28,6 @@ struct ProviderInternalState {
     cooldown_expires_at: Option<i64>,
     last_failure_at: Option<i64>,
     reason: Option<String>,
-    imported_persisted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -99,7 +98,6 @@ impl ProviderHealthManager {
                     cooldown_expires_at: None,
                     last_failure_at: None,
                     reason: None,
-                    imported_persisted: false,
                 });
         }
     }
@@ -123,7 +121,6 @@ impl ProviderHealthManager {
             state.cooldown_expires_at = None;
             state.last_failure_at = None;
             state.reason = None;
-            state.imported_persisted = false;
         }
 
         state.failure_count += 1;
@@ -131,7 +128,6 @@ impl ProviderHealthManager {
         if let Some(reason) = reason {
             state.reason = Some(reason);
         }
-        state.imported_persisted = false;
 
         if state.failure_count >= threshold {
             state.state = "tripped".to_string();
@@ -146,7 +142,6 @@ impl ProviderHealthManager {
         state.cooldown_expires_at = None;
         state.last_failure_at = None;
         state.reason = None;
-        state.imported_persisted = false;
     }
 
     pub(crate) fn is_available(&mut self, provider_key: &str, now_ms: i64) -> bool {
@@ -158,7 +153,6 @@ impl ProviderHealthManager {
                 state.cooldown_expires_at = None;
                 state.last_failure_at = None;
                 state.reason = None;
-                state.imported_persisted = false;
                 true
             }
             Some(_) => false,
@@ -212,25 +206,7 @@ impl ProviderHealthManager {
             state.cooldown_expires_at = None;
             state.last_failure_at = None;
             state.reason = None;
-            state.imported_persisted = false;
         }
-    }
-
-    pub(crate) fn clear_imported_persisted_state(&mut self) -> bool {
-        let mut cleared = false;
-        for state in self.states.values_mut() {
-            if !state.imported_persisted {
-                continue;
-            }
-            state.failure_count = 0;
-            state.state = "healthy".to_string();
-            state.cooldown_expires_at = None;
-            state.last_failure_at = None;
-            state.reason = None;
-            state.imported_persisted = false;
-            cleared = true;
-        }
-        cleared
     }
 
     pub(crate) fn export_persistable_state(&self, now_ms: i64) -> Value {
@@ -336,7 +312,6 @@ impl ProviderHealthManager {
                 .and_then(|v| v.as_str())
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty());
-            state.imported_persisted = true;
         }
         pruned_expired
     }
@@ -352,7 +327,6 @@ impl ProviderHealthManager {
                 cooldown_expires_at: None,
                 last_failure_at: None,
                 reason: None,
-                imported_persisted: false,
             })
     }
 }
@@ -525,41 +499,6 @@ mod tests {
         assert_eq!(state.failure_count, 1);
         assert_eq!(state.cooldown_expires_at, None);
         assert!(restored.is_available("test-provider", 2_000));
-    }
-
-    #[test]
-    fn clear_imported_persisted_state_removes_startup_cooldown_truth() {
-        let mut restored = ProviderHealthManager::new();
-        restored.register_providers(&["test-provider".to_string()]);
-        let raw = json!({
-            "version": 1,
-            "providerCooldowns": [{
-                "providerKey": "test-provider",
-                "state": "tripped",
-                "failureCount": 3,
-                "cooldownExpiresAt": 123_000i64,
-                "lastFailureAt": 1_000i64,
-                "reason": "__http_503_daily_cooldown__"
-            }]
-        });
-
-        let pruned = restored.import_persistable_state(&raw, 4_000);
-        assert!(!pruned);
-        assert!(!restored.is_available("test-provider", 4_000));
-
-        assert!(restored.clear_imported_persisted_state());
-        let state = state_for(&restored, "test-provider");
-        assert_eq!(state.state, "healthy");
-        assert_eq!(state.failure_count, 0);
-        assert_eq!(state.cooldown_expires_at, None);
-        assert!(restored.is_available("test-provider", 4_000));
-        assert_eq!(
-            restored.export_persistable_state(4_000),
-            json!({
-                "version": 1,
-                "providerCooldowns": []
-            })
-        );
     }
 
     #[test]
