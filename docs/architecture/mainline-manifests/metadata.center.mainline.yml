@@ -1,5 +1,5 @@
 lifecycle_id: metadata.center.mainline
-summary: "request-scoped metadata center mainline: request truth is materialized once, continuation/runtime/provider observation attach as separate families, and response/servertool consume read-only projections before closeout release."
+summary: "single request-scoped metadata center mainline: one bound center flows across server -> Hub Pipeline -> provider/runtime -> response closeout; request truth is materialized once, continuation/runtime/provider observation attach as separate families, and later stages consume read-only projections before closeout release."
 owner_feature_id: hub.metadata_center_mainline
 owner_module: src/server/runtime/http-server/metadata-center/metadata-center.ts
 entrypoint:
@@ -13,6 +13,7 @@ node_ids:
   - MetaReq04RuntimeControlBound
   - MetaReq05ProviderObservationProjected
   - MetaResp06ResponseObserved
+  - MetaResp07BridgeMetadataBound
   - MetaResp07ServertoolContextProjected
   - MetaResp08CloseoutReleased
 step_ids:
@@ -24,11 +25,12 @@ step_ids:
   - mtc-05
   - mtc-06
   - mtc-07
+  - mtc-08
 edge_status_counts:
-  anchored: 7
-  partial: 1
+  anchored: 9
+  partial: 0
   binding_pending: 0
-  total: 8
+  total: 9
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

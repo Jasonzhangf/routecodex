@@ -1,5 +1,5 @@
 lifecycle_id: runtime.lifecycle.mainline
-summary: "Managed server and token-daemon lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
+summary: "Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
 owner_feature_id: runtime.lifecycle.pid_cache
 owner_module: src/utils/server-runtime-pid.ts
 entrypoint:
@@ -15,15 +15,11 @@ node_ids:
   - ServerStopCommand
   - StartShutdownHandler
   - StopIntentRecord
-  - TokenDaemonBootstrap
-  - TokenDaemonPidRecord
 step_ids:
   - rtl-01
   - rtl-02
   - rtl-03
   - rtl-04
-  - rtl-05
-  - rtl-06
   - rtl-07
   - rtl-08
   - rtl-09
@@ -31,10 +27,10 @@ step_ids:
   - rtl-11
   - rtl-12
 edge_status_counts:
-  anchored: 12
+  anchored: 10
   partial: 0
   binding_pending: 0
-  total: 12
+  total: 10
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

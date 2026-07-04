@@ -8,6 +8,7 @@ SOURCE_ROOT="$(pwd -P)"
 INSTALL_BUILD_ROOT=""
 VERIFY_PORT="${ROUTECODEX_INSTALL_VERIFY_PORT:-5520}"
 VERIFY_HOST="${ROUTECODEX_INSTALL_VERIFY_HOST:-127.0.0.1}"
+VERIFY_BASE_URL="http://${VERIFY_HOST}:${VERIFY_PORT}"
 VERIFY_HEALTH_URL="http://${VERIFY_HOST}:${VERIFY_PORT}/health"
 EXPECTED_VERSION="$(node -p "require('./package.json').version" 2>/dev/null || true)"
 
@@ -215,6 +216,66 @@ verify_runtime_health() {
     fail "无法读取 package.json version，不能验证 release runtime 版本"
   fi
   echo "🔒 期望 release runtime version: ${EXPECTED_VERSION}"
+
+  health_matches_expected_version() {
+    local health_file="$1"
+    node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);if(body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&body.version===expected){process.exit(0)}process.exit(1)" "$health_file" "$EXPECTED_VERSION"
+  }
+
+  health_reports_ready_wrong_version() {
+    local health_file="$1"
+    node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);if(body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&typeof body.version==='string'&&body.version!==expected){console.log(body.version);process.exit(0)}process.exit(1)" "$health_file" "$EXPECTED_VERSION"
+  }
+
+  write_release_adoption_stop_intent() {
+    node - "$VERIFY_PORT" <<'NODE'
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const port = Number(process.argv[2]);
+if (!Number.isFinite(port) || port <= 0) process.exit(1);
+const rawHome = String(process.env.RCC_HOME || process.env.ROUTECODEX_USER_DIR || process.env.ROUTECODEX_HOME || '').trim();
+const home = rawHome
+  ? path.resolve(rawHome.startsWith('~/') ? path.join(os.homedir(), rawHome.slice(2)) : rawHome)
+  : path.join(os.homedir(), '.rcc');
+const filePath = path.join(home, 'state', 'runtime-lifecycle', 'ports', String(Math.floor(port)), 'stop-intent.json');
+fs.mkdirSync(path.dirname(filePath), { recursive: true });
+fs.writeFileSync(filePath, JSON.stringify({
+  port: Math.floor(port),
+  requestedAtMs: Date.now(),
+  source: 'install-release.runtime-version-adoption',
+  pid: process.pid
+}), 'utf8');
+NODE
+  }
+
+  wait_until_health_unavailable() {
+    local attempt=1
+    local max_attempts=80
+    while [ "$attempt" -le "$max_attempts" ]; do
+      if ! curl -fsS --max-time 1 "$VERIFY_HEALTH_URL" >/dev/null 2>&1; then
+        return 0
+      fi
+      sleep 0.5
+      attempt=$((attempt + 1))
+    done
+    return 1
+  }
+
+  adopt_release_runtime_for_port() {
+    local previous_version="$1"
+    echo "🔁 检测到 live runtime version=${previous_version}，执行 release snapshot 单端口接管: ${VERIFY_HOST}:${VERIFY_PORT}"
+    write_release_adoption_stop_intent
+    curl -fsS --max-time 3 -X POST "${VERIFY_BASE_URL}/shutdown" >/dev/null
+    if ! wait_until_health_unavailable; then
+      fail "旧 runtime 未在 stop-intent + /shutdown 后释放 ${VERIFY_HOST}:${VERIFY_PORT}"
+    fi
+    ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
+    ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
+    RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
+    rcc start --restart --port "$VERIFY_PORT"
+  }
+
   ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
   ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
   RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
@@ -223,9 +284,28 @@ verify_runtime_health() {
   local attempt=1
   local max_attempts=20
   local health_dump="/tmp/routecodex-install-release-health.$$"
+  local wrong_version=""
   while [ "$attempt" -le "$max_attempts" ]; do
     if curl -fsS "$VERIFY_HEALTH_URL" >"$health_dump"; then
-      if node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);if(body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&body.version===expected){process.exit(0)}process.exit(1)" "$health_dump" "$EXPECTED_VERSION"; then
+      if health_matches_expected_version "$health_dump"; then
+        echo "✅ /health 通过且版本匹配: $VERIFY_HEALTH_URL version=${EXPECTED_VERSION}"
+        rm -f "$health_dump"
+        return
+      fi
+      wrong_version="$(health_reports_ready_wrong_version "$health_dump" || true)"
+      if [ -n "$wrong_version" ]; then
+        adopt_release_runtime_for_port "$wrong_version"
+        break
+      fi
+    fi
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+
+  attempt=1
+  while [ "$attempt" -le "$max_attempts" ]; do
+    if curl -fsS "$VERIFY_HEALTH_URL" >"$health_dump"; then
+      if health_matches_expected_version "$health_dump"; then
         echo "✅ /health 通过且版本匹配: $VERIFY_HEALTH_URL version=${EXPECTED_VERSION}"
         rm -f "$health_dump"
         return

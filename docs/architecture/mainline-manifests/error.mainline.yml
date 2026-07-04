@@ -1,5 +1,5 @@
 lifecycle_id: error.mainline
-summary: Provider/runtime/direct failures enter unified ErrorErr chain and only then project to client-visible error.
+summary: Provider/runtime/direct failures enter unified ErrorErr chain; provider availability/cooldown truth stays provider/server-scoped and must not be rewritten into session-storm truth before client projection.
 owner_feature_id: error.pipeline_contract
 owner_module: src/providers/core/utils/provider-error-reporter.ts
 entrypoint:

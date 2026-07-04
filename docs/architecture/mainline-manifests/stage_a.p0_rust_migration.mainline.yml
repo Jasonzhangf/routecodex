@@ -1,0 +1,37 @@
+lifecycle_id: stage_a.p0_rust_migration.mainline
+summary: "Stage A locks P0 Rust migration owner boundaries before implementation: servertool followup orchestration, Anthropic conversion, Responses continuation store, and request/response Chat Process tool governance."
+owner_feature_id: servertool.followup_orchestration
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+entrypoint:
+  node_id: StageAOwnerBoundary
+  wiki_page: docs/goal-prompts/2026-07-03-rust-hub-pipeline-migration.md
+  call_map_chain_id: stage_a.p0_rust_migration.mainline
+node_ids:
+  - AnthropicChatInbound
+  - HubReqChatProcess03Governed
+  - HubReqInbound02Standardized
+  - HubRespChatProcess03Governed
+  - HubRespInbound02Parsed
+  - OpenAiChatCanonical
+  - ResponsesContinuationStore
+  - ServertoolOutcome
+step_ids:
+  - stage-a-p0-01
+  - stage-a-p0-02
+  - stage-a-p0-03
+  - stage-a-p0-04
+  - stage-a-p0-05
+edge_status_counts:
+  anchored: 5
+  partial: 0
+  binding_pending: 0
+  total: 5
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: stage_a.p0_rust_migration.mainline
+  min_function_feature: servertool.followup_orchestration
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency
