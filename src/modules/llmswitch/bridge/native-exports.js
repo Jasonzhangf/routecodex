@@ -1205,3 +1205,221 @@ export function readFollowupClientInjectSourceWithNative(adapterContext) {
     return '';
   }
 }
+
+// === SERVERTOOL CORE BRIDGE WRAPPERS (Phase 4) ===
+// 50 wrappers: inline native-only functions from native-servertool-core-semantics.ts
+
+export function extractTextFromChatLikeWithNative(input) {
+  return invokeRouterHotpathJsonCapability('extractServertoolTextFromChatLikeJson', [input]);
+}
+
+export function inspectStopGatewaySignalWithNative(input) {
+  return invokeRouterHotpathJsonCapability('inspectStopGatewaySignal', [input]);
+}
+
+export function normalizeStopGatewayContextWithNative(input) {
+  return invokeRouterHotpathJsonCapability('normalizeStopGatewayContextJson', [input]);
+}
+
+export function extractStopMessageBlockedReportFromMessagesWithNative(input) {
+  return invokeRouterHotpathJsonCapability('extractStopMessageBlockedReportFromMessagesJson', [input]);
+}
+
+export function normalizeStopMessageCompareContextWithNative(input) {
+  return invokeRouterHotpathJsonCapability('normalizeStopMessageCompareContextJson', [input]);
+}
+
+export function formatStopMessageCompareContextWithNative(input) {
+  return invokeRouterHotpathJsonCapability('formatStopMessageCompareContextJson', [input]);
+}
+
+export function evaluateLoopGuardWithNative(input) {
+  return invokeRouterHotpathJsonCapability('evaluateLoopGuard', [input]);
+}
+
+export function calculateBudgetWithNative(observed, stop_eligible, snapshot, default_config) {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.calculateBudget;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] calculateBudget not available');
+  }
+  const resultJson = fn(
+    observed,
+    stop_eligible,
+    snapshot ? JSON.stringify(snapshot) : undefined,
+    default_config ? JSON.stringify(default_config) : undefined
+  );
+  if (typeof resultJson !== 'string') {
+    throw new Error('[llmswitch-bridge] calculateBudget returned non-string');
+  }
+  return JSON.parse(resultJson);
+}
+
+export function planBudgetStateUpdateWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planBudgetStateUpdateJson', [input]);
+}
+
+export function resolveStopMessageSessionScopeWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveStopMessageSessionScopeJson', [input]);
+}
+
+export function resolveServertoolStickyKeyWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveServertoolStickyKeyJson', [input]);
+}
+
+export function resolveServertoolStateKeyWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveServertoolStateKeyJson', [input]);
+}
+
+export function resolveRuntimeStopMessageStateWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveRuntimeStopMessageStateJson', [input]);
+}
+
+export function readRuntimeStopMessageStageModeWithNative(input) {
+  return invokeRouterHotpathJsonCapability('readRuntimeStopMessageStageModeJson', [input]);
+}
+
+export function normalizeStopMessageStageModeValueWithNative(input) {
+  return invokeRouterHotpathJsonCapability('normalizeStopMessageStageModeValueJson', [input]);
+}
+
+export function hasArmedStopMessageStateWithNative(input) {
+  return invokeRouterHotpathJsonCapability('hasArmedStopMessageStateJson', [input]);
+}
+
+export function planStopMessageRoutingSnapshotWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planStopMessageRoutingSnapshotJson', [input]);
+}
+
+export function planStopMessageRoutingStateApplyWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planStopMessageRoutingStateApplyJson', [input]);
+}
+
+export function planStopMessageRoutingStateClearWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planStopMessageRoutingStateClearJson', [input]);
+}
+
+export function buildClientExecCliProjectionOutputWithNative(input) {
+  return invokeRouterHotpathJsonCapability('buildClientExecCliProjectionOutputJson', [input]);
+}
+
+export function parseServertoolCliProjectionToolArgumentsWithNative(input) {
+  return invokeRouterHotpathJsonCapability('parseServertoolCliProjectionToolArgumentsJson', [input]);
+}
+
+export function normalizeStoplessTriggerHintForMetadataWithNative(input) {
+  return invokeRouterHotpathJsonCapability('normalizeStoplessTriggerHintForMetadataJson', [input]);
+}
+
+export function planStoplessLearnedNoteWriteWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planStoplessLearnedNoteWriteJson', [input]);
+}
+
+export function validateServertoolHookSkeletonPhaseWithNative(input) {
+  return invokeRouterHotpathJsonCapability('validateServertoolHookSkeletonPhaseJson', [input]);
+}
+
+export function planServertoolHookScheduleWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planServertoolHookScheduleJson', [input]);
+}
+
+export function buildClientVisibleProjectionShellWithNative(input) {
+  return invokeRouterHotpathJsonCapability('buildClientVisibleProjectionShellJson', [input]);
+}
+
+export function buildServertoolCliProjectionExecutionContextWithNative(input) {
+  return invokeRouterHotpathJsonCapability('buildServertoolCliProjectionExecutionContextJson', [input]);
+}
+
+export function buildServertoolCliProjectionRuntimeBranchWithNative(input) {
+  return invokeRouterHotpathJsonCapability('buildServertoolCliProjectionRuntimeBranchJson', [input]);
+}
+
+export function validateClientExecCommandResultWithNative(input) {
+  return invokeRouterHotpathJsonCapability('validateClientExecCommandResultJson', [input]);
+}
+
+export function resolveRuntimeStopMessageStateFromMetadataCenterWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveRuntimeStopMessageStateFromMetadataCenterJson', [input]);
+}
+
+export function resolveBdWorkingDirectoryForRecordWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveBdWorkingDirectoryForRecordJson', [input]);
+}
+
+export function resolveStopMessageFollowupProviderKeyWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveStopMessageFollowupProviderKeyJson', [input]);
+}
+
+export function resolveClientConnectionStateWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveClientConnectionStateJson', [input]);
+}
+
+export function hasCompactionFlagWithNative(input) {
+  return invokeRouterHotpathJsonCapability('hasCompactionFlagJson', [input]);
+}
+
+export function resolveEntryEndpointWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveEntryEndpointJson', [input]);
+}
+
+export function resolveDefaultStopMessageSnapshotWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveDefaultStopMessageSnapshotJson', [input]);
+}
+
+export function resolveImplicitGeminiStopMessageSnapshotWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveImplicitGeminiStopMessageSnapshotJson', [input]);
+}
+
+export function readServertoolLoopStateWithNative(input) {
+  return invokeRouterHotpathJsonCapability('readServertoolLoopStateJson', [input]);
+}
+
+export function planServertoolLoopStateWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planServertoolLoopStateJson', [input]);
+}
+
+export function parseServertoolTimeoutMsWithNative(input) {
+  return invokeRouterHotpathJsonCapability('parseServertoolTimeoutMsJson', [input]);
+}
+
+export function planServertoolTimeoutWatcherWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planServertoolTimeoutWatcherJson', [input]);
+}
+
+export function isAdapterClientDisconnectedWithNative(input) {
+  return invokeRouterHotpathJsonCapability('isAdapterClientDisconnectedJson', [input]);
+}
+
+export function planClientDisconnectWatcherWithNative(input) {
+  return invokeRouterHotpathJsonCapability('planClientDisconnectWatcherJson', [input]);
+}
+
+export function createServertoolExecutionLoopStateWithNative(input) {
+  return invokeRouterHotpathJsonCapability('createServertoolExecutionLoopStateJson', [input]);
+}
+
+export function readClientInjectOnlyWithNative(input) {
+  return invokeRouterHotpathJsonCapability('readClientInjectOnlyJson', [input]);
+}
+
+export function normalizeClientInjectTextWithNative(input) {
+  return invokeRouterHotpathJsonCapability('normalizeClientInjectTextJson', [input]);
+}
+
+export function compactFollowupErrorReasonWithNative(input) {
+  return invokeRouterHotpathJsonCapability('compactFollowupErrorReasonJson', [input]);
+}
+
+export function resolveAdapterContextProviderKeyWithNative(input) {
+  return invokeRouterHotpathJsonCapability('resolveAdapterContextProviderKeyJson', [input]);
+}
+
+export function extractCurrentAssistantReasoningStopArgumentsWithNative(input) {
+  return invokeRouterHotpathJsonCapability('extractCurrentAssistantReasoningStopArgumentsJson', [input]);
+}
+
+export function stripStopSchemaControlTextWithNative(input) {
+  return invokeRouterHotpathJsonCapability('stripStopSchemaControlTextJson', [input]);
+}
+
