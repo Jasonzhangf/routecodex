@@ -106,21 +106,27 @@ chains:
       - step_id: sth-req-01
         from_node: HubReqInbound02Standardized
         to_node: ServertoolReqHook01ResultParsed
-        owner_feature_id: binding pending
+        caller_symbol: normalize_shell_like_tool_calls_before_governance
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
+        callee_symbol: normalize_responses_input_function_calls
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
+        owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "next request containing ordinary tool result / CLI stdout"
         semantic_output: "parsed public hook result event, including restoration of shell-executed stop hook results back to model-visible `reasoningStop -> function_call_output`, or no-op when no servertool result exists"
-        status: binding pending
-        binding_pending: true
-        note: "Required when tool result exists."
+        status: anchored
+        note: "Anchored by Rust inbound tool-call normalization converting shell-projected stop hook calls/results back into model-visible `reasoningStop` function-call semantics before request governance."
       - step_id: sth-req-02
         from_node: ServertoolReqHook01ResultParsed
         to_node: ServertoolReqHook02TextRewritten
-        owner_feature_id: binding pending
+        caller_symbol: normalize_responses_input_function_calls
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
+        callee_symbol: build_stop_hook_guidance_text_from_output
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
+        owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "parsed hook result plus schema guidance/feedback"
         semantic_output: "optional model-visible text rewrite or no-op event"
-        status: binding pending
-        binding_pending: true
-        note: "Optional hook; must not replay raw historical tool pairs or leak metadata."
+        status: anchored
+        note: "Anchored by Rust guidance text construction from the parsed stopless CLI result; malformed or non-terminal schema feedback becomes model-visible corrective guidance without replaying raw shell history."
       - step_id: sth-req-03
         from_node: ServertoolReqHook02TextRewritten
         to_node: ServertoolReqHook03ToolInjected

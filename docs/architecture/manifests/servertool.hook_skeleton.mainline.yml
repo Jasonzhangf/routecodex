@@ -84,16 +84,16 @@ edges:
   - step_id: sth-req-01
     from_node: HubReqInbound02Standardized
     to_node: ServertoolReqHook01ResultParsed
-    status: binding pending
-    owner_feature_id: binding pending
-    binding_pending: true
+    status: anchored
+    owner_feature_id: hub.req_chatprocess_governance
+    binding_pending: null
     split_binding_id: null
   - step_id: sth-req-02
     from_node: ServertoolReqHook01ResultParsed
     to_node: ServertoolReqHook02TextRewritten
-    status: binding pending
-    owner_feature_id: binding pending
-    binding_pending: true
+    status: anchored
+    owner_feature_id: hub.req_chatprocess_governance
+    binding_pending: null
     split_binding_id: null
   - step_id: sth-req-03
     from_node: ServertoolReqHook02TextRewritten

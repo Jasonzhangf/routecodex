@@ -179,9 +179,9 @@
           class ServertoolRespHook06ProjectionFinalized anchored;
           class HubRespOutbound04ClientSemantic anchored;
           class ServertoolCli04ClientExecuted anchored;
-          class HubReqInbound02Standardized pending;
-          class ServertoolReqHook01ResultParsed pending;
-          class ServertoolReqHook02TextRewritten pending;
+          class HubReqInbound02Standardized anchored;
+          class ServertoolReqHook01ResultParsed anchored;
+          class ServertoolReqHook02TextRewritten anchored;
           class ServertoolReqHook03ToolInjected anchored;
           class ServertoolReqHook04RequestFinalized anchored;
           class HubReqChatProcess03Governed anchored;</pre>
@@ -197,8 +197,8 @@
         <tr><td>sth-resp-06</td><td><code>ServertoolRespHook05ReenterDispatched -&gt; ServertoolRespHook06ProjectionFinalized</code></td><td>anchored</td><td><code>run_servertool_resp_stopless_hook_skeleton -&gt; build_stopless_auto_cli_projection_from_engine_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-resp-07</td><td><code>ServertoolRespHook06ProjectionFinalized -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>finalize_hub_resp_outbound_04_client_semantic -&gt; build_hub_resp_outbound_04_client_payload_for_protocol</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-cli-01</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolCli04ClientExecuted</code></td><td>anchored</td><td><code>build_stopless_auto_cli_projection_from_engine_json -&gt; build_stopless_auto_cli_projection_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
-        <tr><td>sth-req-01</td><td><code>HubReqInbound02Standardized -&gt; ServertoolReqHook01ResultParsed</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
-        <tr><td>sth-req-02</td><td><code>ServertoolReqHook01ResultParsed -&gt; ServertoolReqHook02TextRewritten</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-req-01</td><td><code>HubReqInbound02Standardized -&gt; ServertoolReqHook01ResultParsed</code></td><td>anchored</td><td><code>normalize_shell_like_tool_calls_before_governance -&gt; normalize_responses_input_function_calls</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>
+        <tr><td>sth-req-02</td><td><code>ServertoolReqHook01ResultParsed -&gt; ServertoolReqHook02TextRewritten</code></td><td>anchored</td><td><code>normalize_responses_input_function_calls -&gt; build_stop_hook_guidance_text_from_output</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>
         <tr><td>sth-req-03</td><td><code>ServertoolReqHook02TextRewritten -&gt; ServertoolReqHook03ToolInjected</code></td><td>anchored</td><td><code>apply_req_process_tool_governance -&gt; inject_reasoning_stop_tool</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>
         <tr><td>sth-req-04</td><td><code>ServertoolReqHook03ToolInjected -&gt; ServertoolReqHook04RequestFinalized</code></td><td>anchored</td><td><code>apply_req_process_tool_governance -&gt; build_processed_request</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>
         <tr><td>sth-req-05</td><td><code>ServertoolReqHook04RequestFinalized -&gt; HubReqChatProcess03Governed</code></td><td>anchored</td><td><code>apply_hub_req_chatprocess_03_tool_governance -&gt; run_hub_req_chatprocess_03_governed_entrypoint</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>

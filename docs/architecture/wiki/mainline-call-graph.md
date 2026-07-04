@@ -59,9 +59,9 @@ flowchart LR
   class ServertoolRespHook06ProjectionFinalized anchored;
   class HubRespOutbound04ClientSemantic anchored;
   class ServertoolCli04ClientExecuted anchored;
-  class HubReqInbound02Standardized pending;
-  class ServertoolReqHook01ResultParsed pending;
-  class ServertoolReqHook02TextRewritten pending;
+  class HubReqInbound02Standardized anchored;
+  class ServertoolReqHook01ResultParsed anchored;
+  class ServertoolReqHook02TextRewritten anchored;
   class ServertoolReqHook03ToolInjected anchored;
   class ServertoolReqHook04RequestFinalized anchored;
   class HubReqChatProcess03Governed anchored;
@@ -77,8 +77,8 @@ flowchart LR
 | sth-resp-06 | `ServertoolRespHook05ReenterDispatched -> ServertoolRespHook06ProjectionFinalized` | anchored | `run_servertool_resp_stopless_hook_skeleton -> build_stopless_auto_cli_projection_from_engine_json` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
 | sth-resp-07 | `ServertoolRespHook06ProjectionFinalized -> HubRespOutbound04ClientSemantic` | anchored | `finalize_hub_resp_outbound_04_client_semantic -> build_hub_resp_outbound_04_client_payload_for_protocol` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
 | sth-cli-01 | `ServertoolRespHook03HookResponseInjected -> ServertoolCli04ClientExecuted` | anchored | `build_stopless_auto_cli_projection_from_engine_json -> build_stopless_auto_cli_projection_json` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
-| sth-req-01 | `HubReqInbound02Standardized -> ServertoolReqHook01ResultParsed` | binding pending | `binding pending` |  | `binding pending` |
-| sth-req-02 | `ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten` | binding pending | `binding pending` |  | `binding pending` |
+| sth-req-01 | `HubReqInbound02Standardized -> ServertoolReqHook01ResultParsed` | anchored | `normalize_shell_like_tool_calls_before_governance -> normalize_responses_input_function_calls` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
+| sth-req-02 | `ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten` | anchored | `normalize_responses_input_function_calls -> build_stop_hook_guidance_text_from_output` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
 | sth-req-03 | `ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected` | anchored | `apply_req_process_tool_governance -> inject_reasoning_stop_tool` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
 | sth-req-04 | `ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized` | anchored | `apply_req_process_tool_governance -> build_processed_request` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
 | sth-req-05 | `ServertoolReqHook04RequestFinalized -> HubReqChatProcess03Governed` | anchored | `apply_hub_req_chatprocess_03_tool_governance -> run_hub_req_chatprocess_03_governed_entrypoint` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |

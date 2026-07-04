@@ -2076,7 +2076,7 @@ mod tests {
             {
               "type": "function_call_output",
               "call_id": "call_stop_cli_stop_1",
-              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；拿不到证据就再试一次；想停的时候直接告诉我一句'做完了'或'卡住了，需要你拍板'。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_terminal_missing_fields\",\"missingFields\":[\"evidence\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"decisionRules\":[\"Only use stopreason=0 when the task is actually finished and there is no remaining next_step to execute.\",\"If there is still a concrete next_step, unfinished gate, pending verification, or more implementation work, use stopreason=2 instead of 0.\"],\"invalidExamples\":[\"Invalid: stopreason=0 with next_step saying continue writing remaining gates/manifests/package wiring.\"]}}"
+              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；拿不到证据就再试一次；想停的时候直接告诉我一句'做完了'或'卡住了，需要你拍板'。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_terminal_missing_fields\",\"missingFields\":[\"evidence\",\"next_step\"]},\"schemaGuidance\":{\"triggerHint\":\"invalid_schema\",\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"decisionRules\":[\"Only use stopreason=0 when the task is actually finished and there is no remaining next_step to execute.\",\"If there is still a concrete next_step, unfinished gate, pending verification, or more implementation work, use stopreason=2 instead of 0.\"],\"invalidExamples\":[\"Invalid: stopreason=0 with next_step saying continue writing remaining gates/manifests/package wiring.\"]}}"
             }
           ]
         });
@@ -2095,7 +2095,7 @@ mod tests {
         assert_eq!(input[2]["role"], "user");
         let text = input[2]["content"][0]["text"].as_str().expect("text");
         assert!(text.contains("继续做下一步"));
-        assert!(text.contains("结尾补齐这些字段"));
+        assert!(text.contains("按条件补齐这些字段"));
         assert!(text.contains("你已经表达 finished/blocked，但还没收齐收尾信息"));
         assert!(text.contains("stopreason"));
         assert!(text.contains("0=finished"));
@@ -2244,7 +2244,7 @@ mod tests {
     }
 
     #[test]
-    fn preserves_user_initiated_stop_hook_history_when_call_id_is_not_auto_injected() {
+    fn rewrites_stop_hook_history_even_when_call_id_is_not_auto_injected() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
           "input": [
@@ -2264,9 +2264,15 @@ mod tests {
 
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let input = payload["input"].as_array().expect("input");
-        assert_eq!(input.len(), 2);
+        assert_eq!(input.len(), 3);
         assert_eq!(input[0]["type"], "function_call");
+        assert_eq!(input[0]["name"], "reasoningStop");
         assert_eq!(input[1]["type"], "function_call_output");
+        let output = input[1]["output"].as_str().expect("output");
+        assert!(!output.contains("stop_message_auto"));
+        assert_eq!(input[2]["role"], "user");
+        let text = input[2]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("继续。"));
     }
 
     #[test]
