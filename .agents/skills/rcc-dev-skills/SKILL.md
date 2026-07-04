@@ -24,6 +24,7 @@ description: RouteCodex 调试与架构路由入口
 
 任何会改实现的任务，先执行且不能跳过：
 
+0. 先用 MemPalace 查项目记忆与旧结论；snippet 只当 locator，必须打开返回源文件再判断。
 1. 定位 feature_id（有时来自问题描述关键词）
 2. 在 `docs/architecture/function-map.yml` 查 `feature_id` 的 owner、allowed / forbidden paths。
 3. 在 `docs/architecture/mainline-call-map.yml` 查 `feature_id`、`caller`、`callee`。
