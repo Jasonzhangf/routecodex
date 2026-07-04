@@ -9,6 +9,15 @@ use crate::hub_resp_outbound_client_semantics_blocks::tool_semantics::*;
 use crate::hub_resp_outbound_sse_stream::resolve_sse_stream_mode;
 use serde_json::{json, Value};
 
+fn parse_single_sse_data_json(frame: &str) -> Value {
+    let data = frame
+        .lines()
+        .find_map(|line| line.strip_prefix("data:"))
+        .map(str::trim)
+        .expect("sse data line");
+    serde_json::from_str(data).expect("sse data json")
+}
+
 #[test]
 fn normalize_openai_chat_reasoning_outbound_maps_structured_reasoning_for_clients() {
     let payload = serde_json::json!({
@@ -1901,7 +1910,10 @@ fn project_responses_sse_frame_for_client_preserves_output_text_delta_spacing() 
     );
     assert_eq!(projected["emit"], true);
     let frame = projected["frame"].as_str().expect("frame");
-    assert!(frame.contains("\"delta\":\" leading space\""));
+    assert_eq!(
+        parse_single_sse_data_json(frame)["delta"],
+        json!(" leading space")
+    );
 
     let projected = project_responses_sse_frame_for_client(
         "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"item_id\":\"msg_spacing_2\",\"delta\":\"The quick \"}\n\n",
@@ -1919,7 +1931,7 @@ fn project_responses_sse_frame_for_client_preserves_output_text_delta_spacing() 
     );
     assert_eq!(projected["emit"], true);
     let frame = projected["frame"].as_str().expect("frame");
-    assert!(frame.contains("\"delta\":\"The quick \""));
+    assert_eq!(parse_single_sse_data_json(frame)["delta"], json!("The quick "));
 }
 
 #[test]

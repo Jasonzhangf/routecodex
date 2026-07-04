@@ -450,17 +450,7 @@ fn is_provider_native_resume_continuation_value(request_semantics: &Value) -> bo
     if continuation_owner == "relay" {
         return false;
     }
-    let resume_from = continuation
-        .get("resumeFrom")
-        .or_else(|| continuation.get("resume_from"))
-        .and_then(Value::as_object);
-    if resume_from
-        .and_then(|row| {
-            read_string(row.get("previousResponseId"))
-                .or_else(|| read_string(row.get("previous_response_id")))
-        })
-        .is_some()
-        || read_string(continuation.get("previousResponseId")).is_some()
+    if read_string(continuation.get("previousResponseId")).is_some()
         || read_string(continuation.get("previous_response_id")).is_some()
     {
         return true;
@@ -946,9 +936,7 @@ mod request_semantics_tests {
         let semantics = json!({
             "continuation": {
                 "continuationOwner": "direct",
-                "resumeFrom": {
-                    "previousResponseId": "resp_1"
-                }
+                "previousResponseId": "resp_1"
             }
         });
         assert!(is_provider_native_resume_continuation_value(&semantics));
@@ -971,9 +959,7 @@ mod request_semantics_tests {
         let semantics = json!({
             "continuation": {
                 "continuationOwner": "relay",
-                "resumeFrom": {
-                    "previousResponseId": "resp_relay_1"
-                }
+                "previousResponseId": "resp_relay_1"
             }
         });
         assert!(!is_provider_native_resume_continuation_value(&semantics));

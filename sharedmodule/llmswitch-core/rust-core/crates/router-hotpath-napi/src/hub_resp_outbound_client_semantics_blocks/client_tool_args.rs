@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
+use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::normalize_reasoning_summary_for_codex_display;
 use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::strip_tool_markup_for_display_text;
 use crate::shared_tool_mapping::build_flattened_namespace_child_alias;
 
@@ -781,6 +782,8 @@ fn sanitize_client_visible_text_field(
     };
     let cleaned = strip_tool_markup_for_display_text(raw.as_str());
     if cleaned == raw {
+        Value::String(raw)
+    } else if !raw.trim().is_empty() && cleaned == raw.trim() {
         Value::String(raw)
     } else {
         Value::String(cleaned)
@@ -1606,7 +1609,33 @@ fn project_responses_sse_client_event_payload(
     metadata: &Value,
 ) -> Value {
     let projected = project_responses_sse_client_payload_deep(data, tools_raw);
-    restore_client_visible_response_payload(&projected, metadata)
+    let restored = restore_client_visible_response_payload(&projected, metadata);
+    sanitize_reasoning_sse_payload(&restored)
+}
+
+fn sanitize_reasoning_sse_payload(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(sanitize_reasoning_sse_payload)
+                .collect(),
+        ),
+        Value::Object(record) => {
+            let mut out = Map::new();
+            for (key, child) in record {
+                out.insert(key.clone(), sanitize_reasoning_sse_payload(child));
+            }
+            if out.get("type").and_then(Value::as_str) == Some("reasoning") {
+                out.remove("status");
+                if let Some(summary) = out.get_mut("summary") {
+                    normalize_reasoning_summary_for_codex_display(summary);
+                }
+            }
+            Value::Object(out)
+        }
+        _ => value.clone(),
+    }
 }
 
 fn mark_response_function_call_outputs_completed(response: &mut Map<String, Value>) {

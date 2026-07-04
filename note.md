@@ -1,3 +1,15 @@
+# 2026-07-05: router-hotpath Rust lib green after response projection fixes
+
+- Slice: Hub response/outbound Rust verification cleanup under full Hub Pipeline rustification goal.
+- Owner lock: `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs` and `responses_payload.rs` remain Rust owners for `/v1/responses` client/SSE projection; TS remains out of this semantic path.
+- Fixes: Responses reasoning/message dedup now reads the client-visible reasoning `summary` instead of forbidden `content`; SSE reasoning item projection strips `<rcc_stop_schema>` and removes reasoning `status`; output text delta sanitizer preserves leading/trailing visible whitespace when only boundary trim occurred.
+- Contract update: ordinary `/v1/responses` tool calls now project `required_action.submit_tool_outputs` without legacy `servertoolRuntimeAction(tool_call_dispatch)`; reasoningStop terminal outputs complete without client-visible internal `reasoningStop` leakage when no session/runtime action is legal.
+- Evidence: focused Rust tests PASS for `responses_reasoning_stop_tool_call`, `responses_tool_call_projects_required_action_without_legacy_runtime_action`, `build_responses_payload_deduplicates_reasoning_and_message_when_text_matches`, `project_responses_sse_frame_for_client_strips_stop_schema_from_reasoning_added_event`, and `project_responses_sse_frame_for_client_preserves_output_text_delta_spacing`.
+- Full Rust evidence: `cargo test -p router-hotpath-napi --lib -- --nocapture` PASS `2147 passed; 0 failed; 1 ignored`.
+- Gate evidence: `verify:servertool-rust-only`, `verify:responses-history-protocol-contract`, `verify:function-map-compile-gate`, `verify:architecture-mainline-binding-pending-gate`, `verify:llmswitch-rustification-audit`, `verify:architecture-mainline-call-map`, `verify:architecture-mainline-manifest-sync`, `verify:architecture-mainline-mermaid-sync`, `verify:architecture-wiki-sync`, `verify:architecture-wiki-html-sync`, `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`, `npm run build:base`, and `git diff --check` all PASS.
+- Mainline status evidence: `servertool.hook_skeleton.mainline` is `anchored=13 partial=0 pending=0`; `responses.continuation.mainline` is `anchored=7 partial=0 pending=0`. Remaining global partials are non-Hub-adjacent: `error.mainline` and `vr.route_availability`.
+- Dirty-worktree boundary: `package.json`, `package-lock.json`, and `src/build-info.ts` were auto-bumped by build to `0.90.3569`; they are not release-adopted yet and must not be staged unless live `/health.version` is proven equal.
+
 # 2026-07-05: Responses continuation rct-02 request-context restore planner
 
 - Slice: `responses.continuation.mainline` `rct-02` (`ChatProcReqContinuation02OwnerResolved -> ChatProcReqContinuation03CanonicalRestored`).

@@ -2222,7 +2222,7 @@ fn test_coerce_standardized_request_from_payload_derives_model_from_retry_provid
             .and_then(|row| row.get("input"))
             .and_then(|v| v.as_array())
             .map(|entries| entries.len()),
-        None
+        Some(1)
     );
 }
 

@@ -328,6 +328,32 @@ fn collect_output_text_parts(parts: &[Value]) -> Option<String> {
     }
 }
 
+fn normalize_text_for_reasoning_message_dedup(text: &str) -> String {
+    text.trim()
+        .trim_start_matches("**Thinking**")
+        .trim()
+        .to_string()
+}
+
+fn collect_reasoning_item_summary_text(reasoning_row: &Map<String, Value>) -> String {
+    reasoning_row
+        .get("summary")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|entry| {
+                    entry
+                        .as_object()
+                        .and_then(|row| row.get("text"))
+                        .and_then(Value::as_str)
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|texts| !texts.is_empty())
+        .map(|texts| normalize_text_for_reasoning_message_dedup(texts.join("").as_str()))
+        .unwrap_or_default()
+}
+
 fn collect_executed_tool_call_ids(response: &Map<String, Value>) -> HashSet<String> {
     let mut ids = HashSet::<String>::new();
     let Some(outputs) = response.get("tool_outputs").and_then(|v| v.as_array()) else {
@@ -834,23 +860,7 @@ pub(crate) fn build_responses_payload_from_chat_core(
             if reasoning_row.get("type").and_then(|v| v.as_str()) == Some("reasoning")
                 && message_row.get("type").and_then(|v| v.as_str()) == Some("message")
             {
-                let reasoning_text = reasoning_row
-                    .get("content")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|e| e.get("text").and_then(|t| t.as_str()))
-                            .collect::<Vec<_>>()
-                    })
-                    .filter(|t| !t.is_empty())
-                    .map(|t| t.join(""))
-                    .map(|t| {
-                        t.trim()
-                            .trim_start_matches("**Thinking**")
-                            .trim()
-                            .to_string()
-                    })
-                    .unwrap_or_default();
+                let reasoning_text = collect_reasoning_item_summary_text(reasoning_row);
                 let message_text = message_row
                     .get("content")
                     .and_then(|v| v.as_array())

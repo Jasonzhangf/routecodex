@@ -2584,7 +2584,7 @@ fn response_tool_call_with_runtime_callbacks_returns_servertool_executor_effect_
 }
 
 #[test]
-fn responses_tool_call_servertool_effect_uses_resp_chatprocess_payload_not_client_projection() {
+fn responses_tool_call_projects_required_action_without_legacy_runtime_action() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
         .execute(HubPipelineRequest {
@@ -2622,21 +2622,9 @@ fn responses_tool_call_servertool_effect_uses_resp_chatprocess_payload_not_clien
         })
         .unwrap();
 
-    let effect = output
-        .effect_plan
-        .effects
-        .iter()
-        .find(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-                && effect.payload["reason"] == json!("tool_call_dispatch")
-        })
-        .unwrap();
-    assert!(effect.payload["payload"].get("choices").is_some());
-    assert!(effect.payload["payload"].get("required_action").is_none());
-    assert_eq!(
-        effect.payload["payload"]["choices"][0]["finish_reason"],
-        json!("tool_calls")
-    );
+    assert!(output.effect_plan.effects.iter().all(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() != json!("servertoolRuntimeAction")
+    }));
     assert_eq!(
         output.payload.unwrap()["required_action"]["type"],
         json!("submit_tool_outputs")
@@ -2693,11 +2681,7 @@ fn responses_reasoning_stop_tool_call_emits_only_stop_runtime_action() {
             serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
         })
         .collect();
-    assert_eq!(servertool_effects.len(), 1);
-    assert_eq!(
-        servertool_effects[0].payload["reason"],
-        json!("stop_eligible_followup")
-    );
+    assert_eq!(servertool_effects.len(), 0);
 }
 
 #[test]
@@ -2753,10 +2737,14 @@ fn responses_reasoning_stop_tool_call_survives_requested_client_tool_filter() {
             serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
         })
         .collect();
-    assert_eq!(servertool_effects.len(), 1);
-    assert_eq!(
-        servertool_effects[0].payload["reason"],
-        json!("stop_eligible_followup")
+    assert_eq!(servertool_effects.len(), 0);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("completed"));
+    assert!(payload.get("required_action").is_none());
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(
+        !serialized.contains("reasoningStop"),
+        "client-visible terminal response must not leak internal reasoningStop: {serialized}"
     );
 }
 
@@ -2941,9 +2929,5 @@ fn responses_reasoning_stop_tool_call_emits_stop_runtime_action_without_runtime_
             serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
         })
         .collect();
-    assert_eq!(servertool_effects.len(), 1);
-    assert_eq!(
-        servertool_effects[0].payload["reason"],
-        json!("stop_eligible_followup")
-    );
+    assert_eq!(servertool_effects.len(), 0);
 }
