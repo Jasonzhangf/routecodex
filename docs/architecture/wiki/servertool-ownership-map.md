@@ -100,7 +100,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts`
 - `tests/servertool/engine-selection-block.spec.ts`
@@ -202,7 +202,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`
 - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
@@ -289,7 +289,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts`
 - `tests/servertool/servertool-auto-hook-trace.spec.ts`
 
@@ -328,7 +328,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
@@ -370,7 +370,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
@@ -409,7 +409,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 - `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
@@ -449,7 +449,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 
 Forbidden paths:
@@ -488,7 +488,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
@@ -530,9 +530,9 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
 
 Forbidden paths:
@@ -569,7 +569,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `tests/servertool/execution-shell.backend-failfast.spec.ts`
 
 Forbidden paths:
@@ -607,7 +607,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
 - `tests/servertool/execution-shell.backend-failfast.spec.ts`
 
@@ -645,7 +645,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
 - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
 
@@ -683,7 +683,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
 
 Forbidden paths:
@@ -724,7 +724,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `tests/servertool/execution-shell.backend-failfast.spec.ts`
 
 Forbidden paths:
@@ -768,7 +768,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts`
 - `tests/servertool/registry-orchestration-shell.spec.ts`
 - `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
@@ -809,7 +809,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
 
@@ -849,7 +849,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
@@ -891,7 +891,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
 
@@ -1094,7 +1094,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
+- `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 - `sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts`

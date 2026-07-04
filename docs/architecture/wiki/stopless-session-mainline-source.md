@@ -102,7 +102,7 @@ flowchart LR
 ## Owner / Allowed / Forbidden Path Summary
 
 - Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src`.
-- Allowed paths include `sharedmodule/llmswitch-core/src/servertool/{cli-projection,engine}.ts`, `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`, and `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`.
+- Allowed paths include `sharedmodule/llmswitch-core/src/servertool/{cli-projection,engine}.ts`, `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`, and `src/modules/llmswitch/bridge/native-exports.ts`.
 - Forbidden paths: `src/providers`, `src/server/runtime/http-server/executor`, and unrelated `sharedmodule/llmswitch-core/src/servertool/handlers` surfaces that do not own stopless CLI semantics.
 
 ## Required Gates

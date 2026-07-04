@@ -1219,7 +1219,7 @@ export function readFollowupClientInjectSourceWithNative(adapterContext) {
 }
 
 // === SERVERTOOL CORE BRIDGE WRAPPERS (Phase 4) ===
-// 50 wrappers: inline native-only functions from native-servertool-core-semantics.ts
+// 50 wrappers: inline native-only functions through router-hotpath JSON capabilities.
 
 export function extractTextFromChatLikeWithNative(input) {
   return invokeRouterHotpathJsonCapability('extractServertoolTextFromChatLikeJson', [input]);

@@ -27,7 +27,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts
     contract:
       - tests/servertool/progress-log-block.failfast.spec.ts
@@ -74,7 +74,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
       - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
     contract:
@@ -154,7 +154,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
     contract:
       - tests/servertool/servertool-auto-hook-trace.spec.ts
@@ -173,7 +173,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
@@ -192,7 +192,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
@@ -211,7 +211,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
@@ -230,7 +230,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
@@ -249,7 +249,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
@@ -269,9 +269,9 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
     contract:
       - tests/servertool/execution-dispatch-outcome-shell.spec.ts
     integration:
@@ -289,7 +289,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
     contract:
       - tests/servertool/execution-shell.backend-failfast.spec.ts
     integration:
@@ -308,7 +308,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
     contract:
       - tests/servertool/execution-shell.backend-failfast.spec.ts
@@ -327,7 +327,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
     contract:
       - tests/servertool/execution-dispatch-outcome-shell.spec.ts
@@ -346,7 +346,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
     contract:
       - tests/servertool/execution-dispatch-outcome-shell.spec.ts
     integration:
@@ -364,7 +364,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
     contract:
       - tests/servertool/execution-shell.backend-failfast.spec.ts
     integration:
@@ -382,7 +382,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts
       - tests/servertool/registry-orchestration-shell.spec.ts
     contract:
@@ -403,7 +403,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts
     contract:
       - tests/servertool/response-stage-orchestration-shell.spec.ts
@@ -423,7 +423,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts
       - sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts
     contract:
@@ -445,7 +445,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts

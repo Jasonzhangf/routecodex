@@ -112,11 +112,9 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
       const candidates = [
         'dist/modules/llmswitch/bridge/native-exports.js',
         'sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js',
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-servertool-core-semantics.js',
         'sharedmodule/llmswitch-core/dist/servertool/metadata-center-carrier.js',
         'sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline.js',
         'node_modules/rcc-llmswitch-core/dist/native/servertool-wrapper.js',
-        'node_modules/rcc-llmswitch-core/dist/native/router-hotpath/native-servertool-core-semantics.js',
         'node_modules/rcc-llmswitch-core/dist/servertool/metadata-center-carrier.js',
         'node_modules/rcc-llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline.js',
       ];
@@ -130,8 +128,6 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
         'planServertoolOutcomeWithNative',
         'readServertoolPrimaryAutoHookIdsWithNative',
         'runServertoolResponseStageWithNative',
-      ];
-      const activeNativeCoreExports = [
         'planEngineSelectionStartWithNative',
         'resolveEngineSelectionAfterRunWithNative',
         'resolveServertoolExecutionLoopInitialDecisionWithNative',
@@ -143,17 +139,6 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
       ]) {
         const mod = await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
         for (const exportName of activeServertoolWrapperExports) {
-          if (typeof mod[exportName] !== 'function') {
-            throw new Error(relativePath + ' missing function export ' + exportName);
-          }
-        }
-      }
-      for (const relativePath of [
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-servertool-core-semantics.js',
-        'node_modules/rcc-llmswitch-core/dist/native/router-hotpath/native-servertool-core-semantics.js',
-      ]) {
-        const mod = await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
-        for (const exportName of activeNativeCoreExports) {
           if (typeof mod[exportName] !== 'function') {
             throw new Error(relativePath + ' missing function export ' + exportName);
           }
