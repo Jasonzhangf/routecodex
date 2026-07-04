@@ -567,9 +567,15 @@ function invokeRouterHotpathJsonCapability(capability: string, args: unknown[]):
     throw new Error(`[llmswitch-bridge] ${String(capability)} not available`);
   }
   const encodedArgs = args.map((arg) => stringifyNativeJsonArg(String(capability), arg));
-  const raw = (fn as (...args: string[]) => string)(...encodedArgs);
+  const raw = (fn as (...args: string[]) => unknown)(...encodedArgs);
+  if (raw instanceof Error) {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} native error: ${raw.message || 'unknown error'}`);
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { message?: unknown }).message === 'string') {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} native error: ${String((raw as { message: unknown }).message)}`);
+  }
   if (typeof raw !== 'string' || raw.length === 0) {
-    throw new Error(`[llmswitch-bridge] ${String(capability)} returned empty result`);
+    throw new Error(`[llmswitch-bridge] ${String(capability)} returned non-string or empty result`);
   }
   try {
     return JSON.parse(raw) as unknown;
@@ -1466,7 +1472,7 @@ export function planServertoolAutoHookQueuesWithNative(input: unknown): unknown 
 }
 
 export function planServertoolAutoHookQueueItemsWithNative<T>(input: unknown): unknown {
-  return invokeRouterHotpathJsonCapability('planServertoolAutoHookQueuesJson', [input]);
+  return invokeRouterHotpathJsonCapability('planServertoolAutoHookQueueItemsJson', [input]);
 }
 
 export function runServertoolOrchestrationMutationWithNative(input: unknown): unknown {
@@ -1911,4 +1917,3 @@ export function extractCurrentAssistantReasoningStopArgumentsWithNative(input: u
 export function stripStopSchemaControlTextWithNative(input: unknown): unknown {
   return invokeRouterHotpathJsonCapability('stripStopSchemaControlTextJson', [input]);
 }
-

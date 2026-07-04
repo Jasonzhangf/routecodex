@@ -729,6 +729,9 @@ function checkServertoolCliProjectionMap() {
   const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const rustOutcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
   const nativeServertoolWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`);
+  const packageServertoolWrapperTypes = readRequired(`${ROOT}/sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts`);
+  const bridgeNativeExports = readRequired(`${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`);
+  const bridgeNativeExportsJs = readRequired(`${ROOT}/src/modules/llmswitch/bridge/native-exports.js`);
   const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
@@ -757,6 +760,30 @@ function checkServertoolCliProjectionMap() {
     orchestration,
     'build_servertool_cli_projection_01_from_hub_resp_chatprocess_03'
   );
+  if (/\bany\b/.test(packageServertoolWrapperTypes)) {
+    fail(
+      'servertool-wrapper-types-no-any',
+      'sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts must keep typed declarations; `any` would bypass the Phase 3 wrapper contract'
+    );
+  }
+  if (!bridgeNativeExports.includes("raw instanceof Error") || !bridgeNativeExportsJs.includes("raw instanceof Error")) {
+    fail(
+      'servertool-wrapper-native-error-message',
+      'src/modules/llmswitch/bridge/native-exports.{ts,js} must preserve native Error object messages instead of collapsing them into non-string result errors'
+    );
+  }
+  const queueItemsWrapper = bridgeNativeExports.match(
+    /export function planServertoolAutoHookQueueItemsWithNative[\s\S]*?\n}/
+  )?.[0] ?? '';
+  const queueItemsWrapperJs = bridgeNativeExportsJs.match(
+    /export function planServertoolAutoHookQueueItemsWithNative[\s\S]*?\n}/
+  )?.[0] ?? '';
+  if (!queueItemsWrapper.includes("planServertoolAutoHookQueueItemsJson") || !queueItemsWrapperJs.includes("planServertoolAutoHookQueueItemsJson")) {
+    fail(
+      'servertool-wrapper-queue-items-binding',
+      'planServertoolAutoHookQueueItemsWithNative must call planServertoolAutoHookQueueItemsJson, not the queues planner'
+    );
+  }
   assertContains(
     'servertool-fixture-rust-dispatch-owner',
     CHAT_SERVERTOOL_ORCHESTRATION,

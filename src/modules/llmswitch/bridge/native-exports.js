@@ -300,8 +300,14 @@ function invokeRouterHotpathJsonCapability(capability, args) {
     }
     const encodedArgs = args.map((arg) => stringifyNativeJsonArg(String(capability), arg));
     const raw = fn(...encodedArgs);
+    if (raw instanceof Error) {
+        throw new Error(`[llmswitch-bridge] ${String(capability)} native error: ${raw.message || 'unknown error'}`);
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof raw.message === 'string') {
+        throw new Error(`[llmswitch-bridge] ${String(capability)} native error: ${String(raw.message)}`);
+    }
     if (typeof raw !== 'string' || raw.length === 0) {
-        throw new Error(`[llmswitch-bridge] ${String(capability)} returned empty result`);
+        throw new Error(`[llmswitch-bridge] ${String(capability)} returned non-string or empty result`);
     }
     try {
         return JSON.parse(raw);
@@ -1422,4 +1428,3 @@ export function extractCurrentAssistantReasoningStopArgumentsWithNative(input) {
 export function stripStopSchemaControlTextWithNative(input) {
   return invokeRouterHotpathJsonCapability('stripStopSchemaControlTextJson', [input]);
 }
-

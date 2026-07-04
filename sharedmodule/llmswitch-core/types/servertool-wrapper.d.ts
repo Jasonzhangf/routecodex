@@ -1,7 +1,31 @@
 // Compile-time shim for the package self-reference used by source files.
-// Runtime packages resolve this specifier through package.json exports to dist/native/servertool-wrapper.js.
+// Keep this aligned with scripts/generate-llmswitch-servertool-wrapper.mjs.
 
 import type { JsonObject } from '../src/conversion/hub/types/json.js';
+
+export type NativeChatWebSearchPlan = {
+  shouldInject: boolean;
+  selectedEngineIndexes: number[];
+};
+
+export type NativePayloadContractSignal = {
+  reason: string;
+  marker: string;
+};
+
+export type ServertoolResponseStageToolCallPayload = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+
+export type ServertoolResponseStageOutput = {
+  providerResponseShape: string;
+  isCanonicalChatCompletionPayload: boolean;
+  payloadContractSignal?: NativePayloadContractSignal | null;
+  normalizedPayload: JsonObject | null;
+  toolCalls: ServertoolResponseStageToolCallPayload[];
+};
 
 export type ServertoolResponseStageGatePayload = {
   shouldBypass: boolean;
@@ -15,69 +39,161 @@ export type ServertoolResponseStageGatePayload = {
 };
 
 export type NativeServertoolResponseStageGate = ServertoolResponseStageGatePayload;
-export type ServertoolAutoHookQueueItems<T> = { queueOrder?: Array<{ queue: string; entries: T[] }> } & Record<string, unknown>;
+export type NativeServertoolResponseStage = ServertoolResponseStageOutput;
+export type ServertoolRegistryLookupActionPlan =
+  | { action: 'return_builtin'; canonicalName: string }
+  | { action: 'return_none' };
+export type ServertoolBuiltinHandlerNamesPlan = { names: string[] };
+export type ServertoolBuiltinHandlerEntryPlan =
+  | { action: 'return_none' }
+  | { action: 'return_entry'; entry: Record<string, unknown> };
+export type ServertoolBuiltinHandlerEntriesPlan = { entries: Record<string, unknown>[] };
+export type ServertoolRegistrationSpec = Record<string, unknown>;
+export type ServertoolToolSpec = Record<string, unknown>;
+export type ServertoolSkeletonDocument = Record<string, unknown>;
+export type ServertoolSkeletonDerivedConfig = Record<string, unknown>;
+export type ServertoolDispatchCandidate = {
+  id: string;
+  name: string;
+  arguments: string;
+  executionMode: string;
+  stripAfterExecute: boolean;
+};
+export type ServertoolDispatchNoop = {
+  id: string;
+  name: string;
+  arguments: string;
+  executionMode?: string;
+  stripAfterExecute?: boolean;
+};
 export type ServertoolDispatchPlan = {
-  executableToolCalls: Array<{ id: string; name: string; arguments: string }>;
-  noopToolCalls: Array<{ id: string; name: string; arguments: string }>;
+  executableToolCalls: ServertoolDispatchCandidate[];
+  noopToolCalls: ServertoolDispatchNoop[];
+  skippedToolCalls: Array<{ id: string; name: string; reason: string }>;
+};
+export type ServertoolDispatchPlanInput = {
+  toolCalls: ServertoolResponseStageToolCallPayload[];
+  disableToolCallHandlers: boolean;
+  includeToolCallHandlerNames?: string[] | null;
+  excludeToolCallHandlerNames?: string[] | null;
+  registeredToolCallHandlers: Array<{
+    name: string;
+    trigger: string;
+    executionMode: string;
+    stripAfterExecute: boolean;
+  }>;
+  runtimeMetadata?: Record<string, unknown>;
+};
+export type ServertoolOutcomePlan = {
+  outcomeMode: string;
+  remainingToolCallIds: string[];
+  flowId?: string | null;
+  requiresPendingInjection: boolean;
+  primaryExecutionMode?: string | null;
+};
+export type ServertoolOutcomePlanInput = {
+  toolCalls: ServertoolResponseStageToolCallPayload[];
+  executedToolCalls: ServertoolDispatchCandidate[];
+  executedFlowIds: string[];
+  lastExecutionFlowId?: string | null;
+};
+export type ServertoolHandlerContractPlan = { action: string };
+export type ServertoolAutoHookPlanEntry<T = Record<string, unknown>> = T & {
+  id: string;
+  phase: string;
+  priority: number;
+  order: number;
+  sourceIndex?: number;
+  queue: 'A_optional' | 'B_mandatory';
+  queueIndex: number;
+  queueTotal: number;
+};
+export type ServertoolAutoHookQueues = {
+  optionalQueue: ServertoolAutoHookPlanEntry[];
+  mandatoryQueue: ServertoolAutoHookPlanEntry[];
+  queueOrder: Array<{
+    queue: 'A_optional' | 'B_mandatory';
+    entries: ServertoolAutoHookPlanEntry[];
+  }>;
+};
+export type ServertoolAutoHookQueueItems<T> = {
+  queueOrder: Array<{
+    queue: 'A_optional' | 'B_mandatory';
+    entries: T[];
+  }>;
+};
+export type ServertoolFollowupRuntimePlan = Record<string, unknown>;
+export type ServertoolNoopOutcome = {
   chatResponse: JsonObject;
+  flowId: string;
+  toolContent: Record<string, unknown>;
+};
+export type ServertoolProgressEvent = {
+  flowId: string;
+  tool: string;
+  stage: 'entry' | 'trigger' | 'match' | 'hook' | 'compare' | string;
+  result: string;
+  message: string;
+  step: number;
 };
 
-export const buildServertoolHandlerErrorToolOutputPayloadWithNative: any;
-export const buildServertoolMatchSkippedProgressEventWithNative: any;
-export const buildServertoolAutoHookTraceProgressEventWithNative: any;
-export const buildServertoolStopEntryProgressEventWithNative: any;
-export const buildServertoolStopCompareProgressEventWithNative: any;
-export const buildServertoolToolOutputPayloadWithNative: any;
-export const collectServertoolAdditionalClientToolCallsWithNative: any;
-export const containsSyntheticRouteCodexControlTextWithNative: any;
-export const detectEmptyAssistantPayloadContractSignalWithNative: any;
-export const detectProviderResponseShapeWithNative: any;
-export const extractCapturedChatSeedWithNative: any;
-export const extractAssistantFollowupMessageWithNative: any;
-export const isServertoolClientExecCliProjectionToolCallWithNative: any;
-export const normalizeFollowupParametersWithNative: any;
-export const normalizeServertoolProgressFlowIdWithNative: any;
-export const normalizeServertoolProgressResultWithNative: any;
-export const normalizeServertoolProgressTokenWithNative: any;
-export const normalizeServertoolRegistrationSpecWithNative: any;
-export const planChatWebSearchOperationsWithNative: any;
-export const planServertoolAutoHookQueueItemsWithNative: any;
-export const planServertoolAutoHookQueuesWithNative: any;
-export const planServertoolBuiltinAutoHandlerEntriesWithNative: any;
-export const planServertoolBuiltinHandlerEntryWithNative: any;
-export const planServertoolBuiltinHandlerNamesWithNative: any;
-export const planServertoolBuiltinHandlerRecordEntriesWithNative: any;
-export const planServertoolRegistryLookupFromSkeletonWithNative: any;
-export const planServertoolResponseStageGateWithNative: any;
-export const planServertoolFollowupRuntimeWithNative: any;
-export const planServertoolHandlerContractWithNative: any;
-export const planServertoolNoopOutcomeWithNative: any;
-export const buildServertoolDispatchPlanInputWithNative: any;
-export const buildServertoolOutcomePlanInputWithNative: any;
-export const planServertoolOutcomeWithNative: any;
-export const planServertoolSkeletonDerivedConfigWithNative: any;
-export const planServertoolToolCallDispatchWithNative: any;
-export const readServertoolPrimaryAutoHookIdsWithNative: any;
-export const resolveServertoolBuiltinHandlerEntryWithNative: any;
-export const resolveServertoolProgressStageWithNative: any;
-export const resolveServertoolProgressToolNameWithNative: any;
-export const resolveServertoolRegisteredNameWithNative: any;
-export const resolveServertoolRegistryHandlerWithNative: any;
-export const resolveServertoolToolSpecWithNative: any;
-export const runServertoolOrchestrationMutationWithNative: any;
-export const runServertoolResponseStageWithNative: any;
-export const shouldUseServertoolGoldProgressHighlightWithNative: any;
-export const visionBuildAnalysisPayloadWithNative: any;
-export const visionBuildPinnedMetadataWithNative: any;
-export const visionExtractOriginalUserPromptWithNative: any;
-export const webSearchBuildSystemPromptWithNative: any;
-export const webSearchBuildToolMessagesWithNative: any;
-export const webSearchCollectHitsWithNative: any;
-export const webSearchExtractAssistantMessageWithNative: any;
-export const webSearchFormatHitsSummaryWithNative: any;
-export const webSearchIsGeminiEngineWithNative: any;
-export const webSearchIsGlmEngineWithNative: any;
-export const webSearchIsQwenEngineWithNative: any;
-export const webSearchLimitHitsWithNative: any;
-export const webSearchNormalizeResultCountWithNative: any;
-export const webSearchSanitizeBackendErrorWithNative: any;
+export declare function detectEmptyAssistantPayloadContractSignalWithNative(payload: unknown): NativePayloadContractSignal | null;
+export declare function detectProviderResponseShapeWithNative(payload: unknown): 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat' | 'unknown';
+export declare function containsSyntheticRouteCodexControlTextWithNative(payload: unknown): boolean;
+export declare function planChatWebSearchOperationsWithNative(request: unknown, runtimeMetadata?: Record<string, unknown>): NativeChatWebSearchPlan;
+export declare function runServertoolResponseStageWithNative(payload: unknown, requestId: string): NativeServertoolResponseStage;
+export declare function planServertoolResponseStageGateWithNative(input: unknown): ServertoolResponseStageGatePayload;
+export declare function getDefaultServertoolSkeletonDocumentWithNative(): ServertoolSkeletonDocument;
+export declare function planServertoolSkeletonDerivedConfigWithNative(input?: unknown): ServertoolSkeletonDerivedConfig;
+export declare function readServertoolPrimaryAutoHookIdsWithNative(input?: unknown): string[];
+export declare function buildServertoolDispatchPlanInputWithNative(input: unknown): ServertoolDispatchPlanInput;
+export declare function buildServertoolOutcomePlanInputWithNative(input: unknown): ServertoolOutcomePlanInput;
+export declare function planServertoolHandlerContractWithNative(input: unknown): ServertoolHandlerContractPlan;
+export declare function normalizeServertoolRegistrationSpecWithNative(input: unknown): ServertoolRegistrationSpec | null;
+export declare function resolveServertoolToolSpecWithNative(input: unknown): ServertoolToolSpec | null;
+export declare function planServertoolBuiltinHandlerEntryWithNative(input: unknown): ServertoolBuiltinHandlerEntryPlan;
+export declare function resolveServertoolBuiltinHandlerEntryWithNative(input: unknown): Record<string, unknown> | null;
+export declare function planServertoolBuiltinHandlerNamesWithNative(input?: unknown): ServertoolBuiltinHandlerNamesPlan;
+export declare function planServertoolBuiltinAutoHandlerEntriesWithNative(input?: unknown): ServertoolBuiltinHandlerEntriesPlan;
+export declare function planServertoolBuiltinHandlerRecordEntriesWithNative(input?: unknown): ServertoolBuiltinHandlerEntriesPlan;
+export declare function planServertoolRegistryLookupFromSkeletonWithNative(input: unknown): ServertoolRegistryLookupActionPlan;
+export declare function resolveServertoolRegistryHandlerWithNative(input: unknown): Record<string, unknown> | null;
+export declare function resolveServertoolRegisteredNameWithNative(input: unknown): boolean;
+export declare function resolveServertoolProgressToolNameWithNative(input: unknown): string;
+export declare function shouldUseServertoolGoldProgressHighlightWithNative(input: unknown): boolean;
+export declare function resolveServertoolProgressStageWithNative(input: unknown): string;
+export declare function normalizeServertoolProgressResultWithNative(input: unknown): string;
+export declare function normalizeServertoolProgressTokenWithNative(input: unknown): string;
+export declare function normalizeServertoolProgressFlowIdWithNative(input: unknown): string;
+export declare function buildServertoolMatchSkippedProgressEventWithNative(input: unknown): ServertoolProgressEvent;
+export declare function buildServertoolAutoHookTraceProgressEventWithNative(input: unknown): ServertoolProgressEvent;
+export declare function buildServertoolStopEntryProgressEventWithNative(input: unknown): ServertoolProgressEvent;
+export declare function buildServertoolStopCompareProgressEventWithNative(input: unknown): ServertoolProgressEvent;
+export declare function planServertoolToolCallDispatchWithNative(input: unknown): ServertoolDispatchPlan;
+export declare function planServertoolOutcomeWithNative(input: unknown): ServertoolOutcomePlan;
+export declare function planServertoolNoopOutcomeWithNative(input: unknown): ServertoolNoopOutcome;
+export declare function planServertoolAutoHookQueuesWithNative(input: unknown): ServertoolAutoHookQueues;
+export declare function planServertoolAutoHookQueueItemsWithNative<T>(input: unknown): ServertoolAutoHookQueueItems<T>;
+export declare function runServertoolOrchestrationMutationWithNative(input: Record<string, unknown>): unknown;
+export declare function planServertoolFollowupRuntimeWithNative(flowId: string): ServertoolFollowupRuntimePlan;
+export declare function extractCapturedChatSeedWithNative(captured: unknown): Record<string, unknown> | null;
+export declare function extractAssistantFollowupMessageWithNative(finalChatResponse: unknown): Record<string, unknown> | null;
+export declare function normalizeFollowupParametersWithNative(parameters: unknown): Record<string, unknown> | undefined;
+export declare function buildServertoolToolOutputPayloadWithNative(input: unknown): JsonObject;
+export declare function buildServertoolHandlerErrorToolOutputPayloadWithNative(input: unknown): JsonObject;
+export declare function collectServertoolAdditionalClientToolCallsWithNative(input: unknown): unknown[];
+export declare function isServertoolClientExecCliProjectionToolCallWithNative(input: unknown): boolean;
+export declare function webSearchIsGeminiEngineWithNative(providerKey: string): boolean;
+export declare function webSearchIsQwenEngineWithNative(providerKey: string): boolean;
+export declare function webSearchIsGlmEngineWithNative(providerKey: string): boolean;
+export declare function webSearchNormalizeResultCountWithNative(valueJson: string): number;
+export declare function webSearchBuildSystemPromptWithNative(targetCount: number): string;
+export declare function webSearchSanitizeBackendErrorWithNative(message: string): string;
+export declare function webSearchCollectHitsWithNative(chatResponseJson: string, targetCount: number): string;
+export declare function webSearchFormatHitsSummaryWithNative(hitsJson: string): string;
+export declare function webSearchLimitHitsWithNative(hitsJson: string): string;
+export declare function webSearchExtractAssistantMessageWithNative(chatResponseJson: string): string;
+export declare function webSearchBuildToolMessagesWithNative(chatResponseJson: string): string;
+export declare function visionBuildAnalysisPayloadWithNative(sourceJson: string): string;
+export declare function visionBuildPinnedMetadataWithNative(adapterContextJson: string, payloadJson: string): string;
+export declare function visionExtractOriginalUserPromptWithNative(messagesJson: string): string;
