@@ -1248,6 +1248,36 @@ export function resolveServertoolEnginePostflightPayloadWithNative(
   }
 }
 
+export function validateServertoolHookSkeletonPhaseWithNative(
+  input: ServertoolHookSpec
+): ServertoolHookProjection {
+  const capability = 'validateServertoolHookSkeletonPhaseJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native unavailable`);
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
+  }
+  return parseServertoolHookProjectionPayload(resultJson, capability);
+}
+
+export function planServertoolHookScheduleWithNative(
+  input: ServertoolHookSchedulerInput
+): ServertoolHookEffectPlan {
+  const capability = 'planServertoolHookScheduleJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native unavailable`);
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
+  }
+  return parseServertoolHookEffectPlanPayload(resultJson, capability);
+}
+
 export interface ServertoolHookSchedulerInput {
   direction: ServertoolHookDirection;
   reqPhase?: ServertoolReqHookPhase;
@@ -1856,6 +1886,62 @@ export function resolveAutoHookCallerFinalizationDecisionWithNative(input: {
     default:
       throw new Error('[servertool] invalid auto-hook caller finalization action');
   }
+}
+
+export function planAutoHookCallerResultProjectionWithNative(input: {
+  resultPresent: boolean;
+  metadataWritePlanPresent?: boolean;
+  chatResponse?: JsonObject;
+  execution?: NativeServerToolExecution;
+  metadataWritePlan?: JsonObject;
+}): AutoHookCallerResultProjectionPlan {
+  const capability = 'planAutoHookCallerResultProjectionJson';
+  const parsed = requireNativeJsonObject(capability, input);
+  const result = parsed.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw new Error(`${capability} native returned invalid result`);
+  }
+  return {
+    result: result as AutoHookCallerResultProjectionPlan['result']
+  };
+}
+
+export function buildClientExecCliProjectionOutputWithNative(
+  input: ClientExecCliProjectionInput
+): ClientExecCliProjectionOutput {
+  const capability = 'buildClientExecCliProjectionOutputJson';
+  const parsed = callNativeJsonCapabilityWithErrorContract(
+    capability,
+    input,
+    (message) => `buildClientExecCliProjectionOutputJson native error: ${message}`
+  );
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid projection output`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.toolName !== 'string' ||
+    typeof record.flowId !== 'string' ||
+    typeof record.execCommand !== 'string'
+  ) {
+    throw new Error(`${capability} native returned malformed projection output`);
+  }
+  return record as unknown as ClientExecCliProjectionOutput;
+}
+
+export function buildClientVisibleProjectionShellWithNative(
+  input: ClientVisibleProjectionShellInput
+): Record<string, unknown> {
+  const capability = 'buildClientVisibleProjectionShellJson';
+  const parsed = callNativeJsonCapabilityWithErrorContract(
+    capability,
+    input,
+    (message) => `buildClientVisibleProjectionShellJson native error: ${message}`
+  );
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid projection shell`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function planServertoolExecutionBranchWithNative(input: {
@@ -2660,6 +2746,43 @@ export function materializeNativeToolCallExecutionOutcomeWithNative(args: {
     default:
       throw new Error('[servertool] invalid execution outcome materialization action');
   }
+}
+
+export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
+  outcomeMode: string;
+  hasLastExecution: boolean;
+  executedToolCallsLen: number;
+  lastExecution?: unknown;
+  flowId?: string;
+}): ServertoolExecutionOutcomeRuntimeActionPlan {
+  const capability = 'planServertoolExecutionOutcomeRuntimeActionJson';
+  const parsed = requireNativeJsonObject(capability, input);
+  if (
+    parsed.action !== 'invalid_mixed_client_tools_outcome' &&
+    parsed.action !== 'return_execution_contract' &&
+    parsed.action !== 'missing_servertool_execution_contract'
+  ) {
+    throw new Error(`${capability} native returned invalid action`);
+  }
+  if (typeof parsed.executionFlowId !== 'string' || !parsed.executionFlowId.trim()) {
+    throw new Error(`${capability} native returned invalid executionFlowId`);
+  }
+  if (
+    parsed.reuseLastExecutionEnvelope !== undefined &&
+    typeof parsed.reuseLastExecutionEnvelope !== 'boolean'
+  ) {
+    throw new Error(`${capability} native returned invalid reuseLastExecutionEnvelope`);
+  }
+  return {
+    action: parsed.action,
+    executionFlowId: parsed.executionFlowId,
+    ...(typeof parsed.reuseLastExecutionEnvelope === 'boolean'
+      ? { reuseLastExecutionEnvelope: parsed.reuseLastExecutionEnvelope }
+      : {}),
+    ...(parsed.selectedExecutionEnvelope !== undefined
+      ? { selectedExecutionEnvelope: parsed.selectedExecutionEnvelope }
+      : {})
+  };
 }
 
 export function planServertoolExecutionLoopRuntimeActionWithNative(input: {
@@ -3771,6 +3894,56 @@ export function planServertoolEntryContextWithNative(input: {
   };
 }
 
+export function readClientInjectOnlyWithNative(input: unknown): boolean {
+  const capability = 'readClientInjectOnlyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native unavailable`);
+  }
+  const raw = fn(JSON.stringify(input));
+  if (raw === 'true') {
+    return true;
+  }
+  if (raw === 'false') {
+    return false;
+  }
+  throw new Error(`${capability} native returned invalid boolean payload`);
+}
+
+export function normalizeClientInjectTextWithNative(input: {
+  value: unknown;
+}): string {
+  const capability = 'normalizeClientInjectTextJson';
+  const parsed = callNativeJsonCapability(capability, input);
+  if (typeof parsed !== 'string' || !parsed.trim()) {
+    throw new Error(`${capability} native returned invalid normalized text`);
+  }
+  return parsed;
+}
+
+export function compactFollowupErrorReasonWithNative(input: unknown): string {
+  const capability = 'compactFollowupErrorReasonJson';
+  const parsed = callNativeJsonCapability(capability, input);
+  if (typeof parsed !== 'string') {
+    throw new Error(`${capability} native returned invalid compacted reason`);
+  }
+  return parsed;
+}
+
+export function resolveAdapterContextProviderKeyWithNative(input: {
+  adapterContext: unknown;
+}): string | null {
+  const capability = 'resolveAdapterContextProviderKeyJson';
+  const parsed = callNativeJsonCapability(capability, input);
+  if (parsed == null) {
+    return null;
+  }
+  if (typeof parsed !== 'string') {
+    throw new Error(`${capability} native returned invalid provider key`);
+  }
+  return parsed;
+}
+
 export function planServertoolEnginePrepassActionWithNative(input: {
   hasPrepassResult: boolean;
   prepassResult?: ServerSideToolEngineResult | null;
@@ -3996,6 +4169,26 @@ export function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: {
       execution: source.execution as Record<string, unknown>,
     };
   });
+}
+
+export function planServertoolRegistryLookupActionWithNative(input: {
+  name: string;
+  builtinEntryPresent: boolean;
+}): ServertoolRegistryLookupActionPlan {
+  const capability = 'planServertoolRegistryLookupActionJson';
+  const parsed = requireNativeJsonObject(capability, input);
+  if (parsed.action !== 'return_builtin' && parsed.action !== 'return_none') {
+    throw new Error(`${capability} native returned invalid action`);
+  }
+  if (parsed.canonicalName !== undefined && typeof parsed.canonicalName !== 'string') {
+    throw new Error(`${capability} native returned invalid canonicalName`);
+  }
+  return {
+    action: parsed.action,
+    ...(typeof parsed.canonicalName === 'string' && parsed.canonicalName.trim()
+      ? { canonicalName: parsed.canonicalName.trim() }
+      : {})
+  };
 }
 
 export type ServertoolRegistryProjectionRecordPlan = {
@@ -4387,6 +4580,19 @@ export function planServertoolTimeoutErrorWithNative(input: {
   );
 }
 
+export function planServertoolStateLoadFailedErrorWithNative(input: {
+  requestId: string;
+  stickyKey: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  error: string;
+}): ServertoolErrorPlan {
+  return parseServertoolErrorPlan(
+    callServertoolErrorPlanNative('planServertoolStateLoadFailedErrorJson', input),
+    'planServertoolStateLoadFailedErrorJson'
+  );
+}
+
 export function planServertoolRequiredResponseHookEmptyErrorWithNative(input: {
   requestId: string;
   responseHookName: string;
@@ -4483,6 +4689,36 @@ export function appendServertoolExecutedRecordWithNative(input: {
     throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
   }
   return parseServertoolExecutionLoopState(resultJson, capability);
+}
+
+export function hasStopMessageAutoCliResultInRequestWithNative(input: unknown): boolean {
+  const capability = 'hasStopMessageAutoCliResultInRequestJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native unavailable`);
+  }
+  const raw = fn(JSON.stringify(input));
+  if (raw === 'true') {
+    return true;
+  }
+  if (raw === 'false') {
+    return false;
+  }
+  throw new Error(`${capability} native returned invalid boolean payload`);
+}
+
+export function extractServertoolCliResultRouteHintFromRequestWithNative(
+  input: unknown
+): string | null {
+  const capability = 'extractServertoolCliResultRouteHintFromRequestJson';
+  const parsed = callNativeJsonCapability(capability, input);
+  if (parsed == null) {
+    return null;
+  }
+  if (typeof parsed !== 'string' || !parsed.trim()) {
+    throw new Error(`${capability} native returned invalid routeHint`);
+  }
+  return parsed;
 }
 
 function callServertoolErrorPlanNative(capability: string, input: unknown): string {
