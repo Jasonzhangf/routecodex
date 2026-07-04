@@ -85,7 +85,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
   })();
 
   const failedRuntimeKeys = new Set<string>();
-  const aliasScopedProviderKeyToRuntimeKey = new Map<string, string>();
   for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
     const providerKey = typeof providerKeyRaw === 'string' ? providerKeyRaw.trim() : '';
     if (!providerKey) {
@@ -140,14 +139,6 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
 
         const handle = await server.createProviderHandle(runtimeKey, patchedRuntime);
         server.providerHandles.set(runtimeKey, handle);
-        const normalizedRuntimeKey = runtimeKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
-        const denormalizedRuntimeKey = runtimeKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
-        if (normalizedRuntimeKey !== runtimeKey && !server.providerHandles.has(normalizedRuntimeKey)) {
-          server.providerHandles.set(normalizedRuntimeKey, handle);
-        }
-        if (denormalizedRuntimeKey !== runtimeKey && !server.providerHandles.has(denormalizedRuntimeKey)) {
-          server.providerHandles.set(denormalizedRuntimeKey, handle);
-        }
         server.providerRuntimeInitErrors.delete(runtimeKey);
       } catch (error) {
         const credentialMissing = isCredentialMissingInitError(error);
@@ -198,48 +189,8 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
       }
     }
 
-    const normalizedRuntimeKey = typeof runtimeKey === 'string'
-      ? runtimeKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1')
-      : runtimeKey;
-    const denormalizedRuntimeKey = typeof runtimeKey === 'string'
-      ? runtimeKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1')
-      : runtimeKey;
-    const resolvedRuntimeKey =
-      server.providerHandles.has(runtimeKey)
-        ? runtimeKey
-        : (normalizedRuntimeKey && server.providerHandles.has(normalizedRuntimeKey)
-          ? normalizedRuntimeKey
-          : (denormalizedRuntimeKey && server.providerHandles.has(denormalizedRuntimeKey)
-            ? denormalizedRuntimeKey
-            : undefined));
-
-    if (resolvedRuntimeKey) {
-      server.providerKeyToRuntimeKey.set(providerKey, resolvedRuntimeKey);
-      const normalizedProviderKey = providerKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
-      if (normalizedProviderKey !== providerKey) {
-        server.providerKeyToRuntimeKey.set(normalizedProviderKey, resolvedRuntimeKey);
-      }
-      const denormalizedProviderKey = providerKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
-      if (denormalizedProviderKey !== providerKey) {
-        server.providerKeyToRuntimeKey.set(denormalizedProviderKey, resolvedRuntimeKey);
-      }
-      const providerKeyParts = providerKey.split('.');
-      if (providerKeyParts.length >= 3) {
-        const aliasScopedKey = `${providerKeyParts[0]}.${providerKeyParts[1]}`;
-        aliasScopedProviderKeyToRuntimeKey.set(aliasScopedKey, resolvedRuntimeKey);
-        if (!server.providerKeyToRuntimeKey.has(aliasScopedKey)) {
-          server.providerKeyToRuntimeKey.set(aliasScopedKey, resolvedRuntimeKey);
-        }
-      }
-    }
-  }
-
-  for (const [aliasScopedKey, runtimeKey] of aliasScopedProviderKeyToRuntimeKey.entries()) {
-    if (!server.providerKeyToRuntimeKey.has(aliasScopedKey)) {
-      server.providerKeyToRuntimeKey.set(aliasScopedKey, runtimeKey);
-    }
-    if (!server.providerHandles.has(aliasScopedKey) && server.providerHandles.has(runtimeKey)) {
-      server.providerHandles.set(aliasScopedKey, server.providerHandles.get(runtimeKey));
+    if (server.providerHandles.has(runtimeKey)) {
+      server.providerKeyToRuntimeKey.set(providerKey, runtimeKey);
     }
   }
 }

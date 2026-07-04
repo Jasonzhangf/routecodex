@@ -465,58 +465,17 @@ export class RouteCodexHttpServer {
     this.requestExecutor = createRequestExecutor({
       runtimeManager: {
         resolveRuntimeKey: (providerKey?: string, metadata?: Record<string, unknown>): string | undefined => {
-          const tryVariants = (candidate: string | undefined): string | undefined => {
-            if (!candidate) {
-              return undefined;
-            }
-            const variants = [
-              candidate,
-              candidate.replace(/\.key(\d+)(?=\.|$)/gi, '.$1'),
-              candidate.replace(/\.(\d+)(?=\.|$)/g, '.key$1')
-            ].filter((value, index, arr) => typeof value === 'string' && value.trim() && arr.indexOf(value) === index) as string[];
-            for (const variant of variants) {
-              if (!this.isProviderVisibleInMetadataScope(variant, metadata)) {
-                continue;
-              }
-              const mapped = this.providerKeyToRuntimeKey.get(variant);
-              if (mapped && this.providerHandles.has(mapped) && this.isProviderVisibleInMetadataScope(mapped, metadata)) {
-                return mapped;
-              }
-              if (mapped) {
-                const mappedVariants = [
-                  mapped,
-                  mapped.replace(/\.key(\d+)(?=\.|$)/gi, '.$1'),
-                  mapped.replace(/\.(\d+)(?=\.|$)/g, '.key$1')
-                ].filter((value, index, arr) => typeof value === 'string' && value.trim() && arr.indexOf(value) === index) as string[];
-                for (const mappedVariant of mappedVariants) {
-                  if (this.providerHandles.has(mappedVariant) && this.isProviderVisibleInMetadataScope(mappedVariant, metadata)) {
-                    return mappedVariant;
-                  }
-                }
-              }
-              if (this.providerHandles.has(variant) && this.isProviderVisibleInMetadataScope(variant, metadata)) {
-                return variant;
-              }
-            }
+          const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+          if (!key || !this.isProviderVisibleInMetadataScope(key, metadata)) {
             return undefined;
-          };
-
-          const direct = tryVariants(providerKey);
-          if (direct) {
-            return direct;
           }
-
-          if (providerKey) {
-            const parts = providerKey.split('.');
-            if (parts.length >= 3) {
-              const aliasScopedKey = `${parts[0]}.${parts[1]}`;
-              const aliasHit = tryVariants(aliasScopedKey);
-              if (aliasHit) {
-                return aliasHit;
-              }
-            }
+          const mapped = this.providerKeyToRuntimeKey.get(key);
+          if (mapped && this.providerHandles.has(mapped) && this.isProviderVisibleInMetadataScope(mapped, metadata)) {
+            return mapped;
           }
-
+          if (this.providerHandles.has(key) && this.isProviderVisibleInMetadataScope(key, metadata)) {
+            return key;
+          }
           return undefined;
         },
         getHandleByRuntimeKey: (runtimeKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined => {
@@ -529,41 +488,6 @@ export class RouteCodexHttpServer {
           const direct = this.providerHandles.get(runtimeKey);
           if (direct) {
             return direct;
-          }
-          const normalizedRuntimeKey = runtimeKey.replace(/\.key(\d+)(?=\.|$)/gi, '.$1');
-          if (normalizedRuntimeKey !== runtimeKey) {
-            const normalizedDirect = this.isProviderVisibleInMetadataScope(normalizedRuntimeKey, metadata)
-              ? this.providerHandles.get(normalizedRuntimeKey)
-              : undefined;
-            if (normalizedDirect) {
-              return normalizedDirect;
-            }
-          }
-          const denormalizedRuntimeKey = runtimeKey.replace(/\.(\d+)(?=\.|$)/g, '.key$1');
-          if (denormalizedRuntimeKey !== runtimeKey) {
-            const denormalizedDirect = this.isProviderVisibleInMetadataScope(denormalizedRuntimeKey, metadata)
-              ? this.providerHandles.get(denormalizedRuntimeKey)
-              : undefined;
-            if (denormalizedDirect) {
-              return denormalizedDirect;
-            }
-          }
-          const runtimeKeyParts = runtimeKey.split('.');
-          if (runtimeKeyParts.length === 2) {
-            const aliasScopedPrefix = `${runtimeKeyParts[0]}.${runtimeKeyParts[1]}.`;
-            for (const [candidateKey, handle] of this.providerHandles.entries()) {
-              if (candidateKey.startsWith(aliasScopedPrefix) && this.isProviderVisibleInMetadataScope(candidateKey, metadata)) {
-                return handle;
-              }
-            }
-            const normalizedAliasScopedPrefix = aliasScopedPrefix.replace(/\.key(\d+)\./i, '.$1.');
-            if (normalizedAliasScopedPrefix !== aliasScopedPrefix) {
-              for (const [candidateKey, handle] of this.providerHandles.entries()) {
-                if (candidateKey.startsWith(normalizedAliasScopedPrefix) && this.isProviderVisibleInMetadataScope(candidateKey, metadata)) {
-                  return handle;
-                }
-              }
-            }
           }
           return undefined;
         }
@@ -1120,53 +1044,6 @@ export class RouteCodexHttpServer {
     }
     if (this.providerHandles.has(normalizedBinding) && this.isProviderVisibleInMetadataScope(normalizedBinding, metadata)) {
       return normalizedBinding;
-    }
-    const scopedPrefix = `${normalizedBinding}.`;
-    for (const runtimeKey of this.providerHandles.keys()) {
-      if ((runtimeKey === normalizedBinding || runtimeKey.startsWith(scopedPrefix)) && this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
-        return runtimeKey;
-      }
-    }
-    if (normalizedBinding.includes('.')) {
-      const lastDot = normalizedBinding.lastIndexOf('.');
-      const modelSuffix = `.${normalizedBinding.slice(lastDot + 1)}`;
-      for (const runtimeKey of this.providerHandles.keys()) {
-        if (runtimeKey.endsWith(modelSuffix) && runtimeKey.startsWith(normalizedBinding.slice(0, lastDot)) && this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
-          return runtimeKey;
-        }
-      }
-      const parentBinding = normalizedBinding.slice(0, lastDot);
-      if (parentBinding && parentBinding !== normalizedBinding) {
-        const parentResolved = this.resolveRuntimeKeyForProviderBinding(parentBinding, metadata);
-        if (parentResolved) {
-          return parentResolved;
-        }
-      }
-    }
-    const segments = normalizedBinding.split('.').map((part) => part.trim()).filter(Boolean);
-    if (segments.length >= 3) {
-      const providerId = segments[0];
-      const alias = segments[1];
-      const normalizedModel = segments[segments.length - 1].replace(/[-_]/g, '').toLowerCase();
-      for (const runtimeKey of this.providerHandles.keys()) {
-        const runtimeSegments = runtimeKey.split('.').map((part) => part.trim()).filter(Boolean);
-        if (runtimeSegments.length < 2 || runtimeSegments[0] !== providerId) {
-          continue;
-        }
-        if (!runtimeSegments.includes(alias)) {
-          continue;
-        }
-        const runtimeTail = runtimeSegments[runtimeSegments.length - 1].replace(/[-_]/g, '').toLowerCase();
-        if (runtimeTail === normalizedModel && this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
-          return runtimeKey;
-        }
-      }
-      for (const runtimeKey of this.providerHandles.keys()) {
-        const runtimeSegments = runtimeKey.split('.').map((part) => part.trim()).filter(Boolean);
-        if (runtimeSegments[0] === providerId && runtimeSegments.includes(alias) && this.isProviderVisibleInMetadataScope(runtimeKey, metadata)) {
-          return runtimeKey;
-        }
-      }
     }
     return undefined;
   }
