@@ -688,68 +688,6 @@ function requireNativeJsonObject(capability: string, input: unknown): Record<str
   return parsed as Record<string, unknown>;
 }
 
-export function buildClientExecCliProjectionOutputWithNative(
-  input: ClientExecCliProjectionInput
-): ClientExecCliProjectionOutput {
-  return callNativeJsonCapabilityWithErrorContract(
-    'buildClientExecCliProjectionOutputJson',
-    input,
-    (message) => `buildClientExecCliProjectionOutputJson native error: ${message}`
-  ) as ClientExecCliProjectionOutput;
-}
-
-export function buildClientVisibleProjectionShellWithNative(
-  input: ClientVisibleProjectionShellInput
-): Record<string, unknown> {
-  return callNativeJsonCapabilityWithErrorContract(
-    'buildClientVisibleProjectionShellJson',
-    input,
-    (message) => `buildClientVisibleProjectionShellJson native error: ${message}`
-  ) as Record<string, unknown>;
-}
-
-export function readClientInjectOnlyWithNative(input: unknown): boolean {
-  const parsed = callNativeJsonCapability('readClientInjectOnlyJson', input);
-  if (typeof parsed !== 'boolean') {
-    throw new Error('readClientInjectOnlyJson native returned non-boolean');
-  }
-  return parsed;
-}
-
-export function normalizeClientInjectTextWithNative(input: unknown): string {
-  const parsed = callNativeJsonCapability('normalizeClientInjectTextJson', input);
-  if (typeof parsed !== 'string') {
-    throw new Error('normalizeClientInjectTextJson native returned non-string');
-  }
-  return parsed;
-}
-
-export function compactFollowupErrorReasonWithNative(input: unknown): string | null {
-  const parsed = callNativeJsonCapability('compactFollowupErrorReasonJson', input);
-  if (parsed !== null && typeof parsed !== 'string') {
-    throw new Error('compactFollowupErrorReasonJson native returned invalid reason');
-  }
-  return parsed as string | null;
-}
-
-export function resolveAdapterContextProviderKeyWithNative(input: unknown): string | null {
-  const parsed = callNativeJsonCapability('resolveAdapterContextProviderKeyJson', input);
-  if (parsed !== null && typeof parsed !== 'string') {
-    throw new Error('resolveAdapterContextProviderKeyJson native returned invalid provider key');
-  }
-  return parsed as string | null;
-}
-
-export function validateServertoolHookSkeletonPhaseWithNative(
-  input: unknown
-): ServertoolHookSkeletonPhaseValidationPlan {
-  return requireNativeJsonObject('validateServertoolHookSkeletonPhaseJson', input);
-}
-
-export function planServertoolHookScheduleWithNative(input: unknown): ServertoolHookSchedulePlan {
-  return requireNativeJsonObject('planServertoolHookScheduleJson', input);
-}
-
 export interface ServertoolExecutionLoopEffectBasePlan {
   toolCall: NativeServertoolExecutedRecord['toolCall'];
   execution: NativeServertoolExecutionSummary;
@@ -1472,119 +1410,6 @@ function parseRuntimeStopMessageStateSnapshotPayload(
   };
 }
 
-export function planStoplessDecisionContextSignalsWithNative(input: {
-  adapterContext: unknown;
-  runtimeMetadata?: unknown;
-}): StoplessDecisionContextSignals {
-  const capability = 'planStoplessDecisionContextSignalsJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStoplessDecisionContextSignalsJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(encodeServertoolExecutionLoopEffectInput(input)));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStoplessDecisionContextSignalsJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${capability} native returned invalid payload`);
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    typeof record.portStopMessageDisabled !== 'boolean' ||
-    typeof record.hasResponsesSubmitToolOutputsResume !== 'boolean' ||
-    typeof record.planModeActive !== 'boolean'
-  ) {
-    throw new Error(`${capability} native returned invalid signal fields`);
-  }
-  return {
-    portStopMessageDisabled: record.portStopMessageDisabled,
-    hasResponsesSubmitToolOutputsResume: record.hasResponsesSubmitToolOutputsResume,
-    planModeActive: record.planModeActive,
-  };
-}
-
-export function planStopMessageDefaultConfigWithNative(input: {
-  tombstoneCleared?: boolean;
-  configEnabled?: unknown;
-  configText?: unknown;
-  configMaxRepeats?: unknown;
-  envText?: unknown;
-  envMaxRepeats?: unknown;
-}): StopMessageDefaultConfigPlan {
-  const capability = 'planStopMessageDefaultConfigJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStopMessageDefaultConfigJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessageDefaultConfigJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${capability} native returned invalid payload`);
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    typeof record.enabled !== 'boolean' ||
-    typeof record.text !== 'string' ||
-    typeof record.maxRepeats !== 'number' ||
-    !Number.isInteger(record.maxRepeats) ||
-    record.maxRepeats <= 0
-  ) {
-    throw new Error(`${capability} native returned invalid default config fields`);
-  }
-  return {
-    enabled: record.enabled,
-    text: record.text,
-    maxRepeats: record.maxRepeats,
-  };
-}
-
-export function planStopMessagePersistSnapshotWithNative(input: {
-  schemaGate: unknown;
-  decision: unknown;
-  stateUpdate?: unknown;
-  defaultText?: string;
-  schemaUsedBeforeCount?: unknown;
-  currentProviderKey?: string;
-}): StopMessagePersistPlan {
-  const capability = 'planStopMessagePersistSnapshotJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStopMessagePersistSnapshotJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessagePersistSnapshotJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${capability} native returned invalid payload`);
-  }
-  const record = parsed as Record<string, unknown>;
-  const snapshot = record.snapshot as Record<string, unknown> | undefined;
-  if (
-    typeof record.compareMaxRepeats !== 'number' ||
-    typeof record.compareRemaining !== 'number' ||
-    typeof record.nextMaxRepeats !== 'number' ||
-    typeof record.nextUsed !== 'number' ||
-    !snapshot ||
-    typeof snapshot !== 'object' ||
-    Array.isArray(snapshot) ||
-    typeof snapshot.text !== 'string' ||
-    typeof snapshot.maxRepeats !== 'number' ||
-    typeof snapshot.used !== 'number' ||
-    typeof snapshot.source !== 'string' ||
-    typeof snapshot.stageMode !== 'string' ||
-    snapshot.aiMode !== 'off'
-  ) {
-    throw new Error(`${capability} native returned invalid persist plan fields`);
-  }
-  return record as unknown as StopMessagePersistPlan;
-}
-
 function readStopMessageStageModeField(value: unknown, source: string): 'on' | 'off' | 'auto' | undefined {
   if (value === undefined || value === null) {
     return undefined;
@@ -1650,30 +1475,6 @@ function parseStopMessageRoutingStateApplyPayload(
   };
 }
 
-export function planStopMessagePersistedLookupWithNative(input: {
-  record: Record<string, unknown>;
-  runtimeMetadata?: Record<string, unknown>;
-  options?: {
-    includeSnapshotLookup?: boolean;
-    includeTombstoneLookup?: boolean;
-  };
-}): StopMessagePersistedLookupPlanOutput {
-  const capability = 'planStopMessagePersistedLookupJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStopMessagePersistedLookupJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessagePersistedLookupJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = parseStopMessagePersistedLookupPlanPayload(resultJson);
-  if (!parsed) {
-    throw new Error('planStopMessagePersistedLookupJson native returned invalid payload');
-  }
-  return parsed;
-}
-
 export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string, unknown>>(
   input: Record<string, unknown>,
 ): TPlan {
@@ -1690,66 +1491,6 @@ export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string
     throw new Error(`planStopMessageAutoHandlerJson native returned non-string: ${typeof raw}`);
   }
   return JSON.parse(raw) as TPlan;
-}
-
-export function planStoplessCliProjectionContextWithNative(input: {
-  metadataWritePlan?: StoplessCliProjectionMetadataWritePlan | null;
-  stoplessControl?: unknown;
-  chatStopText?: string;
-  adapterStopText?: string;
-  sessionId?: string;
-  requestId?: string;
-}): StoplessCliProjectionContextPlan {
-  const capability = 'planStoplessCliProjectionContextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStoplessCliProjectionContextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStoplessCliProjectionContextJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planStoplessCliProjectionContextJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.reasoningText !== 'string' || !record.reasoningText.trim()) {
-    throw new Error('planStoplessCliProjectionContextJson native returned invalid reasoningText');
-  }
-  if (typeof record.repeatCount !== 'number' || !Number.isFinite(record.repeatCount) || record.repeatCount < 1) {
-    throw new Error('planStoplessCliProjectionContextJson native returned invalid repeatCount');
-  }
-  if (typeof record.maxRepeats !== 'number' || !Number.isFinite(record.maxRepeats) || record.maxRepeats < 1) {
-    throw new Error('planStoplessCliProjectionContextJson native returned invalid maxRepeats');
-  }
-  if (record.publicTriggerHint !== undefined && typeof record.publicTriggerHint !== 'string') {
-    throw new Error('planStoplessCliProjectionContextJson native returned invalid publicTriggerHint');
-  }
-  if (
-    record.schemaFeedback !== undefined &&
-    (!record.schemaFeedback || typeof record.schemaFeedback !== 'object' || Array.isArray(record.schemaFeedback))
-  ) {
-    throw new Error('planStoplessCliProjectionContextJson native returned invalid schemaFeedback');
-  }
-  return {
-    reasoningText: record.reasoningText,
-    repeatCount: record.repeatCount,
-    maxRepeats: record.maxRepeats,
-    ...(typeof record.publicTriggerHint === 'string' && record.publicTriggerHint.trim()
-      ? { publicTriggerHint: record.publicTriggerHint }
-      : {}),
-    ...(record.schemaFeedback && typeof record.schemaFeedback === 'object' && !Array.isArray(record.schemaFeedback)
-      ? { schemaFeedback: record.schemaFeedback as JsonObject }
-      : {})
-    ,
-    ...(typeof record.sessionId === 'string' && record.sessionId.trim()
-      ? { sessionId: record.sessionId.trim() }
-      : {}),
-    ...(typeof record.requestId === 'string' && record.requestId.trim()
-      ? { requestId: record.requestId.trim() }
-      : {})
-  };
 }
 
 function parseServertoolHookEffectPlanPayload(
@@ -1815,24 +1556,6 @@ function parseServertoolHookEvent(raw: unknown, capability: string): ServertoolH
     throw new Error(`${capability} native returned invalid hook event fields`);
   }
   return record as unknown as ServertoolHookEvent;
-}
-
-export function resolveStopMessageFollowupToolContentMaxCharsWithNative(input: {
-  envValue?: unknown;
-  providerKey?: string;
-  model?: string;
-}): number | undefined {
-  const capability = 'resolveStopMessageFollowupToolContentMaxCharsJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveStopMessageFollowupToolContentMaxCharsJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveStopMessageFollowupToolContentMaxCharsJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : undefined;
 }
 
 export function planAutoHookRuntimeAttemptWithNative(input: {
@@ -2133,67 +1856,6 @@ export function resolveAutoHookCallerFinalizationDecisionWithNative(input: {
     default:
       throw new Error('[servertool] invalid auto-hook caller finalization action');
   }
-}
-
-export function planAutoHookCallerResultProjectionWithNative(input: {
-  resultPresent: boolean;
-  metadataWritePlanPresent: boolean;
-  chatResponse?: JsonObject;
-  execution?: NativeServerToolExecution;
-  metadataWritePlan?: JsonObject;
-}): AutoHookCallerResultProjectionPlan {
-  const capability = 'planAutoHookCallerResultProjectionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planAutoHookCallerResultProjectionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson instanceof Error) {
-    throw resultJson;
-  }
-  if (
-    resultJson
-    && typeof resultJson === 'object'
-    && 'message' in resultJson
-    && typeof (resultJson as { message?: unknown }).message === 'string'
-  ) {
-    throw new Error((resultJson as { message: string }).message);
-  }
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planAutoHookCallerResultProjectionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planAutoHookCallerResultProjectionJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (record.mode !== 'tool_flow') {
-    throw new Error('planAutoHookCallerResultProjectionJson native returned invalid mode');
-  }
-  if (typeof record.includeMetadataWritePlan !== 'boolean' || !record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
-    throw new Error('planAutoHookCallerResultProjectionJson native returned malformed plan');
-  }
-  const result = record.result as Record<string, unknown>;
-  if (result.mode !== 'tool_flow' || !result.finalChatResponse || typeof result.finalChatResponse !== 'object' || Array.isArray(result.finalChatResponse)) {
-    throw new Error('planAutoHookCallerResultProjectionJson native returned malformed result');
-  }
-  if (!result.execution || typeof result.execution !== 'object' || Array.isArray(result.execution) || typeof (result.execution as Record<string, unknown>).flowId !== 'string') {
-    throw new Error('planAutoHookCallerResultProjectionJson native returned malformed execution');
-  }
-  if (input.metadataWritePlanPresent !== true && ('metadataWritePlan' in result || record.includeMetadataWritePlan === true)) {
-    throw new Error('planAutoHookCallerResultProjectionJson native requested missing metadataWritePlan');
-  }
-  if (input.metadataWritePlanPresent === true && (!('metadataWritePlan' in result) || !result.metadataWritePlan || typeof result.metadataWritePlan !== 'object' || Array.isArray(result.metadataWritePlan))) {
-    throw new Error('planAutoHookCallerResultProjectionJson native omitted requested metadataWritePlan');
-  }
-  return {
-    result: {
-      mode: 'tool_flow',
-      finalChatResponse: result.finalChatResponse as JsonObject,
-      execution: result.execution as NativeServerToolExecution,
-      ...(record.includeMetadataWritePlan === true ? { metadataWritePlan: result.metadataWritePlan as JsonObject } : {})
-    }
-  };
 }
 
 export function planServertoolExecutionBranchWithNative(input: {
@@ -2893,47 +2555,6 @@ export function resolveServertoolEngineSkipDecisionWithNative(input: {
   return {
     returnSkipped: false,
     continueMatchedFlow: true
-  };
-}
-
-export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: {
-  outcomeMode: string;
-  hasLastExecution: boolean;
-  executedToolCallsLen: number;
-  lastExecution?: unknown;
-  flowId?: string;
-}): ServertoolExecutionOutcomeRuntimeActionPlan {
-  const capability = 'planServertoolExecutionOutcomeRuntimeActionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolExecutionOutcomeRuntimeActionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    record.action !== 'invalid_mixed_client_tools_outcome' &&
-    record.action !== 'return_execution_contract' &&
-    record.action !== 'missing_servertool_execution_contract'
-  ) {
-    throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native returned invalid action');
-  }
-  if (typeof record.executionFlowId !== 'string') {
-    throw new Error('planServertoolExecutionOutcomeRuntimeActionJson native returned invalid executionFlowId');
-  }
-  return {
-    action: record.action,
-    reuseLastExecutionEnvelope: record.reuseLastExecutionEnvelope === true,
-    ...(record.selectedExecutionEnvelope !== undefined
-      ? { selectedExecutionEnvelope: record.selectedExecutionEnvelope }
-      : {}),
-    executionFlowId: record.executionFlowId
   };
 }
 
@@ -3809,48 +3430,6 @@ export function resolveServertoolResponseStageAutoHookPostApplicationWithNative(
   };
 }
 
-export function planServertoolResponseStageOrchestrationOutputWithNative(input: {
-  orchestrationExecuted: boolean;
-  orchestrationFlowId?: string;
-}): ServertoolResponseStageOrchestrationOutputPlan {
-  const capability = 'planServertoolResponseStageOrchestrationOutputJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolResponseStageOrchestrationOutputJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolResponseStageOrchestrationOutputJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    record.returnAction !== 'return_executed_payload' &&
-    record.returnAction !== 'return_original_payload'
-  ) {
-    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned invalid returnAction');
-  }
-  if (typeof record.recordExecuted !== 'boolean') {
-    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned invalid recordExecuted');
-  }
-  if (record.recordFlowId !== undefined && typeof record.recordFlowId !== 'string') {
-    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned invalid recordFlowId');
-  }
-  if (record.returnAction === 'return_executed_payload' && record.recordExecuted !== true) {
-    throw new Error('planServertoolResponseStageOrchestrationOutputJson native returned executed payload without executed record');
-  }
-  return {
-    returnAction: record.returnAction,
-    recordExecuted: record.recordExecuted,
-    ...(typeof record.recordFlowId === 'string' && record.recordFlowId.trim()
-      ? { recordFlowId: record.recordFlowId.trim() }
-      : {})
-  };
-}
-
 export function materializeServertoolResponseStageOrchestrationOutputWithNative(input: {
   originalPayload: JsonObject;
   executedPayload: JsonObject;
@@ -4305,41 +3884,6 @@ export type ServertoolRegistryLookupActionPlan = {
   canonicalName?: string;
 };
 
-export function planServertoolRegistryLookupActionWithNative(input: {
-  name: string;
-  builtinEntryPresent: boolean;
-}): ServertoolRegistryLookupActionPlan {
-  const capability = 'planServertoolRegistryLookupActionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolRegistryLookupActionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolRegistryLookupActionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolRegistryLookupActionJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    record.action !== 'return_builtin' &&
-    record.action !== 'return_none'
-  ) {
-    throw new Error('planServertoolRegistryLookupActionJson native returned invalid action');
-  }
-  if (record.canonicalName !== undefined && typeof record.canonicalName !== 'string') {
-    throw new Error('planServertoolRegistryLookupActionJson native returned invalid canonicalName');
-  }
-  return {
-    action: record.action,
-    ...(typeof record.canonicalName === 'string' && record.canonicalName.trim()
-      ? { canonicalName: record.canonicalName }
-      : {})
-  };
-}
-
 export type ServertoolRegistryAutoHookDescriptorPlan = {
   id: string;
   phase: 'pre' | 'default' | 'post';
@@ -4484,76 +4028,6 @@ export type ServertoolRegistrySourceProjectionPlan = {
   registeredRecordRefs: ServertoolRegistrySourceRecordRefPlan[];
 };
 
-export function planServertoolRegistryProjectionWithNative(input: {
-  registeredNames: string[];
-  registeredRecords: Array<{
-    name: string;
-    trigger: string;
-    sourceIndex: number;
-  }>;
-  autoHandlerNames: string[];
-}): ServertoolRegistryProjectionPlan {
-  const capability = 'planServertoolRegistryProjectionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolRegistryProjectionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolRegistryProjectionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolRegistryProjectionJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    !Array.isArray(record.registeredNames) ||
-    !Array.isArray(record.registeredRecords) ||
-    !Array.isArray(record.autoHandlerNames)
-  ) {
-    throw new Error('planServertoolRegistryProjectionJson native returned invalid plan arrays');
-  }
-  return {
-    registeredNames: record.registeredNames.map((name) => {
-      if (typeof name !== 'string' || !name.trim()) {
-        throw new Error('planServertoolRegistryProjectionJson native returned invalid registered name');
-      }
-      return name;
-    }),
-    registeredRecords: record.registeredRecords.map((entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        throw new Error('planServertoolRegistryProjectionJson native returned invalid registered record');
-      }
-      const item = entry as Record<string, unknown>;
-      if (typeof item.name !== 'string' || !item.name.trim()) {
-        throw new Error('planServertoolRegistryProjectionJson native returned invalid registered record name');
-      }
-      if (item.trigger !== 'tool_call' && item.trigger !== 'auto') {
-        throw new Error('planServertoolRegistryProjectionJson native returned invalid registered record trigger');
-      }
-      if (
-        typeof item.sourceIndex !== 'number' ||
-        !Number.isInteger(item.sourceIndex) ||
-        (item.sourceIndex as number) < 0
-      ) {
-        throw new Error('planServertoolRegistryProjectionJson native returned invalid sourceIndex');
-      }
-      return {
-        name: item.name,
-        trigger: item.trigger,
-        sourceIndex: item.sourceIndex
-      };
-    }),
-    autoHandlerNames: record.autoHandlerNames.map((name) => {
-      if (typeof name !== 'string' || !name.trim()) {
-        throw new Error('planServertoolRegistryProjectionJson native returned invalid auto handler name');
-      }
-      return name;
-    })
-  };
-}
-
 function parseServertoolRegistrySource(value: unknown, capability: string): ServertoolRegistrySourceKind {
   if (value !== 'builtin') {
     throw new Error(`${capability} native returned invalid source`);
@@ -4570,77 +4044,6 @@ function parseServertoolRegistrySourceIndex(value: unknown, capability: string):
     throw new Error(`${capability} native returned invalid sourceIndex`);
   }
   return value;
-}
-
-export function planServertoolRegistrySourceProjectionWithNative(input: {
-  builtinNames: string[];
-  builtinAutoHandlerNames: string[];
-  builtinRecords: Array<{
-    name: string;
-    trigger: string;
-  }>;
-}): ServertoolRegistrySourceProjectionPlan {
-  const capability = 'planServertoolRegistrySourceProjectionJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolRegistrySourceProjectionJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolRegistrySourceProjectionJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    !Array.isArray(record.registeredNames) ||
-    !Array.isArray(record.autoHandlerRefs) ||
-    !Array.isArray(record.registeredRecordRefs)
-  ) {
-    throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid plan arrays');
-  }
-  return {
-    registeredNames: record.registeredNames.map((name) => {
-      if (typeof name !== 'string' || !name.trim()) {
-        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid registered name');
-      }
-      return name;
-    }),
-    autoHandlerRefs: record.autoHandlerRefs.map((entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid auto handler ref');
-      }
-      const item = entry as Record<string, unknown>;
-      if (typeof item.name !== 'string' || !item.name.trim()) {
-        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid auto handler name');
-      }
-      return {
-        name: item.name,
-        source: parseServertoolRegistrySource(item.source, 'planServertoolRegistrySourceProjectionJson'),
-        sourceIndex: parseServertoolRegistrySourceIndex(item.sourceIndex, 'planServertoolRegistrySourceProjectionJson')
-      };
-    }),
-    registeredRecordRefs: record.registeredRecordRefs.map((entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid registered record ref');
-      }
-      const item = entry as Record<string, unknown>;
-      if (typeof item.name !== 'string' || !item.name.trim()) {
-        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid registered record name');
-      }
-      if (item.trigger !== 'tool_call' && item.trigger !== 'auto') {
-        throw new Error('planServertoolRegistrySourceProjectionJson native returned invalid registered record trigger');
-      }
-      return {
-        name: item.name,
-        trigger: item.trigger,
-        source: parseServertoolRegistrySource(item.source, 'planServertoolRegistrySourceProjectionJson'),
-        sourceIndex: parseServertoolRegistrySourceIndex(item.sourceIndex, 'planServertoolRegistrySourceProjectionJson')
-      };
-    })
-  };
 }
 
 export function planServertoolHandlerMaterializationWithNative(input: {
@@ -4984,19 +4387,6 @@ export function planServertoolTimeoutErrorWithNative(input: {
   );
 }
 
-export function planServertoolStateLoadFailedErrorWithNative(input: {
-  requestId: string;
-  stickyKey: string;
-  entryEndpoint: string;
-  providerProtocol: string;
-  error: string;
-}): ServertoolErrorPlan {
-  return parseServertoolErrorPlan(
-    callServertoolErrorPlanNative('planServertoolStateLoadFailedErrorJson', input),
-    'planServertoolStateLoadFailedErrorJson'
-  );
-}
-
 export function planServertoolRequiredResponseHookEmptyErrorWithNative(input: {
   requestId: string;
   responseHookName: string;
@@ -5095,20 +4485,6 @@ export function appendServertoolExecutedRecordWithNative(input: {
   return parseServertoolExecutionLoopState(resultJson, capability);
 }
 
-export function planStopMessageFetchFailedErrorWithNative(input: {
-  requestId: string;
-  reason: 'loop_limit';
-  elapsedMs?: unknown;
-  repeatCount?: unknown;
-  attempt?: unknown;
-  maxAttempts?: unknown;
-}): ServertoolErrorPlan {
-  return parseServertoolErrorPlan(
-    callServertoolErrorPlanNative('planStopMessageFetchFailedErrorJson', input),
-    'planStopMessageFetchFailedErrorJson'
-  );
-}
-
 function callServertoolErrorPlanNative(capability: string, input: unknown): string {
   const fn = readNativeFunction(capability);
   if (!fn) {
@@ -5171,68 +4547,6 @@ function parseServertoolExecutionLoopState(
       ? { lastExecution: record.lastExecution as NativeServertoolExecutionSummary }
       : {})
   };
-}
-
-export function hasStopMessageAutoCliResultInRequestWithNative(input: {
-  adapterContext: unknown;
-  runtimeMetadata?: unknown;
-}): boolean {
-  const capability = 'hasStopMessageAutoCliResultInRequestJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('hasStopMessageAutoCliResultInRequestJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`hasStopMessageAutoCliResultInRequestJson native returned non-string: ${typeof resultJson}`);
-  }
-  if (resultJson === 'true') {
-    return true;
-  }
-  if (resultJson === 'false') {
-    return false;
-  }
-  throw new Error(`hasStopMessageAutoCliResultInRequestJson native returned invalid bool: ${resultJson}`);
-}
-
-export function extractServertoolCliResultRouteHintFromRequestWithNative(input: {
-  adapterContext: unknown;
-  runtimeMetadata?: unknown;
-}): string | undefined {
-  const capability = 'extractServertoolCliResultRouteHintFromRequestJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('extractServertoolCliResultRouteHintFromRequestJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`extractServertoolCliResultRouteHintFromRequestJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
-}
-
-export function extractStopMessageAutoCliResultSnapshotFromRequestWithNative(input: {
-  adapterContext: unknown;
-  runtimeMetadata?: unknown;
-}): Record<string, unknown> | undefined {
-  const capability = 'extractStopMessageAutoCliResultSnapshotFromRequestJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('extractStopMessageAutoCliResultSnapshotFromRequestJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`extractStopMessageAutoCliResultSnapshotFromRequestJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (parsed === null) {
-    return undefined;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('extractStopMessageAutoCliResultSnapshotFromRequestJson native returned invalid snapshot');
-  }
-  return parsed as Record<string, unknown>;
 }
 
 export function buildStopMessageTerminalVisiblePayloadWithNative<TPayload extends Record<string, unknown>>(input: {
