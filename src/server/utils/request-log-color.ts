@@ -10,7 +10,7 @@ const REQUEST_LOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
 const REQUEST_LOG_CONTEXT_MAX = 4096;
 
 type RequestLogContextRecord = {
-  sessionKey: string;
+  colorToken: string;
   expiresAtMs: number;
 };
 
@@ -70,19 +70,20 @@ function resolveVirtualRouterHitSessionKey(text: string): string | undefined {
   return normalizeToken(sid);
 }
 
-function resolveVirtualRouterHitColorKey(text: string): string | undefined {
+function resolveVirtualRouterHitColorToken(text: string): string | undefined {
   const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
   const requestKey = normalizeRequestKey(requestId);
   if (requestKey) {
     const record = REQUEST_LOG_CONTEXT.get(requestKey);
     if (record && record.expiresAtMs > Date.now()) {
-      return record.sessionKey;
+      return record.colorToken;
     }
     if (record) {
       REQUEST_LOG_CONTEXT.delete(requestKey);
     }
   }
-  return resolveVirtualRouterHitSessionKey(text);
+  const sessionKey = resolveVirtualRouterHitSessionKey(text);
+  return sessionKey ? resolveSessionAnsiColor(sessionKey) : undefined;
 }
 
 function pruneExpiredContext(nowMs: number): void {
@@ -119,12 +120,16 @@ export function registerRequestLogContext(
 ): void {
   const requestKey = normalizeRequestKey(requestId);
   const sessionKey = resolveSessionKey(context);
-  if (!requestKey || !sessionKey) {
+  if (!requestKey || !context) {
+    return;
+  }
+  const colorToken = sessionKey ? resolveSessionAnsiColor(sessionKey) : ANSI_DEFAULT_NORMAL_LOG_COLOR;
+  if (!colorToken) {
     return;
   }
   const nowMs = Date.now();
   REQUEST_LOG_CONTEXT.set(requestKey, {
-    sessionKey,
+    colorToken,
     expiresAtMs: nowMs + REQUEST_LOG_CONTEXT_TTL_MS
   });
   pruneExpiredContext(nowMs);
@@ -144,7 +149,7 @@ export function resolveRequestLogColorToken(
   }
   const record = REQUEST_LOG_CONTEXT.get(requestKey);
   if (record && record.expiresAtMs > Date.now()) {
-    return resolveSessionAnsiColor(record.sessionKey);
+    return record.colorToken;
   }
   if (record) {
     REQUEST_LOG_CONTEXT.delete(requestKey);
@@ -175,8 +180,7 @@ export function colorizeVirtualRouterHitLogLine(text: string): string {
   if (!text || !text.includes('[virtual-router-hit]') || !isConsoleColorEnabled()) {
     return text;
   }
-  const sessionKey = resolveVirtualRouterHitColorKey(text);
-  const color = sessionKey ? resolveSessionAnsiColor(sessionKey) : undefined;
+  const color = resolveVirtualRouterHitColorToken(text);
   if (!color) {
     return text;
   }

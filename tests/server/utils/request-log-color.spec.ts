@@ -116,6 +116,29 @@ describe('request log color registry', () => {
     expect(line.includes('\x1b[97m')).toBe(false);
   });
 
+  it('keeps registered request, virtual-router-hit, response, and usage colors aligned without a session key', () => {
+    const requestId = 'openai-responses-router-gpt-5.5-20260704T162136689-458956-727';
+    const requestColor = resolveRequestLogColorToken(requestId);
+
+    registerRequestLogContext(requestId, {
+      clientRequestId: '8958-729'
+    });
+
+    const requestLine = colorizeRequestLog(`▶ [/v1/responses] request ${requestId} started`, requestId);
+    const routerHitLine = colorizeVirtualRouterHitLogLine(
+      `\x1b[38;5;141m[virtual-router-hit]\x1b[0m \x1b[90m16:21:36\x1b[0m req=${requestId} \x1b[38;5;141mlongcontext/gateway-priority-5555-priority-longcontext -> orangeai[key1].glm-5.2 reason=longcontext:token-threshold\x1b[0m`
+    );
+    const responseLine = colorizeRequestLog(`✅ [/v1/responses] request ${requestId} completed`, requestId);
+    const usageLine = colorizeRequestLog('[usage] req=8956-727 route=longcontext model=router->glm-5.2', requestId);
+
+    expect(requestColor).toBe('\x1b[36m');
+    expect(requestLine.startsWith(String(requestColor))).toBe(true);
+    expect(routerHitLine.startsWith(String(requestColor))).toBe(true);
+    expect(responseLine.startsWith(String(requestColor))).toBe(true);
+    expect(usageLine.startsWith(String(requestColor))).toBe(true);
+    expect(routerHitLine).toContain(`req=${requestId} longcontext/gateway-priority-5555-priority-longcontext`);
+  });
+
   it('does not recolor virtual-router-hit lines without an explicit session key', () => {
     const line = colorizeVirtualRouterHitLogLine(
       `\x1b[38;5;208m[virtual-router-hit]\x1b[0m \x1b[90m19:42:25\x1b[0m req=req-vr-hit-no-session \x1b[36mtools/pool -> provider.model reason=tools\x1b[0m`
