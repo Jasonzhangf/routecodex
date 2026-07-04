@@ -1,3 +1,9 @@
+# 2026-07-04 retry providerProtocol preservation
+
+- Root cause: `decorateMetadataForAttempt()` released `runtime_control.providerProtocol` on retry. Hub request materialization reads providerProtocol before the next VR selection writes a replacement, so provider failure reroute failed before backup provider send.
+- Fix: retry metadata cleanup now releases only single-use provider pins (`preselectedRoute`, `retryProviderKey`) and preserves providerProtocol until the request-route owner replaces it.
+- Evidence: red `executor-metadata/request-executor metadata -t providerProtocol` failed with providerProtocol `undefined`; green focused providerProtocol tests passed; `request-executor.metadata-center.contract.spec.ts` passed 12/12; sharedmodule/root `tsc` passed; `verify:function-map-compile-gate` passed; `verify:provider-failure-ban-blackbox` passed.
+
 # 2026-07-03 global install 0.90.3538 evidence
 
 - `install-global.sh` only installed `routecodex`; `rcc` remained at 0.90.3537 until `pack:rcc` produced `rcc-0.90.3538.tgz` and it was installed via normal `npm install -g`.

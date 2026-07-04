@@ -1,3 +1,8 @@
+# 2026-07-04: Retry providerProtocol must survive provider reroute metadata cleanup
+- Verified root cause: `decorateMetadataForAttempt()` released `runtime_control.providerProtocol` on retry together with single-use route pins. The next Hub attempt reads providerProtocol before VR can commit the backup route, so the retry failed with `HubPipeline requires metadata center runtime_control.providerProtocol` after `exclude_and_reroute`.
+- Fix rule: retry cleanup releases `preselectedRoute` and `retryProviderKey`, but preserves `providerProtocol`; only the request-route owner may later replace providerProtocol atomically for the current selected target.
+- Verification evidence: providerProtocol focused red/green Jest passed, `request-executor.metadata-center.contract.spec.ts` passed 12/12, sharedmodule/root `tsc` passed, `verify:function-map-compile-gate` passed, and `verify:provider-failure-ban-blackbox` passed with backup reroute for 503/401/403/429.
+
 # 2026-07-03: Responses capture must preserve entry payload across Hub body rewrite
 - Verified root cause: when `/v1/responses` uses `hubBody`, server execution replaces `input.body` with provider wire shape before `HubRequestExecutor` captures Responses conversation context. Capture must therefore read the same-request raw entry payload, not reconstruct from provider wire body or from debug snapshots.
 - Durable rule: when `buildHubPipelineInput()` swaps `body=hubBody`, it must carry the original body as request-scoped data-plane truth (`__raw_request_body`) for Chat Process capture only. Do not fix missing Responses context by scope fallback, by guessing from provider response, or by stuffing request context into MetadataCenter control state.

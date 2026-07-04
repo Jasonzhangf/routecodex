@@ -9,16 +9,10 @@ const readRuntimeControlFromAnyBoundMetadataCenter = jest.fn(() => ({}));
 const runServerToolOrchestrationShell = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
-  () => ({
-    planServertoolResponseStageGateWithNative,
-    detectProviderResponseShapeWithNative
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    planServertoolResponseStageGateWithNative,
+    detectProviderResponseShapeWithNative,
     materializeServertoolResponseStageOrchestrationOutputWithNative,
     extractServertoolResponseStageOrchestrationShellResultWithNative,
     resolveServertoolResponseStageOrchestrationGateApplicationWithNative

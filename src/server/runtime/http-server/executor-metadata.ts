@@ -747,13 +747,6 @@ export function decorateMetadataForAttempt(
       writer: ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
       reason: 'retry provider pin is single-use and must not force provider retry attempts'
     });
-    releaseMetadataCenterSlot({
-      target: clone,
-      family: 'runtime_control',
-      key: 'providerProtocol',
-      writer: ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
-      reason: 'provider protocol belongs to one selected attempt and must be reselected on retry'
-    });
   }
   return clone;
 }
