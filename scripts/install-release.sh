@@ -154,9 +154,9 @@ prepare_dependencies() {
   export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
   export PUPPETEER_SKIP_DOWNLOAD=1
   if [ -f "$INSTALL_BUILD_ROOT/package-lock.json" ]; then
-    (cd "$INSTALL_BUILD_ROOT" && npm ci --no-audit --no-fund --omit=optional --ignore-scripts --loglevel=warn)
+    (cd "$INSTALL_BUILD_ROOT" && npm ci --no-audit --no-fund --ignore-scripts --loglevel=warn)
   else
-    (cd "$INSTALL_BUILD_ROOT" && npm install --no-audit --no-fund --omit=optional --ignore-scripts --prefer-offline --progress=false --loglevel=warn)
+    (cd "$INSTALL_BUILD_ROOT" && npm install --no-audit --no-fund --ignore-scripts --prefer-offline --progress=false --loglevel=warn)
   fi
 }
 
