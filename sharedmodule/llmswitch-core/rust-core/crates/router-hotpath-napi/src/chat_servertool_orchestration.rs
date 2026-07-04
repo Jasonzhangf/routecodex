@@ -2409,6 +2409,11 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi]
+pub fn plan_servertool_auto_hook_queue_items_json(input_json: String) -> NapiResult<String> {
+    plan_servertool_auto_hook_queues_json(input_json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

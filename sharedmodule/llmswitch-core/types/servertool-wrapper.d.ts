@@ -189,7 +189,7 @@ export declare function buildServertoolCliProjectionExecutionContextWithNative(i
 export declare function buildServertoolCliProjectionRuntimeBranchWithNative(input: unknown): Record<string, unknown>;
 export declare function resolveRuntimeStopMessageStateFromMetadataCenterWithNative(metadataCenter: unknown): ServertoolRuntimeStopMessageState | null;
 export declare function parseServertoolTimeoutMsWithNative(value: unknown): number | undefined;
-export declare function planServertoolTimeoutWatcherWithNative(timeoutMs: number): ServertoolTimeoutWatcherPlan;
+export declare function planServertoolTimeoutWatcherWithNative(input: unknown): ServertoolTimeoutWatcherPlan;
 export declare function isAdapterClientDisconnectedWithNative(adapterContext: unknown): boolean;
 export declare function createServertoolExecutionLoopStateWithNative(): ServertoolExecutionLoopState;
 

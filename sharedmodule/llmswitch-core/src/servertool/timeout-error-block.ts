@@ -15,7 +15,7 @@ export function withTimeout<T>(
   timeoutMs: number,
   buildError: () => Error
 ): Promise<T> {
-  const plan = planServertoolTimeoutWatcherWithNative(timeoutMs);
+  const plan = planServertoolTimeoutWatcherWithNative({ timeoutMs });
   if (!plan.armed) {
     return promise;
   }

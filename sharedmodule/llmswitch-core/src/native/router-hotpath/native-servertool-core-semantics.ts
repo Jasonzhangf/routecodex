@@ -19,13 +19,15 @@ import {
   parseServertoolResponseStagePayload,
   type ServertoolResponseStageGatePayload
 } from './native-router-hotpath-analysis.js';
+import {
+  buildServertoolOutcomePlanInputWithNative,
+  planServertoolOutcomeWithNative
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 export type NativeServertoolResponseStageGate = ServertoolResponseStageGatePayload;
 
 // Re-export NAPI wrappers consumed by shell files and orchestration functions
 export {
-  buildClientExecCliProjectionOutputWithNative,
-  buildClientVisibleProjectionShellWithNative,
   buildServertoolCliProjectionExecutionContextWithNative,
   buildServertoolCliProjectionRuntimeBranchWithNative,
   buildServertoolDispatchPlanInputWithNative,
@@ -34,7 +36,6 @@ export {
   buildServertoolAutoHookTraceProgressEventWithNative,
   buildServertoolStopCompareProgressEventWithNative,
   buildServertoolStopEntryProgressEventWithNative,
-  buildServertoolOutcomePlanInputWithNative,
   buildServertoolToolOutputPayloadWithNative,
   collectServertoolAdditionalClientToolCallsWithNative,
   containsSyntheticRouteCodexControlTextWithNative,
@@ -64,9 +65,7 @@ export {
   planServertoolBuiltinHandlerRecordEntriesWithNative,
   planServertoolFollowupRuntimeWithNative,
   planServertoolHandlerContractWithNative,
-  planServertoolHookScheduleWithNative,
   planServertoolNoopOutcomeWithNative,
-  planServertoolOutcomeWithNative,
   planServertoolRegistryLookupFromSkeletonWithNative,
   planServertoolResponseStageGateWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
@@ -359,6 +358,9 @@ export interface ClientVisibleProjectionShellInput {
   reasoningText: string;
   additionalToolCalls?: unknown[];
 }
+
+export type ServertoolHookSkeletonPhaseValidationPlan = Record<string, unknown>;
+export type ServertoolHookSchedulePlan = Record<string, unknown>;
 
 export interface ServertoolCliProjectionExecutionContextInput {
   requestId: string;
@@ -674,6 +676,76 @@ function callNativeJsonCapabilityWithErrorContract(
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(formatError(message));
   }
+}
+
+function requireNativeJsonObject(capability: string, input: unknown): Record<string, unknown> {
+  const parsed = callNativeJsonCapability(capability, input);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} native returned invalid object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export function buildClientExecCliProjectionOutputWithNative(
+  input: ClientExecCliProjectionInput
+): ClientExecCliProjectionOutput {
+  return callNativeJsonCapabilityWithErrorContract(
+    'buildClientExecCliProjectionOutputJson',
+    input,
+    (message) => `buildClientExecCliProjectionOutputJson native error: ${message}`
+  ) as ClientExecCliProjectionOutput;
+}
+
+export function buildClientVisibleProjectionShellWithNative(
+  input: ClientVisibleProjectionShellInput
+): Record<string, unknown> {
+  return callNativeJsonCapabilityWithErrorContract(
+    'buildClientVisibleProjectionShellJson',
+    input,
+    (message) => `buildClientVisibleProjectionShellJson native error: ${message}`
+  ) as Record<string, unknown>;
+}
+
+export function readClientInjectOnlyWithNative(input: unknown): boolean {
+  const parsed = callNativeJsonCapability('readClientInjectOnlyJson', input);
+  if (typeof parsed !== 'boolean') {
+    throw new Error('readClientInjectOnlyJson native returned non-boolean');
+  }
+  return parsed;
+}
+
+export function normalizeClientInjectTextWithNative(input: unknown): string {
+  const parsed = callNativeJsonCapability('normalizeClientInjectTextJson', input);
+  if (typeof parsed !== 'string') {
+    throw new Error('normalizeClientInjectTextJson native returned non-string');
+  }
+  return parsed;
+}
+
+export function compactFollowupErrorReasonWithNative(input: unknown): string | null {
+  const parsed = callNativeJsonCapability('compactFollowupErrorReasonJson', input);
+  if (parsed !== null && typeof parsed !== 'string') {
+    throw new Error('compactFollowupErrorReasonJson native returned invalid reason');
+  }
+  return parsed as string | null;
+}
+
+export function resolveAdapterContextProviderKeyWithNative(input: unknown): string | null {
+  const parsed = callNativeJsonCapability('resolveAdapterContextProviderKeyJson', input);
+  if (parsed !== null && typeof parsed !== 'string') {
+    throw new Error('resolveAdapterContextProviderKeyJson native returned invalid provider key');
+  }
+  return parsed as string | null;
+}
+
+export function validateServertoolHookSkeletonPhaseWithNative(
+  input: unknown
+): ServertoolHookSkeletonPhaseValidationPlan {
+  return requireNativeJsonObject('validateServertoolHookSkeletonPhaseJson', input);
+}
+
+export function planServertoolHookScheduleWithNative(input: unknown): ServertoolHookSchedulePlan {
+  return requireNativeJsonObject('planServertoolHookScheduleJson', input);
 }
 
 export interface ServertoolExecutionLoopEffectBasePlan {

@@ -17,6 +17,34 @@ import {
   planServertoolAutoHookQueueItemsWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
+function assertServerToolAutoHookDescriptor(value: unknown): asserts value is ServerToolAutoHookDescriptor {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('[servertool] native auto-hook queue entry must be an object');
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== 'string' ||
+    typeof record.phase !== 'string' ||
+    typeof record.priority !== 'number' ||
+    typeof record.order !== 'number' ||
+    !record.registration ||
+    typeof record.registration !== 'object' ||
+    Array.isArray(record.registration) ||
+    !record.execution ||
+    typeof record.execution !== 'object' ||
+    Array.isArray(record.execution)
+  ) {
+    throw new Error('[servertool] native auto-hook queue entry must be a ServerToolAutoHookDescriptor');
+  }
+}
+
+function readNativeAutoHookQueueEntries(entries: unknown[]): ServerToolAutoHookDescriptor[] {
+  return entries.map((entry) => {
+    assertServerToolAutoHookDescriptor(entry);
+    return entry;
+  });
+}
+
 function buildAutoHookQueuesFromNativePlan(args: {
   hooks: ServerToolAutoHookDescriptor[];
   includeAutoHookIds: Set<string> | null;
@@ -35,7 +63,7 @@ function buildAutoHookQueuesFromNativePlan(args: {
   return {
     queueOrder: nativePlan.queueOrder.map((queue) => ({
       queueName: queue.queue,
-      hooks: queue.entries
+      hooks: readNativeAutoHookQueueEntries(queue.entries)
     }))
   };
 }

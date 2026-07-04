@@ -20,6 +20,7 @@ describe('servertool timeout/error block native shell', () => {
 
     expect(source).not.toContain('export function isAdapterClientDisconnected(');
     expect(source).not.toContain('isAdapterClientDisconnectedWithNative(adapterContext)');
+    expect(source).toContain('planServertoolTimeoutWatcherWithNative({ timeoutMs })');
     expect(entryPreflightSource).toContain('isAdapterClientDisconnectedWithNative(args.options.adapterContext)');
   });
 
