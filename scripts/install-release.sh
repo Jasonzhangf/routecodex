@@ -270,7 +270,13 @@ NODE
     if ! wait_until_health_unavailable; then
       fail "旧 runtime 未在 stop-intent + /shutdown 后释放 ${VERIFY_HOST}:${VERIFY_PORT}"
     fi
+    start_release_runtime_for_port
+  }
+
+  start_release_runtime_for_port() {
     ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
+    ROUTECODEX_START_DAEMON=1 \
+    RCC_START_DAEMON=1 \
     ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
     RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
     rcc start --restart --port "$VERIFY_PORT"
@@ -279,7 +285,7 @@ NODE
   ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
   ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
   RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
-  rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST"
+  rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST" || start_release_runtime_for_port
 
   local attempt=1
   local max_attempts=20

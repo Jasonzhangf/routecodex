@@ -42,6 +42,7 @@ import {
   stopGuardianDaemon
 } from './cli/guardian/client.js';
 import type { GuardianLifecycleEvent, GuardianRegistration, GuardianStopResult } from './cli/guardian/types.js';
+import { resolveCliIsDevPackage } from './cli/package-mode.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -96,9 +97,10 @@ const pkgName: string = (() => {
 })();
 
 // 包变体：
-// - routecodex（dev 包）：默认端口 5555，用于本地开发调试，不读取配置端口，除非显式设置 ROUTECODEX_PORT/RCC_PORT
+// - routecodex dev build：默认端口 5555，用于本地开发调试，不读取配置端口，除非显式设置 ROUTECODEX_PORT/RCC_PORT
+// - routecodex release snapshot / rcc：严格按配置文件端口启动
 // - rcc（release 包）：严格按配置文件端口启动（httpserver.port/server.port/port）
-const IS_DEV_PACKAGE = pkgName === 'routecodex';
+const IS_DEV_PACKAGE = resolveCliIsDevPackage({ pkgName, buildMode: buildInfo.mode });
 const IS_WINDOWS = process.platform === 'win32';
 const DEFAULT_DEV_PORT = 5555;
 
