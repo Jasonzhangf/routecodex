@@ -14,12 +14,12 @@ chains:
       binding-pending while Rust owner implementation is still being closed out.
   - chain_id: request.mainline
     expected_total_edges: 6
-    min_anchored_edges: 4
-    max_partial_edges: 1
-    max_binding_pending_edges: 1
+    min_anchored_edges: 6
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
     note: >
-      Request route-selection bridge is now anchored; only the req_outbound
-      typed/runtime split remains intentionally open until M4 closes it.
+      Request mainline is fully anchored through provider wire compatibility;
+      req_outbound stage3 compat is Rust-owned and TS remains a native bridge.
   - chain_id: response.mainline
     expected_total_edges: 4
     min_anchored_edges: 4

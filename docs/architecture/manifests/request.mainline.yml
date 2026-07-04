@@ -52,7 +52,7 @@ edges:
   - step_id: req-05
     from_node: HubReqOutbound05ProviderSemantic
     to_node: ProviderReqOutbound06WirePayload
-    status: partial
+    status: anchored
     owner_feature_id: responses.request_compat_normalization
     binding_pending: null
     split_binding_id: null

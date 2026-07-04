@@ -207,7 +207,8 @@ chains:
         owner_feature_id: responses.request_compat_normalization
         semantic_input: "provider-neutral outbound semantic"
         semantic_output: "provider-compatible wire-ready semantic payload"
-        status: partial
+        status: anchored
+        note: "Req-05 is anchored at the native/Rust compat boundary: TS normalizes only the optional profile token and invokes `runReqOutboundStage3CompatWithNative`, while `run_req_outbound_stage3_compat_json` owns provider wire compatibility. Locked by `verify:responses-request-compat-rust-only` and `build:base`."
 
   - chain_id: response.mainline
     summary: "Provider response enters Hub, gets governed, then projects to client protocol and server frame."

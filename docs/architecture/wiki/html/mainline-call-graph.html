@@ -219,7 +219,7 @@
           HubReqInbound02Standardized --&gt;|req-02| HubReqChatProcess03Governed
           HubReqChatProcess03Governed --&gt;|req-03| VrRoute04SelectedTarget
           VrRoute04SelectedTarget --&gt;|req-04| HubReqOutbound05ProviderSemantic
-          HubReqOutbound05ProviderSemantic -.-&gt;|req-05| ProviderReqOutbound06WirePayload
+          HubReqOutbound05ProviderSemantic --&gt;|req-05| ProviderReqOutbound06WirePayload
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -227,8 +227,8 @@
           class HubReqInbound02Standardized anchored;
           class HubReqChatProcess03Governed anchored;
           class VrRoute04SelectedTarget anchored;
-          class HubReqOutbound05ProviderSemantic partial;
-          class ProviderReqOutbound06WirePayload partial;</pre>
+          class HubReqOutbound05ProviderSemantic anchored;
+          class ProviderReqOutbound06WirePayload anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
@@ -238,7 +238,7 @@
         <tr><td>req-02</td><td><code>HubReqInbound02Standardized -&gt; HubReqChatProcess03Governed</code></td><td>anchored</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.req_inbound_responses_context_capture</code>&lt;br/&gt;Rust req_inbound owner captures and normalizes relay <code>/v1/responses</code> request context before any TS bridge reuse</td></tr>
         <tr><td>req-03</td><td><code>HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>execute -&gt; run_vr_route_04_selected_target_entrypoint</code></td><td></td><td><code>hub.route_selection_bridge</code>&lt;br/&gt;Hub req-03 Rust bridge that seals virtual-router decisions into <code>VrRoute04SelectedTarget</code></td></tr>
         <tr><td>req-04</td><td><code>VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic</code></td><td>anchored</td><td><code>execute -&gt; run_hub_req_outbound_05_provider_semantic_entrypoint</code></td><td></td><td><code>hub.req_outbound_provider_semantic</code>&lt;br/&gt;Hub req-04 Rust bridge that applies <code>VrRoute04SelectedTarget</code> to <code>HubReqOutbound05ProviderSemantic</code></td></tr>
-        <tr><td>req-05</td><td><code>HubReqOutbound05ProviderSemantic -&gt; ProviderReqOutbound06WirePayload</code></td><td>partial</td><td><code>runReqOutboundStage3CompatWithNative -&gt; run_req_outbound_stage3_compat_json</code></td><td></td><td><code>responses.request_compat_normalization</code>&lt;br/&gt;Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only</td></tr>
+        <tr><td>req-05</td><td><code>HubReqOutbound05ProviderSemantic -&gt; ProviderReqOutbound06WirePayload</code></td><td>anchored</td><td><code>runReqOutboundStage3CompatWithNative -&gt; run_req_outbound_stage3_compat_json</code></td><td></td><td><code>responses.request_compat_normalization</code>&lt;br/&gt;Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only</td></tr>
         </tbody>
         </table>
         <h2>response.mainline</h2>
