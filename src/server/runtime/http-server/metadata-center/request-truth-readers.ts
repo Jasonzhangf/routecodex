@@ -44,6 +44,7 @@ export type RuntimeControlProjection = {
   retryProviderKey?: string;
   preselectedRoute?: Record<string, unknown>;
   stopless?: {
+    sessionId?: string;
     flowId?: string;
     repeatCount?: number;
     maxRepeats?: number;
@@ -269,6 +270,7 @@ export function readRuntimeControlProjection(
     ...(stopless
       ? {
           stopless: {
+            ...(readTrimmedString(stopless.sessionId) ? { sessionId: readTrimmedString(stopless.sessionId) } : {}),
             ...(readTrimmedString(stopless.flowId) ? { flowId: readTrimmedString(stopless.flowId) } : {}),
             ...(typeof stopless.repeatCount === 'number' ? { repeatCount: stopless.repeatCount } : {}),
             ...(typeof stopless.maxRepeats === 'number' ? { maxRepeats: stopless.maxRepeats } : {}),

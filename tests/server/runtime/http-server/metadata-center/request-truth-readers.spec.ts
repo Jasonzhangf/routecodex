@@ -278,6 +278,7 @@ describe('request-truth-readers', () => {
 
     expect(readRuntimeControlProjection(metadata)).toEqual({
       stopless: {
+        sessionId: 'sess-1',
         flowId: 'stop_message_flow',
         repeatCount: 2,
         maxRepeats: 3,
