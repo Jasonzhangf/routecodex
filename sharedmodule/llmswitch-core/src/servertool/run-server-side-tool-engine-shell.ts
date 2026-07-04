@@ -12,7 +12,7 @@ import {
   resolveServertoolRunEngineEntryPreflightDecisionWithNative,
   resolveServertoolRunEnginePrepassApplicationWithNative,
   resolveServertoolRunEnginePrepassDecisionWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions

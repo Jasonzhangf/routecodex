@@ -7,12 +7,12 @@ import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   planServertoolResponseStageGateWithNative,
   type NativeServertoolResponseStageGate
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   resolveServertoolResponseStagePrepassInitialApplicationWithNative,
   resolveServertoolResponseStagePrepassAfterAutoHookWithNative,
   resolveServertoolResponseStagePrepassInitialDecisionWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 

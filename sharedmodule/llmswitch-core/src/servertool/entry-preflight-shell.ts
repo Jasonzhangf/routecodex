@@ -5,7 +5,7 @@ import {
   readServertoolEntryBaseObjectWithNative,
   resolveServertoolEntryPreflightApplicationWithNative,
   resolveServertoolEntryPreflightWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   createServertoolProviderProtocolErrorFromPlan
 } from './timeout-error-block.js';

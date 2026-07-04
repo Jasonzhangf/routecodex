@@ -12,10 +12,10 @@ import {
   resolveAutoHookCallerFinalizationDecisionWithNative,
   resolveAutoHookRuntimeAttemptDecisionWithNative,
   runStoplessBuiltinHandlerForRuntimeWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   planServertoolAutoHookQueueItemsWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 function assertServerToolAutoHookDescriptor(value: unknown): asserts value is ServerToolAutoHookDescriptor {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

@@ -2,7 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   containsSyntheticRouteCodexControlTextWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   attachStopGatewayContext,
   inspectStopGatewaySignal
@@ -10,7 +10,7 @@ import {
 import {
   planServertoolEnginePreflightWithNative,
   resolveServertoolEnginePreflightDecisionWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 type StopGatewayContext = ReturnType<typeof inspectStopGatewaySignal>;
 type EnginePreflightNativePlan = ReturnType<typeof planServertoolEnginePreflightWithNative>;

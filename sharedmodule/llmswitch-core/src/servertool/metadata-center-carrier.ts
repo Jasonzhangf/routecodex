@@ -5,7 +5,7 @@ import {
   normalizeStopMessageCompareContextWithNative,
   type StopGatewayContext,
   type StopMessageCompareContext
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 import { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL } from '../conversion/hub/metadata-center-runtime-control-writer.js';
 

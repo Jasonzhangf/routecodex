@@ -13,8 +13,8 @@ import {
   materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome,
   resolveServertoolPostExecutionBranchDecisionWithNative,
   resolveServertoolPreExecutionBranchDecisionWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
-import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
+import type { NativeServertoolResponseStageGate } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 export async function runServertoolExecutionStage(args: {
   options: ServerSideToolEngineOptions;

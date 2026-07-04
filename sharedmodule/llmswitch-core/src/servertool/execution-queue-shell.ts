@@ -4,10 +4,10 @@ import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {
   planServertoolNoopOutcomeWithNative,
   buildServertoolHandlerErrorToolOutputPayloadWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   planServertoolToolCallDispatchWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   planServertoolExecutionDispatchErrorWithNative,
   appendServertoolExecutedRecordWithNative,
@@ -22,7 +22,7 @@ import {
   runStoplessBuiltinHandlerForRuntimeWithNative,
   type NativeServertoolExecutedRecord,
   type NativeServertoolExecutionLoopState
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 

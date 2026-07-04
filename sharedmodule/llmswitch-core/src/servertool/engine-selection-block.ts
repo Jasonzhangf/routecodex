@@ -1,9 +1,9 @@
 import type { ServerSideToolEngineOptions, ServerSideToolEngineResult } from './types.js';
-import { readServertoolPrimaryAutoHookIdsWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { readServertoolPrimaryAutoHookIdsWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   planEngineSelectionStartWithNative,
   resolveEngineSelectionAfterRunWithNative,
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 // feature_id: hub.servertool_engine_selection
 type ServerToolEngineRunner = (

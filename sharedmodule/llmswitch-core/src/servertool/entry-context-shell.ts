@@ -7,7 +7,7 @@ import type {
 import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
-import { planServertoolEntryContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
+import { planServertoolEntryContextWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 function nativeEntryTokenSet(tokens: readonly string[] | undefined): Set<string> | null {
   return tokens != null ? new Set(tokens) : null;

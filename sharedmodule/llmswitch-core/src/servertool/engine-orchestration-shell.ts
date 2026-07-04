@@ -31,7 +31,7 @@ import {
   resolveServertoolTimeoutMsFromEnvCandidatesWithNative,
   planServertoolTimeoutErrorWithNative,
   planStoplessExecutionWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 export interface ServerToolOrchestrationOptions {
   chat: JsonObject;

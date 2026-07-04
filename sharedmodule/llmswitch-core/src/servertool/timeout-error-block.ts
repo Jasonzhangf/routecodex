@@ -7,7 +7,7 @@ import {
   createServertoolProviderProtocolErrorFromPlanWithNative,
   planServertoolTimeoutWatcherWithNative,
   type ServertoolErrorPlan
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 // feature_id: hub.servertool_orchestration_policy
 export function withTimeout<T>(

@@ -8,7 +8,7 @@ import {
   type ServertoolEngineRuntimeActionPlan,
   buildServertoolPostflightObservationSummaryWithNative,
   resolveServertoolEnginePostflightPayloadWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';

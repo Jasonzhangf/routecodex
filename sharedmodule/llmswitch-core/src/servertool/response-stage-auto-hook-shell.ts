@@ -9,8 +9,8 @@ import {
   resolveServertoolResponseStageAutoHookPostDecisionWithNative,
   resolveServertoolResponseStageAutoHookPreApplicationWithNative,
   resolveServertoolResponseStageAutoHookPreDecisionWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
-import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
+import type { NativeServertoolResponseStageGate } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 

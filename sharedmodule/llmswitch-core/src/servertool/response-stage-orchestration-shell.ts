@@ -7,12 +7,12 @@ import { runServerToolOrchestrationShell } from './engine-orchestration-shell.js
 import {
   planServertoolResponseStageGateWithNative,
   detectProviderResponseShapeWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   materializeServertoolResponseStageOrchestrationOutputWithNative,
   extractServertoolResponseStageOrchestrationShellResultWithNative,
   resolveServertoolResponseStageOrchestrationGateApplicationWithNative
-} from '../native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { readRuntimeControlFromAnyBoundMetadataCenter } from './metadata-center-carrier.js';
 
 type ChatCompletionLike = JsonObject;
