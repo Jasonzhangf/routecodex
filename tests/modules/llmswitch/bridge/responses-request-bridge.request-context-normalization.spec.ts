@@ -3,6 +3,7 @@ import { MetadataCenter } from '../../../../src/server/runtime/http-server/metad
 
 const mockCaptureReqInboundResponsesContextSnapshot = jest.fn();
 const mockPlanResponsesHandlerEntry = jest.fn();
+const mockMaterializeProviderOwnedSubmitContext = jest.fn();
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -20,6 +21,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   captureReqInboundResponsesContextSnapshot: mockCaptureReqInboundResponsesContextSnapshot,
+  materializeProviderOwnedSubmitContext: mockMaterializeProviderOwnedSubmitContext,
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
 }));
 
@@ -48,6 +50,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
       mode: 'none',
       responseId: undefined
     });
+    mockMaterializeProviderOwnedSubmitContext.mockReset();
   });
 
   it('RED: relay request context uses normalized native input instead of raw duplicate tool history', async () => {
@@ -206,6 +209,35 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('treats provider-owned submit_tool_outputs resume payload as context-free request state', async () => {
+    mockMaterializeProviderOwnedSubmitContext.mockResolvedValue({
+      payload: {
+        response_id: 'resp_submit_direct_1',
+        previous_response_id: 'resp_submit_direct_1',
+        tool_outputs: [
+          {
+            call_id: 'call_submit_direct_1',
+            output: '{"ok":true}'
+          }
+        ],
+        input: [
+          {
+            type: 'function_call_output',
+            call_id: 'call_submit_direct_1',
+            output: '{"ok":true}'
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'function_call_output',
+            call_id: 'call_submit_direct_1',
+            output: '{"ok":true}'
+          }
+        ]
+      }
+    });
+
     const context = await buildResponsesRequestContextForHttp({
       payload: {
         response_id: 'resp_submit_direct_1',
@@ -229,7 +261,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
     });
 
     expect(mockCaptureReqInboundResponsesContextSnapshot).not.toHaveBeenCalled();
-    expect(context).toEqual({
+    expect(mockMaterializeProviderOwnedSubmitContext).toHaveBeenCalledWith({
       payload: {
         response_id: 'resp_submit_direct_1',
         tool_outputs: [
@@ -238,9 +270,34 @@ describe('responses-request-bridge relay request-context normalization', () => {
             output: '{"ok":true}'
           }
         ]
+      }
+    });
+    expect(context).toEqual({
+      payload: {
+        response_id: 'resp_submit_direct_1',
+        previous_response_id: 'resp_submit_direct_1',
+        tool_outputs: [
+          {
+            call_id: 'call_submit_direct_1',
+            output: '{"ok":true}'
+          }
+        ],
+        input: [
+          {
+            type: 'function_call_output',
+            call_id: 'call_submit_direct_1',
+            output: '{"ok":true}'
+          }
+        ]
       },
       context: {
-        input: []
+        input: [
+          {
+            type: 'function_call_output',
+            call_id: 'call_submit_direct_1',
+            output: '{"ok":true}'
+          }
+        ]
       },
       sessionId: 'sess_submit_direct_1',
       conversationId: 'conv_submit_direct_1',

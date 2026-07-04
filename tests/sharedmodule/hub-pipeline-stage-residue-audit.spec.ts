@@ -4040,6 +4040,19 @@ describe('hub pipeline stage residue audit', () => {
     expect(storeSource).not.toContain('responsesResume');
   });
 
+  it('responses provider-owned submit context materialization must be native-owned', () => {
+    const repoRoot = process.cwd();
+    const bridgeSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-request-bridge.ts'),
+      'utf8'
+    );
+
+    expect(bridgeSource).toContain('materializeProviderOwnedSubmitContext');
+    expect(bridgeSource).not.toMatch(/tool_outputs[\s\S]{0,400}\.map\(/u);
+    expect(bridgeSource).not.toMatch(/type:\s*['"]function_call_output['"]/u);
+    expect(bridgeSource).not.toMatch(/tool_call_id[\s\S]{0,180}call_id/u);
+  });
+
   it('src-side JS source maps must not remain tracked generated artifacts', () => {
     const trackedSourceMaps = execFileSync(
       'git',

@@ -3387,6 +3387,7 @@ owners:
     canonical_builders:
       - resumeResponsesConversation
       - materializeLatestResponsesContinuationByScope
+      - materializeProviderOwnedSubmitContext
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/src/native/router-hotpath

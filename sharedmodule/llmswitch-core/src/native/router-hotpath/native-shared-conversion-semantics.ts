@@ -26,6 +26,7 @@ export {
   convertResponsesOutputToInputItemsWithNative,
   buildResponsesConversationScopePlanWithNative,
   enforceChatBudgetWithNative,
+  materializeProviderOwnedSubmitContextWithNative,
   materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,
   planResponsesHandlerEntryWithNative,

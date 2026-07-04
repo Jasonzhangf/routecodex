@@ -54,6 +54,9 @@ type NativeSharedConversionSemantics = {
     entryEndpoint?: string,
     responseIdFromPath?: string
   ) => { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: Record<string, unknown> };
+  materializeProviderOwnedSubmitContextWithNative?: (
+    payload: unknown
+  ) => { payload: Record<string, unknown>; context: { input: unknown[] } } | null;
   stripResponsesStoredContextInputMediaWithNative?: (
     inputEntries: unknown,
     placeholderText?: string
@@ -396,6 +399,9 @@ async function assertSharedBindings(): Promise<void> {
   if (typeof shared.planResponsesHandlerEntryWithNative !== 'function') {
     missing.push('planResponsesHandlerEntryJson');
   }
+  if (typeof shared.materializeProviderOwnedSubmitContextWithNative !== 'function') {
+    missing.push('materializeProviderOwnedSubmitContextJson');
+  }
   if (missing.length > 0) {
     throw new Error(`[llmswitch-bridge] native shared bindings missing: ${missing.join(', ')}`);
   }
@@ -736,6 +742,18 @@ export async function planResponsesHandlerEntry(
     throw new Error('[llmswitch-bridge] planResponsesHandlerEntryJson not available');
   }
   return fn(payload, entryEndpoint, responseIdFromPath) as { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: AnyRecord };
+}
+
+export async function materializeProviderOwnedSubmitContext(input: {
+  payload: Record<string, unknown>;
+}): Promise<{ payload: AnyRecord; context: { input: unknown[] } } | null> {
+  await assertSharedBindings();
+  const mod = await getSharedConversionSemantics();
+  const fn = mod.materializeProviderOwnedSubmitContextWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson not available');
+  }
+  return fn(input.payload) as { payload: AnyRecord; context: { input: unknown[] } } | null;
 }
 
 export async function buildAnthropicResponseFromChatJson(

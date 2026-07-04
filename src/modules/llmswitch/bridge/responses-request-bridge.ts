@@ -22,6 +22,7 @@ import {
 } from './runtime-integrations.js';
 import {
   captureReqInboundResponsesContextSnapshot,
+  materializeProviderOwnedSubmitContext,
   planResponsesHandlerEntry,
 } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
@@ -538,45 +539,15 @@ export async function buildResponsesRequestContextForHttp(args: {
       : undefined;
   const payloadForPersistence = stripRequestBodyMetadataForPipelineForHttp(args.payload);
   if (isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)) {
-    const providerOwnedInput = Array.isArray(payloadForPersistence.input) && payloadForPersistence.input.length > 0
-      ? payloadForPersistence.input
-      : Array.isArray(payloadForPersistence.tool_outputs)
-        ? payloadForPersistence.tool_outputs
-            .map((item) => {
-              if (!item || typeof item !== 'object' || Array.isArray(item)) {
-                return null;
-              }
-              const row = item as Record<string, unknown>;
-              const callId =
-                (typeof row.call_id === 'string' && row.call_id.trim())
-                  ? row.call_id.trim()
-                  : ((typeof row.tool_call_id === 'string' && row.tool_call_id.trim())
-                    ? row.tool_call_id.trim()
-                    : ((typeof row.id === 'string' && row.id.trim())
-                      ? row.id.trim()
-                      : undefined));
-              if (!callId) {
-                return null;
-              }
-              return {
-                type: 'function_call_output',
-                call_id: callId,
-                output: typeof row.output === 'string' ? row.output : JSON.stringify(row.output ?? ''),
-              };
-            })
-            .filter((item): item is { type: 'function_call_output'; call_id: string; output: string } => Boolean(item))
-        : [];
+    const materialized = await materializeProviderOwnedSubmitContext({
+      payload: payloadForPersistence,
+    });
+    if (!materialized) {
+      throw new Error('Responses provider-owned submit_tool_outputs context materialization failed');
+    }
     return {
-      payload: {
-        ...payloadForPersistence,
-        ...(typeof payloadForPersistence.response_id === 'string' && payloadForPersistence.response_id.trim()
-          ? { previous_response_id: payloadForPersistence.response_id.trim() }
-          : {}),
-        input: providerOwnedInput,
-      },
-      context: {
-        input: providerOwnedInput,
-      },
+      payload: materialized.payload,
+      context: materialized.context,
       sessionId: readResponsesSessionIdFromHttp(args.metadata),
       conversationId: readResponsesConversationIdFromHttp(args.metadata),
       ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
@@ -655,33 +626,9 @@ export async function prepareResponsesHandlerEntryForHttp(
         payload.previous_response_id = responseId;
       }
       if (!Array.isArray(payload.input) || payload.input.length === 0) {
-        const toolOutputs = Array.isArray(payload.tool_outputs) ? payload.tool_outputs : [];
-        const materializedInput = toolOutputs
-          .map((item) => {
-            if (!item || typeof item !== 'object' || Array.isArray(item)) {
-              return null;
-            }
-            const row = item as Record<string, unknown>;
-            const callId =
-              (typeof row.call_id === 'string' && row.call_id.trim())
-                ? row.call_id.trim()
-                : ((typeof row.tool_call_id === 'string' && row.tool_call_id.trim())
-                  ? row.tool_call_id.trim()
-                  : ((typeof row.id === 'string' && row.id.trim())
-                    ? row.id.trim()
-                    : undefined));
-            if (!callId) {
-              return null;
-            }
-            return {
-              type: 'function_call_output',
-              call_id: callId,
-              output: typeof row.output === 'string' ? row.output : JSON.stringify(row.output ?? ''),
-            };
-          })
-          .filter((item): item is { type: 'function_call_output'; call_id: string; output: string } => Boolean(item));
-        if (materializedInput.length > 0) {
-          payload.input = materializedInput;
+        const materialized = await materializeProviderOwnedSubmitContext({ payload });
+        if (materialized?.payload.input) {
+          payload.input = materialized.payload.input;
         }
       }
       pipelineEntryEndpoint = args.entryEndpoint;

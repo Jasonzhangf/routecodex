@@ -500,6 +500,58 @@ export function planResponsesHandlerEntryWithNative(
   }
 }
 
+export function materializeProviderOwnedSubmitContextWithNative(
+  payload: unknown
+): { payload: Record<string, unknown>; context: { input: unknown[] } } | null {
+  const capability = 'materializeProviderOwnedSubmitContextJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ payload: Record<string, unknown>; context: { input: unknown[] } } | null>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(payload ?? null);
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseJson(raw);
+    if (parsed === null) {
+      return null;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const record = parsed as Record<string, unknown>;
+    const plannedPayload = record.payload;
+    const context = record.context;
+    if (!plannedPayload || typeof plannedPayload !== 'object' || Array.isArray(plannedPayload)) {
+      return fail('invalid payload');
+    }
+    if (!context || typeof context !== 'object' || Array.isArray(context)) {
+      return fail('invalid context');
+    }
+    const input = (context as Record<string, unknown>).input;
+    if (!Array.isArray(input)) {
+      return fail('invalid context input');
+    }
+    return {
+      payload: plannedPayload as Record<string, unknown>,
+      context: { input },
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function resolveBudgetForModelWithNative(
   modelId: string,
   fallback: { maxBytes: number; safetyRatio: number; allowedBytes: number; source: string } | null | undefined

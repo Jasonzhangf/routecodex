@@ -1284,6 +1284,55 @@ fn normalize_responses_handler_submit_payload(
     Ok((Some(response_id), Value::Object(normalized)))
 }
 
+fn materialize_provider_owned_submit_context(payload: &Value) -> Value {
+    let Some(payload_obj) = payload.as_object() else {
+        return Value::Null;
+    };
+    let Some(response_id) = read_trimmed_string(payload_obj.get("response_id")) else {
+        return Value::Null;
+    };
+    let Some(tool_outputs) = payload_obj.get("tool_outputs").and_then(Value::as_array) else {
+        return Value::Null;
+    };
+
+    let input = if payload_obj
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty())
+    {
+        normalize_responses_history_items(clone_array(payload_obj.get("input")))
+    } else {
+        tool_outputs
+            .iter()
+            .filter_map(|item| {
+                let row = item.as_object()?;
+                let call_id = read_trimmed_string(row.get("call_id"))
+                    .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                    .or_else(|| read_trimmed_string(row.get("id")))?;
+                Some(serde_json::json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": stringify_responses_tool_output(row.get("output")),
+                }))
+            })
+            .collect::<Vec<Value>>()
+    };
+
+    let mut normalized_payload = payload_obj.clone();
+    normalized_payload.insert(
+        "previous_response_id".to_string(),
+        Value::String(response_id),
+    );
+    normalized_payload.insert("input".to_string(), Value::Array(input.clone()));
+
+    serde_json::json!({
+        "payload": Value::Object(normalized_payload),
+        "context": {
+            "input": input,
+        }
+    })
+}
+
 fn plan_responses_handler_entry(
     payload: &Value,
     entry_endpoint: Option<&str>,
@@ -2661,6 +2710,14 @@ pub fn plan_responses_handler_entry_json(
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi]
+pub fn materialize_provider_owned_submit_context_json(payload_json: String) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = materialize_provider_owned_submit_context(&payload);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn read_metadata_center_section<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
     if let Some(center) = context
         .as_object()
@@ -2821,10 +2878,10 @@ pub fn publish_responses_record_plan_json(
 mod tests {
     use super::{
         build_responses_conversation_scope_plan, build_stop_hook_guidance_text_from_output,
-        convert_responses_output_to_input_items, materialize_responses_continuation_payload,
-        plan_responses_handler_entry, prepare_responses_conversation_entry,
-        publish_responses_record_plan_json, restore_responses_continuation_payload,
-        resume_responses_conversation_payload,
+        convert_responses_output_to_input_items, materialize_provider_owned_submit_context,
+        materialize_responses_continuation_payload, plan_responses_handler_entry,
+        prepare_responses_conversation_entry, publish_responses_record_plan_json,
+        restore_responses_continuation_payload, resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
 
@@ -2990,6 +3047,58 @@ mod tests {
             json!("call_submit_1")
         );
         assert!(planned["payload"].get("input").is_none());
+    }
+
+    #[test]
+    fn provider_owned_submit_context_materializes_tool_outputs_in_rust() {
+        let planned = materialize_provider_owned_submit_context(&json!({
+            "response_id": "resp_submit_direct_1",
+            "tool_outputs": [
+                { "call_id": "call_submit_direct_1", "output": { "ok": true } },
+                { "tool_call_id": "call_submit_direct_2", "output": "done" }
+            ]
+        }));
+
+        assert_eq!(
+            planned["payload"]["previous_response_id"],
+            json!("resp_submit_direct_1")
+        );
+        assert_eq!(
+            planned["payload"]["input"],
+            json!([
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_submit_direct_1",
+                    "output": "{\"ok\":true}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_submit_direct_2",
+                    "output": "done"
+                }
+            ])
+        );
+        assert_eq!(planned["context"]["input"], planned["payload"]["input"]);
+    }
+
+    #[test]
+    fn provider_owned_submit_context_preserves_existing_input() {
+        let planned = materialize_provider_owned_submit_context(&json!({
+            "response_id": "resp_submit_direct_2",
+            "tool_outputs": [
+                { "call_id": "call_ignored", "output": "ignored" }
+            ],
+            "input": [
+                { "type": "function_call_output", "call_id": "call_existing", "output": "kept" }
+            ]
+        }));
+
+        assert_eq!(
+            planned["payload"]["input"],
+            json!([
+                { "type": "function_call_output", "call_id": "call_existing", "output": "kept" }
+            ])
+        );
     }
 
     #[test]
