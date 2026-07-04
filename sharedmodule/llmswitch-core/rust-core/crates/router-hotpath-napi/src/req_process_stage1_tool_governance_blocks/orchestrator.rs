@@ -423,6 +423,76 @@ fn latest_stopless_cli_output(request: &Map<String, Value>) -> Option<Map<String
         .or_else(|| latest_stopless_cli_output_from_items(request.get("messages")))
 }
 
+fn latest_stopless_cli_output_from_resume(resume: Option<&Value>) -> Option<Map<String, Value>> {
+    let resume_obj = resume?.as_object()?;
+    if let Some(items) = resume_obj
+        .get("toolOutputsDetailed")
+        .or_else(|| resume_obj.get("tool_outputs_detailed"))
+        .and_then(Value::as_array)
+    {
+        for item in items.iter().rev() {
+            let Some(row) = item.as_object() else {
+                continue;
+            };
+            let output = row
+                .get("outputText")
+                .or_else(|| row.get("output_text"))
+                .or_else(|| row.get("output"));
+            if let Some(parsed) = output.and_then(parse_stopless_cli_output) {
+                return Some(parsed);
+            }
+        }
+    }
+
+    let outputs = resume_obj
+        .get("toolContinuation")
+        .or_else(|| resume_obj.get("tool_continuation"))
+        .and_then(Value::as_object)
+        .and_then(|tool| {
+            tool.get("resumeOutputs")
+                .or_else(|| tool.get("resume_outputs"))
+        })
+        .and_then(Value::as_array);
+    if let Some(outputs) = outputs {
+        for output in outputs.iter().rev() {
+            if let Some(parsed) = parse_stopless_cli_output(output) {
+                return Some(parsed);
+            }
+        }
+    }
+    None
+}
+
+fn latest_stopless_cli_output_from_request_semantics(
+    request: &Map<String, Value>,
+) -> Option<Map<String, Value>> {
+    let semantics = request.get("semantics").and_then(Value::as_object)?;
+    latest_stopless_cli_output_from_items(semantics.get("input"))
+        .or_else(|| {
+            latest_stopless_cli_output_from_resume(
+                semantics
+                    .get("responses")
+                    .and_then(Value::as_object)
+                    .and_then(|responses| responses.get("resume")),
+            )
+        })
+        .or_else(|| latest_stopless_cli_output_from_resume(semantics.get("continuation")))
+}
+
+fn request_truth_session_id(metadata_center: &MetadataCenter) -> Option<String> {
+    metadata_center
+        .request_truth
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn has_request_truth_session_id(metadata_center: &MetadataCenter) -> bool {
+    request_truth_session_id(metadata_center).is_some()
+}
+
 fn read_nested_string_field<'a>(
     row: &'a Map<String, Value>,
     owner: &str,
@@ -463,6 +533,7 @@ fn build_stopless_runtime_control_from_cli(
     row: &Map<String, Value>,
     metadata_center: &MetadataCenter,
 ) -> Option<Value> {
+    let session_id = request_truth_session_id(metadata_center)?;
     let repeat_count = read_u64_field(row, "repeatCount", "repeat_count").or_else(|| {
         row.get("input")
             .and_then(Value::as_object)
@@ -510,18 +581,7 @@ fn build_stopless_runtime_control_from_cli(
 
     let mut stopless = Map::new();
     stopless.insert("flowId".to_string(), Value::String(flow_id));
-    if let Some(session_id) = metadata_center
-        .request_truth
-        .session_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        stopless.insert(
-            "sessionId".to_string(),
-            Value::String(session_id.to_string()),
-        );
-    }
+    stopless.insert("sessionId".to_string(), Value::String(session_id));
     stopless.insert(
         "repeatCount".to_string(),
         Value::Number(repeat_count.into()),
@@ -544,14 +604,16 @@ fn build_stopless_runtime_control_from_cli(
     Some(Value::Object(stopless))
 }
 
-fn build_initial_stopless_runtime_control() -> Value {
-    serde_json::json!({
+fn build_initial_stopless_runtime_control(metadata_center: &MetadataCenter) -> Option<Value> {
+    let session_id = request_truth_session_id(metadata_center)?;
+    Some(serde_json::json!({
         "flowId": "stop_message_flow",
+        "sessionId": session_id,
         "repeatCount": 0,
         "maxRepeats": 3,
         "active": true,
         "updatedAt": now_millis()
-    })
+    }))
 }
 
 fn write_stopless_runtime_control(metadata: &mut Map<String, Value>, stopless: Value) {
@@ -684,14 +746,18 @@ pub fn apply_req_process_tool_governance(
     let metadata_center = build_metadata_center_from_snapshot(&input.metadata_center_snapshot);
     let mut request = normalize_record(lifted_request);
     apply_chat_process_request_sanitizer(&mut request);
+    let has_current_session_id = has_request_truth_session_id(&metadata_center);
     let has_terminal_stopless_turn = request_has_terminal_stopless_output(&request)
         || metadata_has_terminal_stopless_runtime_control(&metadata);
-    if let Some(stopless) = latest_stopless_cli_output(&request)
+    let stopless_cli_output = latest_stopless_cli_output(&request)
+        .or_else(|| latest_stopless_cli_output_from_request_semantics(&request));
+    if let Some(stopless) = stopless_cli_output
         .as_ref()
         .and_then(|row| build_stopless_runtime_control_from_cli(row, &metadata_center))
     {
         write_stopless_runtime_control(&mut metadata, stopless);
-    } else if should_inject_stopless_system_instruction(&metadata_center)
+    } else if has_current_session_id
+        && should_inject_stopless_system_instruction(&metadata_center)
         && !has_terminal_stopless_turn
         && metadata
             .get("runtime_control")
@@ -699,12 +765,17 @@ pub fn apply_req_process_tool_governance(
             .and_then(|runtime_control| runtime_control.get("stopless"))
             .is_none()
     {
-        write_stopless_runtime_control(&mut metadata, build_initial_stopless_runtime_control());
+        if let Some(stopless) = build_initial_stopless_runtime_control(&metadata_center) {
+            write_stopless_runtime_control(&mut metadata, stopless);
+        }
     }
     if has_terminal_stopless_turn {
         strip_stopless_terminal_controls(&mut request);
     }
-    if should_inject_stopless_system_instruction(&metadata_center) && !has_terminal_stopless_turn {
+    if has_current_session_id
+        && should_inject_stopless_system_instruction(&metadata_center)
+        && !has_terminal_stopless_turn
+    {
         inject_stopless_system_instruction(&mut request);
         inject_reasoning_stop_tool(&mut request);
     }

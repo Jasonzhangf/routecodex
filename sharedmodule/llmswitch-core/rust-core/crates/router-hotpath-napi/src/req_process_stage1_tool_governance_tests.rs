@@ -88,6 +88,219 @@ fn test_req_chatprocess_entry_lifts_responses_resume_and_tombstones_metadata() {
 }
 
 #[test]
+fn test_req_chatprocess_restores_stopless_count_from_responses_resume_tool_output() {
+    let stopless_stdout = serde_json::json!({
+        "ok": true,
+        "toolName": "stop_message_auto",
+        "flowId": "stop_message_flow",
+        "repeatCount": 1,
+        "maxRepeats": 3,
+        "continuationPrompt": "继续执行原任务",
+        "schemaFeedback": {
+            "reasonCode": "stop_schema_next_step_missing",
+            "missingFields": ["next_step"]
+        },
+        "input": {
+            "flowId": "stop_message_flow",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "triggerHint": "invalid_schema"
+        }
+    });
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4o",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{"type": "input_text", "text": "continue"}]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses.submit_tool_outputs",
+          "responsesResume": {
+            "previousRequestId": "req_prev",
+            "restoredFromResponseId": "resp_prev",
+            "routeHint": "thinking",
+            "toolOutputsDetailed": [
+              {
+                "callId": "call_stopless_cli_1",
+                "outputText": stopless_stdout.to_string()
+              }
+            ]
+          }
+        }),
+        entry_endpoint: "/v1/responses.submit_tool_outputs".to_string(),
+        request_id: "req_chatprocess_stopless_resume_count".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_chatprocess_stopless_resume_count",
+            "sessionId": "sess_chatprocess_stopless_resume_count"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(stopless["repeatCount"], serde_json::json!(1));
+    assert_eq!(stopless["maxRepeats"], serde_json::json!(3));
+    assert_eq!(
+        stopless["sessionId"],
+        serde_json::json!("sess_chatprocess_stopless_resume_count")
+    );
+    assert_eq!(stopless["triggerHint"], serde_json::json!("invalid_schema"));
+    assert_eq!(
+        stopless["schemaFeedback"]["reasonCode"],
+        serde_json::json!("stop_schema_next_step_missing")
+    );
+    assert_ne!(stopless["repeatCount"], serde_json::json!(0));
+}
+
+#[test]
+fn test_req_chatprocess_restores_stopless_count_from_semantics_input_tool_output() {
+    let stopless_stdout = serde_json::json!({
+        "ok": true,
+        "toolName": "stop_message_auto",
+        "flowId": "stop_message_flow",
+        "repeatCount": 1,
+        "maxRepeats": 3,
+        "continuationPrompt": "继续执行原任务",
+        "schemaFeedback": {
+            "reasonCode": "stop_schema_next_step_missing",
+            "missingFields": ["next_step"]
+        },
+        "input": {
+            "flowId": "stop_message_flow",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "triggerHint": "invalid_schema"
+        }
+    });
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4o",
+          "messages": [
+            {
+              "role": "user",
+              "content": "上一轮 invalid schema 已转成自然语言指导。"
+            }
+          ],
+          "semantics": {
+            "input": [
+              {
+                "type": "function_call_output",
+                "call_id": "call_stopless_cli_1",
+                "output": stopless_stdout.to_string()
+              }
+            ]
+          }
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses.submit_tool_outputs",
+          "runtime_control": {
+            "stopless": {
+              "flowId": "stop_message_flow",
+              "repeatCount": 0,
+              "maxRepeats": 3,
+              "active": true
+            }
+          }
+        }),
+        entry_endpoint: "/v1/responses.submit_tool_outputs".to_string(),
+        request_id: "req_chatprocess_stopless_semantics_input_count".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_chatprocess_stopless_semantics_input_count",
+            "sessionId": "sess_chatprocess_stopless_semantics_input_count"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(stopless["repeatCount"], serde_json::json!(1));
+    assert_eq!(stopless["maxRepeats"], serde_json::json!(3));
+    assert_eq!(
+        stopless["sessionId"],
+        serde_json::json!("sess_chatprocess_stopless_semantics_input_count")
+    );
+    assert_eq!(stopless["triggerHint"], serde_json::json!("invalid_schema"));
+    assert_eq!(
+        stopless["schemaFeedback"]["reasonCode"],
+        serde_json::json!("stop_schema_next_step_missing")
+    );
+}
+
+#[test]
+fn test_req_chatprocess_missing_session_id_does_not_write_stopless_state() {
+    let stopless_stdout = serde_json::json!({
+        "ok": true,
+        "toolName": "stop_message_auto",
+        "flowId": "stop_message_flow",
+        "repeatCount": 1,
+        "maxRepeats": 3,
+        "input": {
+            "flowId": "stop_message_flow",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "triggerHint": "invalid_schema"
+        }
+    });
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4o",
+          "input": [
+            {
+              "type": "function_call_output",
+              "call_id": "call_stopless_cli_1",
+              "output": stopless_stdout.to_string()
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses.submit_tool_outputs"
+        }),
+        entry_endpoint: "/v1/responses.submit_tool_outputs".to_string(),
+        request_id: "req_chatprocess_stopless_missing_session".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_chatprocess_stopless_missing_session"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    assert!(
+        result.metadata["runtime_control"].get("stopless").is_none(),
+        "missing request-truth sessionId must not write stopless runtime state: {}",
+        result.metadata
+    );
+}
+
+#[test]
 fn test_req_process_responses_input_materializes_stopless_instructions_when_client_inject_ready() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
@@ -109,6 +322,9 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
         request_id: "req_stopless_responses_instruction".to_string(),
         has_active_stop_message_for_continue_execution: None,
         metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "sessionId": "sess_stopless_responses_instruction"
+          },
           "runtimeControl": {
             "stopMessage": {
               "enabled": true
@@ -178,6 +394,9 @@ fn test_req_process_prefers_metadata_center_snapshot_for_stop_message_injection(
         request_id: "req_stopless_snapshot_injection".to_string(),
         has_active_stop_message_for_continue_execution: None,
         metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "sessionId": "sess_stopless_snapshot_injection"
+          },
           "runtimeControl": {
             "stopMessage": {
               "enabled": true
@@ -264,6 +483,9 @@ fn test_req_process_replaces_stale_top_level_stopless_responses_instructions() {
         request_id: "req_stopless_responses_instruction_dedup".to_string(),
         has_active_stop_message_for_continue_execution: None,
         metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "sessionId": "sess_stopless_responses_instruction_dedup"
+          },
           "runtimeControl": {
             "stopMessage": {
               "enabled": true
@@ -304,6 +526,9 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
         request_id: "req_stopless_responses_input".to_string(),
         has_active_stop_message_for_continue_execution: None,
         metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "sessionId": "sess_stopless_responses_input"
+          },
           "runtimeControl": {
             "stopMessage": {
               "enabled": true
@@ -344,6 +569,9 @@ fn test_req_process_responses_input_materializes_stopless_instructions_without_c
         request_id: "req_stopless_responses_no_tmux_inject".to_string(),
         has_active_stop_message_for_continue_execution: None,
         metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "sessionId": "sess_stopless_responses_no_tmux_inject"
+          },
           "runtimeControl": {
             "stopMessage": {
               "enabled": true
@@ -929,6 +1157,9 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
         request_id: "req_reasoning_stop_tool_schema".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
         metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "sessionId": "sess_reasoning_stop_tool_schema"
+          },
           "runtimeControl": {
             "stopMessage": {
               "enabled": true
@@ -1442,6 +1673,9 @@ fn test_captured_tool_results_alone_no_longer_strip_reasoning_stop_controls() {
         request_id: "req_reasoning_stop_schema_pass_captured_legacy_only".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
         metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "sessionId": "sess_reasoning_stop_schema_pass_captured_legacy_only"
+          },
           "runtimeControl": {
             "stopMessage": {
               "enabled": true
