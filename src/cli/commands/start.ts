@@ -15,7 +15,8 @@ import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
   clearDaemonStopIntent,
-  consumeDaemonStopIntent
+  consumeDaemonStopIntent,
+  writeDaemonStopIntent
 } from '../../utils/daemon-stop-intent.js';
 import { writeServerPidCache } from '../../utils/server-runtime-pid.js';
 import {
@@ -116,6 +117,93 @@ function resolveStartConfigLogDir(args: {
   return args.pathImpl.join(userDir, 'log', configSegment);
 }
 
+type StartPortGroupLock = {
+  acquired: boolean;
+  lockPath: string;
+  release: () => void;
+};
+
+function resolveStartPortGroupLockPath(args: {
+  pathImpl: typeof path;
+  routeCodexHomeDir: string;
+  ports: number[];
+}): string {
+  const normalizedPorts = [...new Set(
+    args.ports
+      .map((port) => Math.floor(Number(port)))
+      .filter((port) => Number.isFinite(port) && port > 0)
+  )].sort((a, b) => a - b);
+  const key = normalizedPorts.length ? normalizedPorts.join('-') : 'unknown';
+  return args.pathImpl.join(
+    args.routeCodexHomeDir,
+    'state',
+    'runtime-lifecycle',
+    'start-locks',
+    `${key}.lock`
+  );
+}
+
+function acquireStartPortGroupLock(args: {
+  fsImpl: typeof fs;
+  pathImpl: typeof path;
+  routeCodexHomeDir: string;
+  ports: number[];
+  staleMs?: number;
+}): StartPortGroupLock {
+  const lockPath = resolveStartPortGroupLockPath(args);
+  const staleMs = Number.isFinite(args.staleMs as number) && Number(args.staleMs) > 0
+    ? Math.floor(Number(args.staleMs))
+    : 120_000;
+  const release = () => {
+    try {
+      if (args.fsImpl.existsSync(lockPath)) {
+        const raw = args.fsImpl.readFileSync(lockPath, 'utf8');
+        const parsed = JSON.parse(String(raw || '{}')) as { pid?: number };
+        if (Number(parsed?.pid) === process.pid) {
+          args.fsImpl.unlinkSync(lockPath);
+        }
+      }
+    } catch {
+      // lock release is best-effort; stale locks are reaped by age
+    }
+  };
+  try {
+    const dirname =
+      typeof args.pathImpl.dirname === 'function'
+        ? args.pathImpl.dirname.bind(args.pathImpl)
+        : path.dirname;
+    args.fsImpl.mkdirSync(dirname(lockPath), { recursive: true });
+    if (args.fsImpl.existsSync(lockPath)) {
+      try {
+        const stat = args.fsImpl.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          args.fsImpl.unlinkSync(lockPath);
+        }
+      } catch {
+        // Keep the existing lock if it cannot be inspected safely.
+      }
+    }
+    const fd = args.fsImpl.openSync(lockPath, 'wx');
+    try {
+      const record = {
+        pid: process.pid,
+        ports: [...new Set(args.ports)].sort((a, b) => a - b),
+        startedAtMs: Date.now()
+      };
+      args.fsImpl.writeFileSync(fd, JSON.stringify(record), 'utf8');
+    } finally {
+      args.fsImpl.closeSync(fd);
+    }
+    return { acquired: true, lockPath, release };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === 'EEXIST') {
+      return { acquired: false, lockPath, release: () => {} };
+    }
+    return { acquired: true, lockPath, release: () => {} };
+  }
+}
+
 function readChildStartupExitState(args: {
   port: number;
   routeCodexHomeDir?: string;
@@ -162,6 +250,14 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
       const fsImpl = ctx.fsImpl ?? fs;
       const pathImpl = ctx.pathImpl ?? path;
       const home = ctx.homedir ?? (() => homedir());
+      let startPortGroupLock: StartPortGroupLock | null = null;
+      const releaseStartPortGroupLock = (): void => {
+        if (!startPortGroupLock) {
+          return;
+        }
+        startPortGroupLock.release();
+        startPortGroupLock = null;
+      };
       try {
         const runMode = normalizeRunMode(options.mode) ?? 'router';
         ctx.env.RCC_MODE = runMode;
@@ -374,10 +470,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         if (effectivePortGroup.length > 1) {
           spinner.info(`[start] resolved config port-group: ${effectivePortGroup.join(', ')}`);
         }
-        for (const p of effectivePortGroup) {
-          await ctx.ensurePortAvailable(p, spinner, { restart: shouldRestart });
-        }
-
+        const routeCodexHome = resolveRccUserDir(home());
         const resolveServerHost = (): string => {
           if (typeof config?.httpserver?.host === 'string' && config.httpserver.host.trim()) {return config.httpserver.host;}
           if (typeof config?.server?.host === 'string' && config.server.host.trim()) {return config.server.host;}
@@ -385,6 +478,53 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           return LOCAL_HOSTS.LOCALHOST;
         };
         const serverHost = resolveServerHost();
+        const daemonEnabled = !ctx.isDevPackage && resolveReleaseDaemonEnabled(ctx.env);
+        const daemonSupervisor = daemonEnabled && isDaemonSupervisorProcess(ctx.env);
+        const daemonRestartDelayMs = resolveDaemonRestartDelayMs(ctx.env);
+        if (shouldRestart && !daemonSupervisor) {
+          startPortGroupLock = acquireStartPortGroupLock({
+            fsImpl,
+            pathImpl,
+            routeCodexHomeDir: routeCodexHome,
+            ports: effectivePortGroup
+          });
+          if (!startPortGroupLock.acquired) {
+            spinner.info(`[start] another start is already taking over port-group: ${effectivePortGroup.join(', ')}`);
+            const waitMsRaw = String(ctx.env.ROUTECODEX_START_LOCK_WAIT_MS ?? ctx.env.RCC_START_LOCK_WAIT_MS ?? '').trim();
+            const waitMsParsed = Number(waitMsRaw);
+            const waitMs = Number.isFinite(waitMsParsed) && waitMsParsed >= 1000 ? Math.floor(waitMsParsed) : 60_000;
+            const deadline = Date.now() + waitMs;
+            while (Date.now() < deadline) {
+              for (const host of buildLocalProbeHostCandidates(serverHost)) {
+                const probe = await probeRouteCodexHealth({
+                  fetchImpl: ctx.fetch,
+                  host,
+                  port: resolvedPort,
+                  timeoutMs: 800
+                });
+                if (probe.ok) {
+                  spinner.succeed(`RouteCodex is already running on ${serverHost}:${resolvedPort}`);
+                  ctx.logger.info(`Configuration loaded from: ${configPath}`);
+                  ctx.exit(0);
+                }
+              }
+              await ctx.sleep(250);
+            }
+            throw new Error(`Another rcc start is still taking over port-group ${effectivePortGroup.join(', ')}`);
+          }
+        }
+        if (shouldRestart && !daemonEnabled && !daemonSupervisor) {
+          for (const p of effectivePortGroup) {
+            writeDaemonStopIntent(p, {
+              source: 'cli.start.restart_takeover',
+              routeCodexHomeDir: routeCodexHome,
+              pid: process.pid
+            });
+          }
+        }
+        for (const p of effectivePortGroup) {
+          await ctx.ensurePortAvailable(p, spinner, { restart: shouldRestart });
+        }
 
         const isMultiPortGroup = effectivePortGroup.length > 1;
         if (!isMultiPortGroup) {
@@ -458,7 +598,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         const args: string[] = [serverEntry, modulesConfigPath];
 
-        const routeCodexHome = resolveRccUserDir(home());
         const defaultPrecommand = ensureDefaultPrecommandScriptBestEffort({
           fsImpl,
           pathImpl,
@@ -550,10 +689,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           };
         };
 
-        const daemonEnabled = !ctx.isDevPackage && resolveReleaseDaemonEnabled(ctx.env);
-        const daemonSupervisor = daemonEnabled && isDaemonSupervisorProcess(ctx.env);
-        const daemonRestartDelayMs = resolveDaemonRestartDelayMs(ctx.env);
-
         if (daemonEnabled && !daemonSupervisor) {
           const cliEntry = (() => {
             const resolved = ctx.resolveCliEntryPath?.();
@@ -598,6 +733,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           } else {
             ctx.logger.info('Use `rcc stop` to stop.');
           }
+          releaseStartPortGroupLock();
           ctx.exit(0);
         }
 
@@ -989,6 +1125,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                 port: resolvedPort
               });
             }
+            releaseStartPortGroupLock();
             if (signal) {ctx.exit(0);}
             ctx.exit(code ?? 0);
           });
@@ -1022,7 +1159,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           return proc;
         };
 
-        spawnChild();
+        const initialChild = spawnChild();
 
         spinner.succeed(`RouteCodex server starting on ${serverHost}:${resolvedPort}`);
         ctx.logger.info(`Configuration loaded from: ${configPath}`);
@@ -1031,6 +1168,21 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           ctx.logger.info(`Server log file: ${serverLogPath}`);
         }
         ctx.logger.info('Press Ctrl+C to stop the server');
+
+        void (async () => {
+          const probe = await waitForChildHealthyOrExit(initialChild, Date.now() + 60_000);
+          if (probe.healthy) {
+            try {
+              updateRuntimeInstanceStatus({ port: resolvedPort, status: 'healthy', routeCodexHomeDir: routeCodexHome });
+            } catch (error) {
+              logStartNonBlocking(ctx, 'update_runtime_instance.healthy_initial', error, { port: resolvedPort });
+            }
+            for (const p of effectivePortGroup) {
+              clearDaemonStopIntent(p, routeCodexHome);
+            }
+          }
+          releaseStartPortGroupLock();
+        })();
 
         const shutdown = async (sig: NodeJS.Signals) => {
           shutdownSignalCount += 1;
@@ -1046,6 +1198,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               });
             }
             closeServerLogStream();
+            releaseStartPortGroupLock();
             try {
               cleanupKeypress();
             } catch (error) {
@@ -1174,6 +1327,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             }
           } catch (error) {
             closeServerLogStream();
+            releaseStartPortGroupLock();
             ctx.logger.error(error instanceof Error ? error.message : String(error));
             ctx.exit(1);
           }
@@ -1186,6 +1340,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         cleanupKeypress = ctx.setupKeypress(() => { void shutdown('SIGINT'); });
         await ctx.waitForever();
       } catch (error) {
+        releaseStartPortGroupLock();
         if (error instanceof Error && /^exit:\d+$/.test(error.message)) {
           throw error;
         }

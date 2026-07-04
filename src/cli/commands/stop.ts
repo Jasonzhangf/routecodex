@@ -318,6 +318,25 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
             throw new Error(`guardian lifecycle apply rejected (${event.action})`);
           }
         };
+        const reportLifecycleNonBlocking = async (
+          event: GuardianLifecycleEvent,
+          resolvedPort: number
+        ): Promise<void> => {
+          try {
+            await reportLifecycle(event);
+          } catch (error) {
+            logProcessLifecycleSync({
+              event: 'stop_guardian_lifecycle',
+              source: 'cli.stop',
+              details: {
+                result: 'guardian_lifecycle_rejected_non_blocking',
+                action: event.action,
+                port: resolvedPort,
+                error: error instanceof Error ? error.message : String(error)
+              }
+            });
+          }
+        };
         const finalizeStop = async (resolvedPort: number): Promise<void> => {
           try {
             await reportLifecycle({
@@ -429,12 +448,12 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
             continue;
           }
 
-          await reportLifecycle({
+          await reportLifecycleNonBlocking({
             action: 'stop_http_shutdown_request',
             source: 'cli.stop',
             actorPid: process.pid,
             metadata: { port: resolvedPort }
-          });
+          }, resolvedPort);
           const httpShutdownAccepted = await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
           const gracefulDeadline = Date.now() + 3000;
           let stopped = false;

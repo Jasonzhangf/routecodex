@@ -302,6 +302,49 @@ describe('cli server port-utils', () => {
     }
   });
 
+  it('ensurePortAvailableImpl does not send shutdown before confirming the port is occupied', async () => {
+    const probe = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.listen({ host: '0.0.0.0', port: 0 }, () => resolve());
+      probe.once('error', reject);
+    });
+    const address = probe.address();
+    const freePort = typeof address === 'object' && address ? address.port : 0;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    const spinner = {
+      start: () => spinner,
+      succeed: () => {},
+      fail: () => {},
+      warn: () => {},
+      info: () => {},
+      stop: () => {},
+      text: ''
+    };
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+    let fetchCalled = false;
+
+    await ensurePortAvailableImpl({
+      port: freePort,
+      parentSpinner: spinner,
+      opts: { restart: true },
+      fetchImpl: (async () => {
+        fetchCalled = true;
+        return { ok: false };
+      }) as any,
+      sleep: async () => {},
+      env: {},
+      logger,
+      createSpinner: async () => spinner,
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      isServerHealthyQuick: async () => false,
+      exit: (() => { throw new Error('exit should not be called'); }) as any
+    });
+
+    expect(fetchCalled).toBe(false);
+  });
+
   it('ensurePortAvailableImpl uses in-place restart and exits in build restart-only mode', async () => {
     const probe = net.createServer();
     await new Promise<void>((resolve, reject) => {

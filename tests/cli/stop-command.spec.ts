@@ -179,6 +179,45 @@ describe('cli stop command', () => {
     await expect(program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' })).resolves.toBe(program);
   });
 
+  it('does not fail pid-based stop when guardian lifecycle reporting is unavailable', async () => {
+    const program = new Command();
+    let pidChecks = 0;
+    const shutdownPorts: number[] = [];
+    createStopCommand(program, {
+      isDevPackage: true,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: () => {
+        pidChecks += 1;
+        return pidChecks === 1 ? [12345] : [];
+      },
+      killPidBestEffort: () => {},
+      sleep: async () => {},
+      stopGuardianDaemon: async () => {
+        throw new Error('guardian unavailable');
+      },
+      reportGuardianLifecycle: async () => {
+        throw new Error('guardian lifecycle unavailable');
+      },
+      fetchImpl: (async (url: string | URL | Request) => {
+        const text = String(url);
+        if (text.endsWith('/shutdown')) {
+          shutdownPorts.push(Number(new URL(text).port));
+          return { ok: true, status: 200 };
+        }
+        throw new Error('server stopped');
+      }) as any,
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' })).resolves.toBe(program);
+    expect(shutdownPorts).toEqual([5520]);
+  });
+
   it('release stop expands a matched config port to the full port group and shuts down healthy no-pid servers', async () => {
     const previousConfig = process.env.ROUTECODEX_CONFIG_PATH;
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stop-command-'));
@@ -232,6 +271,74 @@ port = 10000
 
       await program.parseAsync(['node', 'rcc', 'stop'], { from: 'node' });
       expect(shutdownPorts).toEqual([4444, 5520, 5555, 10000]);
+    } finally {
+      if (previousConfig === undefined) {
+        delete process.env.ROUTECODEX_CONFIG_PATH;
+      } else {
+        process.env.ROUTECODEX_CONFIG_PATH = previousConfig;
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('release stop treats later no-pid group ports as stopped after an earlier shutdown closes the process', async () => {
+    const previousConfig = process.env.ROUTECODEX_CONFIG_PATH;
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stop-command-'));
+    const configPath = path.join(tempDir, 'config.toml');
+    fs.writeFileSync(configPath, `
+[httpserver]
+port = 5520
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+port = 4444
+
+[[httpserver.ports]]
+port = 5520
+`);
+    process.env.ROUTECODEX_CONFIG_PATH = configPath;
+    const program = new Command();
+    const succeeded: string[] = [];
+    const shutdownPorts: number[] = [];
+
+    try {
+      createStopCommand(program, {
+        isDevPackage: false,
+        defaultDevPort: 5520,
+        createSpinner: async () =>
+          ({
+            ...createStubSpinner(),
+            succeed: (msg?: string) => {
+              if (msg) succeeded.push(msg);
+            }
+          }) as any,
+        logger: { info: () => {}, error: () => {} },
+        findListeningPids: () => [],
+        killPidBestEffort: () => {},
+        sleep: async () => {},
+        env: {},
+        fsImpl: fs,
+        pathImpl: { join: (...parts: string[]) => parts.join('/') },
+        getHomeDir: () => '/home/test',
+        fetchImpl: (async (url: string | URL | Request) => {
+          const text = String(url);
+          const parsed = new URL(text);
+          const port = Number(parsed.port);
+          if (text.endsWith('/shutdown') && port === 4444) {
+            shutdownPorts.push(port);
+            return { ok: true, status: 200 };
+          }
+          throw new Error('network_error');
+        }) as any,
+        exit: (code) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await program.parseAsync(['node', 'rcc', 'stop'], { from: 'node' });
+      expect(shutdownPorts).toEqual([4444]);
+      expect(succeeded.join('\n')).toContain('RouteCodex server stopped on 4444');
+      expect(succeeded.join('\n')).toContain('No server listening on 5520');
     } finally {
       if (previousConfig === undefined) {
         delete process.env.ROUTECODEX_CONFIG_PATH;

@@ -202,10 +202,8 @@ export async function ensurePortAvailableImpl(args: {
     });
   };
 
-  // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6.
-  // This is restart-only behavior; plain `rcc start` must not disrupt existing servers.
-  // In build-restart-only mode, never send shutdown requests.
-  if (opts.restart && !buildRestartOnly) {
+  const attemptConfirmedHttpShutdown = async (): Promise<boolean> => {
+    let accepted = false;
     try {
       const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
       for (const h of candidates) {
@@ -244,6 +242,8 @@ export async function ensurePortAvailableImpl(args: {
               'x-routecodex-stop-caller-cwd': process.cwd(),
               'x-routecodex-stop-caller-cmd': process.argv.join(' ').slice(0, 1024)
             }
+          }).then((response) => {
+            accepted = accepted || Boolean((response as { ok?: boolean })?.ok);
           }).catch((error) => {
             logProcessLifecycle({
               event: 'port_http_shutdown',
@@ -264,13 +264,13 @@ export async function ensurePortAvailableImpl(args: {
           });
         }
       }
-      await args.sleep(300);
     } catch (shutdownError) {
       logPortUtilsNonBlockingError('ensurePortAvailableImpl.gracefulHttpShutdown', shutdownError, {
         port
       });
     }
-  }
+    return accepted;
+  };
 
   if (await canBindPort()) {
     logProcessLifecycle({
@@ -284,6 +284,37 @@ export async function ensurePortAvailableImpl(args: {
   const initialPids = args.findListeningPids(port);
   if (initialPids.length === 0) {
     const healthyWithoutPid = await args.isServerHealthyQuick(port);
+    if (healthyWithoutPid && opts.restart && !buildRestartOnly) {
+      const accepted = await attemptConfirmedHttpShutdown();
+      if (!accepted) {
+        logProcessLifecycle({
+          event: 'port_check_result',
+          source: 'cli.ensurePortAvailable',
+          details: { port, result: 'http_shutdown_unconfirmed_no_pid' }
+        });
+        throw new Error(
+          `Port ${port} is occupied by RouteCodex but no managed PID is available; refusing to start until /shutdown is confirmed.`
+        );
+      }
+      const shutdownDeadline = Date.now() + Number(args.env.ROUTECODEX_STOP_TIMEOUT_MS ?? 5000);
+      while (Date.now() < shutdownDeadline) {
+        if (await canBindPort()) {
+          logProcessLifecycle({
+            event: 'port_check_result',
+            source: 'cli.ensurePortAvailable',
+            details: { port, result: 'freed_after_http_shutdown_no_pid' }
+          });
+          return;
+        }
+        await args.sleep(150);
+      }
+      logProcessLifecycle({
+        event: 'port_check_result',
+        source: 'cli.ensurePortAvailable',
+        details: { port, result: 'http_shutdown_timeout_no_pid' }
+      });
+      throw new Error(`Timed out waiting for RouteCodex /shutdown to free port ${port}.`);
+    }
     if (healthyWithoutPid && opts.restart && buildRestartOnly) {
       logProcessLifecycle({
         event: 'port_check_result',

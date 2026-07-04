@@ -1,9 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 import { Command } from 'commander';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { createStartCommand } from '../../src/cli/commands/start.js';
+import { resolveReleaseDaemonEnabled } from '../../src/cli/commands/start-utils.js';
 import { registerStartCommand } from '../../src/cli/register/start-command.js';
+import { resolveDaemonStopIntentPath } from '../../src/utils/daemon-stop-intent.js';
 
 function createStubSpinner() {
   return {
@@ -30,6 +34,13 @@ function createFakeChild(pid = 43210) {
 }
 
 describe('cli start command', () => {
+  it('keeps release start in foreground unless daemon is explicitly enabled', () => {
+    expect(resolveReleaseDaemonEnabled({})).toBe(false);
+    expect(resolveReleaseDaemonEnabled({ ROUTECODEX_START_DAEMON: '1' })).toBe(true);
+    expect(resolveReleaseDaemonEnabled({ RCC_START_DAEMON: '1' })).toBe(true);
+    expect(resolveReleaseDaemonEnabled({ ROUTECODEX_START_DAEMON: '0' })).toBe(false);
+  });
+
   it('starts only the requested port from a multi-port config', async () => {
     const program = new Command();
     const configPath = '/tmp/rcc/config.toml';
@@ -840,6 +851,185 @@ routingPolicyGroup = "gateway_coding_10000"
     await noRestartProgram.parseAsync(['node', 'rcc', 'start', '--no-restart'], { from: 'node' });
 
     expect(restartFlags).toEqual([true, false]);
+  });
+
+  it('writes daemon stop intent before foreground restart takeover', async () => {
+    const previousRccHome = process.env.RCC_HOME;
+    const previousRouteCodexUserDir = process.env.ROUTECODEX_USER_DIR;
+    const previousRouteCodexHome = process.env.ROUTECODEX_HOME;
+    delete process.env.RCC_HOME;
+    delete process.env.ROUTECODEX_USER_DIR;
+    delete process.env.ROUTECODEX_HOME;
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-start-stop-intent-'));
+    const configPath = path.join(tempHome, 'config.toml');
+    const checkedPorts: number[] = [];
+    const program = new Command();
+
+    try {
+      createStartCommand(program, {
+        isDevPackage: false,
+        isWindows: false,
+        defaultDevPort: 5520,
+        nodeBin: 'node',
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+        env: {},
+        fsImpl: {
+          existsSync: (target: string) => target === configPath || target === '/tmp/index.js' || target === '/tmp/modules.json',
+          statSync: () => ({ isDirectory: () => false } as any),
+          readFileSync: () => `
+[httpserver]
+port = 5520
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+port = 4444
+
+[[httpserver.ports]]
+port = 5520
+`,
+          writeFileSync: () => {},
+          mkdtempSync: () => '/tmp/rc',
+          mkdirSync: () => {},
+          createWriteStream: () => ({ write: () => true, end: () => {} } as any)
+        } as any,
+        pathImpl: {
+          join: (...parts: string[]) => parts.join('/'),
+          resolve: (...parts: string[]) => parts.join('/'),
+          dirname: (target: string) => path.posix.dirname(target),
+          basename: (target: string) => path.posix.basename(target)
+        } as any,
+        homedir: () => tempHome,
+        tmpdir: () => '/tmp',
+        sleep: async () => {},
+        ensureLocalTokenPortalEnv: async () => {},
+        ensurePortAvailable: async (port) => {
+          checkedPorts.push(port);
+          const intentPath = resolveDaemonStopIntentPath(port, path.join(tempHome, '.rcc'));
+          expect(fs.existsSync(intentPath)).toBe(true);
+        },
+        findListeningPids: () => [],
+        killPidBestEffort: () => {},
+        getModulesConfigPath: () => '/tmp/modules.json',
+        resolveCliEntryPath: () => '/tmp/cli.js',
+        resolveServerEntryPath: () => '/tmp/index.js',
+        spawn: () => createFakeChild(43210),
+        fetch: (async () => ({ ok: true })) as any,
+        setupKeypress: () => () => {},
+        waitForever: async () => {},
+        exit: (code: number) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await program.parseAsync(['node', 'rcc', 'start', '--config', configPath], { from: 'node' });
+      expect(checkedPorts).toEqual([4444, 5520]);
+    } finally {
+      if (previousRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = previousRccHome;
+      }
+      if (previousRouteCodexUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = previousRouteCodexUserDir;
+      }
+      if (previousRouteCodexHome === undefined) {
+        delete process.env.ROUTECODEX_HOME;
+      } else {
+        process.env.ROUTECODEX_HOME = previousRouteCodexHome;
+      }
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('does not interrupt another start while the same port group is taking over', async () => {
+    const previousRccHome = process.env.RCC_HOME;
+    const previousRouteCodexUserDir = process.env.ROUTECODEX_USER_DIR;
+    const previousRouteCodexHome = process.env.ROUTECODEX_HOME;
+    delete process.env.RCC_HOME;
+    delete process.env.ROUTECODEX_USER_DIR;
+    delete process.env.ROUTECODEX_HOME;
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-start-lock-'));
+    const configPath = path.join(tempHome, 'config.toml');
+    fs.writeFileSync(configPath, `
+[httpserver]
+port = 5520
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+port = 4444
+
+[[httpserver.ports]]
+port = 5520
+`, 'utf8');
+    const lockDir = path.join(tempHome, '.rcc', 'state', 'runtime-lifecycle', 'start-locks');
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(lockDir, '4444-5520.lock'),
+      JSON.stringify({ pid: 999999, ports: [4444, 5520], startedAtMs: Date.now() }),
+      'utf8'
+    );
+    const checkedPorts: number[] = [];
+    const program = new Command();
+
+    try {
+      createStartCommand(program, {
+        isDevPackage: false,
+        isWindows: false,
+        defaultDevPort: 5520,
+        nodeBin: 'node',
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+        env: { ROUTECODEX_START_LOCK_WAIT_MS: '1000' },
+        homedir: () => tempHome,
+        tmpdir: () => '/tmp',
+        sleep: async () => {},
+        ensureLocalTokenPortalEnv: async () => {},
+        ensurePortAvailable: async (port) => {
+          checkedPorts.push(port);
+        },
+        findListeningPids: () => [],
+        killPidBestEffort: () => {},
+        getModulesConfigPath: () => '/tmp/modules.json',
+        resolveCliEntryPath: () => '/tmp/cli.js',
+        resolveServerEntryPath: () => '/tmp/index.js',
+        spawn: () => {
+          throw new Error('spawn should not be called');
+        },
+        fetch: (async () => ({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true })
+        })) as any,
+        setupKeypress: () => () => {},
+        waitForever: async () => {},
+        exit: (code: number) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath], { from: 'node' })).rejects.toThrow('exit:0');
+      expect(checkedPorts).toEqual([]);
+    } finally {
+      if (previousRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = previousRccHome;
+      }
+      if (previousRouteCodexUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = previousRouteCodexUserDir;
+      }
+      if (previousRouteCodexHome === undefined) {
+        delete process.env.ROUTECODEX_HOME;
+      } else {
+        process.env.ROUTECODEX_HOME = previousRouteCodexHome;
+      }
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
   });
 
   it('release start runs daemon supervisor when ROUTECODEX_START_DAEMON=1', async () => {
