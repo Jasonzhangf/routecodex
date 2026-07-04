@@ -9,7 +9,6 @@ export function createRequiredCoreOutputs(outDir) {
     path.join(outDir, 'native', 'servertool-wrapper.d.ts'),
     path.join(outDir, 'native', 'router-hotpath', 'native-virtual-router-runtime.js'),
     path.join(outDir, 'native', 'router-hotpath', 'native-hub-pipeline-resp-semantics.js'),
-    path.join(outDir, 'native', 'router-hotpath', 'native-chat-process-node-result-semantics.js'),
   ];
 }
 

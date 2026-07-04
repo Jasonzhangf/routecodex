@@ -133,6 +133,56 @@ describe('servertool CLI projection blackbox', () => {
     expect(String((result.chat as any).choices[0].message.content ?? '')).toBe('完成，准备收尾。');
   });
 
+  it('lets simple question reasoningStop stop naturally without client exec_command', async () => {
+    let reenterCount = 0;
+    const result = await runServerToolOrchestration({
+      chat: {
+        id: 'chatcmpl_reasoning_stop_simple_question_blackbox',
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: '北京时间现在是 10:30。',
+              tool_calls: [
+                {
+                  id: 'call_reasoning_stop_simple_question_blackbox',
+                  type: 'function',
+                  function: {
+                    name: 'reasoningStop',
+                    arguments: '{"simple_question":true}'
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      },
+      adapterContext: bindStoplessMetadataCenter({
+        requestId: 'req_reasoning_stop_simple_question_blackbox',
+        sessionId: 'sess-reasoning-stop-simple-question-blackbox',
+        routecodexPortStopMessageEnabled: true,
+        stopMessageEnabled: true
+      } as any),
+      requestId: 'req_reasoning_stop_simple_question_blackbox',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      reenterPipeline: async () => {
+        reenterCount += 1;
+        return { body: {} };
+      }
+    });
+
+    expect(reenterCount).toBe(0);
+    expect(result.executed).toBe(true);
+    expect((result.chat as any).choices[0].finish_reason).toBe('stop');
+    expect((result.chat as any).choices[0].message.tool_calls).toBeUndefined();
+    expect(JSON.stringify(result.chat)).not.toContain('routecodex hook run reasoningStop');
+    expect(String((result.chat as any).choices[0].message.content ?? '')).toBe('北京时间现在是 10:30。');
+  });
+
   it('projects non-terminal reasoningStop tool calls to client exec_command', async () => {
     let reenterCount = 0;
     const reenterPipeline = async () => {

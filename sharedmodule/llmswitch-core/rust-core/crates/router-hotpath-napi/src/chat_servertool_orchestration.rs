@@ -245,6 +245,8 @@ struct ServertoolAutoHookSpecInput {
     order: i64,
     #[serde(default, rename = "sourceIndex")]
     source_index: Option<usize>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -253,7 +255,9 @@ struct ServertoolAutoHookPlannerInput {
     hooks: Vec<ServertoolAutoHookSpecInput>,
     include_auto_hook_ids: Option<Vec<String>>,
     exclude_auto_hook_ids: Option<Vec<String>>,
+    #[serde(default)]
     optional_primary_hook_order: Vec<String>,
+    #[serde(default)]
     mandatory_hook_order: Vec<String>,
 }
 
@@ -266,6 +270,8 @@ struct ServertoolAutoHookPlanEntry {
     order: i64,
     #[serde(rename = "sourceIndex")]
     source_index: usize,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
     queue: String,
     queue_index: i64,
     queue_total: i64,
@@ -2291,6 +2297,7 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
                 priority: hook.priority,
                 order: hook.order,
                 source_index: Some(hook.source_index.unwrap_or(source_index)),
+                extra: hook.extra,
             })
         })
         .collect();
@@ -2362,6 +2369,7 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
             priority: hook.priority,
             order: hook.order,
             source_index: hook.source_index.unwrap_or(index),
+            extra: hook.extra,
             queue: "A_optional".to_string(),
             queue_index: index as i64 + 1,
             queue_total: optional_total,
@@ -2376,6 +2384,7 @@ pub fn plan_servertool_auto_hook_queues_json(input_json: String) -> NapiResult<S
             priority: hook.priority,
             order: hook.order,
             source_index: hook.source_index.unwrap_or(index),
+            extra: hook.extra,
             queue: "B_mandatory".to_string(),
             queue_index: index as i64 + 1,
             queue_total: mandatory_total,

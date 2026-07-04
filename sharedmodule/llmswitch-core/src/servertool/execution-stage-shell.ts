@@ -46,7 +46,7 @@ export async function runServertoolExecutionStage(args: {
       projectedToolCallId: projectedToolCall.id,
       base: args.baseObject
     });
-    return branch.result;
+    return branch.result as unknown as ServerSideToolEngineResult;
   }
   if (!preExecutionBranchDecision.continueResponseStage) {
     throw new Error('[servertool] invalid pre-execution branch action');

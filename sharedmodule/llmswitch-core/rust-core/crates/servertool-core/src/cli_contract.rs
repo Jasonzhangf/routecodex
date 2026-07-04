@@ -296,6 +296,7 @@ fn build_terminal_stopless_output(
 fn stop_schema_field_keys() -> &'static [&'static str] {
     &[
         "stopreason",
+        "simple_question",
         "reason",
         "has_evidence",
         "evidence",
@@ -758,12 +759,16 @@ pub fn stopless_schema_guidance_with_trigger(
     _used: u32,
     _max_repeats: u32,
 ) -> StoplessSchemaGuidance {
-    let sample = r#"{"stopreason":2,"reason":"当前还在推进，先继续执行","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"先看入口，再看链路，再看验证","done_steps":"已完成现有排查","next_step":"继续完成剩余验证并补最后一轮证据","next_suggested_path":"按当前链路继续","needs_user_input":false,"learned":"把真实结论写进 stop schema"}"#;
+    let sample = r#"{"stopreason":2,"simple_question":false,"reason":"当前还在推进，先继续执行","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"先看入口，再看链路，再看验证","done_steps":"已完成现有排查","next_step":"继续完成剩余验证并补最后一轮证据","next_suggested_path":"按当前链路继续","needs_user_input":false,"learned":"把真实结论写进 stop schema"}"#;
     StoplessSchemaGuidance {
         schema_overview: "stop schema 是模型在准备结束或暂停时返回的结构化 JSON 收尾报告。它不是普通文本总结，而是一份固定字段的结果，用来告诉系统这轮是已完成、被阻塞，还是还要继续执行。".to_string(),
         schema_purpose: "它的作用是把结束原因、证据、排查顺序、下一步动作固定成可机器判断的结构，并把每个字段的含义说清楚，避免模型只写泛泛的总结或漏字段。".to_string(),
         required_fields: vec!["stopreason".to_string()],
         field_descriptions: vec![
+            StoplessSchemaFieldDescription {
+                field: "simple_question".to_string(),
+                meaning: "当前用户输入只是非常简单的问题时可填 true；true 时可自然停止，不需要 stopreason/证据/下一步字段".to_string(),
+            },
             StoplessSchemaFieldDescription {
                 field: "stopreason".to_string(),
                 meaning: "0=真的做完了，1=卡住了，2=还要继续推进".to_string(),

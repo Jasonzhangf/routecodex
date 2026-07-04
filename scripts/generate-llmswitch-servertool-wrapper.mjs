@@ -185,6 +185,27 @@ export declare function planServertoolOutcomeWithNative(input: unknown): Servert
 export declare function planServertoolNoopOutcomeWithNative(input: unknown): ServertoolNoopOutcome;
 export declare function planServertoolAutoHookQueuesWithNative(input: unknown): ServertoolAutoHookQueues;
 export declare function planServertoolAutoHookQueueItemsWithNative<T>(input: unknown): ServertoolAutoHookQueueItems<T>;
+
+// 18 servertool-core native wrappers consumed by shell files
+export declare function extractTextFromChatLikeWithNative(payload: unknown): string;
+export declare function inspectStopGatewaySignalWithNative(payload: unknown): ServertoolStopGatewayContext;
+export declare function normalizeStopGatewayContextWithNative(value: unknown): ServertoolStopGatewayContext | undefined;
+export declare function normalizeStopMessageCompareContextWithNative(value: unknown): ServertoolStopMessageCompareContext;
+export declare function formatStopMessageCompareContextWithNative(value: unknown): string;
+export declare function resolveRuntimeStopMessageStateWithNative(metadata: unknown): ServertoolRuntimeStopMessageState;
+export declare function readRuntimeStopMessageStageModeWithNative(input: unknown): string | undefined;
+export declare function buildClientExecCliProjectionOutputWithNative(input: unknown): Record<string, unknown>;
+export declare function parseServertoolCliProjectionToolArgumentsWithNative(input: unknown): unknown;
+export declare function planServertoolHookScheduleWithNative(input: unknown): ServertoolHookSchedulePlan;
+export declare function buildClientVisibleProjectionShellWithNative(input: unknown): Record<string, unknown>;
+export declare function buildServertoolCliProjectionExecutionContextWithNative(input: unknown): Record<string, unknown>;
+export declare function buildServertoolCliProjectionRuntimeBranchWithNative(input: unknown): Record<string, unknown>;
+export declare function resolveRuntimeStopMessageStateFromMetadataCenterWithNative(metadataCenter: unknown): ServertoolRuntimeStopMessageState | null;
+export declare function parseServertoolTimeoutMsWithNative(value: unknown): number | undefined;
+export declare function planServertoolTimeoutWatcherWithNative(timeoutMs: number): ServertoolTimeoutWatcherPlan;
+export declare function isAdapterClientDisconnectedWithNative(adapterContext: unknown): boolean;
+export declare function createServertoolExecutionLoopStateWithNative(): ServertoolExecutionLoopState;
+
 export declare function runServertoolOrchestrationMutationWithNative(input: Record<string, unknown>): unknown;
 export declare function planServertoolFollowupRuntimeWithNative(flowId: string): ServertoolFollowupRuntimePlan;
 export declare function extractCapturedChatSeedWithNative(captured: unknown): Record<string, unknown> | null;

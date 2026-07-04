@@ -880,6 +880,125 @@ mod tests {
     }
 
     #[test]
+    fn simple_question_runtime_returns_terminal_stop_without_cli_projection() {
+        let input = json!({
+            "name": "stop_message_auto",
+            "base": {
+                "id": "chatcmpl-simple-question",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "北京时间现在是 10:30。",
+                        "tool_calls": [{
+                            "id": "call-simple-question",
+                            "type": "function",
+                            "function": {
+                                "name": "reasoningStop",
+                                "arguments": "{\"simple_question\":true}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            },
+            "requestId": "req-simple-question-runtime",
+            "runtimeMetadata": {
+                "metadataCenterSnapshot": {
+                    "requestTruth": {
+                        "requestId": "req-simple-question-runtime",
+                        "sessionId": "sess-simple-question-runtime"
+                    },
+                    "runtimeControl": {
+                        "providerProtocol": "openai-responses",
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "repeatCount": 0,
+                            "maxRepeats": 3,
+                            "active": true
+                        }
+                    }
+                }
+            }
+        });
+
+        let result = run_stopless_builtin_handler_for_runtime_json(input.to_string())
+            .expect("simple question runtime");
+        let output: Value = serde_json::from_str(&result).expect("json parse");
+        assert_eq!(
+            output["execution"]["context"]["stopMessageTerminalFinal"],
+            json!(true)
+        );
+        assert_eq!(
+            output["chatResponse"]["choices"][0]["finish_reason"],
+            json!("stop")
+        );
+        assert!(output["chatResponse"]["choices"][0]["message"]
+            .get("tool_calls")
+            .is_none());
+        assert_eq!(
+            output["chatResponse"]["choices"][0]["message"]["content"],
+            json!("北京时间现在是 10:30。")
+        );
+        assert!(!output
+            .to_string()
+            .contains("routecodex hook run reasoningStop"));
+    }
+
+    #[test]
+    fn simple_question_fenced_schema_is_stripped_from_terminal_text() {
+        let input = json!({
+            "name": "stop_message_auto",
+            "base": {
+                "id": "chatcmpl-simple-question-fence",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "是。\n```json\n{\"simple_question\":true}\n```"
+                    },
+                    "finish_reason": "stop"
+                }]
+            },
+            "requestId": "req-simple-question-fence",
+            "runtimeMetadata": {
+                "metadataCenterSnapshot": {
+                    "requestTruth": {
+                        "requestId": "req-simple-question-fence",
+                        "sessionId": "sess-simple-question-fence"
+                    },
+                    "runtimeControl": {
+                        "providerProtocol": "openai-responses",
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "repeatCount": 0,
+                            "maxRepeats": 3,
+                            "active": true
+                        }
+                    }
+                }
+            }
+        });
+
+        let result = run_stopless_builtin_handler_for_runtime_json(input.to_string())
+            .expect("simple question fenced runtime");
+        let output: Value = serde_json::from_str(&result).expect("json parse");
+        assert_eq!(
+            output["chatResponse"]["choices"][0]["finish_reason"],
+            json!("stop")
+        );
+        assert_eq!(
+            output["chatResponse"]["choices"][0]["message"]["content"],
+            json!("是。")
+        );
+        assert!(!output["chatResponse"]
+            .to_string()
+            .contains("simple_question"));
+    }
+
+    #[test]
     fn stopless_execution_plan_does_not_copy_control_into_execution_context() {
         let result = plan_stopless_execution_json(
             json!({

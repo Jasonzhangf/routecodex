@@ -172,6 +172,7 @@ fn has_stop_schema_control_signal(text: &str) -> bool {
         || lower.contains("reasoningstop")
         || lower.contains("停止原因:")
         || lower.contains("停止原因：")
+        || text.contains("\"simple_question\"")
         || text.contains("\"stopreason\"")
 }
 
@@ -447,11 +448,12 @@ fn is_stop_schema_control_json(raw_json: &str) -> bool {
     let Ok(Value::Object(record)) = serde_json::from_str::<Value>(raw_json.trim()) else {
         return false;
     };
-    if !record.contains_key("stopreason") {
+    if !record.contains_key("stopreason") && !record.contains_key("simple_question") {
         return false;
     }
     [
         "stopreason",
+        "simple_question",
         "reason",
         "has_evidence",
         "evidence",

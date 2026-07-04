@@ -104,13 +104,7 @@ jest.unstable_mockModule(
     applyServertoolExecutionLoopResultDecisionWithNative,
     createServertoolExecutionLoopStateWithNative,
     appendServertoolExecutedRecordWithNative,
-    runStoplessBuiltinHandlerForRuntimeWithNative
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
-  () => ({
+    runStoplessBuiltinHandlerForRuntimeWithNative,
     planServertoolNoopOutcomeWithNative: jest.fn(),
     buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
     planServertoolToolCallDispatchWithNative: jest.fn(),

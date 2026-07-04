@@ -72,15 +72,9 @@ const resolveServertoolResponseStagePrepassAfterAutoHookWithNative = jest.fn((in
 const runServertoolResponseStageAutoHookPass = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
-  () => ({
-    planServertoolResponseStageGateWithNative
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
   () => ({
+    planServertoolResponseStageGateWithNative,
     planServertoolResponseStageRuntimeActionWithNative,
     resolveServertoolResponseStagePrepassInitialDecisionWithNative,
     resolveServertoolResponseStagePrepassInitialApplicationWithNative,
@@ -144,7 +138,9 @@ describe('response-stage-prepass-shell', () => {
     });
     expect(planServertoolResponseStageGateWithNative).toHaveBeenCalledWith({
       payload: { ok: true },
-      adapterContext: { trace: true }
+      adapterContext: { trace: true },
+      runtimeControl: undefined,
+      allowFollowup: false
     });
     expect(planServertoolResponseStageRuntimeActionWithNative).toHaveBeenCalledWith({
       responseStageGatePlan: {

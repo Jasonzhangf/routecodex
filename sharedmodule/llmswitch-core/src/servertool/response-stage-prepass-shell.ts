@@ -35,7 +35,8 @@ export async function runServertoolResponseStagePrePass(args: {
     adapterContext: args.options.adapterContext,
     runtimeControl: readRuntimeControlFromAnyBoundMetadataCenter(
       args.options.adapterContext
-    )
+    ),
+    allowFollowup: false
   });
 
   const prepassDecision = resolveServertoolResponseStagePrepassInitialDecisionWithNative({

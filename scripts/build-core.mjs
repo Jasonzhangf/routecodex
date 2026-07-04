@@ -132,5 +132,10 @@ if ((res.status ?? 0) !== 0) {
   process.exit(res.status ?? 2);
 }
 
-if (!distIsValid()) fail('llmswitch-core dist not produced or missing required outputs');
+if (!distIsValid()) {
+  const missingOutputs = requiredOutputs
+    .filter((file) => !fs.existsSync(file))
+    .map((file) => path.relative(root, file));
+  fail(`llmswitch-core dist not produced or missing required outputs: ${missingOutputs.join(', ')}`);
+}
 console.log('[build-core] llmswitch-core built:', outDir);

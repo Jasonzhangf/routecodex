@@ -1,5 +1,6 @@
 // Native bridge for servertool-core functions.
 // Provides inspect_stop_gateway_signal, evaluate_loop_guard, calculate_budget.
+// Also re-exports the 76 NAPI wrappers consumed by shell files and orchestration.
 
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type { ServerSideToolEngineResult } from '../../servertool/types.js';
@@ -18,204 +19,70 @@ import {
   parseServertoolResponseStagePayload,
   type ServertoolResponseStageGatePayload
 } from './native-router-hotpath-analysis.js';
-import {
-  buildServertoolAutoHookTraceProgressEventWithNative as buildServertoolAutoHookTraceProgressEventWithNativeRaw,
-  buildServertoolDispatchPlanInputWithNative as buildServertoolDispatchPlanInputWithNativeRaw,
-  buildServertoolMatchSkippedProgressEventWithNative as buildServertoolMatchSkippedProgressEventWithNativeRaw,
-  buildServertoolOutcomePlanInputWithNative as buildServertoolOutcomePlanInputWithNativeRaw,
-  buildServertoolStopCompareProgressEventWithNative as buildServertoolStopCompareProgressEventWithNativeRaw,
-  buildServertoolStopEntryProgressEventWithNative as buildServertoolStopEntryProgressEventWithNativeRaw,
-  normalizeServertoolProgressFlowIdWithNative as normalizeServertoolProgressFlowIdWithNativeRaw,
-  normalizeServertoolProgressResultWithNative as normalizeServertoolProgressResultWithNativeRaw,
-  planServertoolAutoHookQueueItemsWithNative as planServertoolAutoHookQueueItemsWithNativeRaw,
-  planServertoolOutcomeWithNative as planServertoolOutcomeWithNativeRaw,
-  planServertoolToolCallDispatchWithNative as planServertoolToolCallDispatchWithNativeRaw,
-  resolveServertoolProgressStageWithNative as resolveServertoolProgressStageWithNativeRaw,
-  resolveServertoolProgressToolNameWithNative as resolveServertoolProgressToolNameWithNativeRaw,
-  runServertoolResponseStageWithNative as runServertoolResponseStageWithNativeRaw,
-  shouldUseServertoolGoldProgressHighlightWithNative as shouldUseServertoolGoldProgressHighlightWithNativeRaw
-} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 export type NativeServertoolResponseStageGate = ServertoolResponseStageGatePayload;
-export type NativeServertoolResponseStage =
-  ReturnType<typeof parseServertoolResponseStagePayload> extends infer T ? Exclude<T, null> : never;
-export type NativeServertoolDispatchPlan =
-  ReturnType<typeof parseServertoolDispatchPlanPayload> extends infer T ? Exclude<T, null> : never;
-export type NativeServertoolDispatchPlanInput =
-  ReturnType<typeof parseServertoolDispatchPlanInputPayload> extends infer T ? Exclude<T, null> : never;
-export type NativeServertoolOutcomePlan =
-  ReturnType<typeof parseServertoolOutcomePlanPayload> extends infer T ? Exclude<T, null> : never;
-export type NativeServertoolOutcomePlanInput =
-  ReturnType<typeof parseServertoolOutcomePlanInputPayload> extends infer T ? Exclude<T, null> : never;
 
-export type NativeServertoolAutoHookQueueItems<T> = {
-  queueOrder: Array<{
-    queue: 'A_optional' | 'B_mandatory';
-    entries: T[];
-  }>;
-};
-
-export interface NativeServertoolProgressEvent {
-  flowId: string;
-  tool: string;
-  stage: 'entry' | 'trigger' | 'match' | 'hook' | 'compare';
-  result: string;
-  message: string;
-  step: number;
-}
-
-export const runServertoolResponseStageWithNative =
-  runServertoolResponseStageWithNativeRaw as (payload: unknown, requestId: string) => NativeServertoolResponseStage;
-
-export const buildServertoolDispatchPlanInputWithNative =
-  buildServertoolDispatchPlanInputWithNativeRaw as (input: {
-    toolCalls: Array<{ id: string; name: string; arguments: string }>;
-    disableToolCallHandlers: boolean;
-    includeToolCallHandlerNames?: string[] | null;
-    excludeToolCallHandlerNames?: string[] | null;
-    runtimeMetadata?: Record<string, unknown>;
-    document?: unknown;
-  }) => NativeServertoolDispatchPlanInput;
-
-export const buildServertoolOutcomePlanInputWithNative =
-  buildServertoolOutcomePlanInputWithNativeRaw as (input: {
-    toolCalls: Array<{ id: string; name: string; arguments: string }>;
-    executionState: unknown;
-    adapterContext?: unknown;
-    baseForExecution?: unknown;
-  }) => NativeServertoolOutcomePlanInput;
-
-export const resolveServertoolProgressToolNameWithNative =
-  resolveServertoolProgressToolNameWithNativeRaw as (input: {
-    flowId: unknown;
-    document?: unknown;
-  }) => string;
-
-export const shouldUseServertoolGoldProgressHighlightWithNative =
-  shouldUseServertoolGoldProgressHighlightWithNativeRaw as (input: {
-    flowId: unknown;
-    document?: unknown;
-  }) => boolean;
-
-export const resolveServertoolProgressStageWithNative =
-  resolveServertoolProgressStageWithNativeRaw as (input: {
-    step: unknown;
-    message: unknown;
-  }) => string;
-
-export const normalizeServertoolProgressResultWithNative =
-  normalizeServertoolProgressResultWithNativeRaw as (input: { message: unknown }) => string;
-
-export const normalizeServertoolProgressFlowIdWithNative =
-  normalizeServertoolProgressFlowIdWithNativeRaw as (input: { value: unknown }) => string;
-
-export const buildServertoolMatchSkippedProgressEventWithNative =
-  buildServertoolMatchSkippedProgressEventWithNativeRaw as (input: {
-    skipReason: string;
-  }) => NativeServertoolProgressEvent;
-
-export const buildServertoolAutoHookTraceProgressEventWithNative =
-  buildServertoolAutoHookTraceProgressEventWithNativeRaw as (input: {
-    hookId: string;
-    phase: string;
-    priority: number;
-    queue: 'A_optional' | 'B_mandatory';
-    queueIndex: number;
-    queueTotal: number;
-    result: 'miss' | 'match' | 'error';
-    reason: string;
-    flowId?: string;
-  }) => NativeServertoolProgressEvent;
-
-export const buildServertoolStopEntryProgressEventWithNative =
-  buildServertoolStopEntryProgressEventWithNativeRaw as (input: {
-    stage: 'entry' | 'trigger';
-    result: string;
-  }) => NativeServertoolProgressEvent;
-
-export const buildServertoolStopCompareProgressEventWithNative =
-  buildServertoolStopCompareProgressEventWithNativeRaw as (input: {
-    stage: 'entry' | 'trigger';
-    flowId?: string;
-    summary: string;
-    compare?: unknown;
-  }) => NativeServertoolProgressEvent;
-
-export const planServertoolToolCallDispatchWithNative =
-  planServertoolToolCallDispatchWithNativeRaw as (input: {
-    toolCalls: Array<{ id: string; name: string; arguments: string }>;
-    disableToolCallHandlers: boolean;
-    includeToolCallHandlerNames?: string[] | null;
-    excludeToolCallHandlerNames?: string[] | null;
-    registeredToolCallHandlers: Array<{
-      name: string;
-      trigger: string;
-      executionMode: string;
-      stripAfterExecute: boolean;
-    }>;
-    runtimeMetadata?: Record<string, unknown>;
-  }) => NativeServertoolDispatchPlan;
-
-export const planServertoolOutcomeWithNative =
-  planServertoolOutcomeWithNativeRaw as (input: {
-    toolCalls: Array<{ id: string; name: string; arguments: string }>;
-    executedToolCalls: Array<{
-      id: string;
-      name: string;
-      arguments: string;
-      executionMode: string;
-      stripAfterExecute: boolean;
-    }>;
-    executedFlowIds: string[];
-    lastExecutionFlowId?: string;
-  }) => NativeServertoolOutcomePlan;
-
-export const planServertoolAutoHookQueueItemsWithNative =
-  planServertoolAutoHookQueueItemsWithNativeRaw as <T extends {
-    id: string;
-    phase: string;
-    priority: number;
-    order: number;
-  }>(input: {
-    hooks: T[];
-    includeAutoHookIds?: string[] | null;
-    excludeAutoHookIds?: string[] | null;
-    document?: unknown;
-  }) => NativeServertoolAutoHookQueueItems<T>;
-
-// Re-export the existing local servertool orchestration wrappers while this module
-// becomes the narrow servertool-core entry surface for TS shells.
+// Re-export NAPI wrappers consumed by shell files and orchestration functions
 export {
+  buildClientExecCliProjectionOutputWithNative,
+  buildClientVisibleProjectionShellWithNative,
+  buildServertoolCliProjectionExecutionContextWithNative,
+  buildServertoolCliProjectionRuntimeBranchWithNative,
+  buildServertoolDispatchPlanInputWithNative,
   buildServertoolHandlerErrorToolOutputPayloadWithNative,
+  buildServertoolMatchSkippedProgressEventWithNative,
+  buildServertoolAutoHookTraceProgressEventWithNative,
+  buildServertoolStopCompareProgressEventWithNative,
+  buildServertoolStopEntryProgressEventWithNative,
+  buildServertoolOutcomePlanInputWithNative,
   buildServertoolToolOutputPayloadWithNative,
   collectServertoolAdditionalClientToolCallsWithNative,
   containsSyntheticRouteCodexControlTextWithNative,
+  createServertoolExecutionLoopStateWithNative,
   detectEmptyAssistantPayloadContractSignalWithNative,
   detectProviderResponseShapeWithNative,
-  extractCapturedChatSeedWithNative,
   extractAssistantFollowupMessageWithNative,
+  extractCapturedChatSeedWithNative,
+  extractTextFromChatLikeWithNative,
+  formatStopMessageCompareContextWithNative,
+  inspectStopGatewaySignalWithNative,
+  isAdapterClientDisconnectedWithNative,
   isServertoolClientExecCliProjectionToolCallWithNative,
   normalizeFollowupParametersWithNative,
+  normalizeStopGatewayContextWithNative,
+  normalizeStopMessageCompareContextWithNative,
   normalizeServertoolProgressTokenWithNative,
   normalizeServertoolRegistrationSpecWithNative,
+  parseServertoolCliProjectionToolArgumentsWithNative,
+  parseServertoolTimeoutMsWithNative,
   planChatWebSearchOperationsWithNative,
+  planServertoolAutoHookQueueItemsWithNative,
   planServertoolAutoHookQueuesWithNative,
   planServertoolBuiltinAutoHandlerEntriesWithNative,
   planServertoolBuiltinHandlerEntryWithNative,
   planServertoolBuiltinHandlerNamesWithNative,
   planServertoolBuiltinHandlerRecordEntriesWithNative,
-  planServertoolRegistryLookupFromSkeletonWithNative,
-  planServertoolResponseStageGateWithNative,
   planServertoolFollowupRuntimeWithNative,
   planServertoolHandlerContractWithNative,
+  planServertoolHookScheduleWithNative,
   planServertoolNoopOutcomeWithNative,
+  planServertoolOutcomeWithNative,
+  planServertoolRegistryLookupFromSkeletonWithNative,
+  planServertoolResponseStageGateWithNative,
   planServertoolSkeletonDerivedConfigWithNative,
+  planServertoolTimeoutWatcherWithNative,
+  planServertoolToolCallDispatchWithNative,
+  readRuntimeStopMessageStageModeWithNative,
   readServertoolPrimaryAutoHookIdsWithNative,
+  resolveRuntimeStopMessageStateFromMetadataCenterWithNative,
+  resolveRuntimeStopMessageStateWithNative,
   resolveServertoolBuiltinHandlerEntryWithNative,
   resolveServertoolRegisteredNameWithNative,
   resolveServertoolRegistryHandlerWithNative,
   resolveServertoolToolSpecWithNative,
   runServertoolOrchestrationMutationWithNative,
+  runServertoolResponseStageWithNative,
+  shouldUseServertoolGoldProgressHighlightWithNative,
   visionBuildAnalysisPayloadWithNative,
   visionBuildPinnedMetadataWithNative,
   visionExtractOriginalUserPromptWithNative,
@@ -229,7 +96,11 @@ export {
   webSearchIsQwenEngineWithNative,
   webSearchLimitHitsWithNative,
   webSearchNormalizeResultCountWithNative,
-  webSearchSanitizeBackendErrorWithNative
+  webSearchSanitizeBackendErrorWithNative,
+  normalizeServertoolProgressFlowIdWithNative,
+  normalizeServertoolProgressResultWithNative,
+  resolveServertoolProgressStageWithNative,
+  resolveServertoolProgressToolNameWithNative,
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -773,6 +644,36 @@ function parseNativeJson(capability: string, raw: unknown): unknown {
     throw new Error(`native ${capability} returned non-string: ${typeof raw}`);
   }
   return JSON.parse(raw) as unknown;
+}
+
+function callNativeJsonCapability(capability: string, input: unknown): unknown {
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`native ${capability} is required`);
+  }
+  try {
+    return parseNativeJson(capability, fn(JSON.stringify(input)));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${capability} native error: ${message}`);
+  }
+}
+
+function callNativeJsonCapabilityWithErrorContract(
+  capability: string,
+  input: unknown,
+  formatError: (message: string) => string
+): unknown {
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`native ${capability} is required`);
+  }
+  try {
+    return parseNativeJson(capability, fn(JSON.stringify(input)));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(formatError(message));
+  }
 }
 
 export interface ServertoolExecutionLoopEffectBasePlan {
@@ -1365,55 +1266,7 @@ export interface ServertoolHookEffectPlan {
   projection: ServertoolHookProjection;
 }
 
-export function extractTextFromChatLikeWithNative(payload: JsonObject): string {
-  const capability = 'extractServertoolTextFromChatLikeJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('extractServertoolTextFromChatLikeJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(payload));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`extractServertoolTextFromChatLikeJson native returned non-string: ${typeof resultJson}`);
-  }
-  const result = JSON.parse(resultJson) as unknown;
-  if (typeof result !== 'string') {
-    throw new Error('extractServertoolTextFromChatLikeJson native returned invalid text');
-  }
-  return result;
-}
-
 // ── Stop gateway context ────────────────────────────────────────────────────
-
-export function inspectStopGatewaySignalWithNative(payload: unknown): StopGatewayContext {
-  const capability = 'inspectStopGatewaySignal';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('inspectStopGatewaySignal native unavailable');
-  }
-  const payloadJson = JSON.stringify(payload);
-  const resultJson = fn(payloadJson);
-  if (typeof resultJson !== 'string') {
-    throw new Error(`inspectStopGatewaySignal native returned non-string: ${typeof resultJson}`);
-  }
-  const context = parseStopGatewayContextPayload(resultJson, capability);
-  if (!context) {
-    throw new Error('inspectStopGatewaySignal native returned null context');
-  }
-  return context;
-}
-
-export function normalizeStopGatewayContextWithNative(value: unknown): StopGatewayContext | undefined {
-  const capability = 'normalizeStopGatewayContextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('normalizeStopGatewayContextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(value ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`normalizeStopGatewayContextJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseStopGatewayContextPayload(resultJson, capability) ?? undefined;
-}
 
 function parseStopGatewayContextPayload(resultJson: string, capability: string): StopGatewayContext | null {
   const raw = JSON.parse(resultJson) as unknown;
@@ -1444,74 +1297,6 @@ function parseStopGatewayContextPayload(resultJson: string, capability: string):
     ...(Number.isInteger(choiceIndex) ? { choiceIndex: choiceIndex as number } : {}),
     ...(typeof hasToolCalls === 'boolean' ? { hasToolCalls } : {}),
   };
-}
-
-export function extractStopMessageBlockedReportFromMessagesWithNative(messages: unknown[]): StopMessageBlockedReport | null {
-  const capability = 'extractStopMessageBlockedReportFromMessagesJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('extractStopMessageBlockedReportFromMessagesJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(messages));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`extractStopMessageBlockedReportFromMessagesJson native returned non-string: ${typeof resultJson}`);
-  }
-  const raw = JSON.parse(resultJson) as unknown;
-  if (raw === null) {
-    return null;
-  }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('extractStopMessageBlockedReportFromMessagesJson native returned invalid report');
-  }
-  const record = raw as Record<string, unknown>;
-  if (
-    typeof record.summary !== 'string' ||
-    typeof record.blocker !== 'string' ||
-    !Array.isArray(record.evidence) ||
-    !record.evidence.every((entry) => typeof entry === 'string')
-  ) {
-    throw new Error('extractStopMessageBlockedReportFromMessagesJson native returned invalid fields');
-  }
-  const nextAction = record.nextAction ?? record.next_action;
-  return {
-    summary: record.summary,
-    blocker: record.blocker,
-    ...(typeof record.impact === 'string' ? { impact: record.impact } : {}),
-    ...(typeof nextAction === 'string' ? { nextAction } : {}),
-    evidence: record.evidence
-  };
-}
-
-export function normalizeStopMessageCompareContextWithNative(
-  value: unknown,
-): StopMessageCompareContext | undefined {
-  const capability = 'normalizeStopMessageCompareContextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('normalizeStopMessageCompareContextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(value ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`normalizeStopMessageCompareContextJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseStopMessageCompareContextPayload(resultJson, capability) ?? undefined;
-}
-
-export function formatStopMessageCompareContextWithNative(value: unknown): string {
-  const capability = 'formatStopMessageCompareContextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('formatStopMessageCompareContextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(value ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`formatStopMessageCompareContextJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (typeof parsed !== 'string') {
-    throw new Error('formatStopMessageCompareContextJson native returned invalid summary');
-  }
-  return parsed;
 }
 
 function parseStopMessageCompareContextPayload(resultJson: string, capability: string): StopMessageCompareContext | null {
@@ -1575,129 +1360,7 @@ function parseStopMessageCompareContextPayload(resultJson: string, capability: s
 
 // ── Loop guard ──────────────────────────────────────────────────────────────
 
-export function evaluateLoopGuardWithNative(input: LoopGuardInput): LoopGuardOutput {
-  const capability = 'evaluateLoopGuard';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('evaluateLoopGuard native unavailable');
-  }
-  const inputJson = JSON.stringify(input);
-  const resultJson = fn(inputJson);
-  if (typeof resultJson !== 'string') {
-    throw new Error(`evaluateLoopGuard native returned non-string: ${typeof resultJson}`);
-  }
-  return JSON.parse(resultJson);
-}
-
 // ── Budget counter ──────────────────────────────────────────────────────────
-
-export function calculateBudgetWithNative(
-  observed: boolean,
-  stop_eligible: boolean,
-  snapshot: BudgetSnapshot | undefined,
-  default_config: DefaultBudgetConfig | undefined,
-): BudgetDecision {
-  const capability = 'calculateBudget';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('calculateBudget native unavailable');
-  }
-  const resultJson = fn(
-    observed,
-    stop_eligible,
-    snapshot ? JSON.stringify(snapshot) : undefined,
-    default_config ? JSON.stringify(default_config) : undefined,
-  );
-  if (typeof resultJson !== 'string') {
-    throw new Error(`calculateBudget native returned non-string: ${typeof resultJson}`);
-  }
-  return JSON.parse(resultJson);
-}
-
-export function planBudgetStateUpdateWithNative(
-  input: BudgetStateUpdatePlanInput,
-): BudgetStateUpdatePlanOutput {
-  const capability = 'planBudgetStateUpdateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planBudgetStateUpdateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planBudgetStateUpdateJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planBudgetStateUpdateJson native returned invalid payload');
-  }
-  return parsed as BudgetStateUpdatePlanOutput;
-}
-
-export function resolveStopMessageSessionScopeWithNative(
-  metadata: Record<string, unknown>,
-): string | undefined {
-  const capability = 'resolveStopMessageSessionScopeJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveStopMessageSessionScopeJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(metadata));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveStopMessageSessionScopeJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
-}
-
-export function resolveServertoolStickyKeyWithNative(
-  metadata: Record<string, unknown>,
-): string | undefined {
-  const capability = 'resolveServertoolStickyKeyJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveServertoolStickyKeyJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(metadata));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveServertoolStickyKeyJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
-}
-
-export function resolveServertoolStateKeyWithNative(
-  metadata: Record<string, unknown>,
-): string {
-  const capability = 'resolveServertoolStateKeyJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveServertoolStateKeyJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(metadata));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveServertoolStateKeyJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (typeof parsed !== 'string' || !parsed.trim()) {
-    throw new Error('resolveServertoolStateKeyJson native returned invalid state key');
-  }
-  return parsed.trim();
-}
-
-export function resolveRuntimeStopMessageStateWithNative(
-  runtimeMetadata: unknown,
-): RuntimeStopMessageStateSnapshot | null {
-  const capability = 'resolveRuntimeStopMessageStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveRuntimeStopMessageStateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(runtimeMetadata ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveRuntimeStopMessageStateJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseRuntimeStopMessageStateSnapshotPayload(resultJson, 'resolveRuntimeStopMessageStateJson');
-}
 
 function parseRuntimeStopMessageStateSnapshotPayload(
   resultJson: string,
@@ -1733,124 +1396,6 @@ function parseRuntimeStopMessageStateSnapshotPayload(
     ...(stageMode ? { stageMode } : {}),
     ...(aiMode ? { aiMode } : {})
   };
-}
-
-export function readRuntimeStopMessageStageModeWithNative(
-  runtimeMetadata: unknown,
-): 'on' | 'off' | 'auto' | undefined {
-  const capability = 'readRuntimeStopMessageStageModeJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('readRuntimeStopMessageStageModeJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(runtimeMetadata ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`readRuntimeStopMessageStageModeJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (parsed === null) {
-    return undefined;
-  }
-  const stageMode = readStopMessageStageModeField(parsed, 'readRuntimeStopMessageStageModeJson');
-  if (!stageMode) {
-    throw new Error('readRuntimeStopMessageStageModeJson native returned invalid stage mode');
-  }
-  return stageMode;
-}
-
-export function normalizeStopMessageStageModeValueWithNative(
-  value: unknown,
-): 'on' | 'off' | 'auto' | undefined {
-  const capability = 'normalizeStopMessageStageModeValueJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('normalizeStopMessageStageModeValueJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(value ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`normalizeStopMessageStageModeValueJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (parsed === null) {
-    return undefined;
-  }
-  const stageMode = readStopMessageStageModeField(parsed, 'normalizeStopMessageStageModeValueJson');
-  if (!stageMode) {
-    throw new Error('normalizeStopMessageStageModeValueJson native returned invalid stage mode');
-  }
-  return stageMode;
-}
-
-export function hasArmedStopMessageStateWithNative(state: unknown): boolean {
-  const capability = 'hasArmedStopMessageStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('hasArmedStopMessageStateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(state ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`hasArmedStopMessageStateJson native returned non-string: ${typeof resultJson}`);
-  }
-  if (resultJson === 'true') {
-    return true;
-  }
-  if (resultJson === 'false') {
-    return false;
-  }
-  throw new Error(`hasArmedStopMessageStateJson native returned invalid bool: ${resultJson}`);
-}
-
-export function planStopMessageRoutingSnapshotWithNative(
-  raw: unknown,
-): RuntimeStopMessageStateSnapshot | null {
-  const capability = 'planStopMessageRoutingSnapshotJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStopMessageRoutingSnapshotJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ raw }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessageRoutingSnapshotJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseRuntimeStopMessageStateSnapshotPayload(resultJson, capability);
-}
-
-export function planStopMessageRoutingStateApplyWithNative(
-  snapshot: unknown,
-): StopMessageRoutingStateApplyPlan {
-  const capability = 'planStopMessageRoutingStateApplyJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStopMessageRoutingStateApplyJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ snapshot }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessageRoutingStateApplyJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseStopMessageRoutingStateApplyPayload(resultJson, capability);
-}
-
-export function planStopMessageRoutingStateClearWithNative(
-  now: unknown,
-): StopMessageRoutingStateClearPlan {
-  const capability = 'planStopMessageRoutingStateClearJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStopMessageRoutingStateClearJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ now }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planStopMessageRoutingStateClearJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${capability} native returned invalid payload`);
-  }
-  const timestamp = (parsed as Record<string, unknown>).timestamp;
-  if (!Number.isInteger(timestamp)) {
-    throw new Error(`${capability} native returned invalid timestamp`);
-  }
-  return { timestamp: timestamp as number };
 }
 
 export function planStoplessDecisionContextSignalsWithNative(input: {
@@ -2055,54 +1600,6 @@ export function planStopMessagePersistedLookupWithNative(input: {
   return parsed;
 }
 
-export function buildClientExecCliProjectionOutputWithNative(
-  input: ClientExecCliProjectionInput,
-): ClientExecCliProjectionOutput {
-  const capability = 'buildClientExecCliProjectionOutputJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('buildClientExecCliProjectionOutputJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
-    const nativeError = resultJson as Record<string, unknown>;
-    const message = typeof nativeError.message === 'string' && nativeError.message.trim()
-      ? nativeError.message.trim()
-      : JSON.stringify(nativeError);
-    throw new Error(`buildClientExecCliProjectionOutputJson native error: ${message}`);
-  }
-  if (typeof resultJson !== 'string') {
-    throw new Error(`buildClientExecCliProjectionOutputJson native returned non-string: ${typeof resultJson}`);
-  }
-  return JSON.parse(resultJson);
-}
-
-export function parseServertoolCliProjectionToolArgumentsWithNative(
-  input: ServertoolCliProjectionToolArgumentsInput,
-): Record<string, unknown> {
-  const capability = 'parseServertoolCliProjectionToolArgumentsJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('parseServertoolCliProjectionToolArgumentsJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
-    const nativeError = resultJson as Record<string, unknown>;
-    const message = typeof nativeError.message === 'string' && nativeError.message.trim()
-      ? nativeError.message.trim()
-      : JSON.stringify(nativeError);
-    throw new Error(`parseServertoolCliProjectionToolArgumentsJson native error: ${message}`);
-  }
-  if (typeof resultJson !== 'string') {
-    throw new Error(`parseServertoolCliProjectionToolArgumentsJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('parseServertoolCliProjectionToolArgumentsJson native returned invalid payload');
-  }
-  return parsed as Record<string, unknown>;
-}
-
 export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string, unknown>>(
   input: Record<string, unknown>,
 ): TPlan {
@@ -2181,84 +1678,6 @@ export function planStoplessCliProjectionContextWithNative(input: {
   };
 }
 
-export function normalizeStoplessTriggerHintForMetadataWithNative(reasonCode: unknown): string {
-  const capability = 'normalizeStoplessTriggerHintForMetadataJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('normalizeStoplessTriggerHintForMetadataJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({
-    ...(typeof reasonCode === 'string' ? { reasonCode } : {})
-  }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`normalizeStoplessTriggerHintForMetadataJson native returned non-string: ${typeof resultJson}`);
-  }
-  return resultJson;
-}
-
-export function planStoplessLearnedNoteWriteWithNative(
-  input: StoplessLearnedNoteWritePlanInput,
-): StoplessLearnedNoteWritePlan {
-  const capability = 'planStoplessLearnedNoteWriteJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planStoplessLearnedNoteWriteJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
-    const nativeError = resultJson as Record<string, unknown>;
-    if (nativeError instanceof Error || typeof nativeError.message === 'string' || typeof nativeError.code === 'string') {
-      const message = typeof nativeError.message === 'string' && nativeError.message.trim()
-        ? nativeError.message.trim()
-        : String(resultJson);
-      throw new Error(`planStoplessLearnedNoteWriteJson native error: ${message}`);
-    }
-  }
-  const parsed = typeof resultJson === 'string' ? JSON.parse(resultJson) as unknown : resultJson;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planStoplessLearnedNoteWriteJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (
-    typeof record.shouldWrite !== 'boolean' ||
-    typeof record.requestId !== 'string' ||
-    typeof record.timestampMs !== 'number'
-  ) {
-    throw new Error(`planStoplessLearnedNoteWriteJson native returned invalid fields: ${JSON.stringify(record)}`);
-  }
-  return record as unknown as StoplessLearnedNoteWritePlan;
-}
-
-export function validateServertoolHookSkeletonPhaseWithNative(
-  input: ServertoolHookSpec,
-): ServertoolHookProjection {
-  const capability = 'validateServertoolHookSkeletonPhaseJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('validateServertoolHookSkeletonPhaseJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`validateServertoolHookSkeletonPhaseJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseServertoolHookProjectionPayload(resultJson, capability);
-}
-
-export function planServertoolHookScheduleWithNative(
-  input: ServertoolHookSchedulerInput,
-): ServertoolHookEffectPlan {
-  const capability = 'planServertoolHookScheduleJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolHookScheduleJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolHookScheduleJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseServertoolHookEffectPlanPayload(resultJson, capability);
-}
-
 function parseServertoolHookEffectPlanPayload(
   resultJson: string,
   capability: string,
@@ -2322,237 +1741,6 @@ function parseServertoolHookEvent(raw: unknown, capability: string): ServertoolH
     throw new Error(`${capability} native returned invalid hook event fields`);
   }
   return record as unknown as ServertoolHookEvent;
-}
-
-export function buildClientVisibleProjectionShellWithNative(
-  input: ClientVisibleProjectionShellInput,
-): Record<string, unknown> {
-  const capability = 'buildClientVisibleProjectionShellJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('buildClientVisibleProjectionShellJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
-    const nativeError = resultJson as Record<string, unknown>;
-    const message = typeof nativeError.message === 'string' && nativeError.message.trim()
-      ? nativeError.message.trim()
-      : JSON.stringify(nativeError);
-    throw new Error(`buildClientVisibleProjectionShellJson native error: ${message}`);
-  }
-  if (typeof resultJson !== 'string') {
-    throw new Error(`buildClientVisibleProjectionShellJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('buildClientVisibleProjectionShellJson native returned invalid projection shell');
-  }
-  return parsed as Record<string, unknown>;
-}
-
-export function buildServertoolCliProjectionExecutionContextWithNative(
-  input: ServertoolCliProjectionExecutionContextInput,
-): ServertoolCliProjectionExecutionContextOutput {
-  const capability = 'buildServertoolCliProjectionExecutionContextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('buildServertoolCliProjectionExecutionContextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
-    const nativeError = resultJson as Record<string, unknown>;
-    const message = typeof nativeError.message === 'string' && nativeError.message.trim()
-      ? nativeError.message.trim()
-      : JSON.stringify(nativeError);
-    throw new Error(`buildServertoolCliProjectionExecutionContextJson native error: ${message}`);
-  }
-  if (typeof resultJson !== 'string') {
-    throw new Error(`buildServertoolCliProjectionExecutionContextJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('buildServertoolCliProjectionExecutionContextJson native returned invalid projection context');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (record.flowId !== 'servertool_cli_projection') {
-    throw new Error('buildServertoolCliProjectionExecutionContextJson native returned invalid projection context fields');
-  }
-  return {
-    flowId: 'servertool_cli_projection'
-  };
-}
-
-export function buildServertoolCliProjectionRuntimeBranchWithNative(
-  input: ServertoolCliProjectionRuntimeBranchInput,
-): ServertoolCliProjectionRuntimeBranchOutput {
-  const capability = 'buildServertoolCliProjectionRuntimeBranchJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (resultJson && typeof resultJson === 'object' && !Array.isArray(resultJson)) {
-    const nativeError = resultJson as Record<string, unknown>;
-    const message = typeof nativeError.message === 'string' && nativeError.message.trim()
-      ? nativeError.message.trim()
-      : JSON.stringify(nativeError);
-    throw new Error(`buildServertoolCliProjectionRuntimeBranchJson native error: ${message}`);
-  }
-  if (typeof resultJson !== 'string') {
-    throw new Error(`buildServertoolCliProjectionRuntimeBranchJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid branch');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (!record.chatResponse || typeof record.chatResponse !== 'object' || Array.isArray(record.chatResponse)) {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid chatResponse');
-  }
-  if (record.resultMode !== 'tool_flow') {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid resultMode');
-  }
-  const execution = record.execution as Record<string, unknown> | undefined;
-  if (!execution || execution.flowId !== 'servertool_cli_projection') {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid execution');
-  }
-  if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid result');
-  }
-  const result = record.result as Record<string, unknown>;
-  if (result.mode !== 'tool_flow') {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid result mode');
-  }
-  if (!result.finalChatResponse || typeof result.finalChatResponse !== 'object' || Array.isArray(result.finalChatResponse)) {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid result finalChatResponse');
-  }
-  const resultExecution = result.execution as Record<string, unknown> | undefined;
-  if (!resultExecution || resultExecution.flowId !== 'servertool_cli_projection') {
-    throw new Error('buildServertoolCliProjectionRuntimeBranchJson native returned invalid result execution');
-  }
-  return {
-    resultMode: 'tool_flow',
-    chatResponse: record.chatResponse as JsonObject,
-    execution: {
-      flowId: 'servertool_cli_projection'
-    },
-    result: {
-      mode: 'tool_flow',
-      finalChatResponse: result.finalChatResponse as JsonObject,
-      execution: {
-        flowId: 'servertool_cli_projection'
-      }
-    }
-  };
-}
-
-export function validateClientExecCommandResultWithNative(rawOutput: string): Record<string, unknown> {
-  const capability = 'validateClientExecCommandResultJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('validateClientExecCommandResultJson native unavailable');
-  }
-  const resultJson = fn(rawOutput);
-  if (typeof resultJson !== 'string') {
-    throw new Error(`validateClientExecCommandResultJson native returned non-string: ${typeof resultJson}`);
-  }
-  return JSON.parse(resultJson) as Record<string, unknown>;
-}
-
-export function resolveRuntimeStopMessageStateFromMetadataCenterWithNative(
-  input: RuntimeStopMessageStateFromMetadataCenterInput,
-): RuntimeStopMessageStateSnapshot | null {
-  const capability = 'resolveRuntimeStopMessageStateFromMetadataCenterJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveRuntimeStopMessageStateFromMetadataCenterJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveRuntimeStopMessageStateFromMetadataCenterJson native returned non-string: ${typeof resultJson}`);
-  }
-  return JSON.parse(resultJson) as RuntimeStopMessageStateSnapshot | null;
-}
-
-export function resolveBdWorkingDirectoryForRecordWithNative(
-  input: ServertoolRecordRuntimeMetadataInput,
-): string | undefined {
-  const capability = 'resolveBdWorkingDirectoryForRecordJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveBdWorkingDirectoryForRecordJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveBdWorkingDirectoryForRecordJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as string | null;
-  return typeof parsed === 'string' && parsed.length ? parsed : undefined;
-}
-
-export function resolveStopMessageFollowupProviderKeyWithNative(
-  input: ServertoolRecordRuntimeMetadataInput,
-): string {
-  const capability = 'resolveStopMessageFollowupProviderKeyJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveStopMessageFollowupProviderKeyJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveStopMessageFollowupProviderKeyJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as string;
-  return typeof parsed === 'string' ? parsed : '';
-}
-
-export function resolveClientConnectionStateWithNative(value: unknown): { disconnected?: boolean } | null {
-  const capability = 'resolveClientConnectionStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveClientConnectionStateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(value));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveClientConnectionStateJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? parsed as { disconnected?: boolean }
-    : null;
-}
-
-export function hasCompactionFlagWithNative(runtimeMetadata: unknown): boolean {
-  const capability = 'hasCompactionFlagJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('hasCompactionFlagJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(runtimeMetadata));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`hasCompactionFlagJson native returned non-string: ${typeof resultJson}`);
-  }
-  if (resultJson === 'true') {
-    return true;
-  }
-  if (resultJson === 'false') {
-    return false;
-  }
-  throw new Error(`hasCompactionFlagJson native returned invalid bool: ${resultJson}`);
-}
-
-export function resolveEntryEndpointWithNative(record: Record<string, unknown>): string {
-  const capability = 'resolveEntryEndpointJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveEntryEndpointJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(record));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveEntryEndpointJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  return typeof parsed === 'string' && parsed.trim().length ? parsed : '/v1/chat/completions';
 }
 
 export function resolveStopMessageFollowupToolContentMaxCharsWithNative(input: {
@@ -5656,64 +4844,6 @@ function parseAutoHookTraceEventPlan(value: unknown, capability: string): AutoHo
   };
 }
 
-export function resolveDefaultStopMessageSnapshotWithNative(
-  input: StopMessageDefaultSnapshotInput,
-): RuntimeStopMessageStateSnapshot | null {
-  const capability = 'resolveDefaultStopMessageSnapshotJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveDefaultStopMessageSnapshotJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveDefaultStopMessageSnapshotJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseRuntimeStopMessageStateSnapshotPayload(resultJson, capability);
-}
-
-export function resolveImplicitGeminiStopMessageSnapshotWithNative(
-  input: StopMessageImplicitGeminiSnapshotInput,
-): RuntimeStopMessageStateSnapshot | null {
-  const capability = 'resolveImplicitGeminiStopMessageSnapshotJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveImplicitGeminiStopMessageSnapshotJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveImplicitGeminiStopMessageSnapshotJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseRuntimeStopMessageStateSnapshotPayload(resultJson, capability);
-}
-
-export function readServertoolLoopStateWithNative(runtimeMetadata: unknown): ServertoolLoopStateSnapshot | null {
-  const capability = 'readServertoolLoopStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('readServertoolLoopStateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(runtimeMetadata ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`readServertoolLoopStateJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseServertoolLoopStatePayload(resultJson, capability);
-}
-
-export function planServertoolLoopStateWithNative(
-  input: ServertoolLoopStatePlanInput,
-): ServertoolLoopStateSnapshot | null {
-  const capability = 'planServertoolLoopStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolLoopStateJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolLoopStateJson native returned non-string: ${typeof resultJson}`);
-  }
-  return parseServertoolLoopStatePayload(resultJson, capability);
-}
-
 function parseServertoolLoopStatePayload(resultJson: string, capability: string): ServertoolLoopStateSnapshot | null {
   const parsed = JSON.parse(resultJson) as unknown;
   if (parsed === null) {
@@ -5737,26 +4867,6 @@ function parseServertoolLoopStatePayload(resultJson: string, capability: string)
   };
 }
 
-export function parseServertoolTimeoutMsWithNative(input: ServertoolTimeoutPolicyInput): number {
-  const capability = 'parseServertoolTimeoutMsJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('parseServertoolTimeoutMsJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(input));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`parseServertoolTimeoutMsJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (typeof parsed !== 'number' || !Number.isInteger(parsed)) {
-    throw new Error('parseServertoolTimeoutMsJson native returned invalid timeout');
-  }
-  if (parsed < 0) {
-    throw new Error('parseServertoolTimeoutMsJson native returned invalid timeout');
-  }
-  return parsed;
-}
-
 export function resolveServertoolTimeoutMsFromEnvCandidatesWithNative(input: {
   candidates: Array<{ key: string; value?: unknown }>;
 }): number {
@@ -5774,67 +4884,6 @@ export function resolveServertoolTimeoutMsFromEnvCandidatesWithNative(input: {
     throw new Error('resolveServertoolTimeoutMsFromEnvCandidatesJson native returned invalid timeout');
   }
   return parsed;
-}
-
-export function planServertoolTimeoutWatcherWithNative(timeoutMs: unknown): ServertoolTimeoutWatcherPlan {
-  const capability = 'planServertoolTimeoutWatcherJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planServertoolTimeoutWatcherJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ timeoutMs }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planServertoolTimeoutWatcherJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planServertoolTimeoutWatcherJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.armed !== 'boolean' || !Number.isInteger(record.timeoutMs) || (record.timeoutMs as number) < 0) {
-    throw new Error('planServertoolTimeoutWatcherJson native returned invalid plan');
-  }
-  return { armed: record.armed, timeoutMs: record.timeoutMs as number };
-}
-
-export function isAdapterClientDisconnectedWithNative(adapterContext: unknown): boolean {
-  const capability = 'isAdapterClientDisconnectedJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('isAdapterClientDisconnectedJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(adapterContext ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`isAdapterClientDisconnectedJson native returned non-string: ${typeof resultJson}`);
-  }
-  if (resultJson === 'true') {
-    return true;
-  }
-  if (resultJson === 'false') {
-    return false;
-  }
-  throw new Error(`isAdapterClientDisconnectedJson native returned invalid bool: ${resultJson}`);
-}
-
-export function planClientDisconnectWatcherWithNative(pollIntervalMs: unknown): ServertoolClientDisconnectWatcherPlan {
-  const capability = 'planClientDisconnectWatcherJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('planClientDisconnectWatcherJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ pollIntervalMs }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`planClientDisconnectWatcherJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('planClientDisconnectWatcherJson native returned invalid plan');
-  }
-  const record = parsed as Record<string, unknown>;
-  if (!Number.isInteger(record.intervalMs) || (record.intervalMs as number) <= 0) {
-    throw new Error('planClientDisconnectWatcherJson native returned invalid interval');
-  }
-  return { intervalMs: record.intervalMs as number };
 }
 
 export function planServertoolClientDisconnectedErrorWithNative(input: {
@@ -5955,19 +5004,6 @@ export function resolveServertoolEngineMatchHitWithNative(input: {
   return { flowId };
 }
 
-export function createServertoolExecutionLoopStateWithNative(): NativeServertoolExecutionLoopState {
-  const capability = 'createServertoolExecutionLoopStateJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error(`${capability} native unavailable`);
-  }
-  const resultJson = fn();
-  if (typeof resultJson !== 'string') {
-    throw new Error(`${capability} native returned non-string: ${typeof resultJson}`);
-  }
-  return parseServertoolExecutionLoopState(resultJson, capability);
-}
-
 export function appendServertoolExecutedRecordWithNative(input: {
   state?: NativeServertoolExecutionLoopState;
   toolCall: NativeServertoolExecutedToolCall;
@@ -6063,76 +5099,6 @@ function parseServertoolExecutionLoopState(
   };
 }
 
-export function readClientInjectOnlyWithNative(metadata: Record<string, unknown>): boolean {
-  const capability = 'readClientInjectOnlyJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('readClientInjectOnlyJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(metadata));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`readClientInjectOnlyJson native returned non-string: ${typeof resultJson}`);
-  }
-  if (resultJson === 'true') {
-    return true;
-  }
-  if (resultJson === 'false') {
-    return false;
-  }
-  throw new Error(`readClientInjectOnlyJson native returned invalid bool: ${resultJson}`);
-}
-
-export function normalizeClientInjectTextWithNative(value: unknown): string {
-  const capability = 'normalizeClientInjectTextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('normalizeClientInjectTextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ value }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`normalizeClientInjectTextJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (typeof parsed !== 'string' || !parsed.trim()) {
-    throw new Error('normalizeClientInjectTextJson native returned invalid text');
-  }
-  return parsed;
-}
-
-export function compactFollowupErrorReasonWithNative(value: unknown): string | undefined {
-  const capability = 'compactFollowupErrorReasonJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('compactFollowupErrorReasonJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(value ?? null));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`compactFollowupErrorReasonJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (parsed === null) {
-    return undefined;
-  }
-  if (typeof parsed !== 'string') {
-    throw new Error('compactFollowupErrorReasonJson native returned invalid reason');
-  }
-  return parsed;
-}
-
-export function resolveAdapterContextProviderKeyWithNative(adapterContext: unknown): string {
-  const capability = 'resolveAdapterContextProviderKeyJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('resolveAdapterContextProviderKeyJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify({ adapterContext }));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`resolveAdapterContextProviderKeyJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  return typeof parsed === 'string' ? parsed : '';
-}
-
 export function hasStopMessageAutoCliResultInRequestWithNative(input: {
   adapterContext: unknown;
   runtimeMetadata?: unknown;
@@ -6193,49 +5159,6 @@ export function extractStopMessageAutoCliResultSnapshotFromRequestWithNative(inp
     throw new Error('extractStopMessageAutoCliResultSnapshotFromRequestJson native returned invalid snapshot');
   }
   return parsed as Record<string, unknown>;
-}
-
-export function extractCurrentAssistantReasoningStopArgumentsWithNative(
-  payload: unknown
-): string | null {
-  const capability = 'extractCurrentAssistantReasoningStopArgumentsJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('extractCurrentAssistantReasoningStopArgumentsJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(payload));
-  if (typeof resultJson !== 'string') {
-    throw new Error(
-      `extractCurrentAssistantReasoningStopArgumentsJson native returned non-string: ${typeof resultJson}`
-    );
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (parsed == null) {
-    return null;
-  }
-  if (typeof parsed !== 'string') {
-    throw new Error(
-      `extractCurrentAssistantReasoningStopArgumentsJson native returned invalid payload: ${typeof parsed}`
-    );
-  }
-  return parsed;
-}
-
-export function stripStopSchemaControlTextWithNative(text: string): string {
-  const capability = 'stripStopSchemaControlTextJson';
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    throw new Error('stripStopSchemaControlTextJson native unavailable');
-  }
-  const resultJson = fn(JSON.stringify(text));
-  if (typeof resultJson !== 'string') {
-    throw new Error(`stripStopSchemaControlTextJson native returned non-string: ${typeof resultJson}`);
-  }
-  const parsed = JSON.parse(resultJson) as unknown;
-  if (typeof parsed !== 'string') {
-    throw new Error(`stripStopSchemaControlTextJson native returned invalid payload: ${typeof parsed}`);
-  }
-  return parsed;
 }
 
 export function buildStopMessageTerminalVisiblePayloadWithNative<TPayload extends Record<string, unknown>>(input: {

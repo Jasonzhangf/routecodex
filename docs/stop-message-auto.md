@@ -62,6 +62,7 @@ Provider response
 ```json
 {
   "stopreason": 0,
+  "simple_question": false,
   "reason": "finished/blocked reason",
   "has_evidence": 1,
   "evidence": "file/log/command output/test evidence",
@@ -76,7 +77,8 @@ Provider response
 }
 ```
 
-- `stopreason`: 唯一无条件必填字段，`0=finished`、`1=blocked`、`2=continue_needed`。`0|1` 都是停止条件，`2` 是继续条件。
+- `simple_question=true`: 当前用户输入只是非常简单的问题时允许自然停止；此时不要求 `stopreason`、证据或下一步字段，停止信号直接发给客户端。
+- `simple_question=false` 或缺省时，`stopreason` 是唯一无条件必填字段，`0=finished`、`1=blocked`、`2=continue_needed`。`0|1` 都是停止条件，`2` 是继续条件。
 - `stopreason=0` 表示任务完成；必须 `has_evidence=1` 且 `evidence` 非空。证据内容只检查存在性，不判断真假。
 - `stopreason=1` 表示阻塞/无法继续；必须 `reason` 非空，提供 reason 即可停止。
 - `has_evidence=1` 时 `evidence` 必填；诊断字段按真实情况填写，不是全局必填。

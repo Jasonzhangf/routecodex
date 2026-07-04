@@ -33,6 +33,46 @@ describe('stop schema lifecycle contract', () => {
     });
   });
 
+  test('simple_question true allows natural stop without stopreason', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '',
+      reasoningStopArguments: '{"simple_question":true}',
+      used: 0,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('allow_stop');
+    expect(gate.reason_code).toBe('stop_schema_simple_question');
+    expect(gate.count_budget).toBe(false);
+    expect(gate.missing_fields).toEqual([]);
+    expect(gate.parsed).toMatchObject({
+      simple_question: true,
+    });
+  });
+
+  test('simple_question true overrides other stop schema fields', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '',
+      reasoningStopArguments: '{"simple_question":true,"stopreason":"unknown"}',
+      used: 0,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('allow_stop');
+    expect(gate.reason_code).toBe('stop_schema_simple_question');
+    expect(gate.missing_fields).toEqual([]);
+  });
+
+  test('simple_question false still requires stopreason', () => {
+    const gate = evaluateStopSchemaGateWithNative({
+      assistantText: '',
+      reasoningStopArguments: '{"simple_question":false}',
+      used: 0,
+      maxRepeats: 3,
+    });
+    expect(gate.action).toBe('followup');
+    expect(gate.reason_code).toBe('stop_schema_stopreason_missing_or_non_numeric');
+    expect(gate.missing_fields).toContain('stopreason');
+  });
+
   test('fenced non-terminal schema follows up with schema-aware guidance', () => {
     const gate = evaluateStopSchemaGateWithNative({
       assistantText:

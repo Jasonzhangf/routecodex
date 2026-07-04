@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 
 const STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
-{"stopreason":2,"reason":"当前状态原因","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
-字段规则：stopreason 是唯一无条件必填字段，只能是数字 0=finished，1=blocked，2=continue_needed；stopreason=0 表示任务完成，必须 has_evidence=1 且 evidence 非空，evidence 内容不做真假校验；stopreason=1 表示阻塞/无法继续，必须 reason 非空，提供 reason 即可停止；needs_user_input=true 时 next_step 必须写给用户的决策问题；stopreason=2 表示任务未完成但需要继续，必须 next_step 非空，下一轮只执行 next_step 的内容；issue_cause/excluded_factors/diagnostic_order/done_steps/next_suggested_path/learned 有内容就写，没有可留空。"#;
+{"stopreason":2,"simple_question":false,"reason":"当前状态原因","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
+字段规则：simple_question=true 表示当前用户输入只是非常简单的问题，可以直接自然停止，不需要 stopreason/证据/下一步字段；否则 stopreason 是唯一无条件必填字段，只能是数字 0=finished，1=blocked，2=continue_needed；stopreason=0 表示任务完成，必须 has_evidence=1 且 evidence 非空，evidence 内容不做真假校验；stopreason=1 表示阻塞/无法继续，必须 reason 非空，提供 reason 即可停止；needs_user_input=true 时 next_step 必须写给用户的决策问题；stopreason=2 表示任务未完成但需要继续，必须 next_step 非空，下一轮只执行 next_step 的内容；issue_cause/excluded_factors/diagnostic_order/done_steps/next_suggested_path/learned 有内容就写，没有可留空。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -147,6 +147,7 @@ pub enum Action {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StopSchemaParsed {
     pub stopreason: Option<u8>,
+    pub simple_question: Option<bool>,
     pub has_evidence: Option<u8>,
     pub forcestop: Option<u8>,
     pub reason: Option<String>,
@@ -345,6 +346,22 @@ fn evaluate_stop_schema_gate_from_parsed(
     prev_no_change_count: u32,
     feedback_history: Vec<SchemaErrorFeedback>,
 ) -> StopSchemaGateDecision {
+    if parsed.simple_question == Some(true) {
+        return StopSchemaGateDecision {
+            max_repeats: provided_cap,
+            action: StopSchemaGateAction::AllowStop,
+            reason_code: "stop_schema_simple_question".to_string(),
+            summary_prefix: None,
+            followup_text: None,
+            count_budget: false,
+            missing_fields: vec![],
+            no_change_count: 0,
+            observation_hash: String::new(),
+            parsed: Some(parsed),
+            feedback_history,
+        };
+    }
+
     if parsed.forcestop == Some(1) {
         let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
         if reason.is_empty() {
@@ -1247,6 +1264,7 @@ fn parse_stop_schema_value(value: Value) -> Option<StopSchemaParsed> {
     let row = value.as_object()?;
     Some(StopSchemaParsed {
         stopreason: read_u8(row.get("stopreason")),
+        simple_question: row.get("simple_question").and_then(|v| v.as_bool()),
         has_evidence: read_u8(row.get("has_evidence")),
         forcestop: read_u8(row.get("forcestop")),
         reason: read_string(row.get("reason")),
@@ -1384,6 +1402,7 @@ fn looks_like_stop_schema_value(value: &Value) -> bool {
     };
     [
         "stopreason",
+        "simple_question",
         "forcestop",
         "reason",
         "has_evidence",
@@ -2360,8 +2379,59 @@ mod tests {
         // The STOP_SCHEMA_JSON_EXAMPLE should contain needs_user_input
         // but stopreason should NOT contain 3 and forcestop stays internal-only.
         assert!(STOP_SCHEMA_JSON_EXAMPLE.contains("needs_user_input"));
+        assert!(STOP_SCHEMA_JSON_EXAMPLE.contains("simple_question"));
         assert!(!STOP_SCHEMA_JSON_EXAMPLE.contains(r#"stopreason":3"#));
         assert!(!STOP_SCHEMA_JSON_EXAMPLE.contains("forcestop"));
+    }
+
+    #[test]
+    fn simple_question_allows_natural_stop_without_stopreason() {
+        let decision = evaluate_stop_schema_gate(
+            tagged_stop_schema(r#"{"simple_question":true}"#).as_str(),
+            0,
+            3,
+            "",
+            0,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(decision.reason_code, "stop_schema_simple_question");
+        assert!(!decision.count_budget);
+        assert!(decision.missing_fields.is_empty());
+        assert_eq!(
+            decision.parsed.as_ref().and_then(|parsed| parsed.simple_question),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn simple_question_true_overrides_other_stop_schema_fields() {
+        let decision = evaluate_stop_schema_gate(
+            tagged_stop_schema(r#"{"simple_question":true,"stopreason":"unknown"}"#).as_str(),
+            0,
+            3,
+            "",
+            0,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(decision.reason_code, "stop_schema_simple_question");
+        assert!(decision.missing_fields.is_empty());
+    }
+
+    #[test]
+    fn simple_question_false_still_requires_stopreason() {
+        let decision = evaluate_stop_schema_gate(
+            tagged_stop_schema(r#"{"simple_question":false}"#).as_str(),
+            0,
+            3,
+            "",
+            0,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(
+            decision.reason_code,
+            "stop_schema_stopreason_missing_or_non_numeric"
+        );
+        assert!(decision.missing_fields.contains(&"stopreason".to_string()));
     }
 
     #[test]

@@ -108,7 +108,7 @@ When the model tries to stop, the final text must include a stop schema object w
 - `1`: blocked
 - `2`: continue needed
 
-Missing schema, invalid schema, malformed schema arguments, or `stopreason=2` without `next_step` causes `cli_projection` until the Rust loop guard is exhausted. Valid `stopreason=2` with `next_step` continues with that exact next-step text and does not consume the consecutive invalid/no-schema budget. Valid `stopreason=0` requires `has_evidence=1` plus non-empty `evidence` and becomes `terminal_final`; evidence content is not semantically judged. Valid `stopreason=1` requires only non-empty `reason` and becomes `terminal_final`; `blocked + needs_user_input=true` must return the summary plus the user decision question and stop with `finish_reason=stop`.
+Missing schema, invalid schema, malformed schema arguments, or `stopreason=2` without `next_step` causes `cli_projection` until the Rust loop guard is exhausted. `simple_question=true` is the only schema option that may allow natural stop without `stopreason`; it is reserved for very simple user inputs and must pass through to the client without CLI projection. Valid `stopreason=2` with `next_step` continues with that exact next-step text and does not consume the consecutive invalid/no-schema budget. Valid `stopreason=0` requires `has_evidence=1` plus non-empty `evidence` and becomes `terminal_final`; evidence content is not semantically judged. Valid `stopreason=1` requires only non-empty `reason` and becomes `terminal_final`; `blocked + needs_user_input=true` must return the summary plus the user decision question and stop with `finish_reason=stop`.
 
 ## Validation
 
