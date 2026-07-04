@@ -38,15 +38,15 @@ async function closeServer(server?: http.Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
-function routerEnv(tmp: string): Array<() => void> {
+function routerEnv(tmp: string, options?: { snapshots?: boolean }): Array<() => void> {
   return [
     setEnv('NODE_ENV', 'test'),
     setEnv('RCC_HOME', path.join(tmp, '.rcc')),
     setEnv('RCC_PROVIDER_DIR', path.join(tmp, '.rcc', 'provider')),
     setEnv('ROUTECODEX_PROVIDER_DIR', path.join(tmp, '.rcc', 'provider')),
-    setEnv('ROUTECODEX_SNAPSHOT', '1'),
-    setEnv('ROUTECODEX_SNAPSHOT_DIR', path.join(tmp, '.rcc', 'codex-samples')),
-    setEnv('ROUTECODEX_SNAPSHOT_STAGES', 'provider-request,provider-response'),
+    setEnv('ROUTECODEX_SNAPSHOT', options?.snapshots ? '1' : undefined),
+    setEnv('ROUTECODEX_SNAPSHOT_DIR', options?.snapshots ? path.join(tmp, '.rcc', 'codex-samples') : undefined),
+    setEnv('ROUTECODEX_SNAPSHOT_STAGES', options?.snapshots ? 'provider-request,provider-response' : undefined),
     setEnv('ROUTECODEX_AUTH_DIR', path.join(tmp, 'auth')),
     setEnv('ROUTECODEX_STATS_LOG', path.join(tmp, 'stats.json')),
     setEnv('ROUTECODEX_LOGIN_FILE', path.join(tmp, 'login')),
@@ -423,7 +423,7 @@ describe('router-direct passthrough HTTP blackbox', () => {
     const upstreamPort = await listen(upstream);
     await writeProviderToml(tmp, 'direct', upstreamPort);
     const userConfig = await writeRouterConfig(configPath, upstreamPort);
-    const restores = routerEnv(tmp);
+    const restores = routerEnv(tmp, { snapshots: true });
     let server: RouteCodexHttpServer | undefined;
     try {
       const started = await startRouteCodex(configPath, userConfig);
