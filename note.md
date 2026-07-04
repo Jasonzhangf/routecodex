@@ -25062,3 +25062,29 @@ Complete SSE rustification status (34 TS files):
 
 ### 测试文件引用（旧路径）
 - 20 个 spec 文件仍从 `native-servertool-core-semantics.js` import（按规则保留，不修改）
+
+# 2026-07-04: 5520 `Provider runtime XL.key1 not found` fixed by provider config identity normalization
+
+- Symptom: live 5520 `/v1/responses` failed at `provider.runtime_resolve` with `Provider runtime XL.key1 not found`.
+- Root cause: config identity mismatch, not code owner. Root forwarder targets and provider file used uppercase `XL`, while runtime health/route canonical state used lowercase `xl.1`; provider loader also treats provider directory name as providerId truth.
+- Fix applied in `~/.rcc`: renamed provider directory `provider/XL` to `provider/xl`, changed `provider/xl/config.v2.toml` `providerId` and `[provider].id` to `xl`, and changed all root forwarder targets from `providerId = "XL"` to `providerId = "xl"`.
+- Verification: `routecodex config validate` PASS; `rcc restart --port 5520` PASS; `/health` OK on live `0.90.3561`; final dry-run shows default selected `asxs.crsa.gpt-5.4` after priority restore and `xl.key1.gpt-5.4` remains `providerRegistered=true`, `available=true`, `runtimeKey=xl.key1`.
+- XL runtime live proof: temporarily set `fwd.gpt.gpt-5.4` xl priority to 0, restarted, sent real `/v1/responses` request; log hit `default/gateway-priority-5520-priority-default -> xl[key1].gpt-5.4`, provider send reached upstream and returned quota error/reroute instead of runtime miss, then final response completed via reroute. Restored xl priority to 2 and restarted.
+- Repo code diff check for runtime resolver/provider runtime files returned empty; no compatibility fallback was kept.
+
+# 2026-07-05: runtime key resolver compatibility removal
+
+- User correction: config identity problems must be fixed in config; resolver compatibility should not be kept.
+- Change: removed server runtime binding compatibility probes in `http-server-runtime-providers.ts` and `index.ts`: no `key1 <-> 1` handle aliases, no alias-scoped provider map entries, no parent/model suffix recursion, no runtime handle prefix/model scanning.
+- Contract: exact `providerKey -> runtimeKey` map entries and exact handles are the only server-side lookup path; `RequestExecutor` can still consume the VR-selected `target.runtimeKey` hint.
+- Verification: `rg` residue scan for removed markers returned 0; focused provider binding/runtime resolver/runtime manager Jest passed 5/5; `npx tsc --noEmit --pretty false`, `verify:architecture-fallback-denylist`, `verify:function-map-compile-gate`, `git diff --check`, and `routecodex config validate` passed.
+
+# 2026-07-04: responses continuation provider-owned submit materialization slice
+
+- Target slice: `responses.continuation.mainline` rct-01/rct-02 sub-edge for provider-owned `/v1/responses/:id/submit_tool_outputs` materialization.
+- Owner lock: feature `hub.chat_process_responses_continuation`; allowed owner path includes Rust `shared_responses_conversation_utils.rs` plus TS bridge `src/modules/llmswitch/bridge` as NAPI/IO shell.
+- Change: moved provider-owned submit `tool_outputs -> function_call_output input` materialization from `responses-request-bridge.ts` into Rust `materialize_provider_owned_submit_context_json`; TS now calls `materializeProviderOwnedSubmitContext` and no longer maps `tool_outputs` locally in either `buildResponsesRequestContextForHttp` or direct continuation handling.
+- Red/gate: added residue audit `responses provider-owned submit context materialization must be native-owned` to reject TS `tool_outputs.map(...)`, local `function_call_output`, and local `tool_call_id -> call_id` materialization in `responses-request-bridge.ts`.
+- Evidence: `cargo test -p router-hotpath-napi provider_owned_submit_context --lib -- --nocapture` PASS 2/2; `cargo test -p router-hotpath-napi shared_responses_conversation_utils --lib -- --nocapture` PASS 50/50; focused Jest provider-owned submit PASS; residue audit for scope isolation + provider-owned submit PASS; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; `git diff --check` PASS.
+- Current blocker outside this slice: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` is blocked by existing dirty servertool wrapper/type consolidation errors in `sharedmodule/llmswitch-core/src/servertool/*` (98 errors). Do not count sharedmodule tsc/build/release/live closeout for this slice until that worker's servertool type surface is reconciled.
+- Remaining: rct-01/rct-02 are not fully anchored yet; TS still owns lookup IO and action branching around direct/relay/scope materialize. This slice only removes the provider-owned submit materialization semantic residue.

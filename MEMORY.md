@@ -717,3 +717,15 @@
 - Review commit evidence: `35549f6a0` committed MetadataCenter stopless `sessionId` projection after `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` passed 10/10; `5c2fafeff` committed Responses store latest stopless guidance collapse after Rust `shared_responses_conversation_utils` passed 48/48, native hotpath build passed, `responses-continuation-store.spec.ts` passed 39/39, and stage residue audit passed 153/153.
 - Review commit evidence: `51234d9ed` committed stopless/servertool Rust governance after `verify:servertool-rust-only` passed, Rust `stopless_` passed 70/70, focused stopless/provider-response/req-process Jest passed 50/50, and `servertool-bridge-equivalence.spec.ts` passed 2/2.
 - Current boundary: these commits prove local code/gate closure for the reviewed slices. Runtime release closeout is still not claimed until live `/health.version` matches the source/package version and same-entry live replay is rerun on that installed runtime.
+
+# 2026-07-04: provider directory name is config providerId truth
+
+- Verified 5520 `Provider runtime XL.key1 not found` was a `~/.rcc` config identity issue, not a runtime resolver code issue. The provider loader rejects `config.v2.toml` when provider directory name and `providerId` differ, and VR/runtime health canonicalize provider identity into the provider key family used at runtime.
+- Correct fix pattern for case-mismatched provider identity: rename the provider directory and update `config.v2.toml` `providerId` / `[provider].id` plus every root forwarder `providerId` target to the same canonical value; do not add resolver fallback/compatibility probing.
+- Evidence: `provider/XL` was renamed to `provider/xl`; root XL targets became `providerId="xl"`; `routecodex config validate`, `rcc restart --port 5520`, live `/health`, and `routecodex port dry-run 5520` passed. A temporary priority live probe hit `xl[key1].gpt-5.4`, reached provider send, got upstream quota/reroute instead of `ERR_PROVIDER_NOT_FOUND`, then priority was restored.
+
+# 2026-07-05: runtime key compatibility probing removed
+
+- Runtime key resolution now only accepts exact `providerKey -> runtimeKey` map entries, exact runtime handles, and the VR-provided `runtimeKey` hint. It no longer normalizes `key1 <-> 1`, creates alias-scoped handle aliases, recursively drops model suffixes, or scans runtime handles by prefix/model suffix.
+- This closes the config-drift masking path exposed by the 5520 `Provider runtime XL.key1 not found` incident: provider identity mismatches must be fixed in `~/.rcc` config, not hidden in resolver compatibility.
+- Evidence: focused provider binding/runtime resolver/runtime manager Jest passed 5/5; root `tsc` passed; `verify:architecture-fallback-denylist`, `verify:function-map-compile-gate`, `git diff --check`, and `routecodex config validate` passed.

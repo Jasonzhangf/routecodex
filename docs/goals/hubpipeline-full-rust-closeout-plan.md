@@ -329,3 +329,91 @@ curl -sS http://127.0.0.1:<managed-port>/health
 - `function-map.yml`、`mainline-call-map.yml`、`verification-map.yml`、wiki/manifest 与代码 owner 一致。
 - 架构 gate 能阻止旧 TS semantic path、fallback、非相邻转换、metadata payload 泄漏、重复 owner 复活。
 - `MEMORY.md` 和相关 skill 已沉淀确证流程与反模式。
+
+## 10. 2026-07-04 Final Closeout Execution Contract
+
+本节覆盖当前最终执行任务。前置事实：Hub Pipeline 尚未完整 Rust 化。当前 gate 结果显示 `servertool.hook_skeleton.mainline` 仍有 12 条 `binding pending`，`responses.continuation.mainline` 仍有 3 条 `partial`，`error.mainline` 和 `vr.route_availability.mainline` 各有 1 条非 Hub-adjacent partial；`verify:llmswitch-rustification-audit` 仍报告 production TS surface 存在。后续执行不得把“gate 在预算内 PASS”误报为“完整 Rust-only closeout”。
+
+### 10.1 当前主目标
+
+把 Hub Pipeline / Chat Process / servertool followup orchestration / Responses continuation 相关剩余语义全部收口到 Rust 唯一真源，并完成本地 gate、架构 gate、release install、live `/health.version`、同入口 replay 的全闭环。
+
+### 10.2 当前剩余必关项
+
+1. `servertool.hook_skeleton.mainline`
+   - 目标：将 12 条 `binding pending` 边全部变成真实 Rust caller/callee adjacent binding。
+   - 要求：每条边必须能回链到 wiki/manifest 节点 ID、function map owner、verification map gate 和真实 Rust symbol。
+   - 禁止：只改 budget 把 pending 消掉；禁止伪造 symbol；禁止让 TS shell 承担 hook scheduling、response action、request restore、followup/reentry 语义。
+
+2. `responses.continuation.mainline`
+   - 目标：关闭 3 条 partial，确认 direct/relay continuation owner、`previous_response_id`、tool output materialize、client projection bypass 等决策是否仍在 TS；凡属语义必须移入 Rust Chat Process/store owner。
+   - 要求：`resp_chatprocess save -> immutable interval -> req_chatprocess restore` 之间只允许传输、投影、scope 校验和释放；不得在 TS inbound/outbound/handler/bridge 恢复 history、补 tool 状态或推断 required_action。
+   - 禁止：用 `entryOriginRequest`、`capturedChatRequest`、`requestSemantics`、session-only scope 或 MetadataCenter 重建 continuation 语义。
+
+3. TS surface classification and deletion
+   - 目标：对剩余 Hub-adjacent TS 文件逐个分类为 `thin bridge`、`IO glue`、`diagnostic/test`、`delete now`、`move to Rust`。
+   - 要求：`move to Rust` 必须先写红测，再迁到唯一 Rust owner；`delete now` 必须物理删除并加 residue gate；保留文件必须有 owner 注释或 map 可反查理由。
+   - 禁止：保留“以后可能用”的 semantic helper；禁止新增 TS 业务逻辑。
+
+4. Runtime closeout
+   - 目标：source/package/global/live runtime version 一致，并用同入口旧样本或真实样本 replay 证明 installed runtime 消费的是本次 Rust owner。
+   - 要求：`/health.version === package.json.version`，`status=ok`，`ready=true`，`pipelineReady=true`；若 mismatch，先修 release adoption，不宣称 closeout。
+
+### 10.3 强制执行顺序
+
+1. 读并执行项目入口规则：`AGENTS.md`、`docs/agent-routing/05-foundation-contract.md`、`.agents/skills/rcc-dev-skills/SKILL.md`、`/Users/fanzhang/.codex/skills/rustify-the-code/SKILL.md`。
+2. 先跑基线：`git status --short`、`npm run verify:llmswitch-rustification-audit`、`npm run verify:architecture-mainline-binding-pending-gate`、`npm run verify:architecture-mainline-call-map`。
+3. 对每个 remaining edge 先查 `docs/architecture/function-map.yml`、`docs/architecture/mainline-call-map.yml`、`docs/architecture/verification-map.yml`、wiki/manifest；无法定位唯一 owner 时先补 map/contract。
+4. 先写测试设计和红测：白盒锁 Rust owner，模块黑盒锁公开入口，项目黑盒锁 HTTP/provider/client，架构红测锁 TS residue 不复活。
+5. 只改唯一 Rust owner；TS 只允许 NAPI/JSON/stream bridge 或外部 IO glue。
+6. 删除或收缩已迁移 TS residue；删除前确认依赖，删除后跑 residue gate。
+7. 每个可闭合 slice 绿后立即精确 commit；多 worker dirty worktree 下只 stage 已 review/已验证范围，不 checkout/reset。
+8. 所有本地 gate 绿后做 release install/runtime adoption：pack、temporary install verification、global/release install、managed restart、strict `/health.version` gate。
+9. live replay 同入口旧失败样本或真实样本，至少覆盖 `/v1/responses` continuation/servertool stopless/followup、success、failure、non-terminal、already-terminal。
+10. 最后做 architecture review、更新 `note.md`、`MEMORY.md` 和必要 skill lessons，再提交 docs/memory。
+
+### 10.4 必跑验证矩阵
+
+每个 slice 的最小验证以 `verification-map.yml` 为准；全局最终验证至少包含：
+
+```bash
+npm run verify:llmswitch-rustification-audit
+npm run verify:architecture-mainline-binding-pending-gate
+npm run verify:architecture-mainline-call-map
+npm run verify:architecture-mainline-manifest-sync
+npm run verify:architecture-mainline-mermaid-sync
+npm run verify:architecture-wiki-sync
+npm run verify:architecture-wiki-html-sync
+npm run verify:function-map-compile-gate
+npm run verify:servertool-rust-only
+npm run verify:responses-history-protocol-contract
+cargo test -p router-hotpath-napi --lib -- --nocapture
+node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
+npm run build:base
+npm run pack:rcc
+npm run verify:rcc-release-install
+```
+
+Live/runtime gate 必须包含：
+
+```bash
+routecodex --version
+rcc --version
+routecodex restart --port <managed-port>
+curl -sS http://127.0.0.1:<managed-port>/health
+```
+
+如果 `/health.version` 与 `package.json` 不一致，停止 rustification 完成声明，先修 release/runtime adoption。禁止用 CLI version、install success、restart success 或 `/health.ready` 替代 exact version gate。
+
+### 10.5 最终完成标准
+
+完整闭环只在以下条件全部满足时成立：
+
+- `servertool.hook_skeleton.mainline` pending 为 0，且每条边真实绑定 Rust caller/callee。
+- `responses.continuation.mainline` partial 为 0，continuation save/restore 不可变区无 TS 语义恢复。
+- Hub-adjacent TS semantic residue 全部迁移或物理删除；保留 TS 均为 thin bridge / IO glue / diagnostic/test。
+- `verify:llmswitch-rustification-audit`、mainline/map/wiki/function gates、Rust/Jest/build gates 全绿。
+- release/global/live runtime version 严格一致。
+- 同入口 live replay 覆盖 success、failure、non-terminal、already-terminal，并证明 internal metadata/debug/control 不进入 provider payload 或 client body。
+- `git status --short` 最终干净，所有可验证 slice 已分组提交。
+- `MEMORY.md` 与相关 lessons 记录最终已验证事实、剩余风险为零或明确列出未闭合项；若仍有未闭合项，不得称为完整 Rust 化。
