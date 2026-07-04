@@ -526,6 +526,27 @@ function isProviderOwnedSubmitToolOutputsResumePayload(payload: AnyRecord): bool
   return Boolean(responseId && toolOutputs.length > 0);
 }
 
+function isRelayMaterializedSubmitToolOutputsResumePayload(
+  payload: AnyRecord,
+  resumeMeta: Record<string, unknown> | undefined
+): boolean {
+  if (
+    !resumeMeta
+    || typeof resumeMeta !== 'object'
+    || Array.isArray(resumeMeta)
+    || resumeMeta.continuationOwner !== 'relay'
+  ) {
+    return false;
+  }
+  const previousResponseId =
+    typeof payload.previous_response_id === 'string' && payload.previous_response_id.trim()
+      ? payload.previous_response_id.trim()
+      : undefined;
+  const fullInput = Array.isArray(resumeMeta.fullInput) ? resumeMeta.fullInput : undefined;
+  const hasInputHistory = Array.isArray(payload.input) && payload.input.length > 0;
+  return Boolean(previousResponseId && hasInputHistory && fullInput && fullInput.length > 0);
+}
+
 async function buildCapturedRelayResumeRequestContextForHttp(args: {
   payload: AnyRecord;
   requestId?: string;
@@ -577,6 +598,50 @@ export async function buildResponsesRequestContextForHttp(args: {
       ? (args.payload.metadata as Record<string, unknown>)
       : undefined;
   const payloadForPersistence = stripRequestBodyMetadataForPipelineForHttp(args.payload);
+  const relayResumeFullInput = Array.isArray(args.resumeMeta?.fullInput) ? args.resumeMeta.fullInput : undefined;
+  const relayResumeTools = Array.isArray(args.resumeMeta?.restoredTools) ? args.resumeMeta.restoredTools : undefined;
+  const relayOwnedSubmitToolOutputsResume =
+    args.resumeMeta
+    && typeof args.resumeMeta === 'object'
+    && !Array.isArray(args.resumeMeta)
+    && args.resumeMeta.continuationOwner === 'relay'
+    && isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)
+    && Array.isArray(relayResumeFullInput)
+    && relayResumeFullInput.length > 0;
+  const relayOwnedMaterializedSubmitToolOutputsResume =
+    isRelayMaterializedSubmitToolOutputsResumePayload(payloadForPersistence, args.resumeMeta);
+  if (relayOwnedSubmitToolOutputsResume) {
+    const relayResumePayload: AnyRecord = {
+      ...payloadForPersistence,
+      ...(typeof args.resumeMeta?.responseId === 'string' && args.resumeMeta.responseId.trim()
+        ? { previous_response_id: args.resumeMeta.responseId.trim() }
+        : {}),
+      input: relayResumeFullInput,
+      ...(relayResumeTools?.length ? { tools: relayResumeTools } : {}),
+    };
+    delete relayResumePayload.response_id;
+    delete relayResumePayload.tool_outputs;
+    return buildCapturedRelayResumeRequestContextForHttp({
+      payload: relayResumePayload,
+      requestId: args.requestId,
+      metadata: args.metadata,
+      matchedPort: args.matchedPort,
+      routingPolicyGroup: args.routingPolicyGroup,
+    });
+  }
+  if (relayOwnedMaterializedSubmitToolOutputsResume) {
+    return buildCapturedRelayResumeRequestContextForHttp({
+      payload: {
+        ...payloadForPersistence,
+        input: relayResumeFullInput ?? [],
+        ...(relayResumeTools?.length ? { tools: relayResumeTools } : {}),
+      },
+      requestId: args.requestId,
+      metadata: args.metadata,
+      matchedPort: args.matchedPort,
+      routingPolicyGroup: args.routingPolicyGroup,
+    });
+  }
   if (isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)) {
     const materialized = await materializeProviderOwnedSubmitContext({
       payload: payloadForPersistence,
