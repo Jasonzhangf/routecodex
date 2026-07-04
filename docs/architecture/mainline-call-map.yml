@@ -322,13 +322,13 @@ chains:
         to_node: ChatProcRespContinuation06ResponseGoverned
         caller_symbol: prepareResponsesJsonClientDispatchPlanForHttp
         caller_file: src/modules/llmswitch/bridge/responses-response-bridge.ts
-        callee_symbol: projectResponsesClientPayloadForClientNative
+        callee_symbol: planResponsesJsonClientDispatchNative
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "governed request yields response-side truth plus finish_reason stop schema or reasoningStop tool-call schema"
         semantic_output: "finalized response-side governed truth after schema judgment and client-visible stopless projection, before persistence"
-        status: partial
-        note: "Response-side hook/stopless projection must complete before canonical save. Tests must assert schema source, schema judgment, and client-visible exec_command projection fields, not SSE frame shape. SSE remains transport-only and cannot be a repair point for this edge."
+        status: anchored
+        note: "JSON client dispatch action is now Rust-owned: TS executes only `direct_passthrough` or `project_client_payload` from `planResponsesJsonClientDispatchNative`; response projection itself remains native-owned through `projectResponsesClientPayloadForClientNative`. Tests assert schema source, schema judgment, client-visible exec_command projection fields, and that SSE remains transport-only."
       - step_id: rct-06
         from_node: ChatProcRespContinuation06ResponseGoverned
         to_node: ChatProcRespContinuation07CanonicalSaved

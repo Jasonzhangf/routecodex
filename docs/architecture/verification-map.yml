@@ -1428,6 +1428,7 @@ verification:
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+      - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
       - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts

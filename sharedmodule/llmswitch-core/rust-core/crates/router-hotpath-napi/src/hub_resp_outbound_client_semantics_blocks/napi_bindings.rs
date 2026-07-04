@@ -7,9 +7,10 @@ use crate::hub_resp_outbound_client_semantics_blocks::anthropic_chat_response::{
 };
 use crate::hub_resp_outbound_client_semantics_blocks::anthropic_response::build_anthropic_response_from_chat_value;
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
-    normalize_responses_tool_call_arguments_for_client, project_responses_client_body_for_client,
-    project_responses_client_payload_for_client, project_responses_sse_frame_for_client,
-    project_sse_error_event_payload, ProjectSseErrorEventPayloadInput,
+    normalize_responses_tool_call_arguments_for_client, plan_responses_json_client_dispatch,
+    project_responses_client_body_for_client, project_responses_client_payload_for_client,
+    project_responses_sse_frame_for_client, project_sse_error_event_payload,
+    ProjectSseErrorEventPayloadInput,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::{
     resolve_client_facing_request_id_from_context, resolve_client_protocol_for_response_entry,
@@ -296,6 +297,14 @@ pub fn project_responses_client_payload_for_client_json(
     }
     let output =
         project_responses_client_payload_for_client(&responses_payload, &tools_raw, &metadata);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn plan_responses_json_client_dispatch_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_json_client_dispatch(&input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

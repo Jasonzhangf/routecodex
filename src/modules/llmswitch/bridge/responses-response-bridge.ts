@@ -18,6 +18,7 @@ import {
   clearResponsesConversationByRequestId,
 } from './runtime-integrations.js';
 import {
+  planResponsesJsonClientDispatchNative,
   projectResponsesClientPayloadForClientNative,
 } from './native-exports.js';
 import {
@@ -165,11 +166,21 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
   clientBody: unknown;
   sanitizedBody: unknown;
 }> {
-  if (args.continuationOwner === 'direct') {
+  const dispatchPlan = planResponsesJsonClientDispatchNative({
+    entryEndpoint: args.entryEndpoint,
+    continuationOwner: args.continuationOwner,
+    hasRequestContextToolsRaw: Array.isArray(args.requestContext?.context?.toolsRaw),
+  });
+  if (dispatchPlan.action === 'direct_passthrough') {
     return {
       clientBody: args.body,
       sanitizedBody: args.body,
     };
+  }
+  if (dispatchPlan.action !== 'project_client_payload') {
+    throw new Error(
+      `[responses] unsupported JSON client dispatch action: ${String(dispatchPlan.action ?? 'unknown')}`
+    );
   }
   const clientBody = await normalizeResponsesClientPayloadForHttp({
     payload: args.body,

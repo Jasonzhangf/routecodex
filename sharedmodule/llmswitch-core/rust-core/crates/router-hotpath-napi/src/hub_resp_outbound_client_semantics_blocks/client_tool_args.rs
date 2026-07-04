@@ -1236,6 +1236,43 @@ pub(crate) fn project_responses_client_payload_for_client(
     restore_client_visible_response_payload(&restored_tool_contract, metadata)
 }
 
+pub(crate) fn plan_responses_json_client_dispatch(input: &Value) -> Value {
+    let record = input.as_object();
+    let entry_endpoint = record
+        .and_then(|row| row.get("entryEndpoint"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let continuation_owner = record
+        .and_then(|row| row.get("continuationOwner"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let has_request_context_tools_raw = record
+        .and_then(|row| row.get("hasRequestContextToolsRaw"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if entry_endpoint != "/v1/responses" && entry_endpoint != "/v1/responses.submit_tool_outputs" {
+        return serde_json::json!({
+            "action": "direct_passthrough",
+            "reason": "non_responses_endpoint"
+        });
+    }
+
+    if continuation_owner == "direct" && !has_request_context_tools_raw {
+        return serde_json::json!({
+            "action": "direct_passthrough",
+            "reason": "direct_continuation_without_projection_context"
+        });
+    }
+
+    serde_json::json!({
+        "action": "project_client_payload",
+        "reason": "responses_client_projection_required"
+    })
+}
+
 pub(crate) fn project_responses_client_body_for_client(
     responses_payload: &Value,
     tools_raw: &Value,

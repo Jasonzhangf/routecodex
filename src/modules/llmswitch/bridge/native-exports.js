@@ -474,6 +474,12 @@ export function projectResponsesClientPayloadForClientNative(args) {
     ]);
     return assertNativeObject('projectResponsesClientPayloadForClientJson', parsed);
 }
+export function planResponsesJsonClientDispatchNative(input) {
+    const parsed = invokeRouterHotpathJsonCapability('planResponsesJsonClientDispatchJson', [
+        input ?? null,
+    ]);
+    return assertNativeObject('planResponsesJsonClientDispatchJson', parsed);
+}
 export function projectResponsesSseFrameForClientNative(args) {
     const parsed = invokeRouterHotpathJsonCapability('projectResponsesSseFrameForClientJson', [
         args.frame ?? '',

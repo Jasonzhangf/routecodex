@@ -172,6 +172,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "mergeToolCallsJson",
   "normalizeAliasMapJson",
   "projectResponsesClientBodyForClientJson",
+  "planResponsesJsonClientDispatchJson",
   "projectResponsesClientPayloadForClientJson",
   "projectResponsesSseFrameForClientJson",
   "projectSseErrorEventPayloadJson",

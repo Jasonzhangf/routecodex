@@ -1147,6 +1147,41 @@ fn project_responses_client_payload_for_client_restores_direct_response_body_mod
 }
 
 #[test]
+fn plan_responses_json_client_dispatch_bypasses_direct_without_projection_context() {
+    let plan = plan_responses_json_client_dispatch(&json!({
+        "entryEndpoint": "/v1/responses",
+        "continuationOwner": "direct",
+        "hasRequestContextToolsRaw": false
+    }));
+
+    assert_eq!(plan["action"], json!("direct_passthrough"));
+    assert_eq!(
+        plan["reason"],
+        json!("direct_continuation_without_projection_context")
+    );
+}
+
+#[test]
+fn plan_responses_json_client_dispatch_projects_relay_and_direct_with_context() {
+    let direct_with_context = plan_responses_json_client_dispatch(&json!({
+        "entryEndpoint": "/v1/responses",
+        "continuationOwner": "direct",
+        "hasRequestContextToolsRaw": true
+    }));
+    let relay = plan_responses_json_client_dispatch(&json!({
+        "entryEndpoint": "/v1/responses.submit_tool_outputs",
+        "continuationOwner": "relay",
+        "hasRequestContextToolsRaw": true
+    }));
+
+    assert_eq!(
+        direct_with_context["action"],
+        json!("project_client_payload")
+    );
+    assert_eq!(relay["action"], json!("project_client_payload"));
+}
+
+#[test]
 fn project_responses_client_payload_for_client_synthesizes_required_action_for_pending_function_calls(
 ) {
     let payload = json!({

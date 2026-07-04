@@ -3389,6 +3389,7 @@ owners:
       - materializeLatestResponsesContinuationByScope
       - materializeProviderOwnedSubmitContext
       - planResponsesContinuationRequestAction
+      - planResponsesJsonClientDispatchNative
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/src/native/router-hotpath
@@ -3397,6 +3398,7 @@ owners:
       - docs/architecture
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+      - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
       - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
       - tests/servertool/execution-stage-shell.spec.ts

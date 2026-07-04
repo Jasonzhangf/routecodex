@@ -79,6 +79,7 @@ export declare function projectResponsesClientPayloadForClientNative(args: {
     metadata?: Record<string, unknown>;
     context?: Record<string, unknown>;
 }): Record<string, unknown>;
+export declare function planResponsesJsonClientDispatchNative(input: unknown): AnyRecord;
 export declare function projectResponsesSseFrameForClientNative(args: {
     frame: string;
     eventName?: string;

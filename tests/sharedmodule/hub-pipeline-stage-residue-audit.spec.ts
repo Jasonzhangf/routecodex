@@ -1577,6 +1577,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('responses JSON client dispatch plan must be native-owned', () => {
+    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-response-bridge.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'ts direct continuation dispatch branch', pattern: /continuationOwner\s*={0,2}={1,2}\s*['"]direct['"]/ },
+      { label: 'ts JSON client dispatch action synthesis', pattern: /action:\s*['"](?:direct_passthrough|project_client_payload)['"]/ },
+    ]);
+
+    expect(source).toContain('planResponsesJsonClientDispatchNative');
+    expect(findings).toEqual([]);
+  });
+
   it('server response handler must not default missing SSE finish reason to stop', () => {
     const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
     const source = fs.readFileSync(filePath, 'utf8');
