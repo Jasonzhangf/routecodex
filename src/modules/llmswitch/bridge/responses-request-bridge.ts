@@ -582,12 +582,11 @@ export async function buildResponsesRequestContextForHttp(args: {
     if (!plannedContext || typeof plannedContext !== 'object' || Array.isArray(plannedContext)) {
       throw new Error('Responses request context planner returned invalid context');
     }
-    const plannedInput = Array.isArray((plannedContext as Record<string, unknown>).input)
-      ? (plannedContext as Record<string, unknown>).input
-      : undefined;
-    if (!plannedInput) {
+    const plannedInputValue = (plannedContext as Record<string, unknown>).input;
+    if (!Array.isArray(plannedInputValue)) {
       throw new Error('Responses request context planner returned invalid context input');
     }
+    const plannedInput: unknown[] = plannedInputValue;
     return {
       payload: plannedPayload as AnyRecord,
       context: {

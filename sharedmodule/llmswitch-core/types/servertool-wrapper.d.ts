@@ -149,10 +149,200 @@ export type ServertoolTimeoutWatcherPlan = {
   timeoutMs: number;
 };
 export type NativeServertoolExecutedRecord = Record<string, unknown>;
-export type NativeServertoolExecutionLoopState = Record<string, unknown>;
+export type NativeServertoolExecutionLoopState = Record<string, unknown> & {
+  executedToolCalls: ServertoolDispatchCandidate[];
+  lastExecution?: NativeServertoolExecution;
+};
 export type ServertoolExecutionLoopState = NativeServertoolExecutionLoopState;
-export type ServertoolEngineRuntimeActionPlan = Record<string, unknown>;
+export type ServertoolEngineRuntimeActionPlan = Record<string, unknown> & {
+  executed: boolean;
+  progressStatus: string;
+  projectedFlowId?: string;
+  finalPayloadSource?: string;
+};
 export type ServertoolErrorPlan = Record<string, unknown>;
+export type NativeServertoolStopMessageReservation = {
+  stickyKey: string;
+  previousState: Record<string, unknown> | null;
+};
+export type NativeServertoolExecution = {
+  flowId: string;
+  stopMessageReservation?: NativeServertoolStopMessageReservation;
+};
+export type NativeServertoolHandlerResult = {
+  chatResponse: JsonObject;
+  execution: NativeServertoolExecution;
+  metadataWritePlan?: JsonObject;
+};
+export type NativeServerSideToolEngineResult = {
+  mode: 'passthrough' | 'tool_flow';
+  finalChatResponse: JsonObject;
+  execution?: NativeServertoolExecution;
+  metadataWritePlan?: JsonObject;
+};
+export type NativeAutoHookRuntimeAttemptDecision = {
+  traceEvent: {
+    hookId: string;
+    phase: string;
+    priority: number;
+    queue: 'A_optional' | 'B_mandatory';
+    queueIndex: number;
+    queueTotal: number;
+    result: 'miss' | 'match' | 'error';
+    reason: string;
+    flowId?: string;
+  };
+  returnResult: boolean;
+  continueQueue: boolean;
+  rethrowError: boolean;
+  errorMessage?: string;
+};
+export type NativeAutoHookCallerFinalizationDecision = {
+  returnResult: boolean;
+  continueNextQueue: boolean;
+  returnNull: boolean;
+  result?: NativeServerSideToolEngineResult;
+};
+export type NativeEnginePreflightPlan = Record<string, unknown> & {
+  attachStopGatewayContext?: boolean;
+  logStopEntry?: {
+    stage: 'entry' | 'trigger';
+    result: string;
+    includeChoiceFacts?: boolean;
+  };
+  logStopCompare?: {
+    stage: 'entry' | 'trigger';
+  };
+};
+export type NativeEngineTriggerObservationPlan = {
+  logStopEntry?: { stage: 'entry' | 'trigger'; result: string };
+  logStopCompare?: { stage: 'entry' | 'trigger'; flowId?: string };
+};
+export type NativeEngineOrchestrationPreflightDecision = {
+  returnPreflightChat?: boolean;
+  chat?: JsonObject;
+  stopSignal?: Record<string, unknown>;
+};
+export type NativeEngineSkipDecision = {
+  returnSkipped: boolean;
+  continueMatchedFlow: boolean;
+  skipReason?: string;
+  triggerResult?: string;
+  shellResult?: {
+    chat: JsonObject;
+    executed: boolean;
+    flowId?: string;
+  };
+};
+export type NativeProviderProtocolError = Error & {
+  status?: number;
+  code: never;
+  category: never;
+  details: Record<string, unknown>;
+};
+export type NativeEnginePreflightDecision = {
+  result: unknown;
+  shouldRunSideEffects: boolean;
+};
+export type NativePostExecutionBranchDecision = {
+  resolveExecutionOutcome: boolean;
+  continueResponseStage: boolean;
+};
+export type NativePreExecutionBranchDecision = {
+  projectClientExecCli: boolean;
+  continueResponseStage: boolean;
+  projectedToolCall: ServertoolResponseStageToolCallPayload;
+};
+export type NativeStoplessExecutionPlan = {
+  execution?: NativeServertoolExecution;
+  orchestrationPlan?: Record<string, unknown>;
+};
+export type NativeEntryContextPlan = {
+  includeToolCallNames?: string[];
+  excludeToolCallNames?: string[];
+  includeAutoHookIds?: string[];
+  excludeAutoHookIds?: string[];
+};
+export type NativeExecutionLoopInitialDecision =
+  | { action: 'skip_non_tool_call_handler' }
+  | { action: 'throw_dispatch_spec_mismatch' }
+  | { action: 'continue_to_handler' };
+export type NativeExecutionLoopResultDecision =
+  | { action: 'apply_materialized_result' }
+  | { action: 'apply_handler_error_tool_output' }
+  | { action: 'continue_without_effect' };
+export type NativeExecutionLoopEffectPlan = {
+  toolCall: ServertoolDispatchCandidate | ServertoolDispatchNoop;
+  execution: NativeServertoolExecution;
+  handlerErrorMessage?: string;
+};
+export type NativeResponseStagePassResult =
+  | { action: 'return_passthrough_bypass' }
+  | { action: 'continue_without_result' }
+  | { action: 'return_auto_hook_result'; result: NativeServerSideToolEngineResult };
+export type NativeResponseStagePrepassInitialDecision =
+  | { action: 'run_auto_hooks' }
+  | { action: 'return_prepass_result'; result: NativeResponseStagePassResult };
+export type NativeResponseStageAutoHookPreApplication =
+  | { runAutoHook: true; runAutoHooks?: true; returnPassResult?: false }
+  | { runAutoHook: false; runAutoHooks?: false; returnPassResult: true; result: NativeResponseStagePassResult };
+export type NativeResponseStagePrepassInitialApplication =
+  | { runAutoHook: true; runAutoHooks?: true; returnPassResult?: false }
+  | { runAutoHook: false; runAutoHooks?: false; returnPassResult: true; result: NativeResponseStagePrepassResult };
+export type NativeResponseStageAutoHookPostApplication =
+  | { throwRequiredResponseHookEmpty: true; errorPlan: ServertoolErrorPlan; returnPassResult?: false }
+  | { throwRequiredResponseHookEmpty?: false; returnPassResult: true; result: NativeResponseStagePassResult };
+export type NativeResponseStageOrchestrationGateApplication =
+  | { bypass: true; skipReason?: string }
+  | { bypass: false };
+export type NativeResponseStageShellResult = {
+  payload: JsonObject;
+  executed: boolean;
+  flowId?: string;
+  skipReason?: string;
+};
+export type NativeResponseStageOrchestrationOutput = Record<string, unknown> & {
+  recordEvent: Record<string, unknown>;
+  shellResult: NativeResponseStageShellResult;
+};
+export type NativeResponseStagePrepassResult =
+  | { action: 'continue_to_execution'; responseStageGatePlan: NativeServertoolResponseStageGate }
+  | { action: 'return_result'; responseStageGatePlan: NativeServertoolResponseStageGate; result: NativeServerSideToolEngineResult };
+export type NativeEntryPreflightDecision =
+  | { action: 'return_result'; result: NativeServerSideToolEngineResult }
+  | { action: 'throw_error'; errorPlan: ServertoolErrorPlan }
+  | { action: 'continue'; baseObject: JsonObject };
+export type NativeEntryPreflightApplication = {
+  throwError?: boolean;
+  errorPlan?: ServertoolErrorPlan;
+  returnResult?: boolean;
+  result?: NativeServerSideToolEngineResult;
+  baseObject: JsonObject;
+};
+export type NativeRunEngineEntryPreflightApplication =
+  | { returnResult: true; result: NativeServerSideToolEngineResult }
+  | { returnResult: false; baseObject: JsonObject };
+export type NativeRunEnginePrepassApplication =
+  | { returnResult: true; result: NativeServerSideToolEngineResult }
+  | { returnResult: false };
+export type NativeEngineSelectionStartPlan = {
+  overrides?: Record<string, unknown>;
+  primaryAutoHookIds?: string[];
+};
+export type NativeEngineSelectionAfterRunDecision = {
+  rerunOverrides?: Record<string, unknown>;
+};
+export type NativeEngineMatchHit = {
+  flowId: string;
+};
+export type NativeServertoolRegistryAutoHookEntry = {
+  id: string;
+  phase: 'pre' | 'default' | 'post';
+  priority: number;
+  order: number;
+  registration: Record<string, unknown>;
+  execution: Record<string, unknown>;
+};
 
 export declare function detectProviderResponseShapeWithNative(payload: unknown): 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat' | 'unknown';
 export declare function containsSyntheticRouteCodexControlTextWithNative(payload: unknown): boolean;
@@ -198,76 +388,91 @@ export declare function createServertoolExecutionLoopStateWithNative(): Serverto
 
 export declare function buildServertoolHandlerErrorToolOutputPayloadWithNative(input: unknown): Record<string, unknown>;
 
-export declare function appendServertoolExecutedRecordWithNative(input: unknown): unknown;
+export declare function appendServertoolExecutedRecordWithNative(input: unknown): NativeServertoolExecutionLoopState;
 
-export declare function applyServertoolExecutionLoopInitialDecisionWithNative(input: unknown): unknown;
-export declare function applyServertoolExecutionLoopResultDecisionWithNative(input: unknown): unknown;
+export declare function applyServertoolExecutionLoopInitialDecisionWithNative<T>(
+  decision: NativeExecutionLoopInitialDecision,
+  application: {
+    skipNonToolCallHandler: () => T;
+    throwDispatchSpecMismatch: () => T;
+    continueToHandler: () => T;
+  }
+): T;
+export declare function applyServertoolExecutionLoopResultDecisionWithNative<T>(
+  decision: NativeExecutionLoopResultDecision,
+  application: {
+    applyMaterializedResult: () => T;
+    applyHandlerErrorToolOutput: () => T;
+    continueWithoutEffect: () => T;
+  }
+): T;
 
-export declare function buildServertoolPostflightObservationSummaryWithNative(input: unknown): unknown;
+export declare function buildServertoolCliProjectionRuntimeBranchWithNative(input: unknown): { result: NativeServerSideToolEngineResult };
+export declare function buildServertoolPostflightObservationSummaryWithNative(input: unknown): Record<string, unknown>;
 
-export declare function createServertoolProviderProtocolErrorFromPlanWithNative(input: unknown): unknown;
+export declare function createServertoolProviderProtocolErrorFromPlanWithNative(input: unknown): NativeProviderProtocolError;
 
-export declare function extractServertoolResponseStageOrchestrationShellResultWithNative(input: unknown): unknown;
+export declare function extractServertoolResponseStageOrchestrationShellResultWithNative(input: unknown): NativeResponseStageShellResult;
 
-export declare function finalizeServertoolResponseStageWithNative(input: unknown): unknown;
+export declare function finalizeServertoolResponseStageWithNative(input: unknown): NativeServerSideToolEngineResult;
 
-export declare function materializeNativeToolCallExecutionOutcomeWithNative(input: unknown): unknown;
+export declare function materializeNativeToolCallExecutionOutcomeWithNative(input: unknown): NativeServerSideToolEngineResult;
 
-export declare function materializeServertoolPlannedResultWithNative(planned: unknown, options: { requestId: string }): Promise<unknown>;
-export declare function materializeServertoolResponseStageOrchestrationOutputWithNative(input: unknown): unknown;
+export declare function materializeServertoolPlannedResultWithNative(planned: unknown, options: { requestId: string }): Promise<NativeServertoolHandlerResult | null>;
+export declare function materializeServertoolResponseStageOrchestrationOutputWithNative(input: unknown): NativeResponseStageOrchestrationOutput;
 
-export declare function planEngineSelectionStartWithNative(input: unknown): unknown;
+export declare function planEngineSelectionStartWithNative(input: unknown): NativeEngineSelectionStartPlan;
 
-export declare function planServertoolEnginePreflightWithNative(input: unknown): unknown;
+export declare function planServertoolEnginePreflightWithNative(input: unknown): NativeEnginePreflightPlan;
 
-export declare function planServertoolEngineRuntimeActionWithNative(input: unknown): unknown;
+export declare function planServertoolEngineRuntimeActionWithNative(input: unknown): ServertoolEngineRuntimeActionPlan;
 
-export declare function planServertoolEngineTriggerObservationWithNative(input: unknown): unknown;
-export declare function planServertoolEntryContextWithNative(input: unknown): unknown;
+export declare function planServertoolEngineTriggerObservationWithNative(input: unknown): NativeEngineTriggerObservationPlan;
+export declare function planServertoolEntryContextWithNative(input: unknown): NativeEntryContextPlan;
 
-export declare function planServertoolExecutionDispatchErrorWithNative(input: unknown): unknown;
+export declare function planServertoolExecutionDispatchErrorWithNative(input: unknown): ServertoolErrorPlan;
 
-export declare function planServertoolHandlerErrorExecutionLoopEffectWithNative(input: unknown): unknown;
+export declare function planServertoolHandlerErrorExecutionLoopEffectWithNative(input: unknown): NativeExecutionLoopEffectPlan & { handlerErrorMessage: string };
 
-export declare function planServertoolNoopExecutionLoopEffectWithNative(input: unknown): unknown;
+export declare function planServertoolNoopExecutionLoopEffectWithNative(input: unknown): NativeExecutionLoopEffectPlan;
 
-export declare function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: unknown): unknown;
+export declare function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: unknown): NativeServertoolRegistryAutoHookEntry[];
 
-export declare function planServertoolTimeoutErrorWithNative(input: unknown): unknown;
+export declare function planServertoolTimeoutErrorWithNative(input: unknown): ServertoolErrorPlan;
 
-export declare function planStoplessExecutionWithNative(input: unknown): unknown;
+export declare function planStoplessExecutionWithNative(input: unknown): NativeStoplessExecutionPlan;
 
-export declare function readServertoolEntryBaseObjectWithNative(input: unknown): unknown;
+export declare function readServertoolEntryBaseObjectWithNative(input: unknown): JsonObject | null;
 
-export declare function resolveAutoHookCallerFinalizationDecisionWithNative(input: unknown): unknown;
-export declare function resolveAutoHookRuntimeAttemptDecisionWithNative(input: unknown): unknown;
+export declare function resolveAutoHookCallerFinalizationDecisionWithNative(input: unknown): NativeAutoHookCallerFinalizationDecision;
+export declare function resolveAutoHookRuntimeAttemptDecisionWithNative(input: unknown): NativeAutoHookRuntimeAttemptDecision;
 
-export declare function resolveEngineSelectionAfterRunWithNative(input: unknown): unknown;
+export declare function resolveEngineSelectionAfterRunWithNative(input: unknown): NativeEngineSelectionAfterRunDecision;
 
-export declare function resolveServertoolEngineMatchHitWithNative(input: unknown): unknown;
-export declare function resolveServertoolEngineOrchestrationPreflightDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolEnginePostflightPayloadWithNative(input: unknown): unknown;
-export declare function resolveServertoolEnginePreflightDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolEngineSkipDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolEntryPreflightApplicationWithNative(input: unknown): unknown;
-export declare function resolveServertoolEntryPreflightWithNative(input: unknown): unknown;
-export declare function resolveServertoolExecutionLoopInitialDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolExecutionLoopResultDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolPostExecutionBranchDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolPreExecutionBranchDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolResponseStageAutoHookPostApplicationWithNative(input: unknown): unknown;
-export declare function resolveServertoolResponseStageAutoHookPostDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolResponseStageAutoHookPreApplicationWithNative(input: unknown): unknown;
-export declare function resolveServertoolResponseStageAutoHookPreDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolResponseStageOrchestrationGateApplicationWithNative(input: unknown): unknown;
-export declare function resolveServertoolResponseStagePrepassAfterAutoHookWithNative(input: unknown): unknown;
-export declare function resolveServertoolResponseStagePrepassInitialApplicationWithNative(input: unknown): unknown;
-export declare function resolveServertoolResponseStagePrepassInitialDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolRunEngineEntryPreflightApplicationWithNative(input: unknown): unknown;
-export declare function resolveServertoolRunEngineEntryPreflightDecisionWithNative(input: unknown): unknown;
-export declare function resolveServertoolRunEnginePrepassApplicationWithNative(input: unknown): unknown;
-export declare function resolveServertoolRunEnginePrepassDecisionWithNative(input: unknown): unknown;
+export declare function resolveServertoolEngineMatchHitWithNative(input: unknown): NativeEngineMatchHit;
+export declare function resolveServertoolEngineOrchestrationPreflightDecisionWithNative(input: unknown): NativeEngineOrchestrationPreflightDecision;
+export declare function resolveServertoolEnginePostflightPayloadWithNative(input: unknown): JsonObject;
+export declare function resolveServertoolEnginePreflightDecisionWithNative(input: unknown): NativeEnginePreflightDecision;
+export declare function resolveServertoolEngineSkipDecisionWithNative(input: unknown): NativeEngineSkipDecision;
+export declare function resolveServertoolEntryPreflightApplicationWithNative(input: unknown): NativeEntryPreflightApplication;
+export declare function resolveServertoolEntryPreflightWithNative(input: unknown): NativeEntryPreflightDecision;
+export declare function resolveServertoolExecutionLoopInitialDecisionWithNative(input: unknown): NativeExecutionLoopInitialDecision;
+export declare function resolveServertoolExecutionLoopResultDecisionWithNative(input: unknown): NativeExecutionLoopResultDecision;
+export declare function resolveServertoolPostExecutionBranchDecisionWithNative(input: unknown): NativePostExecutionBranchDecision;
+export declare function resolveServertoolPreExecutionBranchDecisionWithNative(input: unknown): NativePreExecutionBranchDecision;
+export declare function resolveServertoolResponseStageAutoHookPostApplicationWithNative(input: unknown): NativeResponseStageAutoHookPostApplication;
+export declare function resolveServertoolResponseStageAutoHookPostDecisionWithNative(input: unknown): Record<string, unknown>;
+export declare function resolveServertoolResponseStageAutoHookPreApplicationWithNative(input: unknown): NativeResponseStageAutoHookPreApplication;
+export declare function resolveServertoolResponseStageAutoHookPreDecisionWithNative(input: unknown): Record<string, unknown>;
+export declare function resolveServertoolResponseStageOrchestrationGateApplicationWithNative(input: unknown): NativeResponseStageOrchestrationGateApplication;
+export declare function resolveServertoolResponseStagePrepassAfterAutoHookWithNative(input: unknown): { result: NativeResponseStagePrepassResult };
+export declare function resolveServertoolResponseStagePrepassInitialApplicationWithNative(input: unknown): NativeResponseStagePrepassInitialApplication;
+export declare function resolveServertoolResponseStagePrepassInitialDecisionWithNative(input: unknown): NativeResponseStagePrepassInitialDecision;
+export declare function resolveServertoolRunEngineEntryPreflightApplicationWithNative(input: unknown): NativeRunEngineEntryPreflightApplication;
+export declare function resolveServertoolRunEngineEntryPreflightDecisionWithNative(input: unknown): Record<string, unknown>;
+export declare function resolveServertoolRunEnginePrepassApplicationWithNative(input: unknown): NativeRunEnginePrepassApplication;
+export declare function resolveServertoolRunEnginePrepassDecisionWithNative(input: unknown): Record<string, unknown>;
 
-export declare function resolveServertoolTimeoutMsFromEnvCandidatesWithNative(input: unknown): unknown;
+export declare function resolveServertoolTimeoutMsFromEnvCandidatesWithNative(input: unknown): number;
 
-export declare function runStoplessBuiltinHandlerForRuntimeWithNative(input: unknown): unknown;
+export declare function runStoplessBuiltinHandlerForRuntimeWithNative(input: unknown): NativeServertoolHandlerResult | null;
