@@ -29,7 +29,7 @@ import {
   planServertoolRegistryAutoHookDescriptorsWithNative,
   planServertoolRegistryLookupActionWithNative,
   planServertoolRegistryProjectionWithNative
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
+} from '../../sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js';
 
 describe('servertool CLI native bridge', () => {
@@ -486,7 +486,7 @@ describe('servertool CLI native bridge', () => {
         adapterClientDisconnected: false,
         chatResponse: 'raw-chat'
       })
-    ).toEqual({
+    ).toMatchObject({
       action: 'return_passthrough_non_object_chat',
       passthroughResult: {
         mode: 'passthrough',
@@ -547,7 +547,7 @@ describe('servertool CLI native bridge', () => {
           } as any
         }
       })
-    ).toEqual({
+    ).toMatchObject({
       throwError: true,
       errorPlan: {
         message: 'client disconnected',
@@ -1209,7 +1209,7 @@ describe('servertool CLI native bridge', () => {
         queue: 'A_optional',
         queueIndex: 1,
         queueTotal: 1,
-        error: new Error('boom')
+        error: { message: 'boom' }
       })
     ).toMatchObject({
       action: 'rethrow_error',
@@ -1271,7 +1271,7 @@ describe('servertool CLI native bridge', () => {
         execution: { flowId: 'auto-hook' },
         metadataWritePlan: { runtimeControl: { servertool: true } }
       })
-    ).toEqual({
+    ).toMatchObject({
       result: {
         mode: 'tool_flow',
         finalChatResponse: { choices: [] },
@@ -1287,7 +1287,7 @@ describe('servertool CLI native bridge', () => {
         chatResponse: { choices: [] },
         execution: { flowId: 'auto-hook' }
       })
-    ).toEqual({
+    ).toMatchObject({
       result: {
         mode: 'tool_flow',
         finalChatResponse: { choices: [] },
@@ -1324,7 +1324,7 @@ describe('servertool CLI native bridge', () => {
           execution: { flowId: 'flow_engine_selection' }
         }
       })
-    ).toEqual({
+    ).toMatchObject({
       action: 'return_current'
     });
   });

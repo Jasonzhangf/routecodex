@@ -123,7 +123,11 @@ const STOP_MESSAGE_RUNTIME_UTILS = `${SERVERTOOL_TS_DIR}/handlers/stop-message-a
 const STOP_MESSAGE_ROUTING_STATE = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/routing-state.ts`;
 const STOP_MESSAGE_BLOCKED_REPORT = `${SERVERTOOL_TS_DIR}/handlers/stop-message-auto/blocked-report.ts`;
 const SERVERTOOL_STATE_SCOPE = `${SERVERTOOL_TS_DIR}/state-scope.ts`;
-const NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`;
+const DELETED_NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`;
+const NATIVE_SERVERTOOL_CORE_WRAPPER = `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`;
+const DIST_SERVERTOOL_WRAPPER_JS = `${ROOT}/sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js`;
+const DIST_SERVERTOOL_WRAPPER_DTS = `${ROOT}/sharedmodule/llmswitch-core/dist/native/servertool-wrapper.d.ts`;
+const PACKAGE_SERVERTOOL_WRAPPER_DTS = `${ROOT}/sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts`;
 const NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`;
 const NATIVE_REQUIRED_EXPORTS = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`;
 const NATIVE_STOP_MESSAGE_AUTO = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`;
@@ -799,6 +803,39 @@ function checkNoDuplicateSemantics() {
   }
 }
 
+function checkNativeServertoolWrapperConsolidated() {
+  assertMissingFile(
+    'native-servertool-core-wrapper-deleted',
+    DELETED_NATIVE_SERVERTOOL_CORE_WRAPPER,
+    `${DELETED_NATIVE_SERVERTOOL_CORE_WRAPPER.replace(`${ROOT}/`, '')} must stay physically deleted; src/modules/llmswitch/bridge/native-exports.ts is the package-shim wrapper truth`
+  );
+  const activeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  assertContains(
+    'native-servertool-core-wrapper-consolidated',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    activeWrapper,
+    'function invokeRouterHotpathJsonCapability(capability: string, args: unknown[]): unknown'
+  );
+  assertMissing(
+    'native-servertool-core-wrapper-consolidated',
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    activeWrapper,
+    'invokeNativeServertoolCoreSemanticsExport'
+  );
+  for (const file of [
+    DIST_SERVERTOOL_WRAPPER_JS,
+    DIST_SERVERTOOL_WRAPPER_DTS,
+    PACKAGE_SERVERTOOL_WRAPPER_DTS,
+  ]) {
+    assertMissing(
+      'native-servertool-core-wrapper-consolidated',
+      file,
+      readRequired(file),
+      'native-servertool-core-semantics'
+    );
+  }
+}
+
 // ── Check 4: Servertool CLI projection owner/protocol map ──────
 function checkServertoolCliProjectionMap() {
   const functionMap = readRequired(FUNCTION_MAP);
@@ -807,8 +844,8 @@ function checkServertoolCliProjectionMap() {
   const executionStageShell = readRequired(TS_EXECUTION_STAGE_SHELL);
   const rustCliContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`);
   const rustOutcomeContract = readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/outcome_contract.rs`);
-  const nativeServertoolWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`);
-  const packageServertoolWrapperTypes = readRequired(`${ROOT}/sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts`);
+  const nativeServertoolWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
+  const packageServertoolWrapperTypes = readRequired(PACKAGE_SERVERTOOL_WRAPPER_DTS);
   const bridgeNativeExports = readRequired(`${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`);
   const bridgeNativeExportsJs = readRequired(`${ROOT}/src/modules/llmswitch/bridge/native-exports.js`);
   const napiBlocks = readRequired(`${RUST_SRC_DIR}/servertool_core_blocks.rs`);
@@ -955,13 +992,13 @@ function checkServertoolCliProjectionMap() {
   }
   assertContains(
     'cli-projection-native-wrapper',
-    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
+    `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`,
     nativeServertoolWrapper,
     'buildClientExecCliProjectionOutputWithNative'
   );
   assertContains(
     'cli-projection-native-wrapper',
-    `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
+    `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`,
     nativeServertoolWrapper,
     'buildClientVisibleProjectionShellWithNative'
   );
@@ -987,19 +1024,24 @@ function checkServertoolCliProjectionMap() {
     nativeStopMessageWrapper,
     "const capability = 'evaluateStopSchemaGateJson'"
   );
-  for (const [capability, expected] of [
-    ['buildClientExecCliProjectionOutputJson', 'buildClientExecCliProjectionOutputJson native error: ${message}'],
-    ['buildClientVisibleProjectionShellJson', 'buildClientVisibleProjectionShellJson native error: ${message}'],
+  for (const capability of [
+    'buildClientExecCliProjectionOutputJson',
+    'buildClientVisibleProjectionShellJson',
   ]) {
     assertContains(
       'cli-projection-native-error-contract',
-      `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
+      `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`,
       nativeServertoolWrapper,
       capability
     );
+  }
+  for (const expected of [
+    'function invokeRouterHotpathJsonCapability(capability: string, args: unknown[]): unknown',
+    '${String(capability)} native error:',
+  ]) {
     assertContains(
       'cli-projection-native-error-contract',
-      `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`,
+      `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`,
       nativeServertoolWrapper,
       expected
     );
@@ -1027,16 +1069,16 @@ function checkServertoolCliProjectionMap() {
     ['cli-projection-output-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_client_exec_cli_projection_output'],
     ['cli-projection-output-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_client_exec_cli_projection_output_json'],
     ['cli-projection-output-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildClientExecCliProjectionOutputJson'],
-    ['cli-projection-output-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildClientExecCliProjectionOutputWithNative'],
+    ['cli-projection-output-native-wrapper', `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`, nativeServertoolWrapper, 'buildClientExecCliProjectionOutputWithNative'],
     ['cli-projection-runtime-branch-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'build_servertool_cli_projection_runtime_branch_json'],
     ['cli-projection-runtime-branch-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_servertool_cli_projection_runtime_branch_json'],
     ['cli-projection-runtime-branch-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildServertoolCliProjectionRuntimeBranchJson'],
-    ['cli-projection-runtime-branch-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildServertoolCliProjectionRuntimeBranchWithNative'],
+    ['cli-projection-runtime-branch-native-wrapper', `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`, nativeServertoolWrapper, 'buildServertoolCliProjectionRuntimeBranchWithNative'],
     ['cli-projection-execution-context-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, 'pub fn build_servertool_cli_projection_execution_context'],
     ['cli-projection-execution-context-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'build_servertool_cli_projection_execution_context_json'],
     ['cli-projection-execution-context-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn build_servertool_cli_projection_execution_context_json'],
     ['cli-projection-execution-context-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'buildServertoolCliProjectionExecutionContextJson'],
-    ['cli-projection-execution-context-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'buildServertoolCliProjectionExecutionContextWithNative'],
+    ['cli-projection-execution-context-native-wrapper', `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`, nativeServertoolWrapper, 'buildServertoolCliProjectionExecutionContextWithNative'],
     ['cli-projection-route-hint-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, 'fn route_hint_for_client_exec_tool(tool_name: &str) -> Option<&\'static str>'],
     ['cli-projection-route-hint-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, '"web_search" => Some("web_search")'],
     ['cli-projection-route-hint-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs`, rustCliContract, '"vision_auto" => Some("multimodal")'],
@@ -1077,8 +1119,8 @@ function checkServertoolCliProjectionMap() {
     ['servertool-required-response-hook-empty-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_required_response_hook_empty_error_json'],
     ['servertool-state-load-error-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolStateLoadFailedErrorJson'],
     ['servertool-required-response-hook-empty-native-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolRequiredResponseHookEmptyErrorJson'],
-    ['servertool-state-load-error-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'planServertoolStateLoadFailedErrorWithNative'],
-    ['servertool-required-response-hook-empty-native-wrapper', `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`, nativeServertoolWrapper, 'planServertoolRequiredResponseHookEmptyErrorWithNative'],
+    ['servertool-state-load-error-native-wrapper', `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`, nativeServertoolWrapper, 'planServertoolStateLoadFailedErrorWithNative'],
+    ['servertool-required-response-hook-empty-native-wrapper', `${ROOT}/src/modules/llmswitch/bridge/native-exports.ts`, nativeServertoolWrapper, 'planServertoolRequiredResponseHookEmptyErrorWithNative'],
   ]) {
     assertContains(check, file, content, needle);
   }
@@ -3028,7 +3070,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchJson'],
     ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchApplicationJson'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
-    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchApplicationWithNative'],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchApplicationJson'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'resolveServertoolPreExecutionBranchDecisionWithNative'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'resolveServertoolPostExecutionBranchDecisionWithNative'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'resolveServertoolPreExecutionBranchDecisionWithNative('],
@@ -3043,11 +3085,11 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'invalid post-execution branch action'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'pub projected_tool_call: Option<ServertoolProjectedToolCall>'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'pub struct ServertoolProjectedToolCall'],
-    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, "action: 'client_exec_cli_projection';"],
-    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCall: {'],
-    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, "if (record.action !== 'client_exec_cli_projection')"],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'if (application.projectClientExecCli)'],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCall: application.projectedToolCall'],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectClientExecCli: true'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'projected_tool_call_index'],
-    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCallIndex'],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'projectedToolCall: application.projectedToolCall'],
     ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'feature_id: hub.servertool_engine_preflight_contract'],
     ['servertool-engine-preflight-rust-owner', RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT, readRequired(RUST_SERVERTOOL_ENGINE_PREFLIGHT_CONTRACT), 'pub fn plan_servertool_engine_preflight'],
     ['servertool-engine-preflight-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_preflight_contract'],
@@ -3373,7 +3415,7 @@ function checkServertoolHookSkeletonRustOwner() {
   for (const needle of [
     'export function validateServertoolHookSkeletonPhaseWithNative(',
     'export function planServertoolHookScheduleWithNative(',
-    'function parseServertoolHookEffectPlanPayload(',
+    "invokeRouterHotpathJsonCapability('planServertoolHookScheduleJson'",
   ]) {
     assertContains('servertool-hook-skeleton-native-wrapper', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeWrapper, needle);
   }
@@ -4238,8 +4280,8 @@ function checkEngineSelectionRustOwner() {
     );
   }
   for (const needle of [
-    "record.action === 'rerun_excluding_primary_hooks'",
-    "throw new Error('planEngineSelectionAfterRunJson native returned overrides for return_current action')",
+    "plan.action === 'rerun_excluding_primary_hooks'",
+    "throw new Error('[servertool] invalid engine selection action')",
   ]) {
     assertContains(
       'servertool-engine-selection-native-bridge',
@@ -5198,7 +5240,7 @@ function checkDeletedStopMessageTsOwnersAbsent() {
       'stop-message-metadata-center-runtime-state-wrapper',
       NATIVE_SERVERTOOL_CORE_WRAPPER,
       nativeWrapper,
-      'RuntimeStopMessageStateFromMetadataCenterInput',
+      'resolveRuntimeStopMessageStateFromMetadataCenterJson',
     ],
     [
       'stop-message-metadata-center-runtime-state-wrapper',
@@ -6128,7 +6170,7 @@ function checkServertoolRustOutcomeCloseout() {
     'servertool-execution-shell-ts-orchestration-guard',
     NATIVE_SERVERTOOL_CORE_WRAPPER,
     nativeCoreWrapper,
-    'switch (materializationPlan.action)'
+    'switch (actionPlan.action)'
   );
   assertContains(
     'servertool-execution-shell-ts-orchestration-guard',
@@ -7398,6 +7440,7 @@ console.log('\n=== verify-servertool-rust-only ===\n');
 checkNoBakFiles();
 checkNoTSHandlerRuntimeImport();
 checkNoDuplicateSemantics();
+checkNativeServertoolWrapperConsolidated();
 assertStoplessSessionIdLock();
 assertStoplessSchemaFeedbackLock();
 assertRuntimeMetadataSessionDirLock();

@@ -64,8 +64,6 @@ type NativeSharedConversionSemantics = {
   ) => { changed: boolean; messages: unknown[] };
 };
 
-type NativeServertoolCoreSemantics = Record<string, unknown>;
-
 type NativeChatProcessNodeResultSemantics = {
   deriveFinishReasonJson?: (bodyJson: string) => string;
   hasRequestedToolsInSemanticsJson?: (requestSemanticsJson: string) => boolean;
@@ -289,7 +287,6 @@ let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
 let cachedHubBridgePolicySemantics: NativeHubBridgePolicySemantics | null | undefined;
 let cachedHubBridgePolicySemanticsSync: NativeHubBridgePolicySemantics | null | undefined;
-let cachedNativeServertoolCoreSemantics: NativeServertoolCoreSemantics | null | undefined;
 let cachedRouterHotpathJsonBindingSync: NativeRouterHotpathJsonBinding | null | undefined;
 let cachedHubVrNodeContracts: NativeHubVrNodeContracts | null | undefined;
 let sharedBindingsChecked: boolean | undefined;
@@ -402,9 +399,9 @@ async function assertSharedBindings(): Promise<void> {
   }
   if (typeof shared.materializeProviderOwnedSubmitContextWithNative !== 'function') {
     missing.push('materializeProviderOwnedSubmitContextJson');
+  }
   if (typeof shared.planResponsesContinuationRequestActionWithNative !== 'function') {
     missing.push('planResponsesContinuationRequestActionJson');
-  }
   }
   if (missing.length > 0) {
     throw new Error(`[llmswitch-bridge] native shared bindings missing: ${missing.join(', ')}`);
@@ -605,43 +602,6 @@ function assertNativeObject(capability: string, value: unknown): AnyRecord {
   return value as AnyRecord;
 }
 
-function getNativeServertoolCoreSemantics(): NativeServertoolCoreSemantics {
-  if (cachedNativeServertoolCoreSemantics !== undefined) {
-    if (!cachedNativeServertoolCoreSemantics) {
-      throw new Error('[llmswitch-bridge] native-servertool-core-semantics not available');
-    }
-    return cachedNativeServertoolCoreSemantics;
-  }
-  try {
-    const packageDir = resolveCorePackageDir('ts');
-    const modulePath = path.join(
-      packageDir,
-      'dist',
-      'native',
-      'router-hotpath',
-      'native-servertool-core-semantics.js'
-    );
-    cachedNativeServertoolCoreSemantics = createRequire(path.join(packageDir, 'package.json'))(
-      modulePath
-    ) as NativeServertoolCoreSemantics;
-  } catch {
-    cachedNativeServertoolCoreSemantics = null;
-  }
-  if (!cachedNativeServertoolCoreSemantics) {
-    throw new Error('[llmswitch-bridge] native-servertool-core-semantics not available');
-  }
-  return cachedNativeServertoolCoreSemantics;
-}
-
-function invokeNativeServertoolCoreSemanticsExport(name: string, args: unknown[]): unknown {
-  const module = getNativeServertoolCoreSemantics();
-  const fn = module[name];
-  if (typeof fn !== 'function') {
-    throw new Error(`[llmswitch-bridge] native-servertool-core-semantics missing ${name}`);
-  }
-  return (fn as (...callArgs: unknown[]) => unknown)(...args);
-}
-
 function getChatProcessNodeResultSemantics(): NativeChatProcessNodeResultSemantics {
   return getRouterHotpathJsonBindingSync() as NativeChatProcessNodeResultSemantics;
 }
@@ -759,6 +719,7 @@ export async function materializeProviderOwnedSubmitContext(input: {
   }
   return fn(input.payload) as { payload: AnyRecord; context: { input: unknown[] } } | null;
 }
+
 export async function planResponsesContinuationRequestAction(input: {
   plannedEntryMode: 'none' | 'submit_tool_outputs' | 'scope_materialize';
   entryEndpoint: string;
@@ -774,7 +735,6 @@ export async function planResponsesContinuationRequestAction(input: {
   }
   return fn(input) as AnyRecord;
 }
-
 
 export async function buildAnthropicResponseFromChatJson(
   chatResponse: unknown,
@@ -1476,6 +1436,10 @@ export function resolveServertoolBuiltinHandlerEntryWithNative(input: unknown): 
   return invokeRouterHotpathJsonCapability('resolveServertoolBuiltinHandlerEntryJson', [input]);
 }
 
+export function planStoplessCliProjectionContextWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planStoplessCliProjectionContextJson', [input]);
+}
+
 export function planServertoolBuiltinHandlerNamesWithNative(input: unknown): unknown {
   return invokeRouterHotpathJsonCapability('planServertoolBuiltinHandlerNamesJson', [input]);
 }
@@ -1803,7 +1767,6 @@ export function readFollowupClientInjectSourceWithNative(adapterContext: Record<
 // Types re-exported from native-router-hotpath-analysis
 
 // === SERVERTOOL CORE BRIDGE WRAPPERS (Phase 4) ===
-// 50 wrappers: inline native-only functions from native-servertool-core-semantics.ts
 
 export function extractTextFromChatLikeWithNative(input: unknown): unknown {
   return invokeRouterHotpathJsonCapability('extractServertoolTextFromChatLikeJson', [input]);
@@ -2032,7 +1995,43 @@ export function buildStoplessAutoCliProjectionFromEngineWithNative(input: unknow
 
 // servertool-core bridge: resolveServertoolEnginePostflightPayloadWithNative
 export function resolveServertoolEnginePostflightPayloadWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolEnginePostflightPayloadWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolEnginePostflightPayloadWithNative', input);
+  const runtimeAction = assertNativeObject(
+    'resolveServertoolEnginePostflightPayloadWithNative.runtimeAction',
+    record.runtimeAction
+  );
+  if (runtimeAction.finalPayloadSource === 'engine_result') {
+    const engineResult = assertNativeObject(
+      'resolveServertoolEnginePostflightPayloadWithNative.engineResult',
+      record.engineResult
+    );
+    return engineResult.finalChatResponse;
+  }
+  if (runtimeAction.finalPayloadSource === 'stop_message_cli_projection') {
+    const projection = buildStoplessAutoCliProjectionFromEngineWithNative({
+      metadataCenterSnapshot: record.metadataCenterSnapshot ?? null,
+      execution:
+        record.engineResult && typeof record.engineResult === 'object' && !Array.isArray(record.engineResult)
+          ? (record.engineResult as Record<string, unknown>).execution ?? null
+          : null,
+      metadataWritePlan:
+        record.engineResult && typeof record.engineResult === 'object' && !Array.isArray(record.engineResult)
+          ? (record.engineResult as Record<string, unknown>).metadataWritePlan ?? null
+          : null,
+      requestId: record.requestId ?? null
+    });
+    return assertNativeObject(
+      'resolveServertoolEnginePostflightPayloadWithNative.projection',
+      projection
+    ).chatResponse;
+  }
+  throw Object.assign(new Error('[servertool] unexpected postflight payload source'), {
+    code: 'SERVERTOOL_RUNTIME_ACTION_INVALID',
+    details: {
+      requestId: record.requestId ?? null,
+      finalPayloadSource: runtimeAction.finalPayloadSource
+    }
+  });
 }
 
 // servertool-core bridge: planAutoHookRuntimeAttemptWithNative
@@ -2042,7 +2041,36 @@ export function planAutoHookRuntimeAttemptWithNative(input: unknown): unknown {
 
 // servertool-core bridge: resolveAutoHookRuntimeAttemptDecisionWithNative
 export function resolveAutoHookRuntimeAttemptDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveAutoHookRuntimeAttemptDecisionWithNative', [input]);
+  const plan = assertNativeObject(
+    'resolveAutoHookRuntimeAttemptDecisionWithNative',
+    planAutoHookRuntimeAttemptWithNative(input)
+  );
+  if (plan.action === 'return_result') {
+    return {
+      traceEvent: plan.traceEvent,
+      returnResult: true,
+      continueQueue: false,
+      rethrowError: false
+    };
+  }
+  if (plan.action === 'continue_queue') {
+    return {
+      traceEvent: plan.traceEvent,
+      returnResult: false,
+      continueQueue: true,
+      rethrowError: false
+    };
+  }
+  if (plan.action === 'rethrow_error') {
+    return {
+      traceEvent: plan.traceEvent,
+      returnResult: false,
+      continueQueue: false,
+      rethrowError: true,
+      ...(typeof plan.errorMessage === 'string' ? { errorMessage: plan.errorMessage } : {})
+    };
+  }
+  throw new Error('[servertool] invalid auto-hook attempt action');
 }
 
 // servertool-core bridge: planAutoHookCallerFinalizationWithNative
@@ -2052,7 +2080,33 @@ export function planAutoHookCallerFinalizationWithNative(input: unknown): unknow
 
 // servertool-core bridge: resolveAutoHookCallerFinalizationDecisionWithNative
 export function resolveAutoHookCallerFinalizationDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveAutoHookCallerFinalizationDecisionWithNative', [input]);
+  const plan = assertNativeObject(
+    'resolveAutoHookCallerFinalizationDecisionWithNative',
+    planAutoHookCallerFinalizationWithNative(input)
+  );
+  if (plan.action === 'return_result') {
+    return {
+      returnResult: true,
+      continueNextQueue: false,
+      returnNull: false,
+      result: plan.result
+    };
+  }
+  if (plan.action === 'continue_next_queue') {
+    return {
+      returnResult: false,
+      continueNextQueue: true,
+      returnNull: false
+    };
+  }
+  if (plan.action === 'return_null') {
+    return {
+      returnResult: false,
+      continueNextQueue: false,
+      returnNull: true
+    };
+  }
+  throw new Error('[servertool] invalid auto-hook caller finalization action');
 }
 
 // servertool-core bridge: planAutoHookCallerResultProjectionWithNative
@@ -2067,12 +2121,53 @@ export function planServertoolExecutionBranchWithNative(input: unknown): unknown
 
 // servertool-core bridge: resolveServertoolPreExecutionBranchDecisionWithNative
 export function resolveServertoolPreExecutionBranchDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolPreExecutionBranchDecisionWithNative', [input]);
+  const branchPlan = planServertoolExecutionBranchWithNative({
+    executableToolCalls: assertNativeObject(
+      'resolveServertoolPreExecutionBranchDecisionWithNative',
+      input
+    ).executableToolCalls,
+    executedToolCallsLen: 0
+  });
+  const application = assertNativeObject(
+    'resolveServertoolPreExecutionBranchDecisionWithNative.application',
+    invokeRouterHotpathJsonCapability('planServertoolExecutionBranchApplicationJson', [{
+      branchPlan,
+      phase: 'pre_execution'
+    }])
+  );
+  if (application.projectClientExecCli) {
+    return {
+      projectClientExecCli: true,
+      continueResponseStage: false,
+      projectedToolCall: application.projectedToolCall
+    };
+  }
+  return {
+    projectClientExecCli: false,
+    continueResponseStage: true
+  };
 }
 
 // servertool-core bridge: resolveServertoolPostExecutionBranchDecisionWithNative
 export function resolveServertoolPostExecutionBranchDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolPostExecutionBranchDecisionWithNative', [input]);
+  const branchPlan = planServertoolExecutionBranchWithNative(input);
+  const application = assertNativeObject(
+    'resolveServertoolPostExecutionBranchDecisionWithNative.application',
+    invokeRouterHotpathJsonCapability('planServertoolExecutionBranchApplicationJson', [{
+      branchPlan,
+      phase: 'post_execution'
+    }])
+  );
+  if (application.resolveExecutionOutcome) {
+    return {
+      resolveExecutionOutcome: true,
+      continueResponseStage: false
+    };
+  }
+  return {
+    resolveExecutionOutcome: false,
+    continueResponseStage: true
+  };
 }
 
 // servertool-core bridge: planServertoolEnginePreflightWithNative
@@ -2082,7 +2177,21 @@ export function planServertoolEnginePreflightWithNative(input: unknown): unknown
 
 // servertool-core bridge: resolveServertoolEnginePreflightDecisionWithNative
 export function resolveServertoolEnginePreflightDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolEnginePreflightDecisionWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolEnginePreflightDecisionWithNative', input);
+  const preflightAction = assertNativeObject(
+    'resolveServertoolEnginePreflightDecisionWithNative.preflightAction',
+    record.preflightAction
+  );
+  if (preflightAction.action === 'return_original_chat') {
+    return { result: preflightAction.result, shouldRunSideEffects: false };
+  }
+  if (
+    preflightAction.action === 'return_original_chat_direct_passthrough' ||
+    preflightAction.action === 'continue_to_engine'
+  ) {
+    return { result: preflightAction.result, shouldRunSideEffects: true };
+  }
+  throw new Error('[servertool] invalid engine preflight action');
 }
 
 // servertool-core bridge: planServertoolEngineOrchestrationPreflightActionWithNative
@@ -2092,7 +2201,20 @@ export function planServertoolEngineOrchestrationPreflightActionWithNative(input
 
 // servertool-core bridge: resolveServertoolEngineOrchestrationPreflightDecisionWithNative
 export function resolveServertoolEngineOrchestrationPreflightDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolEngineOrchestrationPreflightDecisionWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolEngineOrchestrationPreflightDecisionWithNative', input);
+  const preflight = assertNativeObject(
+    'resolveServertoolEngineOrchestrationPreflightDecisionWithNative.preflight',
+    record.preflight
+  );
+  const actionPlan = planServertoolEngineOrchestrationPreflightActionWithNative({
+    preflightKind: preflight.kind
+  });
+  return invokeRouterHotpathJsonCapability('planServertoolEngineOrchestrationPreflightApplicationJson', [{
+    actionPlan,
+    preflightKind: preflight.kind,
+    ...(preflight.chat !== undefined ? { chat: preflight.chat } : {}),
+    ...(preflight.stopSignal !== undefined ? { stopSignal: preflight.stopSignal } : {})
+  }]);
 }
 
 // servertool-core bridge: planServertoolEngineRuntimeActionWithNative
@@ -2117,7 +2239,24 @@ export function planServertoolEngineSkipWithNative(input: unknown): unknown {
 
 // servertool-core bridge: resolveServertoolEngineSkipDecisionWithNative
 export function resolveServertoolEngineSkipDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolEngineSkipDecisionWithNative', [input]);
+  const skipPlan = planServertoolEngineSkipWithNative(input);
+  const application = assertNativeObject(
+    'resolveServertoolEngineSkipDecisionWithNative.application',
+    invokeRouterHotpathJsonCapability('planServertoolEngineSkipApplicationJson', [{ skipPlan }])
+  );
+  if (application.returnSkipped) {
+    return {
+      returnSkipped: true,
+      continueMatchedFlow: false,
+      skipReason: application.skipReason,
+      triggerResult: application.triggerResult,
+      shellResult: application.shellResult
+    };
+  }
+  return {
+    returnSkipped: false,
+    continueMatchedFlow: true
+  };
 }
 
 // servertool-core bridge: planServertoolExecutionOutcomeMaterializationWithNative
@@ -2145,7 +2284,53 @@ export function createServertoolProviderProtocolErrorFromPlanWithNative(input: u
 
 // servertool-core bridge: materializeNativeToolCallExecutionOutcomeWithNative
 export function materializeNativeToolCallExecutionOutcomeWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('materializeNativeToolCallExecutionOutcomeWithNative', [input]);
+  const args = assertNativeObject('materializeNativeToolCallExecutionOutcomeWithNative', input);
+  const executionState = assertNativeObject(
+    'materializeNativeToolCallExecutionOutcomeWithNative.executionState',
+    args.executionState
+  );
+  const outcomePlan = planServertoolOutcomeWithNative(
+    buildServertoolOutcomePlanInputWithNative({
+      toolCalls: args.toolCalls,
+      executionState,
+      adapterContext:
+        args.options && typeof args.options === 'object' && !Array.isArray(args.options)
+          ? (args.options as Record<string, unknown>).adapterContext
+          : undefined,
+      baseForExecution: args.baseForExecution
+    })
+  ) as Record<string, unknown>;
+  const executedToolCalls = Array.isArray(executionState.executedToolCalls)
+    ? executionState.executedToolCalls
+    : [];
+  const materializationPlan = assertNativeObject(
+    'materializeNativeToolCallExecutionOutcomeWithNative.materializationPlan',
+    planServertoolExecutionOutcomeMaterializationWithNative({
+      requestId:
+        args.options && typeof args.options === 'object' && !Array.isArray(args.options)
+          ? (args.options as Record<string, unknown>).requestId
+          : undefined,
+      outcomeMode: outcomePlan.outcomeMode,
+      requiresPendingInjection: outcomePlan.requiresPendingInjection,
+      hasLastExecution: executionState.lastExecution != null,
+      executedToolCallsLen: executedToolCalls.length,
+      lastExecution: executionState.lastExecution,
+      flowId: outcomePlan.flowId
+    })
+  );
+  if (materializationPlan.action === 'throw_dispatch_error') {
+    throw createServertoolProviderProtocolErrorFromPlanWithNative(materializationPlan.errorPlan);
+  }
+  if (materializationPlan.action === 'return_tool_flow') {
+    return {
+      mode: materializationPlan.resultMode,
+      finalChatResponse: args.baseForExecution,
+      execution: {
+        flowId: materializationPlan.executionFlowId
+      }
+    };
+  }
+  throw new Error('[servertool] invalid execution outcome materialization action');
 }
 
 // servertool-core bridge: planServertoolExecutionOutcomeRuntimeActionWithNative
@@ -2160,22 +2345,94 @@ export function planServertoolExecutionLoopRuntimeActionWithNative(input: unknow
 
 // servertool-core bridge: resolveServertoolExecutionLoopInitialDecisionWithNative
 export function resolveServertoolExecutionLoopInitialDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolExecutionLoopInitialDecisionWithNative', [input]);
+  const plan = assertNativeObject(
+    'resolveServertoolExecutionLoopInitialDecisionWithNative',
+    planServertoolExecutionLoopRuntimeActionWithNative({
+      ...(input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {}),
+      hasMaterializedResult: false,
+      hasHandlerError: false
+    })
+  );
+  if (plan.action === 'skip_non_tool_call_handler') {
+    return { action: 'skip_non_tool_call_handler' };
+  }
+  if (plan.action === 'throw_dispatch_spec_mismatch') {
+    return { action: 'throw_dispatch_spec_mismatch' };
+  }
+  if (plan.action === 'continue_without_effect') {
+    return { action: 'continue_to_handler' };
+  }
+  throw new Error('[servertool] invalid execution loop initial action');
 }
 
 // servertool-core bridge: resolveServertoolExecutionLoopResultDecisionWithNative
 export function resolveServertoolExecutionLoopResultDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolExecutionLoopResultDecisionWithNative', [input]);
+  const record = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const plan = assertNativeObject(
+    'resolveServertoolExecutionLoopResultDecisionWithNative',
+    planServertoolExecutionLoopRuntimeActionWithNative({
+      hasHandlerEntry: true,
+      triggerMode: record.triggerMode,
+      hasMaterializedResult: record.hasMaterializedResult,
+      hasHandlerError: record.hasHandlerError
+    })
+  );
+  if (plan.action === 'apply_materialized_result') {
+    return { action: 'apply_materialized_result' };
+  }
+  if (plan.action === 'apply_handler_error_tool_output') {
+    return { action: 'apply_handler_error_tool_output' };
+  }
+  if (plan.action === 'continue_without_effect') {
+    return { action: 'continue_without_effect' };
+  }
+  throw new Error('[servertool] invalid execution loop result action');
 }
 
 // servertool-core bridge: applyServertoolExecutionLoopInitialDecisionWithNative
-export function applyServertoolExecutionLoopInitialDecisionWithNative<T>(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('applyServertoolExecutionLoopInitialDecisionWithNative', [input]);
+export function applyServertoolExecutionLoopInitialDecisionWithNative<T>(
+  decision: unknown,
+  application: {
+    skipNonToolCallHandler: () => T;
+    throwDispatchSpecMismatch: () => T;
+    continueToHandler: () => T;
+  }
+): T {
+  const record = assertNativeObject('applyServertoolExecutionLoopInitialDecisionWithNative', decision);
+  if (record.action === 'skip_non_tool_call_handler') {
+    return application.skipNonToolCallHandler();
+  }
+  if (record.action === 'throw_dispatch_spec_mismatch') {
+    return application.throwDispatchSpecMismatch();
+  }
+  if (record.action === 'continue_to_handler') {
+    return application.continueToHandler();
+  }
+  throw new Error('[servertool] invalid execution loop initial action');
 }
 
 // servertool-core bridge: applyServertoolExecutionLoopResultDecisionWithNative
-export function applyServertoolExecutionLoopResultDecisionWithNative<T>(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('applyServertoolExecutionLoopResultDecisionWithNative', [input]);
+export function applyServertoolExecutionLoopResultDecisionWithNative<T>(
+  decision: unknown,
+  application: {
+    applyMaterializedResult: () => T;
+    applyHandlerErrorToolOutput: () => T;
+    continueWithoutEffect: () => T;
+  }
+): T {
+  const record = assertNativeObject('applyServertoolExecutionLoopResultDecisionWithNative', decision);
+  if (record.action === 'apply_materialized_result') {
+    return application.applyMaterializedResult();
+  }
+  if (record.action === 'apply_handler_error_tool_output') {
+    return application.applyHandlerErrorToolOutput();
+  }
+  if (record.action === 'continue_without_effect') {
+    return application.continueWithoutEffect();
+  }
+  throw new Error('[servertool] invalid execution loop result action');
 }
 
 // servertool-core bridge: planServertoolExecutionLoopEffectWithNative
@@ -2189,12 +2446,26 @@ export function planServertoolExecutionLoopEffectWithNative(input: unknown): unk
 
 // servertool-core bridge: planServertoolHandlerErrorExecutionLoopEffectWithNative
 export function planServertoolHandlerErrorExecutionLoopEffectWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('planServertoolHandlerErrorExecutionLoopEffectWithNative', [input]);
+  const record = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  return planServertoolExecutionLoopEffectWithNative({
+    mode: 'handler_error',
+    toolCall: record.toolCall,
+    handlerErrorMessage: record.handlerErrorMessage
+  });
 }
 
 // servertool-core bridge: planServertoolNoopExecutionLoopEffectWithNative
 export function planServertoolNoopExecutionLoopEffectWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('planServertoolNoopExecutionLoopEffectWithNative', [input]);
+  const record = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  return planServertoolExecutionLoopEffectWithNative({
+    mode: 'noop',
+    toolCall: record.toolCall,
+    noopOutcome: record.noopOutcome
+  });
 }
 
 // servertool-core bridge: planServertoolResponseStageRuntimeActionWithNative
@@ -2204,47 +2475,170 @@ export function planServertoolResponseStageRuntimeActionWithNative(input: unknow
 
 // servertool-core bridge: resolveServertoolResponseStagePrepassInitialDecisionWithNative
 export function resolveServertoolResponseStagePrepassInitialDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolResponseStagePrepassInitialDecisionWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolResponseStagePrepassInitialDecisionWithNative', input);
+  const action = assertNativeObject(
+    'resolveServertoolResponseStagePrepassInitialDecisionWithNative.action',
+    planServertoolResponseStageRuntimeActionWithNative({
+      responseStageGatePlan: record.responseStageGatePlan,
+      baseObject: record.baseObject,
+      autoHookEvaluated: false,
+      hasAutoHookResult: false
+    })
+  );
+  if (action.action === 'run_auto_hooks') {
+    return { action: 'run_auto_hooks' };
+  }
+  if (action.action === 'return_passthrough_no_auto_hook_result') {
+    return {
+      action: 'return_prepass_result',
+      result: action.prepassResult
+    };
+  }
+  throw new Error('[servertool] invalid response-stage prepass action');
 }
 
 // servertool-core bridge: resolveServertoolResponseStagePrepassInitialApplicationWithNative
 export function resolveServertoolResponseStagePrepassInitialApplicationWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolResponseStagePrepassInitialApplicationWithNative', [input]);
+  return invokeRouterHotpathJsonCapability('planServertoolResponseStagePrepassInitialApplicationJson', [input]);
 }
 
 // servertool-core bridge: resolveServertoolResponseStageOrchestrationGateApplicationWithNative
 export function resolveServertoolResponseStageOrchestrationGateApplicationWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolResponseStageOrchestrationGateApplicationWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolResponseStageOrchestrationGateApplicationWithNative', input);
+  const runtimeAction = planServertoolResponseStageRuntimeActionWithNative({
+    responseStageGatePlan: record.responseStageGatePlan,
+    baseObject: record.baseObject,
+    autoHookEvaluated: false,
+    hasAutoHookResult: false
+  });
+  return invokeRouterHotpathJsonCapability('planServertoolResponseStageOrchestrationGateApplicationJson', [{
+    runtimeAction
+  }]);
 }
 
 // servertool-core bridge: resolveServertoolResponseStagePrepassAfterAutoHookWithNative
 export function resolveServertoolResponseStagePrepassAfterAutoHookWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolResponseStagePrepassAfterAutoHookWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolResponseStagePrepassAfterAutoHookWithNative', input);
+  const autoHookResult = assertNativeObject(
+    'resolveServertoolResponseStagePrepassAfterAutoHookWithNative.responseStageAutoHookResult',
+    record.responseStageAutoHookResult
+  );
+  const action = assertNativeObject(
+    'resolveServertoolResponseStagePrepassAfterAutoHookWithNative.action',
+    planServertoolResponseStageRuntimeActionWithNative({
+      responseStageGatePlan: record.responseStageGatePlan,
+      baseObject: record.baseObject,
+      autoHookEvaluated: true,
+      hasAutoHookResult: autoHookResult.action === 'return_auto_hook_result',
+      autoHookResult: autoHookResult.action === 'return_auto_hook_result' ? autoHookResult.result : null
+    })
+  );
+  if (
+    action.action === 'return_auto_hook_result' ||
+    action.action === 'return_passthrough_bypass' ||
+    action.action === 'return_passthrough_no_auto_hook_result'
+  ) {
+    return {
+      action: 'return_prepass_result',
+      result: action.prepassResult
+    };
+  }
+  throw new Error('[servertool] invalid response-stage prepass auto-hook action');
 }
 
 // servertool-core bridge: finalizeServertoolResponseStageWithNative
 export function finalizeServertoolResponseStageWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('finalizeServertoolResponseStageWithNative', [input]);
+  const record = assertNativeObject('finalizeServertoolResponseStageWithNative', input);
+  const autoHookResult = assertNativeObject(
+    'finalizeServertoolResponseStageWithNative.responseStageAutoHookResult',
+    record.responseStageAutoHookResult
+  );
+  const action = assertNativeObject(
+    'finalizeServertoolResponseStageWithNative.action',
+    planServertoolResponseStageRuntimeActionWithNative({
+      responseStageGatePlan: record.responseStageGatePlan,
+      baseObject: record.baseObject,
+      autoHookEvaluated: true,
+      hasAutoHookResult: autoHookResult.action === 'return_auto_hook_result',
+      autoHookResult: autoHookResult.action === 'return_auto_hook_result' ? autoHookResult.result : null
+    })
+  );
+  if (
+    action.action === 'return_auto_hook_result' ||
+    action.action === 'return_passthrough_bypass' ||
+    action.action === 'return_passthrough_no_auto_hook_result'
+  ) {
+    return action.finalizeResult;
+  }
+  throw new Error('[servertool] invalid response-stage finalize action');
 }
 
 // servertool-core bridge: resolveServertoolResponseStageAutoHookPreDecisionWithNative
 export function resolveServertoolResponseStageAutoHookPreDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolResponseStageAutoHookPreDecisionWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolResponseStageAutoHookPreDecisionWithNative', input);
+  const action = assertNativeObject(
+    'resolveServertoolResponseStageAutoHookPreDecisionWithNative.action',
+    planServertoolResponseStageRuntimeActionWithNative({
+      responseStageGatePlan: record.responseStageGatePlan,
+      baseObject: record.baseObject,
+      autoHookEvaluated: false,
+      hasAutoHookResult: false
+    })
+  );
+  if (action.action === 'return_passthrough_bypass') {
+    return {
+      action: 'return_pass_result',
+      result: action.passResult
+    };
+  }
+  if (action.action === 'run_auto_hooks') {
+    return { action: 'run_auto_hooks' };
+  }
+  throw new Error('[servertool] invalid response-stage pre auto-hook action');
 }
 
 // servertool-core bridge: resolveServertoolResponseStageAutoHookPreApplicationWithNative
 export function resolveServertoolResponseStageAutoHookPreApplicationWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolResponseStageAutoHookPreApplicationWithNative', [input]);
+  return invokeRouterHotpathJsonCapability('planServertoolResponseStageAutoHookPreApplicationJson', [input]);
 }
 
 // servertool-core bridge: resolveServertoolResponseStageAutoHookPostDecisionWithNative
 export function resolveServertoolResponseStageAutoHookPostDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolResponseStageAutoHookPostDecisionWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolResponseStageAutoHookPostDecisionWithNative', input);
+  const action = assertNativeObject(
+    'resolveServertoolResponseStageAutoHookPostDecisionWithNative.action',
+    planServertoolResponseStageRuntimeActionWithNative({
+      responseStageGatePlan: record.responseStageGatePlan,
+      baseObject: record.baseObject,
+      autoHookEvaluated: true,
+      hasAutoHookResult: record.autoHookResult != null,
+      autoHookResult: record.autoHookResult
+    })
+  );
+  if (action.action === 'return_required_response_hook_empty') {
+    return {
+      action: 'throw_required_response_hook_empty',
+      errorPlan: planServertoolRequiredResponseHookEmptyErrorWithNative({
+        requestId: record.requestId,
+        responseHookName: action.responseHookName
+      })
+    };
+  }
+  if (
+    action.action === 'return_auto_hook_result' ||
+    action.action === 'return_passthrough_no_auto_hook_result'
+  ) {
+    return {
+      action: 'return_pass_result',
+      result: action.passResult
+    };
+  }
+  throw new Error('[servertool] invalid response-stage post auto-hook action');
 }
 
 // servertool-core bridge: resolveServertoolResponseStageAutoHookPostApplicationWithNative
 export function resolveServertoolResponseStageAutoHookPostApplicationWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolResponseStageAutoHookPostApplicationWithNative', [input]);
+  return invokeRouterHotpathJsonCapability('planServertoolResponseStageAutoHookPostApplicationJson', [input]);
 }
 
 // servertool-core bridge: materializeServertoolResponseStageOrchestrationOutputWithNative
@@ -2254,7 +2648,7 @@ export function materializeServertoolResponseStageOrchestrationOutputWithNative(
 
 // servertool-core bridge: extractServertoolResponseStageOrchestrationShellResultWithNative
 export function extractServertoolResponseStageOrchestrationShellResultWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('extractServertoolResponseStageOrchestrationShellResultWithNative', [input]);
+  return assertNativeObject('extractServertoolResponseStageOrchestrationShellResultWithNative', input).shellResult;
 }
 
 // servertool-core bridge: planServertoolEntryPreflightWithNative
@@ -2264,27 +2658,67 @@ export function planServertoolEntryPreflightWithNative(input: unknown): unknown 
 
 // servertool-core bridge: readServertoolEntryBaseObjectWithNative
 export function readServertoolEntryBaseObjectWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('readServertoolEntryBaseObjectWithNative', [input]);
+  if (input == null || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  return input;
 }
 
 // servertool-core bridge: resolveServertoolEntryPreflightWithNative
 export function resolveServertoolEntryPreflightWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolEntryPreflightWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolEntryPreflightWithNative', input);
+  const plan = assertNativeObject(
+    'resolveServertoolEntryPreflightWithNative.plan',
+    planServertoolEntryPreflightWithNative({
+      hasBaseObject: record.baseObject != null,
+      adapterClientDisconnected: record.adapterClientDisconnected,
+      chatResponse: record.chatResponse
+    })
+  );
+  if (plan.action === 'return_passthrough_non_object_chat') {
+    return { action: 'return_result', result: plan.passthroughResult };
+  }
+  if (plan.action === 'throw_client_disconnected') {
+    return {
+      action: 'throw_error',
+      errorPlan: planServertoolClientDisconnectedErrorWithNative({
+        requestId: record.requestId
+      })
+    };
+  }
+  if (plan.action === 'continue_to_tool_flow') {
+    if (record.baseObject == null) {
+      throw new Error('[servertool] invalid entry preflight continue without base object');
+    }
+    return { action: 'continue', baseObject: record.baseObject };
+  }
+  throw new Error('[servertool] invalid entry preflight action');
 }
 
 // servertool-core bridge: resolveServertoolEntryPreflightApplicationWithNative
 export function resolveServertoolEntryPreflightApplicationWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolEntryPreflightApplicationWithNative', [input]);
+  return invokeRouterHotpathJsonCapability('planServertoolEntryPreflightApplicationJson', [input]);
 }
 
 // servertool-core bridge: resolveServertoolRunEngineEntryPreflightDecisionWithNative
 export function resolveServertoolRunEngineEntryPreflightDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolRunEngineEntryPreflightDecisionWithNative', [input]);
+  const record = assertNativeObject('resolveServertoolRunEngineEntryPreflightDecisionWithNative', input);
+  const entryPreflight = assertNativeObject(
+    'resolveServertoolRunEngineEntryPreflightDecisionWithNative.entryPreflight',
+    record.entryPreflight
+  );
+  if (entryPreflight.action === 'return_result') {
+    return { action: 'return_result', result: entryPreflight.result };
+  }
+  if (entryPreflight.action === 'continue') {
+    return { action: 'continue', baseObject: entryPreflight.baseObject };
+  }
+  throw new Error('[servertool] invalid entry preflight result action');
 }
 
 // servertool-core bridge: resolveServertoolRunEngineEntryPreflightApplicationWithNative
 export function resolveServertoolRunEngineEntryPreflightApplicationWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolRunEngineEntryPreflightApplicationWithNative', [input]);
+  return invokeRouterHotpathJsonCapability('planServertoolRunEngineEntryPreflightApplicationJson', [input]);
 }
 
 // servertool-core bridge: planServertoolEntryContextWithNative
@@ -2299,27 +2733,75 @@ export function planServertoolEnginePrepassActionWithNative(input: unknown): unk
 
 // servertool-core bridge: resolveServertoolRunEnginePrepassDecisionWithNative
 export function resolveServertoolRunEnginePrepassDecisionWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolRunEnginePrepassDecisionWithNative', [input]);
+  const action = assertNativeObject(
+    'resolveServertoolRunEnginePrepassDecisionWithNative.action',
+    planServertoolEnginePrepassActionWithNative(input)
+  );
+  if (action.action === 'return_prepass_result') {
+    return {
+      action: 'return_result',
+      result: action.result
+    };
+  }
+  if (action.action === 'continue_to_execution') {
+    return { action: 'continue_to_execution' };
+  }
+  throw new Error('[servertool] invalid engine prepass action');
 }
 
 // servertool-core bridge: resolveServertoolRunEnginePrepassApplicationWithNative
 export function resolveServertoolRunEnginePrepassApplicationWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveServertoolRunEnginePrepassApplicationWithNative', [input]);
+  return invokeRouterHotpathJsonCapability('planServertoolRunEnginePrepassApplicationJson', [input]);
 }
 
 // servertool-core bridge: planServertoolRegistryAutoHookDescriptorsWithNative
 export function planServertoolRegistryAutoHookDescriptorsWithNative(input: unknown): unknown {
-  return invokeRouterHotpathJsonCapability('planServertoolRegistryAutoHookDescriptorsJson', [input]);
+  const record = assertNativeObject('planServertoolRegistryAutoHookDescriptorsWithNative', input);
+  if (!Array.isArray(record.hooks)) {
+    throw new Error('[servertool] planServertoolRegistryAutoHookDescriptorsWithNative requires hooks array');
+  }
+  return invokeRouterHotpathJsonCapability('planServertoolRegistryAutoHookDescriptorsJson', [record.hooks]);
 }
 
 // servertool-core bridge: planServertoolRegistryBuiltinAutoHookEntriesWithNative
 export function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('planServertoolRegistryBuiltinAutoHookEntriesWithNative', [input]);
+  const record = assertNativeObject('planServertoolRegistryBuiltinAutoHookEntriesWithNative', input);
+  const hooks = Array.isArray(record.hooks) ? record.hooks : [];
+  const descriptors = planServertoolRegistryAutoHookDescriptorsWithNative({
+    hooks: hooks.map((hook) => {
+      const source = assertNativeObject('planServertoolRegistryBuiltinAutoHookEntriesWithNative.hook', hook);
+      return {
+        id: source.id,
+        phase: source.phase,
+        priority: source.priority,
+        order: source.order
+      };
+    })
+  }) as unknown[];
+  return descriptors.map((descriptor) => {
+    const desc = assertNativeObject('planServertoolRegistryBuiltinAutoHookEntriesWithNative.descriptor', descriptor);
+    const sourceIndex = typeof desc.sourceIndex === 'number' ? desc.sourceIndex : -1;
+    const source = hooks[sourceIndex];
+    const sourceRecord = assertNativeObject('planServertoolRegistryBuiltinAutoHookEntriesWithNative.source', source);
+    return {
+      id: desc.id,
+      phase: desc.phase,
+      priority: desc.priority,
+      order: desc.order,
+      registration: sourceRecord.registration,
+      execution: sourceRecord.execution
+    };
+  });
 }
 
 // servertool-core bridge: planServertoolRegistryLookupActionWithNative
 export function planServertoolRegistryLookupActionWithNative(input: unknown): unknown {
   return invokeRouterHotpathJsonCapability('planServertoolRegistryLookupActionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolRegistryProjectionWithNative
+export function planServertoolRegistryProjectionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolRegistryProjectionJson', [input]);
 }
 
 // servertool-core bridge: planServertoolHandlerMaterializationWithNative
@@ -2432,7 +2914,17 @@ export function planEngineSelectionAfterRunWithNative(input: unknown): unknown {
 
 // servertool-core bridge: resolveEngineSelectionAfterRunWithNative
 export function resolveEngineSelectionAfterRunWithNative(input: unknown): unknown {
-  return invokeNativeServertoolCoreSemanticsExport('resolveEngineSelectionAfterRunWithNative', [input]);
+  const plan = assertNativeObject(
+    'resolveEngineSelectionAfterRunWithNative',
+    planEngineSelectionAfterRunWithNative(input)
+  );
+  if (plan.action === 'rerun_excluding_primary_hooks') {
+    return { rerunOverrides: plan.overrides };
+  }
+  if (plan.action === 'return_current') {
+    return {};
+  }
+  throw new Error('[servertool] invalid engine selection action');
 }
 
 // servertool-core bridge: resolveServertoolTimeoutMsFromEnvCandidatesWithNative
@@ -2503,5 +2995,4 @@ export function buildStopMessageTerminalVisiblePayloadWithNative<TPayload extend
 
 // ── servertool-core semantics bridge: invokeRouterHotpathJsonCapability wrappers ──
 // These functions replace the readNativeFunction-based implementations in
-// native-servertool-core-semantics.ts. Routing through the unified loader ensures
 // consistent error reporting and native binding discovery.
