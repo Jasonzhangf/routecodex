@@ -21,5 +21,6 @@ pub(crate) use types::{
     StoplessControl, TrafficGovernorControl,
 };
 pub(crate) use write_plan::{
-    build_stopless_metadata_center_write_plan, StoplessMetadataCenterWritePlan,
+    build_stopless_metadata_center_reset_write_plan, build_stopless_metadata_center_write_plan,
+    StoplessMetadataCenterWritePlan,
 };

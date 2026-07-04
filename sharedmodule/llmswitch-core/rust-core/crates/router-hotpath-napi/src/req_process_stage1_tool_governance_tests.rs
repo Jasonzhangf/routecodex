@@ -1096,7 +1096,7 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
             {
               "type": "function_call_output",
               "call_id": "call_stop_retry",
-              "output": "{\"toolName\":\"stop_message_auto\",\"schemaGuidance\":{\"triggerHint\":\"invalid_schema\"}}"
+              "output": "{\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaGuidance\":{\"triggerHint\":\"invalid_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"triggerHint\":\"invalid_schema\"}}"
             }
           ]
         }),
@@ -1108,6 +1108,9 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
         request_id: "req_reasoning_stop_retry".to_string(),
         has_active_stop_message_for_continue_execution: Some(true),
         metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "sessionId": "sess-stopless-request-owner"
+          },
           "runtimeControl": {
             "stopMessage": {
               "enabled": true
@@ -1125,6 +1128,12 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
     assert!(
         instructions.contains("<rcc_stop_schema>"),
         "non-terminal feedback must keep stopless instruction"
+    );
+    assert_eq!(
+        result.metadata["runtime_control"]["stopless"]["sessionId"],
+        serde_json::json!("sess-stopless-request-owner"),
+        "request ChatProcess must scope CLI-derived stopless runtime control with current request truth sessionId: {}",
+        result.metadata
     );
     let tools = processed
         .get("tools")

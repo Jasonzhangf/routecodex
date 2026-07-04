@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { runServerToolOrchestrationShell as runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js';
 
+import { executeHubPipelineWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { readNativeFunction } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
 
 function resolveStateKeyRust(record: Record<string, unknown>): string {
@@ -32,6 +33,31 @@ function buildStopChatResponse(content: string = 'need continue'): JsonObject {
         index: 0,
         message: { role: 'assistant', content },
         finish_reason: 'stop'
+      }
+    ]
+  } as JsonObject;
+}
+
+function buildToolCallsChatResponse(): JsonObject {
+  return {
+    id: 'chatcmpl-stopless-cli-tool-calls',
+    object: 'chat.completion',
+    model: 'gpt-test',
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_exec_command',
+              type: 'function',
+              function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+            }
+          ]
+        },
+        finish_reason: 'tool_calls'
       }
     ]
   } as JsonObject;
@@ -203,7 +229,212 @@ function buildResponsesToolOutputRequest(output: Record<string, unknown>) {
   };
 }
 
+function runNativeStoplessResponse(args: {
+  requestId: string;
+  payload: JsonObject;
+  sessionId?: string;
+  runtimeStopless?: Record<string, unknown>;
+}) {
+  return executeHubPipelineWithNative({
+    config: {},
+    request: {
+      requestId: args.requestId,
+      endpoint: '/v1/responses',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      payload: args.payload,
+      metadata: {
+        clientProtocol: 'openai-responses',
+        entryEndpoint: '/v1/responses'
+      },
+      metadataCenterSnapshot: {
+        requestTruth: {
+          requestId: args.requestId,
+          ...(args.sessionId !== undefined ? { sessionId: args.sessionId } : {})
+        },
+        runtimeControl: {
+          stopless: {
+            flowId: 'stop_message_flow',
+            active: true,
+            repeatCount: 0,
+            maxRepeats: 3,
+            ...(args.runtimeStopless ?? {})
+          }
+        }
+      },
+      stream: false,
+      processMode: 'chat',
+      direction: 'response',
+      stage: 'outbound'
+    }
+  });
+}
+
+function findNativeStoplessWrite(output: {
+  effectPlan: { effects: Array<Record<string, unknown>> };
+}): Record<string, any> | undefined {
+  const effect = output.effectPlan.effects.find((candidate) => {
+    return candidate.kind === 'stoplessMetadataCenterWrite';
+  });
+  return effect?.payload as Record<string, any> | undefined;
+}
+
+function nativeStoplessExecArguments(output: {
+  payload?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const rawArgs = (output.payload as any)?.required_action?.submit_tool_outputs?.tool_calls?.[0]?.function?.arguments;
+  if (typeof rawArgs !== 'string') {
+    return undefined;
+  }
+  const parsed = JSON.parse(rawArgs) as Record<string, unknown>;
+  const command = typeof parsed.cmd === 'string' ? parsed.cmd : '';
+  if (!command.includes('routecodex hook run reasoningStop')) {
+    return undefined;
+  }
+  return extractInput(command);
+}
+
+function hasDiagnosticAlarm(output: {
+  diagnostics: Array<Record<string, unknown>>;
+}, alarm: string): boolean {
+  return output.diagnostics.some((diagnostic) => {
+    return (diagnostic as any).details?.alarm === alarm;
+  });
+}
+
 describe('stopless CLI continuation', () => {
+  test('native response hook alarms and passes through when request truth sessionId is missing', () => {
+    const output = runNativeStoplessResponse({
+      requestId: `req-stopless-native-missing-session-${Date.now()}`,
+      payload: buildStopChatResponse('missing session should pass through naturally')
+    });
+
+    expect(output.success).toBe(true);
+    expect(nativeStoplessExecArguments(output)).toBeUndefined();
+    expect(findNativeStoplessWrite(output)).toBeUndefined();
+    expect(hasDiagnosticAlarm(output, 'stopless_missing_session_id')).toBe(true);
+    expect((output.payload as any)?.output_text).toContain('missing session should pass through naturally');
+    expect(JSON.stringify(output.payload)).not.toContain('routecodex hook run reasoningStop');
+  });
+
+  test('native response hook resets consecutive schema-error streak on non-stop progress', () => {
+    const sessionId = `session-stopless-native-reset-${Date.now()}`;
+    const nonStop = runNativeStoplessResponse({
+      requestId: `req-stopless-native-reset-non-stop-${Date.now()}`,
+      sessionId,
+      payload: buildToolCallsChatResponse(),
+      runtimeStopless: {
+        sessionId,
+        repeatCount: 2,
+        maxRepeats: 3,
+        triggerHint: 'no_schema'
+      }
+    });
+
+    expect(nonStop.success).toBe(true);
+    const resetWrite = findNativeStoplessWrite(nonStop);
+    expect(resetWrite?.stopless).toMatchObject({
+      active: true,
+      sessionId,
+      repeatCount: 0,
+      triggerHint: 'non_stop_response'
+    });
+    expect(nativeStoplessExecArguments(nonStop)).toBeUndefined();
+
+    const nextStop = runNativeStoplessResponse({
+      requestId: `req-stopless-native-reset-next-stop-${Date.now()}`,
+      sessionId,
+      payload: buildStopChatResponse('stop after real progress'),
+      runtimeStopless: resetWrite?.stopless
+    });
+
+    expect(nextStop.success).toBe(true);
+    expect(nativeStoplessExecArguments(nextStop)).toMatchObject({
+      repeatCount: 1,
+      maxRepeats: 3
+    });
+    expect(JSON.stringify(nextStop.payload)).not.toContain('stop_schema_budget_exhausted');
+  });
+
+  test('native response hook isolates consecutive counters by request truth sessionId', () => {
+    const sessionA = `session-stopless-native-a-${Date.now()}`;
+    const sessionB = `session-stopless-native-b-${Date.now()}`;
+    const output = runNativeStoplessResponse({
+      requestId: `req-stopless-native-session-isolation-${Date.now()}`,
+      sessionId: sessionB,
+      payload: buildStopChatResponse('new session first stop'),
+      runtimeStopless: {
+        sessionId: sessionA,
+        repeatCount: 2,
+        maxRepeats: 3,
+        triggerHint: 'no_schema'
+      }
+    });
+
+    expect(output.success).toBe(true);
+    expect(nativeStoplessExecArguments(output)).toMatchObject({
+      repeatCount: 1,
+      maxRepeats: 3
+    });
+    const write = findNativeStoplessWrite(output);
+    expect(write?.stopless).toMatchObject({
+      sessionId: sessionB,
+      repeatCount: 1,
+      active: true
+    });
+  });
+
+  test('native response hook does not inherit unscoped stopless runtime counter', () => {
+    const sessionId = `session-stopless-native-unscoped-${Date.now()}`;
+    const output = runNativeStoplessResponse({
+      requestId: `req-stopless-native-unscoped-counter-${Date.now()}`,
+      sessionId,
+      payload: buildStopChatResponse('unscoped prior state must start fresh'),
+      runtimeStopless: {
+        repeatCount: 2,
+        maxRepeats: 3,
+        triggerHint: 'no_schema'
+      }
+    });
+
+    expect(output.success).toBe(true);
+    expect(nativeStoplessExecArguments(output)).toMatchObject({
+      repeatCount: 1,
+      maxRepeats: 3
+    });
+    expect(findNativeStoplessWrite(output)?.stopless).toMatchObject({
+      sessionId,
+      repeatCount: 1,
+      active: true
+    });
+    expect(JSON.stringify(output.payload)).not.toContain('stop_schema_budget_exhausted');
+  });
+
+  test('native response hook clears schema-error streak on simple_question terminal schema', () => {
+    const sessionId = `session-stopless-native-simple-${Date.now()}`;
+    const output = runNativeStoplessResponse({
+      requestId: `req-stopless-native-simple-question-${Date.now()}`,
+      sessionId,
+      payload: buildStopChatResponse(`是。\n${buildFencedStopSchema('{"simple_question":true}')}`),
+      runtimeStopless: {
+        sessionId,
+        repeatCount: 2,
+        maxRepeats: 3,
+        triggerHint: 'invalid_schema'
+      }
+    });
+
+    expect(output.success).toBe(true);
+    expect(nativeStoplessExecArguments(output)).toBeUndefined();
+    expect(findNativeStoplessWrite(output)?.stopless).toMatchObject({
+      active: false,
+      sessionId,
+      repeatCount: 0,
+      triggerHint: 'schema_pass'
+    });
+    expect(JSON.stringify(output.payload)).not.toContain('routecodex hook run reasoningStop');
+  });
+
   test('direct runtime routeName disables stopless CLI projection', async () => {
     const adapterContext = buildAdapterContext({
       entryEndpoint: '/v1/responses',

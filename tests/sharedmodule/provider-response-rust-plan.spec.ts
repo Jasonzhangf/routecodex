@@ -270,12 +270,7 @@ describe('provider response Rust native plan', () => {
       routecodexPortStopMessageEnabled: false
     };
     const center = MetadataCenter.attach(context);
-    center.writeRequestTruth(
-      'requestId',
-      'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618',
-      TEST_METADATA_WRITER,
-      'simulate provider-level request id rebind'
-    );
+    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRequestTruth('sessionId', context.sessionId, TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRuntimeControl('providerProtocol', 'openai-chat', TEST_METADATA_WRITER, 'test-runtime-control');
@@ -416,8 +411,10 @@ describe('provider response Rust native plan', () => {
     expect(bodyText).toContain('exec_command');
     const command = extractExecCommandFromResponsesBody(result.body);
     expect(command).toContain('routecodex hook run reasoningStop');
-    expect(command).toContain('"repeatCount":2');
-    expect(bodyText).not.toContain('"output_text":""');
+    expect(command).toContain('"repeatCount":1');
+    expect(command).toContain('"triggerHint":"non_terminal_schema"');
+    expect(bodyText).not.toContain('stopreason');
+    expect(bodyText).not.toContain('第二轮还没做完');
   });
 
   it('projects stopless CLI command for captured mimo Anthropic SSE stop shape', async () => {
@@ -448,15 +445,13 @@ describe('provider response Rust native plan', () => {
     expect(bodyText).toContain('stop_message_flow');
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
       runtimeEffects: expect.objectContaining({
-        servertoolRuntimeActions: expect.arrayContaining([
-          expect.objectContaining({
-            reason: 'stop_eligible_followup',
-            stopGateway: expect.objectContaining({
-              eligible: true,
-              reason: 'finish_reason_stop'
-            })
+        stoplessMetadataCenterWrite: expect.objectContaining({
+          stopless: expect.objectContaining({
+            active: true,
+            sessionId: context.sessionId
           })
-        ])
+        }),
+        servertoolRuntimeActions: []
       })
     }));
   });
@@ -504,12 +499,13 @@ describe('provider response Rust native plan', () => {
     expect(outputText).toContain('routecodex hook run reasoningStop');
     expect(outputText).toContain('stop_message_flow');
     const output = Array.isArray((result.body as any)?.output) ? (result.body as any).output : [];
-    const reasoning = output.find((item: any) => item?.type === 'reasoning');
-    expect(reasoning).toBeDefined();
+    expect(output.some((item: any) => item?.type === 'message')).toBe(true);
+    expect(output.some((item: any) => item?.type === 'function_call' && item?.name === 'exec_command')).toBe(true);
   });
 
   it('projects stopless CLI command for relay OpenAI Responses completed stop without session scope', async () => {
     const suffix = `responses_scope_free_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const context: Record<string, unknown> = withMetadataCenter({
       requestId: `req_provider_response_responses_stopless_cli_projection_scope_free_${suffix}`,
       entryEndpoint: '/v1/responses',
@@ -522,33 +518,40 @@ describe('provider response Rust native plan', () => {
       }
     });
 
-    const result = await convertProviderResponse({
-      providerProtocol: 'openai-responses',
-      providerResponse: {
-        id: 'resp_stopless_cli_projection_scope_free',
-        object: 'response',
-        status: 'completed',
-        model: 'gpt-test',
-        output: [{
-          id: 'msg_stopless_cli_projection_scope_free',
-          type: 'message',
-          role: 'assistant',
+    try {
+      const result = await convertProviderResponse({
+        providerProtocol: 'openai-responses',
+        providerResponse: {
+          id: 'resp_stopless_cli_projection_scope_free',
+          object: 'response',
           status: 'completed',
-          content: [{ type: 'output_text', text: 'I stopped without schema.' }]
-        }],
-        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
-      },
-      context: context as any,
-      entryEndpoint: '/v1/responses',
-      wantsStream: false,
-      clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
-    });
+          model: 'gpt-test',
+          output: [{
+            id: 'msg_stopless_cli_projection_scope_free',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: 'I stopped without schema.' }]
+          }],
+          usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+        },
+        context: context as any,
+        entryEndpoint: '/v1/responses',
+        wantsStream: false,
+        clientInjectDispatch: jest.fn(async () => ({ ok: true })) as any
+      });
 
-    expect(result.body?.object).toBe('response');
-    const outputText = JSON.stringify(result.body);
-    expect(outputText).not.toContain('exec_command');
-    expect(outputText).not.toContain('stop_message_flow');
-    expect(outputText).toContain('"status":"completed"');
+      expect(result.body?.object).toBe('response');
+      const outputText = JSON.stringify(result.body);
+      expect(outputText).not.toContain('exec_command');
+      expect(outputText).not.toContain('stop_message_flow');
+      expect(outputText).toContain('"status":"completed"');
+      expect(warnSpy.mock.calls.some((call) => {
+        return String(call[0] ?? '').includes('[hub-pipeline][alarm] stopless_missing_session_id');
+      })).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('does not project stopless CLI command for relay OpenAI Responses completed stop when stop message is disabled', async () => {
@@ -934,35 +937,9 @@ describe('provider response Rust native plan', () => {
     const bodyText = JSON.stringify(result.body);
     expect(bodyText).not.toContain('exec_command');
     expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({
-            kind: 'servertoolRuntimeAction',
-            payload: expect.objectContaining({
-              action: 'requireResponseHookRuntime',
-              reason: 'stop_eligible_followup',
-              requestId: 'req_provider_response_servertool_stop_guard_1',
-              stopGateway: expect.objectContaining({
-                observed: true,
-                eligible: true,
-                source: 'chat',
-                reason: 'finish_reason_stop',
-                choice_index: 0,
-                has_tool_calls: false
-              })
-            })
-          })
-        ])
-      })
-    }));
-    expect(context.__rt).toEqual(expect.objectContaining({
-      stopGatewayContext: expect.objectContaining({
-        observed: true,
-        eligible: true,
-        source: 'chat',
-        reason: 'finish_reason_stop',
-        choiceIndex: 0,
-        hasToolCalls: false
+      runtimeEffects: expect.objectContaining({
+        servertoolRuntimeActions: [],
+        stoplessMetadataCenterWrite: null
       })
     }));
   });

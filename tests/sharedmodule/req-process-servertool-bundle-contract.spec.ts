@@ -241,13 +241,22 @@ describe('req_process servertool bundle contract', () => {
         clientInjectReason: 'tmux_session_missing',
         stopMessageEnabled: true
       },
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          stopMessage: {
+            enabled: true
+          }
+        }
+      },
       entryEndpoint: '/v1/responses',
       requestId: 'req-process-stopless-relay-no-tmux',
       hasActiveStopMessageForContinueExecution: false
     });
 
-    expect(typeof result.processedRequest.instructions).toBe('string');
-    expect(String(result.processedRequest.instructions)).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
     expect(Array.isArray(result.processedRequest.input)).toBe(true);
+    const serialized = JSON.stringify(result.processedRequest.input);
+    expect(serialized).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
+    expect(serialized).toContain('reasoningStop');
+    expect(result.processedRequest.instructions).toBeUndefined();
   });
 });

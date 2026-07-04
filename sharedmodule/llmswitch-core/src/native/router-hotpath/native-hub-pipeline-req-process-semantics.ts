@@ -8,6 +8,7 @@ export interface NativeReqProcessToolGovernanceInput {
   entryEndpoint: string;
   requestId: string;
   hasActiveStopMessageForContinueExecution?: boolean;
+  metadataCenterSnapshot?: Record<string, unknown>;
 }
 
 export interface NativeReqProcessToolGovernanceOutput {

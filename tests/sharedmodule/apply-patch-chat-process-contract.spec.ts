@@ -6,8 +6,33 @@ import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/s
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 
 function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string) {
+  const preselectedRoute = {
+    target: {
+      providerKey: 'test.key1.gpt-test',
+      providerType: 'openai',
+      runtimeKey: 'test.key1',
+      modelId: 'gpt-test',
+      outboundProfile: 'openai-chat',
+    },
+    decision: { routeName: 'default' },
+    diagnostics: {},
+  };
   const result = runHubPipelineLibWithNative({
-    config: { virtualRouter: {} },
+    config: {
+      virtualRouter: {
+        providers: {
+          'test.key1.gpt-test': preselectedRoute.target,
+        },
+        routing: {
+          default: [{
+            id: 'default-priority',
+            priority: 100,
+            mode: 'priority',
+            targets: ['test.key1.gpt-test'],
+          }],
+        },
+      },
+    },
     request: {
       requestId,
       endpoint: '/v1/chat/completions',
@@ -16,10 +41,9 @@ function runRequestPipeline(request: StandardizedRequest, metadata: Record<strin
       payload: request as unknown as Record<string, unknown>,
       metadata: {
         ...metadata,
-        __routecodexPreselectedRoute: {
-          target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
-          decision: { routeName: 'test/preselected' },
-          diagnostics: {},
+        runtime_control: {
+          ...((metadata as any).runtime_control ?? {}),
+          preselectedRoute,
         },
       },
       stream: false,

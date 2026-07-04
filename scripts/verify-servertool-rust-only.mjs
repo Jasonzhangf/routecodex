@@ -343,7 +343,7 @@ function collectServertoolWrapperFunctionRefs() {
 }
 
 function assertNoUnusedServertoolWrapperFunctionDeclarations(packageServertoolWrapperTypes) {
-  const declared = [...packageServertoolWrapperTypes.matchAll(/export declare function (\w+)/g)]
+  const declared = [...packageServertoolWrapperTypes.matchAll(/export declare (?:function|const) (\w+)/g)]
     .map((match) => match[1]);
   const refs = collectServertoolWrapperFunctionRefs();
   const extra = declared.filter((name) => !refs.has(name));
@@ -357,7 +357,7 @@ function assertNoUnusedServertoolWrapperFunctionDeclarations(packageServertoolWr
   }
   pass(
     'servertool-wrapper-unused-export-declarations',
-    `servertool-wrapper.d.ts function declarations match active package-shim imports/re-exports (${declared.length})`
+    `servertool-wrapper.d.ts declarations match active package-shim imports/re-exports (${declared.length})`
   );
 }
 

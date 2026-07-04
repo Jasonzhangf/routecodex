@@ -459,7 +459,10 @@ fn normalize_stopless_runtime_trigger_hint(token: &str) -> &'static str {
     }
 }
 
-fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<Value> {
+fn build_stopless_runtime_control_from_cli(
+    row: &Map<String, Value>,
+    metadata_center: &MetadataCenter,
+) -> Option<Value> {
     let repeat_count = read_u64_field(row, "repeatCount", "repeat_count").or_else(|| {
         row.get("input")
             .and_then(Value::as_object)
@@ -507,6 +510,18 @@ fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<V
 
     let mut stopless = Map::new();
     stopless.insert("flowId".to_string(), Value::String(flow_id));
+    if let Some(session_id) = metadata_center
+        .request_truth
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        stopless.insert(
+            "sessionId".to_string(),
+            Value::String(session_id.to_string()),
+        );
+    }
     stopless.insert(
         "repeatCount".to_string(),
         Value::Number(repeat_count.into()),
@@ -673,7 +688,7 @@ pub fn apply_req_process_tool_governance(
         || metadata_has_terminal_stopless_runtime_control(&metadata);
     if let Some(stopless) = latest_stopless_cli_output(&request)
         .as_ref()
-        .and_then(build_stopless_runtime_control_from_cli)
+        .and_then(|row| build_stopless_runtime_control_from_cli(row, &metadata_center))
     {
         write_stopless_runtime_control(&mut metadata, stopless);
     } else if should_inject_stopless_system_instruction(&metadata_center)

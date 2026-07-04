@@ -113,7 +113,10 @@ pub(crate) fn drop_disallowed_tool_calls_from_payload(payload: &mut Value) -> i6
     dropped
 }
 
-pub(crate) fn strip_visible_content_from_tool_call_rounds(payload: &mut Value) -> i64 {
+pub(crate) fn strip_visible_content_from_tool_call_rounds(
+    payload: &mut Value,
+    preserve_harvested_visible_text: bool,
+) -> i64 {
     let mut changed = 0i64;
     let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
         return changed;
@@ -145,7 +148,11 @@ pub(crate) fn strip_visible_content_from_tool_call_rounds(payload: &mut Value) -
         }
 
         let should_strip = match message.get("content") {
-            Some(Value::String(text)) => !text.trim().is_empty(),
+            Some(Value::String(text)) => {
+                !text.trim().is_empty()
+                    && (!preserve_harvested_visible_text
+                        || looks_like_harvest_transcript_residue(text.as_str()))
+            }
             Some(Value::Array(items)) => !items.is_empty(),
             Some(Value::Object(_)) => true,
             Some(Value::Null) | None => false,
@@ -160,6 +167,17 @@ pub(crate) fn strip_visible_content_from_tool_call_rounds(payload: &mut Value) -
     }
 
     changed
+}
+
+fn looks_like_harvest_transcript_residue(text: &str) -> bool {
+    let lowered = text.to_ascii_lowercase();
+    if lowered.contains("tool transcript") {
+        return true;
+    }
+    text.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.starts_with('›') || trimmed.contains('│')
+    })
 }
 
 fn read_message_content_text(message: &Map<String, Value>) -> String {

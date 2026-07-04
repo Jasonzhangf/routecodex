@@ -49,6 +49,7 @@ pub struct StopMessageControl {
 #[serde(rename_all = "camelCase")]
 pub struct StoplessControl {
     pub active: Option<bool>,
+    pub session_id: Option<String>,
     pub trigger_hint: Option<String>,
     pub repeat_count: Option<u32>,
     pub max_repeats: Option<u32>,

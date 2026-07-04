@@ -146,8 +146,12 @@ fn govern_prepared_payload(
 
     let apply_patch_repaired = normalize_apply_patch_tool_calls(&mut payload);
     let disallowed_tool_calls_dropped = drop_disallowed_tool_calls_from_payload(&mut payload);
+    let preserve_harvested_visible_text = preparation_summary
+        .map(|summary| summary.harvested_tool_calls > 0)
+        .unwrap_or(false)
+        || payload_is_stopless_cli_projection_shell(&payload);
     let stripped_visible_tool_call_content =
-        strip_visible_content_from_tool_call_rounds(&mut payload);
+        strip_visible_content_from_tool_call_rounds(&mut payload, preserve_harvested_visible_text);
     if let Some(reason) = detect_unharvested_text_tool_markup(&payload) {
         return Err(format!(
             "unharvested_text_tool_markup: explicit tool payload/tool wrapper was emitted but no valid tool_calls were recovered ({})",
@@ -182,6 +186,9 @@ fn govern_prepared_payload(
 }
 
 fn normalize_terminal_reasoning_stop_payload(payload: &mut Value) -> bool {
+    if payload_has_requested_reasoning_stop_tool_call(payload) {
+        return false;
+    }
     let Some(arguments) = extract_current_assistant_reasoning_stop_arguments(payload) else {
         return false;
     };
@@ -203,6 +210,48 @@ fn normalize_terminal_reasoning_stop_payload(payload: &mut Value) -> bool {
         });
     *payload = visible.payload;
     visible.changed
+}
+
+fn payload_has_requested_reasoning_stop_tool_call(payload: &Value) -> bool {
+    let requested_reasoning_stop = payload
+        .get("__rcc_tool_governance")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("requestedToolNames"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|name| name.trim() == "reasoningStop");
+    if !requested_reasoning_stop {
+        return false;
+    }
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|choice| {
+            choice
+                .get("message")
+                .and_then(|message| message.get("tool_calls"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|call| {
+                    call.get("function")
+                        .and_then(Value::as_object)
+                        .and_then(|function| function.get("name"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.trim() == "reasoningStop")
+                })
+        })
+}
+
+fn payload_is_stopless_cli_projection_shell(payload: &Value) -> bool {
+    payload
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(|model| model == "routecodex-servertool-cli")
 }
 
 fn payload_has_visible_assistant_text(payload: &Value) -> bool {

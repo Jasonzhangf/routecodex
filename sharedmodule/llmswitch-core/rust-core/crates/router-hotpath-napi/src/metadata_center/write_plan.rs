@@ -8,7 +8,9 @@
 use crate::metadata_center::types::MetadataCenter;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use servertool_core::stop_message_auto_handler::StopMessageAutoHandlerPlan;
+use servertool_core::stop_message_auto_handler::{
+    StopMessageAutoHandlerPlan, StopMessageAutoPlanAction,
+};
 
 // ── Write plan types ─────────────────────────────────────────────────────────
 
@@ -25,6 +27,8 @@ pub struct StoplessMetadataCenterWritePlan {
 pub struct StoplessRuntimeControlWrite {
     pub flow_id: String,
     pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     pub repeat_count: u32,
     pub max_repeats: u32,
     pub trigger_hint: Option<String>,
@@ -57,7 +61,7 @@ pub fn build_stopless_metadata_center_write_plan(
     request_id: &str,
     timestamp_ms: u64,
 ) -> StoplessMetadataCenterWritePlan {
-    let stopless = handler_plan.effective_decision.as_ref().map(|effective| {
+    let stopless = if let Some(effective) = handler_plan.effective_decision.as_ref() {
         let repeat_count = handler_plan
             .persist_plan
             .as_ref()
@@ -69,9 +73,10 @@ pub fn build_stopless_metadata_center_write_plan(
             .map(|p| p.next_max_repeats)
             .unwrap_or(0) as u32;
 
-        StoplessRuntimeControlWrite {
+        Some(StoplessRuntimeControlWrite {
             flow_id: "stop_message_flow".to_string(),
             active: true,
+            session_id: center.request_truth.session_id.clone(),
             repeat_count,
             max_repeats,
             trigger_hint: handler_plan.stopless_trigger_hint.clone(),
@@ -86,8 +91,32 @@ pub fn build_stopless_metadata_center_write_plan(
                 })
             }),
             updated_at: timestamp_ms,
-        }
-    });
+        })
+    } else if matches!(
+        handler_plan.action,
+        StopMessageAutoPlanAction::ReturnTerminalFinal
+            | StopMessageAutoPlanAction::ReturnSchemaFailFast
+            | StopMessageAutoPlanAction::ReturnSchemaAllowStop
+    ) {
+        Some(StoplessRuntimeControlWrite {
+            flow_id: "stop_message_flow".to_string(),
+            active: false,
+            session_id: center.request_truth.session_id.clone(),
+            repeat_count: 0,
+            max_repeats: center
+                .runtime_control
+                .stopless
+                .max_repeats
+                .filter(|value| *value > 0)
+                .unwrap_or(3),
+            trigger_hint: Some("schema_pass".to_string()),
+            continuation_prompt: None,
+            schema_feedback: None,
+            updated_at: timestamp_ms,
+        })
+    } else {
+        None
+    };
 
     let learned_note = handler_plan
         .learned_note
@@ -124,6 +153,45 @@ pub fn build_stopless_metadata_center_write_plan(
             serde_json::to_value(&handler_plan.compare_context).unwrap_or_default(),
         ),
         learned_note,
+    }
+}
+
+pub fn build_stopless_metadata_center_reset_write_plan(
+    center: &MetadataCenter,
+    request_id: &str,
+    timestamp_ms: u64,
+    trigger_hint: &str,
+    active: bool,
+) -> StoplessMetadataCenterWritePlan {
+    let max_repeats = center
+        .runtime_control
+        .stopless
+        .max_repeats
+        .filter(|value| *value > 0)
+        .unwrap_or(3);
+    StoplessMetadataCenterWritePlan {
+        stopless: Some(StoplessRuntimeControlWrite {
+            flow_id: "stop_message_flow".to_string(),
+            active,
+            session_id: center.request_truth.session_id.clone(),
+            repeat_count: 0,
+            max_repeats,
+            trigger_hint: Some(trigger_hint.to_string()),
+            continuation_prompt: None,
+            schema_feedback: None,
+            updated_at: timestamp_ms,
+        }),
+        stop_message_compare_context: Some(serde_json::json!({
+            "armed": false,
+            "mode": "off",
+            "used": 0,
+            "remaining": max_repeats,
+            "active": false,
+            "decision": "reset",
+            "reason": trigger_hint,
+            "requestId": request_id,
+        })),
+        learned_note: None,
     }
 }
 
@@ -190,11 +258,32 @@ mod tests {
         let stopless = write_plan.stopless.unwrap();
         assert_eq!(stopless.repeat_count, 2);
         assert_eq!(stopless.max_repeats, 3);
+        assert_eq!(stopless.session_id, None);
         assert_eq!(stopless.trigger_hint.as_deref(), Some("no_schema"));
         assert_eq!(
             stopless.continuation_prompt.as_deref(),
             Some("continue doing")
         );
+    }
+
+    #[test]
+    fn builds_stopless_reset_write_plan_with_session_truth() {
+        let mut center = MetadataCenter::default();
+        center.request_truth.session_id = Some("sess-reset".to_string());
+        center.runtime_control.stopless.max_repeats = Some(5);
+        let write_plan = build_stopless_metadata_center_reset_write_plan(
+            &center,
+            "req-reset",
+            4000,
+            "non_stop_response",
+            true,
+        );
+        let stopless = write_plan.stopless.expect("stopless reset");
+        assert_eq!(stopless.active, true);
+        assert_eq!(stopless.repeat_count, 0);
+        assert_eq!(stopless.max_repeats, 5);
+        assert_eq!(stopless.session_id.as_deref(), Some("sess-reset"));
+        assert_eq!(stopless.trigger_hint.as_deref(), Some("non_stop_response"));
     }
 
     #[test]

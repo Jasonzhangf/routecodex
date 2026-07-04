@@ -717,7 +717,9 @@ pub(crate) fn sanitize_textual_marker_field_in_message_with_policy(
         && contains_explicit_tool_wrapper_marker(normalized_raw.as_str())
     {
         let transcript_unwrapped = sanitize_text_harvest_shape(normalized_raw.as_str());
-        if transcript_unwrapped != normalized_raw {
+        if transcript_unwrapped != normalized_raw
+            && normalize_preserved_text_whitespace(transcript_unwrapped.as_str()).is_empty()
+        {
             let transcript_cleaned = strip_rcc_wrapper_trailing_terminal_noise(
                 strip_tool_call_marker_payload(transcript_unwrapped.as_str()).as_str(),
             );
@@ -893,7 +895,9 @@ fn sanitize_content_field_after_tool_markup(
                 && contains_explicit_tool_wrapper_marker(raw.as_str())
             {
                 let transcript_unwrapped = sanitize_text_harvest_shape(raw.as_str());
-                if transcript_unwrapped != raw.as_str() {
+                if transcript_unwrapped != raw.as_str()
+                    && normalize_preserved_text_whitespace(transcript_unwrapped.as_str()).is_empty()
+                {
                     let transcript_cleaned = strip_rcc_wrapper_trailing_terminal_noise(
                         strip_orphan_tool_markup_lines(
                             strip_tool_call_marker_payload(transcript_unwrapped.as_str()).as_str(),

@@ -30,6 +30,9 @@ use crate::hub_resp_inbound_format_parse::{parse_resp_format_envelope, RespForma
 use crate::hub_resp_outbound_04_client_payload_boundary::build_hub_resp_outbound_04_client_payload_for_protocol;
 use crate::hub_resp_outbound_04_finalize_boundary::finalize_hub_resp_outbound_04_client_semantic;
 use crate::hub_resp_outbound_sse_stream::{process_sse_stream, SseStreamInput};
+use crate::metadata_center::{
+    build_metadata_center_from_snapshot, build_stopless_metadata_center_reset_write_plan,
+};
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
 };
@@ -695,12 +698,20 @@ impl HubPipelineEngine {
             &metadata_center_snapshot,
             output.request_id.as_str(),
         )?;
+        let stopless_hook_suppresses_runtime_actions = stopless_resp_hook.is_some();
         let governed_payload = if let Some(stopless_hook) = stopless_resp_hook {
             if let Some(write_plan) = stopless_hook.metadata_write_plan {
                 effects.push(HubPipelineEffect {
                     kind: HubPipelineEffectKind::StoplessMetadataCenterWrite,
                     payload: write_plan,
                 });
+            }
+            if let Some(alarm) = stopless_hook.alarm {
+                diagnostics.push(diagnostic(
+                    HubPipelineStageId::RespProcessToolGovernance,
+                    HubPipelineDiagnosticStatus::Skipped,
+                    Some(alarm),
+                ));
             }
             diagnostics.push(diagnostic(
                 HubPipelineStageId::RespProcessToolGovernance,
@@ -710,7 +721,20 @@ impl HubPipelineEngine {
                     "flowId": stopless_hook.flow_id,
                 })),
             ));
-            stopless_hook.payload
+            if let Some(payload) = stopless_hook.payload {
+                payload
+            } else {
+                let governed = govern_hub_resp_chatprocess_03_response(RespToolGovernanceInput {
+                    payload: canonical_payload,
+                    client_protocol,
+                    entry_endpoint,
+                    request_id: output.request_id.clone(),
+                })
+                .map_err(|message| {
+                    HubPipelineError::new("hub_pipeline_resp_tool_governance_failed", message)
+                })?;
+                governed.governed_payload
+            }
         } else {
             let governed = govern_hub_resp_chatprocess_03_response(RespToolGovernanceInput {
                 payload: canonical_payload,
@@ -736,10 +760,12 @@ impl HubPipelineEngine {
                     HubPipelineError::new("hub_pipeline_resp_chatprocess_03_failed", message)
                 })?;
         let resp_chatprocess_payload = resp_chatprocess_03.payload().clone();
-        if !effects.iter().any(|effect| {
-            serde_json::to_value(&effect.kind).ok()
-                == Some(serde_json::json!("stoplessMetadataCenterWrite"))
-        }) {
+        if !stopless_hook_suppresses_runtime_actions
+            && !effects.iter().any(|effect| {
+                serde_json::to_value(&effect.kind).ok()
+                    == Some(serde_json::json!("stoplessMetadataCenterWrite"))
+            })
+        {
             plan_resp_chatprocess_03_servertool_runtime_actions(
                 &mut effects,
                 &normalized_metadata,
@@ -893,9 +919,10 @@ fn response_requires_submit_tool_outputs(payload: &Value) -> bool {
 }
 
 struct ServertoolRespStoplessHookOutput {
-    payload: Value,
+    payload: Option<Value>,
     flow_id: Option<String>,
     metadata_write_plan: Option<Value>,
+    alarm: Option<Value>,
 }
 
 fn run_servertool_resp_stopless_hook_skeleton(
@@ -904,9 +931,8 @@ fn run_servertool_resp_stopless_hook_skeleton(
     metadata_center_snapshot: &Value,
     request_id: &str,
 ) -> HubPipelineResult<Option<ServertoolRespStoplessHookOutput>> {
-    if !is_stopless_runtime_active(metadata, metadata_center_snapshot) {
-        return Ok(None);
-    }
+    let runtime_active = is_stopless_runtime_active(metadata, metadata_center_snapshot);
+    let response_runtime_enabled = is_stop_message_response_runtime_enabled(metadata);
     let stop_gateway = inspect_stop_gateway_signal(&chatprocess_payload.to_string())
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
@@ -915,31 +941,80 @@ fn run_servertool_resp_stopless_hook_skeleton(
         .get("eligible")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    if !stop_gateway_eligible {
-        return Ok(None);
-    }
     let stop_gateway_reason = stop_gateway
         .get("reason")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("");
-    if !matches!(
-        stop_gateway_reason,
-        "finish_reason_stop"
-            | "finish_reason_tool_calls_internal_stop_tool"
-            | "responses_required_action_internal_stop_tool"
-            | "status_completed"
-            | "responses_output_completed"
-    ) {
+    let gateway_internal_stop_tool = stop_gateway_eligible
+        && matches!(
+            stop_gateway_reason,
+            "finish_reason_tool_calls_internal_stop_tool"
+                | "responses_required_action_internal_stop_tool"
+        );
+    let gateway_requires_stopless = stop_gateway_eligible
+        && matches!(
+            stop_gateway_reason,
+            "finish_reason_stop"
+                | "finish_reason_tool_calls_internal_stop_tool"
+                | "responses_required_action_internal_stop_tool"
+                | "status_completed"
+                | "responses_output_completed"
+        );
+    if !runtime_active && !response_runtime_enabled && !gateway_internal_stop_tool {
         return Ok(None);
     }
-
+    let center = build_metadata_center_from_snapshot(metadata_center_snapshot);
+    let request_session_id = center
+        .request_truth
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if request_session_id.is_none() {
+        if !runtime_active && !gateway_requires_stopless {
+            return Ok(None);
+        }
+        return Ok(Some(ServertoolRespStoplessHookOutput {
+            payload: None,
+            flow_id: Some("stop_message_flow".to_string()),
+            metadata_write_plan: None,
+            alarm: Some(serde_json::json!({
+                "alarm": "stopless_missing_session_id",
+                "requestId": request_id,
+                "reason": "stopless requires requestTruth.sessionId before interception",
+            })),
+        }));
+    }
+    if !gateway_requires_stopless {
+        if !runtime_active {
+            return Ok(None);
+        }
+        let reset_plan = build_stopless_metadata_center_reset_write_plan(
+            &center,
+            request_id,
+            current_timestamp_ms(),
+            "non_stop_response",
+            true,
+        );
+        return Ok(Some(ServertoolRespStoplessHookOutput {
+            payload: None,
+            flow_id: Some("stop_message_flow".to_string()),
+            metadata_write_plan: Some(serde_json::to_value(reset_plan).map_err(|error| {
+                HubPipelineError::new(
+                    "hub_pipeline_stopless_reset_plan_invalid",
+                    format!("Rust stopless reset write plan failed to serialize: {error}"),
+                )
+            })?),
+            alarm: None,
+        }));
+    }
     let runtime_input = serde_json::json!({
         "base": chatprocess_payload,
         "requestId": request_id,
         "runtimeMetadata": {
-            "metadataCenterSnapshot": metadata_center_snapshot
+            "metadataCenterSnapshot": sanitize_stopless_metadata_center_snapshot(metadata_center_snapshot, request_session_id)
         }
     });
     let raw_runtime =
@@ -1037,9 +1112,10 @@ fn run_servertool_resp_stopless_hook_skeleton(
                     })?
             };
             Ok(Some(ServertoolRespStoplessHookOutput {
-                payload,
+                payload: Some(payload),
                 flow_id,
                 metadata_write_plan,
+                alarm: None,
             }))
         }
         _ => Err(HubPipelineError::new(
@@ -1047,6 +1123,65 @@ fn run_servertool_resp_stopless_hook_skeleton(
             format!("Rust stopless response hook runtime returned unsupported action: {action}"),
         )),
     }
+}
+
+fn current_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn read_stopless_session_id(stopless: &Value) -> Option<&str> {
+    stopless
+        .get("sessionId")
+        .or_else(|| stopless.get("session_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn sanitize_stopless_metadata_center_snapshot(
+    metadata_center_snapshot: &Value,
+    request_session_id: Option<&str>,
+) -> Value {
+    let mut snapshot = metadata_center_snapshot.clone();
+    let Some(request_session_id) = request_session_id else {
+        return snapshot;
+    };
+    let Some(runtime_control) = snapshot
+        .get_mut("runtimeControl")
+        .and_then(Value::as_object_mut)
+    else {
+        return snapshot;
+    };
+    let should_reset = runtime_control
+        .get("stopless")
+        .is_some_and(|stopless| read_stopless_session_id(stopless) != Some(request_session_id));
+    if should_reset {
+        let max_repeats = runtime_control
+            .get("stopless")
+            .and_then(|stopless| {
+                stopless
+                    .get("maxRepeats")
+                    .or_else(|| stopless.get("max_repeats"))
+            })
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .unwrap_or(3);
+        runtime_control.insert(
+            "stopless".to_string(),
+            serde_json::json!({
+                "flowId": "stop_message_flow",
+                "sessionId": request_session_id,
+                "repeatCount": 0,
+                "maxRepeats": max_repeats,
+                "active": true,
+                "triggerHint": "session_changed"
+            }),
+        );
+    }
+    snapshot
 }
 
 fn is_stopless_runtime_active(metadata: &Value, metadata_center_snapshot: &Value) -> bool {

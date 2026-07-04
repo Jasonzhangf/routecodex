@@ -891,6 +891,12 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
         output["metadata"]
     );
     assert_eq!(
+        output["metadata"]["runtime_control"]["stopless"]["sessionId"],
+        json!("sess-stopless-cli-feedback-provider-guidance"),
+        "request ChatProcess metadata must scope stopless progression to current request truth sessionId: {}",
+        output["metadata"]
+    );
+    assert_eq!(
         output["metadata"]["runtime_control"]["stopless"]["maxRepeats"],
         json!(3),
         "request ChatProcess metadata must expose current stopless max repeats: {}",
@@ -961,6 +967,405 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
         "provider payload must keep reasoningStop tool contract on the next round: {}",
         output
     );
+}
+
+fn stopless_metadata_write<'a>(
+    output: &'a super::types::HubPipelineExecutionOutput,
+) -> Option<&'a serde_json::Value> {
+    output.effect_plan.effects.iter().find_map(|effect| {
+        if serde_json::to_value(&effect.kind).ok() == Some(json!("stoplessMetadataCenterWrite")) {
+            Some(&effect.payload)
+        } else {
+            None
+        }
+    })
+}
+
+fn stopless_exec_arguments(payload: &serde_json::Value) -> Option<&str> {
+    payload
+        .pointer("/required_action/submit_tool_outputs/tool_calls/0/function/arguments")
+        .and_then(serde_json::Value::as_str)
+}
+
+#[test]
+fn stopless_non_stop_response_resets_error_streak_before_next_missing_schema_stop() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let non_stop = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-reset-non-stop".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_reset_non_stop",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_real_tool_1",
+                            "type": "function",
+                            "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-stopless-reset-non-stop" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "sessionId": "sess-stopless-reset-non-stop",
+                        "repeatCount": 2,
+                        "maxRepeats": 3,
+                        "triggerHint": "no_schema",
+                        "active": true
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(non_stop.success);
+    let reset_plan = stopless_metadata_write(&non_stop).expect("non-stop must reset stopless");
+    assert_eq!(reset_plan["stopless"]["active"], json!(true));
+    assert_eq!(reset_plan["stopless"]["repeatCount"], json!(0));
+    assert_eq!(
+        reset_plan["stopless"]["sessionId"],
+        json!("sess-stopless-reset-non-stop")
+    );
+
+    let next_stop = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-reset-next-stop".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_reset_next_stop",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "我先停一下。" },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-stopless-reset-non-stop" },
+                "runtimeControl": reset_plan
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let payload = next_stop.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    let args = stopless_exec_arguments(payload).expect("stopless exec args");
+    assert!(
+        args.contains("\\\"repeatCount\\\":1") || args.contains("\"repeatCount\":1"),
+        "after reset the next missing-schema stop must start at repeatCount=1, got: {args}"
+    );
+    assert!(
+        !payload.to_string().contains("stop_schema_budget_exhausted"),
+        "non-consecutive stop must not exhaust the stopless budget"
+    );
+}
+
+#[test]
+fn stopless_missing_session_id_does_not_intercept_and_reports_alarm() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-missing-session-alarm".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_missing_session",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "缺 session 直接自然停止。" },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "requestId": "req-stopless-missing-session-alarm" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 0,
+                        "maxRepeats": 3,
+                        "active": true
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    assert!(
+        stopless_exec_arguments(output.payload.as_ref().expect("payload")).is_none(),
+        "missing sessionId must not project stopless CLI"
+    );
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.details.as_ref().is_some_and(|details| {
+            details.get("alarm").and_then(serde_json::Value::as_str)
+                == Some("stopless_missing_session_id")
+        })
+    }));
+}
+
+#[test]
+fn stop_message_enabled_missing_session_id_suppresses_stopless_runtime_action_and_reports_alarm() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stop-message-enabled-missing-session-alarm".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stop_message_enabled_missing_session",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "stopMessage enabled but session missing." },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "stopMessageEnabled": true,
+                "routecodexPortStopMessageEnabled": true
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "requestId": "req-stop-message-enabled-missing-session-alarm" },
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat"
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("completed"));
+    assert!(
+        stopless_exec_arguments(payload).is_none(),
+        "missing sessionId must not project stopless CLI"
+    );
+    assert!(
+        stopless_metadata_write(&output).is_none(),
+        "missing sessionId must not write stopless state"
+    );
+    assert!(
+        output.effect_plan.effects.iter().all(|effect| {
+            serde_json::to_value(&effect.kind).ok() != Some(json!("servertoolRuntimeAction"))
+        }),
+        "missing sessionId must suppress legacy servertool runtime action"
+    );
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.details.as_ref().is_some_and(|details| {
+            details.get("alarm").and_then(serde_json::Value::as_str)
+                == Some("stopless_missing_session_id")
+        })
+    }));
+}
+
+#[test]
+fn stopless_counter_isolated_by_session_id() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-session-isolation".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_session_isolation",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "另一个 session 的第一次 stop。" },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-stopless-B" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "sessionId": "sess-stopless-A",
+                        "repeatCount": 2,
+                        "maxRepeats": 3,
+                        "triggerHint": "no_schema",
+                        "active": true
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    let args = stopless_exec_arguments(payload).expect("stopless exec args");
+    assert!(
+        args.contains("\\\"repeatCount\\\":1") || args.contains("\"repeatCount\":1"),
+        "different sessionId must not inherit stale repeatCount, got: {args}"
+    );
+}
+
+#[test]
+fn stopless_counter_does_not_inherit_unscoped_runtime_state() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-unscoped-state-isolation".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_unscoped_state_isolation",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "无 session 标记旧状态不能累计。" },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-stopless-current" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 2,
+                        "maxRepeats": 3,
+                        "triggerHint": "no_schema",
+                        "active": true
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    let args = stopless_exec_arguments(payload).expect("stopless exec args");
+    assert!(
+        args.contains("\\\"repeatCount\\\":1") || args.contains("\"repeatCount\":1"),
+        "unscoped runtime state must not inherit repeatCount, got: {args}"
+    );
+    let write_plan = stopless_metadata_write(&output).expect("stopless write plan");
+    assert_eq!(
+        write_plan["stopless"]["sessionId"],
+        json!("sess-stopless-current")
+    );
+    assert_eq!(write_plan["stopless"]["repeatCount"], json!(1));
+}
+
+#[test]
+fn stopless_terminal_schema_clears_error_streak() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-terminal-reset".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_terminal_reset",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "是。\n<rcc_stop_schema>{\"simple_question\":true}</rcc_stop_schema>"
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-stopless-terminal-reset" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "sessionId": "sess-stopless-terminal-reset",
+                        "repeatCount": 2,
+                        "maxRepeats": 3,
+                        "triggerHint": "invalid_schema",
+                        "active": true
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert!(
+        stopless_exec_arguments(payload).is_none(),
+        "terminal simple_question schema must not project CLI"
+    );
+    let reset_plan = stopless_metadata_write(&output).expect("terminal schema must reset stopless");
+    assert_eq!(reset_plan["stopless"]["active"], json!(false));
+    assert_eq!(reset_plan["stopless"]["repeatCount"], json!(0));
+    assert_eq!(reset_plan["stopless"]["triggerHint"], json!("schema_pass"));
 }
 
 #[test]
@@ -1304,6 +1709,84 @@ fn response_path_projects_responses_required_action_reasoning_stop_to_exec_comma
 }
 
 #[test]
+fn response_path_projects_responses_required_action_reasoning_stop_from_gateway_signal_without_runtime_active(
+) {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-responses-required-action-stopless-gateway".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            payload: json!({
+                "id": "resp_required_action_stopless_gateway",
+                "object": "response",
+                "status": "requires_action",
+                "model": "gpt-5.5",
+                "output": [
+                    {
+                        "id": "fc_call_stopless_gateway_1",
+                        "type": "function_call",
+                        "call_id": "call_stopless_gateway_1",
+                        "name": "reasoningStop",
+                        "arguments": "{\"stopreason\":2,\"reason\":\"not done\",\"next_step\":\"run next check\",\"has_evidence\":1,\"evidence\":\"partial\",\"needs_user_input\":false}"
+                    }
+                ],
+                "required_action": {
+                    "type": "submit_tool_outputs",
+                    "submit_tool_outputs": {
+                        "tool_calls": [{
+                            "id": "call_stopless_gateway_1",
+                            "type": "function",
+                            "name": "reasoningStop",
+                            "tool_call_id": "call_stopless_gateway_1",
+                            "function": {
+                                "name": "reasoningStop",
+                                "arguments": "{\"stopreason\":2,\"reason\":\"not done\",\"next_step\":\"run next check\",\"has_evidence\":1,\"evidence\":\"partial\",\"needs_user_input\":false}"
+                            }
+                        }]
+                    }
+                }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "stream": false
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": {
+                    "requestId": "req-responses-required-action-stopless-gateway",
+                    "sessionId": "sess-responses-required-action-stopless-gateway"
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.expect("projected response payload");
+    let serialized = payload.to_string();
+    assert!(
+        serialized.contains("routecodex hook run reasoningStop"),
+        "client-visible response must contain CLI projection: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("\"name\":\"exec_command\""),
+        "client-visible response must expose exec_command: {}",
+        serialized
+    );
+    assert!(
+        !serialized.contains("\"name\":\"reasoningStop\""),
+        "client-visible response must not leak internal reasoningStop: {}",
+        serialized
+    );
+}
+
+#[test]
 fn anthropic_response_remaps_to_openai_responses_client_payload() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
@@ -1509,6 +1992,7 @@ fn response_chat_stop_schema_projects_stopless_cli_before_responses_outbound() {
                     "stopless": {
                         "active": true,
                         "flowId": "stop_message_flow",
+                        "sessionId": "stopless-live-test-session",
                         "repeatCount": 1,
                         "maxRepeats": 3,
                         "triggerHint": "non_terminal_schema",

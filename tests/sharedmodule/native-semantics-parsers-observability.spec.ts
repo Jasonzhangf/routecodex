@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import fs from 'node:fs';
 
 import { parseOutput } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-parsers.js';
 import { parseAliasMap } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.js';
@@ -71,53 +72,22 @@ describe('native semantics parser observability', () => {
     warnSpy.mockRestore();
   });
 
-  it('logs governance parser JSON failures before fail-fasting native capability', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const mod = await importWithNativeParseFailureMock<{
-      applyRespProcessToolGovernanceWithNative: (input: {
-        payload: Record<string, unknown>;
-        clientProtocol: string;
-        entryEndpoint: string;
-        requestId: string;
-      }) => unknown;
-    }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.js',
-      'governResponseJson'
+  it('keeps retired chat-process governance parser wrappers deleted', () => {
+    const retiredWrapperPath = new URL(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
+      import.meta.url
     );
 
-    expect(() =>
-      mod.applyRespProcessToolGovernanceWithNative({
-        payload: {},
-        clientProtocol: 'openai-chat',
-        entryEndpoint: '/v1/chat/completions',
-        requestId: 'req_parser_observability'
-      })
-    ).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain(
-      'parseRespProcessToolGovernancePayload failed (non-blocking)'
-    );
-
-    warnSpy.mockRestore();
+    expect(() => fs.statSync(retiredWrapperPath)).toThrow();
   });
 
-  it('logs servertool orchestration parser JSON failures before fail-fasting native capability', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const mod = await importWithNativeParseFailureMock<{
-      planChatWebSearchOperationsWithNative: (
-        request: unknown,
-        runtimeMetadata: Record<string, unknown>
-      ) => { shouldInject: boolean; selectedEngineIndexes: number[] };
-    }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
-      'planChatWebSearchOperationsJson'
+  it('keeps retired chat-process servertool orchestration parser wrappers deleted', () => {
+    const retiredWrapperPath = new URL(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts',
+      import.meta.url
     );
 
-    expect(() => mod.planChatWebSearchOperationsWithNative({}, {})).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseWebSearchPlan failed (non-blocking)');
-
-    warnSpy.mockRestore();
+    expect(() => fs.statSync(retiredWrapperPath)).toThrow();
   });
 
   it('logs inbound/outbound parser JSON failures before fail-fasting native capability', async () => {

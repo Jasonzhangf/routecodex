@@ -131,6 +131,26 @@ function runProviderResponseRustHubPipeline(nativeOptions: Parameters<typeof exe
   return nativeResponsePlan;
 }
 
+function emitNativeHubPipelineDiagnosticAlarms(args: {
+  requestId: string;
+  diagnostics: Array<Record<string, unknown>>;
+}): void {
+  for (const diagnostic of args.diagnostics) {
+    const details = isRecord(diagnostic.details) ? diagnostic.details : null;
+    const alarm = readString(details?.alarm);
+    if (!alarm) {
+      continue;
+    }
+    try {
+      console.warn(
+        `[hub-pipeline][alarm] ${alarm} requestId=${args.requestId} details=${JSON.stringify(details)}`
+      );
+    } catch {
+      console.warn(`[hub-pipeline][alarm] ${alarm} requestId=${args.requestId}`);
+    }
+  }
+}
+
 function executeProviderResponseNativeOutboundEffects(args: {
   context: AdapterContext;
   nativeResponsePlan: ReturnType<typeof executeHubPipelineWithNative>;
@@ -143,6 +163,10 @@ function executeProviderResponseNativeOutboundEffects(args: {
   if (!Array.isArray(effects)) {
     throw new Error('Rust HubPipeline response path returned malformed effect plan');
   }
+  emitNativeHubPipelineDiagnosticAlarms({
+    requestId: args.nativeResponsePlan.requestId,
+    diagnostics: args.nativeResponsePlan.diagnostics
+  });
   const normalizedEffects = normalizeProviderResponseEffectPlanWithNative({ effects });
   const runtimeEffects = normalizedEffects as ProviderResponseRuntimeEffectPlan;
   (args.context as Record<string, unknown>).__nativeResponsePlan = {
