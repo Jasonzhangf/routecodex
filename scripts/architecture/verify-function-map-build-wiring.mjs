@@ -5,6 +5,9 @@ const root = process.cwd();
 const pkgPath = path.join(root, 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 const scripts = pkg.scripts || {};
+const installGlobalScript = fs.readFileSync(path.join(root, 'scripts/install-global.sh'), 'utf8');
+const installReleaseScript = fs.readFileSync(path.join(root, 'scripts/install-release.sh'), 'utf8');
+const releaseInstallVerifier = fs.readFileSync(path.join(root, 'scripts/verify-rcc-release-install.mjs'), 'utf8');
 
 const requiredScript = 'verify:function-map-compile-gate';
 const requiredReviewSurfaceLightScript = 'verify:architecture-review-surface-light';
@@ -81,6 +84,38 @@ for (const devScript of ['build:dev', 'build:dev:full']) {
   }
 }
 
+for (const buildScript of ['build', 'build:min', 'build:dev', 'build:dev:full', 'pack:rcc']) {
+  const command = scripts[buildScript] || '';
+  for (const forbidden of ['install:global', 'install:release', 'npm install -g', 'npm uninstall -g']) {
+    if (command.includes(forbidden)) {
+      failures.push(`${buildScript} must not mutate global installs via ${forbidden}; use explicit install scripts`);
+    }
+  }
+}
+
+for (const [name, script] of [
+  ['install-global.sh', installGlobalScript],
+  ['install-release.sh', installReleaseScript],
+]) {
+  for (const forbidden of [
+    'npm uninstall -g rcc',
+    '/node_modules/rcc',
+    '$GLOBAL_NODE_MODULES/rcc',
+    '$NPM_PREFIX/bin/rcc',
+  ]) {
+    if (script.includes(forbidden)) {
+      failures.push(`${name} must not delete or uninstall an existing global rcc package (${forbidden})`);
+    }
+  }
+}
+
+if (!releaseInstallVerifier.includes("'--prefix', prefix")) {
+  failures.push('verify-rcc-release-install must install release tarballs into a temporary --prefix');
+}
+if (releaseInstallVerifier.includes('/opt/homebrew/lib/node_modules/rcc')) {
+  failures.push('verify-rcc-release-install must not inspect or mutate the real global rcc install');
+}
+
 const architectureCi = scripts['verify:architecture-ci'] || '';
 if (!architectureCi.includes(`npm run ${requiredReviewSurfaceScript}`)) {
   failures.push('verify:architecture-ci must run verify:architecture-review-surface');
@@ -102,4 +137,5 @@ console.log('[verify:function-map-build-wiring] ok');
 console.log('- build:base requires verify:architecture-review-surface-light and verify:function-map-compile-gate');
 console.log('- build requires build:base and verify:architecture-ci');
 console.log('- build:dev and build:dev:full use build:base');
+console.log('- build/pack scripts do not mutate global installs; release install verification uses a temp prefix');
 console.log('- verify:architecture-ci requires verify:architecture-review-surface, verify:function-map-build-wiring, and verify:architecture-ci-longtail');

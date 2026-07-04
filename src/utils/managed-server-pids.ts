@@ -132,10 +132,25 @@ export function isTrustedRouteCodexCommand(command: string): boolean {
   if (normalized.includes('routecodex/dist/index.js')) {
     return true;
   }
+  if (normalized.includes('routecodex/dist/cli.js')) {
+    return true;
+  }
+  if (normalized.includes('/node_modules/rcc/dist/index.js')) {
+    return true;
+  }
+  if (normalized.includes('/node_modules/rcc/dist/cli.js')) {
+    return true;
+  }
   if (/\/install\/current\/dist\/index\.js(?:\s|$)/.test(normalized)) {
     return true;
   }
+  if (/\/install\/current\/dist\/cli\.js(?:\s|$)/.test(normalized)) {
+    return true;
+  }
   if (/\/install\/releases\/routecodex-[^/\s]+\/dist\/index\.js(?:\s|$)/.test(normalized)) {
+    return true;
+  }
+  if (/\/install\/releases\/routecodex-[^/\s]+\/dist\/cli\.js(?:\s|$)/.test(normalized)) {
     return true;
   }
   return false;
@@ -181,8 +196,8 @@ export function listManagedServerPidsByPort(
     maybeAcceptPid(pid ?? 0);
   }
 
-  // Fallback for stale/missing pid files: discover listeners by port and
-  // keep only trusted RouteCodex/RCC commands.
+  // Listener discovery covers stale/missing pid files while still accepting
+  // only trusted RouteCodex/RCC command shapes.
   const listeningPids = listListeningPidsByPort(port, spawnSyncImpl);
   for (const pid of listeningPids) {
     maybeAcceptPid(pid);

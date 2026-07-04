@@ -27,6 +27,13 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function runNodeEval(source, options = {}) {
+  return run(process.execPath, ['--input-type=module', '-e', source], {
+    cwd: PROJECT_ROOT,
+    ...options,
+  });
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
@@ -82,12 +89,14 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
     const packageDir = path.join(prefix, 'lib', 'node_modules', packageName);
     const installedPackage = readJson(path.join(packageDir, 'package.json'));
     const llmsDir = path.join(packageDir, 'node_modules', 'rcc-llmswitch-core');
+    const builtinLlmsDir = path.join(packageDir, 'sharedmodule', 'llmswitch-core');
     const checks = {
       packageDirIsSymlink: fs.lstatSync(packageDir).isSymbolicLink(),
       packageJsonHasRepoPath: JSON.stringify(installedPackage).includes(PROJECT_ROOT),
       llmsExists: fs.existsSync(llmsDir),
       llmsIsSymlink: fs.existsSync(llmsDir) ? fs.lstatSync(llmsDir).isSymbolicLink() : true,
       llmsDistExists: fs.existsSync(path.join(llmsDir, 'dist')),
+      builtinLlmsDistExists: fs.existsSync(path.join(builtinLlmsDir, 'dist')),
       esbuildExists: fs.existsSync(path.join(packageDir, 'node_modules', 'esbuild')),
     };
     if (checks.packageDirIsSymlink) fail(`${packageName} installed package is a symlink`);
@@ -95,7 +104,64 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
     if (!checks.llmsExists) fail(`${packageName} installed rcc-llmswitch-core is missing`);
     if (checks.llmsIsSymlink) fail(`${packageName} installed rcc-llmswitch-core must not be a symlink`);
     if (!checks.llmsDistExists) fail(`${packageName} installed rcc-llmswitch-core/dist is missing`);
+    if (!checks.builtinLlmsDistExists) fail(`${packageName} installed sharedmodule/llmswitch-core/dist is missing`);
     if (checks.esbuildExists) fail(`${packageName} installed release should not contain esbuild`);
+
+    runNodeEval(`
+      const packageDir = ${JSON.stringify(packageDir)};
+      const candidates = [
+        'dist/modules/llmswitch/bridge/native-exports.js',
+        'sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js',
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-servertool-core-semantics.js',
+        'sharedmodule/llmswitch-core/dist/servertool/metadata-center-carrier.js',
+        'sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline.js',
+        'node_modules/rcc-llmswitch-core/dist/native/servertool-wrapper.js',
+        'node_modules/rcc-llmswitch-core/dist/native/router-hotpath/native-servertool-core-semantics.js',
+        'node_modules/rcc-llmswitch-core/dist/servertool/metadata-center-carrier.js',
+        'node_modules/rcc-llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline.js',
+      ];
+      for (const relativePath of candidates) {
+        await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
+      }
+      const activeServertoolWrapperExports = [
+        'buildServertoolDispatchPlanInputWithNative',
+        'buildServertoolOutcomePlanInputWithNative',
+        'formatStopMessageCompareContextWithNative',
+        'planServertoolOutcomeWithNative',
+        'readServertoolPrimaryAutoHookIdsWithNative',
+        'runServertoolResponseStageWithNative',
+      ];
+      const activeNativeCoreExports = [
+        'planEngineSelectionStartWithNative',
+        'resolveEngineSelectionAfterRunWithNative',
+        'resolveServertoolExecutionLoopInitialDecisionWithNative',
+        'resolveServertoolExecutionLoopResultDecisionWithNative',
+      ];
+      for (const relativePath of [
+        'sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js',
+        'node_modules/rcc-llmswitch-core/dist/native/servertool-wrapper.js',
+      ]) {
+        const mod = await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
+        for (const exportName of activeServertoolWrapperExports) {
+          if (typeof mod[exportName] !== 'function') {
+            throw new Error(relativePath + ' missing function export ' + exportName);
+          }
+        }
+      }
+      for (const relativePath of [
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-servertool-core-semantics.js',
+        'node_modules/rcc-llmswitch-core/dist/native/router-hotpath/native-servertool-core-semantics.js',
+      ]) {
+        const mod = await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
+        for (const exportName of activeNativeCoreExports) {
+          if (typeof mod[exportName] !== 'function') {
+            throw new Error(relativePath + ' missing function export ' + exportName);
+          }
+        }
+      }
+      const loader = await import(new URL('dist/modules/llmswitch/core-loader.js', 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
+      await loader.importCoreModule('conversion/hub/pipeline/hub-pipeline', 'ts');
+    `, { cwd: packageDir });
 
     return {
       packageName,
@@ -105,6 +171,7 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
       dependencies: Object.keys(installedPackage.dependencies || {}).length,
       bundledDependencies: (installedPackage.bundleDependencies || installedPackage.bundledDependencies || []).length,
       llmsDistExists: checks.llmsDistExists,
+      builtinLlmsDistExists: checks.builtinLlmsDistExists,
       esbuildExists: checks.esbuildExists,
     };
   } finally {

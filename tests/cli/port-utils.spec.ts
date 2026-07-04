@@ -76,6 +76,75 @@ describe('cli server port-utils', () => {
     expect(pids).toEqual([process.pid]);
   });
 
+  it('findListeningPidsImpl trusts release snapshot cli.js pid cache entries', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-managed-cli-pids-'));
+    const pidDir = path.join(tmpHome, 'state', 'runtime-lifecycle', 'ports', '5555');
+    fs.mkdirSync(pidDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pidDir, 'pid.cache'),
+      JSON.stringify({ pid: process.pid, port: 5555, writtenAtMs: Date.now(), origin: 'snapshot' }),
+      'utf8'
+    );
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+
+    const pids = findListeningPidsImpl({
+      port: 5555,
+      routeCodexHomeDir: tmpHome,
+      logger,
+      processKill: ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0 && pid === process.pid) {
+          return true as any;
+        }
+        throw new Error('unexpected processKill call');
+      }) as any,
+      spawnSyncImpl: ((cmd: string, args: string[]) => {
+        if (cmd === 'ps') {
+          return {
+            stdout: `${process.execPath} /Users/fanzhang/.rcc/install/current/dist/cli.js start --port 5555`,
+            status: 0,
+            error: undefined
+          } as any;
+        }
+        if (cmd === 'lsof') {
+          return { stdout: '', status: 1, error: undefined } as any;
+        }
+        throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
+      }) as any
+    });
+
+    expect(pids).toEqual([process.pid]);
+  });
+
+  it('findListeningPidsImpl trusts global rcc dist index listeners', () => {
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+
+    const pids = findListeningPidsImpl({
+      port: 5555,
+      logger,
+      processKill: ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0 && pid === process.pid) {
+          return true as any;
+        }
+        throw new Error('unexpected processKill call');
+      }) as any,
+      spawnSyncImpl: ((cmd: string, args: string[]) => {
+        if (cmd === 'lsof') {
+          return { stdout: `${process.pid}\n`, status: 0, error: undefined } as any;
+        }
+        if (cmd === 'ps') {
+          return {
+            stdout: `${process.execPath} /opt/homebrew/lib/node_modules/rcc/dist/index.js /opt/homebrew/lib/node_modules/rcc/config/modules.json`,
+            status: 0,
+            error: undefined
+          } as any;
+        }
+        throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
+      }) as any
+    });
+
+    expect(pids).toEqual([process.pid]);
+  });
+
   it('findListeningPidsImpl returns empty when pid file command is not trusted', () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-managed-pids-untrusted-'));
     fs.writeFileSync(path.join(tmpHome, 'server-5520.pid'), '12345', 'utf8');

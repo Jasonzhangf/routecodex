@@ -81,6 +81,7 @@ description: RouteCodex 调试与架构路由入口
 | skill 写法 | `references/80-skill-routing-convention.md` | 主 skill 保持短入口 |
 | 2026-05 lessons | `references/91-lessons-2026-05.md` | 5 月沉淀 |
 | 2026-06 lessons | `references/92-lessons-2026-06.md` | 6 月沉淀 |
+| 2026-07 lessons | `references/93-lessons-2026-07.md` | 7 月沉淀 |
 
 ## 最小使用法
 

@@ -99,6 +99,7 @@ import {
   readRuntimeRequestTruthIdentifiers,
 } from './metadata-center/request-truth-readers.js';
 import {
+  bindMetadataCenterRustMirror,
   buildMetadataCenterRustSnapshot,
   releaseMetadataCenterSlot,
   writeMetadataCenterSlot
@@ -275,6 +276,7 @@ function bindExistingMetadataCenter(
   const existing = source ? MetadataCenter.read(source) : undefined;
   if (existing) {
     MetadataCenter.bind(target, existing);
+    bindMetadataCenterRustMirror(source, target);
     return existing;
   }
   return MetadataCenter.attach(target);
@@ -332,9 +334,9 @@ function releaseRouterDirectRetryRouteControl(metadata: Record<string, unknown>)
   releaseMetadataCenterSlot({
     target: metadata,
     family: 'runtime_control',
-    key: 'providerProtocol',
+    key: 'retryProviderKey',
     writer: HTTP_ROUTER_DIRECT_RETRY_RELEASE_WRITER,
-    reason: 'router-direct retry provider protocol must be rebound after route selection'
+    reason: 'router-direct retry provider pin is single-use and must not force provider retry attempts'
   });
 }
 
@@ -1081,16 +1083,22 @@ export class RouteCodexHttpServer {
       return input;
     }
     const { hubBody, ...withoutHubBody } = input;
+    const sourceMetadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+      ? input.metadata as Record<string, unknown>
+      : undefined;
     const metadata =
-      input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+      sourceMetadata
         ? {
-            ...input.metadata,
+            ...sourceMetadata,
             __raw_request_body:
-              Object.prototype.hasOwnProperty.call(input.metadata, '__raw_request_body')
-                ? input.metadata.__raw_request_body
+              Object.prototype.hasOwnProperty.call(sourceMetadata, '__raw_request_body')
+                ? sourceMetadata.__raw_request_body
                 : input.body,
           }
         : { __raw_request_body: input.body };
+    if (sourceMetadata) {
+      bindExistingMetadataCenter(sourceMetadata, metadata);
+    }
     return {
       ...withoutHubBody,
       body: hubBody,
@@ -1419,6 +1427,12 @@ export class RouteCodexHttpServer {
           const relayMetadata = {
             ...(nextInput.metadata ?? {}),
           };
+          bindExistingMetadataCenter(
+            nextInput.metadata && typeof nextInput.metadata === 'object' && !Array.isArray(nextInput.metadata)
+              ? nextInput.metadata as Record<string, unknown>
+              : undefined,
+            relayMetadata
+          );
           writeMetadataCenterRuntimeControl(
             relayMetadata,
             'preselectedRoute',
@@ -1482,12 +1496,21 @@ export class RouteCodexHttpServer {
 
     return await this.executePipeline({
       ...this.buildHubPipelineInput(nextInput),
-      metadata: {
-        ...(nextInput.metadata ?? {}),
-        allowedProviders: [portConfig.providerBinding].filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
-        routecodexProviderRelayBinding: portConfig.providerBinding,
-        routecodexProviderRelayProtocol: handle.providerProtocol,
-      },
+      metadata: (() => {
+        const providerRelayMetadata = {
+          ...(nextInput.metadata ?? {}),
+          allowedProviders: [portConfig.providerBinding].filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+          routecodexProviderRelayBinding: portConfig.providerBinding,
+          routecodexProviderRelayProtocol: handle.providerProtocol,
+        };
+        bindExistingMetadataCenter(
+          nextInput.metadata && typeof nextInput.metadata === 'object' && !Array.isArray(nextInput.metadata)
+            ? nextInput.metadata as Record<string, unknown>
+            : undefined,
+          providerRelayMetadata
+        );
+        return providerRelayMetadata;
+      })(),
     });
   }
 
@@ -1522,13 +1545,14 @@ export class RouteCodexHttpServer {
       routecodexRoutingPolicyGroup: portConfig.routingPolicyGroup,
       ...(allowedProviders && allowedProviders.length > 0 ? { allowedProviders } : {}),
     };
-    const metadataCenter = bindExistingMetadataCenter(
-      input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-        ? (input.metadata as Record<string, unknown>)
-        : undefined,
-      metadataForHub
-    );
+    const inputMetadataRecord = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+      ? (input.metadata as Record<string, unknown>)
+      : undefined;
+    const metadataCenter = bindExistingMetadataCenter(inputMetadataRecord, metadataForHub);
     if (directAttempt > 1) {
+      if (inputMetadataRecord && inputMetadataRecord !== metadataForHub) {
+        releaseRouterDirectRetryRouteControl(inputMetadataRecord);
+      }
       releaseRouterDirectRetryRouteControl(metadataForHub);
     }
     if (!metadataCenter.readRequestTruth().portScope) {

@@ -1,6 +1,7 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
+import { stringifyNativePayloadForError } from './native-hub-bridge-action-semantics-shared.js';
 import type { ProviderProtocolErrorCode } from '../../conversion/provider-protocol-error.js';
 
 type HubPipelineInput = {
@@ -804,13 +805,16 @@ function callNativeString(capability: string, args: unknown[]): string {
   if (isNativeDisabledByEnv()) return fail('native disabled');
   const fn = readNativeFunction(capability);
   if (!fn) return fail();
+  let raw: unknown;
   try {
-    const raw = fn(...args);
-    if (typeof raw !== 'string') return fail('non-string result');
-    return raw;
+    raw = fn(...args);
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error ?? 'unknown'));
   }
+  if (typeof raw !== 'string') {
+    return fail(stringifyNativePayloadForError(raw) ?? 'non-string result');
+  }
+  return raw;
 }
 
 function callNativeJsonString(capability: string, value: unknown): string {

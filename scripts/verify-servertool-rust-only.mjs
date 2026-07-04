@@ -21,6 +21,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -280,6 +281,84 @@ function readOptional(path) {
     return '';
   }
   return readFileSync(path, 'utf8');
+}
+
+function collectTsFiles(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir)) {
+    const fullPath = `${dir}/${entry}`;
+    const stat = statSync(fullPath);
+    if (stat.isDirectory()) {
+      out.push(...collectTsFiles(fullPath));
+      continue;
+    }
+    if (entry.endsWith('.ts')) {
+      out.push(fullPath);
+    }
+  }
+  return out;
+}
+
+function collectServertoolWrapperFunctionRefs() {
+  const refs = new Set();
+  for (const file of collectTsFiles(`${ROOT}/sharedmodule/llmswitch-core/src`)) {
+    const content = readOptional(file);
+    const sourceFile = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const statement of sourceFile.statements) {
+      if (
+        ts.isImportDeclaration(statement) &&
+        statement.moduleSpecifier &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === 'rcc-llmswitch-core/native/servertool-wrapper'
+      ) {
+        const namedBindings = statement.importClause?.namedBindings;
+        if (namedBindings && ts.isNamedImports(namedBindings)) {
+          for (const element of namedBindings.elements) {
+            const name = (element.propertyName ?? element.name).text;
+            if (name.endsWith('WithNative')) {
+              refs.add(name);
+            }
+          }
+        }
+      }
+      if (
+        ts.isExportDeclaration(statement) &&
+        statement.moduleSpecifier &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === 'rcc-llmswitch-core/native/servertool-wrapper'
+      ) {
+        const exportClause = statement.exportClause;
+        if (exportClause && ts.isNamedExports(exportClause)) {
+          for (const element of exportClause.elements) {
+            const name = (element.propertyName ?? element.name).text;
+            if (name.endsWith('WithNative')) {
+              refs.add(name);
+            }
+          }
+        }
+      }
+    }
+  }
+  return refs;
+}
+
+function assertNoUnusedServertoolWrapperFunctionDeclarations(packageServertoolWrapperTypes) {
+  const declared = [...packageServertoolWrapperTypes.matchAll(/export declare function (\w+)/g)]
+    .map((match) => match[1]);
+  const refs = collectServertoolWrapperFunctionRefs();
+  const extra = declared.filter((name) => !refs.has(name));
+  const missing = [...refs].filter((name) => !declared.includes(name));
+  if (extra.length > 0 || missing.length > 0) {
+    fail(
+      'servertool-wrapper-unused-export-declarations',
+      `sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts must match active package-shim imports/re-exports; extra=${extra.join(',') || '<none>'} missing=${missing.join(',') || '<none>'}`
+    );
+    return;
+  }
+  pass(
+    'servertool-wrapper-unused-export-declarations',
+    `servertool-wrapper.d.ts function declarations match active package-shim imports/re-exports (${declared.length})`
+  );
 }
 
 function assertMissing(check, file, content, needle) {
@@ -766,6 +845,7 @@ function checkServertoolCliProjectionMap() {
       'sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts must keep typed declarations; `any` would bypass the Phase 3 wrapper contract'
     );
   }
+  assertNoUnusedServertoolWrapperFunctionDeclarations(packageServertoolWrapperTypes);
   if (!bridgeNativeExports.includes("raw instanceof Error") || !bridgeNativeExportsJs.includes("raw instanceof Error")) {
     fail(
       'servertool-wrapper-native-error-message',

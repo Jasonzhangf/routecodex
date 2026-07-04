@@ -1,10 +1,21 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, jest } from '@jest/globals';
 import { extractProviderRuntimeMetadata } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
+import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+import {
+  buildMetadataCenterRustSnapshot,
+  writeMetadataCenterSlot,
+} from '../../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js';
 import {
   getClientConnectionAbortSignal,
   trackClientConnectionState,
 } from '../../../../src/server/utils/client-connection-state.js';
+
+const TEST_METADATA_WRITER = {
+  module: 'tests/server/runtime/http-server/direct-server-contract.red.spec.ts',
+  symbol: 'direct-server-contract',
+  stage: 'test_setup',
+} as const;
 
 describe('direct server contract', () => {
   it('RED-GREEN: provider-direct forwards the original request body without stream/model repair', async () => {
@@ -418,6 +429,17 @@ describe('direct server contract', () => {
       input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'prepared hub request' }] }],
     };
 
+    const metadata: Record<string, unknown> = {};
+    const originalCenter = MetadataCenter.attach(metadata);
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'runtime_control',
+      key: 'providerProtocol',
+      value: 'openai-responses',
+      writer: TEST_METADATA_WRITER,
+      reason: 'seed entry provider protocol before router-direct relay',
+    });
+
     await (server as any).executePortAwarePipeline(5520, {
       requestId: 'req_router_direct_relay_uses_hub_body',
       entryEndpoint: '/v1/responses',
@@ -426,7 +448,7 @@ describe('direct server contract', () => {
       query: {},
       body: rawBody,
       hubBody: preparedHubBody,
-      metadata: {},
+      metadata,
     });
 
     expect(executePipelineSpy).toHaveBeenCalledTimes(1);
@@ -434,5 +456,114 @@ describe('direct server contract', () => {
     expect(relayInput.body).toBe(preparedHubBody);
     expect(relayInput.body).not.toBe(rawBody);
     expect(relayInput).not.toHaveProperty('hubBody');
+    const relayMetadata = relayInput.metadata as Record<string, unknown>;
+    expect(MetadataCenter.read(relayMetadata)).toBe(originalCenter);
+    expect(originalCenter.readRuntimeControl().providerProtocol).toBe('anthropic-messages');
+    expect(buildMetadataCenterRustSnapshot(relayMetadata).runtimeControl?.providerProtocol)
+      .toBe('anthropic-messages');
+  });
+
+  it('RED-GREEN: router-direct retry releases single-use pins but preserves providerProtocol', async () => {
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'runtime_control',
+      key: 'providerProtocol',
+      value: 'openai-responses',
+      writer: TEST_METADATA_WRITER,
+      reason: 'seed provider protocol before router-direct retry',
+    });
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'runtime_control',
+      key: 'preselectedRoute',
+      value: { target: { providerKey: 'orangeai.key1.glm-5.2' } },
+      writer: TEST_METADATA_WRITER,
+      reason: 'seed stale preselected route before router-direct retry',
+    });
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'runtime_control',
+      key: 'retryProviderKey',
+      value: 'orangeai.key1.glm-5.2',
+      writer: TEST_METADATA_WRITER,
+      reason: 'seed stale retry provider pin before router-direct retry',
+    });
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_direct_5520',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    (server as any).hubPipeline = {
+      execute: jest.fn(),
+      getVirtualRouter: jest.fn(() => ({
+        route: jest.fn(() => ({
+          decision: { routeName: 'longcontext', pool: [] },
+          diagnostics: {},
+        })),
+      })),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_direct_5520', (server as any).hubPipeline],
+    ]);
+
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5520,
+        host: '127.0.0.1',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_direct_5520',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_retry_preserves_provider_protocol',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.4',
+          stream: true,
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'retry' }] }],
+        },
+        metadata,
+      },
+      {
+        maxAttempts: 6,
+        excludedProviderKeys: new Set(['orangeai.key1.glm-5.2']),
+      },
+      2,
+    );
+
+    expect(outcome.used).toBe(false);
+    expect(MetadataCenter.read(metadata)).toBe(center);
+    expect(center.readRuntimeControl().providerProtocol).toBe('openai-responses');
+    expect(center.readRuntimeControl().preselectedRoute).toBeUndefined();
+    expect(center.readRuntimeControl().retryProviderKey).toBeUndefined();
+    expect(buildMetadataCenterRustSnapshot(metadata).runtimeControl?.providerProtocol)
+      .toBe('openai-responses');
+    expect(buildMetadataCenterRustSnapshot(metadata).runtimeControl?.preselectedRoute)
+      .toBeUndefined();
+    expect(buildMetadataCenterRustSnapshot(metadata).runtimeControl?.retryProviderKey)
+      .toBeUndefined();
   });
 });

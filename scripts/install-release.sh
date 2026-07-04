@@ -9,6 +9,7 @@ INSTALL_BUILD_ROOT=""
 VERIFY_PORT="${ROUTECODEX_INSTALL_VERIFY_PORT:-5520}"
 VERIFY_HOST="${ROUTECODEX_INSTALL_VERIFY_HOST:-127.0.0.1}"
 VERIFY_HEALTH_URL="http://${VERIFY_HOST}:${VERIFY_PORT}/health"
+EXPECTED_VERSION="$(node -p "require('./package.json').version" 2>/dev/null || true)"
 
 cleanup_isolated_build_root() {
   if [ -n "${INSTALL_BUILD_ROOT:-}" ] && [ "$INSTALL_BUILD_ROOT" != "$SOURCE_ROOT" ] && [ -d "$INSTALL_BUILD_ROOT" ]; then
@@ -210,6 +211,11 @@ verify_cli_commands() {
 
 verify_runtime_health() {
   echo "🚦 验证 release runtime 启动与健康状态..."
+  if [ -z "${EXPECTED_VERSION:-}" ]; then
+    fail "无法读取 package.json version，不能验证 release runtime 版本"
+  fi
+  echo "🔒 期望 release runtime version: ${EXPECTED_VERSION}"
+  ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
   ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
   RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
   rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST"
@@ -219,8 +225,8 @@ verify_runtime_health() {
   local health_dump="/tmp/routecodex-install-release-health.$$"
   while [ "$attempt" -le "$max_attempts" ]; do
     if curl -fsS "$VERIFY_HEALTH_URL" >"$health_dump"; then
-      if node -e "const fs=require('fs');const p=process.argv[1];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);if(body.status==='ok'&&body.ready===true&&body.pipelineReady===true){process.exit(0)}process.exit(1)" "$health_dump"; then
-        echo "✅ /health 通过: $VERIFY_HEALTH_URL"
+      if node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);if(body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&body.version===expected){process.exit(0)}process.exit(1)" "$health_dump" "$EXPECTED_VERSION"; then
+        echo "✅ /health 通过且版本匹配: $VERIFY_HEALTH_URL version=${EXPECTED_VERSION}"
         rm -f "$health_dump"
         return
       fi
@@ -229,7 +235,7 @@ verify_runtime_health() {
     attempt=$((attempt + 1))
   done
 
-  echo "❌ /health 未通过: $VERIFY_HEALTH_URL"
+  echo "❌ /health 未通过或 live runtime 版本不匹配: $VERIFY_HEALTH_URL expected=${EXPECTED_VERSION}"
   if [ -f "$health_dump" ]; then
     echo "最近一次响应:"
     cat "$health_dump"

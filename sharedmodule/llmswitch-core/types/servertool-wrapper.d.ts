@@ -48,7 +48,6 @@ export type ServertoolBuiltinHandlerEntryPlan =
 export type ServertoolBuiltinHandlerEntriesPlan = { entries: Record<string, unknown>[] };
 export type ServertoolRegistrationSpec = Record<string, unknown>;
 export type ServertoolToolSpec = Record<string, unknown>;
-export type ServertoolSkeletonDocument = Record<string, unknown>;
 export type ServertoolSkeletonDerivedConfig = Record<string, unknown>;
 export type ServertoolDispatchCandidate = {
   id: string;
@@ -96,25 +95,6 @@ export type ServertoolOutcomePlanInput = {
   lastExecutionFlowId?: string | null;
 };
 export type ServertoolHandlerContractPlan = { action: string };
-export type ServertoolEntryContextPlan = {
-  includeToolCallNames?: string[];
-  excludeToolCallNames?: string[];
-  includeAutoHookIds?: string[];
-  excludeAutoHookIds?: string[];
-};
-export type EngineSelectionOverridesPlan = {
-  disableToolCallHandlers?: boolean;
-  includeAutoHookIds?: string[];
-  excludeAutoHookIds?: string[];
-};
-export type EngineSelectionStartPlan = {
-  action: 'run_default' | 'run_primary_hooks';
-  overrides: EngineSelectionOverridesPlan;
-  primaryAutoHookIds: string[];
-};
-export type EngineSelectionAfterRunDecision = {
-  rerunOverrides?: EngineSelectionOverridesPlan;
-};
 export type ServertoolAutoHookPlanEntry<T = Record<string, unknown>> = T & {
   id: string;
   phase: string;
@@ -160,8 +140,6 @@ export declare function containsSyntheticRouteCodexControlTextWithNative(payload
 export declare function planChatWebSearchOperationsWithNative(request: unknown, runtimeMetadata?: Record<string, unknown>): NativeChatWebSearchPlan;
 export declare function runServertoolResponseStageWithNative(payload: unknown, requestId: string): NativeServertoolResponseStage;
 export declare function planServertoolResponseStageGateWithNative(input: unknown): ServertoolResponseStageGatePayload;
-export declare function finalizeServertoolResponseStageWithNative(input: unknown): Record<string, unknown>;
-export declare function getDefaultServertoolSkeletonDocumentWithNative(): ServertoolSkeletonDocument;
 export declare function planServertoolSkeletonDerivedConfigWithNative(input?: unknown): ServertoolSkeletonDerivedConfig;
 export declare function readServertoolPrimaryAutoHookIdsWithNative(input?: unknown): string[];
 export declare function buildServertoolDispatchPlanInputWithNative(input: unknown): ServertoolDispatchPlanInput;
@@ -201,10 +179,7 @@ export declare function normalizeStopMessageCompareContextWithNative(value: unkn
 export declare function formatStopMessageCompareContextWithNative(value: unknown): string;
 export declare function resolveRuntimeStopMessageStateWithNative(metadata: unknown): ServertoolRuntimeStopMessageState;
 export declare function readRuntimeStopMessageStageModeWithNative(input: unknown): string | undefined;
-export declare function buildClientExecCliProjectionOutputWithNative(input: unknown): Record<string, unknown>;
 export declare function parseServertoolCliProjectionToolArgumentsWithNative(input: unknown): unknown;
-export declare function planServertoolHookScheduleWithNative(input: unknown): ServertoolHookSchedulePlan;
-export declare function buildClientVisibleProjectionShellWithNative(input: unknown): Record<string, unknown>;
 export declare function buildServertoolCliProjectionExecutionContextWithNative(input: unknown): Record<string, unknown>;
 export declare function buildServertoolCliProjectionRuntimeBranchWithNative(input: unknown): Record<string, unknown>;
 export declare function resolveRuntimeStopMessageStateFromMetadataCenterWithNative(metadataCenter: unknown): ServertoolRuntimeStopMessageState | null;
@@ -212,10 +187,6 @@ export declare function parseServertoolTimeoutMsWithNative(value: unknown): numb
 export declare function planServertoolTimeoutWatcherWithNative(input: unknown): ServertoolTimeoutWatcherPlan;
 export declare function isAdapterClientDisconnectedWithNative(adapterContext: unknown): boolean;
 export declare function createServertoolExecutionLoopStateWithNative(): ServertoolExecutionLoopState;
-export declare function planServertoolEntryContextWithNative(input: unknown): ServertoolEntryContextPlan;
-export declare function planEngineSelectionStartWithNative(input: unknown): EngineSelectionStartPlan;
-export declare function resolveEngineSelectionAfterRunWithNative(input: unknown): EngineSelectionAfterRunDecision;
-export declare function resolveServertoolEngineMatchHitWithNative(input: unknown): { flowId: string };
 
 export declare function runServertoolOrchestrationMutationWithNative(input: Record<string, unknown>): unknown;
 export declare function planServertoolFollowupRuntimeWithNative(flowId: string): ServertoolFollowupRuntimePlan;

@@ -62,7 +62,6 @@ export type ServertoolBuiltinHandlerEntryPlan =
 export type ServertoolBuiltinHandlerEntriesPlan = { entries: Record<string, unknown>[] };
 export type ServertoolRegistrationSpec = Record<string, unknown>;
 export type ServertoolToolSpec = Record<string, unknown>;
-export type ServertoolSkeletonDocument = Record<string, unknown>;
 export type ServertoolSkeletonDerivedConfig = Record<string, unknown>;
 export type ServertoolDispatchCandidate = {
   id: string;
@@ -155,7 +154,6 @@ export declare function containsSyntheticRouteCodexControlTextWithNative(payload
 export declare function planChatWebSearchOperationsWithNative(request: unknown, runtimeMetadata?: Record<string, unknown>): NativeChatWebSearchPlan;
 export declare function runServertoolResponseStageWithNative(payload: unknown, requestId: string): NativeServertoolResponseStage;
 export declare function planServertoolResponseStageGateWithNative(input: unknown): ServertoolResponseStageGatePayload;
-export declare function getDefaultServertoolSkeletonDocumentWithNative(): ServertoolSkeletonDocument;
 export declare function planServertoolSkeletonDerivedConfigWithNative(input?: unknown): ServertoolSkeletonDerivedConfig;
 export declare function readServertoolPrimaryAutoHookIdsWithNative(input?: unknown): string[];
 export declare function buildServertoolDispatchPlanInputWithNative(input: unknown): ServertoolDispatchPlanInput;
@@ -195,10 +193,7 @@ export declare function normalizeStopMessageCompareContextWithNative(value: unkn
 export declare function formatStopMessageCompareContextWithNative(value: unknown): string;
 export declare function resolveRuntimeStopMessageStateWithNative(metadata: unknown): ServertoolRuntimeStopMessageState;
 export declare function readRuntimeStopMessageStageModeWithNative(input: unknown): string | undefined;
-export declare function buildClientExecCliProjectionOutputWithNative(input: unknown): Record<string, unknown>;
 export declare function parseServertoolCliProjectionToolArgumentsWithNative(input: unknown): unknown;
-export declare function planServertoolHookScheduleWithNative(input: unknown): ServertoolHookSchedulePlan;
-export declare function buildClientVisibleProjectionShellWithNative(input: unknown): Record<string, unknown>;
 export declare function buildServertoolCliProjectionExecutionContextWithNative(input: unknown): Record<string, unknown>;
 export declare function buildServertoolCliProjectionRuntimeBranchWithNative(input: unknown): Record<string, unknown>;
 export declare function resolveRuntimeStopMessageStateFromMetadataCenterWithNative(metadataCenter: unknown): ServertoolRuntimeStopMessageState | null;
