@@ -24742,6 +24742,60 @@ Complete SSE rustification status (34 TS files):
 - Evidence: `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi snapshot_recorder_write_options --lib -- --nocapture` PASS 1/1 matched; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; focused Jest `snapshot-recorder-native-plan + hub-pipeline-stage-residue-audit` PASS 153/153; direct native binding check for `buildSnapshotRecorderWriteOptionsJson` PASS; sharedmodule `tsc` PASS; `verify:function-map-compile-gate` PASS; snapshot contract/owner gates PASS; mainline/review-surface gates PASS; scoped `git diff --check` PASS.
 - Non-blocking unrelated observation: broad `native-required-exports-sse-stream.spec.ts` still has pre-existing servertool/stopless expectation failures unrelated to snapshot recorder; do not use it as snapshot closeout gate.
 
+# 2026-07-04: 5555 Responses SSE request_id + cooldown restart recovery
+
+- Issue 1: installed 0.90.3538 `/v1/responses` failed captured MiniMax Anthropic SSE with `Responses SSE event sequence missing request_id`.
+- Root cause: installed Rust SSE runtime dispatch did not accept TS wrapper snake_case `request_id` / `body_text` under `rename_all = "camelCase"`. Current source already contains aliases; added focused Rust coverage and installed `routecodex/rcc@0.90.3541`.
+- Evidence: installed 0.90.3541 replay of `~/.rcc/codex-samples/openai-responses/ports/5555/req_1783095044093_2201763d/provider-response_3.json` produced SSE with `response.created`, `response.done`, and original request_id.
+- Issue 2: `~/.rcc/sessions/127.0.0.1_5555/provider-health.json` retained expired `orangeai.1.glm-5.2` cooldown after restart.
+- Root cause: expired persisted cooldown was skipped on import but not persisted back immediately, so disk could still show stale tripped state until another health write.
+- Guard: `refresh_provider_health_from_store_persists_pruned_expired_cooldown` proves engine refresh writes cleaned provider-health after pruning expired cooldown.
+- Live evidence: 5555 VR status reports `orangeai.1.glm-5.2` `state=healthy`, `cooldownExpiresAt=null`, `available=true`; live 5555 SSE smoke returned `response.created`, `response.completed`, `response.done` with request_id on `0.90.3541`.
+- Runtime note: 5555 is a localPort under serverId 5520. Both `routecodex` and `rcc` must be installed in sync; live process was `rcc`, not only `routecodex`.
+
+# 2026-07-04: rcc lifecycle stop/start port-group closure
+
+- Symptom: `rcc stop` only handled 5520 and said no server, while `rcc start --snap` resolved `4444, 5520, 5555, 10000` then exited on `4444 already_running_unmanaged`.
+- Root causes:
+  - `resolvePortGroupFromConfig({ targetPort })` collapsed a matched multi-port config to `[targetPort]`, so stop/restart never expanded the full group.
+  - `stop` trusted PID discovery only; when PID cache/listener discovery returned empty, it skipped `/shutdown` even though `/health` was still live.
+  - `start` defaulted to non-restart mode, so healthy no-PID RouteCodex listeners caused `already_running_unmanaged`.
+  - guardian finalize/report errors were treated as stop failure after the actual server ports were already stopped.
+- Fix:
+  - Added `includeSiblingsForTarget` to port-group resolver and used it from stop/restart/start release group resolution.
+  - `stop` now attempts HTTP `/shutdown` even when no PID is found, waits for health to disappear, and treats guardian finalize/report failures as non-blocking lifecycle telemetry.
+  - `start` now owns the managed runtime slot by default; `--no-restart` keeps the old check-only behavior.
+- Evidence:
+  - Focused Jest `tests/cli/start-command.spec.ts`, `tests/cli/stop-command.spec.ts`, `tests/cli/port-utils.spec.ts` PASS 31/31.
+  - `build:min` PASS; `pack:rcc` PASS; global install of both `routecodex-0.90.3542.tgz` and `rcc-0.90.3542.tgz` PASS.
+  - Live `rcc stop` on down group now resolves all four ports and exits 0 despite guardian finalize rejection.
+  - Live `rcc start --snap` brought up 4444/5520/5555/10000 on global 0.90.3542. With existing service running, `ROUTECODEX_START_DAEMON=1 rcc start --snap` sent shutdown for the old group, exited 0, and all four ports returned `/health` 0.90.3542.
+
+# 2026-07-04 lifecycle correction final evidence
+
+- Root cause confirmed in installed old package: `/opt/homebrew/lib/node_modules/{routecodex,rcc}/dist/cli/commands/start.js` had `options.restart !== false`, so plain `start` was restart-like by default.
+- Source fix: `src/cli/commands/start.ts` uses `options.restart === true || options.exclusive === true`; focused CLI tests lock `[false, true]` for default start vs explicit `--restart`.
+- Gate fixes: `verify:servertool-rust-only` now checks deleted chat-process servertool wrapper semantics through `native-servertool-core-semantics.ts`; sharedmodule source self-reference to `rcc-llmswitch-core/native/servertool-wrapper` compiles through `sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts`, avoiding TS5055 from `dist/*.d.ts` inputs.
+- Verification: `npm run jest:run -- --runInBand --runTestsByPath tests/cli/start-command.spec.ts tests/cli/stop-command.spec.ts tests/cli/port-utils.spec.ts` PASS 32/32; `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `node scripts/build-core.mjs` PASS; `npm run build:min` PASS; `npm run pack:rcc` PASS.
+- Install: `npm install -g artifacts/pack/routecodex-0.90.3546.tgz artifacts/pack/rcc-0.90.3546.tgz` PASS; `routecodex --version` and `rcc --version` both 0.90.3546; installed dist contains `options.restart === true`.
+- Live non-disruptive smoke: `routecodex start --port 5555` returned `already_running_unmanaged`; 5520/5555 `/health` stayed OK. No intentional restart was run, so live server process still reports 0.90.3542 until Jason chooses to restart.
+
+# 2026-07-04 correction: start default restart was wrong
+
+- User-visible symptom: foreground server printed SIGTERM / graceful shutdown after `start`-style recovery work, making `restart`/`start` look like it only stopped the service.
+- Corrected root cause: dirty `start.ts` changed plain `start` to `restart` by default (`options.restart !== false`), and one stop-command test had no `fetchImpl` mock, so it could hit live `/shutdown`.
+- Fix: restored plain start to non-disruptive (`options.restart === true || options.exclusive === true`), kept explicit `--restart`, and mocked no-server stop tests so unit tests cannot touch live RouteCodex.
+- Evidence: focused CLI Jest PASS 32/32; sharedmodule tsc PASS; 5520/5555 `/health` OK on 0.90.3542; 5555 `/v1/responses` SSE smoke `routecodex-start-no-auto-restart-20260704T110818` returned `response.created`, `response.completed`, `response.done` with request_id.
+
+# 2026-07-04: model capacity text normalized to retryable 429
+
+- Symptom: upstream/provider error text `Selected model is at capacity. Please try a different model.` carried no HTTP status/code in the visible failure, so RouteCodex did not preserve a canonical 429 identity in the provider error catalog.
+- Owner: `error.provider_failure_policy`; allowed source owner is `src/providers/core/runtime/provider-error-catalog.ts`, with policy consumption in `provider-failure-policy-impl.ts` and HTTP error projection in `provider-http-executor-utils.ts`.
+- Fix: `normalizeKnownProviderError()` now maps `selected model is at capacity` / `model is at capacity` + `try a different model` to existing recoverable `HTTP_429` (`429.1000`), not to `INSUFFICIENT_QUOTA`.
+- Tests added: catalog status/key/class regression, provider failure action plan regression, HTTP error projection regression.
+- Evidence: red first run showed catalog returned `undefined`; then `npm run jest:run -- --runInBand --runTestsByPath tests/providers/core/runtime/provider-error-catalog.spec.ts tests/providers/core/runtime/provider-failure-policy.spec.ts tests/providers/core/runtime/provider-http-executor-utils.spec.ts` PASS 45/45; manual source replay showed catalog `HTTP_429`, normalized `statusCode/status=429`, policy `shouldRetry=true`, `action=reroute_explicit_alternative`, `decisionLabel=exclude_and_reroute`; `verify:function-map-compile-gate` PASS; scoped `git diff --check` PASS.
+- Remaining blockers: `npm run build:base` currently fails on unrelated dirty llmswitch-core/servertool TS errors; `verify:provider-failure-ban-blackbox` still fails on existing native hotpath `resolveHubPipelineRequestProviderProtocolJson` unavailable/non-string result. No global install/live restart claimed for this fix.
+
 # 2026-07-03: servertool postflight metadata write-plan emptiness moved to Rust
 
 - Slice: `engine-postflight-shell.ts` no longer projects metadata write plan to a TS object and checks `Object.keys(runtimeControl).length`. It now calls `projectNativeMetadataWritePlanToRuntimeControlWritePlan()` and applies only the Rust-projected `runtimeControl` write plan.
@@ -24821,3 +24875,25 @@ Complete SSE rustification status (34 TS files):
 - Focused blackbox/Jest: `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/run-server-side-tool-engine-shell.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/servertool-cli-native-bridge.spec.ts` PASS 86/86.
 - Required gates: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `npm run verify:servertool-rust-only` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run verify:architecture-mainline-call-map` PASS; `npm run verify:architecture-mainline-manifest-sync` PASS; `npm run verify:architecture-mainline-mermaid-sync` PASS; `npm run verify:llmswitch-rustification-audit` PASS; `cargo check --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi` PASS with existing warnings; `git diff --check` PASS.
 - Remaining runtime residue: action branch scan now shows only `execution-stage-shell.ts` and `response-stage-auto-hook-shell.ts` among TS runtime files. No P0-1 live replay/closeout claimed yet.
+
+# 2026-07-04: P0-1 servertool execution-stage branch application moved to Rust
+
+- Slice: `execution-stage-shell.ts` no longer applies execution branch action strings in TS. TS now consumes Rust-owned application booleans: pre-execution `projectClientExecCli` / `continueResponseStage`, and post-execution `resolveExecutionOutcome` / `continueResponseStage`.
+- Rust owner: `servertool-core/src/execution_branch_contract.rs` owns `plan_servertool_execution_branch_application`; `router-hotpath-napi` exports `planServertoolExecutionBranchApplicationJson`; `native-router-hotpath-required-exports.ts` requires the export.
+- Gates: `execution-stage-shell.spec.ts` and `servertool-active-orchestration-audit.spec.ts` forbid runtime shell checks for `preExecutionBranchDecision.action` / `postExecutionBranchDecision.action`; `servertool-cli-native-bridge.spec.ts` proves the raw NAPI application plan returns Rust booleans.
+- Evidence: `cargo fmt --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p servertool-core -p router-hotpath-napi` PASS; `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p servertool-core execution_branch --lib -- --nocapture` PASS 7/7 matched; `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi plans_servertool_execution_branch --lib -- --nocapture` PASS 2/2 matched; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS.
+- Focused blackbox/Jest: `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/execution-stage-shell.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/servertool-cli-native-bridge.spec.ts` PASS 88/88.
+- Required gates: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `npm run verify:servertool-rust-only` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run verify:architecture-mainline-call-map` PASS; `npm run verify:architecture-mainline-manifest-sync` PASS; `npm run verify:architecture-mainline-mermaid-sync` PASS; `npm run verify:llmswitch-rustification-audit` PASS after deleting unused new TS type shims; `cargo check --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi` PASS with existing warnings; `git diff --check` PASS.
+- Remaining runtime residue: action branch scan now shows only `response-stage-auto-hook-shell.ts` in TS runtime files: `preAutoHookDecision.action === 'return_pass_result'` and `postAutoHookDecision.action === 'throw_required_response_hook_empty'`. No P0-1 live replay/closeout claimed yet.
+
+# 2026-07-04: P0-1 servertool response-stage auto-hook application moved to Rust
+
+- Slice: `response-stage-auto-hook-shell.ts` no longer applies auto-hook runtime action strings in TS. TS now consumes Rust-owned application booleans: pre auto-hook `returnPassResult` / `runAutoHooks`, and post auto-hook `throwRequiredResponseHookEmpty` / `returnPassResult`.
+- Rust owner: `servertool-core/src/response_stage_runtime_action_contract.rs` owns `plan_servertool_response_stage_auto_hook_pre_application` and `plan_servertool_response_stage_auto_hook_post_application`; `router-hotpath-napi` exports `planServertoolResponseStageAutoHookPreApplicationJson` and `planServertoolResponseStageAutoHookPostApplicationJson`; `native-router-hotpath-required-exports.ts` requires both exports.
+- TS bridge cleanup: `native-servertool-core-semantics.ts` now gives the current servertool-core owner wrapper explicit local signatures for package-shim functions consumed by TS shells, instead of relying on the deleted `native-chat-process-servertool-orchestration-semantics.ts` source. This fixed the `unknown` type spread into `auto-hook-caller.ts`, `execution-queue-shell.ts`, `extract-tool-calls-shell.ts`, and `progress-log-block.ts`.
+- Gates: `response-stage-auto-hook-shell.spec.ts` and `servertool-active-orchestration-audit.spec.ts` forbid the old TS branches for `preAutoHookDecision.action` / `postAutoHookDecision.action`; `servertool-cli-native-bridge.spec.ts` proves the raw NAPI application plans return Rust booleans and required-hook error plan.
+- Evidence: `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p servertool-core auto_hook --lib -- --nocapture` PASS 18/18 matched; `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi plans_servertool_response_stage_auto_hook_application --lib -- --nocapture` PASS 1/1 matched; `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS.
+- Focused blackbox/Jest: `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/response-stage-auto-hook-shell.spec.ts tests/servertool/servertool-active-orchestration-audit.spec.ts tests/servertool/servertool-cli-native-bridge.spec.ts` PASS 88/88.
+- Required gates: `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS; `npm run verify:servertool-rust-only` PASS; `npm run verify:function-map-compile-gate` PASS; `npm run verify:architecture-mainline-call-map` PASS; `npm run verify:architecture-mainline-manifest-sync` PASS; `npm run verify:architecture-mainline-mermaid-sync` PASS; `npm run verify:llmswitch-rustification-audit` PASS with current metrics `prodTsFileCount=184`, `prodTsLocTotal=38086`, `nonNativeFileCount=58`, `nonNativeLocTotal=9393`; `cargo check --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi` PASS with existing warnings; `git diff --check` PASS.
+- Runtime residue scan: scanning `sharedmodule/llmswitch-core/src/servertool` for `.action` application branches returned no matches. The broader scan including `tests/servertool/servertool-active-orchestration-audit.spec.ts` matches only forbidden-marker strings in the audit test itself.
+- Remaining gap: this is still a P0-1 micro-slice. No live replay / full `servertool.followup_orchestration` closeout claimed yet; next step is module/project blackbox and old-sample/live replay before moving P0-1 from local slice evidence to runtime closeout.

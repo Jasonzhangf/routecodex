@@ -124,6 +124,16 @@ export function normalizeKnownProviderError(input: {
     return ALIAS_INDEX.get('INSUFFICIENT_QUOTA');
   }
 
+  if (
+    message.includes('selected model is at capacity')
+    || (
+      message.includes('model is at capacity')
+      && message.includes('try a different model')
+    )
+  ) {
+    return ALIAS_INDEX.get('HTTP_429');
+  }
+
   if (code && ALIAS_INDEX.has(code)) return ALIAS_INDEX.get(code);
   if (upstream && ALIAS_INDEX.has(upstream)) return ALIAS_INDEX.get(upstream);
 

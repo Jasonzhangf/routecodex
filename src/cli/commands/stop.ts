@@ -241,6 +241,54 @@ async function attemptHttpShutdown(
   return false;
 }
 
+async function isHttpServerStillHealthy(
+  ctx: StopCommandContext,
+  resolvedPort: number
+): Promise<boolean> {
+  const fetchImpl = resolveFetchImpl(ctx);
+  if (!fetchImpl) {
+    return false;
+  }
+
+  for (const host of [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST]) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch {
+          /* ignore */
+        }
+      }, 500);
+      const response = await fetchImpl(`http://${host}:${resolvedPort}/health`, {
+        method: 'GET',
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      if (response.ok) {
+        return true;
+      }
+    } catch {
+      /* not healthy on this host */
+    }
+  }
+  return false;
+}
+
+async function waitForHttpShutdown(
+  ctx: StopCommandContext,
+  resolvedPort: number
+): Promise<boolean> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (!(await isHttpServerStillHealthy(ctx, resolvedPort))) {
+      return true;
+    }
+    await ctx.sleep(150);
+  }
+  return false;
+}
+
 export function createStopCommand(program: Command, ctx: StopCommandContext): void {
   program
     .command('stop')
@@ -256,7 +304,10 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
 
         const explicitPort = typeof options?.port === 'string' && options.port.trim() ? Number(options.port.trim()) : NaN;
         const basePort = Number.isFinite(explicitPort) && explicitPort > 0 ? explicitPort : resolveStopPort(ctx, spinner);
-        const grouped = ctx.isDevPackage ? null : resolvePortGroupFromConfig(ctx, { targetPort: basePort });
+        const grouped = ctx.isDevPackage ? null : resolvePortGroupFromConfig(ctx, {
+          targetPort: basePort,
+          includeSiblingsForTarget: true
+        });
         const targetPorts = grouped?.ports?.length ? grouped.ports : [basePort];
         if (targetPorts.length > 1) {
           ctx.logger.info(`[stop] resolved config port-group: ${targetPorts.join(', ')}`);
@@ -268,13 +319,37 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
           }
         };
         const finalizeStop = async (resolvedPort: number): Promise<void> => {
-          await reportLifecycle({
-            action: 'stop_finalize',
-            source: 'cli.stop',
-            actorPid: process.pid,
-            metadata: { port: resolvedPort }
-          });
-          await ctx.stopGuardianDaemon?.();
+          try {
+            await reportLifecycle({
+              action: 'stop_finalize',
+              source: 'cli.stop',
+              actorPid: process.pid,
+              metadata: { port: resolvedPort }
+            });
+          } catch (error) {
+            logProcessLifecycleSync({
+              event: 'stop_guardian_finalize',
+              source: 'cli.stop',
+              details: {
+                result: 'guardian_finalize_rejected_non_blocking',
+                port: resolvedPort,
+                error: error instanceof Error ? error.message : String(error)
+              }
+            });
+          }
+          try {
+            await ctx.stopGuardianDaemon?.();
+          } catch (error) {
+            logProcessLifecycleSync({
+              event: 'stop_guardian_finalize',
+              source: 'cli.stop',
+              details: {
+                result: 'guardian_stop_failed_non_blocking',
+                port: resolvedPort,
+                error: error instanceof Error ? error.message : String(error)
+              }
+            });
+          }
         };
         for (const resolvedPort of targetPorts) {
           logProcessLifecycleSync({
@@ -319,6 +394,27 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
 
           const pids = ctx.findListeningPids(resolvedPort);
           if (!pids.length) {
+            const accepted = await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
+            if (accepted) {
+              const stopped = await waitForHttpShutdown(ctx, resolvedPort);
+              if (!stopped) {
+                spinner.fail(`RouteCodex server on ${resolvedPort} accepted shutdown but did not stop.`);
+                await finalizeStop(resolvedPort);
+                ctx.exit(1);
+              }
+              spinner.succeed(`RouteCodex server stopped on ${resolvedPort}.`);
+              logProcessLifecycleSync({
+                event: 'stop_command',
+                source: 'cli.stop',
+                details: {
+                  result: 'http_shutdown_accepted_no_pid',
+                  port: resolvedPort,
+                  ...callerAudit
+                }
+              });
+              await finalizeStop(resolvedPort);
+              continue;
+            }
             spinner.succeed(`No server listening on ${resolvedPort}.`);
             logProcessLifecycleSync({
               event: 'stop_command',

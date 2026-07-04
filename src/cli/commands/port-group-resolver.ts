@@ -16,6 +16,12 @@ export type ResolvedPortGroup = {
   configPath: string;
 };
 
+export type PortGroupResolveOptions = {
+  configPath?: string;
+  targetPort?: number | null;
+  includeSiblingsForTarget?: boolean;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -32,7 +38,7 @@ function readHost(record: Record<string, unknown> | null): string {
 
 export function resolvePortGroupFromParsedConfig(
   parsed: Record<string, unknown>,
-  options?: { configPath?: string; targetPort?: number | null }
+  options?: PortGroupResolveOptions
 ): ResolvedPortGroup | null {
   const httpserver = (parsed.httpserver && typeof parsed.httpserver === 'object' ? parsed.httpserver : {}) as Record<string, unknown>;
   const server = (parsed.server && typeof parsed.server === 'object' ? parsed.server : {}) as Record<string, unknown>;
@@ -62,7 +68,7 @@ export function resolvePortGroupFromParsedConfig(
     if (options?.targetPort && !matchedPortSeen) {
       return null;
     }
-    const resolvedPorts = options?.targetPort ? [options.targetPort] : unique;
+    const resolvedPorts = options?.targetPort && !options.includeSiblingsForTarget ? [options.targetPort] : unique;
     return {
       ports: resolvedPorts,
       host: matchedPortHost || defaultHost,
@@ -93,7 +99,7 @@ function asValidPort(v: unknown): number | null {
 
 export function resolvePortGroupFromConfig(
   ctx: PortGroupResolveContext,
-  options?: { configPath?: string; targetPort?: number | null }
+  options?: PortGroupResolveOptions
 ): ResolvedPortGroup | null {
   const fsImpl = ctx.fsImpl ?? fs;
   const home = ctx.getHomeDir ?? (() => homedir());
@@ -103,5 +109,9 @@ export function resolvePortGroupFromConfig(
   }
 
   const parsed = decodeUserConfigFileSync(configPath, fsImpl as Pick<typeof fs, 'readFileSync'>).parsed as Record<string, unknown>;
-  return resolvePortGroupFromParsedConfig(parsed, { configPath, targetPort: options?.targetPort });
+  return resolvePortGroupFromParsedConfig(parsed, {
+    configPath,
+    targetPort: options?.targetPort,
+    includeSiblingsForTarget: options?.includeSiblingsForTarget
+  });
 }

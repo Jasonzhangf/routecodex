@@ -6,7 +6,7 @@ import type {
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { finalizeServertoolResponseStageWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export async function finalizeServertoolResponseStage(args: {
   options: ServerSideToolEngineOptions;

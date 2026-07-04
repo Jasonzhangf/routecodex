@@ -243,6 +243,26 @@ type NativeRouterHotpathJsonBinding = {
     payloadJson: string,
     optionsJson?: string
   ) => string;
+
+  // -- servertool orchestration (Phase 3) --
+  runServertoolResponseStageJson?: (payloadJson: string, requestId: string) => string;
+  planServertoolFollowupRuntimeJson?: (flowId: string) => string;
+  resolveFollowupModelJson?: (seedModelJson: string, adapterContextJson: string) => string;
+  webSearchIsGeminiEngine?: (providerKeyJson: string) => string;
+  webSearchIsQwenEngine?: (providerKeyJson: string) => string;
+  webSearchIsGlmEngine?: (providerKeyJson: string) => string;
+  webSearchNormalizeResultCountJson?: (valueJson: string) => string;
+  webSearchBuildSystemPrompt?: (targetCount: number) => string;
+  webSearchSanitizeBackendErrorJson?: (message: string) => string;
+  webSearchCollectHitsJson?: (chatResponseJson: string, targetCount: number) => string;
+  webSearchFormatHitsSummaryJson?: (hitsJson: string) => string;
+  webSearchLimitHitsJson?: (hitsJson: string) => string;
+  webSearchExtractAssistantMessageJson?: (chatResponseJson: string) => string;
+  webSearchBuildToolMessagesJson?: (chatResponseJson: string) => string;
+  visionBuildAnalysisPayloadJson?: (sourceJson: string) => string;
+  visionBuildPinnedMetadataJson?: (adapterContextJson: string, payloadJson: string) => string;
+  visionExtractOriginalUserPromptJson?: (messagesJson: string) => string;
+  readFollowupClientInjectSourceJson?: (adapterContextJson: string) => string;
 };
 
 type NativeHubVrNodeContracts = {
@@ -539,8 +559,9 @@ function stringifyNativeJsonArg(capability: string, value: unknown): string {
   }
 }
 
-function invokeRouterHotpathJsonCapability(capability: keyof NativeRouterHotpathJsonBinding, args: unknown[]): unknown {
-  const binding = getRouterHotpathJsonBindingSync();
+function invokeRouterHotpathJsonCapability(capability: string, args: unknown[]): unknown {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
   const fn = binding[capability];
   if (typeof fn !== 'function') {
     throw new Error(`[llmswitch-bridge] ${String(capability)} not available`);
@@ -1278,3 +1299,398 @@ export function resolveEntryProtocolFromEndpointNative(entryEndpoint: string): s
   }
   return fn(entryEndpoint);
 }
+
+// === SERVERTOOL ORCHESTRATION WRAPPERS (Phase 3) ===
+// 63 wrappers: bridge native-chat-process-servertool-orchestration-semantics.ts -> native-exports.ts
+
+export function detectEmptyAssistantPayloadContractSignalWithNative(payload: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('detectEmptyAssistantPayloadContractSignalJson', [payload]);
+}
+
+export function detectProviderResponseShapeWithNative(payload: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('detectProviderResponseShapeJson', [payload]);
+}
+
+export function containsSyntheticRouteCodexControlTextWithNative(payload: unknown): boolean {
+  const result = invokeRouterHotpathJsonCapability('containsSyntheticRoutecodexControlTextJson', [payload]);
+  return result === true;
+}
+
+export function planChatWebSearchOperationsWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planChatWebSearchOperationsJson', [input]);
+}
+
+export function runServertoolResponseStageWithNative(payload: unknown, requestId: string): unknown {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.runServertoolResponseStageJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] runServertoolResponseStageJson not available');
+  }
+  const payloadJson = JSON.stringify(payload);
+  const raw = fn(payloadJson, requestId);
+  return JSON.parse(raw);
+}
+
+export function planServertoolResponseStageGateWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolResponseStageGateJson', [input]);
+}
+
+export function getDefaultServertoolSkeletonDocumentWithNative(): unknown {
+  return invokeRouterHotpathJsonCapability('getDefaultServertoolSkeletonDocumentJson', []);
+}
+
+export function planServertoolSkeletonDerivedConfigWithNative(input?: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolSkeletonDerivedConfigJson', input !== undefined ? [input] : [{}]);
+}
+
+export function readServertoolPrimaryAutoHookIdsWithNative(input?: unknown): string[] {
+  const derivedConfig = planServertoolSkeletonDerivedConfigWithNative(input) as Record<string, unknown>;
+  const autoHookQueueConfig = derivedConfig?.autoHookQueueConfig;
+  if (!autoHookQueueConfig || typeof autoHookQueueConfig !== 'object' || Array.isArray(autoHookQueueConfig)) {
+    throw new Error('[llmswitch-bridge] readServertoolPrimaryAutoHookIdsWithNative: missing autoHookQueueConfig');
+  }
+  const config = autoHookQueueConfig as Record<string, unknown>;
+  const optionalPrimaryOrder = config.optionalPrimaryOrder;
+  if (!Array.isArray(optionalPrimaryOrder)) {
+    throw new Error('[llmswitch-bridge] readServertoolPrimaryAutoHookIdsWithNative: missing optionalPrimaryOrder');
+  }
+  return optionalPrimaryOrder.filter((entry): entry is string => typeof entry === 'string');
+}
+
+export function buildServertoolDispatchPlanInputWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolDispatchPlanInputJson', [input]);
+}
+
+export function buildServertoolOutcomePlanInputWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolOutcomePlanInputJson', [input]);
+}
+
+export function planServertoolHandlerContractWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolHandlerContractJson', [input]);
+}
+
+export function normalizeServertoolRegistrationSpecWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('normalizeServertoolRegistrationSpecJson', [input]);
+}
+
+export function resolveServertoolToolSpecWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolToolSpecJson', [input]);
+}
+
+export function planServertoolBuiltinHandlerEntryWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolBuiltinHandlerEntryJson', [input]);
+}
+
+export function resolveServertoolBuiltinHandlerEntryWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolBuiltinHandlerEntryJson', [input]);
+}
+
+export function planServertoolBuiltinHandlerNamesWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolBuiltinHandlerNamesJson', [input]);
+}
+
+export function planServertoolBuiltinAutoHandlerEntriesWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolBuiltinAutoHandlerEntriesJson', [input]);
+}
+
+export function planServertoolBuiltinHandlerRecordEntriesWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolBuiltinHandlerRecordEntriesJson', [input]);
+}
+
+export function planServertoolRegistryLookupFromSkeletonWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolRegistryLookupFromSkeletonJson', [input]);
+}
+
+export function resolveServertoolRegistryHandlerWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolRegistryHandlerJson', [input]);
+}
+
+export function resolveServertoolRegisteredNameWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolRegisteredNameJson', [input]);
+}
+
+export function resolveServertoolProgressToolNameWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolProgressToolNameJson', [input]);
+}
+
+export function shouldUseServertoolGoldProgressHighlightWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('shouldUseServertoolGoldProgressHighlightJson', [input]);
+}
+
+export function resolveServertoolProgressStageWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolProgressStageJson', [input]);
+}
+
+export function normalizeServertoolProgressResultWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('normalizeServertoolProgressResultJson', [input]);
+}
+
+export function normalizeServertoolProgressTokenWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('normalizeServertoolProgressTokenJson', [input]);
+}
+
+export function normalizeServertoolProgressFlowIdWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('normalizeServertoolProgressFlowIdJson', [input]);
+}
+
+export function buildServertoolMatchSkippedProgressEventWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolMatchSkippedProgressEventJson', [input]);
+}
+
+export function buildServertoolAutoHookTraceProgressEventWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolAutoHookTraceProgressEventJson', [input]);
+}
+
+export function buildServertoolStopEntryProgressEventWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolStopEntryProgressEventJson', [input]);
+}
+
+export function buildServertoolStopCompareProgressEventWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolStopCompareProgressEventJson', [input]);
+}
+
+export function planServertoolToolCallDispatchWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolToolCallDispatchJson', [input]);
+}
+
+export function planServertoolOutcomeWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolOutcomeJson', [input]);
+}
+
+export function planServertoolNoopOutcomeWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolNoopOutcomeJson', [input]);
+}
+
+export function planServertoolAutoHookQueuesWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolAutoHookQueuesJson', [input]);
+}
+
+export function planServertoolAutoHookQueueItemsWithNative<T>(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolAutoHookQueueItemsJson', [input]);
+}
+
+export function runServertoolOrchestrationMutationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('runServertoolOrchestrationMutationJson', [input]);
+}
+
+export function planServertoolFollowupRuntimeWithNative(flowId: string): unknown {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.planServertoolFollowupRuntimeJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] planServertoolFollowupRuntimeJson not available');
+  }
+  const raw = fn(flowId);
+  return JSON.parse(raw);
+}
+
+export function extractCapturedChatSeedWithNative(captured: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('extractCapturedChatSeedJson', [captured]);
+}
+
+export function buildServertoolReq04FollowupPayloadWithNative(adapterContext: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolReq04FollowupPayloadJson', [adapterContext]);
+}
+
+export function resolveFollowupModelWithNative(seedModel: unknown, adapterContext: unknown): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.resolveFollowupModelJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveFollowupModelJson not available');
+  }
+  const raw = fn(JSON.stringify(seedModel), JSON.stringify(adapterContext));
+  return raw;
+}
+
+export function normalizeFollowupParametersWithNative(parameters: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('normalizeFollowupParametersJson', [parameters]);
+}
+
+export function extractAssistantFollowupMessageWithNative(finalChatResponse: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('extractAssistantFollowupMessageJson', [finalChatResponse]);
+}
+
+export function applyFollowupDeltaPlanWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('applyFollowupDeltaPlanJson', [input]);
+}
+
+export function buildServertoolToolOutputPayloadWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolToolOutputPayloadJson', [input]);
+}
+
+export function buildServertoolHandlerErrorToolOutputPayloadWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolHandlerErrorToolOutputPayloadJson', [input]);
+}
+
+export function collectServertoolAdditionalClientToolCallsWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('collectServertoolAdditionalClientToolCallsJson', [input]);
+}
+
+export function isServertoolClientExecCliProjectionToolCallWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('isServertoolClientExecCliProjectionToolCallJson', [input]);
+}
+
+export function webSearchIsGeminiEngineWithNative(providerKey: string): boolean {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchIsGeminiEngine;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  const raw = fn(JSON.stringify(providerKey));
+  return raw === 'true';
+}
+
+export function webSearchIsQwenEngineWithNative(providerKey: string): boolean {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchIsQwenEngine;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  const raw = fn(JSON.stringify(providerKey));
+  return raw === 'true';
+}
+
+export function webSearchIsGlmEngineWithNative(providerKey: string): boolean {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchIsGlmEngine;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  const raw = fn(JSON.stringify(providerKey));
+  return raw === 'true';
+}
+
+export function webSearchNormalizeResultCountWithNative(valueJson: string): number {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchNormalizeResultCountJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] webSearchNormalizeResultCountJson not available');
+  }
+  const raw = fn(valueJson);
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error('[llmswitch-bridge] webSearchNormalizeResultCountJson: invalid result');
+  }
+  return n;
+}
+
+export function webSearchBuildSystemPromptWithNative(targetCount: number): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchBuildSystemPrompt;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] webSearchBuildSystemPrompt not available');
+  }
+  return fn(targetCount);
+}
+
+export function webSearchSanitizeBackendErrorWithNative(message: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchSanitizeBackendErrorJson;
+  if (typeof fn !== 'function') {
+    return message;
+  }
+  return fn(message);
+}
+
+export function webSearchCollectHitsWithNative(chatResponseJson: string, targetCount: number): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchCollectHitsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] webSearchCollectHitsJson not available');
+  }
+  return fn(chatResponseJson, targetCount);
+}
+
+export function webSearchFormatHitsSummaryWithNative(hitsJson: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchFormatHitsSummaryJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] webSearchFormatHitsSummaryJson not available');
+  }
+  return fn(hitsJson);
+}
+
+export function webSearchLimitHitsWithNative(hitsJson: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchLimitHitsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] webSearchLimitHitsJson not available');
+  }
+  return fn(hitsJson);
+}
+
+export function webSearchExtractAssistantMessageWithNative(chatResponseJson: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchExtractAssistantMessageJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] webSearchExtractAssistantMessageJson not available');
+  }
+  return fn(chatResponseJson);
+}
+
+export function webSearchBuildToolMessagesWithNative(chatResponseJson: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.webSearchBuildToolMessagesJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] webSearchBuildToolMessagesJson not available');
+  }
+  return fn(chatResponseJson);
+}
+
+export function visionBuildAnalysisPayloadWithNative(sourceJson: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.visionBuildAnalysisPayloadJson;
+  if (typeof fn !== 'function') {
+    return 'null';
+  }
+  try {
+    const raw = fn(sourceJson);
+    return typeof raw === 'string' ? raw : 'null';
+  } catch {
+    return 'null';
+  }
+}
+
+export function visionBuildPinnedMetadataWithNative(adapterContextJson: string, payloadJson: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.visionBuildPinnedMetadataJson;
+  if (typeof fn !== 'function') {
+    return 'null';
+  }
+  try {
+    const raw = fn(adapterContextJson, payloadJson);
+    return typeof raw === 'string' ? raw : 'null';
+  } catch {
+    return 'null';
+  }
+}
+
+export function visionExtractOriginalUserPromptWithNative(messagesJson: string): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.visionExtractOriginalUserPromptJson;
+  if (typeof fn !== 'function') {
+    return '';
+  }
+  try {
+    const raw = fn(messagesJson);
+    return typeof raw === 'string' ? raw : '';
+  } catch {
+    return '';
+  }
+}
+
+export function readFollowupClientInjectSourceWithNative(adapterContext: Record<string, unknown>): string {
+  const binding = getRouterHotpathJsonBindingSync();
+  const fn = binding.readFollowupClientInjectSourceJson;
+  if (typeof fn !== 'function') {
+    return '';
+  }
+  try {
+    const ctxJson = JSON.stringify(adapterContext);
+    const raw = fn(ctxJson);
+    return typeof raw === 'string' ? raw : '';
+  } catch {
+    return '';
+  }
+}
+
+// Types re-exported from native-router-hotpath-analysis

@@ -548,9 +548,12 @@ mod tests {
         assert_eq!(state.state, "healthy");
         assert_eq!(state.failure_count, 0);
         assert_eq!(state.cooldown_expires_at, None);
-        assert_eq!(restored.export_persistable_state(4_001), json!({
-            "version": 1,
-            "providerCooldowns": []
-        }));
+        assert_eq!(
+            restored.export_persistable_state(4_001),
+            json!({
+                "version": 1,
+                "providerCooldowns": []
+            })
+        );
     }
 }

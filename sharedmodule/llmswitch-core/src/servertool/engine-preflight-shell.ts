@@ -2,7 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   containsSyntheticRouteCodexControlTextWithNative
-} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   attachStopGatewayContext,
   inspectStopGatewaySignal

@@ -52,10 +52,12 @@ describe('execution-stage-shell', () => {
       }
     });
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'continue_response_stage'
+      projectClientExecCli: false,
+      continueResponseStage: true
     });
     resolveServertoolPostExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'resolve_execution_outcome'
+      resolveExecutionOutcome: true,
+      continueResponseStage: false
     });
     runServertoolIoExecutionQueue.mockResolvedValue({
       executedToolCalls: [{ toolCall: { id: 'call_1' } }]
@@ -103,6 +105,14 @@ describe('execution-stage-shell', () => {
     expect(source).toContain('const postExecutionBranchDecision = resolveServertoolPostExecutionBranchDecisionWithNative({');
     expect(source).not.toContain('switch (preExecutionBranchPlan.action)');
     expect(source).not.toContain('switch (postExecutionBranchPlan.action)');
+    expect(source).not.toContain("preExecutionBranchDecision.action === 'client_exec_cli_projection'");
+    expect(source).not.toContain("preExecutionBranchDecision.action !== 'continue_response_stage'");
+    expect(source).not.toContain("postExecutionBranchDecision.action === 'resolve_execution_outcome'");
+    expect(source).not.toContain("postExecutionBranchDecision.action !== 'continue_response_stage'");
+    expect(source).toContain('preExecutionBranchDecision.projectClientExecCli');
+    expect(source).toContain('preExecutionBranchDecision.continueResponseStage');
+    expect(source).toContain('postExecutionBranchDecision.resolveExecutionOutcome');
+    expect(source).toContain('postExecutionBranchDecision.continueResponseStage');
     expect(source).toContain('invalid pre-execution branch action');
     expect(source).toContain("[servertool] invalid post-execution branch action");
     expect(source).not.toContain('String(preExecutionBranchPlan.action)');
@@ -130,7 +140,8 @@ describe('execution-stage-shell', () => {
   test('returns cli projection when pre-execution branch selects it', async () => {
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'client_exec_cli_projection',
+      projectClientExecCli: true,
+      continueResponseStage: false,
       projectedToolCall: {
         id: 'call_1',
         name: 'web_search',
@@ -165,10 +176,11 @@ describe('execution-stage-shell', () => {
     });
   });
 
-  test('fails fast when pre-execution branch returns an unknown native action', async () => {
+  test('fails fast when pre-execution branch returns an ambiguous native application plan', async () => {
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'unknown_native_action'
+      projectClientExecCli: false,
+      continueResponseStage: false
     });
 
     await expect(
@@ -193,11 +205,13 @@ describe('execution-stage-shell', () => {
   test('projects executable tool calls directly into the native execution-branch planner', async () => {
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'continue_response_stage'
+      projectClientExecCli: false,
+      continueResponseStage: true
     });
     resolveServertoolPostExecutionBranchDecisionWithNative.mockReset();
     resolveServertoolPostExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'resolve_execution_outcome'
+      resolveExecutionOutcome: true,
+      continueResponseStage: false
     });
 
     await runServertoolExecutionStage({
@@ -254,11 +268,13 @@ describe('execution-stage-shell', () => {
   test('finalizes response stage only when post-execution branch explicitly continues', async () => {
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'continue_response_stage'
+      projectClientExecCli: false,
+      continueResponseStage: true
     });
     resolveServertoolPostExecutionBranchDecisionWithNative.mockReset();
     resolveServertoolPostExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'continue_response_stage'
+      resolveExecutionOutcome: false,
+      continueResponseStage: true
     });
     runServertoolIoExecutionQueue.mockResolvedValueOnce({
       executedToolCalls: []
@@ -292,14 +308,16 @@ describe('execution-stage-shell', () => {
     });
   });
 
-  test('fails fast when post-execution branch returns an unknown native action', async () => {
+  test('fails fast when post-execution branch returns an ambiguous native application plan', async () => {
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReset();
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'continue_response_stage'
+      projectClientExecCli: false,
+      continueResponseStage: true
     });
     resolveServertoolPostExecutionBranchDecisionWithNative.mockReset();
     resolveServertoolPostExecutionBranchDecisionWithNative.mockReturnValue({
-      action: 'unknown_post_execution_action'
+      resolveExecutionOutcome: false,
+      continueResponseStage: false
     });
     runServertoolIoExecutionQueue.mockResolvedValueOnce({
       executedToolCalls: []

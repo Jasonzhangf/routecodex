@@ -1,5 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 import { Command } from 'commander';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { createStopCommand } from '../../src/cli/commands/stop.js';
 import { registerStopCommand } from '../../src/cli/register/stop-command.js';
@@ -27,6 +30,9 @@ describe('cli stop command', () => {
       findListeningPids: () => [],
       killPidBestEffort: () => {},
       sleep: async () => {},
+      fetchImpl: (async () => {
+        throw new Error('no server');
+      }) as any,
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -53,6 +59,9 @@ describe('cli stop command', () => {
       findListeningPids: () => [],
       killPidBestEffort: () => {},
       sleep: async () => {},
+      fetchImpl: (async () => {
+        throw new Error('no server');
+      }) as any,
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -131,6 +140,9 @@ describe('cli stop command', () => {
       findListeningPids: () => [],
       killPidBestEffort: () => {},
       sleep: async () => {},
+      fetchImpl: (async () => {
+        throw new Error('no server');
+      }) as any,
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -139,5 +151,94 @@ describe('cli stop command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' });
     expect(succeeded.join('\n')).toContain('No server listening on 5520');
+  });
+
+  it('does not fail stop when guardian shutdown is unavailable', async () => {
+    const program = new Command();
+    createStopCommand(program, {
+      isDevPackage: true,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      sleep: async () => {},
+      stopGuardianDaemon: async () => {
+        throw new Error('guardian unavailable');
+      },
+      reportGuardianLifecycle: async () => false,
+      fetchImpl: (async () => {
+        throw new Error('no server');
+      }) as any,
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' })).resolves.toBe(program);
+  });
+
+  it('release stop expands a matched config port to the full port group and shuts down healthy no-pid servers', async () => {
+    const previousConfig = process.env.ROUTECODEX_CONFIG_PATH;
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stop-command-'));
+    const configPath = path.join(tempDir, 'config.toml');
+    fs.writeFileSync(configPath, `
+[httpserver]
+port = 5520
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+port = 4444
+
+[[httpserver.ports]]
+port = 5520
+
+[[httpserver.ports]]
+port = 5555
+
+[[httpserver.ports]]
+port = 10000
+`);
+    process.env.ROUTECODEX_CONFIG_PATH = configPath;
+    const program = new Command();
+    const shutdownPorts: number[] = [];
+
+    try {
+      createStopCommand(program, {
+        isDevPackage: false,
+        defaultDevPort: 5520,
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: () => {}, error: () => {} },
+        findListeningPids: () => [],
+        killPidBestEffort: () => {},
+        sleep: async () => {},
+        env: {},
+        fsImpl: fs,
+        pathImpl: { join: (...parts: string[]) => parts.join('/') },
+        getHomeDir: () => '/home/test',
+        fetchImpl: (async (url: string | URL | Request) => {
+          const text = String(url);
+          if (text.endsWith('/shutdown')) {
+            shutdownPorts.push(Number(new URL(text).port));
+            return { ok: true, status: 200 };
+          }
+          throw new Error('server stopped');
+        }) as any,
+        exit: (code) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await program.parseAsync(['node', 'rcc', 'stop'], { from: 'node' });
+      expect(shutdownPorts).toEqual([4444, 5520, 5555, 10000]);
+    } finally {
+      if (previousConfig === undefined) {
+        delete process.env.ROUTECODEX_CONFIG_PATH;
+      } else {
+        process.env.ROUTECODEX_CONFIG_PATH = previousConfig;
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

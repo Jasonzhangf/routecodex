@@ -13,9 +13,20 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmitOnError": false,
-    "types": ["node"]
+    "baseUrl": ".",
+    "paths": {
+      "rcc-llmswitch-core/native/servertool-wrapper": [
+        "types/servertool-wrapper.d.ts"
+      ]
+    },
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*", "src/**/*.json"],
+  "include": [
+    "src/**/*",
+    "src/**/*.json"
+  ],
   "exclude": [
     "dist",
     "node_modules",

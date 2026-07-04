@@ -275,6 +275,13 @@ function readRequired(path) {
   return readFileSync(path, 'utf8');
 }
 
+function readOptional(path) {
+  if (!existsSync(path)) {
+    return '';
+  }
+  return readFileSync(path, 'utf8');
+}
+
 function assertMissing(check, file, content, needle) {
   if (content.includes(needle)) {
     fail(check, `${file} must not contain "${needle}"`);
@@ -1365,7 +1372,7 @@ function checkStopMessagePersistedLookupRustOwner() {
   const runtimeUtils = readRequired(STOP_MESSAGE_RUNTIME_UTILS);
   const routingState = readRequired(STOP_MESSAGE_ROUTING_STATE);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
-  const chatProcessWrapper = readRequired(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`);
+  const chatProcessWrapper = readOptional(`${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`);
   const stopMessageAuto = readRequired(STOP_MESSAGE_AUTO_HANDLER);
   const stopMessageCounter = readRequired(TS_STOP_MESSAGE_COUNTER);
   const followupDispatchSpec = readRequired(`${ROOT}/tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts`);
@@ -2908,15 +2915,23 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'pub fn plan_servertool_execution_branch'],
     ['servertool-execution-branch-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_branch_contract'],
     ['servertool-execution-branch-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_execution_branch_json'],
+    ['servertool-execution-branch-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_execution_branch_application_json'],
     ['servertool-execution-branch-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_branch_json'],
+    ['servertool-execution-branch-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_execution_branch_application_json'],
     ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchJson'],
+    ['servertool-execution-branch-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionBranchApplicationJson'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchWithNative'],
+    ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionBranchApplicationWithNative'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'resolveServertoolPreExecutionBranchDecisionWithNative'],
     ['servertool-execution-branch-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'resolveServertoolPostExecutionBranchDecisionWithNative'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'resolveServertoolPreExecutionBranchDecisionWithNative('],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'resolveServertoolPostExecutionBranchDecisionWithNative('],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const preExecutionBranchDecision = resolveServertoolPreExecutionBranchDecisionWithNative({'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'const postExecutionBranchDecision = resolveServertoolPostExecutionBranchDecisionWithNative({'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'preExecutionBranchDecision.projectClientExecCli'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'preExecutionBranchDecision.continueResponseStage'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'postExecutionBranchDecision.resolveExecutionOutcome'],
+    ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'postExecutionBranchDecision.continueResponseStage'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'invalid pre-execution branch action'],
     ['servertool-execution-branch-ts-thin-shell', TS_EXECUTION_STAGE_SHELL, readRequired(TS_EXECUTION_STAGE_SHELL), 'invalid post-execution branch action'],
     ['servertool-execution-branch-rust-owner', RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT, rustExecutionBranch, 'pub projected_tool_call: Option<ServertoolProjectedToolCall>'],
@@ -3159,7 +3174,7 @@ function checkFollowupMainlineNativeBridgeRustOwner() {
 // ── Check 14: skeleton config has Rust owner ──────────────────
 function checkServertoolSkeletonConfigRustOwner() {
   const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
-  const nativeWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
 
   for (const needle of [
@@ -3181,7 +3196,7 @@ function checkServertoolSkeletonConfigRustOwner() {
   ]) {
     assertContains(
       'servertool-skeleton-config-native-bridge',
-      NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
       nativeWrapper,
       needle
     );
@@ -4187,7 +4202,7 @@ function checkEngineSelectionRustOwner() {
 function checkServertoolFlowPresentationRustOwner() {
   const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
   const progressLogShell = readRequired(`${SERVERTOOL_TS_DIR}/progress-log-block.ts`);
-  const nativeWrapper = readRequired(NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER);
+  const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
 
   for (const needle of [
@@ -4242,7 +4257,7 @@ function checkServertoolFlowPresentationRustOwner() {
   ]) {
     assertContains(
       'servertool-flow-presentation-native-bridge',
-      NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
+      NATIVE_SERVERTOOL_CORE_WRAPPER,
       nativeWrapper,
       needle
     );
@@ -5322,10 +5337,10 @@ function checkServertoolRustOutcomeCloseout() {
       'execution-stage-shell.ts must finalize only from explicit native continue_response_stage action'
     );
   }
-  if (!executionStageShell.includes("postExecutionBranchDecision.action !== 'continue_response_stage'")) {
+  if (!executionStageShell.includes('postExecutionBranchDecision.continueResponseStage')) {
     fail(
       'servertool-execution-stage-explicit-continue-response-stage',
-      'execution-stage-shell.ts must explicitly consume native continue_response_stage action'
+      'execution-stage-shell.ts must explicitly consume native continue response-stage application plan'
     );
   }
   for (const marker of ['memory_cache_auto', 'executeServertoolBackendPlan']) {
@@ -6513,6 +6528,8 @@ function checkServertoolResponseStageGateThinShell() {
     'invalid response-stage post auto-hook action',
     'function hasServerSideToolEngineResult(',
     'hasServerSideToolEngineResult(autoHookResult)',
+    "preAutoHookDecision.action === 'return_pass_result'",
+    "postAutoHookDecision.action === 'throw_required_response_hook_empty'",
   ]) {
     if (responseStageAutoHookShell.includes(marker)) {
       fail(
@@ -6537,7 +6554,19 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'createServertoolProviderProtocolErrorFromPlan(postAutoHookDecision.errorPlan)'
+    'resolveServertoolResponseStageAutoHookPreApplicationWithNative'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'resolveServertoolResponseStageAutoHookPostApplicationWithNative'
+  );
+  assertContains(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    responseStageAutoHookShell,
+    'createServertoolProviderProtocolErrorFromPlan(postAutoHookApplication.errorPlan)'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
@@ -6549,13 +6578,13 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'return preAutoHookDecision.result'
+    'return preAutoHookApplication.result'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
     `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
     responseStageAutoHookShell,
-    'return postAutoHookDecision.result'
+    'return postAutoHookApplication.result'
   );
 }
 
@@ -6570,9 +6599,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
   const registryOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`);
   const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
   const executionQueueShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`);
-  const nativeChatProcessServertoolOrchestrationSemantics = readRequired(
-    NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER
-  );
+  const nativeServertoolCoreSemantics = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const rustProjectionContextSource = readRequired(
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
   );
@@ -6833,9 +6860,9 @@ function checkServertoolEngineStoplessSessionThinShell() {
   }
   assertContains(
     'servertool-builtin-handler-stopless-thin-shell',
-    NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
-    nativeChatProcessServertoolOrchestrationSemantics,
-    'resolveServertoolBuiltinHandlerEntryWithNative('
+    NATIVE_SERVERTOOL_CORE_WRAPPER,
+    nativeServertoolCoreSemantics,
+    'resolveServertoolBuiltinHandlerEntryWithNative'
   );
   pass(
     'servertool-engine-stopless-session-thin-shell',

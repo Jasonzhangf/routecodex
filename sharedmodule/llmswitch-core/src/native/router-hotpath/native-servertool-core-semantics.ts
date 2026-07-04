@@ -9,15 +9,230 @@ import {
   type ProviderProtocolErrorCode
 } from '../../conversion/provider-protocol-error.js';
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
-import { parseStopMessagePersistedLookupPlanPayload } from './native-router-hotpath-analysis.js';
 import {
-  type NativeServertoolResponseStageGate,
-  buildServertoolOutcomePlanInputWithNative,
-  planServertoolOutcomeWithNative
-} from './native-chat-process-servertool-orchestration-semantics.js';
+  parseStopMessagePersistedLookupPlanPayload,
+  parseServertoolDispatchPlanInputPayload,
+  parseServertoolDispatchPlanPayload,
+  parseServertoolOutcomePlanInputPayload,
+  parseServertoolOutcomePlanPayload,
+  parseServertoolResponseStagePayload,
+  type ServertoolResponseStageGatePayload
+} from './native-router-hotpath-analysis.js';
+import {
+  buildServertoolAutoHookTraceProgressEventWithNative as buildServertoolAutoHookTraceProgressEventWithNativeRaw,
+  buildServertoolDispatchPlanInputWithNative as buildServertoolDispatchPlanInputWithNativeRaw,
+  buildServertoolMatchSkippedProgressEventWithNative as buildServertoolMatchSkippedProgressEventWithNativeRaw,
+  buildServertoolOutcomePlanInputWithNative as buildServertoolOutcomePlanInputWithNativeRaw,
+  buildServertoolStopCompareProgressEventWithNative as buildServertoolStopCompareProgressEventWithNativeRaw,
+  buildServertoolStopEntryProgressEventWithNative as buildServertoolStopEntryProgressEventWithNativeRaw,
+  normalizeServertoolProgressFlowIdWithNative as normalizeServertoolProgressFlowIdWithNativeRaw,
+  normalizeServertoolProgressResultWithNative as normalizeServertoolProgressResultWithNativeRaw,
+  planServertoolAutoHookQueueItemsWithNative as planServertoolAutoHookQueueItemsWithNativeRaw,
+  planServertoolOutcomeWithNative as planServertoolOutcomeWithNativeRaw,
+  planServertoolToolCallDispatchWithNative as planServertoolToolCallDispatchWithNativeRaw,
+  resolveServertoolProgressStageWithNative as resolveServertoolProgressStageWithNativeRaw,
+  resolveServertoolProgressToolNameWithNative as resolveServertoolProgressToolNameWithNativeRaw,
+  runServertoolResponseStageWithNative as runServertoolResponseStageWithNativeRaw,
+  shouldUseServertoolGoldProgressHighlightWithNative as shouldUseServertoolGoldProgressHighlightWithNativeRaw
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
+
+export type NativeServertoolResponseStageGate = ServertoolResponseStageGatePayload;
+export type NativeServertoolResponseStage =
+  ReturnType<typeof parseServertoolResponseStagePayload> extends infer T ? Exclude<T, null> : never;
+export type NativeServertoolDispatchPlan =
+  ReturnType<typeof parseServertoolDispatchPlanPayload> extends infer T ? Exclude<T, null> : never;
+export type NativeServertoolDispatchPlanInput =
+  ReturnType<typeof parseServertoolDispatchPlanInputPayload> extends infer T ? Exclude<T, null> : never;
+export type NativeServertoolOutcomePlan =
+  ReturnType<typeof parseServertoolOutcomePlanPayload> extends infer T ? Exclude<T, null> : never;
+export type NativeServertoolOutcomePlanInput =
+  ReturnType<typeof parseServertoolOutcomePlanInputPayload> extends infer T ? Exclude<T, null> : never;
+
+export type NativeServertoolAutoHookQueueItems<T> = {
+  queueOrder: Array<{
+    queue: 'A_optional' | 'B_mandatory';
+    entries: T[];
+  }>;
+};
+
+export interface NativeServertoolProgressEvent {
+  flowId: string;
+  tool: string;
+  stage: 'entry' | 'trigger' | 'match' | 'hook' | 'compare';
+  result: string;
+  message: string;
+  step: number;
+}
+
+export const runServertoolResponseStageWithNative =
+  runServertoolResponseStageWithNativeRaw as (payload: unknown, requestId: string) => NativeServertoolResponseStage;
+
+export const buildServertoolDispatchPlanInputWithNative =
+  buildServertoolDispatchPlanInputWithNativeRaw as (input: {
+    toolCalls: Array<{ id: string; name: string; arguments: string }>;
+    disableToolCallHandlers: boolean;
+    includeToolCallHandlerNames?: string[] | null;
+    excludeToolCallHandlerNames?: string[] | null;
+    runtimeMetadata?: Record<string, unknown>;
+    document?: unknown;
+  }) => NativeServertoolDispatchPlanInput;
+
+export const buildServertoolOutcomePlanInputWithNative =
+  buildServertoolOutcomePlanInputWithNativeRaw as (input: {
+    toolCalls: Array<{ id: string; name: string; arguments: string }>;
+    executionState: unknown;
+    adapterContext?: unknown;
+    baseForExecution?: unknown;
+  }) => NativeServertoolOutcomePlanInput;
+
+export const resolveServertoolProgressToolNameWithNative =
+  resolveServertoolProgressToolNameWithNativeRaw as (input: {
+    flowId: unknown;
+    document?: unknown;
+  }) => string;
+
+export const shouldUseServertoolGoldProgressHighlightWithNative =
+  shouldUseServertoolGoldProgressHighlightWithNativeRaw as (input: {
+    flowId: unknown;
+    document?: unknown;
+  }) => boolean;
+
+export const resolveServertoolProgressStageWithNative =
+  resolveServertoolProgressStageWithNativeRaw as (input: {
+    step: unknown;
+    message: unknown;
+  }) => string;
+
+export const normalizeServertoolProgressResultWithNative =
+  normalizeServertoolProgressResultWithNativeRaw as (input: { message: unknown }) => string;
+
+export const normalizeServertoolProgressFlowIdWithNative =
+  normalizeServertoolProgressFlowIdWithNativeRaw as (input: { value: unknown }) => string;
+
+export const buildServertoolMatchSkippedProgressEventWithNative =
+  buildServertoolMatchSkippedProgressEventWithNativeRaw as (input: {
+    skipReason: string;
+  }) => NativeServertoolProgressEvent;
+
+export const buildServertoolAutoHookTraceProgressEventWithNative =
+  buildServertoolAutoHookTraceProgressEventWithNativeRaw as (input: {
+    hookId: string;
+    phase: string;
+    priority: number;
+    queue: 'A_optional' | 'B_mandatory';
+    queueIndex: number;
+    queueTotal: number;
+    result: 'miss' | 'match' | 'error';
+    reason: string;
+    flowId?: string;
+  }) => NativeServertoolProgressEvent;
+
+export const buildServertoolStopEntryProgressEventWithNative =
+  buildServertoolStopEntryProgressEventWithNativeRaw as (input: {
+    stage: 'entry' | 'trigger';
+    result: string;
+  }) => NativeServertoolProgressEvent;
+
+export const buildServertoolStopCompareProgressEventWithNative =
+  buildServertoolStopCompareProgressEventWithNativeRaw as (input: {
+    stage: 'entry' | 'trigger';
+    flowId?: string;
+    summary: string;
+    compare?: unknown;
+  }) => NativeServertoolProgressEvent;
+
+export const planServertoolToolCallDispatchWithNative =
+  planServertoolToolCallDispatchWithNativeRaw as (input: {
+    toolCalls: Array<{ id: string; name: string; arguments: string }>;
+    disableToolCallHandlers: boolean;
+    includeToolCallHandlerNames?: string[] | null;
+    excludeToolCallHandlerNames?: string[] | null;
+    registeredToolCallHandlers: Array<{
+      name: string;
+      trigger: string;
+      executionMode: string;
+      stripAfterExecute: boolean;
+    }>;
+    runtimeMetadata?: Record<string, unknown>;
+  }) => NativeServertoolDispatchPlan;
+
+export const planServertoolOutcomeWithNative =
+  planServertoolOutcomeWithNativeRaw as (input: {
+    toolCalls: Array<{ id: string; name: string; arguments: string }>;
+    executedToolCalls: Array<{
+      id: string;
+      name: string;
+      arguments: string;
+      executionMode: string;
+      stripAfterExecute: boolean;
+    }>;
+    executedFlowIds: string[];
+    lastExecutionFlowId?: string;
+  }) => NativeServertoolOutcomePlan;
+
+export const planServertoolAutoHookQueueItemsWithNative =
+  planServertoolAutoHookQueueItemsWithNativeRaw as <T extends {
+    id: string;
+    phase: string;
+    priority: number;
+    order: number;
+  }>(input: {
+    hooks: T[];
+    includeAutoHookIds?: string[] | null;
+    excludeAutoHookIds?: string[] | null;
+    document?: unknown;
+  }) => NativeServertoolAutoHookQueueItems<T>;
+
+// Re-export the existing local servertool orchestration wrappers while this module
+// becomes the narrow servertool-core entry surface for TS shells.
+export {
+  buildServertoolHandlerErrorToolOutputPayloadWithNative,
+  buildServertoolToolOutputPayloadWithNative,
+  collectServertoolAdditionalClientToolCallsWithNative,
+  containsSyntheticRouteCodexControlTextWithNative,
+  detectEmptyAssistantPayloadContractSignalWithNative,
+  detectProviderResponseShapeWithNative,
+  extractCapturedChatSeedWithNative,
+  extractAssistantFollowupMessageWithNative,
+  isServertoolClientExecCliProjectionToolCallWithNative,
+  normalizeFollowupParametersWithNative,
+  normalizeServertoolProgressTokenWithNative,
+  normalizeServertoolRegistrationSpecWithNative,
+  planChatWebSearchOperationsWithNative,
+  planServertoolAutoHookQueuesWithNative,
+  planServertoolBuiltinAutoHandlerEntriesWithNative,
+  planServertoolBuiltinHandlerEntryWithNative,
+  planServertoolBuiltinHandlerNamesWithNative,
+  planServertoolBuiltinHandlerRecordEntriesWithNative,
+  planServertoolRegistryLookupFromSkeletonWithNative,
+  planServertoolResponseStageGateWithNative,
+  planServertoolFollowupRuntimeWithNative,
+  planServertoolHandlerContractWithNative,
+  planServertoolNoopOutcomeWithNative,
+  planServertoolSkeletonDerivedConfigWithNative,
+  readServertoolPrimaryAutoHookIdsWithNative,
+  resolveServertoolBuiltinHandlerEntryWithNative,
+  resolveServertoolRegisteredNameWithNative,
+  resolveServertoolRegistryHandlerWithNative,
+  resolveServertoolToolSpecWithNative,
+  runServertoolOrchestrationMutationWithNative,
+  visionBuildAnalysisPayloadWithNative,
+  visionBuildPinnedMetadataWithNative,
+  visionExtractOriginalUserPromptWithNative,
+  webSearchBuildSystemPromptWithNative,
+  webSearchBuildToolMessagesWithNative,
+  webSearchCollectHitsWithNative,
+  webSearchExtractAssistantMessageWithNative,
+  webSearchFormatHitsSummaryWithNative,
+  webSearchIsGeminiEngineWithNative,
+  webSearchIsGlmEngineWithNative,
+  webSearchIsQwenEngineWithNative,
+  webSearchLimitHitsWithNative,
+  webSearchNormalizeResultCountWithNative,
+  webSearchSanitizeBackendErrorWithNative
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 // ── Types ───────────────────────────────────────────────────────────────────
-
 export interface StopGatewayContext {
   observed: boolean;
   eligible: boolean;
@@ -368,19 +583,23 @@ export type ServertoolExecutionBranchPlan =
 
 export type ServertoolPreExecutionBranchDecision =
   | {
-      action: 'client_exec_cli_projection';
+      projectClientExecCli: true;
+      continueResponseStage: false;
       projectedToolCall: ServertoolProjectedToolCall;
     }
   | {
-      action: 'continue_response_stage';
+      projectClientExecCli: false;
+      continueResponseStage: true;
     };
 
 export type ServertoolPostExecutionBranchDecision =
   | {
-      action: 'resolve_execution_outcome';
+      resolveExecutionOutcome: true;
+      continueResponseStage: false;
     }
   | {
-      action: 'continue_response_stage';
+      resolveExecutionOutcome: false;
+      continueResponseStage: true;
     };
 
 export interface ServertoolProjectedToolCall {
@@ -676,6 +895,29 @@ export type ServertoolResponseStageAutoHookPostDecision =
   | {
       action: 'throw_required_response_hook_empty';
       errorPlan: ReturnType<typeof planServertoolRequiredResponseHookEmptyErrorWithNative>;
+    };
+
+export type ServertoolResponseStageAutoHookPreApplicationDecision =
+  | {
+      returnPassResult: true;
+      runAutoHooks: false;
+      result: ServertoolResponseStageAutoHookPassResult;
+    }
+  | {
+      returnPassResult: false;
+      runAutoHooks: true;
+    };
+
+export type ServertoolResponseStageAutoHookPostApplicationDecision =
+  | {
+      throwRequiredResponseHookEmpty: true;
+      returnPassResult: false;
+      errorPlan: ReturnType<typeof planServertoolRequiredResponseHookEmptyErrorWithNative>;
+    }
+  | {
+      throwRequiredResponseHookEmpty: false;
+      returnPassResult: true;
+      result: ServertoolResponseStageAutoHookPassResult;
     };
 
 export interface ServertoolResponseStageOrchestrationOutputPlan {
@@ -2750,7 +2992,7 @@ export function planServertoolExecutionBranchWithNative(input: {
   if (record.action !== 'client_exec_cli_projection') {
     return { action: record.action };
   }
-  const projectedToolCall = record.projectedToolCall as ServertoolProjectedToolCall;
+  const projectedToolCall = record.projectedToolCall as unknown as ServertoolProjectedToolCall;
   return {
     action: record.action,
     projectedToolCall,
@@ -2763,6 +3005,91 @@ export function planServertoolExecutionBranchWithNative(input: {
   };
 }
 
+function planServertoolExecutionBranchApplicationWithNative(input: {
+  branchPlan: ServertoolExecutionBranchPlan;
+  phase: 'pre_execution' | 'post_execution';
+}): (
+  | {
+      projectClientExecCli: true;
+      resolveExecutionOutcome: false;
+      continueResponseStage: false;
+      projectedToolCall: ServertoolProjectedToolCall;
+    }
+  | {
+      projectClientExecCli: false;
+      resolveExecutionOutcome: true;
+      continueResponseStage: false;
+      projectedToolCall?: never;
+    }
+  | {
+      projectClientExecCli: false;
+      resolveExecutionOutcome: false;
+      continueResponseStage: true;
+      projectedToolCall?: never;
+    }
+) {
+  const capability = 'planServertoolExecutionBranchApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolExecutionBranchApplicationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolExecutionBranchApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolExecutionBranchApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.projectClientExecCli !== 'boolean' ||
+    typeof record.resolveExecutionOutcome !== 'boolean' ||
+    typeof record.continueResponseStage !== 'boolean'
+  ) {
+    throw new Error('planServertoolExecutionBranchApplicationJson native returned invalid booleans');
+  }
+  const enabledCount = [
+    record.projectClientExecCli,
+    record.resolveExecutionOutcome,
+    record.continueResponseStage
+  ].filter(Boolean).length;
+  if (enabledCount !== 1) {
+    throw new Error('planServertoolExecutionBranchApplicationJson native returned ambiguous plan');
+  }
+  if (record.projectClientExecCli) {
+    if (!record.projectedToolCall || typeof record.projectedToolCall !== 'object' || Array.isArray(record.projectedToolCall)) {
+      throw new Error('planServertoolExecutionBranchApplicationJson native returned invalid projectedToolCall');
+    }
+    const projected = record.projectedToolCall as Record<string, unknown>;
+    if (
+      typeof projected.id !== 'string' ||
+      typeof projected.name !== 'string' ||
+      typeof projected.arguments !== 'string'
+    ) {
+      throw new Error('planServertoolExecutionBranchApplicationJson native returned invalid projectedToolCall');
+    }
+    return {
+      projectClientExecCli: true,
+      resolveExecutionOutcome: false,
+      continueResponseStage: false,
+      projectedToolCall: projected as unknown as ServertoolProjectedToolCall
+    };
+  }
+  if (record.resolveExecutionOutcome) {
+    return {
+      projectClientExecCli: false,
+      resolveExecutionOutcome: true,
+      continueResponseStage: false
+    };
+  }
+  return {
+    projectClientExecCli: false,
+    resolveExecutionOutcome: false,
+    continueResponseStage: true
+  };
+}
+
 export function resolveServertoolPreExecutionBranchDecisionWithNative(input: {
   executableToolCalls: Array<{
     id: string;
@@ -2771,20 +3098,25 @@ export function resolveServertoolPreExecutionBranchDecisionWithNative(input: {
     executionMode?: string;
   }>;
 }): ServertoolPreExecutionBranchDecision {
-  const plan = planServertoolExecutionBranchWithNative({
+  const branchPlan = planServertoolExecutionBranchWithNative({
     executableToolCalls: input.executableToolCalls,
     executedToolCallsLen: 0
   });
-  if (plan.action === 'client_exec_cli_projection') {
+  const application = planServertoolExecutionBranchApplicationWithNative({
+    branchPlan,
+    phase: 'pre_execution'
+  });
+  if (application.projectClientExecCli) {
     return {
-      action: 'client_exec_cli_projection',
-      projectedToolCall: plan.projectedToolCall
+      projectClientExecCli: true,
+      continueResponseStage: false,
+      projectedToolCall: application.projectedToolCall
     };
   }
-  if (plan.action === 'continue_response_stage') {
-    return { action: 'continue_response_stage' };
-  }
-  throw new Error('[servertool] invalid pre-execution branch action');
+  return {
+    projectClientExecCli: false,
+    continueResponseStage: true
+  };
 }
 
 export function resolveServertoolPostExecutionBranchDecisionWithNative(input: {
@@ -2796,14 +3128,21 @@ export function resolveServertoolPostExecutionBranchDecisionWithNative(input: {
   }>;
   executedToolCallsLen: number;
 }): ServertoolPostExecutionBranchDecision {
-  const plan = planServertoolExecutionBranchWithNative(input);
-  if (plan.action === 'resolve_execution_outcome') {
-    return { action: 'resolve_execution_outcome' };
+  const branchPlan = planServertoolExecutionBranchWithNative(input);
+  const application = planServertoolExecutionBranchApplicationWithNative({
+    branchPlan,
+    phase: 'post_execution'
+  });
+  if (application.resolveExecutionOutcome) {
+    return {
+      resolveExecutionOutcome: true,
+      continueResponseStage: false
+    };
   }
-  if (plan.action === 'continue_response_stage') {
-    return { action: 'continue_response_stage' };
-  }
-  throw new Error('[servertool] invalid post-execution branch action');
+  return {
+    resolveExecutionOutcome: false,
+    continueResponseStage: true
+  };
 }
 
 export function planServertoolEnginePreflightWithNative(input: {
@@ -4090,6 +4429,45 @@ export function resolveServertoolResponseStageAutoHookPreDecisionWithNative(inpu
   }
 }
 
+export function resolveServertoolResponseStageAutoHookPreApplicationWithNative(input: {
+  decision: ServertoolResponseStageAutoHookPreDecision;
+}): ServertoolResponseStageAutoHookPreApplicationDecision {
+  const capability = 'planServertoolResponseStageAutoHookPreApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolResponseStageAutoHookPreApplicationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolResponseStageAutoHookPreApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolResponseStageAutoHookPreApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.returnPassResult !== 'boolean' || typeof record.runAutoHooks !== 'boolean') {
+    throw new Error('planServertoolResponseStageAutoHookPreApplicationJson native returned invalid booleans');
+  }
+  if (record.returnPassResult === record.runAutoHooks) {
+    throw new Error('planServertoolResponseStageAutoHookPreApplicationJson native returned ambiguous plan');
+  }
+  if (record.returnPassResult) {
+    if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
+      throw new Error('planServertoolResponseStageAutoHookPreApplicationJson native returned missing result');
+    }
+    return {
+      returnPassResult: true,
+      runAutoHooks: false,
+      result: record.result as ServertoolResponseStageAutoHookPassResult
+    };
+  }
+  return {
+    returnPassResult: false,
+    runAutoHooks: true
+  };
+}
+
 export function resolveServertoolResponseStageAutoHookPostDecisionWithNative(input: {
   requestId: string;
   responseStageGatePlan: NativeServertoolResponseStageGate;
@@ -4121,6 +4499,52 @@ export function resolveServertoolResponseStageAutoHookPostDecisionWithNative(inp
     default:
       throw new Error('[servertool] invalid response-stage post auto-hook action');
   }
+}
+
+export function resolveServertoolResponseStageAutoHookPostApplicationWithNative(input: {
+  decision: ServertoolResponseStageAutoHookPostDecision;
+}): ServertoolResponseStageAutoHookPostApplicationDecision {
+  const capability = 'planServertoolResponseStageAutoHookPostApplicationJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error('planServertoolResponseStageAutoHookPostApplicationJson native unavailable');
+  }
+  const resultJson = fn(JSON.stringify(input));
+  if (typeof resultJson !== 'string') {
+    throw new Error(`planServertoolResponseStageAutoHookPostApplicationJson native returned non-string: ${typeof resultJson}`);
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('planServertoolResponseStageAutoHookPostApplicationJson native returned invalid plan');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.throwRequiredResponseHookEmpty !== 'boolean' ||
+    typeof record.returnPassResult !== 'boolean'
+  ) {
+    throw new Error('planServertoolResponseStageAutoHookPostApplicationJson native returned invalid booleans');
+  }
+  if (record.throwRequiredResponseHookEmpty === record.returnPassResult) {
+    throw new Error('planServertoolResponseStageAutoHookPostApplicationJson native returned ambiguous plan');
+  }
+  if (record.throwRequiredResponseHookEmpty) {
+    if (!record.errorPlan || typeof record.errorPlan !== 'object' || Array.isArray(record.errorPlan)) {
+      throw new Error('planServertoolResponseStageAutoHookPostApplicationJson native returned missing errorPlan');
+    }
+    return {
+      throwRequiredResponseHookEmpty: true,
+      returnPassResult: false,
+      errorPlan: record.errorPlan as ReturnType<typeof planServertoolRequiredResponseHookEmptyErrorWithNative>
+    };
+  }
+  if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) {
+    throw new Error('planServertoolResponseStageAutoHookPostApplicationJson native returned missing result');
+  }
+  return {
+    throwRequiredResponseHookEmpty: false,
+    returnPassResult: true,
+    result: record.result as ServertoolResponseStageAutoHookPassResult
+  };
 }
 
 export function planServertoolResponseStageOrchestrationOutputWithNative(input: {

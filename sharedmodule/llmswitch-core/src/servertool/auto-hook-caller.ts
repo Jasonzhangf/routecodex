@@ -15,7 +15,7 @@ import {
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   planServertoolAutoHookQueueItemsWithNative
-} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 function buildAutoHookQueuesFromNativePlan(args: {
   hooks: ServerToolAutoHookDescriptor[];

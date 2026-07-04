@@ -3,6 +3,12 @@
 - Durable rule: when `buildHubPipelineInput()` swaps `body=hubBody`, it must carry the original body as request-scoped data-plane truth (`__raw_request_body`) for Chat Process capture only. Do not fix missing Responses context by scope fallback, by guessing from provider response, or by stuffing request context into MetadataCenter control state.
 - Verified closure: focused capture Jest passed, function-map gate passed, root `tsc --noEmit` passed, `build:base` passed, global `routecodex 0.90.3527` installed, 5555 restarted healthy, live first `/v1/responses` turn and live `submit_tool_outputs` continuation both succeeded without new `RESPONSES_STORE_MISSING_REQUEST_CONTEXT` / `record.missing_request_context` logs.
 
+# 2026-07-04: plain start is non-disruptive; fixed package installed as 0.90.3546
+- Verified root cause: global 0.90.3542 `dist/cli/commands/start.js` still had `const shouldRestart = options.restart !== false || options.exclusive === true`, so plain start behaved like restart and could stop a live service.
+- Fix truth: source and installed global 0.90.3546 now use `const shouldRestart = options.restart === true || options.exclusive === true`; `start` no longer sends shutdown unless the caller explicitly passes `--restart` / `--exclusive`.
+- Verification evidence: focused CLI lifecycle Jest passed 32/32; sharedmodule `tsc --noEmit` passed; `build-core`, `build:min`, and `pack:rcc` passed; both `routecodex-0.90.3546.tgz` and `rcc-0.90.3546.tgz` installed globally; `routecodex --version` and `rcc --version` report 0.90.3546; global `dist/cli/commands/start.js` contains `options.restart === true`; live `routecodex start --port 5555` returned `already_running_unmanaged` and 5520/5555 `/health` stayed OK.
+- Live caveat: the running managed server still reports 0.90.3542 because no intentional restart was executed after install, to avoid interrupting current traffic.
+
 # 2026-07-02: router-direct hook clone can drop provider runtime carrier
 - Verified root cause: router-direct attaches provider runtime metadata as a non-enumerable symbol, so later `{ ...payload }` clones in direct hooks drop `requestId` / MetadataCenter port truth before `processIncomingDirect()`. This caused direct Responses raw SSE provider snapshot writes to use local `req_...` and fail `entryPort required`.
 - Durable rule: after direct-route hooks or any direct-path clone, reattach the provider runtime carrier to the exact payload object sent to provider. Do not fix this in snapshot writer by guessing ports or reading client payload metadata.
@@ -559,9 +565,33 @@
 
 # 2026-07-03: Codex `tool_mode=code_mode_only` must not be advertised accidentally
 
+# 2026-07-04: 5555 SSE and cooldown restart facts
+
+- `/v1/responses` SSE dispatch from TS to Rust must accept snake_case `request_id` and `body_text`; installed-release replay is required because source can already contain the alias while the live/global package is stale.
+- Provider health restart recovery must clean expired persisted cooldowns during `refresh_provider_health_from_store()`, not wait for a later health write. Verified live on 5555 with `orangeai.1.glm-5.2` `cooldownExpiresAt=null`, `state=healthy`, `available=true`.
+- 5555 is served by serverId 5520 in the current config; live runtime used global `rcc`, so release validation must install and check both `routecodex` and `rcc` before restart/smoke.
+
 - Verified root cause: advertising `tool_mode: "code_mode_only"` from `/v1/models` for `gpt-5.5` changed Codex tool planning. Codex hides direct nested tools under `ToolMode::CodeModeOnly`, so upstream models can emit tool-call transcripts as ordinary text instead of structured tool calls.
 - Fix rule: do not expose `tool_mode` from RouteCodex model metadata unless intentionally switching the client into code-mode executor semantics. For current Codex direct/native tool behavior, keep model metadata capability fields such as `apply_patch_tool_type: "freeform"`, `experimental_supported_tools`, `supports_parallel_tool_calls`, and `input_modalities`, but omit `tool_mode`.
 - Verification evidence: `routes.invalid-json.spec.ts` passed after removing the expectation; Rust leak regressions passed; `verify:architecture-review-surface-light`, `build:min`, `pack:rcc`, and `verify:rcc-release-install` passed; synchronized global `routecodex/rcc@0.90.3537` installed; live 5555 `/v1/models` has no `tool_mode`; latest 5555 samples and logs contain no tool-call transcript leak markers or missing-context errors after the release startup marker.
+
+# 2026-07-04: rcc lifecycle stop/start must use config port group and HTTP truth
+
+- Verified root cause: `rcc stop` only stopped 5520 because `resolvePortGroupFromConfig({ targetPort })` collapsed a matched multi-port config to `[targetPort]`; `rcc start --snap` then saw 4444 still healthy and exited as `already_running_unmanaged`.
+# 2026-07-04: provider model-capacity text is retryable HTTP_429
+- Verified rule: provider text `Selected model is at capacity. Please try a different model.` is transient capacity/rate pressure and belongs to recoverable `HTTP_429` (`429.1000`), not `INSUFFICIENT_QUOTA`.
+- Owner: `error.provider_failure_policy` via `src/providers/core/runtime/provider-error-catalog.ts`; executors and router should consume the catalog/policy result instead of adding caller-side string patches.
+- Evidence: catalog red/green plus policy and HTTP projection Jest passed 45/45; source replay produced `statusCode=429`, `code=HTTP_429`, `shouldRetry=true`, `action=reroute_explicit_alternative`, `decisionLabel=exclude_and_reroute`.
+- Current closure gap: build/live install not claimed because existing unrelated llmswitch-core/servertool TS errors block `build:base`, and existing native hotpath issue blocks `verify:provider-failure-ban-blackbox`.
+
+- Lifecycle truth: PID cache/listener PID discovery is not authoritative. If `/shutdown` is accepted on any port in a multi-port RouteCodex process, it can stop the whole group; subsequent sibling ports may correctly report no listener.
+- Fix rule: stop/restart/start release lifecycle commands must expand a matched configured port to the full port group when operating on managed config, and `stop` must try HTTP `/shutdown` even when PID discovery returns empty. Guardian finalize/report failures are lifecycle telemetry and must not turn an already-stopped port into a failed stop.
+- Installed/live evidence: focused CLI Jest passed, `build:min` and `pack:rcc` passed, both global `routecodex` and `rcc` installed at 0.90.3542, live `rcc stop` on down group exits 0, and live `rcc start --snap` with existing service running shuts down the old group then restores 4444/5520/5555/10000 `/health` at 0.90.3542.
+
+# 2026-07-04 correction: plain start must not stop live servers
+
+- Corrected rule: `rcc start` / `routecodex start` is non-disruptive by default. It may expand the config port group for occupancy checks, but it must not send `/shutdown`, SIGTERM, or restart signals unless the caller passes explicit `--restart` / `--exclusive` or uses the dedicated `restart` command.
+- Root cause of the observed unexpected stop: a dirty lifecycle change made `start` default to restart semantics, and an earlier stop-command test without mocked `fetchImpl` touched live `/shutdown`. The test is now isolated, and start tests lock default `restart=false`, explicit `--restart=true`.
 
 # 2026-06-30: servertool engine/response dead carriers removed
 - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts` no longer carries `effectiveServerToolTimeoutMs`; the engine timeout shell passes a single `serverToolTimeoutMs` truth into `withTimeout()` and timeout error construction.

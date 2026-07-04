@@ -98,6 +98,35 @@ describe('provider failure policy ssot', () => {
     })).toBe('recoverable');
   });
 
+  it('classifies model capacity text without status as recoverable retry', () => {
+    const reason = 'Selected model is at capacity. Please try a different model.';
+    const error = new Error(reason);
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      reason
+    });
+
+    expect(classification).toBe('recoverable');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      classification
+    })).toBe(false);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      reason,
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: true,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'exclude_and_reroute'
+    }));
+  });
+
   it('classifies DeepSeek file upload failure as recoverable health-impacting blocking reroute', () => {
     const error = Object.assign(new Error('DeepSeek file upload returned non-JSON payload'), {
       code: 'DEEPSEEK_FILE_UPLOAD_FAILED',

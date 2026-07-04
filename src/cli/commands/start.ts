@@ -107,7 +107,11 @@ function resolveStartConfigLogDir(args: {
   configPath: string;
 }): string {
   const userDir = resolveRccUserDir(args.homeDir);
-  const configBaseName = args.pathImpl.basename(String(args.configPath || '').trim() || 'config');
+  const basename =
+    typeof args.pathImpl.basename === 'function'
+      ? args.pathImpl.basename.bind(args.pathImpl)
+      : path.basename;
+  const configBaseName = basename(String(args.configPath || '').trim() || 'config');
   const configSegment = sanitizeStartLogSegment(configBaseName);
   return args.pathImpl.join(userDir, 'log', configSegment);
 }
@@ -233,7 +237,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             ? resolveRouteCodexConfigPath(envConfigPath)
             : resolveRouteCodexConfigPath();
         } else {
-          configPath = resolveRouteCodexConfigPath(configPath);
+          configPath = pathImpl.resolve(configPath);
         }
 
         // Ensure provided config path is a file (not a directory)
@@ -357,13 +361,18 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             ? null
             : resolvePortGroupFromConfig(ctx, {
                 configPath,
-                targetPort: resolvedPort
+                targetPort: resolvedPort,
+                includeSiblingsForTarget: true
               }));
         const portGroup = grouped?.ports?.length ? grouped.ports : [resolvedPort];
-        if (portGroup.length > 1) {
-          spinner.info(`[start] resolved config port-group: ${portGroup.join(', ')}`);
+        const explicitFlagPort = typeof options.port === 'string' ? Number(options.port) : NaN;
+        const effectivePortGroup = ctx.isDevPackage && Number.isFinite(explicitFlagPort) && explicitFlagPort > 0
+          ? [resolvedPort]
+          : portGroup;
+        if (effectivePortGroup.length > 1) {
+          spinner.info(`[start] resolved config port-group: ${effectivePortGroup.join(', ')}`);
         }
-        for (const p of portGroup) {
+        for (const p of effectivePortGroup) {
           await ctx.ensurePortAvailable(p, spinner, { restart: shouldRestart });
         }
 
@@ -375,7 +384,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         };
         const serverHost = resolveServerHost();
 
-        const isMultiPortGroup = portGroup.length > 1;
+        const isMultiPortGroup = effectivePortGroup.length > 1;
         if (!isMultiPortGroup) {
           ctx.env.ROUTECODEX_PORT = String(resolvedPort);
           ctx.env.RCC_PORT = String(resolvedPort);

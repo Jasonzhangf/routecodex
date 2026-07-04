@@ -200,3 +200,60 @@ impl VirtualRouterEngineCore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::virtual_router_engine::routing_state_store::{
+        load_provider_health_state, persist_provider_health_state, with_session_dir_override,
+    };
+    use serde_json::json;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("rcc-provider-health-refresh-{unique}"))
+    }
+
+    #[test]
+    fn refresh_provider_health_from_store_persists_pruned_expired_cooldown() {
+        let session_dir = unique_temp();
+        fs::create_dir_all(&session_dir).unwrap();
+
+        with_session_dir_override(session_dir.to_str(), || {
+            persist_provider_health_state(&json!({
+                "version": 1,
+                "providerCooldowns": [{
+                    "providerKey": "test-provider",
+                    "state": "tripped",
+                    "failureCount": 3,
+                    "cooldownExpiresAt": 1i64,
+                    "lastFailureAt": 1i64,
+                    "reason": "expired"
+                }]
+            }));
+
+            let mut core = VirtualRouterEngineCore::new();
+            core.health_manager
+                .register_providers(&["test-provider".to_string()]);
+            core.refresh_provider_health_from_store();
+
+            let persisted = load_provider_health_state().expect("provider health persisted");
+            assert_eq!(
+                persisted,
+                json!({
+                    "version": 1,
+                    "providerCooldowns": []
+                })
+            );
+            assert!(core.health_manager.is_available("test-provider", 2));
+        });
+
+        let _ = fs::remove_dir_all(session_dir);
+    }
+}

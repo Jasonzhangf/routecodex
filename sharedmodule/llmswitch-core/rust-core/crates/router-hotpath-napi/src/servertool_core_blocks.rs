@@ -391,6 +391,19 @@ pub fn plan_servertool_execution_branch_json(input_json: &str) -> Result<String,
         .map_err(|e| format!("serialize servertool execution branch plan: {e}"))
 }
 
+pub fn plan_servertool_execution_branch_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: execution_branch_contract::ServertoolExecutionBranchApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool execution branch application input: {e}")
+        })?;
+    let plan = execution_branch_contract::plan_servertool_execution_branch_application(input)
+        .map_err(|e| format!("plan servertool execution branch application: {e}"))?;
+    serde_json::to_string(&plan)
+        .map_err(|e| format!("serialize servertool execution branch application plan: {e}"))
+}
+
 pub fn plan_servertool_engine_preflight_json(input_json: &str) -> Result<String, String> {
     let input: engine_preflight_contract::ServertoolEnginePreflightInput =
         serde_json::from_str(input_json)
@@ -552,6 +565,44 @@ pub fn plan_servertool_response_stage_prepass_initial_application_json(
         })?;
     serde_json::to_string(&plan).map_err(|e| {
         format!("serialize servertool response stage prepass initial application plan: {e}")
+    })
+}
+
+pub fn plan_servertool_response_stage_auto_hook_pre_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: response_stage_runtime_action_contract::ServertoolResponseStageAutoHookPreApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool response stage auto-hook pre application input: {e}")
+        })?;
+    let plan =
+        response_stage_runtime_action_contract::plan_servertool_response_stage_auto_hook_pre_application(
+            input,
+        )
+        .map_err(|e| {
+            format!("plan servertool response stage auto-hook pre application: {e}")
+        })?;
+    serde_json::to_string(&plan).map_err(|e| {
+        format!("serialize servertool response stage auto-hook pre application plan: {e}")
+    })
+}
+
+pub fn plan_servertool_response_stage_auto_hook_post_application_json(
+    input_json: &str,
+) -> Result<String, String> {
+    let input: response_stage_runtime_action_contract::ServertoolResponseStageAutoHookPostApplicationInput =
+        serde_json::from_str(input_json).map_err(|e| {
+            format!("deserialize servertool response stage auto-hook post application input: {e}")
+        })?;
+    let plan =
+        response_stage_runtime_action_contract::plan_servertool_response_stage_auto_hook_post_application(
+            input,
+        )
+        .map_err(|e| {
+            format!("plan servertool response stage auto-hook post application: {e}")
+        })?;
+    serde_json::to_string(&plan).map_err(|e| {
+        format!("serialize servertool response stage auto-hook post application plan: {e}")
     })
 }
 
@@ -3004,6 +3055,61 @@ fn plans_servertool_execution_branch_via_servertool_core_bridge() {
 }
 
 #[test]
+fn plans_servertool_execution_branch_application_via_servertool_core_bridge() {
+    let cli_projection = plan_servertool_execution_branch_application_json(
+        &serde_json::json!({
+            "phase": "pre_execution",
+            "branchPlan": {
+                "action": "client_exec_cli_projection",
+                "projectedToolCall": {
+                    "id": "call_cli_1",
+                    "name": "web_search",
+                    "arguments": "{}"
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("execution branch application cli projection plan");
+    let cli_projection_value: serde_json::Value =
+        serde_json::from_str(&cli_projection).expect("parse cli projection application plan");
+    assert_eq!(
+        cli_projection_value,
+        serde_json::json!({
+            "projectClientExecCli": true,
+            "resolveExecutionOutcome": false,
+            "continueResponseStage": false,
+            "projectedToolCall": {
+                "id": "call_cli_1",
+                "name": "web_search",
+                "arguments": "{}"
+            }
+        })
+    );
+
+    let resolve_outcome = plan_servertool_execution_branch_application_json(
+        &serde_json::json!({
+            "phase": "post_execution",
+            "branchPlan": {
+                "action": "resolve_execution_outcome"
+            }
+        })
+        .to_string(),
+    )
+    .expect("execution branch application outcome plan");
+    let resolve_outcome_value: serde_json::Value =
+        serde_json::from_str(&resolve_outcome).expect("parse outcome application plan");
+    assert_eq!(
+        resolve_outcome_value,
+        serde_json::json!({
+            "projectClientExecCli": false,
+            "resolveExecutionOutcome": true,
+            "continueResponseStage": false
+        })
+    );
+}
+
+#[test]
 fn plans_servertool_engine_preflight_via_servertool_core_bridge() {
     let synthetic = plan_servertool_engine_preflight_json(
         &serde_json::json!({
@@ -4130,6 +4236,78 @@ fn plans_servertool_response_stage_prepass_initial_application_via_servertool_co
     )
     .expect_err("unknown action must fail");
     assert!(invalid.contains("invalid response-stage prepass decision action"));
+}
+
+#[test]
+fn plans_servertool_response_stage_auto_hook_application_via_servertool_core_bridge() {
+    let pre_return = plan_servertool_response_stage_auto_hook_pre_application_json(
+        r#"{"decision":{"action":"return_pass_result","result":{"action":"return_passthrough_bypass"}}}"#,
+    )
+    .expect("pre return application plan");
+    let pre_return_value: serde_json::Value =
+        serde_json::from_str(&pre_return).expect("parse pre return application plan");
+    assert_eq!(
+        pre_return_value["returnPassResult"],
+        serde_json::json!(true)
+    );
+    assert_eq!(pre_return_value["runAutoHooks"], serde_json::json!(false));
+    assert_eq!(
+        pre_return_value["result"]["action"],
+        serde_json::json!("return_passthrough_bypass")
+    );
+
+    let pre_run = plan_servertool_response_stage_auto_hook_pre_application_json(
+        r#"{"decision":{"action":"run_auto_hooks"}}"#,
+    )
+    .expect("pre run application plan");
+    let pre_run_value: serde_json::Value =
+        serde_json::from_str(&pre_run).expect("parse pre run application plan");
+    assert_eq!(pre_run_value["returnPassResult"], serde_json::json!(false));
+    assert_eq!(pre_run_value["runAutoHooks"], serde_json::json!(true));
+
+    let post_throw = plan_servertool_response_stage_auto_hook_post_application_json(
+        r#"{"decision":{"action":"throw_required_response_hook_empty","errorPlan":{"message":"required hook empty"}}}"#,
+    )
+    .expect("post throw application plan");
+    let post_throw_value: serde_json::Value =
+        serde_json::from_str(&post_throw).expect("parse post throw application plan");
+    assert_eq!(
+        post_throw_value["throwRequiredResponseHookEmpty"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        post_throw_value["returnPassResult"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        post_throw_value["errorPlan"]["message"],
+        serde_json::json!("required hook empty")
+    );
+
+    let post_return = plan_servertool_response_stage_auto_hook_post_application_json(
+        r#"{"decision":{"action":"return_pass_result","result":{"action":"continue_without_result"}}}"#,
+    )
+    .expect("post return application plan");
+    let post_return_value: serde_json::Value =
+        serde_json::from_str(&post_return).expect("parse post return application plan");
+    assert_eq!(
+        post_return_value["throwRequiredResponseHookEmpty"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        post_return_value["returnPassResult"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        post_return_value["result"]["action"],
+        serde_json::json!("continue_without_result")
+    );
+
+    let invalid = plan_servertool_response_stage_auto_hook_pre_application_json(
+        r#"{"decision":{"action":"unknown"}}"#,
+    )
+    .expect_err("unknown action must fail");
+    assert!(invalid.contains("invalid response-stage auto-hook pre decision action"));
 }
 
 #[test]

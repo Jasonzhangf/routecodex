@@ -2,6 +2,47 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
 const planServertoolRequiredResponseHookEmptyErrorWithNative = jest.fn();
+const resolveServertoolResponseStageAutoHookPreApplicationWithNative = jest.fn((input: any) => {
+  const decision = input.decision;
+  if (decision?.action === 'return_pass_result') {
+    return {
+      returnPassResult: true,
+      runAutoHooks: false,
+      result: decision.result
+    };
+  }
+  if (decision?.action === 'run_auto_hooks') {
+    return {
+      returnPassResult: false,
+      runAutoHooks: true
+    };
+  }
+  return {
+    returnPassResult: false,
+    runAutoHooks: false
+  };
+});
+const resolveServertoolResponseStageAutoHookPostApplicationWithNative = jest.fn((input: any) => {
+  const decision = input.decision;
+  if (decision?.action === 'throw_required_response_hook_empty') {
+    return {
+      throwRequiredResponseHookEmpty: true,
+      returnPassResult: false,
+      errorPlan: decision.errorPlan
+    };
+  }
+  if (decision?.action === 'return_pass_result') {
+    return {
+      throwRequiredResponseHookEmpty: false,
+      returnPassResult: true,
+      result: decision.result
+    };
+  }
+  return {
+    throwRequiredResponseHookEmpty: false,
+    returnPassResult: false
+  };
+});
 const resolveServertoolResponseStageAutoHookPreDecisionWithNative = jest.fn((input: any) => {
   const action = planServertoolResponseStageRuntimeActionWithNative({
     responseStageGatePlan: input.responseStageGatePlan,
@@ -56,6 +97,8 @@ jest.unstable_mockModule(
   () => ({
     planServertoolResponseStageRuntimeActionWithNative,
     planServertoolRequiredResponseHookEmptyErrorWithNative,
+    resolveServertoolResponseStageAutoHookPreApplicationWithNative,
+    resolveServertoolResponseStageAutoHookPostApplicationWithNative,
     resolveServertoolResponseStageAutoHookPreDecisionWithNative,
     resolveServertoolResponseStageAutoHookPostDecisionWithNative
   })
@@ -177,6 +220,8 @@ describe('response-stage-auto-hook-shell', () => {
     expect(source).not.toContain("if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass')");
     expect(source).not.toContain("if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty')");
     expect(source).not.toContain("if (postAutoHookRuntimeAction.action === 'return_auto_hook_result')");
+    expect(source).not.toContain("preAutoHookDecision.action === 'return_pass_result'");
+    expect(source).not.toContain("postAutoHookDecision.action === 'throw_required_response_hook_empty'");
     expect(source).not.toContain('function hasServerSideToolEngineResult(');
     expect(source).not.toContain('hasServerSideToolEngineResult(autoHookResult)');
     expect(source).not.toContain('switch (preAutoHookRuntimeAction.action)');
@@ -188,8 +233,12 @@ describe('response-stage-auto-hook-shell', () => {
     expect(source).not.toContain('return postAutoHookRuntimeAction.passResult');
     expect(source).toContain('resolveServertoolResponseStageAutoHookPreDecisionWithNative({');
     expect(source).toContain('resolveServertoolResponseStageAutoHookPostDecisionWithNative({');
-    expect(source).toContain('return preAutoHookDecision.result');
-    expect(source).toContain('return postAutoHookDecision.result');
+    expect(source).toContain('resolveServertoolResponseStageAutoHookPreApplicationWithNative({');
+    expect(source).toContain('resolveServertoolResponseStageAutoHookPostApplicationWithNative({');
+    expect(source).toContain('preAutoHookApplication.returnPassResult');
+    expect(source).toContain('postAutoHookApplication.throwRequiredResponseHookEmpty');
+    expect(source).toContain('return preAutoHookApplication.result');
+    expect(source).toContain('return postAutoHookApplication.result');
     expect(source).not.toContain("return { action: 'return_passthrough_bypass' }");
     expect(source).not.toContain("return { action: 'continue_without_result' }");
     expect(source).not.toContain("action: 'return_auto_hook_result',");

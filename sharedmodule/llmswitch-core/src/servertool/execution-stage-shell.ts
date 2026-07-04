@@ -14,7 +14,7 @@ import {
   resolveServertoolPostExecutionBranchDecisionWithNative,
   resolveServertoolPreExecutionBranchDecisionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-servertool-core-semantics.js';
 
 export async function runServertoolExecutionStage(args: {
   options: ServerSideToolEngineOptions;
@@ -37,7 +37,7 @@ export async function runServertoolExecutionStage(args: {
   const preExecutionBranchDecision = resolveServertoolPreExecutionBranchDecisionWithNative({
     executableToolCalls: dispatchPlan.executableToolCalls
   });
-  if (preExecutionBranchDecision.action === 'client_exec_cli_projection') {
+  if (preExecutionBranchDecision.projectClientExecCli) {
     const projectedToolCall = preExecutionBranchDecision.projectedToolCall;
     const branch = buildServertoolCliProjectionRuntimeBranchWithNative({
       requestId: args.options.requestId,
@@ -48,7 +48,7 @@ export async function runServertoolExecutionStage(args: {
     });
     return branch.result;
   }
-  if (preExecutionBranchDecision.action !== 'continue_response_stage') {
+  if (!preExecutionBranchDecision.continueResponseStage) {
     throw new Error('[servertool] invalid pre-execution branch action');
   }
 
@@ -63,7 +63,7 @@ export async function runServertoolExecutionStage(args: {
     executableToolCalls: dispatchPlan.executableToolCalls,
     executedToolCallsLen: executionState.executedToolCalls.length
   });
-  if (postExecutionBranchDecision.action === 'resolve_execution_outcome') {
+  if (postExecutionBranchDecision.resolveExecutionOutcome) {
     return materializeNativeToolCallExecutionOutcome({
       baseForExecution: args.baseObject,
       options: args.options,
@@ -71,7 +71,7 @@ export async function runServertoolExecutionStage(args: {
       executionState
     });
   }
-  if (postExecutionBranchDecision.action !== 'continue_response_stage') {
+  if (!postExecutionBranchDecision.continueResponseStage) {
     throw new Error('[servertool] invalid post-execution branch action');
   }
   return finalizeServertoolResponseStage({

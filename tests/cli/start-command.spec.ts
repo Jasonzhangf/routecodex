@@ -17,6 +17,18 @@ function createStubSpinner() {
   };
 }
 
+function createFakeChild(pid = 43210) {
+  return {
+    pid,
+    stdout: null,
+    stderr: null,
+    on: () => createFakeChild(pid),
+    once: () => createFakeChild(pid),
+    kill: () => true,
+    unref: () => {}
+  } as any;
+}
+
 describe('cli start command', () => {
   it('starts only the requested port from a multi-port config', async () => {
     const program = new Command();
@@ -72,7 +84,7 @@ routingPolicyGroup = "gateway_coding_10000"
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: (_command, _args, options) => {
         spawnCalls.push({ options });
-        return { pid: 12345, on: () => {}, once: () => {}, kill: () => true } as any;
+        return createFakeChild(12345);
       },
       fetch: (async () => ({ ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
       setupKeypress: () => () => undefined,
@@ -485,7 +497,12 @@ routingPolicyGroup = "gateway_coding_10000"
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
       } as any,
-      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
       homedir: () => '/home/test',
       tmpdir: () => '/tmp',
       sleep: async () => {},
@@ -495,7 +512,7 @@ routingPolicyGroup = "gateway_coding_10000"
       killPidBestEffort: () => {},
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
-      spawn: () => ({ pid: 1, on: () => {}, kill: () => true } as any),
+      spawn: () => createFakeChild(1),
       fetch: (async () => ({ ok: true })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
@@ -525,7 +542,12 @@ routingPolicyGroup = "gateway_coding_10000"
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
       } as any,
-      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
       homedir: () => '/home/test',
       tmpdir: () => '/tmp',
       sleep: async () => {},
@@ -535,7 +557,7 @@ routingPolicyGroup = "gateway_coding_10000"
       killPidBestEffort: () => {},
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
-      spawn: () => ({ pid: 1, on: () => {}, kill: () => true } as any),
+      spawn: () => createFakeChild(1),
       fetch: (async () => ({ ok: true })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
@@ -563,15 +585,17 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({
-          httpserver: { port: 5520, host: '127.0.0.1' },
-          virtualrouter: { providers: { tabglm: { id: 'tabglm', enabled: true } } }
-        }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
       } as any,
-      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
       homedir: () => '/home/test',
       tmpdir: () => '/tmp',
       sleep: async () => {},
@@ -583,7 +607,7 @@ routingPolicyGroup = "gateway_coding_10000"
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: (_cmd, _args, options) => {
         captured.env = options.env as any;
-        return ({ pid: 1, on: () => {}, kill: () => true } as any);
+        return createFakeChild(1);
       },
       fetch: (async () => ({ ok: true })) as any,
       setupKeypress: () => () => {},
@@ -593,7 +617,7 @@ routingPolicyGroup = "gateway_coding_10000"
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.json'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' });
     expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_ENABLE).toBeUndefined();
     expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBeUndefined();
   });
@@ -676,7 +700,12 @@ routingPolicyGroup = "gateway_coding_10000"
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
       } as any,
-      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
       homedir: () => '/home/test',
       tmpdir: () => '/tmp',
       sleep: async () => {},
@@ -686,7 +715,7 @@ routingPolicyGroup = "gateway_coding_10000"
       killPidBestEffort: () => {},
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
-      spawn: () => ({ pid: 1, on: () => {}, kill: () => true } as any),
+      spawn: () => createFakeChild(1),
       fetch: (async () => ({ ok: true })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
@@ -736,7 +765,7 @@ routingPolicyGroup = "gateway_coding_10000"
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: (command, args, options) => {
         spawnCalls.push({ command, args, options });
-        return ({ pid: 43210, on: () => {}, kill: () => true } as any);
+        return createFakeChild(43210);
       },
       fetch: (async () => ({ ok: true })) as any,
       setupKeypress: () => () => {},
@@ -756,6 +785,63 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(spawnCalls[0].options?.env?.RCC_EXPECT_PARENT_PID).toBeUndefined();
   });
 
+  it('release start is non-disruptive by default and preserves explicit --restart', async () => {
+    const restartFlags: Array<boolean | undefined> = [];
+    const createContext = () => ({
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {},
+        createWriteStream: () => ({ write: () => true, end: () => {} } as any)
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensurePortAvailable: async (_port: number, _spinner: any, opts?: { restart?: boolean }) => {
+        restartFlags.push(opts?.restart);
+      },
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveCliEntryPath: () => '/tmp/cli.js',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: () => createFakeChild(43210),
+      fetch: (async () => ({ ok: true })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code: number) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    const defaultProgram = new Command();
+    createStartCommand(defaultProgram, createContext());
+    await defaultProgram.parseAsync(['node', 'rcc', 'start'], { from: 'node' });
+
+    const restartProgram = new Command();
+    createStartCommand(restartProgram, createContext());
+    await restartProgram.parseAsync(['node', 'rcc', 'start', '--restart'], { from: 'node' });
+
+    expect(restartFlags).toEqual([false, true]);
+  });
+
   it('release start runs daemon supervisor when ROUTECODEX_START_DAEMON=1', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any; unrefCalled?: boolean }> = [];
     const program = new Command();
@@ -771,7 +857,7 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
@@ -794,9 +880,7 @@ routingPolicyGroup = "gateway_coding_10000"
         const call = { command, args, options, unrefCalled: false };
         spawnCalls.push(call);
         return {
-          pid: 43210,
-          on: () => {},
-          kill: () => true,
+          ...createFakeChild(43210),
           unref: () => { call.unrefCalled = true; }
         } as any;
       },
@@ -834,7 +918,7 @@ routingPolicyGroup = "gateway_coding_10000"
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {}
@@ -856,7 +940,7 @@ routingPolicyGroup = "gateway_coding_10000"
       killPidBestEffort: () => {},
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
-      spawn: () => ({ pid: 1, on: () => {}, kill: () => true } as any),
+      spawn: () => createFakeChild(1),
       fetch: (async () => ({ ok: true })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
@@ -907,7 +991,7 @@ routingPolicyGroup = "gateway_coding_10000"
       killPidBestEffort: () => {},
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
-      spawn: () => ({ pid: 1, on: () => {}, kill: () => true } as any),
+      spawn: () => createFakeChild(1),
       fetch: (async () => ({ ok: true })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
@@ -958,7 +1042,7 @@ routingPolicyGroup = "gateway_coding_10000"
       killPidBestEffort: () => {},
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
-      spawn: () => ({ pid: 1, on: () => {}, kill: () => true } as any),
+      spawn: () => createFakeChild(1),
       fetch: (async () => ({ ok: true })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},

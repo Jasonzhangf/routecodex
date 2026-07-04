@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { Readable } from 'node:stream';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const executeHubPipelineWithNativeMock = jest.fn();
@@ -9,6 +10,10 @@ const normalizeProviderResponseEffectPlanWithNativeMock = jest.fn(() => ({
   servertoolRuntimeActions: []
 }));
 const materializeProviderResponseSsePayloadWithNativeMock = jest.fn(async ({ payload }: { payload: unknown }) => payload);
+const buildSseFramesFromJsonWithNativeMock = jest.fn(() => ({
+  frames: ['event: response.completed\ndata: {"type":"response.completed"}\n\n'],
+  stats: { protocol: 'openai-responses' }
+}));
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
@@ -143,6 +148,14 @@ jest.unstable_mockModule(
   })
 );
 
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.js',
+  () => ({
+    buildSseFramesFromJsonWithNative: buildSseFramesFromJsonWithNativeMock,
+    buildReadableFromSseFrames: (frames: string[]) => Readable.from(frames),
+  })
+);
+
 const { convertProviderResponse } = await import(
   '../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
 );
@@ -161,6 +174,7 @@ describe('provider response metadata center providerProtocol contract', () => {
     executeHubPipelineWithNativeMock.mockReset();
     normalizeProviderResponseEffectPlanWithNativeMock.mockClear();
     materializeProviderResponseSsePayloadWithNativeMock.mockClear();
+    buildSseFramesFromJsonWithNativeMock.mockClear();
     recordResponsesResponse.mockClear();
     executeHubPipelineWithNativeMock.mockReturnValue({
       success: true,
@@ -239,7 +253,7 @@ describe('provider response metadata center providerProtocol contract', () => {
       })
     }));
     expect(recordResponsesResponse).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'openai-responses-provider-20260628T184855563-416867-1902'
+      requestId: 'openai-responses-router-20260628T184855563-416867-1902'
     }));
     expect(result.body?.choices?.[0]?.message?.content).toBe('center protocol wins');
   });
@@ -363,5 +377,63 @@ describe('provider response metadata center providerProtocol contract', () => {
       entryEndpoint: '/v1/chat/completions',
       wantsStream: true
     })).rejects.toThrow('Rust HubPipeline response path returned malformed stream pipe effect');
+  });
+
+  it('uses request truth id, not streamPipe-local id, when encoding Responses SSE frames', async () => {
+    normalizeProviderResponseEffectPlanWithNativeMock.mockReturnValueOnce({
+      runtimeStateWrite: {
+        keepForSubmitToolOutputs: false
+      },
+      servertoolRuntimeActions: [],
+      streamPipe: {
+        codec: 'openai-responses',
+        requestId: 'stale_stream_pipe_request_id',
+        payload: {
+          id: 'resp_provider_response_sse_request_id',
+          object: 'response',
+          status: 'completed',
+          model: 'gpt-test',
+          output: [],
+        }
+      }
+    });
+    const context: Record<string, unknown> = {
+      requestId: 'openai-responses-router-gpt-5.5-20260704T082457252-457519-3916',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat'
+    };
+    const center = MetadataCenter.attach(context);
+    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRuntimeControl('providerProtocol', 'openai-chat', TEST_METADATA_WRITER, 'test-provider-protocol');
+
+    const result = await convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_provider_response_sse_request_id',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/responses',
+      wantsStream: true
+    });
+
+    expect(result.sseStream).toBeDefined();
+    expect(buildSseFramesFromJsonWithNativeMock).toHaveBeenCalledWith(expect.objectContaining({
+      protocol: 'openai-responses',
+      requestId: 'openai-responses-router-gpt-5.5-20260704T082457252-457519-3916',
+      response: expect.objectContaining({
+        id: 'resp_provider_response_sse_request_id'
+      })
+    }));
+    expect(buildSseFramesFromJsonWithNativeMock).not.toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'stale_stream_pipe_request_id'
+    }));
   });
 });

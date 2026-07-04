@@ -407,7 +407,8 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
       ? null
       : resolvePortGroupFromConfig(ctx, {
           configPath: options.config,
-          targetPort: explicitPort
+          targetPort: explicitPort,
+          includeSiblingsForTarget: true
         });
     const portsToRestart = grouped?.ports?.length ? grouped.ports : [explicitPort];
     const host = explicitHost || grouped?.host || LOCAL_HOSTS.LOCALHOST;

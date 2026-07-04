@@ -30,6 +30,34 @@ describe('normalizeProviderHttpError', () => {
     expect(normalized.response?.data?.error?.message).toBe('fetch failed');
   });
 
+  it('projects model capacity text without status as retryable HTTP_429', async () => {
+    const error = new Error('Selected model is at capacity. Please try a different model.');
+
+    const normalized = await normalizeProviderHttpError({
+      error,
+      processedRequest: {},
+      requestInfo: {
+        endpoint: '/responses',
+        headers: {},
+        targetUrl: 'https://example.invalid/v1/responses',
+        body: {},
+        wantsSse: true
+      },
+      context: {
+        requestId: 'req_provider_http_error_model_capacity',
+        providerKey: 'openai-responses-minimax.key1.MiniMax-M3',
+        providerId: 'openai-responses-minimax'
+      } as any
+    });
+
+    expect(normalized.code).toBe('HTTP_429');
+    expect(normalized.statusCode).toBe(429);
+    expect(normalized.status).toBe(429);
+    expect(normalized.response?.data?.error?.code).toBe('HTTP_429');
+    expect(normalized.response?.data?.error?.message).toBe('Selected model is at capacity. Please try a different model.');
+    expect(normalized.response?.data?.error?.status).toBe(429);
+  });
+
   it('applies provider-configured error mapping to raw upstream error bodies before catalog projection', async () => {
     const error = new Error('HTTP 400: {"error":{"message":"All available accounts exhausted","type":"server_error","param":"","code":null}}') as any;
     error.status = 400;

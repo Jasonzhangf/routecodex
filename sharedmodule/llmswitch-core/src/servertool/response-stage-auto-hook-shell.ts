@@ -5,10 +5,12 @@ import type {
 } from './types.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
+  resolveServertoolResponseStageAutoHookPostApplicationWithNative,
   resolveServertoolResponseStageAutoHookPostDecisionWithNative,
+  resolveServertoolResponseStageAutoHookPreApplicationWithNative,
   resolveServertoolResponseStageAutoHookPreDecisionWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';
-import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import type { NativeServertoolResponseStageGate } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
@@ -29,8 +31,14 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     responseStageGatePlan: args.responseStageGatePlan,
     baseObject: args.baseObject
   });
-  if (preAutoHookDecision.action === 'return_pass_result') {
-    return preAutoHookDecision.result;
+  const preAutoHookApplication = resolveServertoolResponseStageAutoHookPreApplicationWithNative({
+    decision: preAutoHookDecision
+  });
+  if (preAutoHookApplication.returnPassResult) {
+    return preAutoHookApplication.result;
+  }
+  if (!preAutoHookApplication.runAutoHooks) {
+    throw new Error('[servertool] invalid response-stage pre auto-hook application');
   }
 
   const autoHookResult = await runServertoolAutoHookCaller({
@@ -45,8 +53,14 @@ export async function runServertoolResponseStageAutoHookPass(args: {
     baseObject: args.baseObject,
     autoHookResult
   });
-  if (postAutoHookDecision.action === 'throw_required_response_hook_empty') {
-    throw createServertoolProviderProtocolErrorFromPlan(postAutoHookDecision.errorPlan);
+  const postAutoHookApplication = resolveServertoolResponseStageAutoHookPostApplicationWithNative({
+    decision: postAutoHookDecision
+  });
+  if (postAutoHookApplication.throwRequiredResponseHookEmpty) {
+    throw createServertoolProviderProtocolErrorFromPlan(postAutoHookApplication.errorPlan);
   }
-  return postAutoHookDecision.result;
+  if (!postAutoHookApplication.returnPassResult) {
+    throw new Error('[servertool] invalid response-stage post auto-hook application');
+  }
+  return postAutoHookApplication.result;
 }

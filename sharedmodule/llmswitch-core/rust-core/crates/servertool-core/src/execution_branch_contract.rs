@@ -22,7 +22,7 @@ pub struct ServertoolExecutionBranchPlanInput {
     pub executed_tool_calls_len: u64,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ServertoolExecutionBranchAction {
     ClientExecCliProjection,
@@ -30,7 +30,7 @@ pub enum ServertoolExecutionBranchAction {
     ContinueResponseStage,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolExecutionBranchPlan {
     pub action: ServertoolExecutionBranchAction,
@@ -42,12 +42,30 @@ pub struct ServertoolExecutionBranchPlan {
     pub projected_tool_call_index: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServertoolProjectedToolCall {
     pub id: String,
     pub name: String,
     pub arguments: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolExecutionBranchApplicationInput {
+    pub branch_plan: ServertoolExecutionBranchPlan,
+    #[serde(default)]
+    pub phase: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolExecutionBranchApplicationPlan {
+    pub project_client_exec_cli: bool,
+    pub resolve_execution_outcome: bool,
+    pub continue_response_stage: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projected_tool_call: Option<ServertoolProjectedToolCall>,
 }
 
 pub fn plan_servertool_execution_branch(
@@ -101,11 +119,52 @@ pub fn plan_servertool_execution_branch(
     }
 }
 
+pub fn plan_servertool_execution_branch_application(
+    input: ServertoolExecutionBranchApplicationInput,
+) -> Result<ServertoolExecutionBranchApplicationPlan, String> {
+    match input.branch_plan.action {
+        ServertoolExecutionBranchAction::ClientExecCliProjection => {
+            if input.phase.trim() != "pre_execution" {
+                return Err("client exec cli projection is only valid before execution".to_string());
+            }
+            let projected_tool_call = input.branch_plan.projected_tool_call.ok_or_else(|| {
+                "client exec cli projection missing projected tool call".to_string()
+            })?;
+            Ok(ServertoolExecutionBranchApplicationPlan {
+                project_client_exec_cli: true,
+                resolve_execution_outcome: false,
+                continue_response_stage: false,
+                projected_tool_call: Some(projected_tool_call),
+            })
+        }
+        ServertoolExecutionBranchAction::ResolveExecutionOutcome => {
+            if input.phase.trim() != "post_execution" {
+                return Err("resolve execution outcome is only valid after execution".to_string());
+            }
+            Ok(ServertoolExecutionBranchApplicationPlan {
+                project_client_exec_cli: false,
+                resolve_execution_outcome: true,
+                continue_response_stage: false,
+                projected_tool_call: None,
+            })
+        }
+        ServertoolExecutionBranchAction::ContinueResponseStage => {
+            Ok(ServertoolExecutionBranchApplicationPlan {
+                project_client_exec_cli: false,
+                resolve_execution_outcome: false,
+                continue_response_stage: true,
+                projected_tool_call: None,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_servertool_execution_branch, ServertoolExecutableToolCall,
-        ServertoolExecutionBranchAction, ServertoolExecutionBranchPlanInput,
+        plan_servertool_execution_branch, plan_servertool_execution_branch_application,
+        ServertoolExecutableToolCall, ServertoolExecutionBranchAction,
+        ServertoolExecutionBranchApplicationInput, ServertoolExecutionBranchPlanInput,
     };
 
     #[test]
@@ -183,5 +242,78 @@ mod tests {
             plan.action,
             ServertoolExecutionBranchAction::ContinueResponseStage
         );
+    }
+
+    #[test]
+    fn application_projects_client_exec_cli_before_execution() {
+        let branch_plan = plan_servertool_execution_branch(ServertoolExecutionBranchPlanInput {
+            executable_tool_calls: vec![ServertoolExecutableToolCall {
+                id: " call_1 ".to_string(),
+                name: "web_search".to_string(),
+                arguments: "{}".to_string(),
+                execution_mode: "client_exec_cli_projection".to_string(),
+            }],
+            executed_tool_calls_len: 0,
+        });
+        let application = plan_servertool_execution_branch_application(
+            ServertoolExecutionBranchApplicationInput {
+                branch_plan,
+                phase: "pre_execution".to_string(),
+            },
+        )
+        .expect("application plan");
+
+        assert_eq!(application.project_client_exec_cli, true);
+        assert_eq!(application.resolve_execution_outcome, false);
+        assert_eq!(application.continue_response_stage, false);
+        assert_eq!(
+            application.projected_tool_call,
+            Some(super::ServertoolProjectedToolCall {
+                id: "call_1".to_string(),
+                name: "web_search".to_string(),
+                arguments: "{}".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn application_resolves_execution_outcome_after_execution() {
+        let branch_plan = plan_servertool_execution_branch(ServertoolExecutionBranchPlanInput {
+            executable_tool_calls: vec![],
+            executed_tool_calls_len: 1,
+        });
+        let application = plan_servertool_execution_branch_application(
+            ServertoolExecutionBranchApplicationInput {
+                branch_plan,
+                phase: "post_execution".to_string(),
+            },
+        )
+        .expect("application plan");
+
+        assert_eq!(application.project_client_exec_cli, false);
+        assert_eq!(application.resolve_execution_outcome, true);
+        assert_eq!(application.continue_response_stage, false);
+    }
+
+    #[test]
+    fn application_rejects_projection_after_execution() {
+        let branch_plan = plan_servertool_execution_branch(ServertoolExecutionBranchPlanInput {
+            executable_tool_calls: vec![ServertoolExecutableToolCall {
+                id: "call_1".to_string(),
+                name: "web_search".to_string(),
+                arguments: "{}".to_string(),
+                execution_mode: "client_exec_cli_projection".to_string(),
+            }],
+            executed_tool_calls_len: 0,
+        });
+        let err = plan_servertool_execution_branch_application(
+            ServertoolExecutionBranchApplicationInput {
+                branch_plan,
+                phase: "post_execution".to_string(),
+            },
+        )
+        .expect_err("projection after execution must fail");
+
+        assert!(err.contains("only valid before execution"));
     }
 }

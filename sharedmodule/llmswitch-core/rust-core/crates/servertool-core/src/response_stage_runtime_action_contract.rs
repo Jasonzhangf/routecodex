@@ -61,6 +61,38 @@ pub struct ServertoolResponseStagePrepassInitialApplicationPlan {
     pub result: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolResponseStageAutoHookPreApplicationInput {
+    pub decision: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolResponseStageAutoHookPreApplicationPlan {
+    pub return_pass_result: bool,
+    pub run_auto_hooks: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolResponseStageAutoHookPostApplicationInput {
+    pub decision: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServertoolResponseStageAutoHookPostApplicationPlan {
+    pub throw_required_response_hook_empty: bool,
+    pub return_pass_result: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_plan: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+}
+
 fn build_passthrough_result(input: &ServertoolResponseStageRuntimeActionInput) -> Value {
     serde_json::json!({
         "mode": "passthrough",
@@ -243,6 +275,81 @@ pub fn plan_servertool_response_stage_prepass_initial_application(
         }
         _ => Err(format!(
             "invalid response-stage prepass decision action: {action}"
+        )),
+    }
+}
+
+pub fn plan_servertool_response_stage_auto_hook_pre_application(
+    input: ServertoolResponseStageAutoHookPreApplicationInput,
+) -> Result<ServertoolResponseStageAutoHookPreApplicationPlan, String> {
+    let decision = input
+        .decision
+        .as_object()
+        .ok_or_else(|| "response-stage auto-hook pre decision must be an object".to_string())?;
+    let action = decision
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "response-stage auto-hook pre decision missing action".to_string())?;
+
+    match action {
+        "return_pass_result" => {
+            let result = decision.get("result").cloned().ok_or_else(|| {
+                "response-stage auto-hook pre decision missing result".to_string()
+            })?;
+            Ok(ServertoolResponseStageAutoHookPreApplicationPlan {
+                return_pass_result: true,
+                run_auto_hooks: false,
+                result: Some(result),
+            })
+        }
+        "run_auto_hooks" => Ok(ServertoolResponseStageAutoHookPreApplicationPlan {
+            return_pass_result: false,
+            run_auto_hooks: true,
+            result: None,
+        }),
+        _ => Err(format!(
+            "invalid response-stage auto-hook pre decision action: {action}"
+        )),
+    }
+}
+
+pub fn plan_servertool_response_stage_auto_hook_post_application(
+    input: ServertoolResponseStageAutoHookPostApplicationInput,
+) -> Result<ServertoolResponseStageAutoHookPostApplicationPlan, String> {
+    let decision = input
+        .decision
+        .as_object()
+        .ok_or_else(|| "response-stage auto-hook post decision must be an object".to_string())?;
+    let action = decision
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "response-stage auto-hook post decision missing action".to_string())?;
+
+    match action {
+        "throw_required_response_hook_empty" => {
+            let error_plan = decision.get("errorPlan").cloned().ok_or_else(|| {
+                "response-stage auto-hook post decision missing errorPlan".to_string()
+            })?;
+            Ok(ServertoolResponseStageAutoHookPostApplicationPlan {
+                throw_required_response_hook_empty: true,
+                return_pass_result: false,
+                error_plan: Some(error_plan),
+                result: None,
+            })
+        }
+        "return_pass_result" => {
+            let result = decision.get("result").cloned().ok_or_else(|| {
+                "response-stage auto-hook post decision missing result".to_string()
+            })?;
+            Ok(ServertoolResponseStageAutoHookPostApplicationPlan {
+                throw_required_response_hook_empty: false,
+                return_pass_result: true,
+                error_plan: None,
+                result: Some(result),
+            })
+        }
+        _ => Err(format!(
+            "invalid response-stage auto-hook post decision action: {action}"
         )),
     }
 }
@@ -578,5 +685,108 @@ mod tests {
         .expect_err("unknown prepass decision must fail");
 
         assert!(err.contains("invalid response-stage prepass decision action"));
+    }
+
+    #[test]
+    fn auto_hook_pre_application_returns_pass_result() {
+        let result = serde_json::json!({ "action": "return_passthrough_bypass" });
+        let plan = plan_servertool_response_stage_auto_hook_pre_application(
+            ServertoolResponseStageAutoHookPreApplicationInput {
+                decision: serde_json::json!({
+                    "action": "return_pass_result",
+                    "result": result
+                }),
+            },
+        )
+        .expect("auto-hook pre application plan");
+
+        assert!(plan.return_pass_result);
+        assert!(!plan.run_auto_hooks);
+        assert_eq!(plan.result, Some(result));
+    }
+
+    #[test]
+    fn auto_hook_pre_application_runs_auto_hooks() {
+        let plan = plan_servertool_response_stage_auto_hook_pre_application(
+            ServertoolResponseStageAutoHookPreApplicationInput {
+                decision: serde_json::json!({ "action": "run_auto_hooks" }),
+            },
+        )
+        .expect("auto-hook pre application plan");
+
+        assert!(!plan.return_pass_result);
+        assert!(plan.run_auto_hooks);
+        assert_eq!(plan.result, None);
+    }
+
+    #[test]
+    fn auto_hook_pre_application_rejects_unknown_action() {
+        let err = plan_servertool_response_stage_auto_hook_pre_application(
+            ServertoolResponseStageAutoHookPreApplicationInput {
+                decision: serde_json::json!({ "action": "unknown" }),
+            },
+        )
+        .expect_err("unknown auto-hook pre decision must fail");
+
+        assert!(err.contains("invalid response-stage auto-hook pre decision action"));
+    }
+
+    #[test]
+    fn auto_hook_post_application_throws_required_empty_error() {
+        let error_plan = serde_json::json!({
+            "message": "required hook empty",
+            "code": "SERVERTOOL_REQUIRED_RESPONSE_HOOK_EMPTY"
+        });
+        let plan = plan_servertool_response_stage_auto_hook_post_application(
+            ServertoolResponseStageAutoHookPostApplicationInput {
+                decision: serde_json::json!({
+                    "action": "throw_required_response_hook_empty",
+                    "errorPlan": error_plan
+                }),
+            },
+        )
+        .expect("auto-hook post application plan");
+
+        assert!(plan.throw_required_response_hook_empty);
+        assert!(!plan.return_pass_result);
+        assert_eq!(plan.error_plan, Some(error_plan));
+        assert_eq!(plan.result, None);
+    }
+
+    #[test]
+    fn auto_hook_post_application_returns_pass_result() {
+        let result = serde_json::json!({
+            "action": "return_auto_hook_result",
+            "result": {
+                "mode": "tool_flow",
+                "finalChatResponse": { "ok": true }
+            }
+        });
+        let plan = plan_servertool_response_stage_auto_hook_post_application(
+            ServertoolResponseStageAutoHookPostApplicationInput {
+                decision: serde_json::json!({
+                    "action": "return_pass_result",
+                    "result": result
+                }),
+            },
+        )
+        .expect("auto-hook post application plan");
+
+        assert!(!plan.throw_required_response_hook_empty);
+        assert!(plan.return_pass_result);
+        assert_eq!(plan.error_plan, None);
+        assert_eq!(plan.result, Some(result));
+    }
+
+    #[test]
+    fn auto_hook_post_application_rejects_unknown_action() {
+        let err = plan_servertool_response_stage_auto_hook_post_application(
+            ServertoolResponseStageAutoHookPostApplicationInput {
+                decision: serde_json::json!({ "action": "unknown" }),
+            },
+        )
+        .expect_err("unknown auto-hook post decision must fail");
+
+        assert!(err.contains("invalid response-stage auto-hook post decision action"));
     }
 }

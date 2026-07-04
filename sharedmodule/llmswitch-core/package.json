@@ -32,6 +32,10 @@
     "./guidance": {
       "import": "./dist/guidance/index.js",
       "types": "./dist/guidance/index.d.ts"
+    },
+    "./native/servertool-wrapper": {
+      "import": "./dist/native/servertool-wrapper.js",
+      "types": "./dist/native/servertool-wrapper.d.ts"
     }
   },
   "dependencies": {

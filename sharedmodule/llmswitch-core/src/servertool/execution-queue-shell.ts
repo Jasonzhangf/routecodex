@@ -3,9 +3,11 @@ import type { ServerSideToolEngineOptions } from './types.js';
 import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {
   planServertoolNoopOutcomeWithNative,
-  planServertoolToolCallDispatchWithNative,
   buildServertoolHandlerErrorToolOutputPayloadWithNative
-} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
+import {
+  planServertoolToolCallDispatchWithNative
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   planServertoolExecutionDispatchErrorWithNative,
   appendServertoolExecutedRecordWithNative,
@@ -141,8 +143,8 @@ export async function runServertoolIoExecutionQueue(args: {
         id: toolCall.id,
         name: toolCall.name,
         arguments: toolCall.arguments,
-        executionMode: toolCall.executionMode,
-        stripAfterExecute: toolCall.stripAfterExecute
+        executionMode: toolCall.executionMode ?? 'noop',
+        stripAfterExecute: toolCall.stripAfterExecute === true
       },
       noopOutcome: noopResult
     });

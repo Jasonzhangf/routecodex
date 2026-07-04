@@ -1,5 +1,5 @@
 import type { ServerSideToolEngineOptions, ServerSideToolEngineResult } from './types.js';
-import { readServertoolPrimaryAutoHookIdsWithNative } from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import { readServertoolPrimaryAutoHookIdsWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   planEngineSelectionStartWithNative,
   resolveEngineSelectionAfterRunWithNative,

@@ -1483,6 +1483,12 @@ pub fn plan_servertool_execution_branch_json(input_json: String) -> NapiResult<S
 }
 
 #[napi]
+pub fn plan_servertool_execution_branch_application_json(input_json: String) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_execution_branch_application_json(&input_json)
+        .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
 pub fn resolve_servertool_timeout_ms_from_env_candidates_json(
     input_json: String,
 ) -> NapiResult<String> {
@@ -1581,6 +1587,26 @@ pub fn plan_servertool_response_stage_prepass_initial_application_json(
     input_json: String,
 ) -> NapiResult<String> {
     servertool_core_blocks::plan_servertool_response_stage_prepass_initial_application_json(
+        &input_json,
+    )
+    .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_response_stage_auto_hook_pre_application_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_response_stage_auto_hook_pre_application_json(
+        &input_json,
+    )
+    .map_err(|e| napi::Error::from_reason(e))
+}
+
+#[napi]
+pub fn plan_servertool_response_stage_auto_hook_post_application_json(
+    input_json: String,
+) -> NapiResult<String> {
+    servertool_core_blocks::plan_servertool_response_stage_auto_hook_post_application_json(
         &input_json,
     )
     .map_err(|e| napi::Error::from_reason(e))

@@ -11,7 +11,7 @@ import {
   resolveServertoolProgressStageWithNative,
   resolveServertoolProgressToolNameWithNative,
   shouldUseServertoolGoldProgressHighlightWithNative
-} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import { formatStopMessageCompareContextWithNative } from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   readProviderProtocolFromAnyBoundMetadataCenter,

@@ -199,6 +199,82 @@ describe('servertool CLI native bridge', () => {
     });
   });
 
+  it('uses Rust-owned execution-branch application planning through the raw NAPI bridge', () => {
+    const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+    const planApplication = binding?.planServertoolExecutionBranchApplicationJson;
+    expect(typeof planApplication).toBe('function');
+
+    const rawCliApplication = (planApplication as (input: string) => unknown)(JSON.stringify({
+      phase: 'pre_execution',
+      branchPlan: {
+        action: 'client_exec_cli_projection',
+        projectedToolCall: {
+          id: 'call_cli_projection_1',
+          name: 'servertool_fixture',
+          arguments: '{"ok":true}'
+        }
+      }
+    }));
+    expect(typeof rawCliApplication).toBe('string');
+    expect(JSON.parse(rawCliApplication as string)).toEqual({
+      projectClientExecCli: true,
+      resolveExecutionOutcome: false,
+      continueResponseStage: false,
+      projectedToolCall: {
+        id: 'call_cli_projection_1',
+        name: 'servertool_fixture',
+        arguments: '{"ok":true}'
+      }
+    });
+
+    const rawOutcomeApplication = (planApplication as (input: string) => unknown)(JSON.stringify({
+      phase: 'post_execution',
+      branchPlan: {
+        action: 'resolve_execution_outcome'
+      }
+    }));
+    expect(typeof rawOutcomeApplication).toBe('string');
+    expect(JSON.parse(rawOutcomeApplication as string)).toEqual({
+      projectClientExecCli: false,
+      resolveExecutionOutcome: true,
+      continueResponseStage: false
+    });
+  });
+
+  it('uses Rust-owned response-stage auto-hook application planning through the raw NAPI bridge', () => {
+    const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+    const planPreApplication = binding?.planServertoolResponseStageAutoHookPreApplicationJson;
+    const planPostApplication = binding?.planServertoolResponseStageAutoHookPostApplicationJson;
+    expect(typeof planPreApplication).toBe('function');
+    expect(typeof planPostApplication).toBe('function');
+
+    const rawPreApplication = (planPreApplication as (input: string) => unknown)(JSON.stringify({
+      decision: {
+        action: 'return_pass_result',
+        result: { action: 'return_passthrough_bypass' }
+      }
+    }));
+    expect(typeof rawPreApplication).toBe('string');
+    expect(JSON.parse(rawPreApplication as string)).toEqual({
+      returnPassResult: true,
+      runAutoHooks: false,
+      result: { action: 'return_passthrough_bypass' }
+    });
+
+    const rawPostApplication = (planPostApplication as (input: string) => unknown)(JSON.stringify({
+      decision: {
+        action: 'throw_required_response_hook_empty',
+        errorPlan: { message: 'required hook empty' }
+      }
+    }));
+    expect(typeof rawPostApplication).toBe('string');
+    expect(JSON.parse(rawPostApplication as string)).toEqual({
+      throwRequiredResponseHookEmpty: true,
+      returnPassResult: false,
+      errorPlan: { message: 'required hook empty' }
+    });
+  });
+
   it('uses Rust-owned engine runtime-action planning for orchestration shell exits', () => {
     expect(
       planServertoolEngineRuntimeActionWithNative({

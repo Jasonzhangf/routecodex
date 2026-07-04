@@ -47,6 +47,17 @@ describe('provider error catalog normalization', () => {
     expect(normalized?.class).toBe('unrecoverable');
   });
 
+  it('normalizes model capacity text without status to retryable HTTP_429', () => {
+    const normalized = normalizeKnownProviderError({
+      message: 'Selected model is at capacity. Please try a different model.'
+    });
+
+    expect(normalized?.code).toBe('429.1000');
+    expect(normalized?.key).toBe('HTTP_429');
+    expect(normalized?.status).toBe(429);
+    expect(normalized?.class).toBe('recoverable');
+  });
+
   it('normalizes unknown HTTP 5xx provider status as recoverable', () => {
     const normalized = normalizeKnownProviderError({
       statusCode: 524,

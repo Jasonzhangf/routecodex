@@ -12,6 +12,7 @@ const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 const proj = path.join(root, 'sharedmodule', 'llmswitch-core', 'tsconfig.json');
 const coreRoot = path.join(root, 'sharedmodule', 'llmswitch-core');
 const nativeBuildScript = path.join(coreRoot, 'scripts', 'build-native-hotpath.mjs');
+const servertoolWrapperScript = path.join(root, 'scripts', 'generate-llmswitch-servertool-wrapper.mjs');
 const outDir = path.join(coreRoot, 'dist');
 const tsBuildInfo = path.join(coreRoot, 'tsconfig.tsbuildinfo');
 const requiredOutputs = createRequiredCoreOutputs(outDir);
@@ -82,6 +83,16 @@ function runNativeBuild() {
   }
 }
 
+function generateServertoolWrapper() {
+  if (!fs.existsSync(servertoolWrapperScript)) {
+    fail(`servertool wrapper generator missing: ${servertoolWrapperScript}`);
+  }
+  const res = spawnSync(process.execPath, [servertoolWrapperScript], { stdio: 'inherit', cwd: root });
+  if ((res.status ?? 0) !== 0) {
+    fail('servertool wrapper generation failed for llmswitch-core');
+  }
+}
+
 function removeStaleTsBuildInfoIfDistIncomplete() {
   if (distIsValid()) {
     return;
@@ -106,6 +117,7 @@ if (skip === '1' || skip === 'true' || skip === 'yes') {
   process.exit(0);
 }
 runNativeBuild();
+generateServertoolWrapper();
 removeStaleTsBuildInfoIfDistIncomplete();
 if (shouldSkipBuild()) {
   console.log('[build-core] dist up-to-date; skip rebuild:', outDir);

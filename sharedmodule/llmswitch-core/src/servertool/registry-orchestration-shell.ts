@@ -1,7 +1,7 @@
 import {
   planServertoolBuiltinAutoHandlerEntriesWithNative,
   resolveServertoolRegistryHandlerWithNative
-} from '../native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+} from '../native/router-hotpath/native-servertool-core-semantics.js';
 import {
   planServertoolRegistryBuiltinAutoHookEntriesWithNative
 } from '../native/router-hotpath/native-servertool-core-semantics.js';

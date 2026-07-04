@@ -450,7 +450,7 @@ export async function convertProviderResponse(
   const frameResult = buildSseFramesFromJsonWithNative({
     protocol: sseCodec,
     response: hubRespOutbound04ClientSemantic,
-    requestId: streamPipe.requestId,
+    requestId,
     model: "",
   });
   const stream = buildReadableFromSseFrames(frameResult.frames);
