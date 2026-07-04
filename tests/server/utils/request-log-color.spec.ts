@@ -116,9 +116,10 @@ describe('request log color registry', () => {
     expect(line.includes('\x1b[97m')).toBe(false);
   });
 
-  it('keeps registered request, virtual-router-hit, response, and usage colors aligned without a session key', () => {
+  it('uses virtual-router-hit route color for later response and usage lines without a session key', () => {
     const requestId = 'openai-responses-router-gpt-5.5-20260704T162136689-458956-727';
     const requestColor = resolveRequestLogColorToken(requestId);
+    const routeColor = '\x1b[38;5;141m';
 
     registerRequestLogContext(requestId, {
       clientRequestId: '8958-729'
@@ -133,9 +134,9 @@ describe('request log color registry', () => {
 
     expect(requestColor).toBe('\x1b[36m');
     expect(requestLine.startsWith(String(requestColor))).toBe(true);
-    expect(routerHitLine.startsWith(String(requestColor))).toBe(true);
-    expect(responseLine.startsWith(String(requestColor))).toBe(true);
-    expect(usageLine.startsWith(String(requestColor))).toBe(true);
+    expect(routerHitLine.startsWith(routeColor)).toBe(true);
+    expect(responseLine.startsWith(routeColor)).toBe(true);
+    expect(usageLine.startsWith(routeColor)).toBe(true);
     expect(routerHitLine).toContain(`req=${requestId} longcontext/gateway-priority-5555-priority-longcontext`);
   });
 

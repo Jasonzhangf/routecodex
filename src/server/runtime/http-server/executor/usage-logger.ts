@@ -189,7 +189,6 @@ export function logUsageSummary(
       ? info.logSessionColorKey.trim()
       : undefined;
   registerRequestLogContext(requestId, requestLogContext);
-  const requestColor = resolveRequestLogColorToken(requestId, requestLogContext) ?? '';
   const externalLatencyMs = Number.isFinite(info.externalLatencyMs as number)
     ? Math.max(0, Number(info.externalLatencyMs))
     : 0;
@@ -294,6 +293,7 @@ export function logUsageSummary(
     terminal: options?.terminalTiming === true
   });
   const hubStageTopSuffix = isUsageTimingOutputEnabled() ? formatHubStageTop(info.hubStageTop) : '';
+  const requestColor = resolveRequestLogColorToken(requestId, requestLogContext) ?? '';
   const diagTimings = [
     hiMsPairIfSlow('wait.traffic', trafficWaitMs, requestColor),
     hiMsPairIfSlow('wait.inject', clientInjectWaitMs, requestColor),

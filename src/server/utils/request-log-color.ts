@@ -11,6 +11,7 @@ const REQUEST_LOG_CONTEXT_MAX = 4096;
 
 type RequestLogContextRecord = {
   colorToken: string;
+  colorSource: 'session' | 'request_default' | 'virtual_router_hit';
   expiresAtMs: number;
 };
 
@@ -70,12 +71,31 @@ function resolveVirtualRouterHitSessionKey(text: string): string | undefined {
   return normalizeToken(sid);
 }
 
+function resolveVirtualRouterHitRouteColor(text: string): string | undefined {
+  const leadingColor = extractLeadingAnsiColor(text);
+  if (leadingColor) {
+    return leadingColor;
+  }
+  const markerColor = text.match(/(\x1b\[[0-9;]*m)\[virtual-router-hit\]/)?.[1];
+  return markerColor || undefined;
+}
+
 function resolveVirtualRouterHitColorToken(text: string): string | undefined {
   const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
   const requestKey = normalizeRequestKey(requestId);
+  const routeColor = resolveVirtualRouterHitRouteColor(text);
   if (requestKey) {
     const record = REQUEST_LOG_CONTEXT.get(requestKey);
     if (record && record.expiresAtMs > Date.now()) {
+      if (record.colorSource !== 'session' && routeColor) {
+        const nextRecord: RequestLogContextRecord = {
+          colorToken: routeColor,
+          colorSource: 'virtual_router_hit',
+          expiresAtMs: Date.now() + REQUEST_LOG_CONTEXT_TTL_MS
+        };
+        REQUEST_LOG_CONTEXT.set(requestKey, nextRecord);
+        return nextRecord.colorToken;
+      }
       return record.colorToken;
     }
     if (record) {
@@ -127,9 +147,25 @@ export function registerRequestLogContext(
   if (!colorToken) {
     return;
   }
+  const colorSource = sessionKey ? 'session' : 'request_default';
   const nowMs = Date.now();
+  const existing = REQUEST_LOG_CONTEXT.get(requestKey);
+  if (
+    existing
+    && existing.expiresAtMs > nowMs
+    && existing.colorSource !== 'request_default'
+    && colorSource === 'request_default'
+  ) {
+    REQUEST_LOG_CONTEXT.set(requestKey, {
+      ...existing,
+      expiresAtMs: nowMs + REQUEST_LOG_CONTEXT_TTL_MS
+    });
+    pruneExpiredContext(nowMs);
+    return;
+  }
   REQUEST_LOG_CONTEXT.set(requestKey, {
     colorToken,
+    colorSource,
     expiresAtMs: nowMs + REQUEST_LOG_CONTEXT_TTL_MS
   });
   pruneExpiredContext(nowMs);

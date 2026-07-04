@@ -176,6 +176,37 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('\x1b[97m');
   });
 
+  it('keeps usage line on virtual-router-hit route color when request has no session key', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { colorizeVirtualRouterHitLogLine, registerRequestLogContext } = await import('../../../../../src/server/utils/request-log-color.js');
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    const requestId = 'openai-responses-router-gpt-5.5-20260704T162136689-458956-727';
+    const routeColor = '\x1b[38;5;141m';
+    registerRequestLogContext(requestId, { clientRequestId: '8958-729' });
+    const routerHitLine = colorizeVirtualRouterHitLogLine(
+      `${routeColor}[virtual-router-hit]\x1b[0m \x1b[90m16:21:36\x1b[0m req=${requestId} ${routeColor}longcontext/gateway-priority-5555-priority-longcontext -> orangeai[key1].glm-5.2 reason=longcontext:token-threshold\x1b[0m`
+    );
+    expect(routerHitLine.startsWith(routeColor)).toBe(true);
+
+    logUsageSummary(requestId, {
+      providerKey: 'orangeai.key1',
+      model: 'glm-5.2',
+      requestModel: 'gpt-5.5',
+      routeName: 'longcontext',
+      poolId: 'gateway-priority-5555-priority-longcontext',
+      entryPort: 5555,
+      latencyMs: 120,
+      clientRequestId: '8958-729',
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(rendered.startsWith(routeColor)).toBe(true);
+    expect(rendered).toContain('route=longcontext');
+    expect(rendered).toContain('model=gpt-5.5->glm-5.2');
+  });
+
   it('does not repeat finish_reason inside usage detail block', async () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
