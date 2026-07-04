@@ -4,6 +4,10 @@ import { MetadataCenter } from '../../../../src/server/runtime/http-server/metad
 const mockCaptureReqInboundResponsesContextSnapshot = jest.fn();
 const mockPlanResponsesHandlerEntry = jest.fn();
 const mockMaterializeProviderOwnedSubmitContext = jest.fn();
+const mockPlanResponsesContinuationRequestAction = jest.fn();
+const mockLookupResponsesContinuationByResponseId = jest.fn();
+const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
+const mockResumeResponsesConversation = jest.fn();
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -13,15 +17,16 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
   captureResponsesRequestContextForRequest: jest.fn(),
   clearResponsesConversationByRequestId: jest.fn(),
   finalizeResponsesConversationRequestRetention: jest.fn(),
-  lookupResponsesContinuationByResponseId: jest.fn(),
-  materializeLatestResponsesContinuationByScope: jest.fn(),
+  lookupResponsesContinuationByResponseId: mockLookupResponsesContinuationByResponseId,
+  materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
   recordResponsesResponseForRequest: jest.fn(),
-  resumeResponsesConversation: jest.fn(),
+  resumeResponsesConversation: mockResumeResponsesConversation,
 }));
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   captureReqInboundResponsesContextSnapshot: mockCaptureReqInboundResponsesContextSnapshot,
   materializeProviderOwnedSubmitContext: mockMaterializeProviderOwnedSubmitContext,
+  planResponsesContinuationRequestAction: mockPlanResponsesContinuationRequestAction,
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
 }));
 
@@ -35,6 +40,7 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
 
 const {
   buildResponsesRequestContextForHttp,
+  prepareResponsesHandlerEntryForHttp,
   prepareResponsesHandlerRuntimeForHttp,
   prepareResponsesRequestBodyForHttp
 } = await import(
@@ -51,6 +57,14 @@ describe('responses-request-bridge relay request-context normalization', () => {
       responseId: undefined
     });
     mockMaterializeProviderOwnedSubmitContext.mockReset();
+    mockPlanResponsesContinuationRequestAction.mockReset();
+    mockPlanResponsesContinuationRequestAction.mockResolvedValue({
+      action: 'none',
+      pipelineEntryEndpoint: '/v1/responses'
+    });
+    mockLookupResponsesContinuationByResponseId.mockReset();
+    mockMaterializeLatestResponsesContinuationByScope.mockReset();
+    mockResumeResponsesConversation.mockReset();
   });
 
   it('RED: relay request context uses normalized native input instead of raw duplicate tool history', async () => {
@@ -303,6 +317,180 @@ describe('responses-request-bridge relay request-context normalization', () => {
       conversationId: 'conv_submit_direct_1',
       matchedPort: 5555,
       routingPolicyGroup: 'gateway_priority_5555'
+    });
+  });
+
+  it('routes direct submit_tool_outputs through native continuation action plan', async () => {
+    mockPlanResponsesHandlerEntry.mockResolvedValue({
+      mode: 'submit_tool_outputs',
+      responseId: 'resp_direct_plan_1',
+      payload: {
+        response_id: 'resp_direct_plan_1',
+        tool_outputs: [{ call_id: 'call_direct_plan_1', output: 'ok' }]
+      }
+    });
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue({
+      continuationOwner: 'direct',
+      providerKey: 'provider.key1',
+      requestId: 'req_prev_direct_1'
+    });
+    mockPlanResponsesContinuationRequestAction.mockResolvedValue({
+      action: 'direct_submit',
+      responseId: 'resp_direct_plan_1',
+      pipelineEntryEndpoint: '/v1/responses.submit_tool_outputs',
+      materializeProviderOwnedSubmitContext: true,
+      resumeMeta: {
+        responseId: 'resp_direct_plan_1',
+        restored: false,
+        continuationOwner: 'direct',
+        providerKey: 'provider.key1',
+        previousRequestId: 'req_prev_direct_1'
+      }
+    });
+    mockMaterializeProviderOwnedSubmitContext.mockResolvedValue({
+      payload: {
+        response_id: 'resp_direct_plan_1',
+        previous_response_id: 'resp_direct_plan_1',
+        tool_outputs: [{ call_id: 'call_direct_plan_1', output: 'ok' }],
+        input: [{ type: 'function_call_output', call_id: 'call_direct_plan_1', output: 'ok' }]
+      },
+      context: {
+        input: [{ type: 'function_call_output', call_id: 'call_direct_plan_1', output: 'ok' }]
+      }
+    });
+
+    const prepared = await prepareResponsesHandlerEntryForHttp({
+      payload: { response_id: 'resp_direct_plan_1', tool_outputs: [] },
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      requestId: 'req_direct_plan_1',
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    });
+
+    expect(mockPlanResponsesContinuationRequestAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plannedEntryMode: 'submit_tool_outputs',
+        responseId: 'resp_direct_plan_1',
+        continuation: expect.objectContaining({ continuationOwner: 'direct' })
+      })
+    );
+    expect(mockResumeResponsesConversation).not.toHaveBeenCalled();
+    expect(prepared).toMatchObject({
+      kind: 'ok',
+      pipelineEntryEndpoint: '/v1/responses.submit_tool_outputs',
+      resumeMeta: {
+        continuationOwner: 'direct',
+        providerKey: 'provider.key1'
+      }
+    });
+  });
+
+  it('routes relay submit_tool_outputs through native continuation action plan', async () => {
+    mockPlanResponsesHandlerEntry.mockResolvedValue({
+      mode: 'submit_tool_outputs',
+      responseId: 'resp_relay_plan_1',
+      payload: {
+        response_id: 'resp_relay_plan_1',
+        tool_outputs: [{ call_id: 'call_relay_plan_1', output: 'ok' }]
+      }
+    });
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue({
+      continuationOwner: 'relay',
+      requestId: 'req_prev_relay_1'
+    });
+    mockPlanResponsesContinuationRequestAction.mockResolvedValue({
+      action: 'relay_submit',
+      responseId: 'resp_relay_plan_1',
+      pipelineEntryEndpoint: '/v1/responses'
+    });
+    mockResumeResponsesConversation.mockResolvedValue({
+      payload: {
+        previous_response_id: 'resp_relay_plan_1',
+        input: [{ type: 'function_call_output', call_id: 'call_relay_plan_1', output: 'ok' }]
+      },
+      meta: {
+        restored: true,
+        continuationOwner: 'relay'
+      }
+    });
+
+    const prepared = await prepareResponsesHandlerEntryForHttp({
+      payload: { response_id: 'resp_relay_plan_1', tool_outputs: [] },
+      entryEndpoint: '/v1/responses.submit_tool_outputs',
+      requestId: 'req_relay_plan_1',
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    });
+
+    expect(mockResumeResponsesConversation).toHaveBeenCalledWith(
+      'resp_relay_plan_1',
+      expect.objectContaining({ response_id: 'resp_relay_plan_1' }),
+      expect.objectContaining({ entryKind: 'responses', matchedPort: 5555 })
+    );
+    expect(prepared).toMatchObject({
+      kind: 'ok',
+      pipelineEntryEndpoint: '/v1/responses',
+      resumeMeta: {
+        restored: true,
+        continuationOwner: 'relay'
+      }
+    });
+  });
+
+  it('routes scope materialize through native continuation action plan', async () => {
+    mockPlanResponsesHandlerEntry.mockResolvedValue({
+      mode: 'scope_materialize',
+      responseId: undefined,
+      payload: {
+        previous_response_id: 'resp_scope_plan_1',
+        input: [{ type: 'function_call_output', call_id: 'call_scope_plan_1', output: 'ok' }]
+      }
+    });
+    mockLookupResponsesContinuationByResponseId.mockResolvedValue({
+      continuationOwner: 'relay',
+      requestId: 'req_prev_scope_1'
+    });
+    mockPlanResponsesContinuationRequestAction.mockResolvedValue({
+      action: 'relay_scope_materialize',
+      responseId: 'resp_scope_plan_1',
+      pipelineEntryEndpoint: '/v1/responses',
+      continuationOwner: 'relay'
+    });
+    mockMaterializeLatestResponsesContinuationByScope.mockResolvedValue({
+      payload: {
+        previous_response_id: 'resp_scope_plan_1',
+        input: [{ type: 'function_call_output', call_id: 'call_scope_plan_1', output: 'ok' }]
+      },
+      meta: {
+        materialized: true,
+        continuationOwner: 'relay'
+      }
+    });
+
+    const prepared = await prepareResponsesHandlerEntryForHttp({
+      payload: { previous_response_id: 'resp_scope_plan_1', input: [] },
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_scope_plan_1',
+      sessionId: 'sess_scope_plan_1',
+      conversationId: 'conv_scope_plan_1',
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    });
+
+    expect(mockMaterializeLatestResponsesContinuationByScope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuationOwner: 'relay',
+        sessionId: 'sess_scope_plan_1',
+        conversationId: 'conv_scope_plan_1'
+      })
+    );
+    expect(prepared).toMatchObject({
+      kind: 'ok',
+      pipelineEntryEndpoint: '/v1/responses',
+      resumeMeta: {
+        materialized: true,
+        continuationOwner: 'relay'
+      }
     });
   });
 

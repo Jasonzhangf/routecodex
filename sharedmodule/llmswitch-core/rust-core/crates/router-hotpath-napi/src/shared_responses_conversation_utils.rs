@@ -1333,6 +1333,104 @@ fn materialize_provider_owned_submit_context(payload: &Value) -> Value {
     })
 }
 
+fn plan_responses_continuation_request_action(input: &Value) -> Value {
+    let input_obj = input.as_object().cloned().unwrap_or_default();
+    let planned_entry_mode = read_trimmed_string(input_obj.get("plannedEntryMode"))
+        .unwrap_or_else(|| "none".to_string());
+    let entry_endpoint = read_trimmed_string(input_obj.get("entryEndpoint"))
+        .unwrap_or_else(|| "/v1/responses".to_string());
+    let response_id = read_trimmed_string(input_obj.get("responseId"));
+    let previous_response_id = read_trimmed_string(input_obj.get("previousResponseId"));
+    let continuation = input_obj.get("continuation").and_then(Value::as_object);
+    let continuation_owner = continuation
+        .and_then(|row| read_trimmed_string(row.get("continuationOwner")))
+        .filter(|owner| owner == "direct" || owner == "relay");
+    let provider_key = continuation.and_then(|row| read_trimmed_string(row.get("providerKey")));
+    let previous_request_id =
+        continuation.and_then(|row| read_trimmed_string(row.get("requestId")));
+
+    let build_resume_meta = |id: &str, owner: &str, restored: bool| {
+        let mut meta = Map::new();
+        meta.insert("responseId".to_string(), Value::String(id.to_string()));
+        meta.insert("restored".to_string(), Value::Bool(restored));
+        meta.insert(
+            "continuationOwner".to_string(),
+            Value::String(owner.to_string()),
+        );
+        if let Some(provider_key) = provider_key.clone() {
+            meta.insert("providerKey".to_string(), Value::String(provider_key));
+        }
+        if let Some(previous_request_id) = previous_request_id.clone() {
+            meta.insert(
+                "previousRequestId".to_string(),
+                Value::String(previous_request_id),
+            );
+        }
+        Value::Object(meta)
+    };
+
+    if planned_entry_mode == "submit_tool_outputs" {
+        let Some(response_id) = response_id else {
+            return serde_json::json!({
+                "action": "client_error",
+                "status": 400,
+                "code": "bad_request",
+                "origin": "client",
+                "message": "response_id is required for submit_tool_outputs"
+            });
+        };
+        if continuation_owner.as_deref() == Some("direct") {
+            return serde_json::json!({
+                "action": "direct_submit",
+                "responseId": response_id,
+                "pipelineEntryEndpoint": entry_endpoint,
+                "resumeMeta": build_resume_meta(&response_id, "direct", false),
+                "materializeProviderOwnedSubmitContext": true
+            });
+        }
+        return serde_json::json!({
+            "action": "relay_submit",
+            "responseId": response_id,
+            "pipelineEntryEndpoint": "/v1/responses"
+        });
+    }
+
+    if entry_endpoint == "/v1/responses" {
+        if let Some(previous_response_id) = previous_response_id.as_deref() {
+            if continuation_owner.as_deref() == Some("relay")
+                && planned_entry_mode == "scope_materialize"
+            {
+                return serde_json::json!({
+                    "action": "relay_scope_materialize",
+                    "responseId": previous_response_id,
+                    "pipelineEntryEndpoint": entry_endpoint,
+                    "continuationOwner": "relay"
+                });
+            }
+            if let Some(owner) = continuation_owner.as_deref() {
+                return serde_json::json!({
+                    "action": "attach_resume_meta",
+                    "responseId": previous_response_id,
+                    "pipelineEntryEndpoint": entry_endpoint,
+                    "resumeMeta": build_resume_meta(previous_response_id, owner, false)
+                });
+            }
+        }
+    }
+
+    if planned_entry_mode == "scope_materialize" {
+        return serde_json::json!({
+            "action": "scope_materialize",
+            "pipelineEntryEndpoint": entry_endpoint
+        });
+    }
+
+    serde_json::json!({
+        "action": "none",
+        "pipelineEntryEndpoint": entry_endpoint
+    })
+}
+
 fn plan_responses_handler_entry(
     payload: &Value,
     entry_endpoint: Option<&str>,
@@ -2718,6 +2816,14 @@ pub fn materialize_provider_owned_submit_context_json(payload_json: String) -> N
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi]
+pub fn plan_responses_continuation_request_action_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_continuation_request_action(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn read_metadata_center_section<'a>(context: &'a Value, key: &str) -> Option<&'a Value> {
     if let Some(center) = context
         .as_object()
@@ -2879,9 +2985,10 @@ mod tests {
     use super::{
         build_responses_conversation_scope_plan, build_stop_hook_guidance_text_from_output,
         convert_responses_output_to_input_items, materialize_provider_owned_submit_context,
-        materialize_responses_continuation_payload, plan_responses_handler_entry,
-        prepare_responses_conversation_entry, publish_responses_record_plan_json,
-        restore_responses_continuation_payload, resume_responses_conversation_payload,
+        materialize_responses_continuation_payload, plan_responses_continuation_request_action,
+        plan_responses_handler_entry, prepare_responses_conversation_entry,
+        publish_responses_record_plan_json, restore_responses_continuation_payload,
+        resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
 
@@ -3099,6 +3206,78 @@ mod tests {
                 { "type": "function_call_output", "call_id": "call_existing", "output": "kept" }
             ])
         );
+    }
+
+    #[test]
+    fn continuation_request_action_routes_direct_submit_in_rust() {
+        let planned = plan_responses_continuation_request_action(&json!({
+            "plannedEntryMode": "submit_tool_outputs",
+            "entryEndpoint": "/v1/responses.submit_tool_outputs",
+            "responseId": "resp_direct_1",
+            "continuation": {
+                "continuationOwner": "direct",
+                "providerKey": "provider.key1",
+                "requestId": "req_prev_1"
+            }
+        }));
+
+        assert_eq!(planned["action"], json!("direct_submit"));
+        assert_eq!(planned["responseId"], json!("resp_direct_1"));
+        assert_eq!(
+            planned["pipelineEntryEndpoint"],
+            json!("/v1/responses.submit_tool_outputs")
+        );
+        assert_eq!(planned["resumeMeta"]["continuationOwner"], json!("direct"));
+        assert_eq!(planned["resumeMeta"]["providerKey"], json!("provider.key1"));
+        assert_eq!(
+            planned["materializeProviderOwnedSubmitContext"],
+            json!(true)
+        );
+    }
+
+    #[test]
+    fn continuation_request_action_routes_relay_submit_in_rust() {
+        let planned = plan_responses_continuation_request_action(&json!({
+            "plannedEntryMode": "submit_tool_outputs",
+            "entryEndpoint": "/v1/responses.submit_tool_outputs",
+            "responseId": "resp_relay_1",
+            "continuation": {
+                "continuationOwner": "relay",
+                "requestId": "req_prev_2"
+            }
+        }));
+
+        assert_eq!(planned["action"], json!("relay_submit"));
+        assert_eq!(planned["responseId"], json!("resp_relay_1"));
+        assert_eq!(planned["pipelineEntryEndpoint"], json!("/v1/responses"));
+    }
+
+    #[test]
+    fn continuation_request_action_routes_scope_materialize_in_rust() {
+        let planned = plan_responses_continuation_request_action(&json!({
+            "plannedEntryMode": "scope_materialize",
+            "entryEndpoint": "/v1/responses",
+            "previousResponseId": "resp_scope_1",
+            "continuation": {
+                "continuationOwner": "relay"
+            }
+        }));
+
+        assert_eq!(planned["action"], json!("relay_scope_materialize"));
+        assert_eq!(planned["responseId"], json!("resp_scope_1"));
+        assert_eq!(planned["continuationOwner"], json!("relay"));
+    }
+
+    #[test]
+    fn continuation_request_action_rejects_submit_without_response_id() {
+        let planned = plan_responses_continuation_request_action(&json!({
+            "plannedEntryMode": "submit_tool_outputs",
+            "entryEndpoint": "/v1/responses.submit_tool_outputs"
+        }));
+
+        assert_eq!(planned["action"], json!("client_error"));
+        assert_eq!(planned["status"], json!(400));
+        assert_eq!(planned["code"], json!("bad_request"));
     }
 
     #[test]

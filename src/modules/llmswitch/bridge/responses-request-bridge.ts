@@ -23,6 +23,7 @@ import {
 import {
   captureReqInboundResponsesContextSnapshot,
   materializeProviderOwnedSubmitContext,
+  planResponsesContinuationRequestAction,
   planResponsesHandlerEntry,
 } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
@@ -598,40 +599,64 @@ export async function prepareResponsesHandlerEntryForHttp(
     payload.response_id = args.responseIdFromPath;
   }
 
-  if (isSubmitToolOutputs) {
-    const responseId = plannedEntry.responseId || args.responseIdFromPath;
-    if (!responseId) {
+  const responseId = plannedEntry.responseId || args.responseIdFromPath;
+  const previousResponseId =
+    typeof payload.previous_response_id === 'string' && payload.previous_response_id.trim()
+      ? payload.previous_response_id.trim()
+      : undefined;
+  const continuationLookupId = isSubmitToolOutputs ? responseId : previousResponseId;
+  const continuation = continuationLookupId
+    ? await lookupResponsesContinuationByResponseId(continuationLookupId, {
+        entryKind: 'responses',
+        matchedPort: args.matchedPort,
+        routingPolicyGroup: args.routingPolicyGroup,
+      })
+    : undefined;
+  const continuationAction = await planResponsesContinuationRequestAction({
+    plannedEntryMode: plannedEntry.mode,
+    entryEndpoint: args.entryEndpoint,
+    ...(responseId ? { responseId } : {}),
+    ...(previousResponseId ? { previousResponseId } : {}),
+    continuation: continuation || null,
+  });
+
+  switch (continuationAction.action) {
+    case 'client_error': {
       throw Object.assign(
-        new Error('response_id is required for submit_tool_outputs'),
+        new Error(
+          typeof continuationAction.message === 'string'
+            ? continuationAction.message
+            : 'Unable to prepare Responses continuation request'
+        ),
         {
-          status: 400,
-          code: 'bad_request',
-          origin: 'client',
+          status: typeof continuationAction.status === 'number' ? continuationAction.status : 400,
+          code: typeof continuationAction.code === 'string' ? continuationAction.code : 'bad_request',
+          origin: typeof continuationAction.origin === 'string' ? continuationAction.origin : 'client',
         }
       );
     }
-    const continuation = await lookupResponsesContinuationByResponseId(responseId, {
-      entryKind: 'responses',
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup,
-    });
-    if (continuation?.continuationOwner === 'direct') {
-      resumeMeta = {
-        responseId,
-        restored: false,
-        continuationOwner: 'direct',
-        ...(continuation.providerKey ? { providerKey: continuation.providerKey } : {}),
-      };
-      if (typeof payload.previous_response_id !== 'string' || !payload.previous_response_id.trim()) {
-        payload.previous_response_id = responseId;
+    case 'direct_submit': {
+      const plannedResponseId =
+        typeof continuationAction.responseId === 'string' && continuationAction.responseId.trim()
+          ? continuationAction.responseId.trim()
+          : responseId;
+      if (plannedResponseId && (typeof payload.previous_response_id !== 'string' || !payload.previous_response_id.trim())) {
+        payload.previous_response_id = plannedResponseId;
       }
-      if (!Array.isArray(payload.input) || payload.input.length === 0) {
+      if (continuationAction.materializeProviderOwnedSubmitContext === true && (!Array.isArray(payload.input) || payload.input.length === 0)) {
         const materialized = await materializeProviderOwnedSubmitContext({ payload });
         if (materialized?.payload.input) {
           payload.input = materialized.payload.input;
         }
       }
-      pipelineEntryEndpoint = args.entryEndpoint;
+      resumeMeta =
+        continuationAction.resumeMeta && typeof continuationAction.resumeMeta === 'object' && !Array.isArray(continuationAction.resumeMeta)
+          ? (continuationAction.resumeMeta as Record<string, unknown>)
+          : undefined;
+      pipelineEntryEndpoint =
+        typeof continuationAction.pipelineEntryEndpoint === 'string'
+          ? continuationAction.pipelineEntryEndpoint
+          : args.entryEndpoint;
       return {
         kind: 'ok',
         payload,
@@ -641,45 +666,46 @@ export async function prepareResponsesHandlerEntryForHttp(
         resumeMeta,
       };
     }
-    const resumeResult = await resumeResponsesConversation(responseId, payload, {
-      requestId: args.requestId,
-      entryKind: 'responses',
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup,
-    });
-    // Relay-owned continuation is already materialized into a normal
-    // /v1/responses payload; keep it on the mainline instead of letting
-    // downstream provider/runtime layers reinterpret it as upstream-native
-    // submit_tool_outputs.
-    pipelineEntryEndpoint = '/v1/responses';
-    return {
-      kind: 'ok',
-      payload: (resumeResult.payload ?? {}) as AnyRecord,
-      pipelineEntryEndpoint,
-      plannedEntryMode: plannedEntry.mode,
-      isSubmitToolOutputs,
-      resumeMeta: resumeResult.meta,
-    };
-  }
-
-  const previousResponseId =
-    typeof payload.previous_response_id === 'string' && payload.previous_response_id.trim()
-      ? payload.previous_response_id.trim()
-      : undefined;
-  if (args.entryEndpoint === '/v1/responses' && previousResponseId) {
-    const continuation = await lookupResponsesContinuationByResponseId(previousResponseId, {
-      entryKind: 'responses',
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup,
-    });
-    if (continuation?.continuationOwner === 'relay' && plannedEntry.mode === 'scope_materialize') {
+    case 'relay_submit': {
+      const plannedResponseId =
+        typeof continuationAction.responseId === 'string' && continuationAction.responseId.trim()
+          ? continuationAction.responseId.trim()
+          : responseId;
+      if (!plannedResponseId) {
+        throw Object.assign(new Error('response_id is required for submit_tool_outputs'), {
+          status: 400,
+          code: 'bad_request',
+          origin: 'client',
+        });
+      }
+      const resumeResult = await resumeResponsesConversation(plannedResponseId, payload, {
+        requestId: args.requestId,
+        entryKind: 'responses',
+        matchedPort: args.matchedPort,
+        routingPolicyGroup: args.routingPolicyGroup,
+      });
+      pipelineEntryEndpoint =
+        typeof continuationAction.pipelineEntryEndpoint === 'string'
+          ? continuationAction.pipelineEntryEndpoint
+          : '/v1/responses';
+      return {
+        kind: 'ok',
+        payload: (resumeResult.payload ?? {}) as AnyRecord,
+        pipelineEntryEndpoint,
+        plannedEntryMode: plannedEntry.mode,
+        isSubmitToolOutputs,
+        resumeMeta: resumeResult.meta,
+      };
+    }
+    case 'relay_scope_materialize':
+    case 'scope_materialize': {
       const materialized = await materializeLatestResponsesContinuationByScope({
         payload,
         requestId: args.requestId,
         sessionId: args.sessionId,
         conversationId: args.conversationId,
         entryKind: 'responses',
-        continuationOwner: 'relay',
+        ...(continuationAction.continuationOwner === 'relay' ? { continuationOwner: 'relay' as const } : {}),
         matchedPort: args.matchedPort,
         routingPolicyGroup: args.routingPolicyGroup,
       });
@@ -689,44 +715,29 @@ export async function prepareResponsesHandlerEntryForHttp(
       return {
         kind: 'ok',
         payload: (materialized.payload ?? {}) as AnyRecord,
-        pipelineEntryEndpoint,
+        pipelineEntryEndpoint:
+          typeof continuationAction.pipelineEntryEndpoint === 'string'
+            ? continuationAction.pipelineEntryEndpoint
+            : pipelineEntryEndpoint,
         plannedEntryMode: plannedEntry.mode,
         isSubmitToolOutputs,
         resumeMeta: materialized.meta,
       };
     }
-    if (continuation?.continuationOwner === 'direct' || continuation?.continuationOwner === 'relay') {
-      resumeMeta = {
-        responseId: previousResponseId,
-        restored: false,
-        continuationOwner: continuation.continuationOwner,
-        ...(continuation.providerKey ? { providerKey: continuation.providerKey } : {}),
-        ...(continuation.requestId ? { previousRequestId: continuation.requestId } : {}),
-      };
+    case 'attach_resume_meta': {
+      resumeMeta =
+        continuationAction.resumeMeta && typeof continuationAction.resumeMeta === 'object' && !Array.isArray(continuationAction.resumeMeta)
+          ? (continuationAction.resumeMeta as Record<string, unknown>)
+          : undefined;
+      break;
     }
-  }
-
-  if (plannedEntry.mode === 'scope_materialize') {
-    const materialized = await materializeLatestResponsesContinuationByScope({
-      payload,
-      requestId: args.requestId,
-      sessionId: args.sessionId,
-      conversationId: args.conversationId,
-      entryKind: 'responses',
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup,
-    });
-    if (!materialized) {
-      return { kind: 'scope_continuation_expired' };
+    case 'none':
+      break;
+    default: {
+      throw new Error(
+        `[responses] unsupported continuation request action: ${String(continuationAction.action ?? 'unknown')}`
+      );
     }
-    return {
-      kind: 'ok',
-      payload: (materialized.payload ?? {}) as AnyRecord,
-      pipelineEntryEndpoint,
-      plannedEntryMode: plannedEntry.mode,
-      isSubmitToolOutputs,
-      resumeMeta: materialized.meta,
-    };
   }
 
   return {

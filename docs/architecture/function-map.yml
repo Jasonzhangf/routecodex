@@ -3388,6 +3388,7 @@ owners:
       - resumeResponsesConversation
       - materializeLatestResponsesContinuationByScope
       - materializeProviderOwnedSubmitContext
+      - planResponsesContinuationRequestAction
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/src/native/router-hotpath

@@ -4053,6 +4053,19 @@ describe('hub pipeline stage residue audit', () => {
     expect(bridgeSource).not.toMatch(/tool_call_id[\s\S]{0,180}call_id/u);
   });
 
+  it('responses continuation request action routing must be native-owned', () => {
+    const repoRoot = process.cwd();
+    const bridgeSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-request-bridge.ts'),
+      'utf8'
+    );
+
+    expect(bridgeSource).toContain('planResponsesContinuationRequestAction');
+    expect(bridgeSource).not.toContain("continuation?.continuationOwner === 'direct'");
+    expect(bridgeSource).not.toContain("continuation?.continuationOwner === 'relay'");
+    expect(bridgeSource).not.toMatch(/plannedEntry\.mode\s*===\s*['"]scope_materialize['"][\s\S]{0,240}continuationOwner/u);
+  });
+
   it('src-side JS source maps must not remain tracked generated artifacts', () => {
     const trackedSourceMaps = execFileSync(
       'git',

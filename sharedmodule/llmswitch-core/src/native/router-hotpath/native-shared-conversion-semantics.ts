@@ -29,6 +29,7 @@ export {
   materializeProviderOwnedSubmitContextWithNative,
   materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,
+  planResponsesContinuationRequestActionWithNative,
   planResponsesHandlerEntryWithNative,
   prepareResponsesConversationEntryWithNative,
   publishResponsesRecordPlanWithNative,

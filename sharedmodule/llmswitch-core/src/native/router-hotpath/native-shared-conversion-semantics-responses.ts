@@ -552,6 +552,36 @@ export function materializeProviderOwnedSubmitContextWithNative(
   }
 }
 
+export function planResponsesContinuationRequestActionWithNative(input: unknown): Record<string, unknown> {
+  const capability = 'planResponsesContinuationRequestActionJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? null);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed || typeof parsed.action !== 'string') {
+      return fail('invalid payload');
+    }
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function resolveBudgetForModelWithNative(
   modelId: string,
   fallback: { maxBytes: number; safetyRatio: number; allowedBytes: number; source: string } | null | undefined
