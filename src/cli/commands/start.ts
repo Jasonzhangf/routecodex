@@ -353,8 +353,10 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
         };
 
-        // Plain start is non-disruptive; only explicit restart/exclusive may stop an existing server.
-        const shouldRestart = options.restart === true || options.exclusive === true;
+        // Start must take over an existing RouteCodex runtime by default so the
+        // installed snapshot is actually refreshed. Use --no-restart for a
+        // probe-only start that refuses occupied ports.
+        const shouldRestart = options.exclusive === true || options.restart !== false;
         const grouped = hasMultiPortConfig
           ? resolvedPortGroup
           : (ctx.isDevPackage

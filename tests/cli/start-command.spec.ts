@@ -785,7 +785,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(spawnCalls[0].options?.env?.RCC_EXPECT_PARENT_PID).toBeUndefined();
   });
 
-  it('release start is non-disruptive by default and preserves explicit --restart', async () => {
+  it('release start restarts by default and preserves explicit --no-restart', async () => {
     const restartFlags: Array<boolean | undefined> = [];
     const createContext = () => ({
       isDevPackage: false,
@@ -835,11 +835,11 @@ routingPolicyGroup = "gateway_coding_10000"
     createStartCommand(defaultProgram, createContext());
     await defaultProgram.parseAsync(['node', 'rcc', 'start'], { from: 'node' });
 
-    const restartProgram = new Command();
-    createStartCommand(restartProgram, createContext());
-    await restartProgram.parseAsync(['node', 'rcc', 'start', '--restart'], { from: 'node' });
+    const noRestartProgram = new Command();
+    createStartCommand(noRestartProgram, createContext());
+    await noRestartProgram.parseAsync(['node', 'rcc', 'start', '--no-restart'], { from: 'node' });
 
-    expect(restartFlags).toEqual([false, true]);
+    expect(restartFlags).toEqual([true, false]);
   });
 
   it('release start runs daemon supervisor when ROUTECODEX_START_DAEMON=1', async () => {
@@ -903,7 +903,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(spawnCalls[0].unrefCalled).toBe(true);
   });
 
-  it('does not restart by default', async () => {
+  it('restarts by default', async () => {
     const program = new Command();
     const portChecks: Array<{ restart?: boolean }> = [];
 
@@ -951,7 +951,7 @@ routingPolicyGroup = "gateway_coding_10000"
 
     await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
-    expect(portChecks[0]?.restart).toBe(false);
+    expect(portChecks[0]?.restart).toBe(true);
   });
 
   it('uses restart flow when --restart is provided', async () => {

@@ -371,7 +371,7 @@ export async function ensurePortAvailableImpl(args: {
     });
     parentSpinner.stop();
     args.logger.success(`RouteCodex is already running on port ${port}.`);
-    args.logger.info(`Use 'rcc stop' or 'rcc start --restart' to restart.`);
+    args.logger.info(`Use 'rcc stop' or plain 'rcc start' to restart.`);
     args.exit(0);
   }
 
@@ -382,7 +382,7 @@ export async function ensurePortAvailableImpl(args: {
       details: { port, result: 'occupied_no_restart', pids: initialPids, healthy }
     });
     throw new Error(
-      `Port ${port} is occupied by RouteCodex process(es). Use 'rcc stop' or 'rcc start --restart' to take over.`
+      `Port ${port} is occupied by RouteCodex process(es). Use 'rcc stop' or plain 'rcc start' to take over.`
     );
   }
 

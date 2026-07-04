@@ -293,7 +293,7 @@ describe('cli server port-utils', () => {
         killPidBestEffort: () => { killCalled = true; },
         isServerHealthyQuick: async () => false,
         exit: (() => { throw new Error('exit should not be called'); }) as any
-      })).rejects.toThrow("Use 'rcc stop' or 'rcc start --restart'");
+      })).rejects.toThrow("Use 'rcc stop' or plain 'rcc start'");
 
       expect(fetchCalled).toBe(false);
       expect(killCalled).toBe(false);
