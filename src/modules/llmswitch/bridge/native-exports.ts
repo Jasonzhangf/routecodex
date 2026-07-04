@@ -1917,3 +1917,399 @@ export function extractCurrentAssistantReasoningStopArgumentsWithNative(input: u
 export function stripStopSchemaControlTextWithNative(input: unknown): unknown {
   return invokeRouterHotpathJsonCapability('stripStopSchemaControlTextJson', [input]);
 }
+
+
+// servertool-core bridge: planStoplessExecutionWithNative
+export function planStoplessExecutionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planStoplessExecutionJson', [input]);
+}
+
+// servertool-core bridge: buildStoplessAutoCliProjectionFromEngineWithNative
+export function buildStoplessAutoCliProjectionFromEngineWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildStoplessAutoCliProjectionFromEngineJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolEnginePostflightPayloadWithNative
+export function resolveServertoolEnginePostflightPayloadWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolEnginePostflightPayloadJson', [input]);
+}
+
+// servertool-core bridge: planAutoHookRuntimeAttemptWithNative
+export function planAutoHookRuntimeAttemptWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planAutoHookRuntimeAttemptJson', [input]);
+}
+
+// servertool-core bridge: resolveAutoHookRuntimeAttemptDecisionWithNative
+export function resolveAutoHookRuntimeAttemptDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveAutoHookRuntimeAttemptDecisionJson', [input]);
+}
+
+// servertool-core bridge: planAutoHookCallerFinalizationWithNative
+export function planAutoHookCallerFinalizationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planAutoHookCallerFinalizationJson', [input]);
+}
+
+// servertool-core bridge: resolveAutoHookCallerFinalizationDecisionWithNative
+export function resolveAutoHookCallerFinalizationDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveAutoHookCallerFinalizationDecisionJson', [input]);
+}
+
+// servertool-core bridge: planAutoHookCallerResultProjectionWithNative
+export function planAutoHookCallerResultProjectionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planAutoHookCallerResultProjectionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolExecutionBranchWithNative
+export function planServertoolExecutionBranchWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolExecutionBranchJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolPreExecutionBranchDecisionWithNative
+export function resolveServertoolPreExecutionBranchDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolPreExecutionBranchDecisionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolPostExecutionBranchDecisionWithNative
+export function resolveServertoolPostExecutionBranchDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolPostExecutionBranchDecisionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolEnginePreflightWithNative
+export function planServertoolEnginePreflightWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolEnginePreflightJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolEnginePreflightDecisionWithNative
+export function resolveServertoolEnginePreflightDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolEnginePreflightDecisionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolEngineOrchestrationPreflightActionWithNative
+export function planServertoolEngineOrchestrationPreflightActionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolEngineOrchestrationPreflightActionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolEngineOrchestrationPreflightDecisionWithNative
+export function resolveServertoolEngineOrchestrationPreflightDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolEngineOrchestrationPreflightDecisionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolEngineRuntimeActionWithNative
+export function planServertoolEngineRuntimeActionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolEngineRuntimeActionJson', [input]);
+}
+
+// servertool-core bridge: runStoplessBuiltinHandlerForRuntimeWithNative
+export function runStoplessBuiltinHandlerForRuntimeWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('runStoplessBuiltinHandlerForRuntimeJson', [input]);
+}
+
+// servertool-core bridge: planServertoolEngineTriggerObservationWithNative
+export function planServertoolEngineTriggerObservationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolEngineTriggerObservationJson', [input]);
+}
+
+// servertool-core bridge: planServertoolEngineSkipWithNative
+export function planServertoolEngineSkipWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolEngineSkipJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolEngineSkipDecisionWithNative
+export function resolveServertoolEngineSkipDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolEngineSkipDecisionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolExecutionOutcomeMaterializationWithNative
+export function planServertoolExecutionOutcomeMaterializationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolExecutionOutcomeMaterializationJson', [input]);
+}
+
+// servertool-core bridge: createServertoolProviderProtocolErrorFromPlanWithNative
+export function createServertoolProviderProtocolErrorFromPlanWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('createServertoolProviderProtocolErrorFromPlanJson', [input]);
+}
+
+// servertool-core bridge: materializeNativeToolCallExecutionOutcomeWithNative
+export function materializeNativeToolCallExecutionOutcomeWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('materializeNativeToolCallExecutionOutcomeJson', [input]);
+}
+
+// servertool-core bridge: planServertoolExecutionOutcomeRuntimeActionWithNative
+export function planServertoolExecutionOutcomeRuntimeActionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolExecutionOutcomeRuntimeActionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolExecutionLoopRuntimeActionWithNative
+export function planServertoolExecutionLoopRuntimeActionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolExecutionLoopRuntimeActionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolExecutionLoopInitialDecisionWithNative
+export function resolveServertoolExecutionLoopInitialDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolExecutionLoopInitialDecisionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolExecutionLoopResultDecisionWithNative
+export function resolveServertoolExecutionLoopResultDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolExecutionLoopResultDecisionJson', [input]);
+}
+
+// servertool-core bridge: applyServertoolExecutionLoopInitialDecisionWithNative
+export function applyServertoolExecutionLoopInitialDecisionWithNative<T>(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('applyServertoolExecutionLoopInitialDecisionJson', [input]);
+}
+
+// servertool-core bridge: applyServertoolExecutionLoopResultDecisionWithNative
+export function applyServertoolExecutionLoopResultDecisionWithNative<T>(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('applyServertoolExecutionLoopResultDecisionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolExecutionLoopEffectWithNative
+export function planServertoolExecutionLoopEffectWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolExecutionLoopEffectJson', [input]);
+}
+
+// servertool-core bridge: planServertoolExecutionLoopEffectWithNative
+
+// servertool-core bridge: planServertoolExecutionLoopEffectWithNative
+
+// servertool-core bridge: planServertoolHandlerErrorExecutionLoopEffectWithNative
+export function planServertoolHandlerErrorExecutionLoopEffectWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolHandlerErrorExecutionLoopEffectJson', [input]);
+}
+
+// servertool-core bridge: planServertoolNoopExecutionLoopEffectWithNative
+export function planServertoolNoopExecutionLoopEffectWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolNoopExecutionLoopEffectJson', [input]);
+}
+
+// servertool-core bridge: planServertoolResponseStageRuntimeActionWithNative
+export function planServertoolResponseStageRuntimeActionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolResponseStageRuntimeActionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolResponseStagePrepassInitialDecisionWithNative
+export function resolveServertoolResponseStagePrepassInitialDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolResponseStagePrepassInitialDecisionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolResponseStagePrepassInitialApplicationWithNative
+export function resolveServertoolResponseStagePrepassInitialApplicationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolResponseStagePrepassInitialApplicationJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolResponseStageOrchestrationGateApplicationWithNative
+export function resolveServertoolResponseStageOrchestrationGateApplicationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolResponseStageOrchestrationGateApplicationJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolResponseStagePrepassAfterAutoHookWithNative
+export function resolveServertoolResponseStagePrepassAfterAutoHookWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolResponseStagePrepassAfterAutoHookJson', [input]);
+}
+
+// servertool-core bridge: finalizeServertoolResponseStageWithNative
+export function finalizeServertoolResponseStageWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('finalizeServertoolResponseStageJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolResponseStageAutoHookPreDecisionWithNative
+export function resolveServertoolResponseStageAutoHookPreDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolResponseStageAutoHookPreDecisionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolResponseStageAutoHookPreApplicationWithNative
+export function resolveServertoolResponseStageAutoHookPreApplicationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolResponseStageAutoHookPreApplicationJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolResponseStageAutoHookPostDecisionWithNative
+export function resolveServertoolResponseStageAutoHookPostDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolResponseStageAutoHookPostDecisionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolResponseStageAutoHookPostApplicationWithNative
+export function resolveServertoolResponseStageAutoHookPostApplicationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolResponseStageAutoHookPostApplicationJson', [input]);
+}
+
+// servertool-core bridge: materializeServertoolResponseStageOrchestrationOutputWithNative
+export function materializeServertoolResponseStageOrchestrationOutputWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('materializeServertoolResponseStageOrchestrationOutputJson', [input]);
+}
+
+// servertool-core bridge: extractServertoolResponseStageOrchestrationShellResultWithNative
+export function extractServertoolResponseStageOrchestrationShellResultWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('extractServertoolResponseStageOrchestrationShellResultJson', [input]);
+}
+
+// servertool-core bridge: planServertoolEntryPreflightWithNative
+export function planServertoolEntryPreflightWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolEntryPreflightJson', [input]);
+}
+
+// servertool-core bridge: readServertoolEntryBaseObjectWithNative
+export function readServertoolEntryBaseObjectWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('readServertoolEntryBaseObjectJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolEntryPreflightWithNative
+export function resolveServertoolEntryPreflightWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolEntryPreflightJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolEntryPreflightApplicationWithNative
+export function resolveServertoolEntryPreflightApplicationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolEntryPreflightApplicationJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolRunEngineEntryPreflightDecisionWithNative
+export function resolveServertoolRunEngineEntryPreflightDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolRunEngineEntryPreflightDecisionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolRunEngineEntryPreflightApplicationWithNative
+export function resolveServertoolRunEngineEntryPreflightApplicationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolRunEngineEntryPreflightApplicationJson', [input]);
+}
+
+// servertool-core bridge: planServertoolEntryContextWithNative
+export function planServertoolEntryContextWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolEntryContextJson', [input]);
+}
+
+// servertool-core bridge: planServertoolEnginePrepassActionWithNative
+export function planServertoolEnginePrepassActionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolEnginePrepassActionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolRunEnginePrepassDecisionWithNative
+export function resolveServertoolRunEnginePrepassDecisionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolRunEnginePrepassDecisionJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolRunEnginePrepassApplicationWithNative
+export function resolveServertoolRunEnginePrepassApplicationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolRunEnginePrepassApplicationJson', [input]);
+}
+
+// servertool-core bridge: planServertoolRegistryAutoHookDescriptorsWithNative
+export function planServertoolRegistryAutoHookDescriptorsWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolRegistryAutoHookDescriptorsJson', [input]);
+}
+
+// servertool-core bridge: planServertoolRegistryBuiltinAutoHookEntriesWithNative
+export function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolRegistryBuiltinAutoHookEntriesJson', [input]);
+}
+
+// servertool-core bridge: planServertoolRegistryLookupActionWithNative
+export function planServertoolRegistryLookupActionWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolRegistryLookupActionJson', [input]);
+}
+
+// servertool-core bridge: planServertoolHandlerMaterializationWithNative
+export function planServertoolHandlerMaterializationWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolHandlerMaterializationJson', [input]);
+}
+
+// servertool-core bridge: planServertoolHandlerMaterializationForPlannedWithNative
+export function planServertoolHandlerMaterializationForPlannedWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolHandlerMaterializationForPlannedJson', [input]);
+}
+
+// servertool-core bridge: materializeServertoolHandlerResultWithNative
+export function materializeServertoolHandlerResultWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('materializeServertoolHandlerResultJson', [input]);
+}
+
+// servertool-core bridge: finalizeServertoolHandlerPlanWithNative
+export function finalizeServertoolHandlerPlanWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('finalizeServertoolHandlerPlanJson', [input]);
+}
+
+// servertool-core bridge: planEngineSelectionStartWithNative
+export function planEngineSelectionStartWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planEngineSelectionStartJson', [input]);
+}
+
+// servertool-core bridge: planEngineSelectionAfterRunWithNative
+export function planEngineSelectionAfterRunWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planEngineSelectionAfterRunJson', [input]);
+}
+
+// servertool-core bridge: resolveEngineSelectionAfterRunWithNative
+export function resolveEngineSelectionAfterRunWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveEngineSelectionAfterRunJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolTimeoutMsFromEnvCandidatesWithNative
+export function resolveServertoolTimeoutMsFromEnvCandidatesWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolTimeoutMsFromEnvCandidatesJson', [input]);
+}
+
+// servertool-core bridge: planServertoolClientDisconnectedErrorWithNative
+export function planServertoolClientDisconnectedErrorWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolClientDisconnectedErrorJson', [input]);
+}
+
+// servertool-core bridge: planServertoolTimeoutErrorWithNative
+export function planServertoolTimeoutErrorWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolTimeoutErrorJson', [input]);
+}
+
+// servertool-core bridge: planServertoolStateLoadFailedErrorWithNative
+export function planServertoolStateLoadFailedErrorWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolStateLoadFailedErrorJson', [input]);
+}
+
+// servertool-core bridge: planServertoolRequiredResponseHookEmptyErrorWithNative
+export function planServertoolRequiredResponseHookEmptyErrorWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolRequiredResponseHookEmptyErrorJson', [input]);
+}
+
+// servertool-core bridge: planServertoolExecutionDispatchErrorWithNative
+export function planServertoolExecutionDispatchErrorWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planServertoolExecutionDispatchErrorJson', [input]);
+}
+
+// servertool-core bridge: buildServertoolPostflightObservationSummaryWithNative
+export function buildServertoolPostflightObservationSummaryWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildServertoolPostflightObservationSummaryJson', [input]);
+}
+
+// servertool-core bridge: resolveServertoolEngineMatchHitWithNative
+export function resolveServertoolEngineMatchHitWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('resolveServertoolEngineMatchHitJson', [input]);
+}
+
+// servertool-core bridge: appendServertoolExecutedRecordWithNative
+export function appendServertoolExecutedRecordWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('appendServertoolExecutedRecordJson', [input]);
+}
+
+// servertool-core bridge: hasStopMessageAutoCliResultInRequestWithNative
+export function hasStopMessageAutoCliResultInRequestWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('hasStopMessageAutoCliResultInRequestJson', [input]);
+}
+
+// servertool-core bridge: extractServertoolCliResultRouteHintFromRequestWithNative
+export function extractServertoolCliResultRouteHintFromRequestWithNative(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('extractServertoolCliResultRouteHintFromRequestJson', [input]);
+}
+
+
+export function planStopMessageAutoHandlerWithNative<TPlan extends Record<string, unknown>>(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('planStopMessageAutoHandlerJson', [input]);
+}
+
+
+
+export function buildStopMessageTerminalVisiblePayloadWithNative<TPayload extends Record<string, unknown>>(input: unknown): unknown {
+  return invokeRouterHotpathJsonCapability('buildStopMessageTerminalVisiblePayloadJson', [input]);
+}
+
+// ── servertool-core semantics bridge: invokeRouterHotpathJsonCapability wrappers ──
+// These functions replace the readNativeFunction-based implementations in
+// native-servertool-core-semantics.ts. Routing through the unified loader ensures
+// consistent error reporting and native binding discovery.
