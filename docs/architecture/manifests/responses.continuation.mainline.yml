@@ -22,7 +22,7 @@ edges:
   - step_id: rct-01
     from_node: ChatProcReqContinuation01EntryEvidence
     to_node: ChatProcReqContinuation02OwnerResolved
-    status: partial
+    status: anchored
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null
@@ -50,7 +50,7 @@ edges:
   - step_id: rct-05
     from_node: ChatProcReqContinuation05Governed
     to_node: ChatProcRespContinuation06ResponseGoverned
-    status: partial
+    status: anchored
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null

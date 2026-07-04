@@ -16,30 +16,39 @@ chains:
       - step_id: sth-resp-01
         from_node: HubRespChatProcess03Governed
         to_node: ServertoolRespHook01Intercepted
-        owner_feature_id: binding pending
+        caller_symbol: execute
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: run_servertool_resp_stopless_hook_skeleton
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "canonical provider response after Hub response chat-process parsing"
         semantic_output: "response interception event for normal response, abnormal/error response, stopless trigger, `finish_reason=stop` schema candidate, `finish_reason=tool_calls` registered internal servertool call candidate, or no-op"
-        status: binding pending
-        binding_pending: true
-        note: "Target standard skeleton edge. Chat Process owns the interception point before any bridge/outbound mapping, normalization, or continuation save. Current runtime still uses TS transitional servertool orchestration; do not bind to TS symbols."
+        status: anchored
+        note: "Anchored by Rust Hub response governance calling the stopless response hook skeleton before continuation save, outbound mapping, or SSE projection."
       - step_id: sth-resp-02
         from_node: ServertoolRespHook01Intercepted
         to_node: ServertoolRespHook02SchemaValidated
-        owner_feature_id: binding pending
+        caller_symbol: run_servertool_resp_stopless_hook_skeleton
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: inspect_stop_gateway_signal
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "response interception event plus skeleton-selected schema source: assistant text/fence for `finish_reason=stop`, or registered internal servertool arguments for `finish_reason=tool_calls` such as `reasoningStop.arguments`"
         semantic_output: "single schema validation event covering valid terminal, non-terminal/still-running, empty schema/no_schema, invalid schema, malformed args, already-terminal cases, and client-projection-required cases"
-        status: binding pending
-        binding_pending: true
-        note: "Required for schema-managed flows; missing/invalid schema must not be silently accepted. This validation belongs inside Chat Process before any continuation save or outbound bridge. `reasoningStop` is internal/model-facing and must not be returned to the client as raw required_action."
+        status: anchored
+        note: "Anchored by Rust stop gateway inspection inside the Chat Process response hook skeleton; internal `reasoningStop`/stop schema judgment happens before outbound projection."
       - step_id: sth-resp-03
         from_node: ServertoolRespHook02SchemaValidated
         to_node: ServertoolRespHook03HookResponseInjected
-        owner_feature_id: binding pending
+        caller_symbol: run_servertool_resp_stopless_hook_skeleton
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: run_stopless_auto_handler_runtime_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "schema validation pass/deny/error event"
         semantic_output: "terminal-stop summary projection when schema passes, or client-visible shell `exec_command(routecodex hook run reasoningStop ...)` projection plan when feedback/client execution is required"
-        status: binding pending
-        binding_pending: true
-        note: "Business execution remains client-visible CLI; hook only plans injection/projection. This remains a Chat Process concern and must complete before canonical continuation save and before HubRespOutbound04ClientSemantic."
+        status: anchored
+        note: "Anchored by Rust stopless runtime planning in the response hook skeleton; business execution remains a client-visible CLI projection rather than server-side tool execution."
       - step_id: sth-resp-04
         from_node: ServertoolRespHook03HookResponseInjected
         to_node: ServertoolRespHook04FollowupPlanned
@@ -61,30 +70,39 @@ chains:
       - step_id: sth-resp-06
         from_node: ServertoolRespHook05ReenterDispatched
         to_node: ServertoolRespHook06ProjectionFinalized
-        owner_feature_id: binding pending
+        caller_symbol: run_servertool_resp_stopless_hook_skeleton
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: build_stopless_auto_cli_projection_from_engine_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "post-intercept/post-followup governed response candidate plus hook events"
         semantic_output: "final governed response truth with internal tool stripped and client projection handoff selected"
-        status: binding pending
-        binding_pending: true
-        note: "Required finalize hook; servertool must not have a second response projector."
+        status: anchored
+        note: "Anchored by Rust projection finalization for non-terminal stopless hook results; internal tool semantics are converted to the governed client shell projection before outbound mapping."
       - step_id: sth-resp-07
         from_node: ServertoolRespHook06ProjectionFinalized
         to_node: HubRespOutbound04ClientSemantic
-        owner_feature_id: binding pending
+        caller_symbol: finalize_hub_resp_outbound_04_client_semantic
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: build_hub_resp_outbound_04_client_payload_for_protocol
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "final servertool governed response truth"
         semantic_output: "normal Hub response outbound client semantic"
-        status: binding pending
-        binding_pending: true
-        note: "Must return to normal Hub response chain."
+        status: anchored
+        note: "Anchored by Rust response finalize/remap after the stopless hook payload is selected; servertool returns to the normal Hub response outbound chain."
       - step_id: sth-cli-01
         from_node: ServertoolRespHook03HookResponseInjected
         to_node: ServertoolCli04ClientExecuted
-        owner_feature_id: binding pending
+        caller_symbol: build_stopless_auto_cli_projection_from_engine_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
+        callee_symbol: build_stopless_auto_cli_projection_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "client-visible exec_command projection plan"
         semantic_output: "client executes `routecodex hook run <toolName> --input-json <json>` and returns ordinary tool result"
-        status: binding pending
-        binding_pending: true
-        note: "Business CLI lifecycle edge; hook does not execute client CLI."
+        status: anchored
+        note: "Anchored by Rust CLI projection builder emitting the client-visible `routecodex hook run reasoningStop ...` command; the hook still does not execute client CLI."
       - step_id: sth-req-01
         from_node: HubReqInbound02Standardized
         to_node: ServertoolReqHook01ResultParsed
@@ -106,21 +124,27 @@ chains:
       - step_id: sth-req-03
         from_node: ServertoolReqHook02TextRewritten
         to_node: ServertoolReqHook03ToolInjected
-        owner_feature_id: binding pending
+        caller_symbol: apply_req_process_tool_governance
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+        callee_symbol: inject_reasoning_stop_tool
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+        owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "request semantic after optional text rewrite"
         semantic_output: "request tool declarations, stop hook contract, and tool constraints injected for servertool-managed turns"
-        status: binding pending
-        binding_pending: true
-        note: "Required for servertool-managed turns. Tool injection belongs to Chat Process request closeout, not bridge/outbound mapping."
+        status: anchored
+        note: "Anchored by Rust req_chatprocess governance injecting the model-facing `reasoningStop` tool and stopless system contract for servertool-managed turns."
       - step_id: sth-req-04
         from_node: ServertoolReqHook03ToolInjected
         to_node: ServertoolReqHook04RequestFinalized
-        owner_feature_id: binding pending
+        caller_symbol: apply_req_process_tool_governance
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+        callee_symbol: build_processed_request
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/request_result.rs
+        owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "request semantic with parsed result/rewrite/tool injection events"
         semantic_output: "final request semantic ready for HubReqChatProcess03Governed"
-        status: binding pending
-        binding_pending: true
-        note: "Required request finalize hook. This finalize step must happen before any provider wire build."
+        status: anchored
+        note: "Anchored by Rust req_chatprocess governance building the processed request before it re-enters the typed HubReqChatProcess03Governed entrypoint."
       - step_id: sth-req-05
         from_node: ServertoolReqHook04RequestFinalized
         to_node: HubReqChatProcess03Governed

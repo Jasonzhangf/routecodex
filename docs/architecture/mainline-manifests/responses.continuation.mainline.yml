@@ -24,8 +24,8 @@ step_ids:
   - rct-06
   - rct-07
 edge_status_counts:
-  anchored: 4
-  partial: 3
+  anchored: 6
+  partial: 1
   binding_pending: 0
   total: 7
 sources:

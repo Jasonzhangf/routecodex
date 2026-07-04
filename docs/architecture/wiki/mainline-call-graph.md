@@ -50,37 +50,37 @@ flowchart LR
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-  class HubRespChatProcess03Governed pending;
-  class ServertoolRespHook01Intercepted pending;
-  class ServertoolRespHook02SchemaValidated pending;
+  class HubRespChatProcess03Governed anchored;
+  class ServertoolRespHook01Intercepted anchored;
+  class ServertoolRespHook02SchemaValidated anchored;
   class ServertoolRespHook03HookResponseInjected pending;
   class ServertoolRespHook04FollowupPlanned pending;
   class ServertoolRespHook05ReenterDispatched pending;
-  class ServertoolRespHook06ProjectionFinalized pending;
-  class HubRespOutbound04ClientSemantic pending;
-  class ServertoolCli04ClientExecuted pending;
+  class ServertoolRespHook06ProjectionFinalized anchored;
+  class HubRespOutbound04ClientSemantic anchored;
+  class ServertoolCli04ClientExecuted anchored;
   class HubReqInbound02Standardized pending;
   class ServertoolReqHook01ResultParsed pending;
   class ServertoolReqHook02TextRewritten pending;
-  class ServertoolReqHook03ToolInjected pending;
-  class ServertoolReqHook04RequestFinalized pending;
+  class ServertoolReqHook03ToolInjected anchored;
+  class ServertoolReqHook04RequestFinalized anchored;
   class HubReqChatProcess03Governed anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
-| sth-resp-01 | `HubRespChatProcess03Governed -> ServertoolRespHook01Intercepted` | binding pending | `binding pending` |  | `binding pending` |
-| sth-resp-02 | `ServertoolRespHook01Intercepted -> ServertoolRespHook02SchemaValidated` | binding pending | `binding pending` |  | `binding pending` |
-| sth-resp-03 | `ServertoolRespHook02SchemaValidated -> ServertoolRespHook03HookResponseInjected` | binding pending | `binding pending` |  | `binding pending` |
+| sth-resp-01 | `HubRespChatProcess03Governed -> ServertoolRespHook01Intercepted` | anchored | `execute -> run_servertool_resp_stopless_hook_skeleton` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
+| sth-resp-02 | `ServertoolRespHook01Intercepted -> ServertoolRespHook02SchemaValidated` | anchored | `run_servertool_resp_stopless_hook_skeleton -> inspect_stop_gateway_signal` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
+| sth-resp-03 | `ServertoolRespHook02SchemaValidated -> ServertoolRespHook03HookResponseInjected` | anchored | `run_servertool_resp_stopless_hook_skeleton -> run_stopless_auto_handler_runtime_json` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
 | sth-resp-04 | `ServertoolRespHook03HookResponseInjected -> ServertoolRespHook04FollowupPlanned` | binding pending | `binding pending` |  | `binding pending` |
 | sth-resp-05 | `ServertoolRespHook04FollowupPlanned -> ServertoolRespHook05ReenterDispatched` | binding pending | `binding pending` |  | `binding pending` |
-| sth-resp-06 | `ServertoolRespHook05ReenterDispatched -> ServertoolRespHook06ProjectionFinalized` | binding pending | `binding pending` |  | `binding pending` |
-| sth-resp-07 | `ServertoolRespHook06ProjectionFinalized -> HubRespOutbound04ClientSemantic` | binding pending | `binding pending` |  | `binding pending` |
-| sth-cli-01 | `ServertoolRespHook03HookResponseInjected -> ServertoolCli04ClientExecuted` | binding pending | `binding pending` |  | `binding pending` |
+| sth-resp-06 | `ServertoolRespHook05ReenterDispatched -> ServertoolRespHook06ProjectionFinalized` | anchored | `run_servertool_resp_stopless_hook_skeleton -> build_stopless_auto_cli_projection_from_engine_json` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
+| sth-resp-07 | `ServertoolRespHook06ProjectionFinalized -> HubRespOutbound04ClientSemantic` | anchored | `finalize_hub_resp_outbound_04_client_semantic -> build_hub_resp_outbound_04_client_payload_for_protocol` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
+| sth-cli-01 | `ServertoolRespHook03HookResponseInjected -> ServertoolCli04ClientExecuted` | anchored | `build_stopless_auto_cli_projection_from_engine_json -> build_stopless_auto_cli_projection_json` |  | `hub.servertool_stopless_cli_continuation`<br/>stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary |
 | sth-req-01 | `HubReqInbound02Standardized -> ServertoolReqHook01ResultParsed` | binding pending | `binding pending` |  | `binding pending` |
 | sth-req-02 | `ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten` | binding pending | `binding pending` |  | `binding pending` |
-| sth-req-03 | `ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected` | binding pending | `binding pending` |  | `binding pending` |
-| sth-req-04 | `ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized` | binding pending | `binding pending` |  | `binding pending` |
+| sth-req-03 | `ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected` | anchored | `apply_req_process_tool_governance -> inject_reasoning_stop_tool` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
+| sth-req-04 | `ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized` | anchored | `apply_req_process_tool_governance -> build_processed_request` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
 | sth-req-05 | `ServertoolReqHook04RequestFinalized -> HubReqChatProcess03Governed` | anchored | `apply_hub_req_chatprocess_03_tool_governance -> run_hub_req_chatprocess_03_governed_entrypoint` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
 
 ## request.mainline
@@ -173,33 +173,33 @@ flowchart LR
   ChatProcReqContinuation03CanonicalRestored["ChatProcReqContinuation03CanonicalRestored"]
   ChatProcReqContinuation02OwnerResolved["ChatProcReqContinuation02OwnerResolved"]
   ChatProcReqContinuation01EntryEvidence["ChatProcReqContinuation01EntryEvidence"]
-  ChatProcReqContinuation01EntryEvidence -.->|rct-01| ChatProcReqContinuation02OwnerResolved
+  ChatProcReqContinuation01EntryEvidence -->|rct-01| ChatProcReqContinuation02OwnerResolved
   ChatProcReqContinuation02OwnerResolved -.->|rct-02| ChatProcReqContinuation03CanonicalRestored
   ChatProcReqContinuation03CanonicalRestored -->|rct-03| ChatProcReqContinuation04HookRestored
   ChatProcReqContinuation04HookRestored -->|rct-04| ChatProcReqContinuation05Governed
-  ChatProcReqContinuation05Governed -.->|rct-05| ChatProcRespContinuation06ResponseGoverned
+  ChatProcReqContinuation05Governed -->|rct-05| ChatProcRespContinuation06ResponseGoverned
   ChatProcRespContinuation06ResponseGoverned -->|rct-06| ChatProcRespContinuation07CanonicalSaved
   ChatProcRespContinuation07CanonicalSaved -->|rct-07| ChatProcRespContinuation08Released
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-  class ChatProcReqContinuation01EntryEvidence partial;
+  class ChatProcReqContinuation01EntryEvidence anchored;
   class ChatProcReqContinuation02OwnerResolved partial;
   class ChatProcReqContinuation03CanonicalRestored partial;
   class ChatProcReqContinuation04HookRestored anchored;
-  class ChatProcReqContinuation05Governed partial;
-  class ChatProcRespContinuation06ResponseGoverned partial;
+  class ChatProcReqContinuation05Governed anchored;
+  class ChatProcRespContinuation06ResponseGoverned anchored;
   class ChatProcRespContinuation07CanonicalSaved anchored;
   class ChatProcRespContinuation08Released anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
-| rct-01 | `ChatProcReqContinuation01EntryEvidence -> ChatProcReqContinuation02OwnerResolved` | partial | `prepareResponsesHandlerEntryForHttp -> planResponsesHandlerEntry` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-01 | `ChatProcReqContinuation01EntryEvidence -> ChatProcReqContinuation02OwnerResolved` | anchored | `prepareResponsesHandlerEntryForHttp -> planResponsesContinuationRequestAction` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-02 | `ChatProcReqContinuation02OwnerResolved -> ChatProcReqContinuation03CanonicalRestored` | partial | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-03 | `ChatProcReqContinuation03CanonicalRestored -> ChatProcReqContinuation04HookRestored` | anchored | `buildCapturedRelayResumeRequestContextForHttp -> captureReqInboundResponsesContextSnapshot` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-04 | `ChatProcReqContinuation04HookRestored -> ChatProcReqContinuation05Governed` | anchored | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
-| rct-05 | `ChatProcReqContinuation05Governed -> ChatProcRespContinuation06ResponseGoverned` | partial | `prepareResponsesJsonClientDispatchPlanForHttp -> projectResponsesClientPayloadForClientNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-05 | `ChatProcReqContinuation05Governed -> ChatProcRespContinuation06ResponseGoverned` | anchored | `prepareResponsesJsonClientDispatchPlanForHttp -> planResponsesJsonClientDispatchNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-06 | `ChatProcRespContinuation06ResponseGoverned -> ChatProcRespContinuation07CanonicalSaved` | anchored | `convertProviderResponse -> recordResponsesResponse` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-07 | `ChatProcRespContinuation07CanonicalSaved -> ChatProcRespContinuation08Released` | anchored | `releaseMetadataCenterForHttpResponse -> releaseMetadataCenterForHttpResponse` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 

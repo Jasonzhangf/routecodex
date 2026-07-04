@@ -195,7 +195,7 @@
         <h2>Owner / Allowed / Forbidden Path Summary</h2>
         <ul>
           <li>Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src</code>.</li>
-          <li>Allowed paths include <code>sharedmodule/llmswitch-core/src/servertool/{cli-projection,engine}.ts</code>, <code>sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts</code>, and <code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts</code>.</li>
+          <li>Allowed paths include <code>sharedmodule/llmswitch-core/src/servertool/{cli-projection,engine}.ts</code>, <code>sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts</code>, and <code>src/modules/llmswitch/bridge/native-exports.ts</code>.</li>
           <li>Forbidden paths: <code>src/providers</code>, <code>src/server/runtime/http-server/executor</code>, and unrelated <code>sharedmodule/llmswitch-core/src/servertool/handlers</code> surfaces that do not own stopless CLI semantics.</li>
         </ul>
         <h2>Required Gates</h2>

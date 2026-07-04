@@ -170,37 +170,37 @@
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-          class HubRespChatProcess03Governed pending;
-          class ServertoolRespHook01Intercepted pending;
-          class ServertoolRespHook02SchemaValidated pending;
+          class HubRespChatProcess03Governed anchored;
+          class ServertoolRespHook01Intercepted anchored;
+          class ServertoolRespHook02SchemaValidated anchored;
           class ServertoolRespHook03HookResponseInjected pending;
           class ServertoolRespHook04FollowupPlanned pending;
           class ServertoolRespHook05ReenterDispatched pending;
-          class ServertoolRespHook06ProjectionFinalized pending;
-          class HubRespOutbound04ClientSemantic pending;
-          class ServertoolCli04ClientExecuted pending;
+          class ServertoolRespHook06ProjectionFinalized anchored;
+          class HubRespOutbound04ClientSemantic anchored;
+          class ServertoolCli04ClientExecuted anchored;
           class HubReqInbound02Standardized pending;
           class ServertoolReqHook01ResultParsed pending;
           class ServertoolReqHook02TextRewritten pending;
-          class ServertoolReqHook03ToolInjected pending;
-          class ServertoolReqHook04RequestFinalized pending;
+          class ServertoolReqHook03ToolInjected anchored;
+          class ServertoolReqHook04RequestFinalized anchored;
           class HubReqChatProcess03Governed anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>sth-resp-01</td><td><code>HubRespChatProcess03Governed -&gt; ServertoolRespHook01Intercepted</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
-        <tr><td>sth-resp-02</td><td><code>ServertoolRespHook01Intercepted -&gt; ServertoolRespHook02SchemaValidated</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
-        <tr><td>sth-resp-03</td><td><code>ServertoolRespHook02SchemaValidated -&gt; ServertoolRespHook03HookResponseInjected</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-resp-01</td><td><code>HubRespChatProcess03Governed -&gt; ServertoolRespHook01Intercepted</code></td><td>anchored</td><td><code>execute -&gt; run_servertool_resp_stopless_hook_skeleton</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>sth-resp-02</td><td><code>ServertoolRespHook01Intercepted -&gt; ServertoolRespHook02SchemaValidated</code></td><td>anchored</td><td><code>run_servertool_resp_stopless_hook_skeleton -&gt; inspect_stop_gateway_signal</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>sth-resp-03</td><td><code>ServertoolRespHook02SchemaValidated -&gt; ServertoolRespHook03HookResponseInjected</code></td><td>anchored</td><td><code>run_servertool_resp_stopless_hook_skeleton -&gt; run_stopless_auto_handler_runtime_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-resp-04</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolRespHook04FollowupPlanned</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
         <tr><td>sth-resp-05</td><td><code>ServertoolRespHook04FollowupPlanned -&gt; ServertoolRespHook05ReenterDispatched</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
-        <tr><td>sth-resp-06</td><td><code>ServertoolRespHook05ReenterDispatched -&gt; ServertoolRespHook06ProjectionFinalized</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
-        <tr><td>sth-resp-07</td><td><code>ServertoolRespHook06ProjectionFinalized -&gt; HubRespOutbound04ClientSemantic</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
-        <tr><td>sth-cli-01</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolCli04ClientExecuted</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-resp-06</td><td><code>ServertoolRespHook05ReenterDispatched -&gt; ServertoolRespHook06ProjectionFinalized</code></td><td>anchored</td><td><code>run_servertool_resp_stopless_hook_skeleton -&gt; build_stopless_auto_cli_projection_from_engine_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>sth-resp-07</td><td><code>ServertoolRespHook06ProjectionFinalized -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>finalize_hub_resp_outbound_04_client_semantic -&gt; build_hub_resp_outbound_04_client_payload_for_protocol</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>sth-cli-01</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolCli04ClientExecuted</code></td><td>anchored</td><td><code>build_stopless_auto_cli_projection_from_engine_json -&gt; build_stopless_auto_cli_projection_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-req-01</td><td><code>HubReqInbound02Standardized -&gt; ServertoolReqHook01ResultParsed</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
         <tr><td>sth-req-02</td><td><code>ServertoolReqHook01ResultParsed -&gt; ServertoolReqHook02TextRewritten</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
-        <tr><td>sth-req-03</td><td><code>ServertoolReqHook02TextRewritten -&gt; ServertoolReqHook03ToolInjected</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
-        <tr><td>sth-req-04</td><td><code>ServertoolReqHook03ToolInjected -&gt; ServertoolReqHook04RequestFinalized</code></td><td>binding pending</td><td><code>binding pending</code></td><td></td><td><code>binding pending</code></td></tr>
+        <tr><td>sth-req-03</td><td><code>ServertoolReqHook02TextRewritten -&gt; ServertoolReqHook03ToolInjected</code></td><td>anchored</td><td><code>apply_req_process_tool_governance -&gt; inject_reasoning_stop_tool</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>
+        <tr><td>sth-req-04</td><td><code>ServertoolReqHook03ToolInjected -&gt; ServertoolReqHook04RequestFinalized</code></td><td>anchored</td><td><code>apply_req_process_tool_governance -&gt; build_processed_request</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>
         <tr><td>sth-req-05</td><td><code>ServertoolReqHook04RequestFinalized -&gt; HubReqChatProcess03Governed</code></td><td>anchored</td><td><code>apply_hub_req_chatprocess_03_tool_governance -&gt; run_hub_req_chatprocess_03_governed_entrypoint</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>
         </tbody>
         </table>
@@ -284,33 +284,33 @@
           ChatProcReqContinuation03CanonicalRestored[&quot;ChatProcReqContinuation03CanonicalRestored&quot;]
           ChatProcReqContinuation02OwnerResolved[&quot;ChatProcReqContinuation02OwnerResolved&quot;]
           ChatProcReqContinuation01EntryEvidence[&quot;ChatProcReqContinuation01EntryEvidence&quot;]
-          ChatProcReqContinuation01EntryEvidence -.-&gt;|rct-01| ChatProcReqContinuation02OwnerResolved
+          ChatProcReqContinuation01EntryEvidence --&gt;|rct-01| ChatProcReqContinuation02OwnerResolved
           ChatProcReqContinuation02OwnerResolved -.-&gt;|rct-02| ChatProcReqContinuation03CanonicalRestored
           ChatProcReqContinuation03CanonicalRestored --&gt;|rct-03| ChatProcReqContinuation04HookRestored
           ChatProcReqContinuation04HookRestored --&gt;|rct-04| ChatProcReqContinuation05Governed
-          ChatProcReqContinuation05Governed -.-&gt;|rct-05| ChatProcRespContinuation06ResponseGoverned
+          ChatProcReqContinuation05Governed --&gt;|rct-05| ChatProcRespContinuation06ResponseGoverned
           ChatProcRespContinuation06ResponseGoverned --&gt;|rct-06| ChatProcRespContinuation07CanonicalSaved
           ChatProcRespContinuation07CanonicalSaved --&gt;|rct-07| ChatProcRespContinuation08Released
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-          class ChatProcReqContinuation01EntryEvidence partial;
+          class ChatProcReqContinuation01EntryEvidence anchored;
           class ChatProcReqContinuation02OwnerResolved partial;
           class ChatProcReqContinuation03CanonicalRestored partial;
           class ChatProcReqContinuation04HookRestored anchored;
-          class ChatProcReqContinuation05Governed partial;
-          class ChatProcRespContinuation06ResponseGoverned partial;
+          class ChatProcReqContinuation05Governed anchored;
+          class ChatProcRespContinuation06ResponseGoverned anchored;
           class ChatProcRespContinuation07CanonicalSaved anchored;
           class ChatProcRespContinuation08Released anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>rct-01</td><td><code>ChatProcReqContinuation01EntryEvidence -&gt; ChatProcReqContinuation02OwnerResolved</code></td><td>partial</td><td><code>prepareResponsesHandlerEntryForHttp -&gt; planResponsesHandlerEntry</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-01</td><td><code>ChatProcReqContinuation01EntryEvidence -&gt; ChatProcReqContinuation02OwnerResolved</code></td><td>anchored</td><td><code>prepareResponsesHandlerEntryForHttp -&gt; planResponsesContinuationRequestAction</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-02</td><td><code>ChatProcReqContinuation02OwnerResolved -&gt; ChatProcReqContinuation03CanonicalRestored</code></td><td>partial</td><td><code>buildResponsesRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshotJson</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-03</td><td><code>ChatProcReqContinuation03CanonicalRestored -&gt; ChatProcReqContinuation04HookRestored</code></td><td>anchored</td><td><code>buildCapturedRelayResumeRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshot</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-04</td><td><code>ChatProcReqContinuation04HookRestored -&gt; ChatProcReqContinuation05Governed</code></td><td>anchored</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
-        <tr><td>rct-05</td><td><code>ChatProcReqContinuation05Governed -&gt; ChatProcRespContinuation06ResponseGoverned</code></td><td>partial</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; projectResponsesClientPayloadForClientNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-05</td><td><code>ChatProcReqContinuation05Governed -&gt; ChatProcRespContinuation06ResponseGoverned</code></td><td>anchored</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; planResponsesJsonClientDispatchNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-06</td><td><code>ChatProcRespContinuation06ResponseGoverned -&gt; ChatProcRespContinuation07CanonicalSaved</code></td><td>anchored</td><td><code>convertProviderResponse -&gt; recordResponsesResponse</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-07</td><td><code>ChatProcRespContinuation07CanonicalSaved -&gt; ChatProcRespContinuation08Released</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; releaseMetadataCenterForHttpResponse</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         </tbody>
