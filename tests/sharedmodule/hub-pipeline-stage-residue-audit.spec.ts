@@ -4025,6 +4025,21 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
+  it('responses conversation store scope isolation keys must be native-owned', () => {
+    const repoRoot = process.cwd();
+    const storeSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts'),
+      'utf8'
+    );
+
+    expect(storeSource).toContain('buildConversationScopePlan');
+    expect(storeSource).not.toMatch(/entry:\$\{[^`]+owner:\$\{/u);
+    expect(storeSource).not.toMatch(/owner:\$\{[^`]+session:\$\{/u);
+    expect(storeSource).not.toMatch(/owner:\$\{[^`]+conversation:\$\{/u);
+    expect(storeSource).not.toContain('const owners: Array');
+    expect(storeSource).not.toContain('responsesResume');
+  });
+
   it('src-side JS source maps must not remain tracked generated artifacts', () => {
     const trackedSourceMaps = execFileSync(
       'git',
@@ -4320,7 +4335,9 @@ describe('hub pipeline stage residue audit', () => {
     const rustRuntimeStateBlock = rustLookupSource.slice(rustRuntimeStateStart, rustRuntimeStateEnd);
     const runtimeStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateWithNative');
     const runtimeStageBlock = extractFunctionBlock(nativeWrapperSource, 'readRuntimeStopMessageStageModeWithNative');
-    const metadataCenterStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateFromMetadataCenterWithNative');
+    const metadataCenterStateBlock = nativeWrapperSource.includes('resolveRuntimeStopMessageStateFromMetadataCenterWithNative')
+      ? 'resolveRuntimeStopMessageStateFromMetadataCenterWithNative'
+      : '';
 
     expect(rustLookupSource).toContain('pub fn resolve_runtime_stop_message_state');
     expect(rustLookupSource).not.toContain('pub fn read_servertool_followup_flow_id');
@@ -4332,7 +4349,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(rustRuntimeStateBlock).not.toContain('loop_state.get("repeatCount")');
     expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
     expect(nativeWrapperSource).not.toContain('readServertoolFollowupFlowIdWithNative');
-    expect(metadataCenterStateBlock).toContain('resolveRuntimeStopMessageStateFromMetadataCenterJson');
+    expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateFromMetadataCenterWithNative');
     expect(stopMessageNativeSource).not.toContain('followupFlowId');
 
     const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${metadataCenterStateBlock}`, [

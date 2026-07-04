@@ -5,6 +5,7 @@ import path from 'node:path';
 import { isRecord } from '../../shared/common-utils.js';
 import {
   assertResponsesConversationStoreNativeAvailable,
+  buildConversationScopePlan,
   convertOutputToInputItems,
   materializeContinuationPayload,
   pickPersistedFields,
@@ -214,16 +215,7 @@ function collectPendingToolCallIds(input: AnyRecord[]): string[] {
 
 function readPortScopeKey(scope: { matchedPort?: unknown; routingPolicyGroup?: unknown } | undefined): string | undefined {
   if (!scope) return undefined;
-  const port = typeof scope.matchedPort === 'number' && Number.isFinite(scope.matchedPort) && scope.matchedPort > 0
-    ? Math.floor(scope.matchedPort)
-    : undefined;
-  if (port !== undefined) return `port:${port}`;
-  const group = readScopeToken(scope.routingPolicyGroup);
-  return group ? `group:${group}` : undefined;
-}
-
-function qualifyScopeKey(portScopeKey: string | undefined, key: string): string {
-  return portScopeKey ? `${portScopeKey}|${key}` : key;
+  return buildConversationScopePlan({ mode: 'stored', scope }).portScopeKey;
 }
 
 function buildStoredScopeKeysFromResolved(scope: {
@@ -232,18 +224,13 @@ function buildStoredScopeKeysFromResolved(scope: {
   entryKind?: unknown;
   continuationOwner?: unknown;
 }, portScopeKey: string | undefined): string[] {
-  const keys: string[] = [];
-  const entryKind = normalizeEntryKind(scope.entryKind);
-  const continuationOwner = normalizeContinuationOwner(scope.continuationOwner) ?? 'relay';
-  const sessionId = readScopeToken(scope.sessionId);
-  const conversationId = readScopeToken(scope.conversationId);
-  if (sessionId) {
-    keys.push(qualifyScopeKey(portScopeKey, `entry:${entryKind}|owner:${continuationOwner}|session:${sessionId}`));
-  }
-  if (conversationId) {
-    keys.push(qualifyScopeKey(portScopeKey, `entry:${entryKind}|owner:${continuationOwner}|conversation:${conversationId}`));
-  }
-  return [...new Set(keys)];
+  return buildConversationScopePlan({
+    mode: 'stored',
+    scope: {
+      ...scope,
+      ...(portScopeKey ? { portScopeKey } : {})
+    }
+  }).keys;
 }
 
 function buildStoredScopeKeys(scope: {
@@ -254,8 +241,7 @@ function buildStoredScopeKeys(scope: {
   entryKind?: unknown;
   continuationOwner?: unknown;
 }): string[] {
-  const portScopeKey = readPortScopeKey(scope);
-  return buildStoredScopeKeysFromResolved(scope, portScopeKey);
+  return buildConversationScopePlan({ mode: 'stored', scope }).keys;
 }
 
 function buildRequestedScopeKeys(scope: {
@@ -266,22 +252,7 @@ function buildRequestedScopeKeys(scope: {
   entryKind?: unknown;
   continuationOwner?: unknown;
 }): string[] {
-  const keys: string[] = [];
-  const portScopeKey = readPortScopeKey(scope);
-  const entryKind = normalizeEntryKind(scope.entryKind);
-  const requestedOwner = normalizeContinuationOwner(scope.continuationOwner);
-  const owners: Array<'direct' | 'relay'> = requestedOwner ? [requestedOwner] : ['direct', 'relay'];
-  const sessionId = readScopeToken(scope.sessionId);
-  const conversationId = readScopeToken(scope.conversationId);
-  for (const owner of owners) {
-    if (sessionId) {
-      keys.push(qualifyScopeKey(portScopeKey, `entry:${entryKind}|owner:${owner}|session:${sessionId}`));
-    }
-    if (conversationId) {
-      keys.push(qualifyScopeKey(portScopeKey, `entry:${entryKind}|owner:${owner}|conversation:${conversationId}`));
-    }
-  }
-  return [...new Set(keys)];
+  return buildConversationScopePlan({ mode: 'requested', scope }).keys;
 }
 
 function entryMatchesPortScope(entry: ConversationEntry, requestedPortScopeKey: string | undefined): boolean {
@@ -290,38 +261,7 @@ function entryMatchesPortScope(entry: ConversationEntry, requestedPortScopeKey: 
 }
 
 function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): string[] {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return [];
-  }
-  const metadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
-    ? (payload.metadata as Record<string, unknown>)
-    : undefined;
-  const sessionId =
-    readScopeToken(payload.session_id)
-    ?? readScopeToken(payload.sessionId)
-    ?? readScopeToken(metadata?.session_id)
-    ?? readScopeToken(metadata?.sessionId);
-  const conversationId =
-    readScopeToken(payload.conversation_id)
-    ?? readScopeToken(payload.conversationId)
-    ?? readScopeToken(metadata?.conversation_id)
-    ?? readScopeToken(metadata?.conversationId);
-  const continuationOwner =
-    readScopeToken(payload.continuationOwner)
-    ?? readScopeToken(metadata?.continuationOwner)
-    ?? (
-      isRecord(metadata?.responsesResume)
-        ? readScopeToken((metadata?.responsesResume as AnyRecord).continuationOwner)
-        : undefined
-    );
-  return buildRequestedScopeKeys({
-    sessionId,
-    conversationId,
-    entryKind: 'responses',
-    continuationOwner,
-    matchedPort: metadata?.matchedPort ?? (metadata?.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext) ? (metadata.portContext as AnyRecord).matchedPort : undefined),
-    routingPolicyGroup: metadata?.routingPolicyGroup ?? (metadata?.portContext && typeof metadata.portContext === 'object' && !Array.isArray(metadata.portContext) ? (metadata.portContext as AnyRecord).routingPolicyGroup : undefined)
-  });
+  return buildConversationScopePlan({ mode: 'submit_payload', payload }).keys;
 }
 
 

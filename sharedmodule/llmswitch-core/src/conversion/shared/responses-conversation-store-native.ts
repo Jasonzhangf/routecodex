@@ -1,4 +1,5 @@
 import {
+  buildResponsesConversationScopePlanWithNative,
   convertResponsesOutputToInputItemsWithNative,
   materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,
@@ -11,6 +12,7 @@ import type { AnyRecord, ConversationEntry } from './responses-conversation-stor
 
 export function assertResponsesConversationStoreNativeAvailable(): void {
   if (
+    typeof buildResponsesConversationScopePlanWithNative !== 'function' ||
     typeof pickResponsesPersistedFieldsWithNative !== 'function' ||
     typeof convertResponsesOutputToInputItemsWithNative !== 'function' ||
     typeof prepareResponsesConversationEntryWithNative !== 'function' ||
@@ -21,6 +23,10 @@ export function assertResponsesConversationStoreNativeAvailable(): void {
   ) {
     throw new Error('[responses-conversation-store] native bindings unavailable');
   }
+}
+
+export function buildConversationScopePlan(input: unknown): { keys: string[]; portScopeKey?: string } {
+  return buildResponsesConversationScopePlanWithNative(input);
 }
 
 export function pickPersistedFields(payload: AnyRecord): AnyRecord {
@@ -50,18 +56,11 @@ export function resumeConversationPayload(
   submitPayload: AnyRecord,
   requestId?: string
 ): { payload: AnyRecord; meta: AnyRecord } {
-  const resumeInput = Array.isArray(entry.input) && entry.input.length > 0
-    ? entry.input
-    : (Array.isArray(entry.releasedInputPrefix) ? entry.releasedInputPrefix : []);
-  const usesReleasedPrefixAsInput =
-    (!Array.isArray(entry.input) || entry.input.length === 0)
-    && Array.isArray(entry.releasedInputPrefix)
-    && entry.releasedInputPrefix.length > 0;
   const resumed = resumeResponsesConversationPayloadWithNative(
     {
       requestId: entry.requestId,
       basePayload: entry.basePayload,
-      input: resumeInput,
+      input: Array.isArray(entry.input) ? entry.input : [],
       releasedInputPrefix: entry.releasedInputPrefix,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,

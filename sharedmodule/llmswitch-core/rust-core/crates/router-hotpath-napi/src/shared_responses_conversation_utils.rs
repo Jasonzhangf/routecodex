@@ -801,13 +801,16 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
     });
     let mut normalized = Vec::<Value>::with_capacity(items.len());
     let mut guidance_injected = false;
-    let mut suppressed_stop_hook_call_id: Option<String> = None;
+    let mut pending_stop_hook_call_id: Option<String> = None;
     for item in items {
         let Some(row) = item.as_object() else {
             normalized.push(item);
             continue;
         };
         if is_stopless_guidance_message(&item) {
+            if latest_stopless_guidance.is_none() {
+                normalized.push(item);
+            }
             continue;
         }
         let item_type = read_trimmed_string(row.get("type"))
@@ -818,18 +821,21 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
                 normalized.push(item);
                 continue;
             };
-            if is_stop_hook_function_call(row)
-                && completed_stopless_call_ids.contains(call_id.as_str())
-            {
-                suppressed_stop_hook_call_id = Some(call_id);
+            if completed_stopless_call_ids.contains(call_id.as_str()) {
+                pending_stop_hook_call_id = Some(call_id);
                 continue;
             }
+            pending_stop_hook_call_id = if is_stop_hook_function_call(row) {
+                Some(call_id.clone())
+            } else {
+                None
+            };
             normalized.push(item);
             continue;
         }
         if item_type == "message"
             && row.get("role").and_then(Value::as_str) == Some("assistant")
-            && suppressed_stop_hook_call_id.is_some()
+            && pending_stop_hook_call_id.is_some()
         {
             continue;
         }
@@ -846,8 +852,8 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
                     }
                     guidance_injected = true;
                 }
-                if suppressed_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
-                    suppressed_stop_hook_call_id = None;
+                if pending_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
+                    pending_stop_hook_call_id = None;
                 }
                 continue;
             }
@@ -859,10 +865,13 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
                     normalized.push(guidance);
                 }
                 guidance_injected = true;
-                if suppressed_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
-                    suppressed_stop_hook_call_id = None;
+                if pending_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
+                    pending_stop_hook_call_id = None;
                 }
                 continue;
+            }
+            if pending_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
+                pending_stop_hook_call_id = None;
             }
         }
         normalized.push(item);
@@ -1456,6 +1465,223 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
     Value::Object(entry)
 }
 
+fn responses_scope_token(value: Option<&Value>) -> Option<String> {
+    read_trimmed_string(value)
+}
+
+fn responses_entry_kind(value: Option<&Value>) -> String {
+    match responses_scope_token(value).as_deref() {
+        Some("chat") => "chat".to_string(),
+        Some("messages") => "messages".to_string(),
+        _ => "responses".to_string(),
+    }
+}
+
+fn responses_continuation_owner(value: Option<&Value>) -> Option<String> {
+    match responses_scope_token(value).as_deref() {
+        Some("direct") => Some("direct".to_string()),
+        Some("relay") => Some("relay".to_string()),
+        _ => None,
+    }
+}
+
+fn responses_port_scope_key(scope: &Map<String, Value>) -> Option<String> {
+    if let Some(port_scope_key) = responses_scope_token(scope.get("portScopeKey")) {
+        return Some(port_scope_key);
+    }
+    if let Some(port) = scope.get("matchedPort").and_then(Value::as_i64) {
+        if port > 0 {
+            return Some(format!("port:{}", port));
+        }
+    }
+    responses_scope_token(scope.get("routingPolicyGroup")).map(|group| format!("group:{}", group))
+}
+
+fn responses_qualify_scope_key(port_scope_key: Option<&str>, key: String) -> String {
+    match port_scope_key {
+        Some(port_scope_key) if !port_scope_key.trim().is_empty() => {
+            format!("{}|{}", port_scope_key.trim(), key)
+        }
+        _ => key,
+    }
+}
+
+fn responses_build_stored_scope_keys_from_resolved(
+    session_id: Option<String>,
+    conversation_id: Option<String>,
+    entry_kind: &str,
+    continuation_owner: &str,
+    port_scope_key: Option<&str>,
+) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    if let Some(session_id) = session_id {
+        keys.push(responses_qualify_scope_key(
+            port_scope_key,
+            format!(
+                "entry:{}|owner:{}|session:{}",
+                entry_kind, continuation_owner, session_id
+            ),
+        ));
+    }
+    if let Some(conversation_id) = conversation_id {
+        keys.push(responses_qualify_scope_key(
+            port_scope_key,
+            format!(
+                "entry:{}|owner:{}|conversation:{}",
+                entry_kind, continuation_owner, conversation_id
+            ),
+        ));
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn responses_build_requested_scope_keys(scope: &Map<String, Value>) -> Vec<String> {
+    let entry_kind = responses_entry_kind(scope.get("entryKind"));
+    let owners: Vec<String> = match responses_continuation_owner(scope.get("continuationOwner")) {
+        Some(owner) => vec![owner],
+        None => vec!["direct".to_string(), "relay".to_string()],
+    };
+    let session_id = responses_scope_token(scope.get("sessionId"));
+    let conversation_id = responses_scope_token(scope.get("conversationId"));
+    let port_scope_key = responses_port_scope_key(scope);
+    let mut keys = Vec::new();
+    for owner in owners {
+        keys.extend(responses_build_stored_scope_keys_from_resolved(
+            session_id.clone(),
+            conversation_id.clone(),
+            &entry_kind,
+            &owner,
+            port_scope_key.as_deref(),
+        ));
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn responses_read_submit_payload_scope_value<'a>(
+    payload: &'a Map<String, Value>,
+    metadata: Option<&'a Map<String, Value>>,
+    direct_keys: &[&str],
+    metadata_keys: &[&str],
+) -> Option<String> {
+    for key in direct_keys {
+        if let Some(value) = responses_scope_token(payload.get(*key)) {
+            return Some(value);
+        }
+    }
+    if let Some(metadata) = metadata {
+        for key in metadata_keys {
+            if let Some(value) = responses_scope_token(metadata.get(*key)) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn responses_read_resume_scope_keys_from_submit_payload(payload: &Value) -> Vec<String> {
+    let Some(payload_obj) = payload.as_object() else {
+        return Vec::new();
+    };
+    let metadata = payload_obj.get("metadata").and_then(Value::as_object);
+    let port_context = metadata
+        .and_then(|row| row.get("portContext"))
+        .and_then(Value::as_object);
+    let session_id = responses_read_submit_payload_scope_value(
+        payload_obj,
+        metadata,
+        &["session_id", "sessionId"],
+        &["session_id", "sessionId"],
+    );
+    let conversation_id = responses_read_submit_payload_scope_value(
+        payload_obj,
+        metadata,
+        &["conversation_id", "conversationId"],
+        &["conversation_id", "conversationId"],
+    );
+    let continuation_owner = responses_read_submit_payload_scope_value(
+        payload_obj,
+        metadata,
+        &["continuationOwner"],
+        &["continuationOwner"],
+    )
+    .or_else(|| {
+        metadata
+            .and_then(|row| row.get("responsesResume"))
+            .and_then(Value::as_object)
+            .and_then(|row| responses_scope_token(row.get("continuationOwner")))
+    });
+
+    let mut scope = Map::new();
+    if let Some(session_id) = session_id {
+        scope.insert("sessionId".to_string(), Value::String(session_id));
+    }
+    if let Some(conversation_id) = conversation_id {
+        scope.insert("conversationId".to_string(), Value::String(conversation_id));
+    }
+    if let Some(continuation_owner) = continuation_owner {
+        scope.insert(
+            "continuationOwner".to_string(),
+            Value::String(continuation_owner),
+        );
+    }
+    if let Some(value) = metadata
+        .and_then(|row| row.get("matchedPort"))
+        .or_else(|| port_context.and_then(|row| row.get("matchedPort")))
+    {
+        scope.insert("matchedPort".to_string(), value.clone());
+    }
+    if let Some(value) = metadata
+        .and_then(|row| row.get("routingPolicyGroup"))
+        .or_else(|| port_context.and_then(|row| row.get("routingPolicyGroup")))
+    {
+        scope.insert("routingPolicyGroup".to_string(), value.clone());
+    }
+    scope.insert(
+        "entryKind".to_string(),
+        Value::String("responses".to_string()),
+    );
+    responses_build_requested_scope_keys(&scope)
+}
+
+fn build_responses_conversation_scope_plan(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let mode = responses_scope_token(obj.get("mode")).unwrap_or_default();
+    let scope_obj = obj
+        .get("scope")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let port_scope_key = responses_port_scope_key(&scope_obj);
+    let keys = match mode.as_str() {
+        "stored" => {
+            let entry_kind = responses_entry_kind(scope_obj.get("entryKind"));
+            let continuation_owner =
+                responses_continuation_owner(scope_obj.get("continuationOwner"))
+                    .unwrap_or_else(|| "relay".to_string());
+            responses_build_stored_scope_keys_from_resolved(
+                responses_scope_token(scope_obj.get("sessionId")),
+                responses_scope_token(scope_obj.get("conversationId")),
+                &entry_kind,
+                &continuation_owner,
+                port_scope_key.as_deref(),
+            )
+        }
+        "requested" => responses_build_requested_scope_keys(&scope_obj),
+        "submit_payload" => responses_read_resume_scope_keys_from_submit_payload(
+            obj.get("payload").unwrap_or(&Value::Null),
+        ),
+        _ => Vec::new(),
+    };
+    serde_json::json!({
+        "keys": keys,
+        "portScopeKey": port_scope_key,
+    })
+}
+
 fn strip_meta_value(value: Value) -> Value {
     match value {
         Value::Array(arr) => Value::Array(arr.into_iter().map(strip_meta_value).collect()),
@@ -1493,6 +1719,8 @@ fn resume_responses_conversation_payload(
     } else {
         direct_input
     };
+    merged_input =
+        collapse_auto_stop_hook_pairs_in_history(normalize_responses_history_items(merged_input));
     let tool_outputs = clone_array(
         submit_payload
             .as_object()
@@ -1503,7 +1731,7 @@ fn resume_responses_conversation_payload(
         normalize_submitted_tool_outputs(&tool_outputs, &merged_input)?;
     merged_input.extend(normalized_items);
     let full_input = remove_auto_stop_hook_assistant_echoes_in_history(
-        normalize_responses_history_items(merged_input),
+        collapse_auto_stop_hook_pairs_in_history(normalize_responses_history_items(merged_input)),
     );
     payload.insert("input".to_string(), Value::Array(full_input.clone()));
 
@@ -1917,6 +2145,63 @@ fn find_delta_from_released_pending_tool_outputs(
     None
 }
 
+fn collapse_replayed_pending_tool_batches(
+    delta_items: Vec<Value>,
+    pending_call_ids: &[String],
+) -> Vec<Value> {
+    if pending_call_ids.is_empty() || delta_items.is_empty() {
+        return delta_items;
+    }
+
+    let mut index = 0usize;
+    while index + pending_call_ids.len() <= delta_items.len() {
+        let candidate = &delta_items[index..index + pending_call_ids.len()];
+        let is_replayed_call_batch =
+            candidate
+                .iter()
+                .zip(pending_call_ids.iter())
+                .all(|(item, expected_call_id)| {
+                    let Some(row) = item.as_object() else {
+                        return false;
+                    };
+                    let item_type = read_trimmed_string(row.get("type"))
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    item_type == "function_call"
+                        && read_bridge_function_call_id(row).as_deref() == Some(expected_call_id)
+                });
+        if !is_replayed_call_batch {
+            break;
+        }
+        index += pending_call_ids.len();
+    }
+
+    let pending: HashSet<&str> = pending_call_ids.iter().map(String::as_str).collect();
+    let mut seen_outputs = HashSet::<String>::new();
+    let mut collapsed = Vec::<Value>::with_capacity(delta_items.len().saturating_sub(index));
+    for item in delta_items.into_iter().skip(index) {
+        let Some(row) = item.as_object() else {
+            collapsed.push(item);
+            continue;
+        };
+        let item_type = read_trimmed_string(row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if is_bridge_tool_output_item_type(item_type.as_str()) {
+            if let Some(call_id) = read_bridge_function_call_id(row) {
+                if pending.contains(call_id.as_str()) {
+                    if seen_outputs.contains(call_id.as_str()) {
+                        continue;
+                    }
+                    seen_outputs.insert(call_id);
+                }
+            }
+        }
+        collapsed.push(item);
+    }
+    collapsed
+}
+
 fn raw_suffix_for_normalized_delta(
     raw_items: &[Value],
     normalized_items: &[Value],
@@ -2128,6 +2413,7 @@ fn materialize_responses_continuation_payload(
 
         let suffix_delta =
             raw_suffix_for_normalized_delta(&input_items_raw, &input_items, &suffix_delta);
+        let suffix_delta = collapse_replayed_pending_tool_batches(suffix_delta, &pending_call_ids);
         if suffix_delta.is_empty() {
             return Value::Null;
         }
@@ -2199,6 +2485,11 @@ fn materialize_responses_continuation_payload(
     };
     let continuation_delta =
         raw_suffix_for_normalized_delta(&input_items_raw, &input_items, &continuation_delta);
+    let continuation_delta =
+        collapse_replayed_pending_tool_batches(continuation_delta, &pending_call_ids);
+    if continuation_delta.is_empty() {
+        return Value::Null;
+    }
 
     let last_response_id = read_trimmed_string(entry_obj.get("lastResponseId"));
     let submitted_details = collect_submitted_tool_output_details(&continuation_delta);
@@ -2271,6 +2562,14 @@ pub fn prepare_responses_conversation_entry_json(
     let context: Value =
         serde_json::from_str(&context_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = prepare_responses_conversation_entry(&payload, &context);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi]
+pub fn build_responses_conversation_scope_plan_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = build_responses_conversation_scope_plan(&input);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -2521,10 +2820,11 @@ pub fn publish_responses_record_plan_json(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_stop_hook_guidance_text_from_output, convert_responses_output_to_input_items,
-        materialize_responses_continuation_payload, plan_responses_handler_entry,
-        prepare_responses_conversation_entry, publish_responses_record_plan_json,
-        restore_responses_continuation_payload, resume_responses_conversation_payload,
+        build_responses_conversation_scope_plan, build_stop_hook_guidance_text_from_output,
+        convert_responses_output_to_input_items, materialize_responses_continuation_payload,
+        plan_responses_handler_entry, prepare_responses_conversation_entry,
+        publish_responses_record_plan_json, restore_responses_continuation_payload,
+        resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
 
@@ -2898,6 +3198,121 @@ mod tests {
     }
 
     #[test]
+    fn materialize_collapses_replayed_pending_tool_call_batches() {
+        let prefix = json!([
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "start" }]
+            },
+            {
+                "type": "reasoning",
+                "id": "rs_dup_1",
+                "summary": [{ "type": "summary_text", "text": "plan tools" }]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": "I will inspect the relevant files." }]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dup_1",
+                "call_id": "call_dup_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"sed -n 1,10p note.md\"}"
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dup_2",
+                "call_id": "call_dup_2",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"sed -n 1,10p CACHE.md\"}"
+            }
+        ]);
+        let incoming = json!([
+            {
+                "type": "function_call",
+                "id": "fc_dup_1",
+                "call_id": "call_dup_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"sed -n 1,10p note.md\"}"
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dup_2",
+                "call_id": "call_dup_2",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"sed -n 1,10p CACHE.md\"}"
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dup_1",
+                "call_id": "call_dup_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"sed -n 1,10p note.md\"}"
+            },
+            {
+                "type": "function_call",
+                "id": "fc_dup_2",
+                "call_id": "call_dup_2",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"sed -n 1,10p CACHE.md\"}"
+            },
+            { "type": "function_call_output", "call_id": "call_dup_1", "output": "note:first" },
+            { "type": "function_call_output", "call_id": "call_dup_2", "output": "cache:first" },
+            { "type": "function_call_output", "call_id": "call_dup_1", "output": "note:second" },
+            { "type": "function_call_output", "call_id": "call_dup_2", "output": "cache:second" },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "continue" }]
+            }
+        ]);
+
+        let materialized = materialize_responses_continuation_payload(
+            &json!({
+                "requestId": "req_materialize_dup_1",
+                "basePayload": {
+                    "model": "gpt-5.5",
+                    "store": true
+                },
+                "input": [],
+                "releasedInputPrefix": prefix,
+                "lastResponseId": "resp_materialize_dup_1",
+                "releasedPendingToolCallIds": ["call_dup_1", "call_dup_2"],
+                "tools": Value::Null
+            }),
+            &json!({
+                "model": "gpt-5.5",
+                "input": incoming
+            }),
+            Some("req_materialize_dup_2"),
+            Some("port:5555|entry:responses|owner:relay|session:s_dup"),
+        );
+
+        let payload = materialized
+            .get("payload")
+            .and_then(Value::as_object)
+            .unwrap();
+        let input = payload.get("input").and_then(Value::as_array).unwrap();
+        let serialized = serde_json::to_string(input).unwrap();
+        assert_eq!(input.len(), 8);
+        assert_eq!(input[5]["output"], json!("note:first"));
+        assert_eq!(input[6]["output"], json!("cache:first"));
+        assert_eq!(input[7]["content"][0]["text"], json!("continue"));
+        assert!(!serialized.contains("note:second"));
+        assert!(!serialized.contains("cache:second"));
+
+        let meta = materialized.get("meta").and_then(Value::as_object).unwrap();
+        assert_eq!(
+            meta.get("continuationDeltaItems").and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(meta.get("fullInputItems").and_then(Value::as_u64), Some(8));
+    }
+
+    #[test]
     fn prepare_collapses_auto_projected_stopless_pairs_into_guidance_only() {
         let entry = prepare_responses_conversation_entry(
             &json!({
@@ -3018,59 +3433,27 @@ mod tests {
 
         let payload = resumed.get("payload").and_then(Value::as_object).unwrap();
         let input = payload.get("input").and_then(Value::as_array).unwrap();
-        assert_eq!(input.len(), 4);
+        assert_eq!(input.len(), 2);
         assert_eq!(input[0]["type"], json!("message"));
         assert_eq!(input[1]["type"], json!("message"));
         let serialized = serde_json::to_string(input).unwrap();
         assert!(!serialized.contains("call_third_round_1"));
-        assert!(serialized.contains("call_third_round_2"));
+        assert!(!serialized.contains("call_third_round_2"));
         assert!(!serialized.contains("继续执行中"));
-        let guidance = input
-            .iter()
-            .filter_map(|item| {
-                item.get("content")?
-                    .as_array()?
-                    .first()?
-                    .get("text")?
-                    .as_str()
-            })
-            .find(|text| text.contains("上一轮执行结果"))
-            .expect("guidance");
-        assert!(guidance.contains("上一轮执行结果：repeatCount=2/3。"));
+        assert!(!serialized.contains("\"type\":\"function_call_output\""));
+        let guidance = input[1]["content"][0]["text"].as_str().expect("guidance");
+        assert!(guidance.contains("上一轮执行结果：repeatCount=3/3。"));
         assert!(guidance.contains("继续往下做"));
         assert!(guidance.contains("stopreason"));
-        let current_call = input
-            .iter()
-            .find(|item| {
-                item.get("type").and_then(Value::as_str) == Some("function_call")
-                    && item.get("call_id").and_then(Value::as_str) == Some("call_third_round_2")
-            })
-            .expect("current stopless shell call remains for request governance");
-        assert_eq!(current_call["name"], json!("exec_command"));
-        let current_output = input
-            .iter()
-            .find(|item| {
-                item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                    && item.get("call_id").and_then(Value::as_str) == Some("call_third_round_2")
-            })
-            .expect("current stopless output remains for request governance");
-        assert!(
-            current_output
-                .get("output")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .contains("stop_message_auto"),
-            "current raw CLI output must reach request governance sanitizer"
-        );
 
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
-        assert_eq!(full_input.len(), 4);
+        assert_eq!(full_input.len(), 2);
         assert_eq!(full_input[0]["type"], json!("message"));
         assert_eq!(full_input[1]["type"], json!("message"));
         let full_input_serialized = serde_json::to_string(full_input).unwrap();
         assert!(!full_input_serialized.contains("call_third_round_1"));
-        assert!(full_input_serialized.contains("call_third_round_2"));
+        assert!(!full_input_serialized.contains("call_third_round_2"));
         assert!(!full_input_serialized.contains("继续执行中"));
     }
 
@@ -4105,6 +4488,59 @@ mod tests {
         assert_eq!(items[0]["type"], "function_call");
         assert_eq!(items[0]["call_id"], "call_status_1");
         assert!(items[0].get("status").is_none());
+    }
+
+    #[test]
+    fn responses_conversation_scope_plan_is_rust_owned() {
+        let stored = build_responses_conversation_scope_plan(&serde_json::json!({
+            "mode": "stored",
+            "scope": {
+                "sessionId": " sess-1 ",
+                "conversationId": "conv-1",
+                "entryKind": "responses",
+                "continuationOwner": "relay",
+                "matchedPort": 5555
+            }
+        }));
+        assert_eq!(stored["portScopeKey"], "port:5555");
+        assert_eq!(
+            stored["keys"],
+            serde_json::json!([
+                "port:5555|entry:responses|owner:relay|conversation:conv-1",
+                "port:5555|entry:responses|owner:relay|session:sess-1"
+            ])
+        );
+
+        let requested = build_responses_conversation_scope_plan(&serde_json::json!({
+            "mode": "requested",
+            "scope": {
+                "sessionId": "sess-1",
+                "entryKind": "responses",
+                "routingPolicyGroup": "gateway"
+            }
+        }));
+        assert_eq!(
+            requested["keys"],
+            serde_json::json!([
+                "group:gateway|entry:responses|owner:direct|session:sess-1",
+                "group:gateway|entry:responses|owner:relay|session:sess-1"
+            ])
+        );
+
+        let submit = build_responses_conversation_scope_plan(&serde_json::json!({
+            "mode": "submit_payload",
+            "payload": {
+                "metadata": {
+                    "session_id": "sess-submit",
+                    "responsesResume": { "continuationOwner": "direct" },
+                    "portContext": { "matchedPort": 5520 }
+                }
+            }
+        }));
+        assert_eq!(
+            submit["keys"],
+            serde_json::json!(["port:5520|entry:responses|owner:direct|session:sess-submit"])
+        );
     }
 
     #[test]

@@ -24,6 +24,7 @@ export {
 } from './native-shared-conversion-semantics-metadata.js';
 export {
   convertResponsesOutputToInputItemsWithNative,
+  buildResponsesConversationScopePlanWithNative,
   enforceChatBudgetWithNative,
   materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,

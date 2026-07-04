@@ -119,6 +119,46 @@ function isResponsesConversationToolResultError(reason: string): boolean {
     || normalized.includes('orphan_tool_result');
 }
 
+export function buildResponsesConversationScopePlanWithNative(input: unknown): {
+  keys: string[];
+  portScopeKey?: string;
+} {
+  const capability = 'buildResponsesConversationScopePlanJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ keys: string[]; portScopeKey?: string }>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? null);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed || !Array.isArray(parsed.keys)) {
+      return fail('invalid payload');
+    }
+    const keys = parsed.keys.filter((key): key is string => typeof key === 'string' && key.trim().length > 0);
+    return {
+      keys,
+      ...(typeof parsed.portScopeKey === 'string' && parsed.portScopeKey.trim()
+        ? { portScopeKey: parsed.portScopeKey.trim() }
+        : {})
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function pickResponsesPersistedFieldsWithNative(payload: unknown): Record<string, unknown> {
   const capability = 'pickResponsesPersistedFieldsJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
