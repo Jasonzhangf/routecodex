@@ -275,13 +275,13 @@ chains:
         to_node: ChatProcReqContinuation02OwnerResolved
         caller_symbol: prepareResponsesHandlerEntryForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
-        callee_symbol: planResponsesHandlerEntry
+        callee_symbol: planResponsesContinuationRequestAction
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "raw current request payload plus explicit continuation evidence such as submit_tool_outputs, previous_response_id, response_id, or internal reentry marker"
-        semantic_output: "entry evidence classified into ordinary create vs legal continuation candidate"
-        status: partial
-        note: "Request-visible evidence is the only legal starting point. Session/scope-only hits are forbidden. Handler/bridge code is a temporary shell; semantic owner is the Chat Process continuation block. Non-responses protocols must skip this block entirely."
+        semantic_output: "Rust-owned continuation action plan resolves direct vs relay owner, legal submit/materialize action, client error, or no-op"
+        status: anchored
+        note: "Request-visible evidence is the only legal starting point. `prepareResponsesHandlerEntryForHttp` performs host IO lookup, then delegates continuation owner/action semantics to Rust `planResponsesContinuationRequestAction`; session/scope-only hits remain forbidden. Non-responses protocols skip this block."
       - step_id: rct-02
         from_node: ChatProcReqContinuation02OwnerResolved
         to_node: ChatProcReqContinuation03CanonicalRestored
