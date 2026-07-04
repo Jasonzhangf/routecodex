@@ -698,3 +698,22 @@
 - Export gate: `verify:servertool-rust-only` now AST-audits `sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts` against active `rcc-llmswitch-core/native/servertool-wrapper` imports/re-exports. Unused package-shim declarations were removed; current verified function declaration count is 74.
 - Related runtime fixes: router-direct retry preserves `runtime_control.providerProtocol` while releasing only single-use provider pins; MetadataCenter Rust mirror is rebound across cloned metadata; managed PID trust includes release `dist/cli.js` and global `node_modules/rcc/dist/{index,cli}.js`.
 - Evidence: sharedmodule/root `tsc` passed; `verify:function-map-compile-gate` passed; `verify:servertool-rust-only` passed; focused CLI/direct/providerProtocol Jest passed; `pack:rcc` passed; `verify:rcc-release-install` passed for `routecodex-0.90.3553.tgz` and `rcc-0.90.3553.tgz` using temporary prefixes. No real global install or live replay was claimed in this slice.
+
+# 2026-07-04: release install health gate must verify live runtime version
+
+- Verified false-green mode: `install:release` can restart a managed port and pass readiness while the live server is still an older runtime version. CLI/shim `--version` is not enough; `/health.version` must equal the package version being installed.
+- Durable gate: release install closeout must check `/health.status`, `ready`, `pipelineReady`, and exact `version`. If ready health reports a different version, expose/adopt through the single-port managed release path and verify again; do not claim runtime closeout from readiness alone.
+- Verified P0-1 live replay pattern: `scripts/tests/stopless-5555-live-probe.mjs` is a valid servertool followup lifecycle smoke when it shows first-turn `requires_action`, one or more `submit_tool_outputs` continuations, final `completed`, and no stop schema leakage.
+
+# 2026-07-04: stopless sessionId guard and consecutive counter contract
+
+- Verified stopless rule: response-side stopless requires current request-truth `sessionId`; missing/blank sessionId must pass through naturally, emit `stopless_missing_session_id`, project no CLI, and write no stopless runtime state.
+- Verified counter rule: `repeatCount` is same-session consecutive missing/invalid schema budget only. Non-stop progress/tool calls reset it, terminal schema and `simple_question=true` clear it, and a different session starts from `repeatCount=1` instead of inheriting stale state.
+- Evidence: `cargo test -p router-hotpath-napi stopless_ --lib -- --nocapture`, `cargo test -p servertool-core stopless|cli_contract|persisted_lookup --lib -- --nocapture`, `cargo test -p stop-message-core --test stop_schema_gate_closure -- --nocapture`, native hotpath build, focused stopless Jest, `verify:stopless-invalid-schema-blackbox`, `verify:servertool-rust-only`, `verify:function-map-compile-gate`, and `verify:architecture-review-surface-light` passed.
+- Closure gap: root `tsc` / `build:base` and live replay were not claimed for this stopless slice because unrelated dirty `src/modules/llmswitch/bridge/native-exports.ts` duplicate exports block root typecheck.
+
+# 2026-07-04: review commits closed local code gates, not live runtime adoption
+
+- Review commit evidence: `35549f6a0` committed MetadataCenter stopless `sessionId` projection after `tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts` passed 10/10; `5c2fafeff` committed Responses store latest stopless guidance collapse after Rust `shared_responses_conversation_utils` passed 48/48, native hotpath build passed, `responses-continuation-store.spec.ts` passed 39/39, and stage residue audit passed 153/153.
+- Review commit evidence: `51234d9ed` committed stopless/servertool Rust governance after `verify:servertool-rust-only` passed, Rust `stopless_` passed 70/70, focused stopless/provider-response/req-process Jest passed 50/50, and `servertool-bridge-equivalence.spec.ts` passed 2/2.
+- Current boundary: these commits prove local code/gate closure for the reviewed slices. Runtime release closeout is still not claimed until live `/health.version` matches the source/package version and same-entry live replay is rerun on that installed runtime.
