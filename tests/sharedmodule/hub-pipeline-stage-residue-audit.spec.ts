@@ -4065,6 +4065,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(bridgeSource).not.toMatch(/tool_call_id[\s\S]{0,180}call_id/u);
   });
 
+  it('responses request context restore planning must be native-owned', () => {
+    const repoRoot = process.cwd();
+    const bridgeSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-request-bridge.ts'),
+      'utf8'
+    );
+
+    expect(bridgeSource).toContain('planResponsesRequestContext');
+    expect(bridgeSource).not.toContain('relayOwnedSubmitToolOutputsResume');
+    expect(bridgeSource).not.toContain('relayOwnedMaterializedSubmitToolOutputsResume');
+    expect(bridgeSource).not.toMatch(/resumeMeta\.continuationOwner\s*===\s*['"]relay['"]/u);
+    expect(bridgeSource).not.toMatch(/delete\s+\w+\.response_id/u);
+    expect(bridgeSource).not.toMatch(/delete\s+\w+\.tool_outputs/u);
+    expect(bridgeSource).not.toMatch(/restoredTools[\s\S]{0,220}\?\s*\{\s*tools/u);
+  });
+
   it('responses continuation request action routing must be native-owned', () => {
     const repoRoot = process.cwd();
     const bridgeSource = fs.readFileSync(

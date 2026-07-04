@@ -1333,6 +1333,121 @@ fn materialize_provider_owned_submit_context(payload: &Value) -> Value {
     })
 }
 
+fn plan_responses_request_context(input: &Value) -> Value {
+    let Some(input_obj) = input.as_object() else {
+        return serde_json::json!({
+            "kind": "error",
+            "message": "Responses request context planner missing input"
+        });
+    };
+    let payload = input_obj.get("payload").cloned().unwrap_or(Value::Null);
+    let payload_for_persistence = strip_request_metadata_from_payload(&payload);
+    let payload_obj = payload_for_persistence
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    let resume_meta = input_obj.get("resumeMeta").and_then(Value::as_object);
+    let continuation_owner =
+        resume_meta.and_then(|meta| read_trimmed_string(meta.get("continuationOwner")));
+    let relay_full_input = resume_meta
+        .and_then(|meta| meta.get("fullInput"))
+        .and_then(Value::as_array)
+        .cloned();
+    let relay_tools = resume_meta
+        .and_then(|meta| meta.get("restoredTools"))
+        .and_then(Value::as_array)
+        .cloned();
+    let is_relay = continuation_owner.as_deref() == Some("relay");
+    let has_provider_owned_submit = read_trimmed_string(payload_obj.get("response_id")).is_some()
+        && payload_obj
+            .get("tool_outputs")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty());
+    let has_materialized_relay_submit =
+        read_trimmed_string(payload_obj.get("previous_response_id")).is_some()
+            && payload_obj
+                .get("input")
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty())
+            && relay_full_input
+                .as_ref()
+                .is_some_and(|items| !items.is_empty());
+
+    if is_relay
+        && has_provider_owned_submit
+        && relay_full_input
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+    {
+        let mut relay_payload = payload_obj;
+        if let Some(response_id) =
+            resume_meta.and_then(|meta| read_trimmed_string(meta.get("responseId")))
+        {
+            relay_payload.insert(
+                "previous_response_id".to_string(),
+                Value::String(response_id),
+            );
+        }
+        relay_payload.insert(
+            "input".to_string(),
+            Value::Array(relay_full_input.unwrap_or_default()),
+        );
+        if let Some(tools) = relay_tools.filter(|items| !items.is_empty()) {
+            relay_payload.insert("tools".to_string(), Value::Array(tools));
+        }
+        relay_payload.remove("response_id");
+        relay_payload.remove("tool_outputs");
+        return serde_json::json!({
+            "kind": "capture_request",
+            "payload": Value::Object(relay_payload),
+        });
+    }
+
+    if is_relay && has_materialized_relay_submit {
+        let mut relay_payload = payload_obj;
+        relay_payload.insert(
+            "input".to_string(),
+            Value::Array(relay_full_input.unwrap_or_default()),
+        );
+        if let Some(tools) = relay_tools.filter(|items| !items.is_empty()) {
+            relay_payload.insert("tools".to_string(), Value::Array(tools));
+        }
+        return serde_json::json!({
+            "kind": "capture_request",
+            "payload": Value::Object(relay_payload),
+        });
+    }
+
+    if has_provider_owned_submit {
+        let materialized = materialize_provider_owned_submit_context(&payload_for_persistence);
+        if materialized.is_null() {
+            return serde_json::json!({
+                "kind": "error",
+                "message": "Responses provider-owned submit_tool_outputs context materialization failed"
+            });
+        }
+        return serde_json::json!({
+            "kind": "context",
+            "payload": materialized.get("payload").cloned().unwrap_or(Value::Null),
+            "context": materialized.get("context").cloned().unwrap_or(Value::Null),
+        });
+    }
+
+    serde_json::json!({
+        "kind": "capture_request",
+        "payload": payload_for_persistence,
+    })
+}
+
+fn strip_request_metadata_from_payload(payload: &Value) -> Value {
+    let Some(record) = payload.as_object() else {
+        return payload.clone();
+    };
+    let mut out = record.clone();
+    out.remove("metadata");
+    Value::Object(out)
+}
+
 fn plan_responses_continuation_request_action(input: &Value) -> Value {
     let input_obj = input.as_object().cloned().unwrap_or_default();
     let planned_entry_mode = read_trimmed_string(input_obj.get("plannedEntryMode"))
@@ -2817,6 +2932,14 @@ pub fn materialize_provider_owned_submit_context_json(payload_json: String) -> N
 }
 
 #[napi_derive::napi]
+pub fn plan_responses_request_context_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_request_context(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi]
 pub fn plan_responses_continuation_request_action_json(input_json: String) -> NapiResult<String> {
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -2986,7 +3109,8 @@ mod tests {
         build_responses_conversation_scope_plan, build_stop_hook_guidance_text_from_output,
         convert_responses_output_to_input_items, materialize_provider_owned_submit_context,
         materialize_responses_continuation_payload, plan_responses_continuation_request_action,
-        plan_responses_handler_entry, prepare_responses_conversation_entry,
+        plan_responses_handler_entry, plan_responses_request_context,
+        prepare_responses_conversation_entry,
         publish_responses_record_plan_json, restore_responses_continuation_payload,
         resume_responses_conversation_payload,
     };
@@ -3205,6 +3329,105 @@ mod tests {
             json!([
                 { "type": "function_call_output", "call_id": "call_existing", "output": "kept" }
             ])
+        );
+    }
+
+    #[test]
+    fn request_context_plan_materializes_provider_owned_submit_in_rust() {
+        let planned = plan_responses_request_context(&json!({
+            "payload": {
+                "model": "gpt-5.5",
+                "metadata": { "client": "data-plane" },
+                "response_id": "resp_provider_submit_plan",
+                "tool_outputs": [
+                    { "tool_call_id": "call_provider_plan_1", "output": { "ok": true } }
+                ]
+            }
+        }));
+
+        assert_eq!(planned["kind"], json!("context"));
+        assert_eq!(
+            planned["payload"]["previous_response_id"],
+            json!("resp_provider_submit_plan")
+        );
+        assert_eq!(
+            planned["context"]["input"][0]["type"],
+            json!("function_call_output")
+        );
+        assert_eq!(
+            planned["context"]["input"][0]["call_id"],
+            json!("call_provider_plan_1")
+        );
+        assert!(planned["payload"].get("metadata").is_none());
+    }
+
+    #[test]
+    fn request_context_plan_routes_relay_submit_to_capture_payload_in_rust() {
+        let planned = plan_responses_request_context(&json!({
+            "payload": {
+                "model": "gpt-5.5",
+                "metadata": { "client": "data-plane" },
+                "response_id": "resp_relay_submit_plan",
+                "tool_outputs": [
+                    { "tool_call_id": "call_relay_plan_1", "output": "ok" }
+                ]
+            },
+            "resumeMeta": {
+                "continuationOwner": "relay",
+                "responseId": "resp_relay_submit_plan",
+                "fullInput": [
+                    { "type": "message", "role": "user", "content": "run pwd" },
+                    { "type": "function_call", "call_id": "call_relay_plan_1", "name": "exec_command", "arguments": "{}" },
+                    { "type": "function_call_output", "call_id": "call_relay_plan_1", "output": "ok" }
+                ],
+                "restoredTools": [
+                    { "type": "function", "name": "exec_command" }
+                ]
+            }
+        }));
+
+        assert_eq!(planned["kind"], json!("capture_request"));
+        assert_eq!(
+            planned["payload"]["previous_response_id"],
+            json!("resp_relay_submit_plan")
+        );
+        assert!(planned["payload"].get("response_id").is_none());
+        assert!(planned["payload"].get("tool_outputs").is_none());
+        assert!(planned["payload"].get("metadata").is_none());
+        assert_eq!(planned["payload"]["input"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            planned["payload"]["tools"][0]["name"],
+            json!("exec_command")
+        );
+    }
+
+    #[test]
+    fn request_context_plan_routes_relay_materialized_submit_to_capture_payload_in_rust() {
+        let planned = plan_responses_request_context(&json!({
+            "payload": {
+                "model": "gpt-5.5",
+                "previous_response_id": "resp_relay_materialized_plan",
+                "input": [
+                    { "type": "function_call_output", "call_id": "call_relay_materialized_1", "output": "ok" }
+                ]
+            },
+            "resumeMeta": {
+                "continuationOwner": "relay",
+                "fullInput": [
+                    { "type": "message", "role": "user", "content": "run pwd" },
+                    { "type": "function_call_output", "call_id": "call_relay_materialized_1", "output": "ok" }
+                ],
+                "restoredTools": [
+                    { "type": "function", "name": "exec_command" }
+                ]
+            }
+        }));
+
+        assert_eq!(planned["kind"], json!("capture_request"));
+        assert_eq!(planned["payload"]["input"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            planned["payload"]["tools"][0]["name"],
+            json!("exec_command")
         );
     }
 

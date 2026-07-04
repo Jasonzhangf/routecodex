@@ -4,6 +4,7 @@ import { MetadataCenter } from '../../../../src/server/runtime/http-server/metad
 const mockCaptureReqInboundResponsesContextSnapshot = jest.fn();
 const mockPlanResponsesHandlerEntry = jest.fn();
 const mockMaterializeProviderOwnedSubmitContext = jest.fn();
+const mockPlanResponsesRequestContext = jest.fn();
 const mockPlanResponsesContinuationRequestAction = jest.fn();
 const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
@@ -26,6 +27,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   captureReqInboundResponsesContextSnapshot: mockCaptureReqInboundResponsesContextSnapshot,
   materializeProviderOwnedSubmitContext: mockMaterializeProviderOwnedSubmitContext,
+  planResponsesRequestContext: mockPlanResponsesRequestContext,
   planResponsesContinuationRequestAction: mockPlanResponsesContinuationRequestAction,
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
 }));
@@ -57,6 +59,14 @@ describe('responses-request-bridge relay request-context normalization', () => {
       responseId: undefined
     });
     mockMaterializeProviderOwnedSubmitContext.mockReset();
+    mockPlanResponsesRequestContext.mockReset();
+    mockPlanResponsesRequestContext.mockImplementation(({ payload }) => {
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        const { metadata: _metadata, ...withoutMetadata } = payload as Record<string, unknown>;
+        return { kind: 'capture_request', payload: withoutMetadata };
+      }
+      return { kind: 'capture_request', payload };
+    });
     mockPlanResponsesContinuationRequestAction.mockReset();
     mockPlanResponsesContinuationRequestAction.mockResolvedValue({
       action: 'none',
@@ -223,7 +233,8 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('treats provider-owned submit_tool_outputs resume payload as context-free request state', async () => {
-    mockMaterializeProviderOwnedSubmitContext.mockResolvedValue({
+    mockPlanResponsesRequestContext.mockReturnValueOnce({
+      kind: 'context',
       payload: {
         response_id: 'resp_submit_direct_1',
         previous_response_id: 'resp_submit_direct_1',
@@ -275,7 +286,8 @@ describe('responses-request-bridge relay request-context normalization', () => {
     });
 
     expect(mockCaptureReqInboundResponsesContextSnapshot).not.toHaveBeenCalled();
-    expect(mockMaterializeProviderOwnedSubmitContext).toHaveBeenCalledWith({
+    expect(mockMaterializeProviderOwnedSubmitContext).not.toHaveBeenCalled();
+    expect(mockPlanResponsesRequestContext).toHaveBeenCalledWith({
       payload: {
         response_id: 'resp_submit_direct_1',
         tool_outputs: [
@@ -283,7 +295,10 @@ describe('responses-request-bridge relay request-context normalization', () => {
             call_id: 'call_submit_direct_1',
             output: '{"ok":true}'
           }
-        ]
+        ],
+        metadata: {
+          toolCallIdStyle: 'openai'
+        }
       }
     });
     expect(context).toEqual({
@@ -495,6 +510,49 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('normalizes relay fullInput stopless history into provider-facing reasoningStop pair', async () => {
+    const fullInput = [
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: '继续执行 stopless 测试' }],
+      },
+      {
+        type: 'function_call',
+        id: 'fc_stopless_resume_1',
+        call_id: 'call_stopless_resume_1',
+        name: 'exec_command',
+        arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}',
+      },
+      {
+        type: 'function_call_output',
+        id: 'fc_stopless_resume_1',
+        call_id: 'call_stopless_resume_1',
+        output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
+      },
+      {
+        type: 'function_call',
+        id: 'fc_stopless_resume_2',
+        call_id: 'call_stopless_resume_2',
+        name: 'exec_command',
+        arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}',
+      },
+      {
+        type: 'function_call_output',
+        id: 'fc_stopless_resume_2',
+        call_id: 'call_stopless_resume_2',
+        output: '',
+      },
+    ];
+    const restoredTools = [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }];
+    mockPlanResponsesRequestContext.mockReturnValueOnce({
+      kind: 'capture_request',
+      payload: {
+        model: 'gpt-5.4',
+        previous_response_id: 'resp_stopless_resume_1',
+        input: fullInput,
+        tools: restoredTools,
+      }
+    });
     mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
       input: [
         {
@@ -546,40 +604,8 @@ describe('responses-request-bridge relay request-context normalization', () => {
       },
       resumeMeta: {
         continuationOwner: 'relay',
-        fullInput: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: '继续执行 stopless 测试' }],
-          },
-          {
-            type: 'function_call',
-            id: 'fc_stopless_resume_1',
-            call_id: 'call_stopless_resume_1',
-            name: 'exec_command',
-            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":1,\\\\\\"maxRepeats\\\\\\":3}\\""}',
-          },
-          {
-            type: 'function_call_output',
-            id: 'fc_stopless_resume_1',
-            call_id: 'call_stopless_resume_1',
-            output: '{"ok":true,"toolName":"stop_message_auto","repeatCount":2,"maxRepeats":3}',
-          },
-          {
-            type: 'function_call',
-            id: 'fc_stopless_resume_2',
-            call_id: 'call_stopless_resume_2',
-            name: 'exec_command',
-            arguments: '{"cmd":"routecodex hook run reasoningStop --input-json \\"{\\\\\\"flowId\\\\\\":\\\\\\"stop_message_flow\\\\\\",\\\\\\"repeatCount\\\\\\":2,\\\\\\"maxRepeats\\\\\\":3}\\""}',
-          },
-          {
-            type: 'function_call_output',
-            id: 'fc_stopless_resume_2',
-            call_id: 'call_stopless_resume_2',
-            output: '',
-          },
-        ],
-        restoredTools: [{ type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }],
+        fullInput,
+        restoredTools,
       },
       matchedPort: 5555,
       routingPolicyGroup: 'gateway_priority_5555',

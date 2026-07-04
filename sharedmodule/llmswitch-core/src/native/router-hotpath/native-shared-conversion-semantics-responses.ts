@@ -552,6 +552,60 @@ export function materializeProviderOwnedSubmitContextWithNative(
   }
 }
 
+export function planResponsesRequestContextWithNative(input: unknown): Record<string, unknown> {
+  const capability = 'planResponsesRequestContextJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? null);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed || typeof parsed.kind !== 'string') {
+      return fail('invalid payload');
+    }
+    if (parsed.kind === 'capture_request') {
+      const payload = parsed.payload;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return fail('invalid capture payload');
+      }
+    } else if (parsed.kind === 'context') {
+      const payload = parsed.payload;
+      const context = parsed.context;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return fail('invalid context payload');
+      }
+      if (!context || typeof context !== 'object' || Array.isArray(context)) {
+        return fail('invalid context');
+      }
+      if (!Array.isArray((context as Record<string, unknown>).input)) {
+        return fail('invalid context input');
+      }
+    } else if (parsed.kind === 'error') {
+      if (typeof parsed.message !== 'string' || !parsed.message.trim()) {
+        return fail('invalid error payload');
+      }
+    } else {
+      return fail('invalid kind');
+    }
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function planResponsesContinuationRequestActionWithNative(input: unknown): Record<string, unknown> {
   const capability = 'planResponsesContinuationRequestActionJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);

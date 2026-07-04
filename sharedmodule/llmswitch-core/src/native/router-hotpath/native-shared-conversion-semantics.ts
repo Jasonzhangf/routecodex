@@ -30,6 +30,7 @@ export {
   materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,
   planResponsesContinuationRequestActionWithNative,
+  planResponsesRequestContextWithNative,
   planResponsesHandlerEntryWithNative,
   prepareResponsesConversationEntryWithNative,
   publishResponsesRecordPlanWithNative,

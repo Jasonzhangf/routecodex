@@ -174,7 +174,7 @@ flowchart LR
   ChatProcReqContinuation02OwnerResolved["ChatProcReqContinuation02OwnerResolved"]
   ChatProcReqContinuation01EntryEvidence["ChatProcReqContinuation01EntryEvidence"]
   ChatProcReqContinuation01EntryEvidence -->|rct-01| ChatProcReqContinuation02OwnerResolved
-  ChatProcReqContinuation02OwnerResolved -.->|rct-02| ChatProcReqContinuation03CanonicalRestored
+  ChatProcReqContinuation02OwnerResolved -->|rct-02| ChatProcReqContinuation03CanonicalRestored
   ChatProcReqContinuation03CanonicalRestored -->|rct-03| ChatProcReqContinuation04HookRestored
   ChatProcReqContinuation04HookRestored -->|rct-04| ChatProcReqContinuation05Governed
   ChatProcReqContinuation05Governed -->|rct-05| ChatProcRespContinuation06ResponseGoverned
@@ -184,8 +184,8 @@ flowchart LR
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
   class ChatProcReqContinuation01EntryEvidence anchored;
-  class ChatProcReqContinuation02OwnerResolved partial;
-  class ChatProcReqContinuation03CanonicalRestored partial;
+  class ChatProcReqContinuation02OwnerResolved anchored;
+  class ChatProcReqContinuation03CanonicalRestored anchored;
   class ChatProcReqContinuation04HookRestored anchored;
   class ChatProcReqContinuation05Governed anchored;
   class ChatProcRespContinuation06ResponseGoverned anchored;
@@ -196,7 +196,7 @@ flowchart LR
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
 | rct-01 | `ChatProcReqContinuation01EntryEvidence -> ChatProcReqContinuation02OwnerResolved` | anchored | `prepareResponsesHandlerEntryForHttp -> planResponsesContinuationRequestAction` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
-| rct-02 | `ChatProcReqContinuation02OwnerResolved -> ChatProcReqContinuation03CanonicalRestored` | partial | `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
+| rct-02 | `ChatProcReqContinuation02OwnerResolved -> ChatProcReqContinuation03CanonicalRestored` | anchored | `buildResponsesRequestContextForHttp -> planResponsesRequestContext` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-03 | `ChatProcReqContinuation03CanonicalRestored -> ChatProcReqContinuation04HookRestored` | anchored | `buildCapturedRelayResumeRequestContextForHttp -> captureReqInboundResponsesContextSnapshot` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-04 | `ChatProcReqContinuation04HookRestored -> ChatProcReqContinuation05Governed` | anchored | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |
 | rct-05 | `ChatProcReqContinuation05Governed -> ChatProcRespContinuation06ResponseGoverned` | anchored | `prepareResponsesJsonClientDispatchPlanForHttp -> planResponsesJsonClientDispatchNative` |  | `hub.chat_process_responses_continuation`<br/>/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern |

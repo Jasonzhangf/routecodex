@@ -57,6 +57,7 @@ type NativeSharedConversionSemantics = {
   materializeProviderOwnedSubmitContextWithNative?: (
     payload: unknown
   ) => { payload: Record<string, unknown>; context: { input: unknown[] } } | null;
+  planResponsesRequestContextWithNative?: (input: unknown) => Record<string, unknown>;
   planResponsesContinuationRequestActionWithNative?: (input: unknown) => Record<string, unknown>;
   stripResponsesStoredContextInputMediaWithNative?: (
     inputEntries: unknown,
@@ -166,6 +167,7 @@ type NativeRouterHotpathJsonBinding = {
   // -- hub_pipeline batch #6 --
   resolveEntryProtocolFromEndpointJson?: (entryEndpoint: string) => string;
   captureReqInboundResponsesContextSnapshotJson?: (inputJson: string) => string;
+  planResponsesRequestContextJson?: (inputJson: string) => string;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -399,6 +401,9 @@ async function assertSharedBindings(): Promise<void> {
   }
   if (typeof shared.materializeProviderOwnedSubmitContextWithNative !== 'function') {
     missing.push('materializeProviderOwnedSubmitContextJson');
+  }
+  if (typeof shared.planResponsesRequestContextWithNative !== 'function') {
+    missing.push('planResponsesRequestContextJson');
   }
   if (typeof shared.planResponsesContinuationRequestActionWithNative !== 'function') {
     missing.push('planResponsesContinuationRequestActionJson');
@@ -718,6 +723,19 @@ export async function materializeProviderOwnedSubmitContext(input: {
     throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson not available');
   }
   return fn(input.payload) as { payload: AnyRecord; context: { input: unknown[] } } | null;
+}
+
+export async function planResponsesRequestContext(input: {
+  payload: Record<string, unknown>;
+  resumeMeta?: Record<string, unknown>;
+}): Promise<AnyRecord> {
+  await assertSharedBindings();
+  const mod = await getSharedConversionSemantics();
+  const fn = mod.planResponsesRequestContextWithNative;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] planResponsesRequestContextJson not available');
+  }
+  return fn(input) as AnyRecord;
 }
 
 export async function planResponsesContinuationRequestAction(input: {

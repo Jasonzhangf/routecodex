@@ -285,7 +285,7 @@
           ChatProcReqContinuation02OwnerResolved[&quot;ChatProcReqContinuation02OwnerResolved&quot;]
           ChatProcReqContinuation01EntryEvidence[&quot;ChatProcReqContinuation01EntryEvidence&quot;]
           ChatProcReqContinuation01EntryEvidence --&gt;|rct-01| ChatProcReqContinuation02OwnerResolved
-          ChatProcReqContinuation02OwnerResolved -.-&gt;|rct-02| ChatProcReqContinuation03CanonicalRestored
+          ChatProcReqContinuation02OwnerResolved --&gt;|rct-02| ChatProcReqContinuation03CanonicalRestored
           ChatProcReqContinuation03CanonicalRestored --&gt;|rct-03| ChatProcReqContinuation04HookRestored
           ChatProcReqContinuation04HookRestored --&gt;|rct-04| ChatProcReqContinuation05Governed
           ChatProcReqContinuation05Governed --&gt;|rct-05| ChatProcRespContinuation06ResponseGoverned
@@ -295,8 +295,8 @@
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
           class ChatProcReqContinuation01EntryEvidence anchored;
-          class ChatProcReqContinuation02OwnerResolved partial;
-          class ChatProcReqContinuation03CanonicalRestored partial;
+          class ChatProcReqContinuation02OwnerResolved anchored;
+          class ChatProcReqContinuation03CanonicalRestored anchored;
           class ChatProcReqContinuation04HookRestored anchored;
           class ChatProcReqContinuation05Governed anchored;
           class ChatProcRespContinuation06ResponseGoverned anchored;
@@ -307,7 +307,7 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>rct-01</td><td><code>ChatProcReqContinuation01EntryEvidence -&gt; ChatProcReqContinuation02OwnerResolved</code></td><td>anchored</td><td><code>prepareResponsesHandlerEntryForHttp -&gt; planResponsesContinuationRequestAction</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
-        <tr><td>rct-02</td><td><code>ChatProcReqContinuation02OwnerResolved -&gt; ChatProcReqContinuation03CanonicalRestored</code></td><td>partial</td><td><code>buildResponsesRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshotJson</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
+        <tr><td>rct-02</td><td><code>ChatProcReqContinuation02OwnerResolved -&gt; ChatProcReqContinuation03CanonicalRestored</code></td><td>anchored</td><td><code>buildResponsesRequestContextForHttp -&gt; planResponsesRequestContext</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-03</td><td><code>ChatProcReqContinuation03CanonicalRestored -&gt; ChatProcReqContinuation04HookRestored</code></td><td>anchored</td><td><code>buildCapturedRelayResumeRequestContextForHttp -&gt; captureReqInboundResponsesContextSnapshot</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-04</td><td><code>ChatProcReqContinuation04HookRestored -&gt; ChatProcReqContinuation05Governed</code></td><td>anchored</td><td><code>captureReqInboundResponsesContextSnapshot -&gt; captureReqInboundResponsesContextSnapshotWithNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>
         <tr><td>rct-05</td><td><code>ChatProcReqContinuation05Governed -&gt; ChatProcRespContinuation06ResponseGoverned</code></td><td>anchored</td><td><code>prepareResponsesJsonClientDispatchPlanForHttp -&gt; planResponsesJsonClientDispatchNative</code></td><td></td><td><code>hub.chat_process_responses_continuation</code>&lt;br/&gt;/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern</td></tr>

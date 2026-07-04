@@ -23,6 +23,7 @@ import {
 import {
   captureReqInboundResponsesContextSnapshot,
   materializeProviderOwnedSubmitContext,
+  planResponsesRequestContext,
   planResponsesContinuationRequestAction,
   planResponsesHandlerEntry,
 } from './native-exports.js';
@@ -517,36 +518,6 @@ export function shouldProjectResponsesResumeClientErrorForHttp(args: {
   return typeof args.origin === 'string' && args.origin.trim() === 'client';
 }
 
-function isProviderOwnedSubmitToolOutputsResumePayload(payload: AnyRecord): boolean {
-  const responseId =
-    typeof payload.response_id === 'string' && payload.response_id.trim()
-      ? payload.response_id.trim()
-      : undefined;
-  const toolOutputs = Array.isArray(payload.tool_outputs) ? payload.tool_outputs : [];
-  return Boolean(responseId && toolOutputs.length > 0);
-}
-
-function isRelayMaterializedSubmitToolOutputsResumePayload(
-  payload: AnyRecord,
-  resumeMeta: Record<string, unknown> | undefined
-): boolean {
-  if (
-    !resumeMeta
-    || typeof resumeMeta !== 'object'
-    || Array.isArray(resumeMeta)
-    || resumeMeta.continuationOwner !== 'relay'
-  ) {
-    return false;
-  }
-  const previousResponseId =
-    typeof payload.previous_response_id === 'string' && payload.previous_response_id.trim()
-      ? payload.previous_response_id.trim()
-      : undefined;
-  const fullInput = Array.isArray(resumeMeta.fullInput) ? resumeMeta.fullInput : undefined;
-  const hasInputHistory = Array.isArray(payload.input) && payload.input.length > 0;
-  return Boolean(previousResponseId && hasInputHistory && fullInput && fullInput.length > 0);
-}
-
 async function buildCapturedRelayResumeRequestContextForHttp(args: {
   payload: AnyRecord;
   requestId?: string;
@@ -597,76 +568,60 @@ export async function buildResponsesRequestContextForHttp(args: {
     args.payload.metadata && typeof args.payload.metadata === 'object' && !Array.isArray(args.payload.metadata)
       ? (args.payload.metadata as Record<string, unknown>)
       : undefined;
-  const payloadForPersistence = stripRequestBodyMetadataForPipelineForHttp(args.payload);
-  const relayResumeFullInput = Array.isArray(args.resumeMeta?.fullInput) ? args.resumeMeta.fullInput : undefined;
-  const relayResumeTools = Array.isArray(args.resumeMeta?.restoredTools) ? args.resumeMeta.restoredTools : undefined;
-  const relayOwnedSubmitToolOutputsResume =
-    args.resumeMeta
-    && typeof args.resumeMeta === 'object'
-    && !Array.isArray(args.resumeMeta)
-    && args.resumeMeta.continuationOwner === 'relay'
-    && isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)
-    && Array.isArray(relayResumeFullInput)
-    && relayResumeFullInput.length > 0;
-  const relayOwnedMaterializedSubmitToolOutputsResume =
-    isRelayMaterializedSubmitToolOutputsResumePayload(payloadForPersistence, args.resumeMeta);
-  if (relayOwnedSubmitToolOutputsResume) {
-    const relayResumePayload: AnyRecord = {
-      ...payloadForPersistence,
-      ...(typeof args.resumeMeta?.responseId === 'string' && args.resumeMeta.responseId.trim()
-        ? { previous_response_id: args.resumeMeta.responseId.trim() }
-        : {}),
-      input: relayResumeFullInput,
-      ...(relayResumeTools?.length ? { tools: relayResumeTools } : {}),
-    };
-    delete relayResumePayload.response_id;
-    delete relayResumePayload.tool_outputs;
-    return buildCapturedRelayResumeRequestContextForHttp({
-      payload: relayResumePayload,
-      requestId: args.requestId,
-      metadata: args.metadata,
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup,
-    });
-  }
-  if (relayOwnedMaterializedSubmitToolOutputsResume) {
-    return buildCapturedRelayResumeRequestContextForHttp({
-      payload: {
-        ...payloadForPersistence,
-        input: relayResumeFullInput ?? [],
-        ...(relayResumeTools?.length ? { tools: relayResumeTools } : {}),
-      },
-      requestId: args.requestId,
-      metadata: args.metadata,
-      matchedPort: args.matchedPort,
-      routingPolicyGroup: args.routingPolicyGroup,
-    });
-  }
-  if (isProviderOwnedSubmitToolOutputsResumePayload(payloadForPersistence)) {
-    const materialized = await materializeProviderOwnedSubmitContext({
-      payload: payloadForPersistence,
-    });
-    if (!materialized) {
-      throw new Error('Responses provider-owned submit_tool_outputs context materialization failed');
+  const contextPlan = await planResponsesRequestContext({
+    payload: args.payload,
+    ...(args.resumeMeta ? { resumeMeta: args.resumeMeta } : {}),
+  });
+  const planKind = typeof contextPlan.kind === 'string' ? contextPlan.kind : '';
+  if (planKind === 'context') {
+    const plannedPayload = contextPlan.payload;
+    const plannedContext = contextPlan.context;
+    if (!plannedPayload || typeof plannedPayload !== 'object' || Array.isArray(plannedPayload)) {
+      throw new Error('Responses request context planner returned invalid payload');
+    }
+    if (!plannedContext || typeof plannedContext !== 'object' || Array.isArray(plannedContext)) {
+      throw new Error('Responses request context planner returned invalid context');
+    }
+    const plannedInput = Array.isArray((plannedContext as Record<string, unknown>).input)
+      ? (plannedContext as Record<string, unknown>).input
+      : undefined;
+    if (!plannedInput) {
+      throw new Error('Responses request context planner returned invalid context input');
     }
     return {
-      payload: materialized.payload,
-      context: materialized.context,
+      payload: plannedPayload as AnyRecord,
+      context: {
+        input: plannedInput,
+      },
       sessionId: readResponsesSessionIdFromHttp(args.metadata),
       conversationId: readResponsesConversationIdFromHttp(args.metadata),
       ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
       ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
     };
   }
+  if (planKind === 'error') {
+    throw new Error(
+      typeof contextPlan.message === 'string'
+        ? contextPlan.message
+        : 'Responses request context planning failed'
+    );
+  }
+  if (planKind !== 'capture_request') {
+    throw new Error(`Responses request context planner returned unsupported kind: ${String(planKind || 'unknown')}`);
+  }
+  const payloadForPersistence = contextPlan.payload;
+  if (!payloadForPersistence || typeof payloadForPersistence !== 'object' || Array.isArray(payloadForPersistence)) {
+    throw new Error('Responses request context planner returned invalid capture payload');
+  }
   const captured = await captureReqInboundResponsesContextSnapshot({
-    rawRequest: args.payload,
+    rawRequest: payloadForPersistence as AnyRecord,
     requestId: args.requestId,
-    toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
+    toolCallIdStyle: (payloadForPersistence as AnyRecord).toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
   });
   const capturedInput = Array.isArray(captured.input) ? captured.input : [];
   const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : [];
   const normalizedPayload: AnyRecord = {
-    ...payloadForPersistence,
+    ...(payloadForPersistence as AnyRecord),
     input: capturedInput,
   };
   if (capturedToolsRaw.length) {

@@ -2988,8 +2988,8 @@ pub use shared_responses_conversation_utils::{
     materialize_provider_owned_submit_context_json,
     materialize_responses_continuation_payload_json,
     plan_responses_continuation_request_action_json, plan_responses_handler_entry_json,
-    prepare_responses_conversation_entry_json, publish_responses_record_plan_json,
-    resume_responses_conversation_payload_json,
+    plan_responses_request_context_json, prepare_responses_conversation_entry_json,
+    publish_responses_record_plan_json, resume_responses_conversation_payload_json,
 };
 
 // ---------------------------------------------------------------------------

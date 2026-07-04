@@ -1,3 +1,14 @@
+# 2026-07-05: Responses continuation rct-02 request-context restore planner
+
+- Slice: `responses.continuation.mainline` `rct-02` (`ChatProcReqContinuation02OwnerResolved -> ChatProcReqContinuation03CanonicalRestored`).
+- Owner lock: Rust owner is `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`; TS bridge owner is only `src/modules/llmswitch/bridge/responses-request-bridge.ts` native/HTTP/session IO glue.
+- Change: added Rust `plan_responses_request_context` / NAPI `plan_responses_request_context_json`; TS `buildResponsesRequestContextForHttp` now calls native `planResponsesRequestContext` and no longer branches on relay/provider-owned submit restore semantics or mutates `response_id` / `tool_outputs` locally.
+- Mainline result: `responses.continuation.mainline` now reports `anchored=7 partial=0 pending=0 total=7`; global binding gate still has two non-Hub partials (`error.mainline`, `vr.route_availability`), so full Hub rustification is still not complete.
+- Whitebox evidence: `cargo test -p router-hotpath-napi request_context_plan --lib -- --nocapture` PASS `3 passed`; `cargo test -p router-hotpath-napi provider_owned_submit_context --lib -- --nocapture` PASS `2 passed`; `npm run verify:responses-history-protocol-contract` PASS with Rust Responses history suite `57 passed`.
+- Bridge/module evidence: `node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` PASS; focused Jest for `responses-request-bridge.request-context-normalization`, `metadata-center`, and `tool-history-errorsample` PASS `3 suites / 22 tests`.
+- Architecture/residue evidence: focused residue audit PASS for `responses request context restore planning must be native-owned`, `responses provider-owned submit context materialization must be native-owned`, and `responses continuation request action routing must be native-owned`; `verify:architecture-mainline-call-map`, `verify:architecture-mainline-binding-pending-gate`, `verify:architecture-mainline-manifest-sync`, `verify:architecture-mainline-mermaid-sync`, `verify:architecture-wiki-sync`, `verify:architecture-wiki-html-sync`, `verify:function-map-compile-gate`, and `git diff --check` all PASS.
+- Dirty-worktree boundary: unrelated version/adoption files `package.json`, `package-lock.json`, and `src/build-info.ts` remain unstaged and are not part of this slice.
+
 # 2026-07-05: servertool hook skeleton mainline binding slice
 
 - Scope: documentation/mainline binding closeout only; no runtime code changes in this slice.

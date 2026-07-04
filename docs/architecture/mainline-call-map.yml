@@ -323,13 +323,13 @@ chains:
         to_node: ChatProcReqContinuation03CanonicalRestored
         caller_symbol: buildResponsesRequestContextForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
-        callee_symbol: captureReqInboundResponsesContextSnapshotJson
+        callee_symbol: planResponsesRequestContext
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "legal continuation candidate plus request metadata scope"
         semantic_output: "canonical direct ownership metadata or relay materialized request truth"
-        status: partial
-        note: "This edge is partial because request-side owner truth is still split between native resume/materialize and TS bridge surfaces; target owner is Chat Process request entry boundary."
+        status: anchored
+        note: "Anchored by Rust request-context restore planner. TS `buildResponsesRequestContextForHttp` now passes payload/resumeMeta to native and only performs HTTP/session IO plus the follow-on native capture call for the planned canonical request payload."
       - step_id: rct-03
         from_node: ChatProcReqContinuation03CanonicalRestored
         to_node: ChatProcReqContinuation04HookRestored

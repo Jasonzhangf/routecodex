@@ -29,7 +29,7 @@ edges:
   - step_id: rct-02
     from_node: ChatProcReqContinuation02OwnerResolved
     to_node: ChatProcReqContinuation03CanonicalRestored
-    status: partial
+    status: anchored
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null

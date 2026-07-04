@@ -143,6 +143,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "resumeResponsesConversationPayloadJson",
   "planResponsesHandlerEntryJson",
   "materializeProviderOwnedSubmitContextJson",
+  "planResponsesRequestContextJson",
   "planResponsesContinuationRequestActionJson",
   "ensureBridgeOutputFieldsJson",
   "extractSessionIdentifiersJson",

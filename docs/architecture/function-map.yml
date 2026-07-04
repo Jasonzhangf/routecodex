@@ -3388,6 +3388,7 @@ owners:
       - resumeResponsesConversation
       - materializeLatestResponsesContinuationByScope
       - materializeProviderOwnedSubmitContext
+      - planResponsesRequestContext
       - planResponsesContinuationRequestAction
       - planResponsesJsonClientDispatchNative
     allowed_paths:
@@ -3424,7 +3425,7 @@ owners:
       - "Tool governance, tool result governance, stopless hook restore/projection, and CLI result restoration belong to Chat Process. Handler/SSE code must not implement them."
       - "SSE is transport-only. No continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic may live in `handler-response-sse.ts` or `responses-sse-bridge.ts`."
       - "Responses handler/bridge may prepare request body and continuation carrier IO, but must not synthesize stopless instructions or request-side governance text. Chat Process Rust remains the semantic owner."
-      - "Canonical builders above are current partial TS/bridge adjacency anchors only; final Chat Process Rust adjacent builders are still pending and must not be faked in the mainline call map."
+      - "Request-context restore planning now belongs to Rust `planResponsesRequestContext`; TS may call native and attach HTTP/session IO only."
       - "Continuation is a `/v1/responses` save/restore boundary only. It must not own response governance, request governance, history conversion, stopless/schema judgment, tool governance, SSE transport, or provider/client projection."
       - "After response Chat Process saves canonical continuation truth and before the next request Chat Process restores it, no layer may mutate request/response history: no cleanup, conversion, reordering, shape patching, semantic repair, or lossy normalization."
       - "All response/request content-changing logic must happen before continuation save in response Chat Process or after continuation restore in request Chat Process."
