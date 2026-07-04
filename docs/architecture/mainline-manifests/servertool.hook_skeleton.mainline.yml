@@ -37,9 +37,9 @@ step_ids:
   - sth-req-04
   - sth-req-05
 edge_status_counts:
-  anchored: 11
+  anchored: 13
   partial: 0
-  binding_pending: 2
+  binding_pending: 0
   total: 13
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml

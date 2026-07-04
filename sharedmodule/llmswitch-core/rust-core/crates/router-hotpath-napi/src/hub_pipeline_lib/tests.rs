@@ -2307,7 +2307,7 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
 }
 
 #[test]
-fn response_stream_stop_with_runtime_callbacks_returns_stream_and_servertool_effects() {
+fn response_stream_stop_with_missing_session_returns_stream_and_alarm_without_servertool_effect() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
         .execute(HubPipelineRequest {
@@ -2355,27 +2355,26 @@ fn response_stream_stop_with_runtime_callbacks_returns_stream_and_servertool_eff
         stream_effect.payload["requestId"],
         json!("req-stream-servertool-effect-1")
     );
-    let servertool_effect = output
-        .effect_plan
-        .effects
-        .iter()
-        .find(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-                && effect.payload["action"] == json!("requireResponseHookRuntime")
+    assert!(
+        output
+            .effect_plan
+            .effects
+            .iter()
+            .all(|effect| serde_json::to_value(&effect.kind).unwrap()
+                != json!("servertoolRuntimeAction")),
+        "missing sessionId must suppress legacy servertool runtime action"
+    );
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.details.as_ref().is_some_and(|details| {
+            details.get("alarm").and_then(serde_json::Value::as_str)
+                == Some("stopless_missing_session_id")
         })
-        .unwrap();
-    assert_eq!(
-        servertool_effect.payload["reason"],
-        json!("stop_eligible_followup")
-    );
-    assert_eq!(
-        servertool_effect.payload["requestId"],
-        json!("req-stream-servertool-effect-1")
-    );
+    }));
 }
 
 #[test]
-fn anthropic_sse_end_turn_stream_stop_returns_servertool_effect() {
+fn anthropic_sse_end_turn_stream_stop_without_stopmessage_runtime_returns_stream_without_servertool_effect(
+) {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let body_text = [
         "event: message_start\n",
@@ -2416,33 +2415,90 @@ fn anthropic_sse_end_turn_stream_stop_returns_servertool_effect() {
         })
         .unwrap();
 
-    let servertool_effect = output
+    let stream_effect = output
         .effect_plan
         .effects
         .iter()
-        .find(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-                && effect.payload["reason"] == json!("stop_eligible_followup")
-        })
-        .expect("Anthropic SSE end_turn must enter stopless runtime action");
+        .find(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("streamPipe"))
+        .unwrap();
     assert_eq!(
-        servertool_effect.payload["payload"]["choices"][0]["finish_reason"],
-        json!("stop")
-    );
-    assert_eq!(
-        servertool_effect.payload["stopGateway"]["reason"],
-        json!("finish_reason_stop")
+        stream_effect.payload["requestId"],
+        json!("req-anthropic-sse-stream-stopless")
     );
     assert!(
-        servertool_effect.payload["payload"]["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap()
-            .contains("\"stopreason\":2")
+        output
+            .effect_plan
+            .effects
+            .iter()
+            .all(|effect| serde_json::to_value(&effect.kind).unwrap()
+                != json!("servertoolRuntimeAction")),
+        "stopMessage runtime must be enabled before Rust emits a servertool runtime action"
     );
 }
 
 #[test]
-fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
+fn anthropic_sse_end_turn_stream_stop_with_missing_session_reports_alarm() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let body_text = [
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sse_stopless\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"MiniMax-M3\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Jason，继续执行。{\\\"stopreason\\\":2,\\\"reason\\\":\\\"未完成\\\",\\\"has_evidence\\\":0,\\\"next_step\\\":\\\"运行 smoke\\\"}\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":3,\"output_tokens\":12}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    ]
+    .join("");
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-anthropic-sse-stream-stopless".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "anthropic-messages".to_string(),
+            payload: json!({
+                "mode": "sse",
+                "bodyText": body_text
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "stopMessageEnabled": true,
+                "routecodexPortStopMessageEnabled": true,
+                "runtimeEffects": { "clientInjectDispatch": true }
+            }),
+            metadata_center_snapshot: json!(null),
+            stream: true,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(
+        output
+            .effect_plan
+            .effects
+            .iter()
+            .all(|effect| serde_json::to_value(&effect.kind).unwrap()
+                != json!("servertoolRuntimeAction")),
+        "missing sessionId must suppress legacy servertool runtime action"
+    );
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.details.as_ref().is_some_and(|details| {
+            details.get("alarm").and_then(serde_json::Value::as_str)
+                == Some("stopless_missing_session_id")
+        })
+    }));
+}
+
+#[test]
+fn response_stop_without_stopmessage_runtime_returns_no_servertool_effect_plan() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
         .execute(HubPipelineRequest {
@@ -2472,31 +2528,14 @@ fn response_stop_with_runtime_callbacks_returns_servertool_effect_plan() {
         })
         .unwrap();
 
-    let effect = output
-        .effect_plan
-        .effects
-        .iter()
-        .find(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-        })
-        .unwrap();
-    assert_eq!(
-        effect.payload["action"],
-        json!("requireResponseHookRuntime")
-    );
-    assert_eq!(effect.payload["reason"], json!("stop_eligible_followup"));
-    assert_eq!(
-        effect.payload["payload"]["choices"][0]["finish_reason"],
-        json!("stop")
-    );
-    assert_eq!(
-        effect.payload["payload"]["choices"][0]["message"]["content"],
-        json!("done")
-    );
-    assert_eq!(effect.payload["stopGateway"]["source"], json!("chat"));
-    assert_eq!(
-        effect.payload["requestId"],
-        json!("req-servertool-effect-1")
+    assert!(
+        output
+            .effect_plan
+            .effects
+            .iter()
+            .all(|effect| serde_json::to_value(&effect.kind).unwrap()
+                != json!("servertoolRuntimeAction")),
+        "providerInvoker alone must not enable stopMessage/servertool followup runtime"
     );
 }
 
