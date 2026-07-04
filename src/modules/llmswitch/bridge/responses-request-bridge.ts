@@ -203,6 +203,43 @@ function buildResponsesResumeControlForContinuationContextForHttp(
       out[key] = resumeMeta[key];
     }
   };
+  const copyToolOutputsDetailed = (): void => {
+    const raw = resumeMeta.toolOutputsDetailed;
+    if (!Array.isArray(raw)) {
+      return;
+    }
+    const readRowString = (row: Record<string, unknown>, keys: string[]): string | undefined => {
+      for (const key of keys) {
+        const value = row[key];
+        if (typeof value === 'string' && value.trim()) {
+          return value.trim();
+        }
+      }
+      return undefined;
+    };
+    const toolOutputsDetailed = raw.flatMap((item): Array<Record<string, string>> => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return [];
+      }
+      const row = item as Record<string, unknown>;
+      const callId = readRowString(row, ['callId', 'originalId', 'call_id', 'tool_call_id', 'id']);
+      const outputText = readRowString(row, ['outputText', 'output_text', 'output']);
+      if (!callId || !outputText) {
+        return [];
+      }
+      const originalId = readRowString(row, ['originalId', 'original_id']);
+      return [
+        {
+          callId,
+          ...(originalId ? { originalId } : {}),
+          outputText,
+        },
+      ];
+    });
+    if (toolOutputsDetailed.length > 0) {
+      out.toolOutputsDetailed = toolOutputsDetailed;
+    }
+  };
   copyString('responseId');
   copyString('restoredFromResponseId');
   copyString('previousRequestId');
@@ -218,6 +255,7 @@ function buildResponsesResumeControlForContinuationContextForHttp(
   copyNumber('incomingInputItems');
   copyNumber('continuationDeltaItems');
   copyNumber('fullInputItems');
+  copyToolOutputsDetailed();
   return out;
 }
 

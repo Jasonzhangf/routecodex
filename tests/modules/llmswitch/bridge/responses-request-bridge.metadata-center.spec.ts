@@ -16,6 +16,8 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   captureReqInboundResponsesContextSnapshot: jest.fn(),
+  materializeProviderOwnedSubmitContext: jest.fn(),
+  planResponsesContinuationRequestAction: jest.fn(),
   planResponsesHandlerEntry: jest.fn(),
 }));
 
@@ -217,5 +219,88 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(readRuntimeControlProjection(metadata).routeHint).toBeUndefined();
     expect(readRuntimeControlProjection(metadata).retryProviderKey).toBeUndefined();
     expect(readRuntimeControlProjection(metadata).providerProtocol).toBe('openai-responses');
+  });
+
+  it('keeps current-turn stopless tool output evidence in responses resume control only', () => {
+    const requestContext = {
+      payload: { model: 'gpt-5.5', input: [] },
+      context: { input: [] },
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    };
+    const stoplessStdout = JSON.stringify({
+      ok: true,
+      kind: 'stop_message_auto',
+      tool: 'reasoningStop',
+      repeatCount: 1,
+      maxRepeats: 3,
+      schemaFeedback: {
+        reasonCode: 'stop_schema_next_step_missing',
+        missingFields: ['next_step']
+      }
+    });
+    const resumeMeta = {
+      responseId: 'resp_stopless_tool_output_1',
+      continuationOwner: 'relay',
+      routeHint: 'search',
+      providerKey: 'minimonth.key1.MiniMax-M2.7',
+      sessionId: 'sess-from-resume-meta',
+      conversationId: 'conv-from-resume-meta',
+      fullInput: [{ type: 'message', content: 'must not be copied' }],
+      toolOutputsDetailed: [
+        {
+          callId: 'call_stopless_1',
+          originalId: 'call_stopless_original_1',
+          outputText: stoplessStdout,
+          output: { must: 'not be copied' },
+          rawPayload: { must: 'not be copied' }
+        },
+        {
+          callId: 'call_blank_output',
+          outputText: '   '
+        },
+        {
+          outputText: 'missing call id'
+        }
+      ]
+    };
+
+    const metadata = buildResponsesPipelineMetadataForHttp({
+      streamPlan: {
+        originalStream: true,
+        outboundStream: true,
+        inboundStream: true,
+        acceptsSse: true,
+        requestStartMeta: {}
+      },
+      clientRequestId: 'client-stopless-tool-output-1',
+      requestContext,
+      resumeMeta
+    });
+
+    const center = MetadataCenter.read(metadata);
+    expect(center?.readContinuationContext()).toMatchObject({
+      responsesResume: {
+        responseId: 'resp_stopless_tool_output_1',
+        continuationOwner: 'relay',
+        toolOutputsDetailed: [
+          {
+            callId: 'call_stopless_1',
+            originalId: 'call_stopless_original_1',
+            outputText: stoplessStdout
+          }
+        ]
+      }
+    });
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('routeHint');
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('providerKey');
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('sessionId');
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('conversationId');
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('fullInput');
+    expect(center?.readContinuationContext().responsesResume.toolOutputsDetailed?.[0]).not.toHaveProperty('output');
+    expect(center?.readContinuationContext().responsesResume.toolOutputsDetailed?.[0]).not.toHaveProperty('rawPayload');
+    expect(center?.readRequestTruth()).toEqual({});
+    expect(readRuntimeControlProjection(metadata).routeHint).toBeUndefined();
+    expect(readRuntimeControlProjection(metadata).retryProviderKey).toBeUndefined();
   });
 });
