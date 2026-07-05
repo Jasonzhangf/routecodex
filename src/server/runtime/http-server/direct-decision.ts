@@ -61,7 +61,6 @@ export interface DecideDirectRouterRetryArgs {
   directAttempt: number;
   maxAttempts: number;
   providerKey: string;
-  pool: ReadonlyArray<string>;
   error: unknown;
 }
 
@@ -69,17 +68,6 @@ function newExcluded(excluded: ReadonlySet<string>, key: string): Set<string> {
   const next = new Set(excluded);
   next.add(key);
   return next;
-}
-
-function countRemainingRouteCandidates(pool: ReadonlyArray<string>, excluded: ReadonlySet<string>): number {
-  let count = 0;
-  for (const candidate of pool) {
-    const key = typeof candidate === 'string' ? candidate.trim() : '';
-    if (key && !excluded.has(key)) {
-      count += 1;
-    }
-  }
-  return count;
 }
 
 function readPlanRemainingRouteCandidateCount(plan: DirectRetryPlanLike): number | undefined {
@@ -152,9 +140,10 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
   const excluded = retryExecutionPlan.excludedCurrentProvider
     ? newExcluded(excludedProviderKeys, providerKey)
     : new Set(excludedProviderKeys);
-  const remainingCandidates =
-    readPlanRemainingRouteCandidateCount(retryExecutionPlan)
-    ?? countRemainingRouteCandidates(args.pool, excluded);
+  const remainingCandidates = readPlanRemainingRouteCandidateCount(retryExecutionPlan);
+  if (remainingCandidates === undefined) {
+    return rethrowDecision(error, excludedProviderKeys);
+  }
   if (remainingCandidates <= 0) {
     if (
       retryExecutionPlan.defaultPoolAvailable === true

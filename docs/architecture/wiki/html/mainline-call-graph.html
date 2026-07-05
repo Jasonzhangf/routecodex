@@ -416,15 +416,15 @@
           VrAvail01RouteCandidates --&gt;|vra-01| VrAvail02PoolFiltered
           VrAvail02PoolFiltered --&gt;|vra-02| VrAvail03DefaultFloorEvaluated
           VrAvail03DefaultFloorEvaluated --&gt;|vra-03| VrAvail04PrimaryExhaustedPlanned
-          VrAvail04PrimaryExhaustedPlanned -.-&gt;|vra-04| ErrorErr05ExecutionDecision
+          VrAvail04PrimaryExhaustedPlanned --&gt;|vra-04| ErrorErr05ExecutionDecision
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
           class VrAvail01RouteCandidates anchored;
           class VrAvail02PoolFiltered anchored;
           class VrAvail03DefaultFloorEvaluated anchored;
-          class VrAvail04PrimaryExhaustedPlanned partial;
-          class ErrorErr05ExecutionDecision partial;</pre>
+          class VrAvail04PrimaryExhaustedPlanned anchored;
+          class ErrorErr05ExecutionDecision anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
@@ -432,7 +432,7 @@
         <tr><td>vra-01</td><td><code>VrAvail01RouteCandidates -&gt; VrAvail02PoolFiltered</code></td><td>anchored</td><td><code>resolve_forwarder_candidate_for_pool -&gt; select</code></td><td></td><td><code>vr.provider_forwarder_runtime</code>&lt;br/&gt;ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router</td></tr>
         <tr><td>vra-02</td><td><code>VrAvail02PoolFiltered -&gt; VrAvail03DefaultFloorEvaluated</code></td><td>anchored</td><td><code>build_provider_not_available_error -&gt; evaluate_singleton_route_pool_exhaustion</code></td><td></td><td><code>vr.route_availability_floor</code>&lt;br/&gt;route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td></tr>
         <tr><td>vra-03</td><td><code>VrAvail03DefaultFloorEvaluated -&gt; VrAvail04PrimaryExhaustedPlanned</code></td><td>anchored</td><td><code>resolvePrimaryExhaustedPlan -&gt; planPrimaryExhaustedToDefaultPoolNative</code></td><td></td><td><code>virtual_router.primary_exhausted_to_default_pool</code>&lt;br/&gt;primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td></tr>
-        <tr><td>vra-04</td><td><code>VrAvail04PrimaryExhaustedPlanned -&gt; ErrorErr05ExecutionDecision</code></td><td>partial</td><td><code>executeRouterDirectPipelineForPort -&gt; resolveDefaultTierAvailableForErrorErr05</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
+        <tr><td>vra-04</td><td><code>VrAvail04PrimaryExhaustedPlanned -&gt; ErrorErr05ExecutionDecision</code></td><td>anchored</td><td><code>executeRouterDirectPipelineForPort -&gt; resolveErrorErr05RouteAvailabilityDecision</code></td><td></td><td><code>vr.route_availability_floor</code>&lt;br/&gt;route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice</td></tr>
         </tbody>
         </table>
         <h2>vr.online_diagnostics.mainline</h2>

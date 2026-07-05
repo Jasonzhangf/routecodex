@@ -61,14 +61,12 @@ import {
   describeRequestSemanticsResolution
 } from './executor/provider-response-utils.js';
 import {
-  buildErrorErr05DefaultAvailabilityTiers,
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
   mergeMetadataPreservingDefined,
-  resolveDefaultTierAvailableForErrorErr05,
+  resolveErrorErr05RouteAvailabilityDecision,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
-  resolveRoutePoolAuthoritativeForRetry,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
 import {
@@ -908,23 +906,19 @@ export class HubRequestExecutor implements RequestExecutor {
           providerPayload,
           target
         } = resolvedPipelineAttempt;
-        const defaultTierAvailableForAttempt = resolveDefaultTierAvailableForErrorErr05({
-          tiers: buildErrorErr05DefaultAvailabilityTiers({
-            routeName: routeNameForAttempt,
-            routeTiers: routeTiersForAttempt,
-            defaultRouteTiers: defaultRouteTiersForAttempt,
-          }),
-          routePool: routePoolForAttempt,
-          excludedProviderKeys,
-        });
         const routingDecisionForAttempt = pipelineResult.routingDecision as Record<string, unknown> | undefined;
-        const routePoolIsAuthoritativeForAttempt = resolveRoutePoolAuthoritativeForRetry({
-          routingDecision: routingDecisionForAttempt,
-          routePoolForAttempt,
-          routeTiersForAttempt,
-          defaultTierAvailable: defaultTierAvailableForAttempt,
+        const routeAvailabilityForAttempt = resolveErrorErr05RouteAvailabilityDecision({
+          routeName: routeNameForAttempt,
+          routePool: routePoolForAttempt,
+          routeTiers: routeTiersForAttempt,
+          defaultRouteTiers: defaultRouteTiersForAttempt,
           excludedProviderKeys,
+          providerKey: target.providerKey,
+          routingDecisionRoutePoolPresent:
+            Array.isArray(routingDecisionForAttempt?.routePool) && routingDecisionForAttempt.routePool.length > 0,
         });
+        const defaultTierAvailableForAttempt = routeAvailabilityForAttempt.defaultPoolAvailable;
+        const routePoolIsAuthoritativeForAttempt = routeAvailabilityForAttempt.routePoolAuthoritative;
         const concurrencyScopeKey =
           typeof target.concurrencyScopeKey === 'string' && target.concurrencyScopeKey.trim()
             ? target.concurrencyScopeKey.trim()
@@ -1750,7 +1744,7 @@ export const __requestExecutorTestables = {
   resolveProviderRetryExclusionPlan,
   resolveProviderRetryExecutionPlan,
   resolveRequestExecutorPipelineAttempt,
-  resolveRoutePoolAuthoritativeForRetry,
+  resolveErrorErr05RouteAvailabilityDecision,
   buildProviderRetryTelemetryPlan,
   writeProviderProtocolRuntimeControl,
   resetRequestExecutorInternalStateForTests

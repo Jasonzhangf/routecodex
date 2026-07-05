@@ -106,14 +106,12 @@ import {
   writeMetadataCenterSlot
 } from './metadata-center/dualwrite-api.js';
 import {
-  buildErrorErr05DefaultAvailabilityTiers,
   collectPrimaryExhaustedKnownTargets,
   isPoolExhaustedPipelineError,
-  resolveDefaultTierAvailableForErrorErr05,
+  resolveErrorErr05RouteAvailabilityDecision,
   resolveErrorErr05RoutingPolicyGroup,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
-  resolveRoutePoolAuthoritativeForRetry,
 } from './executor/request-executor-core-utils.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
 import { getSessionExecutionStateTracker } from './session-execution-state.js';
@@ -1716,22 +1714,19 @@ export class RouteCodexHttpServer {
             'default',
           )
           : [];
-      const defaultTierAvailableForDecision = resolveDefaultTierAvailableForErrorErr05({
-        tiers: buildErrorErr05DefaultAvailabilityTiers({
-          routeName: routingDecisionRouteName,
-          routeTiers: routingDecisionTiers,
-          defaultRouteTiers,
-        }),
+      const routeAvailabilityDecision = resolveErrorErr05RouteAvailabilityDecision({
+        routeName: routingDecisionRouteName,
         routePool: routingDecisionProviderPool,
+        routeTiers: routingDecisionTiers,
+        defaultRouteTiers,
         excludedProviderKeys: retryState.excludedProviderKeys,
+        providerKey,
+        routingDecisionRoutePoolPresent:
+          Array.isArray((routingDecision as Record<string, unknown> | undefined)?.routePool)
+          && ((routingDecision as Record<string, unknown>).routePool as unknown[]).length > 0,
       });
-      const routePoolIsAuthoritativeForDecision = resolveRoutePoolAuthoritativeForRetry({
-        routingDecision: routingDecision as Record<string, unknown> | undefined,
-        routePoolForAttempt: routingDecisionProviderPool,
-        routeTiersForAttempt: routingDecisionTiers,
-        defaultTierAvailable: defaultTierAvailableForDecision,
-        excludedProviderKeys: retryState.excludedProviderKeys,
-      });
+      const defaultTierAvailableForDecision = routeAvailabilityDecision.defaultPoolAvailable;
+      const routePoolIsAuthoritativeForDecision = routeAvailabilityDecision.routePoolAuthoritative;
       await processProviderResolveFailure({
         error: resolveError,
         requestId: input.requestId,
@@ -1946,22 +1941,19 @@ export class RouteCodexHttpServer {
               'default',
             )
             : [];
-        const defaultTierAvailableForDecision = resolveDefaultTierAvailableForErrorErr05({
-          tiers: buildErrorErr05DefaultAvailabilityTiers({
-            routeName: routingDecisionRouteName,
-            routeTiers: routingDecisionTiers,
-            defaultRouteTiers,
-          }),
+        const routeAvailabilityDecision = resolveErrorErr05RouteAvailabilityDecision({
+          routeName: routingDecisionRouteName,
           routePool: routingDecisionProviderPool,
+          routeTiers: routingDecisionTiers,
+          defaultRouteTiers,
           excludedProviderKeys: retryState.excludedProviderKeys,
+          providerKey: ctx.providerKey,
+          routingDecisionRoutePoolPresent:
+            Array.isArray((ctx.routingDecision as Record<string, unknown> | undefined)?.routePool)
+            && ((ctx.routingDecision as Record<string, unknown>).routePool as unknown[]).length > 0,
         });
-        const routePoolIsAuthoritativeForDecision = resolveRoutePoolAuthoritativeForRetry({
-          routingDecision: ctx.routingDecision as Record<string, unknown> | undefined,
-          routePoolForAttempt: routingDecisionProviderPool,
-          routeTiersForAttempt: routingDecisionTiers,
-          defaultTierAvailable: defaultTierAvailableForDecision,
-          excludedProviderKeys: retryState.excludedProviderKeys,
-        });
+        const defaultTierAvailableForDecision = routeAvailabilityDecision.defaultPoolAvailable;
+        const routePoolIsAuthoritativeForDecision = routeAvailabilityDecision.routePoolAuthoritative;
         this.logStage('router-direct.send.error', input.requestId, {
           port: portConfig.port,
           providerKey: ctx.providerKey,
@@ -2047,16 +2039,11 @@ export class RouteCodexHttpServer {
           directAttempt,
           maxAttempts: retryState.maxAttempts,
           providerKey: ctx.providerKey,
-          pool: routingDecisionProviderPool,
           error,
         });
         retryState.excludedProviderKeys = directRetryDecision.mutatedExcluded;
-        const routePoolRemainingAfterExclusion = routingDecisionProviderPool.filter((candidate) => {
-          if (typeof candidate !== 'string' || !candidate.trim()) {
-            return false;
-          }
-          return !retryState.excludedProviderKeys.has(candidate.trim());
-        });
+        const routePoolRemainingAfterExclusion =
+          providerSendFailureResult.retryExecutionPlan?.routePoolRemainingAfterExclusion ?? [];
         if (
           defaultTierAvailableForDecision
           && routingDecisionRouteName

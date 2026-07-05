@@ -431,6 +431,23 @@ export function evaluateSingletonRoutePoolExhaustionNative(input) {
     ]);
     return assertNativeObject('evaluateSingletonRoutePoolExhaustionJson', parsed);
 }
+export function resolveErrorErr05RouteAvailabilityDecisionNative(input) {
+    const excludedProviderKeys = input.excludedProviderKeys instanceof Set
+        ? Array.from(input.excludedProviderKeys)
+        : Array.isArray(input.excludedProviderKeys) ? input.excludedProviderKeys : [];
+    const parsed = invokeRouterHotpathJsonCapability('resolveErrorErr05RouteAvailabilityDecisionJson', [
+        {
+            routeName: typeof input.routeName === 'string' ? input.routeName : undefined,
+            routePool: Array.isArray(input.routePool) ? input.routePool : [],
+            routeTiers: Array.isArray(input.routeTiers) ? input.routeTiers : [],
+            defaultRouteTiers: Array.isArray(input.defaultRouteTiers) ? input.defaultRouteTiers : [],
+            excludedProviderKeys,
+            providerKey: typeof input.providerKey === 'string' ? input.providerKey : undefined,
+            routingDecisionRoutePoolPresent: input.routingDecisionRoutePoolPresent === true,
+        }
+    ]);
+    return assertNativeObject('resolveErrorErr05RouteAvailabilityDecisionJson', parsed);
+}
 export function planPrimaryExhaustedToDefaultPoolNative(input) {
     const parsed = invokeRouterHotpathJsonCapability('planPrimaryExhaustedToDefaultPoolJson', [
         {

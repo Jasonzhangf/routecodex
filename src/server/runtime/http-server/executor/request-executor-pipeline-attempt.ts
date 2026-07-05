@@ -4,13 +4,7 @@ import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import { writeMetadataCenterSlot } from '../metadata-center/dualwrite-api.js';
 import {
-  hasAlternativeRouteCandidate
-} from './request-executor-retry-decision.js';
-import {
-  buildErrorErr05DefaultAvailabilityTiers,
-  isReselectedExcludedProviderVerifiedLastProvider,
-  resolveDefaultTierAvailableForErrorErr05,
-  resolveRoutePoolAuthoritativeForRetry
+  resolveErrorErr05RouteAvailabilityDecision
 } from './request-executor-core-utils.js';
 import {
   normalizeExplicitRoutePoolNative,
@@ -212,44 +206,26 @@ export function resolveRequestExecutorPipelineAttempt(args: {
         }
       );
     }
-    const hasAlternativeCandidate = hasAlternativeRouteCandidate({
-      providerKey: target.providerKey,
+    const availabilityDecision = resolveErrorErr05RouteAvailabilityDecision({
+      routeName: readTrimmedString(routingDecision?.routeName),
       routePool: routePoolForAttempt,
-      excludedProviderKeys: args.excludedProviderKeys
-    });
-    const defaultTierAvailable = resolveDefaultTierAvailableForErrorErr05({
-      tiers: buildErrorErr05DefaultAvailabilityTiers({
-        routeName: readTrimmedString(routingDecision?.routeName),
-        routeTiers: args.routeTiersForAttempt ?? [],
-        defaultRouteTiers: args.defaultRouteTiersForAttempt ?? [],
-      }),
-      routePool: routePoolForAttempt,
+      routeTiers: args.routeTiersForAttempt ?? [],
+      defaultRouteTiers: args.defaultRouteTiersForAttempt ?? [],
       excludedProviderKeys: args.excludedProviderKeys,
-    });
-    const routePoolIsAuthoritative = resolveRoutePoolAuthoritativeForRetry({
-      routingDecision,
-      routePoolForAttempt,
-      routeTiersForAttempt: args.routeTiersForAttempt ?? [],
-      defaultTierAvailable,
-      excludedProviderKeys: args.excludedProviderKeys,
-    });
-    const isVerifiedLastProvider = isReselectedExcludedProviderVerifiedLastProvider({
       providerKey: target.providerKey,
-      routingDecision,
-      routePoolForAttempt,
-      routeTiersForAttempt: args.routeTiersForAttempt ?? [],
-      defaultTierAvailable,
+      routingDecisionRoutePoolPresent: Array.isArray(routingDecision?.routePool) && routingDecision.routePool.length > 0,
     });
     args.logStage('provider.retry.excluded_target_reselected', args.providerRequestId, {
       providerKey: target.providerKey,
       excluded: Array.from(args.excludedProviderKeys),
       attempt: args.attempt,
-      hasAlternativeCandidate,
-      routePoolIsAuthoritative,
-      defaultTierAvailable,
-      isVerifiedLastProvider
+      hasAlternativeCandidate: availabilityDecision.hasAlternativeCandidate,
+      routePoolIsAuthoritative: availabilityDecision.routePoolAuthoritative,
+      defaultTierAvailable: availabilityDecision.defaultPoolAvailable,
+      isVerifiedLastProvider: availabilityDecision.verifiedLastProvider,
+      reasonCode: availabilityDecision.reasonCode
     });
-    if (!hasAlternativeCandidate && isVerifiedLastProvider) {
+    if (!availabilityDecision.hasAlternativeCandidate && availabilityDecision.verifiedLastProvider) {
       args.logStage('provider.retry.excluded_target_reselected_last_provider', args.providerRequestId, {
         providerKey: target.providerKey,
         excluded: Array.from(args.excludedProviderKeys),
@@ -258,7 +234,7 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     } else {
       throw Object.assign(
         new Error(
-          hasAlternativeCandidate
+          availabilityDecision.hasAlternativeCandidate
             ? `Virtual router reselected excluded provider ${target.providerKey} while alternatives remain`
             : `Virtual router reselected excluded provider ${target.providerKey} without verified last-provider truth`
         ),
@@ -268,8 +244,8 @@ export function resolveRequestExecutorPipelineAttempt(args: {
           providerKey: target.providerKey,
           excluded: Array.from(args.excludedProviderKeys),
           attempt: args.attempt,
-          hasAlternativeCandidate,
-          isVerifiedLastProvider
+          hasAlternativeCandidate: availabilityDecision.hasAlternativeCandidate,
+          isVerifiedLastProvider: availabilityDecision.verifiedLastProvider
         }
       );
     }

@@ -1,7 +1,8 @@
 import { writeClientSnapshot } from '../../../../providers/core/utils/snapshot-writer.js';
 import {
   evaluateSingletonRoutePoolExhaustionNative,
-  planPrimaryExhaustedToDefaultPoolNative
+  planPrimaryExhaustedToDefaultPoolNative,
+  resolveErrorErr05RouteAvailabilityDecisionNative
 } from '../../../../modules/llmswitch/bridge/native-exports.js';
 import { asRecord } from '../provider-utils.js';
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
@@ -82,6 +83,28 @@ export interface ResolvePrimaryExhaustedPlanInput {
   tiers: Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
 }
 
+export interface ErrorErr05RouteAvailabilityDecisionInput {
+  routeName?: string;
+  routePool?: string[];
+  routeTiers?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
+  defaultRouteTiers?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
+  excludedProviderKeys: Set<string>;
+  providerKey?: string;
+  routingDecisionRoutePoolPresent?: boolean;
+}
+
+export interface ErrorErr05RouteAvailabilityDecision {
+  routePoolRemainingAfterExclusion: string[];
+  remainingRouteCandidates: number;
+  defaultPoolAvailable: boolean;
+  policyExhausted: boolean;
+  mayProject: boolean;
+  routePoolAuthoritative: boolean;
+  verifiedLastProvider: boolean;
+  hasAlternativeCandidate: boolean;
+  reasonCode: string;
+}
+
 export interface ResolvePrimaryExhaustedPlanOutput {
   status: 'no_default_pool_needed' | 'default_pool' | 'unknown_target' | 'route_not_configured';
   defaultPoolTargets: string[];
@@ -105,63 +128,6 @@ export interface ResolveSingletonRoutePoolExhaustionDecisionOutput {
   shouldBlock: boolean;
   waitMs?: number;
   candidateProviderCount?: number;
-}
-
-export function resolveRoutePoolAuthoritativeForRetry(args: {
-  routingDecision?: Record<string, unknown>;
-  routePoolForAttempt: string[];
-  routeTiersForAttempt?: Array<{ targets: string[]; backup?: boolean }>;
-  defaultTierAvailable: boolean;
-  excludedProviderKeys: Set<string>;
-}): boolean {
-  const decisionRoutePool = args.routingDecision?.routePool;
-  if (!Array.isArray(decisionRoutePool) || decisionRoutePool.length === 0) {
-    return false;
-  }
-  if (args.routePoolForAttempt.length > 1) {
-    return true;
-  }
-  const configuredCandidateCount =
-    Array.isArray(args.routeTiersForAttempt) && args.routeTiersForAttempt.length > 0
-      ? new Set(
-        args.routeTiersForAttempt
-          .flatMap((tier) => Array.isArray(tier.targets) ? tier.targets : [])
-          .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
-          .map((target) => target.trim())
-      ).size
-      : null;
-  return args.routePoolForAttempt.length === 1
-    && configuredCandidateCount === 1
-    && args.defaultTierAvailable === false
-    && args.excludedProviderKeys.size === 0;
-}
-
-export function isReselectedExcludedProviderVerifiedLastProvider(args: {
-  providerKey: string;
-  routingDecision?: Record<string, unknown>;
-  routePoolForAttempt: string[];
-  routeTiersForAttempt?: Array<{ targets: string[]; backup?: boolean }>;
-  defaultTierAvailable: boolean;
-}): boolean {
-  const decisionRoutePool = args.routingDecision?.routePool;
-  if (!Array.isArray(decisionRoutePool) || decisionRoutePool.length === 0) {
-    return false;
-  }
-  const routePool = args.routePoolForAttempt
-    .map((target) => typeof target === 'string' ? target.trim() : '')
-    .filter((target) => target.length > 0);
-  if (routePool.length !== 1 || routePool[0] !== args.providerKey) {
-    return false;
-  }
-  const configuredCandidates = new Set(
-    (args.routeTiersForAttempt ?? [])
-      .flatMap((tier) => Array.isArray(tier.targets) ? tier.targets : [])
-      .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
-      .map((target) => target.trim())
-  );
-  return configuredCandidates.size === 1
-    && configuredCandidates.has(args.providerKey)
-    && args.defaultTierAvailable === false;
 }
 
 function normalizePrimaryExhaustedRouteName(value: unknown): string | undefined {
@@ -262,57 +228,6 @@ export function collectPrimaryExhaustedKnownTargets(
   return knownTargets;
 }
 
-export function resolveDefaultTierAvailableForErrorErr05(args: {
-  tiers?: Array<{ targets: string[]; backup?: boolean }>;
-  routePool?: string[];
-  excludedProviderKeys: Set<string>;
-}): boolean {
-  const tiers = Array.isArray(args.tiers) ? args.tiers : [];
-  const defaultTier = tiers.find((tier) => tier.backup === true);
-  if (!defaultTier || !Array.isArray(defaultTier.targets)) {
-    return false;
-  }
-  const routePool = new Set(
-    (Array.isArray(args.routePool) ? args.routePool : [])
-      .filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
-      .map((target) => target.trim())
-  );
-  for (const target of defaultTier.targets) {
-    if (typeof target !== 'string') {
-      continue;
-    }
-    const normalized = target.trim();
-    if (!normalized || args.excludedProviderKeys.has(normalized)) {
-      continue;
-    }
-    if (routePool.has(normalized)) {
-      continue;
-    }
-    return true;
-  }
-  return false;
-}
-
-export function buildErrorErr05DefaultAvailabilityTiers(args: {
-  routeName?: string;
-  routeTiers?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
-  defaultRouteTiers?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
-}): Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }> {
-  const routeTiers = Array.isArray(args.routeTiers) ? args.routeTiers : [];
-  const defaultRouteTiers = Array.isArray(args.defaultRouteTiers) ? args.defaultRouteTiers : [];
-  const routeName = typeof args.routeName === 'string' ? args.routeName.trim().toLowerCase() : '';
-  if (!routeName || routeName === 'default' || defaultRouteTiers.length === 0) {
-    return routeTiers;
-  }
-  return [
-    ...routeTiers,
-    ...defaultRouteTiers.map((tier) => ({
-      ...tier,
-      backup: true,
-    })),
-  ];
-}
-
 export function resolveErrorErr05RoutingPolicyGroup(args: {
   metadata?: Record<string, unknown>;
   portRoutingPolicyGroup?: string;
@@ -323,6 +238,20 @@ export function resolveErrorErr05RoutingPolicyGroup(args: {
   }
   const portGroup = args.portRoutingPolicyGroup;
   return typeof portGroup === 'string' && portGroup.trim() ? portGroup.trim() : undefined;
+}
+
+export function resolveErrorErr05RouteAvailabilityDecision(
+  input: ErrorErr05RouteAvailabilityDecisionInput
+): ErrorErr05RouteAvailabilityDecision {
+  return resolveErrorErr05RouteAvailabilityDecisionNative({
+    routeName: input.routeName,
+    routePool: input.routePool ?? [],
+    routeTiers: input.routeTiers ?? [],
+    defaultRouteTiers: input.defaultRouteTiers ?? [],
+    excludedProviderKeys: input.excludedProviderKeys,
+    providerKey: input.providerKey,
+    routingDecisionRoutePoolPresent: input.routingDecisionRoutePoolPresent === true,
+  });
 }
 
 /**

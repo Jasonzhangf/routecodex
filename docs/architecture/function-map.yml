@@ -1374,15 +1374,16 @@ owners:
     summary: "route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice"
     owner_kind: rust_ssot
     owner_scope: "route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
     canonical_types:
       - VrRoute04SelectedTarget
     canonical_builders:
       - build_unavailable_providers_details
       - collect_recoverable_cooldown_for_key
       - evaluate_singleton_route_pool_exhaustion
+      - resolve_error_err05_route_availability_decision
     allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - src/modules/llmswitch/bridge/native-exports.ts
       - src/server/runtime/http-server/executor/request-executor-core-utils.ts
@@ -1395,6 +1396,7 @@ owners:
       - tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
       - tests/server/handlers/responses-handler.routing-empty-pool.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs
     required_gates:
       - npm run verify:vr-no-ts-runtime
       - npm run verify:architecture-ci
@@ -1408,6 +1410,7 @@ owners:
       - "do not patch empty-pool behavior in handlers, adapters, provider TS runtime, or executor-local policy code."
       - "route order is requested route -> inserted tools route when required -> default; search/tool path must stay `search -> tools -> default`, and if default pool has providers routing must not return empty."
       - "Before excluding/removing an ordinary-route candidate, runtime truth must preserve the default-pool last-provider floor; `forwarder_no_available_target` or route-local empty-pool is non-terminal while default-pool availability remains."
+      - "ErrorErr05 consumer inputs for remaining route candidates, routePoolAuthoritative, verifiedLastProvider, defaultPoolAvailable, policyExhausted, and mayProject must come from `resolve_error_err05_route_availability_decision`; TS executor/direct code may only consume the native decision."
 
   - feature_id: vr.provider_forwarder_runtime
     status: active

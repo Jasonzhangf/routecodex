@@ -6,6 +6,7 @@ import {
 } from './request-executor-error-shared.js';
 import {
   resolveProviderRetryExecutionPolicyNative,
+  resolveErrorErr05RouteAvailabilityDecisionNative,
 } from '../../../../modules/llmswitch/bridge/native-exports.js';
 import {
   hasAlternativeRouteCandidate,
@@ -54,20 +55,17 @@ export function resolveProviderRetryExecutionPlanExhaustionGate(args: {
   policyExhausted: boolean;
   mayProject: boolean;
 } {
-  const rawPool = Array.isArray(args.routePool) ? args.routePool : [];
-  const remaining = rawPool.filter((candidate) => {
-    if (typeof candidate !== 'string' || candidate.length === 0) {
-      return false;
-    }
-    return !args.excludedProviderKeys.has(candidate);
+  const decision = resolveErrorErr05RouteAvailabilityDecisionNative({
+    routePool: args.routePool ?? [],
+    routeTiers: args.defaultPoolAvailable ? [{ targets: ['__routecodex_default_pool_available__'], backup: true }] : [],
+    excludedProviderKeys: args.excludedProviderKeys,
+    routingDecisionRoutePoolPresent: Array.isArray(args.routePool) && args.routePool.length > 0,
   });
-  const policyExhausted = remaining.length === 0 && args.defaultPoolAvailable === false;
-  const mayProject = policyExhausted;
   return {
-    routePoolRemainingAfterExclusion: remaining,
+    routePoolRemainingAfterExclusion: decision.routePoolRemainingAfterExclusion,
     defaultPoolAvailable: args.defaultPoolAvailable === true,
-    policyExhausted,
-    mayProject,
+    policyExhausted: decision.policyExhausted,
+    mayProject: decision.mayProject,
   };
 }
 

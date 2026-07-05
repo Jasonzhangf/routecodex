@@ -12,6 +12,8 @@ const MAINLINE_MAP = 'docs/architecture/mainline-call-map.yml';
 const VR_MAINLINE_DOC = 'docs/architecture/wiki/virtual-router-route-availability-mainline-source.md';
 const RUST_SELECTION =
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs';
+const RUST_ERROR_ERR05_AVAILABILITY =
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs';
 const RUST_FORWARDER =
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/forwarder.rs';
 const TS_CORE_UTILS =
@@ -75,9 +77,23 @@ if (!rustForwarder.includes('ERR_FORWARDER_NO_AVAILABLE_TARGET')) {
   failures.push('forwarder.rs: missing ERR_FORWARDER_NO_AVAILABLE_TARGET');
 }
 
+const rustErrorErr05Availability = read(RUST_ERROR_ERR05_AVAILABILITY);
+for (const token of [
+  'resolve_error_err05_route_availability_decision',
+  'default_pool_available',
+  'route_pool_authoritative',
+  'verified_last_provider',
+  'route_pool_remaining_after_exclusion',
+  'may_project',
+]) {
+  if (!rustErrorErr05Availability.includes(token)) {
+    failures.push(`error_err05_availability.rs: missing ${token}`);
+  }
+}
+
 const tsCoreUtils = read(TS_CORE_UTILS);
 for (const token of [
-  'resolveDefaultTierAvailableForErrorErr05',
+  'resolveErrorErr05RouteAvailabilityDecision',
   'resolvePrimaryExhaustedPlan',
 ]) {
   if (!tsCoreUtils.includes(token)) {
@@ -85,8 +101,17 @@ for (const token of [
   }
 }
 
-if (tsCoreUtils.includes('function resolveDefaultPoolLastProvider') || tsCoreUtils.includes('defaultPoolLastProvider')) {
-  failures.push('request-executor-core-utils.ts: unexpected local default-pool-last-provider helper detected');
+for (const forbidden of [
+  'resolveDefaultTierAvailableForErrorErr05',
+  'buildErrorErr05DefaultAvailabilityTiers',
+  'resolveRoutePoolAuthoritativeForRetry',
+  'isReselectedExcludedProviderVerifiedLastProvider',
+  'function resolveDefaultPoolLastProvider',
+  'defaultPoolLastProvider',
+]) {
+  if (tsCoreUtils.includes(forbidden)) {
+    failures.push(`request-executor-core-utils.ts: unexpected local availability helper detected: ${forbidden}`);
+  }
 }
 
 const tsHttpIndex = read(TS_HTTP_INDEX);

@@ -13,12 +13,15 @@ function buildArgs(overrides: Partial<DecideDirectRouterRetryArgs> = {}): Decide
         reason: 'recoverable',
       },
       excludedCurrentProvider: true,
+      routePoolRemainingAfterExclusion: ['cc.key1.gpt-5.4-mini'],
+      defaultPoolAvailable: false,
+      policyExhausted: false,
+      mayProject: false,
     },
     excludedProviderKeys: new Set<string>(),
     directAttempt: 1,
     maxAttempts: 6,
     providerKey: '1token.key1.gpt-5.4-mini',
-    pool: ['1token.key1.gpt-5.4-mini', 'cc.key1.gpt-5.4-mini', 'sdfv.key1.gpt-5.4-mini'],
     error: Object.assign(new Error('stream closed before response.completed'), {
       code: 'UPSTREAM_STREAM_INCOMPLETE',
       statusCode: 502,
@@ -37,7 +40,6 @@ describe('direct-decision upstream_stream_incomplete', () => {
 
   it('[reverse] stream incomplete with no ErrorErr05 switch plan must rethrow (no host-injected fallback)', () => {
     const decision = decideDirectRouterRetry(buildArgs({
-      pool: ['1token.key1.gpt-5.4-mini'],
       excludedProviderKeys: new Set<string>(['1token.key1.gpt-5.4-mini']),
       retryExecutionPlan: {
         shouldRetry: false,
@@ -48,7 +50,6 @@ describe('direct-decision upstream_stream_incomplete', () => {
 
   it('[forward] ErrorErr05 exclude_and_reroute must recurse even when observed router-direct pool is current-only', () => {
     const decision = decideDirectRouterRetry(buildArgs({
-      pool: ['1token.key1.gpt-5.4-mini'],
       retryExecutionPlan: {
         shouldRetry: true,
         retrySwitchPlan: {

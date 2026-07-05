@@ -50,7 +50,7 @@ flowchart LR
 | `vra-01` | route candidates -> filtered route pool | `vr.provider_forwarder_runtime` + `vr.route_availability_floor` | route-tier targets plus request-scoped exclusion/health/quota/protocol state | filtered ordinary route pool, unavailable-route-pool details, forwarder empty-vs-real-target evidence |
 | `vra-02` | filtered route pool -> default floor evaluated | `vr.route_availability_floor` | filtered ordinary route pool and blocker details | explicit knowledge whether the request has reached the default-pool last-provider floor |
 | `vra-03` | default floor evaluated -> primary exhausted plan | `virtual_router.primary_exhausted_to_default_pool` | primary exhausted route name, exhausted targets, configured route tiers, known targets | declarative default-pool plan only, never local synthesis |
-| `vra-04` | primary exhausted plan -> ErrorErr05 execution decision | `error.execution_decision_consumer` consuming Rust truth only | Rust singleton/default floor truth plus default-pool plan | `mayProject=false` until route pool and default pool are both empty |
+| `vra-04` | primary exhausted plan -> ErrorErr05 execution decision | `vr.route_availability_floor` via Rust native decision contract | route/default tiers, route pool, provider key, excluded providers, and default-pool plan context | Rust-owned ErrorErr05 availability decision: `remainingRouteCandidates`, `defaultPoolAvailable`, `routePoolAuthoritative`, `verifiedLastProvider`, `policyExhausted`, and `mayProject` |
 
 ## Owner Binding
 
@@ -99,20 +99,29 @@ Contract:
 - host may pass route-scoped tiers unchanged
 - host must not synthesize a target list, invent backup tiers, or bypass empty/unknown states
 
-### `vra-04` Execution-decision consumer
+### `vra-04` ErrorErr05 availability decision owner
 
-TS consumer only:
+Rust source of truth:
 
-- `src/server/runtime/http-server/executor/request-executor-core-utils.ts`
-  - `resolveDefaultTierAvailableForErrorErr05`
-  - `resolvePrimaryExhaustedPlan`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs`
+  - `resolve_error_err05_route_availability_decision`
+- NAPI / host bridge:
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
+    - `resolve_error_err05_route_availability_decision_json`
+  - `src/modules/llmswitch/bridge/native-exports.ts`
+    - `resolveErrorErr05RouteAvailabilityDecisionNative`
+- TS consumers:
+  - `src/server/runtime/http-server/executor/request-executor-core-utils.ts`
+    - `resolveErrorErr05RouteAvailabilityDecision`
 - `src/server/runtime/http-server/index.ts`
 - `src/server/runtime/http-server/request-executor.ts`
 
 Consumer contract:
 
-- TS may log, wait, and replay with Rust-derived plan
-- TS must not decide terminal projection before `defaultPoolAvailable=false`
+- TS may pass route/default tiers, route pool, provider key, and excluded provider keys into Rust unchanged
+- TS may log, wait, and replay with the Rust-derived decision
+- TS must not decide terminal projection before Rust returns `defaultPoolAvailable=false`
+- TS must not locally compute remaining route candidates, routePoolAuthoritative, verifiedLastProvider, or default-pool availability
 - TS must not reinterpret forwarder empty as global no-provider
 
 ## Incident Interpretation Rule
@@ -140,6 +149,7 @@ If yes, the system may still be globally healthy while a route-local floor check
 ## Required Tests
 
 - `tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts`
+- Rust unit tests in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs`
 - `tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts`
 - `tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts`
 - `tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts`

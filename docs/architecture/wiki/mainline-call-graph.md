@@ -317,15 +317,15 @@ flowchart LR
   VrAvail01RouteCandidates -->|vra-01| VrAvail02PoolFiltered
   VrAvail02PoolFiltered -->|vra-02| VrAvail03DefaultFloorEvaluated
   VrAvail03DefaultFloorEvaluated -->|vra-03| VrAvail04PrimaryExhaustedPlanned
-  VrAvail04PrimaryExhaustedPlanned -.->|vra-04| ErrorErr05ExecutionDecision
+  VrAvail04PrimaryExhaustedPlanned -->|vra-04| ErrorErr05ExecutionDecision
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
   class VrAvail01RouteCandidates anchored;
   class VrAvail02PoolFiltered anchored;
   class VrAvail03DefaultFloorEvaluated anchored;
-  class VrAvail04PrimaryExhaustedPlanned partial;
-  class ErrorErr05ExecutionDecision partial;
+  class VrAvail04PrimaryExhaustedPlanned anchored;
+  class ErrorErr05ExecutionDecision anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
@@ -333,7 +333,7 @@ flowchart LR
 | vra-01 | `VrAvail01RouteCandidates -> VrAvail02PoolFiltered` | anchored | `resolve_forwarder_candidate_for_pool -> select` |  | `vr.provider_forwarder_runtime`<br/>ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router |
 | vra-02 | `VrAvail02PoolFiltered -> VrAvail03DefaultFloorEvaluated` | anchored | `build_provider_not_available_error -> evaluate_singleton_route_pool_exhaustion` |  | `vr.route_availability_floor`<br/>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice |
 | vra-03 | `VrAvail03DefaultFloorEvaluated -> VrAvail04PrimaryExhaustedPlanned` | anchored | `resolvePrimaryExhaustedPlan -> planPrimaryExhaustedToDefaultPoolNative` |  | `virtual_router.primary_exhausted_to_default_pool`<br/>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only |
-| vra-04 | `VrAvail04PrimaryExhaustedPlanned -> ErrorErr05ExecutionDecision` | partial | `executeRouterDirectPipelineForPort -> resolveDefaultTierAvailableForErrorErr05` |  | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute |
+| vra-04 | `VrAvail04PrimaryExhaustedPlanned -> ErrorErr05ExecutionDecision` | anchored | `executeRouterDirectPipelineForPort -> resolveErrorErr05RouteAvailabilityDecision` |  | `vr.route_availability_floor`<br/>route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice |
 
 ## vr.online_diagnostics.mainline
 

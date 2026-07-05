@@ -17,7 +17,7 @@ Feature scope: `vr.* / virtual_router.*`
 | `vr.metadata_center_surface` | Virtual Router read-only metadata-center-backed route surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:architecture-owner-queryability`<br/>`npm run verify:vr-no-ts-runtime` |
 | `vr.route_retry_pin_surface` | Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-custom-payload-carrier-owner-queryability` |
 | `virtual_router.primary_exhausted_to_default_pool` | primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run build:base` |
-| `vr.route_availability_floor` | route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-ci`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:vr-route-availability-default-floor` |
+| `vr.route_availability_floor` | route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-ci`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:vr-route-availability-default-floor` |
 | `vr.provider_forwarder_runtime` | ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run verify:vr-forwarder-runtime`<br/>`npm run verify:function-map-compile-gate` |
 | `vr.online_diagnostics` | Virtual Router online status and dry-run route diagnostics stay Rust-owned | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:vr-no-ts-runtime`<br/>`npm run verify:vr-forwarder-runtime` |
 
@@ -207,7 +207,7 @@ Notes:
 Summary: route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice
 
 Owner kind: `rust_ssot`
-Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
 Owner scope: route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice
 
 Canonical types:
@@ -217,9 +217,10 @@ Canonical builders:
 - `build_unavailable_providers_details`
 - `collect_recoverable_cooldown_for_key`
 - `evaluate_singleton_route_pool_exhaustion`
+- `resolve_error_err05_route_availability_decision`
 
 Allowed paths:
-- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath`
 - `src/modules/llmswitch/bridge/native-exports.ts`
 - `src/server/runtime/http-server/executor/request-executor-core-utils.ts`
@@ -234,6 +235,7 @@ Required tests:
 - `tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts`
 - `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
 - `tests/server/handlers/responses-handler.routing-empty-pool.spec.ts`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs`
 
 Required gates:
 - `npm run verify:vr-no-ts-runtime`
@@ -248,6 +250,7 @@ Notes:
 - do not patch empty-pool behavior in handlers, adapters, provider TS runtime, or executor-local policy code.
 - route order is requested route -> inserted tools route when required -> default; search/tool path must stay `search -> tools -> default`, and if default pool has providers routing must not return empty.
 - Before excluding/removing an ordinary-route candidate, runtime truth must preserve the default-pool last-provider floor; `forwarder_no_available_target` or route-local empty-pool is non-terminal while default-pool availability remains.
+- ErrorErr05 consumer inputs for remaining route candidates, routePoolAuthoritative, verifiedLastProvider, defaultPoolAvailable, policyExhausted, and mayProject must come from `resolve_error_err05_route_availability_decision`; TS executor/direct code may only consume the native decision.
 
 ## vr.provider_forwarder_runtime
 

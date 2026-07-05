@@ -780,6 +780,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs
       - src/modules/llmswitch/bridge/native-exports.ts
       - src/server/runtime/http-server/executor/request-executor-core-utils.ts
     contract:
@@ -800,6 +801,7 @@ verification:
       - "Empty-pool closeout belongs to Rust VR selection only; no TS-side policy recovery or fallback is allowed."
       - "Singleton/default hold decision must be exported from Rust and consumed by TS executor shell only."
       - "Verification must lock the rule: ordinary route pool may collapse, but default-pool last-provider protection must still keep projection non-terminal until default is also empty."
+      - "ErrorErr05 route availability inputs must be native-decision fields; TS must not locally compute default pool availability, remaining route candidates, routePoolAuthoritative, or verifiedLastProvider."
 
   - feature_id: vr.provider_forwarder_runtime
     change_risk: high

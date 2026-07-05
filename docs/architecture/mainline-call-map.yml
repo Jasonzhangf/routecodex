@@ -576,13 +576,13 @@ chains:
         to_node: ErrorErr05ExecutionDecision
         caller_symbol: executeRouterDirectPipelineForPort
         caller_file: src/server/runtime/http-server/index.ts
-        callee_symbol: resolveDefaultTierAvailableForErrorErr05
+        callee_symbol: resolveErrorErr05RouteAvailabilityDecision
         callee_file: src/server/runtime/http-server/executor/request-executor-core-utils.ts
-        owner_feature_id: error.execution_decision_consumer
-        semantic_input: "Rust-owned route floor + default-pool plan + current request excluded-provider set"
-        semantic_output: "executor-visible mayProject=false until route pool and default pool are both empty"
-        status: partial
-        note: "TS is a consumer only on this edge. It may not infer global no-provider from forwarder empty or ordinary route exhaustion while a default-pool last provider remains."
+        owner_feature_id: vr.route_availability_floor
+        semantic_input: "route name, route/default tiers, current route pool, provider key, and current request excluded-provider set"
+        semantic_output: "Rust-owned ErrorErr05 availability decision: remaining route candidates, defaultPoolAvailable, routePoolAuthoritative, verifiedLastProvider, and mayProject"
+        status: anchored
+        note: "TS is a consumer only on this edge. It invokes the Rust native decision contract and must not infer global no-provider from forwarder empty or ordinary route exhaustion while a default-pool last provider remains."
 
   - chain_id: vr.online_diagnostics.mainline
     summary: "Virtual Router online diagnostics: HTTP/CLI thin shells call Rust VR status/dry-run contracts; Rust alone expands routes, forwarders, default-floor state, and unavailable-provider explanations."

@@ -236,6 +236,9 @@ type NativeRouterHotpathJsonBinding = {
   evaluateSingletonRoutePoolExhaustionJson?: (
     inputJson: string
   ) => string;
+  resolveErrorErr05RouteAvailabilityDecisionJson?: (
+    inputJson: string
+  ) => string;
   planPrimaryExhaustedToDefaultPoolJson?: (
     inputJson: string
   ) => string;
@@ -812,6 +815,62 @@ export function evaluateSingletonRoutePoolExhaustionNative(input: {
     shouldBlock: boolean;
     waitMs?: number;
     candidateProviderCount?: number;
+  };
+}
+
+export function resolveErrorErr05RouteAvailabilityDecisionNative(input: {
+  routeName?: string;
+  routePool?: string[];
+  routeTiers?: Array<{
+    id?: string;
+    targets: string[];
+    priority?: number;
+    backup?: boolean;
+  }>;
+  defaultRouteTiers?: Array<{
+    id?: string;
+    targets: string[];
+    priority?: number;
+    backup?: boolean;
+  }>;
+  excludedProviderKeys?: string[] | Set<string>;
+  providerKey?: string;
+  routingDecisionRoutePoolPresent?: boolean;
+}): {
+  routePoolRemainingAfterExclusion: string[];
+  remainingRouteCandidates: number;
+  defaultPoolAvailable: boolean;
+  policyExhausted: boolean;
+  mayProject: boolean;
+  routePoolAuthoritative: boolean;
+  verifiedLastProvider: boolean;
+  hasAlternativeCandidate: boolean;
+  reasonCode: string;
+} {
+  const excludedProviderKeys = input.excludedProviderKeys instanceof Set
+    ? Array.from(input.excludedProviderKeys)
+    : Array.isArray(input.excludedProviderKeys) ? input.excludedProviderKeys : [];
+  const parsed = invokeRouterHotpathJsonCapability('resolveErrorErr05RouteAvailabilityDecisionJson', [
+    {
+      routeName: typeof input.routeName === 'string' ? input.routeName : undefined,
+      routePool: Array.isArray(input.routePool) ? input.routePool : [],
+      routeTiers: Array.isArray(input.routeTiers) ? input.routeTiers : [],
+      defaultRouteTiers: Array.isArray(input.defaultRouteTiers) ? input.defaultRouteTiers : [],
+      excludedProviderKeys,
+      providerKey: typeof input.providerKey === 'string' ? input.providerKey : undefined,
+      routingDecisionRoutePoolPresent: input.routingDecisionRoutePoolPresent === true,
+    }
+  ]);
+  return assertNativeObject('resolveErrorErr05RouteAvailabilityDecisionJson', parsed) as {
+    routePoolRemainingAfterExclusion: string[];
+    remainingRouteCandidates: number;
+    defaultPoolAvailable: boolean;
+    policyExhausted: boolean;
+    mayProject: boolean;
+    routePoolAuthoritative: boolean;
+    verifiedLastProvider: boolean;
+    hasAlternativeCandidate: boolean;
+    reasonCode: string;
   };
 }
 

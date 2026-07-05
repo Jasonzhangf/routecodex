@@ -36,6 +36,10 @@ function plan(over: Partial<Plan> = {}): Plan {
       switchAction: 'exclude_and_reroute',
     } as Plan['retrySwitchPlan'],
     excludedCurrentProvider: true,
+    routePoolRemainingAfterExclusion: ['p2'],
+    defaultPoolAvailable: false,
+    policyExhausted: false,
+    mayProject: false,
     ...over,
   } as Plan;
 }
@@ -48,7 +52,6 @@ describe('router-direct.candidate-exhaustion', () => {
       directAttempt: 1,
       maxAttempts: 3,
       providerKey: 'p1',
-      pool: ['p1', 'p2', 'p3'],
       error: { code: 'PROVIDER_TRANSPORT', message: 'upstream 5xx' },
     });
     expect(decision.action).toBe('request_reroute');
@@ -64,7 +67,6 @@ describe('router-direct.candidate-exhaustion', () => {
       directAttempt: 1,
       maxAttempts: 3,
       providerKey: 'p1',
-      pool: ['p1', 'p2'],
       error: { code: 'PROVIDER_TRANSPORT', message: 'upstream 5xx' },
     });
     expect(decision.action).toBe('request_reroute');
@@ -73,12 +75,11 @@ describe('router-direct.candidate-exhaustion', () => {
 
   it('[reverse] only 1 candidate left in pool → must NOT reroute, caller rethrows', () => {
     const decision = decideDirectRouterRetry({
-      retryExecutionPlan: plan(),
+      retryExecutionPlan: plan({ routePoolRemainingAfterExclusion: [], policyExhausted: true, mayProject: true }),
       excludedProviderKeys: new Set(),
       directAttempt: 1,
       maxAttempts: 3,
       providerKey: 'p1',
-      pool: ['p1'],
       error: { code: 'PROVIDER_TRANSPORT', message: 'upstream 5xx' },
     });
     expect(decision.action).toBe('rethrow');
@@ -99,7 +100,6 @@ describe('router-direct.candidate-exhaustion', () => {
       directAttempt: 1,
       maxAttempts: 3,
       providerKey: 'p1',
-      pool: ['p1'],
       error: { code: 'HTTP_401', statusCode: 401, message: 'auth failed' },
     });
     expect(decision.action).toBe('request_reroute');
@@ -115,7 +115,6 @@ describe('router-direct.candidate-exhaustion', () => {
       directAttempt: 1,
       maxAttempts: 3,
       providerKey: 'p1',
-      pool: ['p1', 'p2'],
       error: { status: 499, code: 'HTTP_499', message: 'client abort request' },
     });
     expect(isClientDisconnectLikeError(decision.error)).toBe(true);
@@ -130,12 +129,15 @@ describe('router-direct.candidate-exhaustion', () => {
         shouldRetry: false,
         retrySwitchPlan: undefined,
         excludedCurrentProvider: false,
+        routePoolRemainingAfterExclusion: ['p2'],
+        defaultPoolAvailable: false,
+        policyExhausted: false,
+        mayProject: false,
       } as Plan,
       excludedProviderKeys: new Set(),
       directAttempt: 1,
       maxAttempts: 3,
       providerKey: 'p1',
-      pool: ['p1', 'p2'],
       error: { code: 'special_400', message: 'malformed request' },
     });
     expect(decision.action).toBe('rethrow');
@@ -156,7 +158,6 @@ describe('router-direct.candidate-exhaustion', () => {
       directAttempt: 1,
       maxAttempts: 3,
       providerKey: 'p1',
-      pool: ['p1', 'p2'],
       error,
     });
     expect(decision.action).toBe('request_reroute');
@@ -172,7 +173,6 @@ describe('router-direct.candidate-exhaustion', () => {
       directAttempt: 3,
       maxAttempts: 3,
       providerKey: 'p1',
-      pool: ['p1', 'p2', 'p3'],
       error: { code: 'PROVIDER_TRANSPORT', message: 'upstream 5xx' },
     });
     expect(decision.action).toBe('rethrow');
@@ -188,7 +188,6 @@ describe('router-direct.candidate-exhaustion', () => {
       directAttempt: 1,
       maxAttempts: 1,
       providerKey: 'p1',
-      pool: ['p1', 'p2'],
       error: { code: 'HTTP_502', statusCode: 502, message: 'upstream 502' },
     });
     expect(decision.action).toBe('request_reroute');

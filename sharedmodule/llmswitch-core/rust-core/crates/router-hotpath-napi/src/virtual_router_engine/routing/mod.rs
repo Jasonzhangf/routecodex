@@ -1,6 +1,7 @@
 mod bootstrap;
 mod config;
 mod direct_model;
+mod error_err05_availability;
 mod key_utils;
 mod metadata;
 mod primary_exhausted_to_default_pool;
@@ -30,6 +31,9 @@ pub(crate) use metadata::{
 pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,
     resolve_instruction_target, InstructionTargetMatchMode,
+};
+pub(crate) use error_err05_availability::{
+    resolve_error_err05_route_availability_decision, ErrorErr05RouteAvailabilityDecisionInput,
 };
 
 #[allow(unused_imports)]

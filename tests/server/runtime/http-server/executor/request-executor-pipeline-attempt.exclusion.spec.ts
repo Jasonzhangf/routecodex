@@ -5,45 +5,36 @@ const { resolveRequestExecutorPipelineAttempt } = __requestExecutorTestables;
 
 describe('resolveRequestExecutorPipelineAttempt excluded provider guard', () => {
   it('does not mark a narrowed current-only routePool authoritative after prior exclusions', () => {
-    const narrowedCurrentOnly = __requestExecutorTestables.resolveRoutePoolAuthoritativeForRetry({
-      routingDecision: {
-        routeName: 'tools/gateway-priority-5555-priority-tools',
-        routePool: ['minimax.key1.MiniMax-M3']
-      },
-      routePoolForAttempt: ['minimax.key1.MiniMax-M3'],
-      routeTiersForAttempt: [{ targets: ['minimax.key1.MiniMax-M3'] }],
-      defaultTierAvailable: false,
-      excludedProviderKeys: new Set<string>(['spark.key1.gpt-5.3-codex-spark'])
-    });
-    const trueSingletonLastProvider = __requestExecutorTestables.resolveRoutePoolAuthoritativeForRetry({
-      routingDecision: {
-        routeName: 'tools/gateway-priority-5555-priority-tools',
-        routePool: ['minimax.key1.MiniMax-M3']
-      },
-      routePoolForAttempt: ['minimax.key1.MiniMax-M3'],
-      routeTiersForAttempt: [{ targets: ['minimax.key1.MiniMax-M3'] }],
-      defaultTierAvailable: false,
-      excludedProviderKeys: new Set<string>()
-    });
+    const narrowedCurrentOnly = __requestExecutorTestables.resolveErrorErr05RouteAvailabilityDecision({
+      routeName: 'tools/gateway-priority-5555-priority-tools',
+      routePool: ['minimax.key1.MiniMax-M3'],
+      routeTiers: [{ targets: ['minimax.key1.MiniMax-M3'] }],
+      excludedProviderKeys: new Set<string>(['spark.key1.gpt-5.3-codex-spark']),
+      routingDecisionRoutePoolPresent: true,
+    }).routePoolAuthoritative;
+    const trueSingletonLastProvider = __requestExecutorTestables.resolveErrorErr05RouteAvailabilityDecision({
+      routeName: 'tools/gateway-priority-5555-priority-tools',
+      routePool: ['minimax.key1.MiniMax-M3'],
+      routeTiers: [{ targets: ['minimax.key1.MiniMax-M3'] }],
+      excludedProviderKeys: new Set<string>(),
+      routingDecisionRoutePoolPresent: true,
+    }).routePoolAuthoritative;
 
     expect(narrowedCurrentOnly).toBe(false);
     expect(trueSingletonLastProvider).toBe(true);
   });
 
   it('does not mark a singleton priority tier authoritative when later route tiers exist', () => {
-    const firstTierSingleton = __requestExecutorTestables.resolveRoutePoolAuthoritativeForRetry({
-      routingDecision: {
-        routeName: 'tools/gateway-priority-5555-priority-tools',
-        routePool: ['spark.key1.gpt-5.3-codex-spark']
-      },
-      routePoolForAttempt: ['spark.key1.gpt-5.3-codex-spark'],
-      routeTiersForAttempt: [
+    const firstTierSingleton = __requestExecutorTestables.resolveErrorErr05RouteAvailabilityDecision({
+      routeName: 'tools/gateway-priority-5555-priority-tools',
+      routePool: ['spark.key1.gpt-5.3-codex-spark'],
+      routeTiers: [
         { targets: ['spark.key1.gpt-5.3-codex-spark'] },
         { targets: ['minimax.key1.MiniMax-M3'] }
       ],
-      defaultTierAvailable: false,
-      excludedProviderKeys: new Set<string>()
-    });
+      excludedProviderKeys: new Set<string>(),
+      routingDecisionRoutePoolPresent: true,
+    }).routePoolAuthoritative;
 
     expect(firstTierSingleton).toBe(false);
   });

@@ -44,6 +44,35 @@ export declare function evaluateSingletonRoutePoolExhaustionNative(input: {
     waitMs?: number;
     candidateProviderCount?: number;
 };
+export declare function resolveErrorErr05RouteAvailabilityDecisionNative(input: {
+    routeName?: string;
+    routePool?: string[];
+    routeTiers?: Array<{
+        id?: string;
+        targets: string[];
+        priority?: number;
+        backup?: boolean;
+    }>;
+    defaultRouteTiers?: Array<{
+        id?: string;
+        targets: string[];
+        priority?: number;
+        backup?: boolean;
+    }>;
+    excludedProviderKeys?: string[] | Set<string>;
+    providerKey?: string;
+    routingDecisionRoutePoolPresent?: boolean;
+}): {
+    routePoolRemainingAfterExclusion: string[];
+    remainingRouteCandidates: number;
+    defaultPoolAvailable: boolean;
+    policyExhausted: boolean;
+    mayProject: boolean;
+    routePoolAuthoritative: boolean;
+    verifiedLastProvider: boolean;
+    hasAlternativeCandidate: boolean;
+    reasonCode: string;
+};
 export declare function planPrimaryExhaustedToDefaultPoolNative(input: {
     route: string;
     tiers: Array<{
