@@ -23,6 +23,7 @@ import {
   planRecordScopeEntryMatch,
   planResumeEntryMatch,
   planStoreSweep,
+  planStoreTokens,
   planScopeContinuationMatch,
   prepareConversationEntry,
   restoreContinuationPayload,
@@ -80,23 +81,14 @@ function deserializeEntry(value: unknown): ConversationEntry | undefined {
   return plan.action === 'entry' ? plan.entry : undefined;
 }
 
-function readScopeToken(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function normalizeEntryKind(value: unknown): ResponsesContinuationEntryKind {
-  if (value === 'chat' || value === 'messages') {
-    return value;
-  }
-  return 'responses';
-}
-
-function normalizeContinuationOwner(value: unknown): 'direct' | 'relay' | undefined {
-  return value === 'direct' || value === 'relay' ? value : undefined;
+function normalizeStoreTokens(input: unknown): {
+  providerKey?: string;
+  sessionId?: string;
+  conversationId?: string;
+  entryKind: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
+} {
+  return planStoreTokens(input);
 }
 
 function readPortScopeKey(scope: { matchedPort?: unknown; routingPolicyGroup?: unknown } | undefined): string | undefined {
@@ -186,12 +178,13 @@ function collectScopeMatchCandidates(scopeIndex: Map<string, ConversationEntry>,
     const entry = scopeIndex.get(scopeKey);
     if (!entry) continue;
     entriesByScopeKey.set(scopeKey, entry);
+    const tokens = normalizeStoreTokens({ continuationOwner: entry.continuationOwner });
     candidates.push({
       scopeKey,
       requestId: entry.requestId,
       lastResponseId: entry.lastResponseId,
       allowContinuation: entry.allowContinuation,
-      continuationOwner: normalizeContinuationOwner(entry.continuationOwner)
+      continuationOwner: tokens.continuationOwner
     });
   }
   return { entriesByScopeKey, candidates };
@@ -202,15 +195,19 @@ function projectResumeEntryCandidate(
   source: ResumeEntryMatchCandidate['source'],
   scopeKey?: string
 ): ResumeEntryMatchCandidate {
+  const tokens = normalizeStoreTokens({
+    entryKind: entry.entryKind,
+    continuationOwner: entry.continuationOwner
+  });
   return {
     source,
     scopeKey: scopeKey ?? '',
     requestId: entry.requestId,
     lastResponseId: entry.lastResponseId,
     allowContinuation: entry.allowContinuation,
-    continuationOwner: normalizeContinuationOwner(entry.continuationOwner),
+    continuationOwner: tokens.continuationOwner,
     portScopeKey: entry.portScopeKey,
-    entryKind: normalizeEntryKind(entry.entryKind)
+    entryKind: tokens.entryKind
   };
 }
 
@@ -325,7 +322,7 @@ class ResponsesConversationStore {
     }
     const scopeKeys = buildStoredScopeKeys({
       ...args,
-      entryKind: normalizeEntryKind(args.entryKind),
+      entryKind: normalizeStoreTokens({ entryKind: args.entryKind }).entryKind,
       continuationOwner: 'relay'
     });
     const portScopeKey = readPortScopeKey(args);
@@ -346,17 +343,24 @@ class ResponsesConversationStore {
       const candidate = this.requestMap.get(detachRequestId);
       if (candidate) this.detachEntry(candidate);
     }
+    const entryTokens = normalizeStoreTokens({
+      providerKey: args.providerKey,
+      fallbackProviderKey: payload.providerKey,
+      sessionId: args.sessionId,
+      conversationId: args.conversationId,
+      entryKind: args.entryKind
+    });
     const entry: ConversationEntry = {
       requestId,
       basePayload: isRecord(prepared.basePayload) ? prepared.basePayload : pickPersistedFields(payload),
       input: Array.isArray(prepared.input) ? prepared.input : [],
       allowContinuation: shouldAllowContinuation(payload),
       tools: Array.isArray(prepared.tools) ? prepared.tools : undefined,
-      providerKey: readScopeToken(args.providerKey) ?? readScopeToken(payload.providerKey),
-      entryKind: normalizeEntryKind(args.entryKind),
+      providerKey: entryTokens.providerKey,
+      entryKind: entryTokens.entryKind,
       continuationOwner: undefined,
-      sessionId: readScopeToken(args.sessionId),
-      conversationId: readScopeToken(args.conversationId),
+      sessionId: entryTokens.sessionId,
+      conversationId: entryTokens.conversationId,
       scopeKeys,
       portScopeKey,
       createdAt: Date.now(),
@@ -388,11 +392,15 @@ class ResponsesConversationStore {
       entry = this.requestMap.get(responseId);
     }
     if (!entry) {
+      const fallbackTokens = normalizeStoreTokens({
+        entryKind: args.entryKind,
+        continuationOwner: args.continuationOwner
+      });
       const fallbackScopeKeys = buildRequestedScopeKeys({
         sessionId: args.sessionId,
         conversationId: args.conversationId,
-        entryKind: normalizeEntryKind(args.entryKind),
-        continuationOwner: normalizeContinuationOwner(args.continuationOwner),
+        entryKind: fallbackTokens.entryKind,
+        continuationOwner: fallbackTokens.continuationOwner,
         matchedPort: args.matchedPort,
         routingPolicyGroup: args.routingPolicyGroup
       });
@@ -446,14 +454,21 @@ class ResponsesConversationStore {
     if (responsePortScopeKey && !entry.portScopeKey) {
       entry.portScopeKey = responsePortScopeKey;
     }
-    const responseProviderKey = readScopeToken(args.providerKey);
-    if (responseProviderKey) {
-      entry.providerKey = responseProviderKey;
+    const responseTokens = normalizeStoreTokens({
+      providerKey: args.providerKey,
+      sessionId: args.sessionId,
+      conversationId: args.conversationId,
+      entryKind: args.entryKind ?? entry.entryKind,
+      continuationOwner: args.continuationOwner,
+      fallbackContinuationOwner: entry.continuationOwner ?? 'relay'
+    });
+    if (responseTokens.providerKey) {
+      entry.providerKey = responseTokens.providerKey;
     }
-    entry.sessionId = readScopeToken(args.sessionId) ?? entry.sessionId;
-    entry.conversationId = readScopeToken(args.conversationId) ?? entry.conversationId;
-    entry.entryKind = normalizeEntryKind(args.entryKind ?? entry.entryKind);
-    entry.continuationOwner = normalizeContinuationOwner(args.continuationOwner) ?? entry.continuationOwner ?? 'relay';
+    entry.sessionId = responseTokens.sessionId ?? entry.sessionId;
+    entry.conversationId = responseTokens.conversationId ?? entry.conversationId;
+    entry.entryKind = responseTokens.entryKind;
+    entry.continuationOwner = responseTokens.continuationOwner;
     const nextScopeKeys = buildStoredScopeKeysFromResolved({
       sessionId: entry.sessionId,
       conversationId: entry.conversationId,
@@ -713,15 +728,19 @@ class ResponsesConversationStore {
   resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
     this.ensurePersistenceLoaded();
     this.prune();
+    const requestTokens = normalizeStoreTokens({
+      entryKind: args.entryKind,
+      continuationOwner: args.continuationOwner
+    });
     const scopeKeys = buildRequestedScopeKeys({
       ...args,
-      entryKind: normalizeEntryKind(args.entryKind)
+      entryKind: requestTokens.entryKind
     });
     const { entriesByScopeKey, candidates } = collectScopeMatchCandidates(this.scopeIndex, scopeKeys);
     const plan = planScopeContinuationMatch({
       mode: 'resume',
       candidates,
-      options: { continuationOwner: normalizeContinuationOwner(args.continuationOwner) }
+      options: { continuationOwner: requestTokens.continuationOwner }
     });
     if (plan.action !== 'restore' || !plan.scopeKey) {
       return null;
@@ -744,16 +763,19 @@ class ResponsesConversationStore {
   materializeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
     this.ensurePersistenceLoaded();
     this.prune();
-    const requestedOwner = normalizeContinuationOwner(args.continuationOwner);
+    const requestTokens = normalizeStoreTokens({
+      entryKind: args.entryKind,
+      continuationOwner: args.continuationOwner
+    });
     const scopeKeys = buildRequestedScopeKeys({
       ...args,
-      entryKind: normalizeEntryKind(args.entryKind)
+      entryKind: requestTokens.entryKind
     });
     const { entriesByScopeKey, candidates } = collectScopeMatchCandidates(this.scopeIndex, scopeKeys);
     const plan = planScopeContinuationMatch({
       mode: 'materialize',
       candidates,
-      options: { continuationOwner: requestedOwner }
+      options: { continuationOwner: requestTokens.continuationOwner }
     });
     if (plan.action !== 'materialize' || !plan.scopeKey) {
       return null;

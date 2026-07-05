@@ -35,6 +35,7 @@ export {
   planResponsesConversationResumeEntryMatchWithNative,
   planResponsesConversationRetentionWithNative,
   planResponsesPersistedEntryWithNative,
+  planResponsesStoreTokensWithNative,
   planResponsesRecordScopeCleanupWithNative,
   planResponsesRecordScopeEntryMatchWithNative,
   planResponsesStoreSweepWithNative,

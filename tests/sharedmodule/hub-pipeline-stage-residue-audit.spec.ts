@@ -756,6 +756,73 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('__responses_payload_snapshot');
   });
 
+  it('responses response payload bridge must call native pipeline without TS wrapper or swallowed errors', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'uses TS bridge action state wrapper', pattern: /createBridgeActionState/ },
+      { label: 'uses TS bridge action pipeline wrapper', pattern: /runBridgeActionPipeline\(/ },
+      { label: 'swallows response outbound bridge action errors', pattern: /bridge action pipeline failed/ },
+      { label: 'keeps ignored bridge logging failure catch', pattern: /ignore logging failures/ },
+    ]);
+
+    expect(source).toContain('runBridgeActionPipelineWithNative');
+    expect(findings).toEqual([]);
+  });
+
+  it('responses response payload reasoning normalization must be native fail-fast', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'uses shared TS reasoning normalizer wrapper', pattern: /normalizeMessageReasoningTools\b/ },
+      { label: 'keeps best-effort reasoning swallow comment', pattern: /best-effort reasoning normalization/ },
+      { label: 'swallows reasoning normalization errors', pattern: /catch\s*\{\s*\/\/ best-effort reasoning normalization/s },
+    ]);
+
+    expect(source).toContain('normalizeMessageReasoningToolsWithNative');
+    expect(findings).toEqual([]);
+  });
+
+  it('responses request bridge must not own action filtering policy in TS', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'keeps TS redundant reasoning action filter', pattern: /filterRedundantResponsesReasoningAction/ },
+      { label: 'keeps TS tool signal scanner', pattern: /hasToolSignalsInMessages/ },
+      { label: 'keeps TS inbound payload-hint filter', pattern: /filterResponsesInboundActionsByPayloadHints/ },
+      { label: 'keeps direct reasoning.extract string filter', pattern: /reasoning\.extract/ },
+      { label: 'keeps direct normalize-call-ids string filter', pattern: /tools\.normalize-call-ids/ },
+      { label: 'keeps direct ensure-placeholders string filter', pattern: /tools\.ensure-placeholders/ },
+    ]);
+
+    expect(source).toContain('planResponsesBridgePolicyActionsWithNative');
+    expect(findings).toEqual([]);
+  });
+
+  it('responses bridge files must not import deleted TS bridge wrappers', () => {
+    const files = [
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
+    ];
+    const findings = files.flatMap((relativePath) => {
+      const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+      return collectMatches(source, [
+        { label: `${relativePath} imports TS bridge-policies wrapper`, pattern: /bridge-policies\.js/ },
+      ]);
+    });
+
+    expect(findings).toEqual([]);
+  });
+
   it('responses retention registry wrapper must fail fast on native errors', () => {
     const retiredPath = path.join(
       process.cwd(),
@@ -1381,14 +1448,29 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingFiles, existingTests }).toEqual({ existingFiles: [], existingTests: [] });
   });
 
-  it('bridge action pipeline wrapper must not retain TS registry fallback execution', () => {
+  it('bridge action wrapper file must stay physically deleted after native pipeline takeover', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/bridge-actions.ts');
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  it('bridge policy wrapper file must stay physically deleted after native pipeline takeover', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/bridge-policies.ts');
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  it('bridge policy wrapper must not retain TS action descriptor parsers', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts'
+    );
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
-      { label: 'exports TS bridge action registry registration', pattern: /export function registerBridgeAction/ },
-      { label: 'keeps TS bridge action registry map', pattern: /new Map<string, BridgeAction>/ },
-      { label: 'executes registered TS bridge action', pattern: /registry\.get/ },
-      { label: 'swallows bridge action errors', pattern: /catch\s*\{\s*\/\/ Ignore action failures/s },
+      { label: 'parses bridge action descriptors in TS', pattern: /function parseActionDescriptor/ },
+      { label: 'parses bridge action arrays in TS', pattern: /function parseActionDescriptors/ },
+      { label: 'parses bridge policy phase in TS', pattern: /function parsePhase/ },
+      { label: 'parses bridge policy in TS', pattern: /function parsePolicy/ },
+      { label: 'keeps local JSON parse failure sentinel', pattern: /JSON_PARSE_FAILED/ },
+      { label: 'keeps local bridge policy parse logger', pattern: /logNativeBridgePolicyNonBlocking/ },
     ]);
 
     expect(findings).toEqual([]);
@@ -2527,12 +2609,13 @@ describe('hub pipeline stage residue audit', () => {
     const retiredFiles = [
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_semantic_mapper_chat.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_provider_response_helpers.rs',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-semantic-mappers.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-rcc-fence-semantics.ts',
     ];
     const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
     expect(existingRetiredFiles).toEqual([]);
 
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-semantic-mappers.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_submit_tool_outputs.rs',
@@ -3873,11 +3956,16 @@ describe('hub pipeline stage residue audit', () => {
 
   it('conversion shared thin wrappers must not expose retired zero-consumer public helpers', () => {
     const repoRoot = process.cwd();
-    const files = [
-      'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts',
+    [
       'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-response.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/chat-output-normalizer.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/output-content-normalizer.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.ts',
+    ].forEach((relativePath) => {
+      expect(fs.existsSync(path.join(repoRoot, relativePath))).toBe(false);
+    });
+    const files = [
+      'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/tooling.ts',

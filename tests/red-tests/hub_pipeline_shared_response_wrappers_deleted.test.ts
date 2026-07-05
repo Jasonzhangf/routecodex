@@ -9,16 +9,12 @@ function read(relativePath: string): string {
 }
 
 describe('Hub Pipeline shared response wrapper deletion boundary', () => {
-  it('keeps zero-consumer output content wrappers deleted', () => {
-    const source = read('sharedmodule/llmswitch-core/src/conversion/shared/output-content-normalizer.ts');
+  it('keeps zero-consumer output content wrapper file deleted', () => {
     const native = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts');
     const rust = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_output_content_normalizer.rs');
     const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
 
-    expect(source).toContain('normalizeMessageContentPartsWithNative');
-    expect(source).not.toMatch(/export\s+function\s+extractOutputSegments\b/);
-    expect(source).not.toMatch(/export\s+function\s+normalizeContentPart\b/);
-    expect(source).not.toMatch(/export\s+interface\s+OutputContentExtractionResult\b/);
+    expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/output-content-normalizer.ts')).toThrow();
     expect(native).not.toMatch(/\bextractOutputSegmentsWithNative\b/);
     expect(native).not.toMatch(/\bnormalizeContentPartWithNative\b/);
     expect(rust).not.toMatch(/\bextract_output_segments_json\b/);
@@ -27,13 +23,8 @@ describe('Hub Pipeline shared response wrapper deletion boundary', () => {
     expect(requiredExports).not.toContain('normalizeOutputContentPartJson');
   });
 
-  it('keeps zero-consumer response reasoning wrapper deleted', () => {
-    const source = read('sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.ts');
-
-    expect(source).toContain('normalizeMessageReasoningToolsWithNative');
-    expect(source).not.toMatch(/export\s+function\s+normalizeChatResponseReasoningTools\b/);
-    expect(source).not.toMatch(/export\s+interface\s+ReasoningNormalizationResult\b/);
-    expect(source).not.toContain('normalizeChatResponseReasoningToolsWithNative');
+  it('keeps zero-consumer response reasoning wrapper file deleted', () => {
+    expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.ts')).toThrow();
   });
 
   it('keeps zero-consumer single-tool mapping wrappers deleted', () => {

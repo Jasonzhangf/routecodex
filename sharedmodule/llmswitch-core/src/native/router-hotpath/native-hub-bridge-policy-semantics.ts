@@ -2,8 +2,12 @@ import {
   failNativeRequired,
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
+import {
+  parseNativeJsonObjectOrFail,
+  parseNativeJsonValueOrFail,
+  readNativeFunction,
+  safeStringify
+} from './native-hub-bridge-action-semantics-shared.js';
 
 export interface NativeBridgeActionDescriptor {
   name: string;
@@ -29,45 +33,20 @@ type NativeBridgePolicyStage =
   | 'response_inbound'
   | 'response_outbound';
 
-const NON_BLOCKING_BRIDGE_POLICY_LOG_THROTTLE_MS = 60_000;
-const nonBlockingBridgePolicyLogState = new Map<string, number>();
-const JSON_PARSE_FAILED = Symbol('native-hub-bridge-policy-semantics.parse-failed');
-
-
-function logNativeBridgePolicyNonBlocking(stage: string, error: unknown): void {
-  const now = Date.now();
-  const last = nonBlockingBridgePolicyLogState.get(stage) ?? 0;
-  if (now - last < NON_BLOCKING_BRIDGE_POLICY_LOG_THROTTLE_MS) {
-    return;
-  }
-  nonBlockingBridgePolicyLogState.set(stage, now);
-  console.warn(
-    `[native-hub-bridge-policy-semantics] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
-  );
-}
-
-function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch (error) {
-    logNativeBridgePolicyNonBlocking(stage, error);
-    return JSON_PARSE_FAILED;
-  }
-}
-
-function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
-  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
-  const fn = binding?.[name];
-  return typeof fn === 'function' ? (fn as (...args: unknown[]) => unknown) : null;
+interface NativeResponsesBridgePolicyActionPlanInput {
+  stage: NativeBridgePolicyStage;
+  actions?: NativeBridgeActionDescriptor[];
+  messages?: Array<Record<string, unknown>>;
 }
 
 export function hasDeclaredApplyPatchToolWithNative(payload: unknown): boolean {
   const capability = 'hasDeclaredApplyPatchToolJson';
   const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
-  const parsed = parseJson('hasDeclaredApplyPatchToolWithNative', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw failNativeRequired<boolean>(capability, 'invalid payload');
-  }
+  const parsed = parseNativeJsonObjectOrFail<{ hasDeclaredApplyPatchTool?: unknown }>(
+    capability,
+    raw,
+    'hasDeclaredApplyPatchToolWithNative'
+  );
   return (parsed as { hasDeclaredApplyPatchTool?: unknown }).hasDeclaredApplyPatchTool === true;
 }
 
@@ -87,25 +66,17 @@ export function evaluateResponsesDirectRouteDecisionWithNative(input: {
     input.inboundProtocol ?? '',
     input.applyPatchMode ?? '',
   ]);
-  const parsed = parseJson('evaluateResponsesDirectRouteDecisionWithNative', raw);
-  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
-  }
+  const parsed = parseNativeJsonObjectOrFail<Record<string, unknown>>(
+    capability,
+    raw,
+    'evaluateResponsesDirectRouteDecisionWithNative'
+  );
   return parsed as {
     providerWireValid: boolean;
     requiresHubRelay: boolean;
     reason?: string;
     hasDeclaredApplyPatchTool?: boolean;
   };
-}
-
-function safeStringify(value: unknown): string | undefined {
-  try {
-    return JSON.stringify(value);
-  } catch (error) {
-    logNativeBridgePolicyNonBlocking('safeStringify', error);
-    return undefined;
-  }
 }
 
 function invokeNativeStringCapability(capability: string, args: unknown[]): string {
@@ -125,14 +96,18 @@ function invokeNativeStringCapability(capability: string, args: unknown[]): stri
     if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { message?: unknown }).message === 'string') {
       return fail(String((raw as { message: unknown }).message));
     }
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
-    return raw;
+    return parseNativeStringResult(capability, raw);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
+}
+
+function parseNativeStringResult(capability: string, raw: unknown): string {
+  if (typeof raw === 'string' && raw.length) {
+    return raw;
+  }
+  return failNativeRequired<string>(capability, 'empty result');
 }
 
 function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unknown[]): string {
@@ -148,116 +123,6 @@ function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unkn
   return invokeNativeStringCapability(capability, encodedArgs);
 }
 
-function parseActionDescriptor(candidate: unknown): NativeBridgeActionDescriptor | null {
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return null;
-  }
-  const row = candidate as Record<string, unknown>;
-  const name = typeof row.name === 'string' ? row.name.trim() : '';
-  if (!name) {
-    return null;
-  }
-  const options = row.options;
-  return {
-    name,
-    ...(options && typeof options === 'object' && !Array.isArray(options)
-      ? { options: options as Record<string, unknown> }
-      : {})
-  };
-}
-
-function parseActionDescriptors(raw: string): NativeBridgeActionDescriptor[] | undefined | null {
-  const parsed = parseJson('parseActionDescriptors', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed == null) {
-    return undefined;
-  }
-  if (!Array.isArray(parsed)) {
-    return null;
-  }
-  const out = parsed
-    .map((entry) => parseActionDescriptor(entry))
-    .filter((entry): entry is NativeBridgeActionDescriptor => Boolean(entry));
-  return out;
-}
-
-function parsePhase(candidate: unknown): NativeBridgePhaseConfig | undefined | null {
-  if (candidate == null) {
-    return undefined;
-  }
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return null;
-  }
-  const row = candidate as Record<string, unknown>;
-  const out: NativeBridgePhaseConfig = {};
-  if (Object.prototype.hasOwnProperty.call(row, 'inbound')) {
-    if (row.inbound == null) {
-      out.inbound = undefined;
-    } else if (Array.isArray(row.inbound)) {
-      const inbound = row.inbound
-        .map((entry) => parseActionDescriptor(entry))
-        .filter((entry): entry is NativeBridgeActionDescriptor => Boolean(entry));
-      out.inbound = inbound;
-    } else {
-      return null;
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(row, 'outbound')) {
-    if (row.outbound == null) {
-      out.outbound = undefined;
-    } else if (Array.isArray(row.outbound)) {
-      const outbound = row.outbound
-        .map((entry) => parseActionDescriptor(entry))
-        .filter((entry): entry is NativeBridgeActionDescriptor => Boolean(entry));
-      out.outbound = outbound;
-    } else {
-      return null;
-    }
-  }
-  return out;
-}
-
-function parsePolicy(raw: string): NativeBridgePolicy | undefined | null {
-  const parsed = parseJson('parsePolicy', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  if (parsed == null) {
-    return undefined;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-  const row = parsed as Record<string, unknown>;
-  const id = typeof row.id === 'string' ? row.id.trim() : '';
-  if (!id) {
-    return null;
-  }
-  const protocol = typeof row.protocol === 'string' && row.protocol.trim().length
-    ? row.protocol.trim()
-    : undefined;
-  const moduleType = typeof row.moduleType === 'string' && row.moduleType.trim().length
-    ? row.moduleType.trim()
-    : undefined;
-  const request = parsePhase(row.request);
-  if (request === null) {
-    return null;
-  }
-  const response = parsePhase(row.response);
-  if (response === null) {
-    return null;
-  }
-  return {
-    id,
-    ...(protocol ? { protocol } : {}),
-    ...(moduleType ? { moduleType } : {}),
-    ...(request ? { request } : {}),
-    ...(response ? { response } : {})
-  };
-}
-
 export function resolveBridgePolicyWithNative(options: {
   protocol?: string;
   moduleType?: string;
@@ -269,8 +134,12 @@ export function resolveBridgePolicyWithNative(options: {
     protocol: options?.protocol,
     moduleType: options?.moduleType
   }]);
-    const parsed = parsePolicy(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
+    const parsed = parseNativeJsonValueOrFail<NativeBridgePolicy | null>(
+      capability,
+      raw,
+      'resolveBridgePolicyWithNative'
+    );
+    return parsed ?? undefined;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
@@ -290,8 +159,36 @@ export function resolveBridgePolicyActionsWithNative(
       return fail('json stringify failed');
     }
     const raw = invokeNativeStringCapability(capability, [policyJson, String(stage || '')]);
-    const parsed = parseActionDescriptors(raw);
-    return parsed === null ? fail('invalid payload') : parsed;
+    const parsed = parseNativeJsonValueOrFail<NativeBridgeActionDescriptor[] | null>(
+      capability,
+      raw,
+      'resolveBridgePolicyActionsWithNative'
+    );
+    return parsed ?? undefined;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planResponsesBridgePolicyActionsWithNative(
+  input: NativeResponsesBridgePolicyActionPlanInput
+): NativeBridgeActionDescriptor[] | undefined {
+  const capability = 'planResponsesBridgePolicyActionsJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<NativeBridgeActionDescriptor[] | undefined>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
+      stage: input.stage,
+      actions: input.actions ?? [],
+      messages: input.messages ?? []
+    }]);
+    const parsed = parseNativeJsonValueOrFail<NativeBridgeActionDescriptor[] | null>(
+      capability,
+      raw,
+      'planResponsesBridgePolicyActionsWithNative'
+    );
+    return parsed ?? undefined;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
@@ -313,10 +210,11 @@ export function sanitizeProviderOutboundPayloadWithNative(input: {
       enforceLayout: input?.enforceLayout,
       payload: input?.payload ?? {}
     }]);
-    const parsed = parseJson('sanitizeProviderOutboundPayload', raw);
-    if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return fail('invalid payload');
-    }
+    const parsed = parseNativeJsonObjectOrFail<Record<string, unknown>>(
+      capability,
+      raw,
+      'sanitizeProviderOutboundPayload'
+    );
     return parsed as Record<string, unknown>;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

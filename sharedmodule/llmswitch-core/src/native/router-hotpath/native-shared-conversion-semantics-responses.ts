@@ -123,6 +123,14 @@ type PersistedEntryPlan = {
   entry?: Record<string, unknown>;
 };
 
+type StoreTokensPlan = {
+  providerKey?: string;
+  sessionId?: string;
+  conversationId?: string;
+  entryKind: 'responses' | 'chat' | 'messages';
+  continuationOwner?: 'direct' | 'relay';
+};
+
 type ContinuationMetaPlan = {
   action: 'meta';
   reason: string;
@@ -440,6 +448,50 @@ export function planResponsesPersistedEntryWithNative(input: unknown): Persisted
     return {
       action,
       reason: reason.trim()
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planResponsesStoreTokensWithNative(input: unknown): StoreTokensPlan {
+  const capability = 'planResponsesStoreTokensJson';
+  const fail = (reason?: string) => failNativeRequired<StoreTokensPlan>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? null);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    const entryKind = parsed?.entryKind;
+    const continuationOwner = parsed?.continuationOwner;
+    if (entryKind !== 'responses' && entryKind !== 'chat' && entryKind !== 'messages') {
+      return fail('invalid entry kind');
+    }
+    return {
+      ...(typeof parsed?.providerKey === 'string' && parsed.providerKey.trim()
+        ? { providerKey: parsed.providerKey.trim() }
+        : {}),
+      ...(typeof parsed?.sessionId === 'string' && parsed.sessionId.trim()
+        ? { sessionId: parsed.sessionId.trim() }
+        : {}),
+      ...(typeof parsed?.conversationId === 'string' && parsed.conversationId.trim()
+        ? { conversationId: parsed.conversationId.trim() }
+        : {}),
+      entryKind,
+      ...(continuationOwner === 'direct' || continuationOwner === 'relay' ? { continuationOwner } : {})
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

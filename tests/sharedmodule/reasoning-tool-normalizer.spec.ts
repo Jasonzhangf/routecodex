@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { normalizeMessageReasoningTools } from '../../sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.js';
+import { normalizeMessageReasoningToolsWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.js';
 
 describe('reasoning-tool-normalizer', () => {
   test('writes normalized native message back into original record', () => {
@@ -14,13 +14,11 @@ describe('reasoning-tool-normalizer', () => {
       ].join('\n')
     };
 
-    const result = normalizeMessageReasoningTools(message, {
-      idPrefix: 'reasoning_test'
-    });
+    const result = normalizeMessageReasoningToolsWithNative(message, 'reasoning_test');
 
     expect(result.toolCallsAdded).toBe(1);
-    expect(Array.isArray(message.tool_calls)).toBe(true);
-    expect(message.tool_calls).toEqual([
+    expect(Array.isArray(result.message.tool_calls)).toBe(true);
+    expect(result.message.tool_calls).toEqual([
       {
         id: 'call_reasoning_1',
         type: 'function',
@@ -30,7 +28,7 @@ describe('reasoning-tool-normalizer', () => {
         }
       }
     ]);
-    expect(typeof message.reasoning_content).toBe('string');
-    expect(String(message.reasoning_content)).not.toContain('<tool_call>');
+    expect(typeof result.message.reasoning_content).toBe('string');
+    expect(String(result.message.reasoning_content)).not.toContain('<tool_call>');
   });
 });

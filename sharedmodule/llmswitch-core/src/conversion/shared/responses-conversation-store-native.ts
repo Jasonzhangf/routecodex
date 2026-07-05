@@ -9,6 +9,7 @@ import {
   planResponsesRecordScopeCleanupWithNative,
   planResponsesRecordScopeEntryMatchWithNative,
   planResponsesPersistedEntryWithNative,
+  planResponsesStoreTokensWithNative,
   planResponsesStoreSweepWithNative,
   planResponsesAttachEntryScopesWithNative,
   planResponsesRebindRequestIdWithNative,
@@ -40,6 +41,7 @@ export function assertResponsesConversationStoreNativeAvailable(): void {
     typeof planResponsesCapturePendingCleanupWithNative !== 'function' ||
     typeof planResponsesConversationPersistenceEligibilityWithNative !== 'function' ||
     typeof planResponsesPersistedEntryWithNative !== 'function' ||
+    typeof planResponsesStoreTokensWithNative !== 'function' ||
     typeof planResponsesRecordScopeCleanupWithNative !== 'function' ||
     typeof planResponsesRecordScopeEntryMatchWithNative !== 'function' ||
     typeof planResponsesStoreSweepWithNative !== 'function' ||
@@ -94,6 +96,16 @@ export function planPersistedEntry(input: {
     reason: plan.reason,
     ...(plan.entry ? { entry: plan.entry as unknown as ConversationEntry } : {})
   };
+}
+
+export function planStoreTokens(input: unknown): {
+  providerKey?: string;
+  sessionId?: string;
+  conversationId?: string;
+  entryKind: 'responses' | 'chat' | 'messages';
+  continuationOwner?: 'direct' | 'relay';
+} {
+  return planResponsesStoreTokensWithNative(input);
 }
 
 export type CapturePendingCleanupCandidate = {

@@ -427,6 +427,25 @@ fn sanitize_string_array(value: Option<&Value>) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn plan_responses_store_tokens(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let provider_key = read_trimmed_string(obj.get("providerKey"))
+        .or_else(|| read_trimmed_string(obj.get("fallbackProviderKey")));
+    let session_id = read_trimmed_string(obj.get("sessionId"));
+    let conversation_id = read_trimmed_string(obj.get("conversationId"));
+    let entry_kind = normalize_entry_kind(obj.get("entryKind"));
+    let continuation_owner = responses_continuation_owner(obj.get("continuationOwner"))
+        .or_else(|| responses_continuation_owner(obj.get("fallbackContinuationOwner")));
+
+    serde_json::json!({
+        "providerKey": provider_key,
+        "sessionId": session_id,
+        "conversationId": conversation_id,
+        "entryKind": entry_kind,
+        "continuationOwner": continuation_owner,
+    })
+}
+
 fn plan_responses_persisted_entry(input: &Value) -> Value {
     let obj = input.as_object().cloned().unwrap_or_default();
     let mode = read_trimmed_string(obj.get("mode")).unwrap_or_else(|| "serialize".to_string());
@@ -1257,7 +1276,8 @@ fn plan_responses_continuation_meta(input: &Value) -> Value {
     }
 
     let meta_owner = responses_continuation_owner(output.get("continuationOwner"));
-    let entry_owner = entry.and_then(|row| responses_continuation_owner(row.get("continuationOwner")));
+    let entry_owner =
+        entry.and_then(|row| responses_continuation_owner(row.get("continuationOwner")));
     if meta_owner.is_none() {
         if let Some(owner) = entry_owner {
             output.insert("continuationOwner".to_string(), Value::String(owner));
@@ -3958,6 +3978,14 @@ pub fn plan_responses_persisted_entry_json(input_json: String) -> NapiResult<Str
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi(js_name = "planResponsesStoreTokensJson")]
+pub fn plan_responses_store_tokens_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_store_tokens(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi_derive::napi(js_name = "planResponsesCapturePendingCleanupJson")]
 pub fn plan_responses_capture_pending_cleanup_json(input_json: String) -> NapiResult<String> {
     let input: Value =
@@ -4325,16 +4353,16 @@ mod tests {
         convert_responses_output_to_input_items, materialize_provider_owned_submit_context,
         materialize_responses_continuation_payload, plan_responses_attach_entry_scopes,
         plan_responses_capture_pending_cleanup, plan_responses_continuation_lookup_by_response_id,
-        plan_responses_continuation_request_action,
+        plan_responses_continuation_meta, plan_responses_continuation_request_action,
         plan_responses_conversation_persistence_eligibility,
         plan_responses_conversation_resume_entry_match, plan_responses_conversation_retention,
         plan_responses_handler_entry, plan_responses_persisted_entry,
         plan_responses_rebind_request_id, plan_responses_record_scope_cleanup,
         plan_responses_record_scope_entry_match, plan_responses_release_request_payload,
         plan_responses_request_context, plan_responses_scope_continuation_match,
-        plan_responses_store_sweep, prepare_responses_conversation_entry,
-        publish_responses_record_plan_json, restore_responses_continuation_payload,
-        resume_responses_conversation_payload,
+        plan_responses_store_sweep, plan_responses_store_tokens,
+        prepare_responses_conversation_entry, publish_responses_record_plan_json,
+        restore_responses_continuation_payload, resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
 
@@ -4674,6 +4702,77 @@ mod tests {
                 }
             }))["reason"],
             "missing_last_response_id"
+        );
+    }
+
+    #[test]
+    fn continuation_meta_plan_fills_missing_store_projection_fields_only() {
+        let merged = plan_responses_continuation_meta(&json!({
+            "meta": {
+                "requestId": "req-current",
+                "providerKey": "meta.provider",
+                "entryKind": "chat"
+            },
+            "entry": {
+                "providerKey": "entry.provider",
+                "continuationOwner": "relay",
+                "entryKind": "responses"
+            }
+        }));
+        assert_eq!(merged["action"], "meta");
+        assert_eq!(merged["meta"]["providerKey"], json!("meta.provider"));
+        assert_eq!(merged["meta"]["entryKind"], json!("chat"));
+        assert_eq!(merged["meta"]["continuationOwner"], json!("relay"));
+        assert_eq!(merged["meta"]["requestId"], json!("req-current"));
+
+        let filled = plan_responses_continuation_meta(&json!({
+            "meta": {},
+            "entry": {
+                "providerKey": " entry.provider ",
+                "continuationOwner": "direct",
+                "entryKind": "messages"
+            }
+        }));
+        assert_eq!(filled["meta"]["providerKey"], json!("entry.provider"));
+        assert_eq!(filled["meta"]["continuationOwner"], json!("direct"));
+        assert_eq!(filled["meta"]["entryKind"], json!("messages"));
+    }
+
+    #[test]
+    fn store_tokens_plan_normalizes_trimmed_tokens_kind_and_owner() {
+        assert_eq!(
+            plan_responses_store_tokens(&json!({
+                "providerKey": " provider.primary ",
+                "fallbackProviderKey": " provider.fallback ",
+                "sessionId": " sess_1 ",
+                "conversationId": " conv_1 ",
+                "entryKind": "messages",
+                "continuationOwner": "invalid",
+                "fallbackContinuationOwner": "relay"
+            })),
+            json!({
+                "providerKey": "provider.primary",
+                "sessionId": "sess_1",
+                "conversationId": "conv_1",
+                "entryKind": "messages",
+                "continuationOwner": "relay"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_store_tokens(&json!({
+                "providerKey": " ",
+                "fallbackProviderKey": " provider.fallback ",
+                "entryKind": "unknown",
+                "continuationOwner": "direct"
+            })),
+            json!({
+                "providerKey": "provider.fallback",
+                "sessionId": null,
+                "conversationId": null,
+                "entryKind": "responses",
+                "continuationOwner": "direct"
+            })
         );
     }
 

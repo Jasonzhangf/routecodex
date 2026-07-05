@@ -1,7 +1,4 @@
 import { evaluateResponsesHostPolicy } from '../responses-host-policy.js';
-import { normalizeMessageReasoningTools } from '../../shared/reasoning-tool-normalizer.js';
-import { createBridgeActionState, runBridgeActionPipeline } from '../../bridge-actions.js';
-import { resolveBridgePolicy, resolvePolicyActions } from '../../bridge-policies.js';
 import {
   consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
   consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases
@@ -15,7 +12,15 @@ import {
   buildResponsesPayloadFromChatWithNative,
   normalizeResponsesToolCallArgumentsForClientWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
-import { normalizeChatResponseReasoningToolsWithNative } from '../../../native/router-hotpath/native-hub-bridge-action-semantics.js';
+import {
+  normalizeChatResponseReasoningToolsWithNative,
+  normalizeMessageReasoningToolsWithNative,
+  runBridgeActionPipelineWithNative
+} from '../../../native/router-hotpath/native-hub-bridge-action-semantics.js';
+import {
+  resolveBridgePolicyActionsWithNative,
+  resolveBridgePolicyWithNative,
+} from '../../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
 function normalizeResponsesToolCallArgumentsForClient(responsesPayload: Record<string, unknown>, context?: ResponsesRequestContext): void {
   const toolsRaw = Array.isArray(context?.toolsRaw) ? (context?.toolsRaw as unknown[]) : [];
@@ -187,46 +192,42 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
     });
   }
   if (message) {
-    try {
-      const bridgePolicy = resolveBridgePolicy({ protocol: 'openai-responses', moduleType: 'openai-responses' });
-      const policyActions = resolvePolicyActions(bridgePolicy, 'response_outbound');
-      if (policyActions?.length) {
-        const actionState = createBridgeActionState({ messages: [message] });
-        runBridgeActionPipeline({
-          stage: 'response_outbound',
-          actions: policyActions,
-          protocol: bridgePolicy?.protocol ?? 'openai-responses',
-          moduleType: bridgePolicy?.moduleType ?? 'openai-responses',
-          requestId: context?.requestId,
-          state: actionState
-        });
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : typeof error === 'string'
-            ? error
-            : 'unknown_error';
-      try {
-        // eslint-disable-next-line no-console
-        console.error(
-          `\x1b[31m[responses-bridge][response_outbound] bridge action pipeline failed requestId=${
-            context?.requestId ?? 'unknown'
-          } error=${errorMessage}\x1b[0m`
-        );
-      } catch {
-        // ignore logging failures
+    const policyActions = resolveBridgePolicyActionsWithNative(
+      resolveBridgePolicyWithNative({ protocol: 'openai-responses', moduleType: 'openai-responses' }),
+      'response_outbound'
+    );
+    if (policyActions?.length) {
+      const actionState = runBridgeActionPipelineWithNative({
+        stage: 'response_outbound',
+        actions: policyActions,
+        protocol: 'openai-responses',
+        moduleType: 'openai-responses',
+        requestId: context?.requestId,
+        state: { messages: [message] }
+      });
+      const nextMessage = Array.isArray(actionState?.messages) ? actionState.messages[0] : undefined;
+      if (nextMessage && typeof nextMessage === 'object' && !Array.isArray(nextMessage)) {
+        for (const key of Object.keys(message)) {
+          if (!Object.prototype.hasOwnProperty.call(nextMessage, key)) {
+            delete message[key];
+          }
+        }
+        Object.assign(message, nextMessage);
       }
     }
   }
   if (message) {
-    try {
-      normalizeMessageReasoningTools(message, {
-        idPrefix: `responses_reasoning_${context?.requestId ?? 'canonical'}`
-      });
-    } catch {
-      // best-effort reasoning normalization
+    const normalizedReasoning = normalizeMessageReasoningToolsWithNative(
+      message,
+      `responses_reasoning_${context?.requestId ?? 'canonical'}`
+    );
+    if (normalizedReasoning?.message && typeof normalizedReasoning.message === 'object' && !Array.isArray(normalizedReasoning.message)) {
+      for (const key of Object.keys(message)) {
+        if (!Object.prototype.hasOwnProperty.call(normalizedReasoning.message, key)) {
+          delete message[key];
+        }
+      }
+      Object.assign(message, normalizedReasoning.message);
     }
   }
   const nativeBuilt = buildResponsesPayloadFromChatWithNative(response as Record<string, unknown>, {

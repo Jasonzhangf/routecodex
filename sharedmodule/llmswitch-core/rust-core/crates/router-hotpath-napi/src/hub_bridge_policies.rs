@@ -444,6 +444,77 @@ pub(crate) fn resolve_bridge_policy_actions_for_tokens(
     resolve_bridge_policy_actions(Some(&policy), stage)
 }
 
+fn read_action_name(action: &Value) -> String {
+    action
+        .as_object()
+        .and_then(|row| row.get("name"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn message_has_tool_signal(message: &Value) -> bool {
+    let Some(row) = message.as_object() else {
+        return false;
+    };
+    if row
+        .get("role")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().eq_ignore_ascii_case("tool"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if row
+        .get("tool_call_id")
+        .and_then(|value| value.as_str())
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    row.get("tool_calls")
+        .and_then(|value| value.as_array())
+        .map(|items| !items.is_empty())
+        .unwrap_or(false)
+}
+
+fn messages_have_tool_signal(messages: Option<&Vec<Value>>) -> bool {
+    messages
+        .map(|items| items.iter().any(message_has_tool_signal))
+        .unwrap_or(false)
+}
+
+pub(crate) fn plan_responses_bridge_policy_actions(input: &Value) -> Value {
+    let actions = match input.get("actions").and_then(|value| value.as_array()) {
+        Some(items) => items,
+        None => return Value::Null,
+    };
+    let stage = input
+        .get("stage")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    let has_tool_signals = messages_have_tool_signal(input.get("messages").and_then(|value| value.as_array()));
+    let mut filtered: Vec<Value> = Vec::new();
+    for action in actions {
+        let name = read_action_name(action);
+        if matches!(stage.as_str(), "request_inbound" | "request_outbound")
+            && name == "reasoning.extract"
+        {
+            continue;
+        }
+        if stage == "request_inbound"
+            && !has_tool_signals
+            && matches!(name.as_str(), "tools.normalize-call-ids" | "tools.ensure-placeholders")
+        {
+            continue;
+        }
+        filtered.push(action.clone());
+    }
+    Value::Array(filtered)
+}
+
 #[napi]
 pub fn resolve_bridge_policy_json(input_json: String) -> NapiResult<String> {
     if input_json.trim().is_empty() {
@@ -467,6 +538,18 @@ pub fn resolve_bridge_policy_actions_json(
     let policy: Value = serde_json::from_str(&policy_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse policy JSON: {}", e)))?;
     let output = resolve_bridge_policy_actions(Some(&policy), &stage);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+#[napi]
+pub fn plan_responses_bridge_policy_actions_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = plan_responses_bridge_policy_actions(&input);
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
@@ -527,5 +610,52 @@ mod tests {
         };
         let policy = resolve_bridge_policy(&input).unwrap();
         assert!(resolve_bridge_policy_actions(Some(&policy), "unknown_stage").is_none());
+    }
+
+    #[test]
+    fn responses_bridge_policy_action_plan_filters_ts_payload_hints() {
+        let input = json!({
+          "stage": "request_inbound",
+          "actions": [
+            { "name": "reasoning.extract" },
+            { "name": "tools.normalize-call-ids" },
+            { "name": "tools.ensure-placeholders" },
+            { "name": "metadata.extra-fields" }
+          ],
+          "messages": [
+            { "role": "user", "content": "hello" }
+          ]
+        });
+        let out = plan_responses_bridge_policy_actions(&input);
+        let names: Vec<String> = out
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(read_action_name)
+            .collect();
+        assert_eq!(names, vec!["metadata.extra-fields"]);
+    }
+
+    #[test]
+    fn responses_bridge_policy_action_plan_keeps_tool_actions_when_tool_signal_exists() {
+        let input = json!({
+          "stage": "request_inbound",
+          "actions": [
+            { "name": "reasoning.extract" },
+            { "name": "tools.normalize-call-ids" },
+            { "name": "tools.ensure-placeholders" }
+          ],
+          "messages": [
+            { "role": "assistant", "tool_calls": [{ "id": "call_1" }] }
+          ]
+        });
+        let out = plan_responses_bridge_policy_actions(&input);
+        let names: Vec<String> = out
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(read_action_name)
+            .collect();
+        assert_eq!(names, vec!["tools.normalize-call-ids", "tools.ensure-placeholders"]);
     }
 }

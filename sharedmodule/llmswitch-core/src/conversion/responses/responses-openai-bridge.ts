@@ -30,6 +30,11 @@ import {
   resolveResponsesBridgeToolsWithNative,
   runBridgeActionPipelineWithNative
 } from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
+import {
+  resolveBridgePolicyActionsWithNative,
+  resolveBridgePolicyWithNative,
+  planResponsesBridgePolicyActionsWithNative
+} from '../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
 import type {
   BuildChatRequestResult,
   BuildResponsesRequestResult,
@@ -41,8 +46,6 @@ export type {
   ResponsesRequestContext
 } from './responses-openai-bridge/types.js';
 
-// --- Utilities (ported strictly) ---
-import { resolveBridgePolicy, resolvePolicyActions } from '../bridge-policies.js';
 import { logHubStageTiming } from '../hub/pipeline/hub-stage-timing.js';
 import {
   RESPONSES_TOOL_PASSTHROUGH_KEYS,
@@ -97,56 +100,6 @@ function runNativeResponsesBridgePipeline(input: {
         ? (output.metadata as Record<string, unknown>)
         : undefined
   };
-}
-
-function filterRedundantResponsesReasoningAction(
-  actions: Array<{ name: string; options?: Record<string, unknown> }> | undefined
-): Array<{ name: string; options?: Record<string, unknown> }> | undefined {
-  return actions?.filter((action) => {
-    const name = typeof action?.name === 'string' ? action.name.trim().toLowerCase() : '';
-    return name !== 'reasoning.extract';
-  });
-}
-
-function hasToolSignalsInMessages(messages: Array<Record<string, unknown>>): boolean {
-  for (const message of messages) {
-    if (!message || typeof message !== 'object') {
-      continue;
-    }
-    const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
-    if (role === 'tool') {
-      return true;
-    }
-    if (typeof message.tool_call_id === 'string' && message.tool_call_id.trim().length) {
-      return true;
-    }
-    const toolCalls = (message as Record<string, unknown>).tool_calls;
-    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function filterResponsesInboundActionsByPayloadHints(
-  actions: Array<{ name: string; options?: Record<string, unknown> }> | undefined,
-  messages: Array<Record<string, unknown>>
-): Array<{ name: string; options?: Record<string, unknown> }> | undefined {
-  if (!actions?.length) {
-    return actions;
-  }
-  const hasToolSignals = hasToolSignalsInMessages(messages);
-  if (hasToolSignals) {
-    return actions;
-  }
-  const toolOnlyActions = new Set([
-    'tools.normalize-call-ids',
-    'tools.ensure-placeholders'
-  ]);
-  return actions.filter((action) => {
-    const name = typeof action?.name === 'string' ? action.name.trim().toLowerCase() : '';
-    return !toolOnlyActions.has(name);
-  });
 }
 
 function readPreviousResponseIdFromChatSemantics(chat: Record<string, unknown>): string {
@@ -326,21 +279,22 @@ export function buildChatRequestFromResponses(
     elapsedMs: Date.now() - convertStart,
     forceLog: true
   });
-  const bridgePolicy = resolveBridgePolicy({ protocol: 'openai-responses', moduleType: 'openai-responses' });
-  const policyActions = filterResponsesInboundActionsByPayloadHints(
-    filterRedundantResponsesReasoningAction(
-      resolvePolicyActions(bridgePolicy, 'request_inbound')
+  const policyActions = planResponsesBridgePolicyActionsWithNative({
+    stage: 'request_inbound',
+    actions: resolveBridgePolicyActionsWithNative(
+      resolveBridgePolicyWithNative({ protocol: 'openai-responses', moduleType: 'openai-responses' }),
+      'request_inbound'
     ),
     messages
-  );
+  });
   if (policyActions?.length) {
     logHubStageTiming(requestId, 'req_inbound.responses.inbound_policy', 'start');
     const policyStart = Date.now();
     const actionState = runNativeResponsesBridgePipeline({
       stage: 'request_inbound',
       actions: policyActions,
-      protocol: (bridgePolicy?.protocol ?? 'openai-responses') as 'openai-responses',
-      moduleType: (bridgePolicy?.moduleType ?? 'openai-responses') as 'openai-responses',
+      protocol: 'openai-responses',
+      moduleType: 'openai-responses',
       requestId: context.requestId,
       messages,
       capturedToolResults: readCapturedToolResults(context),
@@ -429,16 +383,20 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
 
   let messages: any[] = Array.isArray(chat.messages) ? chat.messages as any[] : [];
   let bridgeMetadata: Record<string, unknown> | undefined;
-  const bridgePolicy = resolveBridgePolicy({ protocol: 'openai-responses', moduleType: 'openai-responses' });
-  const policyActions = filterRedundantResponsesReasoningAction(
-    resolvePolicyActions(bridgePolicy, 'request_outbound')
-  );
+  const policyActions = planResponsesBridgePolicyActionsWithNative({
+    stage: 'request_outbound',
+    actions: resolveBridgePolicyActionsWithNative(
+      resolveBridgePolicyWithNative({ protocol: 'openai-responses', moduleType: 'openai-responses' }),
+      'request_outbound'
+    ),
+    messages: messages as Array<Record<string, unknown>>
+  });
   if (policyActions?.length) {
     const actionState = runNativeResponsesBridgePipeline({
       stage: 'request_outbound',
       actions: policyActions,
-      protocol: (bridgePolicy?.protocol ?? 'openai-responses') as 'openai-responses',
-      moduleType: (bridgePolicy?.moduleType ?? 'openai-responses') as 'openai-responses',
+      protocol: 'openai-responses',
+      moduleType: 'openai-responses',
       requestId: ctx?.requestId,
       messages,
       rawRequest: chat as Record<string, unknown>
