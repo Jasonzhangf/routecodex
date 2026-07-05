@@ -28,23 +28,18 @@ for (const forbidden of [
   }
 }
 
-for (const required of [
-  'evaluateResponsesDirectRouteDecisionNative',
-]) {
-  if (!directPayload.includes(required)) {
-    failures.push(`direct payload missing route decision hook: ${required}`);
-  }
-}
-
 for (const forbidden of [
   'validateResponsesDirectToolShapeContractNative',
   'resolveResponsesDirectPayloadNative',
   'applyResponsesDirectRouteParamsOverrideNative',
   'buildResponsesDirectPassthroughBodyNative',
   'hasDeclaredApplyPatchToolNative',
+  'evaluateResponsesDirectRouteDecisionNative',
+  'evaluateDirectRouteDecision',
+  'findResponsesDirectFunctionCallOutputContentViolation',
 ]) {
   if (directPayload.includes(forbidden)) {
-    failures.push(`direct payload must not retain direct body builder/raw replay/runtime validator path: ${forbidden}`);
+    failures.push(`direct payload must not retain direct body builder/raw replay/runtime preflight path: ${forbidden}`);
   }
 }
 

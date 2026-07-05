@@ -1639,7 +1639,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Rust now owns the contract; direct/provider guards must remain thin shells around the native validator, shared direct passthrough body builder, shared direct route decision helper, shared `apply_patch` relay detector, and shared direct routeParams override helper."
+      - "Rust owns route/apply_patch decision helpers where they are explicitly used, but live direct passthrough must keep `requireDirectPassthroughPayloadObject()` payload-only and must not call provider-wire validators before provider dispatch."
       - "same-protocol direct skip/relay regressions for `apply_patch` servertool mode and Responses custom `apply_patch` declarations must remain in CI, not local-only route tests."
       - "Raw direct replay payload selection and stream lift are part of the same Rust-owned direct contract and must not reappear in TS."
 

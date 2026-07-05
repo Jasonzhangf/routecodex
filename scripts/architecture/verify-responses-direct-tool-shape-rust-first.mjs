@@ -38,7 +38,6 @@ for (const forbidden of [
 }
 
 for (const expected of [
-  'evaluateDirectRouteDecision',
   'evaluateResponsesDirectRouteDecisionNative',
   'evaluate_responses_direct_route_decision_json',
   'has_declared_apply_patch_tool_json',
@@ -48,8 +47,8 @@ for (const expected of [
   }
 }
 
-if (!directSource.includes('evaluateResponsesDirectRouteDecisionNative')) {
-  failures.push('direct passthrough helper must call evaluateResponsesDirectRouteDecisionNative');
+if (directSource.includes('evaluateResponsesDirectRouteDecisionNative') || directSource.includes('evaluateDirectRouteDecision')) {
+  failures.push('direct passthrough helper must not call native direct decision as provider-wire preflight');
 }
 if (!nativeTsSource.includes('hasDeclaredApplyPatchToolWithNative')) {
   failures.push('native TS bridge must expose hasDeclaredApplyPatchToolWithNative');

@@ -65,13 +65,8 @@ import {
 } from './router-direct-failure-snapshot.js';
 import {
   requireDirectPassthroughPayloadObject,
-  findResponsesDirectFunctionCallOutputContentViolation,
 } from './direct-passthrough-payload.js';
 import { buildDirectProviderRuntimeMetadata } from './direct-runtime-metadata.js';
-import {
-  annotateAsHostPayloadContractError,
-  buildDirectPayloadContractError,
-} from '../../../providers/core/runtime/responses-direct-contract-error.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
 import { processProviderResolveFailure } from './executor/request-executor-provider-resolve-failure.js';
@@ -147,7 +142,7 @@ import {
   stopSessionDaemonInjectLoop
 } from './http-server-session-daemon.js';
 import { setupRuntime } from './http-server-runtime-setup.js';
-import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
+import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-types.js';
 import {
   initializeProviderRuntimes,
   createProviderHandle,
@@ -1496,20 +1491,6 @@ export class RouteCodexHttpServer {
 
     const rawDirectPayload = requireDirectPassthroughPayloadObject(input.body);
     const inboundProtocol = resolveInboundProtocolFromEntryPath(input.entryEndpoint);
-    const directPayloadViolation = inboundProtocol === 'openai-responses'
-      ? findResponsesDirectFunctionCallOutputContentViolation(rawDirectPayload)
-      : undefined;
-    if (directPayloadViolation) {
-      throw annotateAsHostPayloadContractError(
-        buildDirectPayloadContractError(
-          directPayloadViolation,
-          {
-            reason: directPayloadViolation,
-            inboundProtocol,
-          },
-        ),
-      );
-    }
     const routingPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
     const routerEngine = routingPipeline?.getVirtualRouter?.();
     if (!routerEngine || typeof routerEngine.route !== 'function') {

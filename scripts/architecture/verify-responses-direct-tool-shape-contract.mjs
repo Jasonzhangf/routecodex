@@ -20,25 +20,27 @@ const ciJest = read('scripts/tests/ci-jest.mjs');
 const directSpec = readIfExists('tests/server/runtime/http-server/direct-passthrough-payload.spec.ts');
 const providerSpec = readIfExists('tests/providers/core/runtime/protocol-http-providers.unit.test.ts');
 const serverIndex = read('src/server/runtime/http-server/index.ts');
-const directPayloadModule = read('src/server/runtime/http-server/direct-passthrough-payload.ts');
 const pkg = read('package.json');
 
 if (!directPayload.includes('requireDirectPassthroughPayloadObject')) {
   failures.push('direct payload contract missing invariant: requireDirectPassthroughPayloadObject');
 }
-if (!directPayload.includes('findResponsesDirectFunctionCallOutputContentViolation')) {
-  failures.push('direct payload contract missing invariant: findResponsesDirectFunctionCallOutputContentViolation');
-}
-if (!serverIndex.includes('findResponsesDirectFunctionCallOutputContentViolation')) {
-  failures.push('router direct wire guard missing anchor: findResponsesDirectFunctionCallOutputContentViolation');
-}
-
-for (const required of [
+for (const forbidden of [
+  'findResponsesDirectFunctionCallOutputContentViolation',
   'evaluateDirectRouteDecision',
   'evaluateResponsesDirectRouteDecisionNative',
 ]) {
-  if (!directPayload.includes(required)) {
-    failures.push(`direct passthrough must run Rust route decision helper: ${required}`);
+  if (directPayload.includes(forbidden)) {
+    failures.push(`direct payload helper must not run provider-wire preflight: ${forbidden}`);
+  }
+}
+for (const forbidden of [
+  'findResponsesDirectFunctionCallOutputContentViolation',
+  'buildDirectPayloadContractError',
+  'annotateAsHostPayloadContractError',
+]) {
+  if (serverIndex.includes(forbidden)) {
+    failures.push(`router direct must not preflight Responses provider wire shape: ${forbidden}`);
   }
 }
 
@@ -57,8 +59,12 @@ if (directSpec && !directSpec.includes('allows chat-style function tools on resp
   failures.push('direct passthrough spec must assert same-protocol chat-style client tools stay on direct');
 }
 
-if (directSpec && !directSpec.includes('rejects historical responses tool input content on direct')) {
-  failures.push('direct passthrough spec must assert invalid historical tool content stays fail-fast on direct');
+if (directSpec && !directSpec.includes('keeps historical responses tool input content on direct without wire-shape preflight')) {
+  failures.push('direct passthrough spec must assert historical tool content is not preflighted on direct');
+}
+
+if (directSpec && directSpec.includes('evaluateResponsesDirectRouteDecisionJson JSON stringify failed')) {
+  failures.push('direct passthrough spec must not lock native stringify failure as expected behavior');
 }
 
 if (providerSpec && !providerSpec.includes('direct passthrough sends chat-style response tools to transport')) {

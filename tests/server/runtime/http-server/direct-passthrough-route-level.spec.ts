@@ -343,6 +343,98 @@ describe('direct passthrough route-level', () => {
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
   });
 
+  it('router same-protocol direct does not preflight Responses tool-output wire shape', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    let sentPayload: Record<string, unknown> | undefined;
+    const providerHandle = {
+      runtimeKey: 'dbittai-gpt.key1.gpt-5.3-codex',
+      providerId: 'dbittai-gpt',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      runtime: {},
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, body: { ok: true } };
+        },
+        processIncomingDirect: async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, body: { ok: true, direct: true } };
+        },
+      },
+    };
+
+    const routerRoute = jest.fn(() => ({
+      target: {
+        providerKey: 'dbittai-gpt.key1.gpt-5.3-codex',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: providerHandle.runtimeKey,
+        modelId: 'gpt-5.3-codex',
+      },
+      decision: { routeName: 'default', pool: ['dbittai-gpt.key1.gpt-5.3-codex'] },
+      diagnostics: {},
+    }));
+    (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
+      getVirtualRouter: jest.fn(() => ({ route: routerRoute })),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['default', (server as any).hubPipeline]
+    ]);
+
+    const directBody = {
+      model: 'gpt-5.3-codex',
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: 'ok',
+          content: [{ type: 'output_text', text: 'historical provider-owned shape' }],
+        },
+      ],
+    };
+
+    const directResult = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5520,
+        host: '0.0.0.0',
+        mode: 'router',
+        routingPolicyGroup: 'default',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_no_responses_wire_preflight',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: directBody,
+        metadata: {},
+      },
+    );
+
+    expect(directResult.used).toBe(true);
+    expect(sentPayload).toEqual(directBody);
+    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(routerRoute).toHaveBeenCalledTimes(1);
+  });
+
   it('router direct keeps runtime carrier after model override clones payload', async () => {
     jest.resetModules();
     const { executeRouterDirectPipeline } = await import('../../../../src/server/runtime/http-server/router-direct-pipeline.js');

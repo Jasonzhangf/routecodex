@@ -1,7 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
-  findResponsesDirectFunctionCallOutputContentViolation,
   requireDirectPassthroughPayloadObject,
 } from '../../../../src/server/runtime/http-server/direct-passthrough-payload.js';
 
@@ -18,10 +17,9 @@ describe('direct-passthrough-payload', () => {
 
     expect(resolved).toBe(body);
     expect(resolved).toEqual(body);
-    expect(findResponsesDirectFunctionCallOutputContentViolation(resolved)).toBeUndefined();
   });
 
-  it('rejects historical responses tool input content on direct', () => {
+  it('keeps historical responses tool input content on direct without wire-shape preflight', () => {
     const body = {
       model: 'gpt-5.5',
       input: [
@@ -39,9 +37,6 @@ describe('direct-passthrough-payload', () => {
 
     expect(result).toBe(body);
     expect(result).toEqual(body);
-    expect(findResponsesDirectFunctionCallOutputContentViolation(result)).toBe(
-      'openai-responses provider wire input[1] function_call_output must not include content; use output only',
-    );
   });
 
   it('does not evaluate stopless relay decisions in direct payload helper', () => {
@@ -51,7 +46,6 @@ describe('direct-passthrough-payload', () => {
     };
 
     expect(requireDirectPassthroughPayloadObject(body)).toBe(body);
-    expect(findResponsesDirectFunctionCallOutputContentViolation(body)).toBeUndefined();
   });
 
   it('keeps cyclic metadata out of direct payload helper', () => {
@@ -73,10 +67,9 @@ describe('direct-passthrough-payload', () => {
     metadata.self = metadata;
 
     expect(requireDirectPassthroughPayloadObject(body)).toBe(body);
-    expect(findResponsesDirectFunctionCallOutputContentViolation(body)).toBeUndefined();
   });
 
-  it('fails fast when native direct decision sees non-JSON payload carriers', () => {
+  it('keeps non-JSON internal carriers out of payload helper decisions', () => {
     const body: Record<string, unknown> = {
       model: 'gpt-5.5',
       input: [
@@ -93,9 +86,6 @@ describe('direct-passthrough-payload', () => {
     body.__rt = body;
 
     expect(requireDirectPassthroughPayloadObject(body)).toBe(body);
-    expect(() => findResponsesDirectFunctionCallOutputContentViolation(body)).toThrow(
-      'evaluateResponsesDirectRouteDecisionJson JSON stringify failed',
-    );
   });
 
   it('fails fast when direct payload is not an object', () => {

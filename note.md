@@ -25393,3 +25393,24 @@ Complete SSE rustification status (34 TS files):
 - Change: `hub.response_post_servertool_client_projection` map was corrected to Rust crate scope because the feature spans `hub_pipeline_lib/effect_plan.rs` effect planning and `hub_resp_outbound_client_semantics_blocks/responses_payload.rs` client projection. This fixes source-anchor and canonical-builder coverage without changing runtime code.
 - Verification evidence: `verify:architecture-ts-owner-ban` PASS; `verify:architecture-feature-anchor-coverage` PASS; `verify:function-map-canonical-builder-definitions` PASS; `verify:architecture-mainline-call-map` PASS; full `verify:function-map-compile-gate` PASS.
 - Boundary: this slice is architecture map/gate classification only. No runtime implementation, live install/restart, or upstream replay was claimed.
+
+# 2026-07-05: responses-direct-no-wire-preflight-stackfix-20260705
+
+- Symptom: live 5520 `/v1/responses` direct request failed with `[llmswitch-bridge] evaluateResponsesDirectRouteDecisionJson JSON stringify failed: Maximum call stack size exceeded`.
+- Root cause: router same-protocol direct path called `findResponsesDirectFunctionCallOutputContentViolation()` before provider dispatch. That helper called native `evaluateResponsesDirectRouteDecisionNative()`, which JSON-stringified live payload/control carriers and could stack-overflow on cyclic or oversized request-adjacent objects.
+- Contract owner: `responses.direct_tool_shape_contract`. Same-protocol direct must keep the current request body as provider wire; server direct may require an object body, but must not provider-wire preflight, sanitize, repair historical `function_call_output`, replay raw metadata, or force relay for tool shape.
+- Change:
+  - Removed server direct provider-wire preflight from `src/server/runtime/http-server/index.ts`.
+  - Reduced `direct-passthrough-payload.ts` to payload object-boundary only.
+  - Deleted dead `responses-direct-contract-error.ts`.
+  - Added route-level regression proving historical Responses tool-output shape is passed through direct unchanged and HubPipeline is not executed.
+  - Updated direct gates and mainline map/manifest/wiki for `responses.direct_passthrough.mainline`.
+- Evidence:
+  - Focused red evidence: new route-level test failed on old preflight with historical tool-output contract error.
+  - Focused green: direct payload spec + new route-level test passed.
+  - Gates passed: `verify:responses-direct-tool-shape-contract`, `verify:responses-direct-tool-shape-rust-first`, `verify:responses-direct-tool-shape-native-availability`, `verify:responses-direct-tool-shape-no-ts-fallback`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, touched-file `git diff --check`.
+  - Release evidence: `build:base`, `pack:rcc`, `verify:rcc-release-install`, global install of `routecodex/rcc 0.90.3591`, `rcc restart --port 5520`, `/health` ready on 5520/4444/5555/10000, `/daemon/auth/status authRequired:false`.
+  - Live smoke: same-entry `/v1/responses` with `function_call_output.content` returned HTTP 200; post-restart logs had no new `evaluateResponsesDirectRouteDecisionJson` / stack overflow hits.
+- Boundary:
+  - Exact failed request sample directory for request `...3225` was not present; replay used same-entry same-shape smoke.
+  - Broad unrelated Jest suites still have existing failures outside this direct-preflight slice.

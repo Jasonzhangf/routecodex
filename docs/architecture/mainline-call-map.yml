@@ -276,6 +276,37 @@ chains:
         status: anchored
         note: "Req-05 is anchored at the native/Rust compat boundary: TS normalizes only the optional profile token and invokes `runReqOutboundStage3CompatWithNative`, while `run_req_outbound_stage3_compat_json` owns provider wire compatibility. Locked by `verify:responses-request-compat-rust-only` and `build:base`."
 
+  - chain_id: responses.direct_passthrough.mainline
+    summary: "Responses same-protocol direct keeps the current request body as provider wire, uses Virtual Router only for target selection, and must not preflight, sanitize, repair, or replay historical tool shape in the server layer."
+    entry_contract:
+      node: ServerReqInbound01ClientRaw
+      owner_doc: docs/architecture/wiki/responses-direct-relay-map.md
+    edges:
+      - step_id: rdp-01
+        from_node: ServerReqInbound01ClientRaw
+        to_node: VrRoute04SelectedTarget
+        caller_symbol: executeRouterDirectPipelineForPort
+        caller_file: src/server/runtime/http-server/index.ts
+        callee_symbol: route
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/core.rs
+        owner_feature_id: responses.direct_tool_shape_contract
+        semantic_input: "current request body object plus request-scoped runtime control metadata"
+        semantic_output: "Virtual Router selected target for direct provider dispatch"
+        status: anchored
+        note: "The server direct path may require that the body is an object, but it must not call Responses provider-wire validators, sanitize function_call_output history, or rebuild from raw metadata before VR selection."
+      - step_id: rdp-02
+        from_node: VrRoute04SelectedTarget
+        to_node: ProviderReqOutbound06WirePayload
+        caller_symbol: executeRouterDirectPipelineForPort
+        caller_file: src/server/runtime/http-server/index.ts
+        callee_symbol: executeRouterDirectPipeline
+        callee_file: src/server/runtime/http-server/router-direct-pipeline.ts
+        owner_feature_id: responses.direct_tool_shape_contract
+        semantic_input: "selected direct target plus the same current request body object"
+        semantic_output: "provider direct send payload with direct runtime metadata carrier only"
+        status: anchored
+        note: "Provider/runtime owns any provider-specific rejection. Direct passthrough must not force relay or fail-fast because of historical Responses tool-output shape."
+
   - chain_id: response.mainline
     summary: "Provider response enters Hub, gets governed, then projects to client protocol and server frame."
     entry_contract:

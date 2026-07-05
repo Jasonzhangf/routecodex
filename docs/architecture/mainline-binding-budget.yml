@@ -29,6 +29,16 @@ chains:
     note: >
       Request mainline is fully anchored through provider wire compatibility;
       req_outbound stage3 compat is Rust-owned and TS remains a native bridge.
+  - chain_id: responses.direct_passthrough.mainline
+    expected_total_edges: 2
+    min_anchored_edges: 2
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Responses same-protocol direct is fully anchored: server route selection
+      and provider direct dispatch must keep the current request body as the
+      provider wire payload without provider-wire preflight, repair, sanitize,
+      raw replay, or forced relay.
   - chain_id: response.mainline
     expected_total_edges: 4
     min_anchored_edges: 4

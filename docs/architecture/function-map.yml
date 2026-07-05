@@ -2549,6 +2549,7 @@ owners:
       - "Direct/provider-direct/router-direct is same-protocol passthrough plus hooks only; live request body identity is preserved."
       - "Deleted old direct body builder, raw replay, route-params builder, and runtime tool-shape validator exports must stay deleted."
       - "Direct route decision may detect apply_patch for routing hooks, but must not validate Responses wire shape or force Hub relay for normal tools."
+      - "`src/server/runtime/http-server/direct-passthrough-payload.ts` is payload-object boundary only; router-direct must not call direct route decision helpers as provider-wire preflight."
       - "same-protocol direct `apply_patch` declaration detection for servertool-mode relay must stay in Rust, not in `http-server/index.ts`."
       - "Direct must not read `metadata.__raw_request_body`, snapshot, context, or history to rebuild request payload."
       - "Historical tool-shape repair belongs in Hub/req_outbound compat, never in direct passthrough."

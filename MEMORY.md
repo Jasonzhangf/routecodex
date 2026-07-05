@@ -881,3 +881,12 @@
 - `conversion.responses.store` detach decisions for `clearUnresolvedRequests()` and `prune()` are owned by Rust `planResponsesStoreSweepJson` in `shared_responses_conversation_utils.rs`.
 - TS `responses-conversation-store.ts` may project `requestMap` candidates and execute native-selected `detachRequestIds`, but it must not regain unresolved-only cleanup, TTL expiry cleanup, invalid-mode fallback, or dedupe rules for lifecycle sweep.
 - Verified evidence on 2026-07-05: Rust `store_sweep` test, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 66/66, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8351`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses direct passthrough must not provider-wire preflight live bodies
+
+- Marker: responses-direct-no-wire-preflight-stackfix-20260705.
+- Live failure signature: `/v1/responses` on router same-protocol direct fails before provider dispatch with `[llmswitch-bridge] evaluateResponsesDirectRouteDecisionJson JSON stringify failed: Maximum call stack size exceeded`.
+- Durable rule: `src/server/runtime/http-server/direct-passthrough-payload.ts` is only a payload-object boundary. The router direct path must keep the current request body as provider wire and must not call `evaluateResponsesDirectRouteDecisionNative()` or any provider-wire shape validator as a live preflight.
+- Provider-specific or historical Responses tool-output shape rejection belongs to the provider/runtime or Hub relay owner that actually transforms the protocol. Server same-protocol direct must not sanitize, repair, force relay, replay raw metadata, or fail-fast because of historical `function_call_output.content`.
+- Verified closeout on 2026-07-05: focused route-level red/green test, direct payload spec, direct architecture gates, function-map gate, mainline-call-map gate, `build:base`, `pack:rcc`, `verify:rcc-release-install`, global `routecodex/rcc 0.90.3591` install, managed `rcc restart --port 5520`, all configured `/health` endpoints ready, and live same-shape `/v1/responses` smoke returned HTTP 200 with no new post-restart stack-overflow logs.
+- Caveat: the exact original request sample directory for `...3225` was unavailable; replay used the same entry and same problematic body shape.

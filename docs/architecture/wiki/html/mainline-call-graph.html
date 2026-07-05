@@ -264,6 +264,29 @@
         <tr><td>req-05</td><td><code>HubReqOutbound05ProviderSemantic -&gt; ProviderReqOutbound06WirePayload</code></td><td>anchored</td><td><code>runReqOutboundStage3CompatWithNative -&gt; run_req_outbound_stage3_compat_json</code></td><td></td><td><code>responses.request_compat_normalization</code>&lt;br/&gt;Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only</td></tr>
         </tbody>
         </table>
+        <h2>responses.direct_passthrough.mainline</h2>
+        <p>Responses same-protocol direct keeps the current request body as provider wire, uses Virtual Router only for target selection, and must not preflight, sanitize, repair, or replay historical tool shape in the server layer.</p>
+        <p>Entry contract: <code>ServerReqInbound01ClientRaw</code> via <code>docs/architecture/wiki/responses-direct-relay-map.md</code></p>
+        <pre class="mermaid">flowchart LR
+          ProviderReqOutbound06WirePayload[&quot;ProviderReqOutbound06WirePayload&quot;]
+          VrRoute04SelectedTarget[&quot;VrRoute04SelectedTarget&quot;]
+          ServerReqInbound01ClientRaw[&quot;ServerReqInbound01ClientRaw&quot;]
+          ServerReqInbound01ClientRaw --&gt;|rdp-01| VrRoute04SelectedTarget
+          VrRoute04SelectedTarget --&gt;|rdp-02| ProviderReqOutbound06WirePayload
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class ServerReqInbound01ClientRaw anchored;
+          class VrRoute04SelectedTarget anchored;
+          class ProviderReqOutbound06WirePayload anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>rdp-01</td><td><code>ServerReqInbound01ClientRaw -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>executeRouterDirectPipelineForPort -&gt; route</code></td><td></td><td><code>responses.direct_tool_shape_contract</code>&lt;br/&gt;Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape</td></tr>
+        <tr><td>rdp-02</td><td><code>VrRoute04SelectedTarget -&gt; ProviderReqOutbound06WirePayload</code></td><td>anchored</td><td><code>executeRouterDirectPipelineForPort -&gt; executeRouterDirectPipeline</code></td><td></td><td><code>responses.direct_tool_shape_contract</code>&lt;br/&gt;Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape</td></tr>
+        </tbody>
+        </table>
         <h2>response.mainline</h2>
         <p>Provider response enters Hub, gets governed, then projects to client protocol and server frame.</p>
         <p>Entry contract: <code>ProviderRespInbound01Raw</code> via <code>docs/design/pipeline-type-topology-and-module-boundaries.md</code></p>
