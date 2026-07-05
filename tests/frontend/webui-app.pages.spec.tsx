@@ -3,10 +3,8 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import {
-  ControlPage,
   ProviderPage,
-  RoutingPage,
-  StatsPage
+  RoutingPage
 } from '../../webui/src/App';
 
 type JsonRecord = Record<string, unknown>;
@@ -147,73 +145,8 @@ function installPageFetchMock() {
         path: '/tmp/config.json'
       });
     }
-    if (path === '/daemon/control/mutate' && method === 'POST') {
-      return json({ ok: true, action: body.action || 'unknown' });
-    }
     if (path === '/config/routing' && method === 'GET') {
       return json({ routing: { default: [{ targets: ['demo.default.demo-max'] }] } });
-    }
-
-    if (path === '/daemon/stats' && method === 'GET') {
-      return json({
-        session: {
-          totals: [
-            {
-              providerKey: 'demo.default.demo-max',
-              model: 'demo-max',
-              requestCount: 9,
-              errorCount: 1,
-              totalPromptTokens: 100,
-              totalCompletionTokens: 200,
-              totalOutputTokens: 300
-            }
-          ]
-        },
-        historical: {
-          totals: [
-            {
-              providerKey: 'demo.default.demo-max',
-              model: 'demo-max',
-              requestCount: 99,
-              errorCount: 5,
-              totalPromptTokens: 1000,
-              totalCompletionTokens: 2000,
-              totalOutputTokens: 3000
-            }
-          ]
-        },
-        totals: {
-          session: {
-            requestCount: 9,
-            errorCount: 1,
-            totalPromptTokens: 100,
-            totalCompletionTokens: 200,
-            totalOutputTokens: 300
-          },
-          historical: {
-            requestCount: 99,
-            errorCount: 5,
-            totalPromptTokens: 1000,
-            totalCompletionTokens: 2000,
-            totalOutputTokens: 3000
-          }
-        }
-      });
-    }
-
-    if (path === '/daemon/control/snapshot' && method === 'GET') {
-      return json({
-        ok: true,
-        nowMs: Date.now(),
-        servers: [{ port: 3000, version: 'test', ready: true, pids: [123] }],
-        quota: {
-          providers: [{ providerKey: 'demo.default.demo-max', inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null }]
-        },
-        serverTool: {
-          state: { enabled: true, updatedAtMs: Date.now(), updatedBy: 'test' },
-          stats: { executions: 3, success: 2, failure: 1, scannedLines: 10, byTool: [], recent: [] }
-        }
-      });
     }
 
     return json({});
@@ -264,19 +197,4 @@ describe('webui page-level coverage', () => {
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
     routingView.unmount();
   });
-
-  it('renders and interacts with stats/control pages', async () => {
-    const hasToast = (needle: string) => onToast.mock.calls.some(([msg]) => String(msg).includes(needle));
-    const statsView = render(<StatsPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('Stats Management')).toBeTruthy());
-    expect(screen.getByText('Token Usage (Session + Historical)')).toBeTruthy();
-    statsView.unmount();
-
-    const controlView = render(<ControlPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('Control Plane')).toBeTruthy());
-    onToast.mockClear();
-    fireEvent.click(screen.getByText('Restart All Servers'));
-    await waitFor(() => expect(hasToast('servers.restart done.')).toBe(true));
-    controlView.unmount();
-
 });

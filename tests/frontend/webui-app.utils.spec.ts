@@ -70,8 +70,8 @@ describe('webui App utilities', () => {
 
     const targets = extractRoutingTargets(routing);
     expect(Array.from(targets).sort()).toEqual([
-      'mock.provider.model-a',
       'demo',
+      'mock.provider.model-a',
       'tab',
       'tab.work.gpt-4'
     ]);
@@ -91,9 +91,9 @@ describe('webui App utilities', () => {
 
     const resolved = resolveRoutedProviderKeys(targets, providers);
     expect(Array.from(resolved).sort()).toEqual([
-      'mock.provider.model-a',
       'demo.default.demo-max',
       'demo.work.demo-plus',
+      'mock.provider.model-a',
       'tab.key1.gpt-5',
       'tab.work.gpt-4'
     ]);

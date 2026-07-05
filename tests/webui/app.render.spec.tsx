@@ -1,11 +1,9 @@
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import {
-  AdvancedPage,
   App,
   ProviderPage,
-  RoutingPage,
-  StatsPage
+  RoutingPage
 } from '../../webui/src/App';
 
 describe('webui render smoke', () => {
@@ -28,11 +26,5 @@ describe('webui render smoke', () => {
 
     const routing = renderToString(<RoutingPage {...common} />);
     expect(routing).toContain('Routing Management');
-
-    const stats = renderToString(<StatsPage {...common} />);
-    expect(stats).toContain('Stats Management');
-
-    const advancedControl = renderToString(<AdvancedPage {...common} tab="control" />);
-    expect(advancedControl).toContain('Control Plane');
   });
 });

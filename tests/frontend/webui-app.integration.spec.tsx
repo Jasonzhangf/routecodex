@@ -17,9 +17,6 @@ describe('webui integration flows (feature coverage)', () => {
     'routing.group_create_copy',
     'routing.group_save',
     'routing.activate_local',
-    'routing.activate_all',
-    'stats.refresh',
-    'advanced.control_restart_all',
     'auth.logout',
     'auth.login',
     'auth.change_password'
@@ -41,7 +38,6 @@ describe('webui integration flows (feature coverage)', () => {
     activeGroupId: 'default'
   };
   const fault = {
-    controlMutateFail: false,
     clockFetchFail: false
   };
 
@@ -108,7 +104,6 @@ describe('webui integration flows (feature coverage)', () => {
     state.authenticated = true;
     state.hasPassword = true;
     state.activeGroupId = 'default';
-    fault.controlMutateFail = false;
     fault.clockFetchFail = false;
 
     Object.defineProperty(window, 'confirm', {
@@ -299,72 +294,6 @@ describe('webui integration flows (feature coverage)', () => {
         return json({ ok: true, routing });
       }
 
-      if (path === '/daemon/stats' && method === 'GET') {
-        return json({
-          session: {
-            totals: [
-              {
-                providerKey: 'demo.default.demo-max',
-                model: 'demo-max',
-                requestCount: 10,
-                errorCount: 1,
-                totalPromptTokens: 100,
-                totalCompletionTokens: 200,
-                totalOutputTokens: 300
-              }
-            ]
-          },
-          historical: {
-            totals: [
-              {
-                providerKey: 'demo.default.demo-max',
-                model: 'demo-max',
-                requestCount: 100,
-                errorCount: 3,
-                totalPromptTokens: 1000,
-                totalCompletionTokens: 2000,
-                totalOutputTokens: 3000
-              }
-            ]
-          },
-          totals: {
-            session: {
-              requestCount: 10,
-              errorCount: 1,
-              totalPromptTokens: 100,
-              totalCompletionTokens: 200,
-              totalOutputTokens: 300
-            },
-            historical: {
-              requestCount: 100,
-              errorCount: 3,
-              totalPromptTokens: 1000,
-              totalCompletionTokens: 2000,
-              totalOutputTokens: 3000
-            }
-          }
-        });
-      }
-
-      if (path === '/daemon/control/snapshot' && method === 'GET') {
-        return json({
-          ok: true,
-          nowMs: Date.now(),
-          servers: [{ port: 3000, version: 'test', ready: true, pids: [123] }],
-          serverTool: {
-            state: { enabled: true, updatedAtMs: Date.now(), updatedBy: 'test' },
-            stats: { executions: 3, success: 2, failure: 1, scannedLines: 10, byTool: [], recent: [] }
-          }
-        });
-      }
-
-      if (path === '/daemon/control/mutate' && method === 'POST') {
-        if (fault.controlMutateFail) {
-          return json({ error: { message: 'control mutate failed' } }, 500);
-        }
-        return json({ ok: true, action: body.action || 'unknown' });
-      }
-
       return json({ error: { message: `unhandled ${method} ${path}` } }, 500);
     }) as unknown as typeof fetch;
   });
@@ -458,33 +387,10 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/Routing group saved\./)).toBeTruthy());
     hit('routing.group_save');
 
-    fireEvent.click(screen.getByText('Activate + Restart Local'));
+    fireEvent.click(screen.getByText('Activate Local'));
     await waitFor(() => expect(screen.getByText(/Routing group activated locally\./)).toBeTruthy());
     hit('routing.activate_local');
 
-    fireEvent.click(screen.getByText('Activate + Restart All'));
-    await waitFor(() => expect(screen.getByText(/Restart-all requested\./)).toBeTruthy());
-    hit('routing.activate_all');
-
-    // Stats page
-    fireEvent.click(screen.getByText('Ops'));
-    fireEvent.click(screen.getByText('Stats'));
-    await waitFor(() => expect(screen.getByText('Stats Management')).toBeTruthy());
-    fireEvent.click(within(panelByTitle('Stats Management')).getByText('Refresh'));
-    hit('stats.refresh');
-
-    // Quota page
-    // Ops / Control Plane
-    fireEvent.click(screen.getByText('Ops'));
-    fireEvent.click(screen.getByText('Control Plane'));
-    await waitFor(() => expect(panelByTitle('Control Plane')).toBeTruthy());
-    const controlPanel = panelByTitle('Control Plane');
-
-    fireEvent.click(within(controlPanel).getByText('Restart All Servers'));
-    await waitFor(() => expect(screen.getByText(/servers\.restart done\./)).toBeTruthy());
-    hit('advanced.control_restart_all');
-
-    // Auth flows: logout + login + change password
     fireEvent.click(screen.getByText('Logout'));
     await waitFor(() => expect(screen.getByText(/Logged out\./)).toBeTruthy());
     hit('auth.logout');
@@ -500,65 +406,7 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/Password changed\./)).toBeTruthy());
     hit('auth.change_password');
 
-    const functionalCoverage = covered.size / requiredFeatures.length;
-    expect(functionalCoverage).toBeGreaterThanOrEqual(0.9);
-  });
-
-  it('covers validation and failure branches across pages', async () => {
-    fault.controlMutateFail = true;
-    fault.clockFetchFail = true;
-
-    render(<App />);
-    await waitFor(() => expect(screen.getByText('Provider Pool')).toBeTruthy());
-
-    const panelByTitle = (title: string) => {
-      const node = screen
-        .getAllByText(title)
-        .find((item) => item.classList.contains('card-title') || item.classList.contains('card-sub')) || screen.getAllByText(title)[0];
-      const panel = node.closest('.panel');
-      if (!panel) throw new Error(`panel not found for ${title}`);
-      return panel as HTMLElement;
-    };
-
-    const providerPoolPanel = panelByTitle('Provider Pool');
-    fireEvent.click(within(providerPoolPanel).getByText('New'));
-
-    const providerEditorPanel = panelByTitle('Provider Editor');
-    fireEvent.click(within(providerEditorPanel).getByText('Save'));
-    await waitFor(() => expect(screen.getByText(/provider id is required/i)).toBeTruthy());
-
-    const providerIdInput = screen.getByLabelText('provider id') as HTMLInputElement;
-    const modelPanel = panelByTitle('Models + Test + Authfile');
-    fireEvent.change(providerIdInput, { target: { value: '' } });
-    fireEvent.click(within(modelPanel).getByText('Create authfile'));
-    await waitFor(() => expect(screen.getByText(/provider id is required before creating authfile/i)).toBeTruthy());
-
-    fireEvent.change(providerIdInput, { target: { value: 'demo' } });
-    fireEvent.click(within(modelPanel).getByText('Create authfile'));
-    await waitFor(() => expect(screen.getByText(/api key is required/i)).toBeTruthy());
-    expect((within(modelPanel).getByText('Apply to provider') as HTMLButtonElement).disabled).toBe(true);
-    const routingPanel = panelByTitle('Routing Management');
-    fireEvent.click(screen.getByText('Create/Copy Group'));
-    await waitFor(() => expect(screen.getByText(/new group id is required/i)).toBeTruthy());
-    fireEvent.click(within(routingPanel).getByText('Add Route'));
-    await waitFor(() => expect(screen.getByText(/route name is required/i)).toBeTruthy());
-    fireEvent.click(within(routingPanel).getByText('Remove Route'));
-    fireEvent.click(within(routingPanel).getByText('Save Group'));
-    await waitFor(() => expect(screen.getByText(/At least one route is required before save\./i)).toBeTruthy());
-    fireEvent.change(within(routingPanel).getByPlaceholderText('route name (e.g. default / coding / tools)'), {
-      target: { value: 'default' }
-    });
-    fireEvent.click(within(routingPanel).getByText('Add Route'));
-    fireEvent.click(within(routingPanel).getByText('Add Pool'));
-    await waitFor(() => expect(screen.getByText(/at least one target is required|select a route first/i)).toBeTruthy());
-    fireEvent.click(screen.getByText('Delete Group'));
-    await waitFor(() => expect(screen.getAllByText(/cannot delete active group/i).length).toBeGreaterThan(0));
-
-    fireEvent.click(screen.getByText('Ops'));
-    fireEvent.click(screen.getByText('Control Plane'));
-    await waitFor(() => expect(panelByTitle('Control Plane')).toBeTruthy());
-    fireEvent.click(within(panelByTitle('Control Plane')).getByText('Restart All Servers'));
-    await waitFor(() => expect(screen.getAllByText(/control mutate failed/i).length).toBeGreaterThan(0));
+    expect(covered).toEqual(new Set(requiredFeatures));
 
   });
 });

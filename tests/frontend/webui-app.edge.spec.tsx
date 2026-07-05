@@ -4,10 +4,8 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import {
   App,
-  ControlPage,
   ProviderPage,
-  RoutingPage,
-  StatsPage
+  RoutingPage
 } from '../../webui/src/App';
 
 type JsonRecord = Record<string, unknown>;
@@ -264,9 +262,6 @@ describe('webui edge coverage', () => {
         }
         return responseJson({ ok: true, activeGroupId: 'default', groups: { default: { routing: {} } }, path: '/tmp/config.json' });
       }
-      if (path === '/daemon/control/mutate' && method === 'POST') {
-        return responseJson({ error: { message: 'restart all failed' } }, 500);
-      }
 
       return responseJson({});
     }) as unknown as typeof fetch;
@@ -339,69 +334,10 @@ describe('webui edge coverage', () => {
     await waitFor(() => expect(hasToast('save group failed') || hasToast('No routing group selected.')).toBe(true));
 
     onToast.mockClear();
-    fireEvent.click(within(routingPanel).getByText('Activate + Restart Local'));
+    fireEvent.click(within(routingPanel).getByText('Activate Local'));
     await waitFor(() => expect(hasToast('activate local failed') || hasToast('No routing group selected.')).toBe(true));
 
-    onToast.mockClear();
-    fireEvent.click(within(routingPanel).getByText('Activate + Restart All'));
-    await waitFor(() => expect(hasToast('restart all failed') || hasToast('No routing group selected.')).toBe(true));
-
-    fireEvent.click(within(screen.getByText('Runtime Pool Snapshot').closest('.panel') as HTMLElement).getByText('Refresh Pool'));
     routingView.unmount();
   });
-
-  it('covers stats/control edge rendering and control branches', async () => {
-    const onToast = jest.fn();
-    const hasToast = (needle: string) => onToast.mock.calls.some(([msg]) => String(msg).includes(needle));
-
-    let statsCalls = 0;
-    let quotaDisableCalls = 0;
-    let clockCalls = 0;
-
-    global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const { path, method, body } = parseReq(input, init);
-
-      if (path === '/daemon/stats' && method === 'GET') {
-        statsCalls += 1;
-        if (statsCalls === 1) {
-          return responseJson({ error: { message: 'stats down' } }, 500);
-        }
-        return responseJson({
-          session: { totals: [{ providerKey: 'demo.default.demo-max', model: 'demo-max', requestCount: 1, errorCount: 0 }] },
-          historical: { totals: [] },
-          totals: { session: { requestCount: 1, errorCount: 0 }, historical: { requestCount: 0, errorCount: 0 } }
-        });
-      }
-
-      if (path === '/daemon/control/snapshot' && method === 'GET') {
-        return responseJson({ ok: true, nowMs: Date.now(), servers: [], quota: { providers: [] } });
-      }
-      if (path === '/daemon/control/mutate' && method === 'POST') {
-        return responseJson({ ok: true, action: body.action || 'unknown' });
-      }
-
-      return responseJson({});
-    }) as unknown as typeof fetch;
-
-    const statsView = render(<StatsPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(hasToast('stats down')).toBe(true));
-    fireEvent.click(screen.getByText('Refresh'));
-    await waitFor(() => expect(screen.getByText('Session Requests')).toBeTruthy());
-    fireEvent.click(screen.getByLabelText(/auto refresh/i));
-    statsView.unmount();
-
-    const controlView = render(<ControlPage authenticated authEpoch={1} onToast={onToast} />);
-    await waitFor(() => expect(screen.getByText('Control Plane')).toBeTruthy());
-
-    const controlPanel = screen.getByText('Control Plane').closest('.panel') as HTMLElement;
-
-    onToast.mockClear();
-    fireEvent.click(within(controlPanel).getByText('Refresh'));
-    await waitFor(() => expect(screen.getByText('Control snapshot refreshed.')).toBeTruthy());
-
-    onToast.mockClear();
-    fireEvent.click(within(controlPanel).getByText('Restart All Servers'));
-    await waitFor(() => expect(hasToast('servers.restart done.')).toBe(true));
-    controlView.unmount();
 
 });

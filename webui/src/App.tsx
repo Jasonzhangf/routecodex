@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-type MainTab = 'providers' | 'routing' | 'ops';
-type OpsTab = 'stats' | 'control';
+type MainTab = 'providers' | 'routing';
 type DensityMode = 'compact' | 'comfortable';
-type AdvancedTab = 'control';
 
 export type ApiError = Error & {
   status?: number;
@@ -36,27 +34,8 @@ export type RoutingSource = {
   location?: string;
 };
 
-export type StatsRow = {
-  providerKey?: string;
-  model?: string;
-  requestCount?: number;
-  errorCount?: number;
-  totalPromptTokens?: number;
-  totalCompletionTokens?: number;
-  totalOutputTokens?: number;
-};
-
 export type ProviderRuntimeKeyItem = {
   providerKey?: string;
-};
-
-export type PeriodStatsRow = {
-  period?: string;
-  requestCount?: number;
-  errorCount?: number;
-  totalPromptTokens?: number;
-  totalCompletionTokens?: number;
-  totalOutputTokens?: number;
 };
 
 
@@ -284,7 +263,7 @@ function AdminAuthPanel({
         title={authStatus.hasPassword ? 'Admin Login' : 'Admin Setup'}
         sub={
           authStatus.hasPassword
-            ? 'Authenticate before opening provider, routing, or control pages.'
+            ? 'Authenticate before opening provider and routing config pages.'
             : 'Set the daemon admin password first. Setup is allowed only for local trusted access.'
         }
       />
@@ -353,7 +332,6 @@ function AdminAuthPanel({
 
 export function App() {
   const [mainTab, setMainTab] = useState<MainTab>('providers');
-  const [opsTab, setOpsTab] = useState<OpsTab>('stats');
   const [densityMode, setDensityMode] = useState<DensityMode>(() => {
     const cached = readSessionValue('routecodex:webui:density').trim().toLowerCase();
     return cached === 'comfortable' ? 'comfortable' : 'compact';
@@ -506,14 +484,8 @@ export function App() {
     if (mainTab === 'routing') {
       return 'Routing / Routing Groups';
     }
-    if (opsTab === 'stats') {
-      return 'Ops / Stats';
-    }
-    if (opsTab === 'control') {
-      return 'Ops / Control Plane';
-    }
-    return 'Ops / Control Plane';
-  }, [mainTab, opsTab]);
+    return 'Providers / Catalog';
+  }, [mainTab]);
 
   const refreshCurrentView = () => {
     setViewEpoch((v) => v + 1);
@@ -545,7 +517,7 @@ export function App() {
       <div className="topbar">
         <div>
           <h1 className="title">RouteCodex WebUI V2</h1>
-          <p className="subtitle">Task-oriented workspace: Providers / Routing / Ops</p>
+          <p className="subtitle">Config editor workspace: Providers / Routing</p>
         </div>
         <div className="pill-row">
           <span className={`pill ${statusClass(serverStatus)}`}>status: {serverStatus}</span>
@@ -621,9 +593,6 @@ export function App() {
             <button className={mainTab === 'routing' ? 'active' : ''} onClick={() => setMainTab('routing')}>
               Routing
             </button>
-            <button className={mainTab === 'ops' ? 'active' : ''} onClick={() => setMainTab('ops')}>
-              Ops
-            </button>
             {mainTab === 'providers' ? (
               <button className="active">
                 Provider Catalog
@@ -633,16 +602,6 @@ export function App() {
               <button className="active">
                 Routing Groups
               </button>
-            ) : null}
-            {mainTab === 'ops' ? (
-              <>
-                <button className={opsTab === 'stats' ? 'active' : ''} onClick={() => setOpsTab('stats')}>
-                  Stats
-                </button>
-                <button className={opsTab === 'control' ? 'active' : ''} onClick={() => setOpsTab('control')}>
-                  Control Plane
-                </button>
-              </>
             ) : null}
           </div>
 
@@ -671,12 +630,6 @@ export function App() {
             {mainTab === 'routing' ? (
               <RoutingPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
             ) : null}
-            {mainTab === 'ops' && opsTab === 'stats'
-              ? <StatsPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
-              : null}
-            {mainTab === 'ops' && opsTab === 'control'
-              ? <ControlPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
-              : null}
           </div>
         </>
       )}
@@ -1631,32 +1584,6 @@ export function RoutingPage({
     }
   };
 
-  const activateAll = async () => {
-    if (!authenticated) return;
-    const groupId = selectedGroupId.trim();
-    if (!groupId) {
-      onToast('No routing group selected.');
-      return;
-    }
-    if (!window.confirm(`Activate group "${groupId}" and restart all local servers?`)) return;
-    try {
-      await apiFetch(`/config/routing/groups/activate${currentSourceQuery()}`, {
-        method: 'POST',
-        body: JSON.stringify({ groupId, location, path: sourcePath || undefined })
-      });
-      const out = await apiFetch('/daemon/control/mutate', {
-        method: 'POST',
-        body: JSON.stringify({ action: 'servers.restart' })
-      });
-      setLog(`Activated ${groupId} and sent restart-all.\n${prettyJson(out)}`);
-      onToast('Restart-all requested.', 'ok');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`Activate all failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
   const addRoute = () => {
     const routeName = newRouteName.trim();
     if (!routeName) {
@@ -1794,10 +1721,7 @@ export function RoutingPage({
             Save Group
           </button>
           <button className="warn" onClick={() => void activateLocal()} disabled={!authenticated}>
-            Activate + Restart Local
-          </button>
-          <button className="warn" onClick={() => void activateAll()} disabled={!authenticated}>
-            Activate + Restart All
+            Activate Local
           </button>
           <span className="pill mono">location: {location}</span>
         </div>
@@ -1899,519 +1823,4 @@ export function RoutingPage({
       </div>
     </div>
   );
-}
-
-export function StatsPage({
-  authenticated,
-  authEpoch,
-  onToast
-}: {
-  authenticated: boolean;
-  authEpoch: number;
-  onToast: (message: string, kind?: 'ok' | 'err') => void;
-}) {
-  const [sessionRows, setSessionRows] = useState<StatsRow[]>([]);
-  const [historicalRows, setHistoricalRows] = useState<StatsRow[]>([]);
-  const [periods, setPeriods] = useState<{
-    daily: PeriodStatsRow[];
-    weekly: PeriodStatsRow[];
-    monthly: PeriodStatsRow[];
-  }>({ daily: [], weekly: [], monthly: [] });
-  const [periodMode, setPeriodMode] = useState<'daily' | 'weekly' | 'monthly'>('daily');
-  const [totals, setTotals] = useState<any>(null);
-  const [updatedAt, setUpdatedAt] = useState(0);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-
-  const refresh = async () => {
-    if (!authenticated) return;
-    try {
-      const out = await apiFetch<{
-        session?: { totals?: StatsRow[] };
-        historical?: { totals?: StatsRow[] };
-        periods?: {
-          daily?: PeriodStatsRow[];
-          weekly?: PeriodStatsRow[];
-          monthly?: PeriodStatsRow[];
-        };
-        totals?: any;
-      }>(
-        '/daemon/stats'
-      );
-      setSessionRows(Array.isArray(out?.session?.totals) ? out.session!.totals! : []);
-      setHistoricalRows(Array.isArray(out?.historical?.totals) ? out.historical!.totals! : []);
-      setPeriods({
-        daily: Array.isArray(out?.periods?.daily) ? out.periods!.daily! : [],
-        weekly: Array.isArray(out?.periods?.weekly) ? out.periods!.weekly! : [],
-        monthly: Array.isArray(out?.periods?.monthly) ? out.periods!.monthly! : []
-      });
-      setTotals(out?.totals || null);
-      setUpdatedAt(Date.now());
-    } catch (error) {
-      onToast(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, authEpoch]);
-
-  useEffect(() => {
-    if (!authenticated || !autoRefresh) return;
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, 2000);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, autoRefresh]);
-
-  const summarize = (rows: StatsRow[]) => {
-    const byProvider = new Map<string, { req: number; err: number }>();
-    const byRuntime = new Map<string, { req: number; err: number }>();
-    const byModel = new Map<string, { req: number; err: number }>();
-    let reqTotal = 0;
-    let errTotal = 0;
-
-    for (const row of rows) {
-      const providerKey = textOf(row.providerKey).trim();
-      if (!providerKey) continue;
-      const req = Number(row.requestCount || 0);
-      const err = Number(row.errorCount || 0);
-      reqTotal += req;
-      errTotal += err;
-
-      const providerId = providerKey.split('.')[0] || providerKey;
-      const runtime = providerKey.split('.').slice(0, 2).join('.') || providerKey;
-      const model = textOf(row.model || '—') || '—';
-
-      const p = byProvider.get(providerId) || { req: 0, err: 0 };
-      p.req += req;
-      p.err += err;
-      byProvider.set(providerId, p);
-
-      const rt = byRuntime.get(runtime) || { req: 0, err: 0 };
-      rt.req += req;
-      rt.err += err;
-      byRuntime.set(runtime, rt);
-
-      const m = byModel.get(model) || { req: 0, err: 0 };
-      m.req += req;
-      m.err += err;
-      byModel.set(model, m);
-    }
-
-    return {
-      reqTotal,
-      errTotal,
-      byProvider: Array.from(byProvider.entries()).sort((a, b) => b[1].req - a[1].req),
-      byRuntime: Array.from(byRuntime.entries()).sort((a, b) => b[1].req - a[1].req),
-      byModel: Array.from(byModel.entries()).sort((a, b) => b[1].req - a[1].req)
-    };
-  };
-
-  const sessionSummary = summarize(sessionRows);
-  const historicalSummary = summarize(historicalRows);
-
-  const mergedTokenRows = useMemo(() => {
-    const map = new Map<string, { providerKey: string; model: string; session?: StatsRow; historical?: StatsRow }>();
-    const keyOf = (row: StatsRow) => `${textOf(row.providerKey)}|${textOf(row.model || '')}`;
-
-    for (const row of sessionRows) {
-      const key = keyOf(row);
-      map.set(key, {
-        providerKey: textOf(row.providerKey),
-        model: textOf(row.model || ''),
-        session: row,
-        historical: map.get(key)?.historical
-      });
-    }
-
-    for (const row of historicalRows) {
-      const key = keyOf(row);
-      map.set(key, {
-        providerKey: textOf(row.providerKey),
-        model: textOf(row.model || ''),
-        session: map.get(key)?.session,
-        historical: row
-      });
-    }
-
-    return Array.from(map.values()).sort((a, b) => {
-      const ak = `${a.providerKey}.${a.model}`;
-      const bk = `${b.providerKey}.${b.model}`;
-      return ak.localeCompare(bk);
-    });
-  }, [sessionRows, historicalRows]);
-
-  const periodRows = useMemo(() => {
-    const rows = periods[periodMode] || [];
-    return rows
-      .slice()
-      .sort((a, b) => textOf(b.period).localeCompare(textOf(a.period)));
-  }, [periods, periodMode]);
-
-  return (
-    <div className="grid">
-      <div className="panel">
-        <SectionHeader
-          title="Stats Management"
-          sub="Merged session/historical/token analytics in one page. Session stats reset on restart."
-        />
-        <div className="row" style={{ marginBottom: 8 }}>
-          <button className="primary" onClick={() => void refresh()} disabled={!authenticated}>
-            Refresh
-          </button>
-          <label>
-            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} /> auto refresh (2s)
-          </label>
-          <span className="pill mono">updated: {updatedAt ? formatTs(updatedAt) : '—'}</span>
-        </div>
-
-        <div className="kpi-grid" style={{ marginBottom: 10 }}>
-          <div className="kpi">
-            <div className="v">{formatInt(sessionSummary.reqTotal)}</div>
-            <div className="k">Session Requests</div>
-          </div>
-          <div className="kpi">
-            <div className="v">{formatInt(sessionSummary.errTotal)}</div>
-            <div className="k">Session Errors</div>
-          </div>
-          <div className="kpi">
-            <div className="v">{formatInt(historicalSummary.reqTotal)}</div>
-            <div className="k">Historical Requests</div>
-          </div>
-          <div className="kpi">
-            <div className="v">{formatInt(historicalSummary.errTotal)}</div>
-            <div className="k">Historical Errors</div>
-          </div>
-        </div>
-
-        <div className="split">
-          <div className="panel" style={{ padding: 10 }}>
-            <SectionHeader title="Session" />
-            <div className="table-wrap short">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>provider</th>
-                    <th>req</th>
-                    <th>err</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessionSummary.byProvider.map(([key, val]) => (
-                    <tr key={`s-p-${key}`}>
-                      <td className="mono">{key}</td>
-                      <td className="mono">{formatInt(val.req)}</td>
-                      <td className="mono">{formatInt(val.err)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="table-wrap short" style={{ marginTop: 8 }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>runtime</th>
-                    <th>req</th>
-                    <th>err</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessionSummary.byRuntime.map(([key, val]) => (
-                    <tr key={`s-r-${key}`}>
-                      <td className="mono">{key}</td>
-                      <td className="mono">{formatInt(val.req)}</td>
-                      <td className="mono">{formatInt(val.err)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="panel" style={{ padding: 10 }}>
-            <SectionHeader title="Historical" />
-            <div className="table-wrap short">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>provider</th>
-                    <th>req</th>
-                    <th>err</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {historicalSummary.byProvider.map(([key, val]) => (
-                    <tr key={`h-p-${key}`}>
-                      <td className="mono">{key}</td>
-                      <td className="mono">{formatInt(val.req)}</td>
-                      <td className="mono">{formatInt(val.err)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="table-wrap short" style={{ marginTop: 8 }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>runtime</th>
-                    <th>req</th>
-                    <th>err</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {historicalSummary.byRuntime.map(([key, val]) => (
-                    <tr key={`h-r-${key}`}>
-                      <td className="mono">{key}</td>
-                      <td className="mono">{formatInt(val.req)}</td>
-                      <td className="mono">{formatInt(val.err)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div className="panel" style={{ marginTop: 10, padding: 10 }}>
-          <SectionHeader title="Token Usage (Session + Historical)" />
-          <AppNotice>
-            ALL(session): req={formatInt(totals?.session?.requestCount)} err={formatInt(totals?.session?.errorCount)} in/out/total=
-            {formatInt(totals?.session?.totalPromptTokens)}/{formatInt(totals?.session?.totalCompletionTokens)}/
-            {formatInt(totals?.session?.totalOutputTokens)}
-            <br />
-            ALL(historical): req={formatInt(totals?.historical?.requestCount)} err={formatInt(totals?.historical?.errorCount)} in/out/total=
-            {formatInt(totals?.historical?.totalPromptTokens)}/{formatInt(totals?.historical?.totalCompletionTokens)}/
-            {formatInt(totals?.historical?.totalOutputTokens)}
-          </AppNotice>
-          <div className="table-wrap" style={{ marginTop: 8 }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>providerKey</th>
-                  <th>model</th>
-                  <th>session req/err</th>
-                  <th>session in/out/total</th>
-                  <th>historical req/err</th>
-                  <th>historical in/out/total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mergedTokenRows.map((row) => (
-                  <tr key={`${row.providerKey}.${row.model}`}>
-                    <td className="mono">{row.providerKey}</td>
-                    <td className="mono">{row.model || '—'}</td>
-                    <td className="mono">
-                      {row.session ? `${formatInt(row.session.requestCount)} / ${formatInt(row.session.errorCount)}` : '—'}
-                    </td>
-                    <td className="mono">
-                      {row.session
-                        ? `${formatInt(row.session.totalPromptTokens)}/${formatInt(row.session.totalCompletionTokens)}/${formatInt(
-                            row.session.totalOutputTokens
-                          )}`
-                        : '—'}
-                    </td>
-                    <td className="mono">
-                      {row.historical ? `${formatInt(row.historical.requestCount)} / ${formatInt(row.historical.errorCount)}` : '—'}
-                    </td>
-                    <td className="mono">
-                      {row.historical
-                        ? `${formatInt(row.historical.totalPromptTokens)}/${formatInt(row.historical.totalCompletionTokens)}/${formatInt(
-                            row.historical.totalOutputTokens
-                          )}`
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-                {!mergedTokenRows.length ? (
-                  <tr>
-                    <td colSpan={6} className="muted">
-                      No token data.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="panel" style={{ marginTop: 10, padding: 10 }}>
-          <SectionHeader title="Persistent History (Day / Week / Month)" />
-          <div className="row" style={{ marginBottom: 8 }}>
-            <button
-              className={periodMode === 'daily' ? 'primary' : ''}
-              onClick={() => setPeriodMode('daily')}
-            >
-              Daily
-            </button>
-            <button
-              className={periodMode === 'weekly' ? 'primary' : ''}
-              onClick={() => setPeriodMode('weekly')}
-            >
-              Weekly
-            </button>
-            <button
-              className={periodMode === 'monthly' ? 'primary' : ''}
-              onClick={() => setPeriodMode('monthly')}
-            >
-              Monthly
-            </button>
-          </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>period</th>
-                  <th>req/err</th>
-                  <th>in/out/total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {periodRows.map((row) => (
-                  <tr key={`${periodMode}-${textOf(row.period)}`}>
-                    <td className="mono">{textOf(row.period)}</td>
-                    <td className="mono">
-                      {formatInt(row.requestCount)} / {formatInt(row.errorCount)}
-                    </td>
-                    <td className="mono">
-                      {formatInt(row.totalPromptTokens)}/{formatInt(row.totalCompletionTokens)}/{formatInt(row.totalOutputTokens)}
-                    </td>
-                  </tr>
-                ))}
-                {!periodRows.length ? (
-                  <tr>
-                    <td colSpan={3} className="muted">
-                      No persisted period data.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-export function AdvancedPage({
-  authenticated,
-  authEpoch,
-  tab,
-  onToast
-}: {
-  authenticated: boolean;
-  authEpoch: number;
-  tab: AdvancedTab;
-  onToast: (message: string, kind?: 'ok' | 'err') => void;
-}) {
-  return <ControlPage authenticated={authenticated} authEpoch={authEpoch} onToast={onToast} />;
-}
-
-export function ControlPage({
-  authenticated,
-  authEpoch,
-  onToast
-}: {
-  authenticated: boolean;
-  authEpoch: number;
-  onToast: (message: string, kind?: 'ok' | 'err') => void;
-}) {
-  const [snapshot, setSnapshot] = useState<any>(null);
-  const [providerKey, setProviderKey] = useState('');
-  const [mode, setMode] = useState<'cooldown' | 'blacklist'>('cooldown');
-  const [duration, setDuration] = useState(60);
-  const [log, setLog] = useState('');
-
-  const refresh = async () => {
-    if (!authenticated) return;
-    try {
-      const out = await apiFetch('/daemon/control/snapshot');
-      setSnapshot(out);
-      setLog('Control snapshot refreshed.');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`Snapshot failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, authEpoch]);
-
-  const mutate = async (action: string, payload: Record<string, unknown> = {}) => {
-    if (!authenticated) return;
-    try {
-      const out = await apiFetch('/daemon/control/mutate', {
-        method: 'POST',
-        body: JSON.stringify({ action, ...payload })
-      });
-      setLog(`${action} success\n${prettyJson(out)}`);
-      onToast(`${action} done.`, 'ok');
-      await refresh();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setLog(`${action} failed: ${msg}`);
-      onToast(msg);
-    }
-  };
-
-  const servers = Array.isArray(snapshot?.servers) ? snapshot.servers : [];
-  return (
-    <div className="grid grid-wide-left">
-      <div className="panel">
-        <SectionHeader title="Control Plane" sub="Single entry for control snapshot and server restart operations." />
-        <div className="row" style={{ marginBottom: 8 }}>
-          <button className="primary" onClick={() => void refresh()} disabled={!authenticated}>
-            Refresh
-          </button>
-          <button className="danger" onClick={() => void mutate('servers.restart')} disabled={!authenticated}>
-            Restart All Servers
-          </button>
-        </div>
-
-        <div className="table-wrap short" style={{ marginBottom: 8 }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>port</th>
-                <th>version</th>
-                <th>ready</th>
-                <th>pids</th>
-              </tr>
-            </thead>
-            <tbody>
-              {servers.map((item: any) => (
-                <tr key={textOf(item.port)}>
-                  <td className="mono">{textOf(item.port || '—')}</td>
-                  <td className="mono">{textOf(item.version || '—')}</td>
-                  <td>{String(Boolean(item.ready))}</td>
-                  <td className="mono">{Array.isArray(item.pids) ? item.pids.join(' ') : '—'}</td>
-                </tr>
-              ))}
-              {!servers.length ? (
-                <tr>
-                  <td colSpan={4} className="muted">
-                    No local servers discovered.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="panel">
-        <SectionHeader title="Control Log" />
-        <LogBox value={log} />
-      </div>
-    </div>
-  );
-
 }
