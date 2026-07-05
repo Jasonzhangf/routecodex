@@ -19,6 +19,9 @@ last_run_id: 2026-07-04T00:00:00+08:00
   supervisor, stop-intent, PID registry, and health.
 - `verification_gate_mapping`: every actionable finding must map to function
   map, mainline call map, and verification map before L2.
+- `webui_config_editor`: WebUI config editor work must preserve config codec,
+  config writer, provider config writer, and Rust forwarder ownership before
+  implementation.
 - `worker_collision`: unrelated dirty files must remain untouched; loop reports
   collisions but does not stage, reset, checkout, or delete.
 
@@ -31,6 +34,7 @@ Allowed `watchlist_id` values:
 - `release_install_sync`
 - `runtime_lifecycle`
 - `verification_gate_mapping`
+- `webui_config_editor`
 - `worker_collision`
 
 ## L1 Run Procedure

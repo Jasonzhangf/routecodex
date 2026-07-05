@@ -270,4 +270,3 @@ export function describeRequestSemanticsResolution(
     resolved: summarizeSemanticsNode(resolved)
   };
 }
-import { MetadataCenter } from '../metadata-center/metadata-center.js';

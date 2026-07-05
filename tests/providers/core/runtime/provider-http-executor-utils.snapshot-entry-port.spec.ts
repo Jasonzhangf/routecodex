@@ -14,9 +14,6 @@ describe('normalizeProviderHttpError snapshot entryPort', () => {
       writeProviderSnapshot,
       attachProviderSseSnapshotStream
     }));
-    jest.unstable_mockModule('../../../../src/providers/auth/oauth-lifecycle.js', () => ({
-      handleUpstreamInvalidOAuthToken: async () => false
-    }));
     const { normalizeProviderHttpError } = await import(
       '../../../../src/providers/core/runtime/provider-http-executor-utils.ts'
     );

@@ -6,6 +6,31 @@
 - Current config fact from 2026-07-05: 5520/5555/4444 are explicit `sameProtocolBehavior="direct"` and 10000 defaults to direct. Do not call 5520 symptoms relay without a relay-configured port or relay ownership sample.
 - Verified evidence: focused Rust tests for Responses SSE frame closeout passed; focused direct provider Jest passed; `build:base`, `pack:rcc`, release install verification, global install `routecodex/rcc@0.90.3583`, managed restart, and `/health.version` on all configured ports passed. Live 5520 smoke and latest sample `req_1783240882820_e055cb52` ended with `response.completed` plus `data: [DONE]`. Installed native probe proved global Rust encoder returns `last="data: [DONE]\n\n"`.
 
+# 2026-07-05: Responses store finalize retention plan is Rust-owned
+
+- Verified rule: `finalizeResponsesConversationRequestRetention()` in `responses-conversation-store.ts` must not own retention lifecycle decisions. Rust `shared_responses_conversation_utils.rs` owns the decision via `planResponsesConversationRetentionJson`; TS store only executes the returned `clear` / `release` IO action and debug logging.
+- Locked semantics: missing `lastResponseId` clears request, `keepForSubmitToolOutputs=true` releases payload for submit continuation, missing scope clears request, valid scoped continuation releases retained payload.
+- Evidence: Rust retention unit passed, focused store Jest passed, `verify:responses-history-protocol-contract` passed with 58 Rust tests, native hotpath build passed, rustification audit passed with `nonNativeLocTotal=8296`.
+
+# 2026-07-05: Responses store lifecycle decisions are Rust native helpers
+
+- Verified rule: `responses-conversation-store.ts` must not own continuation allow, entry isolation, or pending tool-call calculation. Those decisions are Rust-owned in `shared_responses_conversation_utils.rs` via `shouldAllowResponsesConversationContinuationJson`, `responsesConversationEntryMatchesIsolationJson`, and `collectResponsesPendingToolCallIdsJson`; TS may only call the native facade while doing map/index/persistence IO.
+- Build rule: after adding or renaming router-hotpath NAPI exports, run `npm run build:native-hotpath` before Jest that imports sharedmodule `src` with real native bindings. TypeScript passing is insufficient because tests load the existing `.node` addon and will fail native-required exports until rebuilt.
+- Evidence: focused store Jest 198/198 passed after native rebuild; `verify:responses-history-protocol-contract`, `verify:llmswitch-rustification-audit`, architecture mainline gates, and `verify:function-map-compile-gate` passed.
+
+# 2026-07-05: architecture modularity/control-data audit baseline
+
+- Audit scope: read-only architecture review for modularity, module boundaries, mainline clarity, and control/data separation.
+- Green baseline: `verify:architecture-mainline-call-map`, `verify:architecture-mainline-binding-pending-gate`, `verify:architecture-metadata-center-write-boundaries`, `verify:architecture-provider-specific-leaks`, `verify:architecture-metadata-leak-boundary`, `verify:architecture-nonadjacent-conversion`, `verify:architecture-thin-wrapper-only`, and `verify:llmswitch-rustification-audit` passed during the audit.
+- Remaining high-signal architecture debt:
+  - Function-map compile gate fails on `config.virtual_router_builder` and `config.virtual_router_types` source anchors existing without function-map / verification-map entries.
+  - Mainline binding gate has no `binding pending`, but one `partial` remains: `error.mainline` `err-03` (`ErrorErr03RuntimeClassified -> ErrorErr05ExecutionDecision`).
+  - TS owner ban still flags TS-owned/transitional surfaces: runtime key resolution, MetadataCenter dualwrite API, debug surfaces, manager health runtime, and Responses continuation bridge.
+  - Forbidden-path growth still flags Hub typed nodes / MetadataCenter / continuation lookup terms appearing in server/provider/TS store paths and needs per-hit owner-vs-allowlist triage.
+  - Duplicate DTO gate still flags TS mirror `ErrorErr05RouteAvailabilityDecisionInput` in `request-executor-core-utils.ts` against Rust truth in `error_err05_availability.rs`.
+  - Custom payload carrier containment still flags debug `response.metadata` example usage plus `__routecodex*` route-control sentinels.
+- Useful prioritization: fix map/anchor drift first because it blocks function-map compile truth; then close the single `error.mainline` partial and duplicate DTO because they are both on the provider-error reroute/mainline boundary; then reduce TS owner transitional surfaces and forbidden-path hits.
+
 # 2026-07-04: Responses store released prefix is not live input
 - Verified rule: `responses-conversation-store-native.ts` must pass current live `entry.input` to Rust and keep `releasedInputPrefix` as a separate side-channel. Treating released prefix as current input hides the store's released/pending branch truth and can let duplicate pending function_call batches or stale stopless tool history survive.
 - Rust owner: `shared_responses_conversation_utils.rs` owns materialize/resume collapse for replayed pending tool batches, duplicate output batches, and completed stopless auto-hook pairs. TS store/bridge may marshal opaque payloads only; it must not reconstruct continuation history or use released prefix as a semantic fallback input.
@@ -766,3 +791,93 @@
 - `conversion.shared.anthropic` owner truth is `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs`; TS `anthropic-message-utils.ts`, `anthropic-message-utils-core.ts`, and `anthropic-message-utils-tool-schema.ts` are native shells/re-export surfaces only.
 - Anthropic tool schema sanitize, tool name/action normalization, text/tool-result normalization, image block validation/order, and OpenAI function `tool_choice` mapping must stay in Rust; TS resurrection is blocked by `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
 - Verified closeout evidence for this slice: Rust `anthropic_openai_codec` and `hub_protocol_spec_semantics` tests, focused Anthropic Jest, `verify:hub-response-anthropic-native`, sharedmodule tsc, function-map/mainline gates, `verify:llmswitch-rustification-audit` (`57` files / `8481` LOC), native build, and `build:base` passed. Live Anthropic replay remains unclaimed because codex Anthropic samples were absent.
+
+# 2026-07-05: responses-sse-transport-flush-20260705
+
+- `/v1/responses` SSE disconnect hardening belongs to the transport owner only: flush already-finalized SSE bytes after `res.write()` when `res.flush()` exists. Do not tighten timeout to mask buffering and do not add non-Responses protocol events.
+- Keepalive remains an SSE comment (`: keepalive\n\n`). Synthetic `event: ping` or `{"type":"ping"}` is forbidden for this path because it adds non-transport semantics to the client-visible protocol stream.
+- Verified release state for this slice: global `rcc`/`routecodex` and snapshot install `0.90.3576` contain `flush.call(res)` in `dist/server/handlers/handler-response-sse.js`; live 5520 `/v1/responses` smoke marker `RCC_SSE_FLUSH_3576_OK_1783227434` returned HTTP 200, `response.completed`, and `[DONE]`.
+- Boundary caveat: exact historical long-running disconnect sample was not replayed; current claim is transport flush installed and same-entry live smoke, not full reproduction closure for every upstream long stream.
+
+# 2026-07-05: P0 architecture remediation and config materialization boundary
+
+- Marker: p0 architecture provider materialization blackbox 20260705.
+- Verified P0 architecture closeout: map/anchor drift for `config.virtual_router_builder` / `config.virtual_router_types`, the duplicate TS `ErrorErr05*` DTO mirror, and the `error.mainline` partial edge were closed. `error.mainline` now includes explicit `ErrorErr04RouterPolicyApplied` before `ErrorErr05ExecutionDecision`.
+- Durable config boundary: Provider v2 file loading, routing-policy-group flattening, provider-port inclusion, forwarder target providerId/providerKey expansion, and `applyPatch` config normalization are TS config materialization responsibilities in `buildVirtualRouterInputV2()`. Rust Virtual Router bootstrap/selection remains the runtime semantic truth, but it cannot replace TS materialization unless it receives equivalent provider config source input.
+- Failure signature: if `verify:provider-failure-ban-blackbox` or startup reports `Virtual Router requires at least one provider in configuration`, inspect `buildVirtualRouterInputV2()` materialized `providers` before changing VR selection/runtime policy.
+- Build rule: `verify:provider-failure-ban-blackbox` reads `dist`; after config/runtime source edits, run `npm run build:base` before the blackbox or the harness may execute stale runtime code.
+- Verification evidence for this closeout passed: config Jest, root `tsc`, `verify:function-map-compile-gate`, `build:base`, `verify:provider-failure-ban-blackbox`, mainline manifest/wiki sync gates, `verify:error-pipeline-contract`, `verify:architecture-duplicate-dto-patterns`, `verify:vr-route-availability-default-floor`, focused executor retry Jest, and `git diff --check`.
+- Boundary: no live managed install/restart or real upstream replay was claimed for this P0 slice; the provider failure proof is local blackbox coverage with mock upstreams.
+
+# 2026-07-05: Responses store scope-match selection is Rust-owned
+
+- `conversion.responses.store` scope continuation selection is now owned by Rust `planResponsesScopeContinuationMatchJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may build requested scope keys, read `scopeIndex`, project minimal candidates, and execute restore/materialize IO; it must not re-own allow-continuation filtering, direct-vs-relay exclusion, dedupe, mixed-owner ambiguity, no-match, or multi-match ambiguity.
+- Verified evidence: Rust `scope_match` test, sharedmodule TypeScript check, native hotpath build, focused responses store/residue Jest, `verify:responses-history-protocol-contract` 59/59, `verify:llmswitch-rustification-audit`, function-map gate, mainline binding/call-map gates, and touched-file `git diff --check` passed.
+
+# 2026-07-05: Responses submit resume entry selection is Rust-owned
+
+- `resumeConversation()` entry selection for Responses submit_tool_outputs now uses Rust `planResponsesConversationResumeEntryMatchJson`.
+- TS store may project response-index/request-map/scope candidates and execute selected IO; it must not own responseIndex precedence, requestMap recovery ambiguity, submit-payload scope fallback matching, port scope matching, entry-kind/owner isolation, or allow-continuation expiry for submit resume.
+- Verified evidence: Rust `resume_entry_match` test, sharedmodule TypeScript check, native hotpath build, focused responses store/residue Jest, `verify:responses-history-protocol-contract` 60/60, `verify:llmswitch-rustification-audit`, function-map gate, mainline binding/call-map gates, and touched-file `git diff --check` passed.
+
+# 2026-07-05: Responses lookup-by-response projection gate is Rust-owned
+
+- `lookupContinuationByResponseId()` now uses Rust `planResponsesContinuationLookupByResponseIdJson` for responseId lookup validation and projection.
+- TS store may read `responseIndex`, pass entry/options/requested port scope to native, and return the native projection; it must not own lastResponseId existence, responseId match, port scope, entry-kind, continuation-owner, providerKey, or requestId projection semantics for this lookup path.
+- Verified evidence: Rust `continuation_lookup_plan` test, sharedmodule TypeScript check, native hotpath build, focused responses store/residue Jest, `verify:responses-history-protocol-contract` 61/61, `verify:llmswitch-rustification-audit`, function-map gate, mainline binding/call-map gates, and touched-file `git diff --check` passed.
+
+# 2026-07-05: Responses persistence eligibility is Rust-owned
+
+- `conversion.responses.store` persistence load/flush eligibility is now owned by Rust `shared_responses_conversation_utils.rs` through `planResponsesConversationPersistenceEligibilityJson`.
+- TS `responses-conversation-store.ts` may serialize/deserialize the persistence file and read/write Maps, but must not decide missing-response, direct-owner, `allowContinuation`, load TTL, or persisted `lastResponseId` eligibility. Add/modify Rust plan tests for those rules instead of restoring TS filters.
+- Verified evidence: Rust `persistence_eligibility` test, sharedmodule TypeScript check, native hotpath build, focused responses store/residue Jest, `verify:responses-history-protocol-contract` 62/62, rustification audit, function-map gate, and mainline binding/call-map gates passed on 2026-07-05. No live managed install/restart or upstream replay was claimed for this code/gate slice.
+
+# 2026-07-05: Responses isolation helper facade is deleted
+
+- The old `responsesConversationEntryMatchesIsolationJson` / `entryMatchesIsolation` surface has been physically removed after scope-match, submit-resume, and lookup native plans took over entry-kind, continuation-owner, and port-scope isolation.
+- Do not reintroduce a generic TS-callable isolation helper in `responses-conversation-store-native.ts`; new isolation decisions must be returned by a concrete Rust action plan for the specific store operation.
+- Verified evidence: repository search for the old isolation symbols returned 0 matches; native hotpath and llmswitch-core checked outputs were rebuilt; focused store/residue Jest, responses history protocol contract, rustification audit, function-map gate, mainline call-map gate, and touched-file diff check passed on 2026-07-05.
+
+# 2026-07-05: Responses capture pending cleanup is Rust-owned
+
+- `conversion.responses.store` `captureRequestContext()` pending same-scope cleanup now uses Rust `planResponsesCapturePendingCleanupJson`.
+- TS store may project request-map candidates and detach native-selected request ids, but must not decide unresolved-only cleanup, same-request exclusion, requested-scope missing behavior, scope overlap, or duplicate cleanup ids.
+- Verified evidence: Rust `capture_pending_cleanup` test, native hotpath rebuild, llmswitch-core checked output build, sharedmodule tsc, focused store/residue Jest, `verify:responses-history-protocol-contract` 63/63, rustification audit, function-map gate, mainline call-map gate, and touched-file diff check passed on 2026-07-05. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: responses-direct-data-only-event-prefix-20260705
+
+- Direct `/v1/responses` provider passthrough may receive upstream SSE blocks that contain only `data: {"type":"response.*",...}` without an `event:` line. Codex tool parsing needs the named SSE event even when the JSON payload is otherwise intact.
+- The allowed fix point is `src/providers/core/runtime/responses-provider.ts` direct provider wire normalization: prefix `event: <payload.type>` for data-only JSON blocks whose `type` starts with `response.`. Preserve the original `data:` payload and frame boundaries. Do not synthesize `request_id`, terminal events, `[DONE]`, `required_action`, continuation, stopless/servertool state, or tool history.
+- `handler-response-sse.ts` remains transport-only. If a future SSE sample has tool JSON present but no named event, fix direct/provider projection owner, not the server handler or continuation store.
+- Verified release: packed and globally installed `routecodex`/`rcc 0.90.3581`; live `/health.version` on 4444/5520/5555/10000 matched `0.90.3581`; live 5520 sample `req_1783235429497_960485c5` contained named `response.*` events plus `apply_patch` / `function_call`; recent post-restart logs had no new `Responses SSE event sequence missing request_id`.
+
+# 2026-07-05: forbidden-path owner names require helper projections
+
+- Marker: forbidden path runtime carrier helper boundary 20260705.
+- Verified rule: `verify:architecture-forbidden-path-growth` treats canonical owner names as hard module-boundary signals. Do not fix forbidden-path hits by widening allowlists when provider/runtime/executor code mentions owner names such as `MetadataCenter`, `ResponsesSseEvent`, or `ContinuationLookupResult`.
+- MetadataCenter boundary: code outside `src/server/runtime/http-server/metadata-center/` must use helper/projection APIs in `request-truth-readers.ts` for runtime carrier, request truth, continuation, runtime control, and provider observation reads/writes. Provider/runtime/executor files must not import or directly name `MetadataCenter`.
+- Naming ownership: Rust/direct SSE owner wording such as `ResponsesSseEvent` must stay in the canonical owner layer; direct provider wire helpers should use local descriptive names. TS Responses store lookup shapes must avoid canonical continuation owner DTO names such as `ContinuationLookupResult`; use store-local projection names instead.
+- ErrorErr05 default-pool truth: default pool availability makes provider failure non-terminal. Executor consumers must recompute projection permission from the Rust decision plus local args and only project provider error to client when route pool is empty and `defaultPoolAvailable` is false.
+- Verified gates for this boundary passed on 2026-07-05: forbidden-path growth, function-map compile, metadata-center write/dualwrite, responses history protocol, custom payload carrier gates, SSE architecture boundary, error pipeline contract, VR default floor, provider failure blackbox, build/base TypeScript checks, and focused ErrorErr05 Rust/Jest suites. No live managed install/restart was claimed for this slice.
+
+# 2026-07-05: TS owner ban classification is map/gate truth, not automatic runtime migration
+
+- Marker: ts owner ban map classification p1 20260705.
+- `verify:architecture-ts-owner-ban` distinguishes forbidden TS semantic owners from allowed TS shells/glue. `server.runtime_key_resolution`, `hub.metadata_center_dualwrite_api`, `debug.unified_surface`, `debug.internal_error_numbering`, and `manager.health_runtime` are explicitly classified as TS transitional/host/debug/manager shells; their migration targets remain tracked, but the gate should not fail while they are the registered shell owner.
+- `hub.chat_process_responses_continuation` is Rust-owned in `shared_responses_conversation_utils.rs`, not `src/modules/llmswitch/bridge`. Its function-map canonical builders must use Rust symbols, while TS bridge files remain IO/native facade allowed paths.
+- `hub.response_post_servertool_client_projection` is a Rust scope feature spanning `hub_pipeline_lib/effect_plan.rs` and `hub_resp_outbound_client_semantics_blocks/responses_payload.rs`; mapping it to only one file creates false canonical-builder or anchor failures.
+- Verified gates for this classification passed on 2026-07-05: `verify:architecture-ts-owner-ban`, `verify:architecture-feature-anchor-coverage`, `verify:function-map-canonical-builder-definitions`, `verify:architecture-mainline-call-map`, and full `verify:function-map-compile-gate`. No runtime/live adoption was claimed.
+
+# 2026-07-05: Responses record-time cleanup and fallback scope entry match are Rust-owned
+
+- `conversion.responses.store` `recordResponse()` same-scope completed-entry cleanup is owned by Rust `planResponsesRecordScopeCleanupJson` in `shared_responses_conversation_utils.rs`.
+- `conversion.responses.store` missing-request fallback scope entry selection inside `recordResponse()` is owned by Rust `planResponsesRecordScopeEntryMatchJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may only build requested scope keys, project `scopeIndex` / `requestMap` candidates, and execute native `detachRequestIds` / selected `scopeKey`; it must not regain completed-vs-pending cleanup rules, self exclusion, dedupe, or fallback scope-order selection policy.
+- Verified evidence on 2026-07-05: Rust `record_scope_cleanup` and `record_scope_entry` tests, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 65/65, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8334`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses store lifecycle sweep is Rust-owned
+
+- `conversion.responses.store` detach decisions for `clearUnresolvedRequests()` and `prune()` are owned by Rust `planResponsesStoreSweepJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may project `requestMap` candidates and execute native-selected `detachRequestIds`, but it must not regain unresolved-only cleanup, TTL expiry cleanup, invalid-mode fallback, or dedupe rules for lifecycle sweep.
+- Verified evidence on 2026-07-05: Rust `store_sweep` test, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 66/66, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8351`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.

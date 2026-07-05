@@ -408,6 +408,10 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     logSseFrameProjection(requestLabel, 'response.sse.write_frame', frame);
     try {
       res.write(frame);
+      const flush = (res as FlushableResponse).flush;
+      if (typeof flush === 'function') {
+        flush.call(res);
+      }
     } catch (error) {
       logResponseNonBlockingError(`${errorLabel}:${requestLabel}`, error);
     }

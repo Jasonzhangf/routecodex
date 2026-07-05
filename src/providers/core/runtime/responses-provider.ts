@@ -50,7 +50,10 @@ import {
 } from './responses-sse-error-guard.js';
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
-import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
+import {
+  bindRuntimeCarrierFromSource,
+  readRuntimeRequestTruthPortNumber
+} from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'> & Partial<Pick<HttpClient, 'postStreamOrResponse'>>;
 
@@ -142,12 +145,9 @@ function readProviderSnapshotEntryPort(metadata: unknown): number | undefined {
     return undefined;
   }
   const record = metadata as Record<string, unknown>;
-  const requestTruthPortScope = MetadataCenter.read(record)?.readRequestTruth().portScope;
-  if (typeof requestTruthPortScope === 'string') {
-    const parsed = Number.parseInt(requestTruthPortScope, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
+  const requestTruthPort = readRuntimeRequestTruthPortNumber(record);
+  if (typeof requestTruthPort === 'number') {
+    return requestTruthPort;
   }
   for (const value of [
     record.entryPort,
@@ -191,7 +191,6 @@ function applyRequestRuntimeMetadataToProviderContext(
   const mergedMetadata = runtimeMetadataRecord
     ? { ...(existingMetadata ?? {}), ...runtimeMetadataRecord }
     : existingMetadata;
-  const runtimeMetadataCenter = runtimeMetadataRecord ? MetadataCenter.read(runtimeMetadataRecord) : undefined;
   const entryPort =
     readProviderSnapshotEntryPort(runtimeMetadataRecord)
     ?? readProviderSnapshotEntryPort(runtimeMetadata as Record<string, unknown>)
@@ -205,9 +204,7 @@ function applyRequestRuntimeMetadataToProviderContext(
         runtimeMetadataRecord.matchedPort = entryPort;
       }
     }
-    if (runtimeMetadataCenter) {
-      MetadataCenter.bind(mergedMetadata, runtimeMetadataCenter);
-    }
+    bindRuntimeCarrierFromSource({ target: mergedMetadata, source: runtimeMetadataRecord });
     context.metadata = mergedMetadata;
   }
   context.runtimeMetadata = {

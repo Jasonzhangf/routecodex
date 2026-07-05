@@ -1,7 +1,7 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import type { UnknownRecord } from '../config/virtual-router-types.js';
+import type { UnknownRecord } from '../config/user-config-codec.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 import {
   readString,

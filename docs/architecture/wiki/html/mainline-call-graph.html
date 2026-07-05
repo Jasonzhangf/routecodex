@@ -135,6 +135,29 @@
           <li><code>partial</code> = edge is bound, but only part of the transition is concretely anchored</li>
           <li><code>binding pending</code> = edge intentionally left unresolved until code audit pins the real bridge</li>
         </ul>
+        <h2>webui.config_editor_surface.mainline</h2>
+        <p>WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics.</p>
+        <p>Entry contract: <code>WebuiConfigEditor01UserIntent</code> via <code>docs/loops/runtime-lifecycle/gate-matrix.md</code></p>
+        <pre class="mermaid">flowchart LR
+          WebuiConfigEditor03SharedConfigMutation[&quot;WebuiConfigEditor03SharedConfigMutation&quot;]
+          WebuiConfigEditor02AdminApiRequest[&quot;WebuiConfigEditor02AdminApiRequest&quot;]
+          WebuiConfigEditor01UserIntent[&quot;WebuiConfigEditor01UserIntent&quot;]
+          WebuiConfigEditor01UserIntent --&gt;|wce-01| WebuiConfigEditor02AdminApiRequest
+          WebuiConfigEditor02AdminApiRequest --&gt;|wce-02| WebuiConfigEditor03SharedConfigMutation
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class WebuiConfigEditor01UserIntent anchored;
+          class WebuiConfigEditor02AdminApiRequest anchored;
+          class WebuiConfigEditor03SharedConfigMutation anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>wce-01</td><td><code>WebuiConfigEditor01UserIntent -&gt; WebuiConfigEditor02AdminApiRequest</code></td><td>anchored</td><td><code>ProviderPage -&gt; apiFetch</code></td><td></td><td><code>webui.config_editor_surface</code>&lt;br/&gt;WebUI online config editor surface for provider cards, per-port routing tabs, and fwd aggregation configuration</td></tr>
+        <tr><td>wce-02</td><td><code>WebuiConfigEditor02AdminApiRequest -&gt; WebuiConfigEditor03SharedConfigMutation</code></td><td>anchored</td><td><code>registerProviderRoutes -&gt; writeUserConfigFile</code></td><td></td><td><code>webui.config_editor_surface</code>&lt;br/&gt;WebUI online config editor surface for provider cards, per-port routing tabs, and fwd aggregation configuration</td></tr>
+        </tbody>
+        </table>
         <h2>servertool.hook_skeleton.mainline</h2>
         <p>Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks.</p>
         <p>Entry contract: <code>HubRespChatProcess03Governed</code> via <code>docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md</code></p>
@@ -379,20 +402,23 @@
         <pre class="mermaid">flowchart LR
           ErrorErr06ClientProjected[&quot;ErrorErr06ClientProjected&quot;]
           ErrorErr05ExecutionDecision[&quot;ErrorErr05ExecutionDecision&quot;]
+          ErrorErr04RouterPolicyApplied[&quot;ErrorErr04RouterPolicyApplied&quot;]
           ErrorErr03RuntimeClassified[&quot;ErrorErr03RuntimeClassified&quot;]
           ErrorErr02HostCaptured[&quot;ErrorErr02HostCaptured&quot;]
           ErrorErr01SourceRaised[&quot;ErrorErr01SourceRaised&quot;]
           ErrorErr01SourceRaised --&gt;|err-01| ErrorErr02HostCaptured
           ErrorErr02HostCaptured --&gt;|err-02| ErrorErr03RuntimeClassified
-          ErrorErr03RuntimeClassified -.-&gt;|err-03| ErrorErr05ExecutionDecision
-          ErrorErr05ExecutionDecision --&gt;|err-04| ErrorErr06ClientProjected
+          ErrorErr03RuntimeClassified --&gt;|err-03| ErrorErr04RouterPolicyApplied
+          ErrorErr04RouterPolicyApplied --&gt;|err-04| ErrorErr05ExecutionDecision
+          ErrorErr05ExecutionDecision --&gt;|err-05| ErrorErr06ClientProjected
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
           class ErrorErr01SourceRaised anchored;
           class ErrorErr02HostCaptured anchored;
-          class ErrorErr03RuntimeClassified partial;
-          class ErrorErr05ExecutionDecision partial;
+          class ErrorErr03RuntimeClassified anchored;
+          class ErrorErr04RouterPolicyApplied anchored;
+          class ErrorErr05ExecutionDecision anchored;
           class ErrorErr06ClientProjected anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
@@ -400,8 +426,9 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>err-01</td><td><code>ErrorErr01SourceRaised -&gt; ErrorErr02HostCaptured</code></td><td>anchored</td><td><code>reportProviderErrorToRouterPolicy -&gt; reportProviderErrorToRouterPolicy</code></td><td></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td></tr>
         <tr><td>err-02</td><td><code>ErrorErr02HostCaptured -&gt; ErrorErr03RuntimeClassified</code></td><td>anchored</td><td><code>classifyProviderFailure -&gt; classifyProviderFailure</code></td><td></td><td><code>error.provider_failure_policy</code>&lt;br/&gt;provider/server error cataloging, runtime classification, router policy application, and availability/cooldown truth; session-local storm semantics are explicitly separate</td></tr>
-        <tr><td>err-03</td><td><code>ErrorErr03RuntimeClassified -&gt; ErrorErr05ExecutionDecision</code></td><td>partial</td><td><code>resolveProviderRetryExecutionPlan -&gt; resolveProviderRetryExecutionPlan</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
-        <tr><td>err-04</td><td><code>ErrorErr05ExecutionDecision -&gt; ErrorErr06ClientProjected</code></td><td>anchored</td><td><code>project_error_err_06_client_from_error_err_05_execution_decision -&gt; mapErrorToHttp</code></td><td></td><td><code>error.client_projection</code>&lt;br/&gt;ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames</td></tr>
+        <tr><td>err-03</td><td><code>ErrorErr03RuntimeClassified -&gt; ErrorErr04RouterPolicyApplied</code></td><td>anchored</td><td><code>apply_error_err_04_router_policy_from_error_err_03_runtime -&gt; report_internal_error_err_02_host_to_router_policy</code></td><td></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td></tr>
+        <tr><td>err-04</td><td><code>ErrorErr04RouterPolicyApplied -&gt; ErrorErr05ExecutionDecision</code></td><td>anchored</td><td><code>resolveProviderRetryExecutionPlan -&gt; resolveProviderRetryExecutionPlan</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
+        <tr><td>err-05</td><td><code>ErrorErr05ExecutionDecision -&gt; ErrorErr06ClientProjected</code></td><td>anchored</td><td><code>project_error_err_06_client_from_error_err_05_execution_decision -&gt; mapErrorToHttp</code></td><td></td><td><code>error.client_projection</code>&lt;br/&gt;ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames</td></tr>
         </tbody>
         </table>
         <h2>vr.route_availability.mainline</h2>

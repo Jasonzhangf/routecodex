@@ -46,5 +46,11 @@ export {
   resolveAnthropicStopReasonWithNative,
   resolveProviderResponseContextHelpersWithNative,
   resolveProviderTypeFromProtocolWithNative,
-  summarizeToolCallsFromProviderResponseWithNative
+  summarizeToolCallsFromProviderResponseWithNative,
+  registerResponsesPayloadSnapshotWithNative,
+  consumeResponsesPayloadSnapshotWithNative,
+  consumeResponsesPayloadSnapshotByAliasesWithNative,
+  registerResponsesPassthroughWithNative,
+  consumeResponsesPassthroughWithNative,
+  consumeResponsesPassthroughByAliasesWithNative
 } from './native-hub-pipeline-resp-semantics-outbound-tools.js';

@@ -116,7 +116,7 @@ function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
 const REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER = {
   module: 'src/server/runtime/http-server/request-executor.ts',
   symbol: 'resolveProviderRequestContext',
-  stage: 'HubReqOutbound05ProviderSemantic'
+  stage: 'request_executor_provider_protocol_runtime_control'
 } as const;
 
 function isSameMetadataCenterWriter(a: MetadataCenterWriter | undefined, b: MetadataCenterWriter): boolean {

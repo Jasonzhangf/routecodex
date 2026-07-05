@@ -33,12 +33,12 @@ if (!serverIndex.includes('findResponsesDirectFunctionCallOutputContentViolation
   failures.push('router direct wire guard missing anchor: findResponsesDirectFunctionCallOutputContentViolation');
 }
 
-for (const forbidden of [
+for (const required of [
   'evaluateDirectRouteDecision',
   'evaluateResponsesDirectRouteDecisionNative',
 ]) {
-  if (directPayload.includes(forbidden)) {
-    failures.push(`direct passthrough must not run route decision helper: ${forbidden}`);
+  if (!directPayload.includes(required)) {
+    failures.push(`direct passthrough must run Rust route decision helper: ${required}`);
   }
 }
 

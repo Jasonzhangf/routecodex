@@ -7,6 +7,36 @@ version: 1
 status: seed
 
 chains:
+  - chain_id: webui.config_editor_surface.mainline
+    summary: "WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics."
+    entry_contract:
+      node: WebuiConfigEditor01UserIntent
+      owner_doc: docs/loops/runtime-lifecycle/gate-matrix.md
+    edges:
+      - step_id: wce-01
+        from_node: WebuiConfigEditor01UserIntent
+        to_node: WebuiConfigEditor02AdminApiRequest
+        caller_symbol: ProviderPage
+        caller_file: webui/src/App.tsx
+        callee_symbol: apiFetch
+        callee_file: webui/src/App.tsx
+        owner_feature_id: webui.config_editor_surface
+        semantic_input: "provider card, backup/restore, per-port routing tab, provider picker, or fwd aggregation edit intent"
+        semantic_output: "authenticated daemon admin/config HTTP request intent without provider secrets in client state"
+        status: anchored
+      - step_id: wce-02
+        from_node: WebuiConfigEditor02AdminApiRequest
+        to_node: WebuiConfigEditor03SharedConfigMutation
+        caller_symbol: registerProviderRoutes
+        caller_file: src/server/runtime/http-server/daemon-admin/providers-handler.ts
+        callee_symbol: writeUserConfigFile
+        callee_file: src/config/user-config-writer.ts
+        owner_feature_id: webui.config_editor_surface
+        semantic_input: "admin config mutation request for provider/routing/forwarder editor surface"
+        semantic_output: "shared writer/codec-owned user/provider config mutation; fwd selection remains vr.provider_forwarder_runtime"
+        status: anchored
+        note: "Current admin route owner writes routing/user-config mutations through writeUserConfigFile; future dedicated WebUI config editor APIs must keep this shared writer edge."
+
   - chain_id: servertool.hook_skeleton.mainline
     summary: "Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks."
     entry_contract:
@@ -511,16 +541,27 @@ chains:
         status: anchored
       - step_id: err-03
         from_node: ErrorErr03RuntimeClassified
+        to_node: ErrorErr04RouterPolicyApplied
+        caller_symbol: apply_error_err_04_router_policy_from_error_err_03_runtime
+        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
+        callee_symbol: report_internal_error_err_02_host_to_router_policy
+        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
+        owner_feature_id: error.pipeline_contract
+        semantic_input: "classified provider/server failure"
+        semantic_output: "router-policy-applied error event with runtime scope and availability policy input"
+        status: anchored
+      - step_id: err-04
+        from_node: ErrorErr04RouterPolicyApplied
         to_node: ErrorErr05ExecutionDecision
         caller_symbol: resolveProviderRetryExecutionPlan
         caller_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
         callee_symbol: resolveProviderRetryExecutionPlan
         callee_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
         owner_feature_id: error.execution_decision_consumer
-        semantic_input: "classified provider/runtime failure + retry/error snapshot"
+        semantic_input: "router-policy-applied error event + retry/error snapshot"
         semantic_output: "executor-visible provider failover/default-pool/client-projection decision; session_storm may not intercept provider availability truth"
-        status: partial
-      - step_id: err-04
+        status: anchored
+      - step_id: err-05
         from_node: ErrorErr05ExecutionDecision
         to_node: ErrorErr06ClientProjected
         caller_symbol: project_error_err_06_client_from_error_err_05_execution_decision

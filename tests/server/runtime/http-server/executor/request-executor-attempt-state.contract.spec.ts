@@ -184,7 +184,7 @@ describe('request-executor attempt-state contract', () => {
       `export function ${'finalizeRequestExecutorAttemptMetadata'}`
     );
 
-    expect(prepareBlock).toContain('writeRuntimeControl(');
+    expect(prepareBlock).toContain('writeRuntimeControlSlot(');
     expect(prepareBlock).toContain("'retryProviderKey'");
     expect(prepareBlock).not.toContain('metadataForAttempt.__routecodexRetryProviderKey =');
     expect(prepareBlock).toContain("delete metadataForAttempt.__routecodexRetryProviderKey;");
@@ -192,7 +192,7 @@ describe('request-executor attempt-state contract', () => {
     expect(source).not.toContain('__routecodexPreselectedRoute');
   });
 
-  it('fails fast when pipeline result returns a second MetadataCenter', () => {
+  it('fails fast when pipeline result returns a second runtime carrier', () => {
     const attemptMetadata: Record<string, unknown> = {};
     const pipelineMetadata: Record<string, unknown> = {};
     MetadataCenter.attach(attemptMetadata).writeRuntimeControl(
@@ -232,7 +232,7 @@ describe('request-executor attempt-state contract', () => {
         clientRequestId: 'client-second-center',
       })
     ).toThrow(
-      'request-executor attempt metadata violated single-center contract: pipeline result returned a second MetadataCenter'
+      'request-executor attempt metadata violated single-center contract: pipeline result returned a second runtime carrier'
     );
   });
 
@@ -244,7 +244,7 @@ describe('request-executor attempt-state contract', () => {
     );
 
     expect(finalizeBlock).toContain(
-      'request-executor attempt metadata violated single-center contract: pipeline result returned a second MetadataCenter'
+      'request-executor attempt metadata violated single-center contract: pipeline result returned a second runtime carrier'
     );
     expect(finalizeBlock).not.toContain('pipelineMetadataCenter.snapshot().runtimeControl');
     expect(finalizeBlock).not.toContain('merged from pipeline result metadata center');

@@ -25,11 +25,22 @@ export {
 export {
   convertResponsesOutputToInputItemsWithNative,
   buildResponsesConversationScopePlanWithNative,
+  collectResponsesPendingToolCallIdsWithNative,
   enforceChatBudgetWithNative,
   materializeProviderOwnedSubmitContextWithNative,
   materializeResponsesContinuationPayloadWithNative,
   pickResponsesPersistedFieldsWithNative,
+  planResponsesCapturePendingCleanupWithNative,
+  planResponsesConversationPersistenceEligibilityWithNative,
+  planResponsesConversationResumeEntryMatchWithNative,
+  planResponsesConversationRetentionWithNative,
+  planResponsesRecordScopeCleanupWithNative,
+  planResponsesRecordScopeEntryMatchWithNative,
+  planResponsesStoreSweepWithNative,
+  planResponsesReleaseRequestPayloadWithNative,
+  planResponsesContinuationLookupByResponseIdWithNative,
   planResponsesContinuationRequestActionWithNative,
+  planResponsesScopeContinuationMatchWithNative,
   planResponsesRequestContextWithNative,
   planResponsesHandlerEntryWithNative,
   prepareResponsesConversationEntryWithNative,
@@ -38,6 +49,7 @@ export {
   resolveBudgetForModelWithNative,
   restoreResponsesContinuationPayloadWithNative,
   resumeResponsesConversationPayloadWithNative,
+  shouldAllowResponsesConversationContinuationWithNative,
   stripResponsesStoredContextInputMediaWithNative
 } from './native-shared-conversion-semantics-responses.js';
 export {

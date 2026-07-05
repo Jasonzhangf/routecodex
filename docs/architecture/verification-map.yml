@@ -715,6 +715,7 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs
     contract:
       - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
@@ -1802,6 +1803,33 @@ verification:
       - npm run build:base
     notes:
       - "Provider config writes must stay in shared writer owner."
+
+  - feature_id: webui.config_editor_surface
+    change_risk: high
+    unit:
+      - webui/src/App.tsx
+      - webui/src/styles.css
+    contract:
+      - tests/frontend/webui-app.integration.spec.tsx
+      - tests/frontend/webui-app.pages.spec.tsx
+      - tests/frontend/webui-app.edge.spec.tsx
+      - tests/frontend/webui-app.render.spec.tsx
+      - tests/frontend/webui-app.utils.spec.ts
+      - tests/config/config-writer.spec.ts
+      - tests/config/routecodex-config-loader.v2-single-source.spec.ts
+      - tests/config/provider-v2-loader.spec.ts
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run test:webui
+      - npm run verify:config-ssot
+      - npm run verify:function-map-compile-gate
+      - npm run verify:runtime-lifecycle-loop-gate-matrix
+    build:
+      - npm run build:base
+    notes:
+      - "WebUI config editor must prove provider cards, provider backup/restore, per-port routing tabs, provider selection, and fwd priority/weighted/roundrobin config without owning runtime selection semantics."
+      - "Blackbox must use a test config path or disposable fixture; live production config writes require explicit approval."
 
   - feature_id: manager.routing_control_surface
     change_risk: high

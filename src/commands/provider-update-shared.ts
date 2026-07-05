@@ -3,7 +3,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 import { resolveRccProviderDir } from '../config/user-data-paths.js';
-import type { UnknownRecord } from '../config/virtual-router-types.js';
+import type { UnknownRecord } from '../config/user-config-codec.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 export { isRecord };
 

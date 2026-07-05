@@ -1,5 +1,3 @@
-import { isRecord } from '../utils/common-utils.js';
-
 export type UnknownRecord = Record<string, unknown>;
 
 export interface VirtualRouterRoutingPool extends UnknownRecord {
@@ -11,32 +9,14 @@ export type VirtualRouterRoutingConfig = Record<string, VirtualRouterRoutingPool
 
 export type VirtualRouterProvidersConfig = Record<string, UnknownRecord>;
 
-/**
- * Host-side view of the Virtual Router input passed into
- * `bootstrapVirtualRouterConfig`. This is intentionally loose and mirrors
- * the `virtualrouter` section of the user config.
- */
 export interface VirtualRouterInput extends UnknownRecord {
   providers: VirtualRouterProvidersConfig;
   routing: VirtualRouterRoutingConfig;
   routingPolicyGroup?: string;
-  /**
-   * ProviderForwarder 节点（顶层 key = forwarder id，如 `fwd.openai.gpt-4o`）。
-   * 每个 entry 形如 { protocol, model, resolutionMode, strategy, targets, stickyKey, ... }
-   * Rust 端 `forwarder.rs` 负责解析 + sticky 状态。
-   */
   forwarders?: Record<string, UnknownRecord>;
   applyPatch?: UnknownRecord;
 }
 
-/**
- * Derive a VirtualRouterInput shape from the raw user config.
- * This mirrors the legacy fallback logic where `providers` / `routing`
- * could live either under `virtualrouter` or at the top level.
- *
- * This function does not mutate the input and is currently intended
- * for tests and migration tooling.
- */
 export function buildVirtualRouterInputFromUserConfig(userConfig: UnknownRecord): VirtualRouterInput {
   const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
   const providersSource = isRecord(vrNode.providers)
@@ -78,4 +58,8 @@ export function buildVirtualRouterInputFromUserConfig(userConfig: UnknownRecord)
       ? { forwarders: { ...forwardersSource } }
       : {})
   };
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

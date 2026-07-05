@@ -261,6 +261,11 @@ describe('buildVirtualRouterInputV2', () => {
     const userConfig: UnknownRecord = {
       version: '2.0.0',
       virtualrouterMode: 'v2',
+      httpserver: {
+        ports: [
+          { port: 5520, mode: 'router', routingPolicyGroup: 'gateway_priority_5520' }
+        ]
+      },
       virtualrouter: {
         forwarders: {
           'fwd.minimax.MiniMax-M3': {
@@ -542,7 +547,13 @@ describe('buildVirtualRouterInputV2', () => {
       version: '2.0.0',
       virtualrouterMode: 'v2',
       servertool: { apply_patch: { mode: 'freeform' } },
-      httpserver: { port: 10000, host: '127.0.0.1' },
+      httpserver: {
+        port: 10000,
+        host: '127.0.0.1',
+        ports: [
+          { port: 10000, host: '127.0.0.1', mode: 'router', routingPolicyGroup: 'default' }
+        ]
+      },
       virtualrouter: {
         routingPolicyGroups: {
           default: { routing: { default: [{ id: 'primary', targets: ['demo.mock-1'] }] } }

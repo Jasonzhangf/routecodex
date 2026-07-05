@@ -18,8 +18,8 @@ step_ids:
   - vra-03
   - vra-04
 edge_status_counts:
-  anchored: 3
-  partial: 1
+  anchored: 4
+  partial: 0
   binding_pending: 0
   total: 4
 sources:

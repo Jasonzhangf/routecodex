@@ -20,12 +20,12 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
   }
   const skipUnless = liveConfig ? it : it.skip;
 
-  skipUnless('10000 tool/search targets resolve to fwd.minimax.MiniMax-M2.7', async () => {
+  skipUnless('10000 tool/search targets resolve to fwd.minimax.MiniMax-M3', async () => {
     const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_coding_10000',
     });
     for (const routeName of ['tools', 'search', 'web_search']) {
-      expect(routeTargets(input.routing, routeName)).toEqual(['fwd.minimax.MiniMax-M2.7']);
+      expect(routeTargets(input.routing, routeName)).toEqual(['fwd.minimax.MiniMax-M3']);
     }
   });
 
@@ -38,12 +38,15 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
       'fwd.deepseek.deepseek-v4-flash',
       'fwd.deepseek.deepseek-v4-pro',
       'fwd.glm.glm-5.2',
+      'fwd.gpt.gpt-5.4',
+      'fwd.gpt.gpt-5.5',
+      'fwd.lmstudio.ornith-1.0-397b',
       'fwd.minimax.MiniMax-M2.7',
       'fwd.minimax.MiniMax-M3',
       'fwd.minimax.minimax-m3',
       'fwd.paid.gpt-5.4',
       'fwd.paid.gpt-5.4-mini',
-      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.paid.gpt-5.5',
     ]);
 
     const paid54 = fwds['fwd.paid.gpt-5.4'] as {
@@ -53,17 +56,17 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     };
     expect(paid54.strategy).toBe('priority');
     expect(paid54.stickyKey).toBe('none');
-    expect(new Set(paid54.targets.map((t) => t.providerId))).toEqual(new Set(['asxs', '1token', 'XL']));
+    expect(new Set(paid54.targets.map((t) => t.providerId))).toEqual(new Set(['asxs', '1token', 'xl']));
     expect(paid54.targets).toEqual(expect.arrayContaining([
       expect.objectContaining({ providerId: 'asxs', providerKey: 'asxs.crsa.gpt-5.4', priority: 1 }),
-      expect.objectContaining({ providerId: 'XL', providerKey: 'XL.key1.gpt-5.4', priority: 2 }),
+      expect.objectContaining({ providerId: 'xl', providerKey: 'xl.key1.gpt-5.4', priority: 2 }),
       expect.objectContaining({ providerId: '1token', providerKey: '1token.key1.gpt-5.4', priority: 3 }),
     ]));
     for (const target of paid54.targets) {
       expect(target.providerKey).toContain('.gpt-5.4');
       const expectedPriority = target.providerId === 'asxs'
         ? 1
-        : target.providerId === 'XL'
+        : target.providerId === 'xl'
           ? 2
           : target.providerId === '1token'
             ? 3
@@ -78,12 +81,12 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     };
     expect(paid54Mini.strategy).toBe('priority');
     expect(paid54Mini.stickyKey).toBe('none');
-    expect(new Set(paid54Mini.targets.map((t) => t.providerId))).toEqual(new Set(['asxs', 'XL']));
+    expect(new Set(paid54Mini.targets.map((t) => t.providerId))).toEqual(new Set(['asxs', 'xl']));
     for (const target of paid54Mini.targets) {
       expect(target.providerKey).toContain('.gpt-5.4-mini');
       const expectedPriority = target.providerId === 'asxs'
         ? 1
-        : target.providerId === 'XL'
+        : target.providerId === 'xl'
           ? 2
           : 3;
       expect(target.priority).toBe(expectedPriority);
@@ -117,18 +120,8 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     expect(glm52.stickyKey).toBe('none');
     expect(glm52.targets).toEqual([
       expect.objectContaining({
-        providerId: 'XLC',
-        providerKey: 'XLC.key1.glm-5.2',
-        weight: 1,
-      }),
-      expect.objectContaining({
-        providerId: 'XLC',
-        providerKey: 'XLC.key2.glm-5.2',
-        weight: 1,
-      }),
-      expect.objectContaining({
-        providerId: 'replaypool',
-        providerKey: 'replaypool.key1.glm-5.2',
+        providerId: 'orangeai',
+        providerKey: 'orangeai.key1.glm-5.2',
         weight: 1,
       }),
     ]);
@@ -138,31 +131,22 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_priority_5520',
     });
-    expect(routeTargets(input.routing, 'coding')).toEqual(['fwd.temp.gpt-5.5-thinking-xhigh', 'fwd.paid.gpt-5.4-mini']);
+    expect(routeTargets(input.routing, 'coding')).toEqual(['fwd.paid.gpt-5.5', 'fwd.paid.gpt-5.5']);
     for (const routeName of ['tools', 'search', 'web_search', 'multimodal']) {
-      expect(routeTargets(input.routing, routeName)).toEqual([
-        'fwd.temp.gpt-5.5-thinking-xhigh',
-        'fwd.paid.gpt-5.4-mini',
-      ]);
+      expect(routeTargets(input.routing, routeName)).toEqual(['fwd.paid.gpt-5.4-mini']);
     }
     expect(routeTargets(input.routing, 'thinking')).toEqual([
-      'fwd.temp.gpt-5.5-thinking-xhigh',
-      'fwd.paid.gpt-5.4',
+      'fwd.paid.gpt-5.5',
+      'fwd.paid.gpt-5.5',
     ]);
     expect(routeTargets(input.routing, 'longcontext')).toEqual([
-      'fwd.temp.gpt-5.5-thinking-xhigh',
-      'fwd.paid.gpt-5.4-mini',
-      'fwd.glm.glm-5.2',
+      'fwd.gpt.gpt-5.5',
+      'fwd.gpt.gpt-5.5',
     ]);
-    expect(routeTargets(input.routing, 'default')).toEqual([
-      'fwd.temp.gpt-5.5-thinking-xhigh',
-      'fwd.paid.gpt-5.4-mini',
-      'fwd.glm.glm-5.2',
-      'fwd.minimax.MiniMax-M3',
-    ]);
+    expect(routeTargets(input.routing, 'default')).toEqual(['fwd.gpt.gpt-5.4']);
   });
 
-  skipUnless('5520 thinking uses the current xhigh priority pool', async () => {
+  skipUnless('5520 thinking uses the current high priority pool', async () => {
     const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_priority_5520',
     });
@@ -170,8 +154,8 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     expect(Array.isArray(thinkingRoute)).toBe(true);
     const [pool] = thinkingRoute as Array<Record<string, unknown>>;
     expect(pool.mode).toBe('priority');
-    expect(pool.targets).toEqual(['fwd.temp.gpt-5.5-thinking-xhigh', 'fwd.paid.gpt-5.4']);
-    expect(pool.thinking).toBe('xhigh');
+    expect(pool.targets).toEqual(['fwd.paid.gpt-5.5', 'fwd.paid.gpt-5.5']);
+    expect(pool.thinking).toBe('high');
   });
 
   skipUnless('5555 route targets match current config truth', async () => {
@@ -179,36 +163,36 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
       routingPolicyGroup: 'gateway_priority_5555',
     });
     expect(routeTargets(input.routing, 'coding')).toEqual([
-      'fwd.temp.gpt-5.5-thinking-xhigh',
       'fwd.glm.glm-5.2',
-      'fwd.deepseek.deepseek-v4-pro',
       'fwd.paid.gpt-5.4-mini',
+      'fwd.minimax.MiniMax-M3',
     ]);
     expect(routeTargets(input.routing, 'thinking')).toEqual([
-      'fwd.temp.gpt-5.5-thinking-xhigh',
       'fwd.glm.glm-5.2',
-      'fwd.deepseek.deepseek-v4-pro',
       'fwd.paid.gpt-5.4-mini',
+      'fwd.minimax.MiniMax-M3',
     ]);
     expect(routeTargets(input.routing, 'longcontext')).toEqual([
-      'fwd.temp.gpt-5.5-thinking-xhigh',
       'fwd.glm.glm-5.2',
-      'fwd.deepseek.deepseek-v4-pro',
       'fwd.paid.gpt-5.4-mini',
+      'fwd.minimax.MiniMax-M3',
     ]);
     for (const routeName of ['tools', 'search', 'web_search']) {
       expect(routeTargets(input.routing, routeName)).toEqual([
-        'fwd.temp.gpt-5.5-thinking-xhigh',
-        'fwd.deepseek.deepseek-v4-flash',
-        'fwd.minimax.MiniMax-M3',
         'fwd.minimax.MiniMax-M2.7',
+        'fwd.minimax.MiniMax-M3',
+        'fwd.paid.gpt-5.4-mini',
       ]);
     }
-    expect(routeTargets(input.routing, 'multimodal')).toEqual(['fwd.temp.gpt-5.5-thinking-xhigh', 'fwd.minimax.MiniMax-M3']);
+    expect(routeTargets(input.routing, 'multimodal')).toEqual(['fwd.minimax.MiniMax-M3', 'fwd.paid.gpt-5.4-mini']);
     expect(routeTargets(input.routing, 'default')).toEqual([
-      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.glm.glm-5.2',
       'fwd.paid.gpt-5.4-mini',
       'fwd.minimax.MiniMax-M3',
+      'fwd.minimax.MiniMax-M2.7',
+      'fwd.paid.gpt-5.5',
+      'fwd.paid.gpt-5.5',
+      'fwd.gpt.gpt-5.4',
     ]);
   });
 
@@ -224,24 +208,25 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
       'asxs',
       'minimax',
       'minimonth',
-      'XL',
-      'XLC',
-      'replaypool',
-      'crsa',
+      'xl',
+      'cc',
+      '1token',
     ]));
     expect(allowed).not.toContain('fwd');
   });
 
-  skipUnless('10000 routing contains MiniMax forwarder targets only', async () => {
+  skipUnless('10000 routing contains current forwarder targets', async () => {
     const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_coding_10000',
     });
     const all = collectTargets(input.routing);
     const fwdTargets = all.filter((t) => t.startsWith('fwd.'));
     expect(fwdTargets).toEqual([
-      'fwd.minimax.MiniMax-M2.7',
-      'fwd.minimax.MiniMax-M2.7',
-      'fwd.minimax.MiniMax-M2.7',
+      'fwd.minimax.MiniMax-M3',
+      'fwd.minimax.MiniMax-M3',
+      'fwd.minimax.MiniMax-M3',
+      'fwd.glm.glm-5.2',
+      'fwd.minimax.MiniMax-M3',
     ]);
   });
 
@@ -253,12 +238,15 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
       'fwd.deepseek.deepseek-v4-flash',
       'fwd.deepseek.deepseek-v4-pro',
       'fwd.glm.glm-5.2',
+      'fwd.gpt.gpt-5.4',
+      'fwd.gpt.gpt-5.5',
+      'fwd.lmstudio.ornith-1.0-397b',
       'fwd.minimax.MiniMax-M2.7',
       'fwd.minimax.MiniMax-M3',
       'fwd.minimax.minimax-m3',
       'fwd.paid.gpt-5.4',
       'fwd.paid.gpt-5.4-mini',
-      'fwd.temp.gpt-5.5-thinking-xhigh',
+      'fwd.paid.gpt-5.5',
     ]);
   });
 });

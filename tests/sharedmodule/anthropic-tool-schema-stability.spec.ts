@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { mapChatToolsToAnthropicTools } from '../../sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils.js';
+import { mapChatToolsToAnthropicToolsWithNative as mapChatToolsToAnthropicTools } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tool-definitions.js';
 
 describe('anthropic tool schema stability (root regression)', () => {
   test('sanitizes builtin exec_command schema while preserving required keys', () => {

@@ -1,0 +1,32 @@
+lifecycle_id: webui.config_editor_surface.mainline
+summary: WebUI config editor intent must flow through daemon admin/config APIs
+  into shared config codec/writer owners; WebUI owns no provider runtime,
+  routing policy, or forwarder selection semantics.
+owner_feature_id: webui.config_editor_surface
+entrypoint:
+  node_id: WebuiConfigEditor01UserIntent
+  wiki_page: null
+  call_map_chain_id: webui.config_editor_surface.mainline
+node_ids:
+  - WebuiConfigEditor01UserIntent
+  - WebuiConfigEditor02AdminApiRequest
+  - WebuiConfigEditor03SharedConfigMutation
+edges:
+  - step_id: wce-01
+    from_node: WebuiConfigEditor01UserIntent
+    to_node: WebuiConfigEditor02AdminApiRequest
+    status: anchored
+    owner_feature_id: webui.config_editor_surface
+    binding_pending: null
+    split_binding_id: null
+  - step_id: wce-02
+    from_node: WebuiConfigEditor02AdminApiRequest
+    to_node: WebuiConfigEditor03SharedConfigMutation
+    status: anchored
+    owner_feature_id: webui.config_editor_surface
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

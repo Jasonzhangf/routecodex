@@ -1,11 +1,11 @@
 import {
-  consumeResponsesPayloadSnapshotByAliases,
-  consumeResponsesPassthrough,
-  consumeResponsesPassthroughByAliases,
-  consumeResponsesPayloadSnapshot,
-  registerResponsesPassthrough,
-  registerResponsesPayloadSnapshot
-} from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.js';
+  consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
+  consumeResponsesPassthroughWithNative as consumeResponsesPassthrough,
+  consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases,
+  consumeResponsesPayloadSnapshotWithNative as consumeResponsesPayloadSnapshot,
+  registerResponsesPassthroughWithNative as registerResponsesPassthrough,
+  registerResponsesPayloadSnapshotWithNative as registerResponsesPayloadSnapshot
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 describe('responses registry pruning', () => {
   it('registers and consumes payload snapshots through native registry', () => {

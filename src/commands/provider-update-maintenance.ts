@@ -9,7 +9,7 @@ import { buildRoutingHintsConfigFragment, inspectProviderConfig } from '../provi
 import { decodeProviderConfigFile } from '../config/provider-config-codec.js';
 import { loadProviderConfigsV2, type ProviderConfigV2 } from '../config/provider-v2-loader.js';
 import { writeProviderConfigFile } from '../config/provider-config-writer.js';
-import type { UnknownRecord } from '../config/virtual-router-types.js';
+import type { UnknownRecord } from '../config/user-config-codec.js';
 import {
   ask,
   askYesNo,

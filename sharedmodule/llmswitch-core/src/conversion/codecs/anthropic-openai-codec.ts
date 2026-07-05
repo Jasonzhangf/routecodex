@@ -1,5 +1,5 @@
 import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
-import { buildAnthropicRequestFromOpenAIChat } from '../shared/anthropic-message-utils.js';
+import { buildAnthropicRequestFromOpenAIChat } from '../shared/anthropic-message-utils-openai-request.js';
 import {
   buildAnthropicFromOpenAIChatWithNative,
   buildOpenAIChatFromAnthropicWithNative

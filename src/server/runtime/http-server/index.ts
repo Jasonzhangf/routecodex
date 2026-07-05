@@ -315,7 +315,6 @@ function buildMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<
 }
 
 function releaseRouterDirectRetryRouteControl(metadata: Record<string, unknown>): void {
-  delete metadata.__routecodexPreselectedRoute;
   const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
     ? { ...(metadata.__rt as Record<string, unknown>) }
     : undefined;

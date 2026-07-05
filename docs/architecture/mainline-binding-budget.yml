@@ -4,6 +4,15 @@ description: >
   are explicitly acknowledged per chain, but any growth must fail fast until the
   chain is re-budgeted with review.
 chains:
+  - chain_id: webui.config_editor_surface.mainline
+    expected_total_edges: 2
+    min_anchored_edges: 2
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      WebUI config editor is a thin surface: user intent and admin API config
+      mutation edges must stay anchored to WebUI/apiFetch and shared config
+      writer owners; WebUI must not own provider runtime or forwarder selection.
   - chain_id: servertool.hook_skeleton.mainline
     expected_total_edges: 13
     min_anchored_edges: 0
@@ -53,11 +62,11 @@ chains:
       envelope, external linking, debug projection, and client-boundary guard
       must stay fully anchored and must not become ErrorErr policy truth.
   - chain_id: error.mainline
-    expected_total_edges: 4
-    min_anchored_edges: 3
-    max_partial_edges: 1
+    expected_total_edges: 5
+    min_anchored_edges: 5
+    max_partial_edges: 0
     max_binding_pending_edges: 0
-    note: Error mainline still has one split host/runtime classification edge.
+    note: Error mainline is fully anchored through explicit ErrorErr04 router-policy application and ErrorErr05 executor consumption.
   - chain_id: metadata.center.mainline
     expected_total_edges: 9
     min_anchored_edges: 8

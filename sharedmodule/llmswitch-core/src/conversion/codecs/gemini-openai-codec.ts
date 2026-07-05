@@ -8,11 +8,11 @@ import {
 } from '../../native/router-hotpath/native-compat-action-semantics.js';
 import { buildChatResponseFromResponsesWithNative } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import {
-  consumeResponsesPassthroughByAliases,
-  consumeResponsesPayloadSnapshotByAliases,
-  registerResponsesPassthrough,
-  registerResponsesPayloadSnapshot
-} from '../shared/responses-reasoning-registry.js';
+  consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases,
+  consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
+  registerResponsesPassthroughWithNative as registerResponsesPassthrough,
+  registerResponsesPayloadSnapshotWithNative as registerResponsesPayloadSnapshot
+} from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 function isJsonValue(value: unknown): value is JsonValue {
   if (

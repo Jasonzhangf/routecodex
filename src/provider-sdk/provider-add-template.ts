@@ -1,6 +1,6 @@
 import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../cli/config/bootstrap-provider-templates.js';
 import type { InitProviderTemplate } from '../cli/config/init-provider-catalog.js';
-import type { UnknownRecord } from '../config/virtual-router-types.js';
+import type { UnknownRecord } from '../config/user-config-codec.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
 
 

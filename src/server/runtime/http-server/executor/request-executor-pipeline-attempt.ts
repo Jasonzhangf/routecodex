@@ -1,8 +1,11 @@
 import type { HubPipelineResult } from '../executor-pipeline.js';
 import { finalizeRequestExecutorAttemptMetadata } from './request-executor-attempt-state.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
-import { MetadataCenter } from '../metadata-center/metadata-center.js';
-import { writeMetadataCenterSlot } from '../metadata-center/dualwrite-api.js';
+import {
+  hasRuntimeCarrier,
+  writeProviderObservationSlot,
+  writeRuntimeControlSlot
+} from '../metadata-center/request-truth-readers.js';
 import {
   resolveErrorErr05RouteAvailabilityDecision
 } from './request-executor-core-utils.js';
@@ -67,73 +70,64 @@ function commitRequestExecutorAttemptSelection(args: {
     });
   }
 
-  writeMetadataCenterSlot({
+  writeProviderObservationSlot({
     target: metadata,
-    family: 'provider_observation',
     key: 'target',
     value: { ...(target as Record<string, unknown>) },
     writer: PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
     reason: 'selected pipeline target'
   });
-  writeMetadataCenterSlot({
+  writeProviderObservationSlot({
     target: metadata,
-    family: 'provider_observation',
     key: 'providerKey',
     value: target.providerKey,
     writer: PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
     reason: 'selected pipeline target'
   });
-  writeMetadataCenterSlot({
+  writeProviderObservationSlot({
     target: metadata,
-    family: 'provider_observation',
     key: 'assignedModelId',
     value: modelId,
     writer: PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
     reason: 'selected pipeline target'
   });
-  writeMetadataCenterSlot({
+  writeProviderObservationSlot({
     target: metadata,
-    family: 'provider_observation',
     key: 'modelId',
     value: modelId,
     writer: PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
     reason: 'selected pipeline target'
   });
-  writeMetadataCenterSlot({
+  writeProviderObservationSlot({
     target: metadata,
-    family: 'provider_observation',
     key: 'clientModelId',
     value: clientModelId,
     writer: PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
     reason: 'selected pipeline target'
   });
-  writeMetadataCenterSlot({
+  writeProviderObservationSlot({
     target: metadata,
-    family: 'provider_observation',
     key: 'compatibilityProfile',
     value: readTrimmedString(target.compatibilityProfile),
     writer: PIPELINE_ATTEMPT_PROVIDER_OBSERVATION_WRITER,
     reason: 'selected pipeline target'
   });
-  writeMetadataCenterSlot({
+  writeRuntimeControlSlot({
     target: metadata,
-    family: 'runtime_control',
     key: 'routeName',
     value: routeName,
     writer: PIPELINE_ATTEMPT_SELECTION_COMMIT_WRITER,
     reason: 'selected pipeline route'
   });
-  writeMetadataCenterSlot({
+  writeRuntimeControlSlot({
     target: metadata,
-    family: 'runtime_control',
     key: 'routeId',
     value: routeId,
     writer: PIPELINE_ATTEMPT_SELECTION_COMMIT_WRITER,
     reason: 'selected pipeline route'
   });
-  writeMetadataCenterSlot({
+  writeRuntimeControlSlot({
     target: metadata,
-    family: 'runtime_control',
     key: 'providerProtocol',
     value: providerProtocol,
     writer: PIPELINE_ATTEMPT_SELECTION_COMMIT_WRITER,
@@ -251,8 +245,7 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     }
   }
 
-  const metadataCenter = MetadataCenter.read(mergedMetadata);
-  if (metadataCenter) {
+  if (hasRuntimeCarrier(mergedMetadata)) {
     commitRequestExecutorAttemptSelection({
       metadata: mergedMetadata,
       routingDecision,

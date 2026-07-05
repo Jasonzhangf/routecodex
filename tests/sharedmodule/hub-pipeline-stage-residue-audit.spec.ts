@@ -757,9 +757,14 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('responses retention registry wrapper must fail fast on native errors', () => {
-    const filePath = path.join(
+    const retiredPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts',
+    );
+    expect(fs.existsSync(retiredPath)).toBe(false);
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts',
     );
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
@@ -3819,7 +3824,11 @@ describe('hub pipeline stage residue audit', () => {
     const findings: string[] = [];
 
     for (const relativePath of files) {
-      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      const fullPath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(fullPath)) {
+        continue;
+      }
+      const source = fs.readFileSync(fullPath, 'utf8');
       const matches = collectMatches(source, [
         { label: 'exports retired bidirectional factory', pattern: /\bcreateBidirectionalConverters\b/ },
         { label: 'exports retired bidirectional singleton', pattern: /\bbidirectionalConverters\b/ },
@@ -3843,7 +3852,11 @@ describe('hub pipeline stage residue audit', () => {
     const findings: string[] = [];
 
     for (const relativePath of files) {
-      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      const fullPath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(fullPath)) {
+        continue;
+      }
+      const source = fs.readFileSync(fullPath, 'utf8');
       const matches = collectMatches(source, [
         { label: 'exports TS responses reasoning payload type', pattern: /export\s+interface\s+ResponsesReasoningPayload\b/ },
         { label: 'exports TS responses output text meta type', pattern: /export\s+interface\s+ResponsesOutputTextMeta\b/ },
@@ -3893,7 +3906,11 @@ describe('hub pipeline stage residue audit', () => {
     ].filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
     for (const relativePath of files) {
-      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      const fullPath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(fullPath)) {
+        continue;
+      }
+      const source = fs.readFileSync(fullPath, 'utf8');
       const matches = collectMatches(source, [
         { label: 'exports unused output extraction result type', pattern: /export\s+interface\s+OutputContentExtractionResult\b/ },
         { label: 'exports unused output extraction wrapper', pattern: /export\s+function\s+extractOutputSegments\b/ },
@@ -3969,7 +3986,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-tool-schema.ts',
-    ];
+    ].filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
     const forbidden = [
       { label: 'public TS alias builder', pattern: /buildAnthropicToolAliasMap\b/ },
       { label: 'TS anthropic inbound converter', pattern: /buildOpenAIChatFromAnthropic\s*\(/ },
@@ -3985,7 +4002,11 @@ describe('hub pipeline stage residue audit', () => {
     const findings: string[] = [];
 
     for (const relativePath of files) {
-      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      const fullPath = path.join(repoRoot, relativePath);
+      if (!fs.existsSync(fullPath)) {
+        continue;
+      }
+      const source = fs.readFileSync(fullPath, 'utf8');
       for (const rule of forbidden) {
         if (rule.pattern.test(source)) {
           findings.push(`${relativePath}: ${rule.label}`);

@@ -11,7 +11,7 @@ import { decodeProviderConfigFile } from '../config/provider-config-codec.js';
 import { writeProviderConfigFile } from '../config/provider-config-writer.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import type { ProviderConfigV2 } from '../config/provider-v2-loader.js';
-import type { UnknownRecord } from '../config/virtual-router-types.js';
+import type { UnknownRecord } from '../config/user-config-codec.js';
 import {
   __providerUpdateTestables,
   buildProviderUpdateInputFromV2,

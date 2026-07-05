@@ -6,7 +6,7 @@
  */
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
 import { captureResponsesRequestContextForRequest, clearResponsesConversationByRequestId, finalizeResponsesConversationRequestRetention, lookupResponsesContinuationByResponseId, materializeLatestResponsesContinuationByScope, recordResponsesResponseForRequest, resumeResponsesConversation, } from './runtime-integrations.js';
-import { captureReqInboundResponsesContextSnapshot, planResponsesHandlerEntry, } from './native-exports.js';
+import { captureReqInboundResponsesContextSnapshot, materializeProviderOwnedSubmitContext, planResponsesContinuationRequestAction, planResponsesHandlerEntry, planResponsesRequestContext, } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';

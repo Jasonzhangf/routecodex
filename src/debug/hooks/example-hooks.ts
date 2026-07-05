@@ -50,7 +50,7 @@ interface ResponseDebugPayload extends UnknownObject {
   status?: number;
   headers?: UnknownObject;
   data?: ResponseDataPayload;
-  metadata?: {
+  _debugMetadata?: {
     requestId?: string;
     usage?: UsagePayload;
     hookMetrics?: UnknownObject;
@@ -66,7 +66,7 @@ interface ResponseDebugPayload extends UnknownObject {
   _errorTrace?: UnknownObject;
 }
 
-type ResponseMetadata = NonNullable<ResponseDebugPayload['metadata']>;
+type ResponseDebugMetadata = NonNullable<ResponseDebugPayload['_debugMetadata']>;
 
 interface ErrorInfoPayload extends UnknownObject {
   message?: string;
@@ -391,21 +391,21 @@ export const responsePostProcessingMonitoringHook: BidirectionalHook = {
     observations.push(`⏱️ 总处理时间: ${totalTime}ms`);
     metrics.totalProcessingTime = totalTime;
 
-    // 检查是否有元数据
-    if (response.metadata) {
-      observations.push(`📋 响应包含元数据`);
+    // 检查是否有调试元数据
+    if (response._debugMetadata) {
+      observations.push(`📋 响应包含调试元数据`);
 
-      if (response.metadata.requestId) {
-        observations.push(`🆔 请求ID: ${response.metadata.requestId}`);
+      if (response._debugMetadata.requestId) {
+        observations.push(`🆔 请求ID: ${response._debugMetadata.requestId}`);
       }
 
-      if (response.metadata.usage) {
-        const usage = response.metadata.usage;
+      if (response._debugMetadata.usage) {
+        const usage = response._debugMetadata.usage;
         observations.push(`📊 元数据Token使用 - 输入: ${usage.prompt_tokens}, 输出: ${usage.completion_tokens}`);
       }
 
-      if (response.metadata.hookMetrics) {
-        const hookMetrics = response.metadata.hookMetrics;
+      if (response._debugMetadata.hookMetrics) {
+        const hookMetrics = response._debugMetadata.hookMetrics;
         observations.push(`🔧 Hook执行指标已记录`);
         metrics.hookMetrics = hookMetrics;
       }
@@ -428,25 +428,25 @@ export const responsePostProcessingMonitoringHook: BidirectionalHook = {
     const observations: string[] = [];
     const changes: DataChange[] = [];
     const modifiedData = ensureRecord(data.data) as ResponseDebugPayload;
-    const metadata = ensureRecord(modifiedData.metadata) as ResponseMetadata;
-    modifiedData.metadata = metadata;
+    const debugMetadata = ensureRecord(modifiedData._debugMetadata) as ResponseDebugMetadata;
+    modifiedData._debugMetadata = debugMetadata;
 
     // 添加最终处理时间戳
     changes.push({
       type: 'added',
-      path: 'metadata.finalProcessingTimestamp',
+      path: '_debugMetadata.finalProcessingTimestamp',
       newValue: Date.now(),
       reason: '记录最终处理时间戳'
     });
 
-    metadata.finalProcessingTimestamp = Date.now();
+    debugMetadata.finalProcessingTimestamp = Date.now();
     observations.push(`🏁 添加最终处理时间戳`);
 
     // 添加性能指标
     const totalTime = Date.now() - context.startTime;
     changes.push({
       type: 'added',
-      path: 'metadata.performanceMetrics',
+      path: '_debugMetadata.performanceMetrics',
       newValue: {
         totalProcessingTime: totalTime,
         dataSize: data.metadata.size,
@@ -455,7 +455,7 @@ export const responsePostProcessingMonitoringHook: BidirectionalHook = {
       reason: '记录性能指标'
     });
 
-    metadata.performanceMetrics = {
+    debugMetadata.performanceMetrics = {
       totalProcessingTime: totalTime,
       dataSize: data.metadata.size,
       executionId: context.executionId

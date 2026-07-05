@@ -5,7 +5,7 @@ import {
   type ProviderCatalogSdkBinding,
   type ProviderCatalogWebSearchBinding
 } from '../cli/config/init-provider-catalog.js';
-import type { UnknownRecord } from '../config/virtual-router-types.js';
+import type { UnknownRecord } from '../config/user-config-codec.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

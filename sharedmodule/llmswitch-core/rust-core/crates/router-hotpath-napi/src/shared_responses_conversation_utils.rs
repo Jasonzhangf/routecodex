@@ -1,12 +1,13 @@
 // feature_id: conversion.responses.store
 // canonical_builder: stage_a_conversion_responses_store_owner_boundary
+use crate::chat_process_media_semantics::strip_responses_stored_context_input_media;
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
 use crate::shared_json_utils::{
     read_optional_bool, read_string_array_command, read_trimmed_string, read_workdir_from_args,
 };
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn stage_a_conversion_responses_store_owner_boundary() {}
 
@@ -205,6 +206,752 @@ fn read_entry_tools_value(entry_obj: &Map<String, Value>) -> Value {
         .and_then(|row| row.get("tools"))
         .cloned()
         .unwrap_or(Value::Null)
+}
+
+fn should_allow_responses_conversation_continuation(payload: &Value) -> bool {
+    let Some(row) = payload.as_object() else {
+        return false;
+    };
+    if row.get("store").and_then(Value::as_bool) == Some(false) {
+        return false;
+    }
+    if row.get("store").and_then(Value::as_bool) == Some(true) {
+        return true;
+    }
+    let previous_response_id = read_trimmed_string(row.get("previous_response_id"));
+    let response_id = read_trimmed_string(row.get("response_id"));
+    let tool_outputs_len = row
+        .get("tool_outputs")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    (previous_response_id.is_some() || response_id.is_some()) && tool_outputs_len > 0
+}
+
+fn read_responses_tool_call_id(item: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(item.get("call_id"))
+        .or_else(|| read_trimmed_string(item.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(item.get("id")))
+}
+
+fn collect_responses_pending_tool_call_ids(input: &Value) -> Vec<String> {
+    let Some(items) = input.as_array() else {
+        return Vec::new();
+    };
+    let mut pending: Vec<String> = Vec::new();
+    for item in items {
+        let Some(row) = item.as_object() else {
+            continue;
+        };
+        let item_type = read_trimmed_string(row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let Some(call_id) = read_responses_tool_call_id(row) else {
+            continue;
+        };
+        if item_type == "function_call" {
+            if !pending.iter().any(|existing| existing == &call_id) {
+                pending.push(call_id);
+            }
+            continue;
+        }
+        if item_type == "function_call_output"
+            || item_type == "tool_result"
+            || item_type == "tool_message"
+        {
+            if let Some(index) = pending.iter().position(|existing| existing == &call_id) {
+                pending.remove(index);
+            }
+        }
+    }
+    pending
+}
+
+fn plan_responses_conversation_retention(entry: &Value, options: &Value) -> Value {
+    if !entry.is_object() {
+        return serde_json::json!({
+            "action": "noop",
+            "reason": "missing_entry",
+        });
+    }
+    let last_response_id =
+        entry.as_object()
+            .and_then(|row| read_trimmed_string(row.get("lastResponseId")));
+    if last_response_id.is_none() {
+        return serde_json::json!({
+            "action": "clear",
+            "reason": "missing_response",
+        });
+    }
+    let keep_for_submit_tool_outputs = options
+        .as_object()
+        .and_then(|row| row.get("keepForSubmitToolOutputs"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if keep_for_submit_tool_outputs {
+        return serde_json::json!({
+            "action": "release",
+            "reason": "keep_for_submit",
+            "lastResponseId": last_response_id,
+        });
+    }
+    let scope_count = entry
+        .as_object()
+        .and_then(|row| row.get("scopeKeys"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .count()
+        })
+        .unwrap_or(0);
+    if scope_count == 0 {
+        return serde_json::json!({
+            "action": "clear",
+            "reason": "missing_scope",
+            "lastResponseId": last_response_id,
+        });
+    }
+    serde_json::json!({
+        "action": "release",
+        "reason": "release",
+        "lastResponseId": last_response_id,
+    })
+}
+
+fn plan_responses_conversation_persistence_eligibility(entry: &Value, options: &Value) -> Value {
+    let mode = options
+        .as_object()
+        .and_then(|row| read_trimmed_string(row.get("mode")))
+        .unwrap_or_else(|| "flush".to_string());
+    let Some(entry_obj) = entry.as_object() else {
+        return serde_json::json!({
+            "action": "skip",
+            "reason": "missing_entry",
+        });
+    };
+    let Some(last_response_id) = read_trimmed_string(entry_obj.get("lastResponseId")) else {
+        return serde_json::json!({
+            "action": "skip",
+            "reason": "missing_response",
+        });
+    };
+    if responses_continuation_owner(entry_obj.get("continuationOwner")).as_deref() == Some("direct")
+    {
+        return serde_json::json!({
+            "action": "skip",
+            "reason": "direct_owner",
+            "lastResponseId": last_response_id,
+        });
+    }
+    if mode == "flush"
+        && entry_obj
+            .get("allowContinuation")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            != true
+    {
+        return serde_json::json!({
+            "action": "skip",
+            "reason": "continuation_not_allowed",
+            "lastResponseId": last_response_id,
+        });
+    }
+    if mode == "load" {
+        let now_ms = options
+            .as_object()
+            .and_then(|row| row.get("nowMs"))
+            .and_then(Value::as_i64);
+        let ttl_ms = options
+            .as_object()
+            .and_then(|row| row.get("ttlMs"))
+            .and_then(Value::as_i64);
+        let updated_at = entry_obj.get("updatedAt").and_then(Value::as_i64);
+        if let (Some(now_ms), Some(ttl_ms), Some(updated_at)) = (now_ms, ttl_ms, updated_at) {
+            if now_ms - updated_at > ttl_ms {
+                return serde_json::json!({
+                    "action": "skip",
+                    "reason": "expired",
+                    "lastResponseId": last_response_id,
+                });
+            }
+        }
+    }
+    serde_json::json!({
+        "action": "persist",
+        "reason": "eligible",
+        "lastResponseId": last_response_id,
+    })
+}
+
+fn read_scope_keys(row: &Map<String, Value>) -> Vec<String> {
+    row.get("scopeKeys")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn plan_responses_capture_pending_cleanup(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let Some(request_id) = read_trimmed_string(obj.get("requestId")) else {
+        return serde_json::json!({
+            "action": "noop",
+            "reason": "missing_request_id",
+            "detachRequestIds": [],
+        });
+    };
+    let requested_scope_keys: HashSet<String> = obj
+        .get("scopeKeys")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect()
+        })
+        .unwrap_or_default();
+    if requested_scope_keys.is_empty() {
+        return serde_json::json!({
+            "action": "noop",
+            "reason": "missing_scope",
+            "detachRequestIds": [],
+        });
+    }
+    let candidates = obj
+        .get("candidates")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut detach_request_ids: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for candidate in candidates {
+        let Some(row) = candidate.as_object() else {
+            continue;
+        };
+        let Some(candidate_request_id) = read_trimmed_string(row.get("requestId")) else {
+            continue;
+        };
+        if candidate_request_id == request_id {
+            continue;
+        }
+        if read_trimmed_string(row.get("lastResponseId")).is_some() {
+            continue;
+        }
+        let has_scope_overlap = read_scope_keys(row)
+            .iter()
+            .any(|scope_key| requested_scope_keys.contains(scope_key));
+        if !has_scope_overlap || !seen.insert(candidate_request_id.clone()) {
+            continue;
+        }
+        detach_request_ids.push(candidate_request_id);
+    }
+    serde_json::json!({
+        "action": if detach_request_ids.is_empty() { "noop" } else { "detach" },
+        "reason": if detach_request_ids.is_empty() { "no_match" } else { "pending_scope_overlap" },
+        "detachRequestIds": detach_request_ids,
+    })
+}
+
+fn plan_responses_record_scope_cleanup(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let Some(request_id) = read_trimmed_string(obj.get("requestId")) else {
+        return serde_json::json!({
+            "action": "noop",
+            "reason": "missing_request_id",
+            "detachRequestIds": [],
+        });
+    };
+    let scope_keys: HashSet<String> = obj
+        .get("scopeKeys")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect()
+        })
+        .unwrap_or_default();
+    if scope_keys.is_empty() {
+        return serde_json::json!({
+            "action": "noop",
+            "reason": "missing_scope",
+            "detachRequestIds": [],
+        });
+    }
+    let candidates = obj
+        .get("candidates")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut detach_request_ids: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for candidate in candidates {
+        let Some(row) = candidate.as_object() else {
+            continue;
+        };
+        let Some(candidate_request_id) = read_trimmed_string(row.get("requestId")) else {
+            continue;
+        };
+        if candidate_request_id == request_id {
+            continue;
+        }
+        if read_trimmed_string(row.get("lastResponseId")).is_none() {
+            continue;
+        }
+        let has_scope_overlap = read_scope_keys(row)
+            .iter()
+            .any(|scope_key| scope_keys.contains(scope_key));
+        if !has_scope_overlap || !seen.insert(candidate_request_id.clone()) {
+            continue;
+        }
+        detach_request_ids.push(candidate_request_id);
+    }
+    serde_json::json!({
+        "action": if detach_request_ids.is_empty() { "noop" } else { "detach" },
+        "reason": if detach_request_ids.is_empty() { "no_match" } else { "completed_scope_overlap" },
+        "detachRequestIds": detach_request_ids,
+    })
+}
+
+fn plan_responses_record_scope_entry_match(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let requested_scope_keys: Vec<String> = obj
+        .get("scopeKeys")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect()
+        })
+        .unwrap_or_default();
+    if requested_scope_keys.is_empty() {
+        return serde_json::json!({
+            "action": "none",
+            "reason": "missing_scope",
+        });
+    }
+    let candidates = obj
+        .get("candidates")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut candidate_by_scope: HashMap<String, String> = HashMap::new();
+    for candidate in candidates {
+        let Some(row) = candidate.as_object() else {
+            continue;
+        };
+        let Some(scope_key) = read_trimmed_string(row.get("scopeKey")) else {
+            continue;
+        };
+        let Some(request_id) = read_trimmed_string(row.get("requestId")) else {
+            continue;
+        };
+        candidate_by_scope.entry(scope_key).or_insert(request_id);
+    }
+    for scope_key in requested_scope_keys {
+        if let Some(request_id) = candidate_by_scope.get(&scope_key) {
+            return serde_json::json!({
+                "action": "select",
+                "reason": "scope_match",
+                "scopeKey": scope_key,
+                "requestId": request_id,
+            });
+        }
+    }
+    serde_json::json!({
+        "action": "none",
+        "reason": "no_scope_match",
+    })
+}
+
+fn plan_responses_store_sweep(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let mode = read_trimmed_string(obj.get("mode")).unwrap_or_default();
+    if mode != "clear_unresolved" && mode != "prune_expired" {
+        return serde_json::json!({
+            "action": "noop",
+            "reason": "invalid_mode",
+            "detachRequestIds": [],
+        });
+    }
+    let now_ms = obj.get("nowMs").and_then(Value::as_i64);
+    let ttl_ms = obj.get("ttlMs").and_then(Value::as_i64);
+    let candidates = obj
+        .get("candidates")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut detach_request_ids: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for candidate in candidates {
+        let Some(row) = candidate.as_object() else {
+            continue;
+        };
+        let Some(request_id) = read_trimmed_string(row.get("requestId")) else {
+            continue;
+        };
+        if !seen.insert(request_id.clone()) {
+            continue;
+        }
+        let should_detach = if mode == "clear_unresolved" {
+            read_trimmed_string(row.get("lastResponseId")).is_none()
+        } else {
+            match (
+                row.get("updatedAt").and_then(Value::as_i64),
+                now_ms,
+                ttl_ms,
+            ) {
+                (Some(updated_at), Some(now_ms), Some(ttl_ms)) if ttl_ms >= 0 => {
+                    now_ms - updated_at > ttl_ms
+                }
+                _ => false,
+            }
+        };
+        if should_detach {
+            detach_request_ids.push(request_id);
+        }
+    }
+    let reason = if mode == "clear_unresolved" {
+        if detach_request_ids.is_empty() {
+            "no_unresolved"
+        } else {
+            "unresolved"
+        }
+    } else if detach_request_ids.is_empty() {
+        "no_expired"
+    } else {
+        "expired"
+    };
+    serde_json::json!({
+        "action": if detach_request_ids.is_empty() { "noop" } else { "detach" },
+        "reason": reason,
+        "detachRequestIds": detach_request_ids,
+    })
+}
+
+fn plan_responses_release_request_payload(entry: &Value) -> Value {
+    let entry_obj = entry.as_object().cloned().unwrap_or_default();
+    let released_input_prefix_raw = clone_array(entry_obj.get("input"));
+    let stripped = strip_responses_stored_context_input_media(
+        released_input_prefix_raw,
+        "[Image omitted]".to_string(),
+    );
+    let released_input_prefix = stripped.messages;
+    let mut base_payload = entry_obj
+        .get("basePayload")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(last_response_id) = read_trimmed_string(entry_obj.get("lastResponseId")) {
+        base_payload.insert(
+            "previous_response_id".to_string(),
+            Value::String(last_response_id),
+        );
+    }
+    let released_pending_tool_call_ids =
+        collect_responses_pending_tool_call_ids(&Value::Array(released_input_prefix.clone()));
+    serde_json::json!({
+        "basePayload": Value::Object(base_payload),
+        "releasedInputPrefix": released_input_prefix,
+        "releasedPendingToolCallIds": released_pending_tool_call_ids,
+        "input": [],
+    })
+}
+
+fn plan_responses_scope_continuation_match(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let mode = read_trimmed_string(obj.get("mode")).unwrap_or_default();
+    if mode != "resume" && mode != "materialize" {
+        return serde_json::json!({
+            "action": "none",
+            "reason": "invalid_mode",
+        });
+    }
+    let requested_owner = obj
+        .get("options")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("continuationOwner"))
+        .and_then(|value| responses_continuation_owner(Some(value)));
+    let candidates = obj
+        .get("candidates")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut matched_owners: HashSet<String> = HashSet::new();
+    let mut matches: HashMap<String, Value> = HashMap::new();
+
+    for candidate in candidates {
+        let Some(row) = candidate.as_object() else {
+            continue;
+        };
+        let Some(scope_key) = read_trimmed_string(row.get("scopeKey")) else {
+            continue;
+        };
+        let Some(request_id) = read_trimmed_string(row.get("requestId")) else {
+            continue;
+        };
+        if row
+            .get("allowContinuation")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            != true
+        {
+            continue;
+        }
+        let owner = row
+            .get("continuationOwner")
+            .and_then(|value| responses_continuation_owner(Some(value)));
+        if mode == "materialize" {
+            let Some(owner_value) = owner.clone() else {
+                continue;
+            };
+            matched_owners.insert(owner_value.clone());
+            if owner_value == "direct" {
+                continue;
+            }
+        } else if owner.as_deref() == Some("direct") {
+            continue;
+        }
+        let last_response_id = read_trimmed_string(row.get("lastResponseId"));
+        if mode == "resume" && last_response_id.is_none() {
+            continue;
+        }
+        let dedupe_key = format!(
+            "{}:{}",
+            request_id,
+            last_response_id.clone().unwrap_or_default()
+        );
+        matches.entry(dedupe_key.clone()).or_insert_with(|| {
+            serde_json::json!({
+                "scopeKey": scope_key,
+                "dedupeKey": dedupe_key,
+                "requestId": request_id,
+                "lastResponseId": last_response_id,
+            })
+        });
+    }
+
+    if mode == "materialize"
+        && requested_owner.is_none()
+        && matched_owners.contains("direct")
+        && matched_owners.contains("relay")
+    {
+        return serde_json::json!({
+            "action": "none",
+            "reason": "mixed_owner_ambiguous",
+        });
+    }
+    if matches.len() != 1 {
+        return serde_json::json!({
+            "action": "none",
+            "reason": if matches.is_empty() { "no_match" } else { "ambiguous" },
+            "matchCount": matches.len(),
+        });
+    }
+    let mut selected = matches.into_values().next().unwrap_or(Value::Null);
+    if let Some(row) = selected.as_object_mut() {
+        row.insert(
+            "action".to_string(),
+            Value::String(if mode == "resume" { "restore" } else { "materialize" }.to_string()),
+        );
+        row.insert("reason".to_string(), Value::String("matched".to_string()));
+    }
+    selected
+}
+
+fn response_entry_candidate_matches(
+    row: &Map<String, Value>,
+    response_id: &str,
+    requested_port_scope_key: Option<&str>,
+    options: Option<&Map<String, Value>>,
+) -> bool {
+    if read_trimmed_string(row.get("lastResponseId")).as_deref() != Some(response_id) {
+        return false;
+    }
+    if let Some(requested_port_scope_key) = requested_port_scope_key {
+        if read_trimmed_string(row.get("portScopeKey")).as_deref() != Some(requested_port_scope_key)
+        {
+            return false;
+        }
+    }
+    if let Some(options) = options {
+        if options.contains_key("entryKind") {
+            let requested_entry_kind = responses_entry_kind(options.get("entryKind"));
+            let actual_entry_kind = responses_entry_kind(row.get("entryKind"));
+            if actual_entry_kind != requested_entry_kind {
+                return false;
+            }
+        }
+        if let Some(requested_owner) =
+            responses_continuation_owner(options.get("continuationOwner"))
+        {
+            let actual_owner = responses_continuation_owner(row.get("continuationOwner"));
+            if actual_owner.as_deref() != Some(requested_owner.as_str()) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn selected_resume_entry_plan(row: &Map<String, Value>, source: &str) -> Value {
+    if row
+        .get("allowContinuation")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        != true
+    {
+        return serde_json::json!({
+            "action": "none",
+            "reason": "expired_or_unknown_response_id",
+        });
+    }
+    serde_json::json!({
+        "action": "select",
+        "reason": "matched",
+        "source": source,
+        "requestId": read_trimmed_string(row.get("requestId")),
+        "lastResponseId": read_trimmed_string(row.get("lastResponseId")),
+        "scopeKey": read_trimmed_string(row.get("scopeKey")),
+    })
+}
+
+fn plan_responses_conversation_resume_entry_match(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let Some(response_id) = read_trimmed_string(obj.get("responseId")) else {
+        return serde_json::json!({
+            "action": "none",
+            "reason": "missing_or_empty_response_id",
+        });
+    };
+    let requested_port_scope_key =
+        read_trimmed_string(obj.get("requestedPortScopeKey")).filter(|value| !value.is_empty());
+    let options = obj.get("options").and_then(Value::as_object);
+    let candidates = obj
+        .get("candidates")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut indexed_present = false;
+    let mut request_matches: Vec<Map<String, Value>> = Vec::new();
+
+    for candidate in &candidates {
+        let Some(row) = candidate.as_object() else {
+            continue;
+        };
+        let source = read_trimmed_string(row.get("source")).unwrap_or_default();
+        if source == "response_index" {
+            indexed_present = true;
+            if response_entry_candidate_matches(
+                row,
+                &response_id,
+                requested_port_scope_key.as_deref(),
+                options,
+            ) {
+                return selected_resume_entry_plan(row, "response_index");
+            }
+        }
+    }
+
+    if !indexed_present {
+        for candidate in &candidates {
+            let Some(row) = candidate.as_object() else {
+                continue;
+            };
+            let source = read_trimmed_string(row.get("source")).unwrap_or_default();
+            if source != "request_map" {
+                continue;
+            }
+            if response_entry_candidate_matches(
+                row,
+                &response_id,
+                requested_port_scope_key.as_deref(),
+                options,
+            ) {
+                request_matches.push(row.clone());
+            }
+        }
+        if request_matches.len() > 1 {
+            return serde_json::json!({
+                "action": "ambiguous",
+                "reason": "ambiguous_response_id_index",
+                "responseId": response_id,
+                "matchCount": request_matches.len(),
+            });
+        }
+        if let Some(row) = request_matches.first() {
+            return selected_resume_entry_plan(row, "request_map");
+        }
+    }
+
+    for candidate in &candidates {
+        let Some(row) = candidate.as_object() else {
+            continue;
+        };
+        let source = read_trimmed_string(row.get("source")).unwrap_or_default();
+        if source != "scope" {
+            continue;
+        }
+        if response_entry_candidate_matches(
+            row,
+            &response_id,
+            requested_port_scope_key.as_deref(),
+            options,
+        ) {
+            return selected_resume_entry_plan(row, "scope");
+        }
+    }
+
+    serde_json::json!({
+        "action": "none",
+        "reason": "expired_or_unknown_response_id",
+    })
+}
+
+fn plan_responses_continuation_lookup_by_response_id(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let Some(response_id) = read_trimmed_string(obj.get("responseId")) else {
+        return serde_json::json!({
+            "action": "none",
+            "reason": "missing_or_empty_response_id",
+        });
+    };
+    let Some(entry) = obj.get("entry").and_then(Value::as_object) else {
+        return serde_json::json!({
+            "action": "none",
+            "reason": "missing_entry",
+        });
+    };
+    let requested_port_scope_key =
+        read_trimmed_string(obj.get("requestedPortScopeKey")).filter(|value| !value.is_empty());
+    let options = obj.get("options").and_then(Value::as_object);
+    if !response_entry_candidate_matches(
+        entry,
+        &response_id,
+        requested_port_scope_key.as_deref(),
+        options,
+    ) {
+        return serde_json::json!({
+            "action": "none",
+            "reason": "isolation_mismatch",
+        });
+    }
+    serde_json::json!({
+        "action": "select",
+        "reason": "matched",
+        "responseId": read_trimmed_string(entry.get("lastResponseId")),
+        "providerKey": read_trimmed_string(entry.get("providerKey")),
+        "continuationOwner": responses_continuation_owner(entry.get("continuationOwner")),
+        "entryKind": responses_entry_kind(entry.get("entryKind")),
+        "requestId": read_trimmed_string(entry.get("requestId")),
+    })
 }
 
 fn normalize_responses_history_item(value: Value) -> Value {
@@ -2835,6 +3582,117 @@ pub fn build_responses_conversation_scope_plan_json(input_json: String) -> NapiR
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi(js_name = "shouldAllowResponsesConversationContinuationJson")]
+pub fn should_allow_responses_conversation_continuation_json(
+    payload_json: String,
+) -> NapiResult<bool> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(should_allow_responses_conversation_continuation(&payload))
+}
+
+#[napi_derive::napi(js_name = "collectResponsesPendingToolCallIdsJson")]
+pub fn collect_responses_pending_tool_call_ids_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = collect_responses_pending_tool_call_ids(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesConversationRetentionJson")]
+pub fn plan_responses_conversation_retention_json(
+    entry_json: String,
+    options_json: String,
+) -> NapiResult<String> {
+    let entry: Value =
+        serde_json::from_str(&entry_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let options: Value =
+        serde_json::from_str(&options_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_conversation_retention(&entry, &options);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesConversationPersistenceEligibilityJson")]
+pub fn plan_responses_conversation_persistence_eligibility_json(
+    entry_json: String,
+    options_json: String,
+) -> NapiResult<String> {
+    let entry: Value =
+        serde_json::from_str(&entry_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let options: Value =
+        serde_json::from_str(&options_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_conversation_persistence_eligibility(&entry, &options);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesCapturePendingCleanupJson")]
+pub fn plan_responses_capture_pending_cleanup_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_capture_pending_cleanup(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesRecordScopeCleanupJson")]
+pub fn plan_responses_record_scope_cleanup_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_record_scope_cleanup(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesRecordScopeEntryMatchJson")]
+pub fn plan_responses_record_scope_entry_match_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_record_scope_entry_match(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesStoreSweepJson")]
+pub fn plan_responses_store_sweep_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_store_sweep(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesReleaseRequestPayloadJson")]
+pub fn plan_responses_release_request_payload_json(entry_json: String) -> NapiResult<String> {
+    let entry: Value =
+        serde_json::from_str(&entry_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_release_request_payload(&entry);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesScopeContinuationMatchJson")]
+pub fn plan_responses_scope_continuation_match_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_scope_continuation_match(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesConversationResumeEntryMatchJson")]
+pub fn plan_responses_conversation_resume_entry_match_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_conversation_resume_entry_match(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesContinuationLookupByResponseIdJson")]
+pub fn plan_responses_continuation_lookup_by_response_id_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_continuation_lookup_by_response_id(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi_derive::napi]
 pub fn resume_responses_conversation_payload_json(
     entry_json: String,
@@ -3109,8 +3967,15 @@ mod tests {
         build_responses_conversation_scope_plan, build_stop_hook_guidance_text_from_output,
         convert_responses_output_to_input_items, materialize_provider_owned_submit_context,
         materialize_responses_continuation_payload, plan_responses_continuation_request_action,
-        plan_responses_handler_entry, plan_responses_request_context,
-        prepare_responses_conversation_entry,
+        plan_responses_capture_pending_cleanup, plan_responses_record_scope_cleanup,
+        plan_responses_record_scope_entry_match, plan_responses_release_request_payload,
+        plan_responses_store_sweep,
+        plan_responses_conversation_persistence_eligibility, plan_responses_handler_entry,
+        plan_responses_request_context,
+        plan_responses_conversation_retention, prepare_responses_conversation_entry,
+        plan_responses_conversation_resume_entry_match,
+        plan_responses_continuation_lookup_by_response_id,
+        plan_responses_scope_continuation_match,
         publish_responses_record_plan_json, restore_responses_continuation_payload,
         resume_responses_conversation_payload,
     };
@@ -3186,6 +4051,407 @@ mod tests {
         assert_eq!(
             planned["recordArgs"]["routingPolicyGroup"],
             json!("gateway-priority-5555")
+        );
+    }
+
+    #[test]
+    fn retention_plan_clears_without_response_and_releases_keep_or_scoped_entries() {
+        assert_eq!(
+            plan_responses_conversation_retention(
+                &json!({
+                    "requestId": "req_missing_response",
+                    "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                }),
+                &json!({})
+            ),
+            json!({
+                "action": "clear",
+                "reason": "missing_response"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_retention(
+                &json!({
+                    "requestId": "req_missing_scope",
+                    "lastResponseId": "resp_missing_scope",
+                    "scopeKeys": []
+                }),
+                &json!({})
+            ),
+            json!({
+                "action": "clear",
+                "reason": "missing_scope",
+                "lastResponseId": "resp_missing_scope"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_retention(
+                &json!({
+                    "requestId": "req_keep",
+                    "lastResponseId": "resp_keep",
+                    "scopeKeys": []
+                }),
+                &json!({ "keepForSubmitToolOutputs": true })
+            ),
+            json!({
+                "action": "release",
+                "reason": "keep_for_submit",
+                "lastResponseId": "resp_keep"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_retention(
+                &json!({
+                    "requestId": "req_release",
+                    "lastResponseId": "resp_release",
+                    "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                }),
+                &json!({})
+            ),
+            json!({
+                "action": "release",
+                "reason": "release",
+                "lastResponseId": "resp_release"
+            })
+        );
+    }
+
+    #[test]
+    fn persistence_eligibility_plan_skips_direct_expired_missing_and_unallowed_entries() {
+        assert_eq!(
+            plan_responses_conversation_persistence_eligibility(
+                &json!({
+                    "requestId": "req_flush",
+                    "lastResponseId": "resp_flush",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay"
+                }),
+                &json!({ "mode": "flush" })
+            ),
+            json!({
+                "action": "persist",
+                "reason": "eligible",
+                "lastResponseId": "resp_flush"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_persistence_eligibility(
+                &json!({
+                    "requestId": "req_direct",
+                    "lastResponseId": "resp_direct",
+                    "allowContinuation": true,
+                    "continuationOwner": "direct"
+                }),
+                &json!({ "mode": "flush" })
+            ),
+            json!({
+                "action": "skip",
+                "reason": "direct_owner",
+                "lastResponseId": "resp_direct"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_persistence_eligibility(
+                &json!({
+                    "requestId": "req_not_allowed",
+                    "lastResponseId": "resp_not_allowed",
+                    "allowContinuation": false,
+                    "continuationOwner": "relay"
+                }),
+                &json!({ "mode": "flush" })
+            ),
+            json!({
+                "action": "skip",
+                "reason": "continuation_not_allowed",
+                "lastResponseId": "resp_not_allowed"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_persistence_eligibility(
+                &json!({
+                    "requestId": "req_expired",
+                    "lastResponseId": "resp_expired",
+                    "updatedAt": 100
+                }),
+                &json!({ "mode": "load", "nowMs": 1200, "ttlMs": 1000 })
+            ),
+            json!({
+                "action": "skip",
+                "reason": "expired",
+                "lastResponseId": "resp_expired"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_persistence_eligibility(
+                &json!({ "requestId": "req_missing" }),
+                &json!({ "mode": "load", "nowMs": 1200, "ttlMs": 1000 })
+            ),
+            json!({
+                "action": "skip",
+                "reason": "missing_response"
+            })
+        );
+    }
+
+    #[test]
+    fn capture_pending_cleanup_plan_detaches_only_unresolved_same_scope_entries() {
+        assert_eq!(
+            plan_responses_capture_pending_cleanup(&json!({
+                "requestId": "req_new",
+                "scopeKeys": ["entry:responses|owner:relay|session:s"],
+                "candidates": [
+                    {
+                        "requestId": "req_old_pending",
+                        "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                    },
+                    {
+                        "requestId": "req_old_done",
+                        "lastResponseId": "resp_done",
+                        "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                    },
+                    {
+                        "requestId": "req_other_scope",
+                        "scopeKeys": ["entry:responses|owner:relay|session:other"]
+                    },
+                    {
+                        "requestId": "req_new",
+                        "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                    },
+                    {
+                        "requestId": "req_old_pending",
+                        "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                    }
+                ]
+            })),
+            json!({
+                "action": "detach",
+                "reason": "pending_scope_overlap",
+                "detachRequestIds": ["req_old_pending"]
+            })
+        );
+
+        assert_eq!(
+            plan_responses_capture_pending_cleanup(&json!({
+                "requestId": "req_new",
+                "scopeKeys": [],
+                "candidates": [{
+                    "requestId": "req_old_pending",
+                    "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                }]
+            })),
+            json!({
+                "action": "noop",
+                "reason": "missing_scope",
+                "detachRequestIds": []
+            })
+        );
+    }
+
+    #[test]
+    fn record_scope_cleanup_plan_detaches_only_completed_same_scope_entries() {
+        assert_eq!(
+            plan_responses_record_scope_cleanup(&json!({
+                "requestId": "req_current",
+                "scopeKeys": ["entry:responses|owner:relay|session:s"],
+                "candidates": [
+                    {
+                        "requestId": "req_completed",
+                        "lastResponseId": "resp_completed",
+                        "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                    },
+                    {
+                        "requestId": "req_pending",
+                        "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                    },
+                    {
+                        "requestId": "req_other_scope",
+                        "lastResponseId": "resp_other",
+                        "scopeKeys": ["entry:responses|owner:relay|session:other"]
+                    },
+                    {
+                        "requestId": "req_current",
+                        "lastResponseId": "resp_current",
+                        "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                    },
+                    {
+                        "requestId": "req_completed",
+                        "lastResponseId": "resp_completed",
+                        "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                    }
+                ]
+            })),
+            json!({
+                "action": "detach",
+                "reason": "completed_scope_overlap",
+                "detachRequestIds": ["req_completed"]
+            })
+        );
+
+        assert_eq!(
+            plan_responses_record_scope_cleanup(&json!({
+                "requestId": "req_current",
+                "scopeKeys": [],
+                "candidates": [{
+                    "requestId": "req_completed",
+                    "lastResponseId": "resp_completed",
+                    "scopeKeys": ["entry:responses|owner:relay|session:s"]
+                }]
+            })),
+            json!({
+                "action": "noop",
+                "reason": "missing_scope",
+                "detachRequestIds": []
+            })
+        );
+    }
+
+    #[test]
+    fn record_scope_entry_match_plan_selects_first_requested_scope_entry() {
+        assert_eq!(
+            plan_responses_record_scope_entry_match(&json!({
+                "scopeKeys": [
+                    "entry:responses|owner:relay|session:missing",
+                    "entry:responses|owner:relay|session:s"
+                ],
+                "candidates": [
+                    {
+                        "scopeKey": "entry:responses|owner:relay|session:s",
+                        "requestId": "req_scope"
+                    },
+                    {
+                        "scopeKey": "entry:responses|owner:relay|session:other",
+                        "requestId": "req_other"
+                    }
+                ]
+            })),
+            json!({
+                "action": "select",
+                "reason": "scope_match",
+                "scopeKey": "entry:responses|owner:relay|session:s",
+                "requestId": "req_scope"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_record_scope_entry_match(&json!({
+                "scopeKeys": ["entry:responses|owner:relay|session:s"],
+                "candidates": [{
+                    "scopeKey": "entry:responses|owner:relay|session:other",
+                    "requestId": "req_other"
+                }]
+            })),
+            json!({
+                "action": "none",
+                "reason": "no_scope_match"
+            })
+        );
+    }
+
+    #[test]
+    fn store_sweep_plan_detaches_unresolved_and_expired_entries_by_mode() {
+        assert_eq!(
+            plan_responses_store_sweep(&json!({
+                "mode": "clear_unresolved",
+                "candidates": [
+                    { "requestId": "req_pending", "updatedAt": 100 },
+                    { "requestId": "req_done", "lastResponseId": "resp_done", "updatedAt": 100 },
+                    { "requestId": "req_pending", "updatedAt": 200 }
+                ]
+            })),
+            json!({
+                "action": "detach",
+                "reason": "unresolved",
+                "detachRequestIds": ["req_pending"]
+            })
+        );
+
+        assert_eq!(
+            plan_responses_store_sweep(&json!({
+                "mode": "prune_expired",
+                "nowMs": 10_000,
+                "ttlMs": 500,
+                "candidates": [
+                    { "requestId": "req_expired", "lastResponseId": "resp_expired", "updatedAt": 1_000 },
+                    { "requestId": "req_live", "updatedAt": 9_900 }
+                ]
+            })),
+            json!({
+                "action": "detach",
+                "reason": "expired",
+                "detachRequestIds": ["req_expired"]
+            })
+        );
+
+        assert_eq!(
+            plan_responses_store_sweep(&json!({
+                "mode": "prune_expired",
+                "candidates": [{ "requestId": "req_live", "updatedAt": 9_900 }]
+            })),
+            json!({
+                "action": "noop",
+                "reason": "no_expired",
+                "detachRequestIds": []
+            })
+        );
+    }
+
+    #[test]
+    fn release_request_payload_plan_sets_previous_response_and_pending_ids() {
+        assert_eq!(
+            plan_responses_release_request_payload(&json!({
+                "lastResponseId": "resp_release",
+                "basePayload": {
+                    "model": "gpt-5.4",
+                    "previous_response_id": "old_resp"
+                },
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "look" },
+                            { "type": "input_image", "image_url": "data:image/png;base64,abc" }
+                        ]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_release",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }
+                ]
+            })),
+            json!({
+                "basePayload": {
+                    "model": "gpt-5.4",
+                    "previous_response_id": "resp_release"
+                },
+                "releasedInputPrefix": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "look" },
+                            { "type": "input_text", "text": "[Image omitted]" }
+                        ]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_release",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }
+                ],
+                "releasedPendingToolCallIds": ["call_release"],
+                "input": []
+            })
         );
     }
 
@@ -5073,5 +6339,293 @@ mod tests {
         assert_eq!(items[0]["id"], "reasoning-enc-1");
         assert!(items[0].get("status").is_none());
         assert_eq!(items[0]["encrypted_content"], "encrypted-opaque-value");
+    }
+
+    #[test]
+    fn scope_match_plan_selects_single_relay_and_rejects_ambiguous_or_direct_candidates() {
+        let relay_resume = plan_responses_scope_continuation_match(&json!({
+            "mode": "resume",
+            "candidates": [
+                {
+                    "scopeKey": "entry:responses|owner:relay|session:s",
+                    "requestId": "req_relay",
+                    "lastResponseId": "resp_relay",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay"
+                }
+            ]
+        }));
+        assert_eq!(relay_resume["action"], json!("restore"));
+        assert_eq!(
+            relay_resume["scopeKey"],
+            json!("entry:responses|owner:relay|session:s")
+        );
+        assert_eq!(relay_resume["dedupeKey"], json!("req_relay:resp_relay"));
+
+        let direct_resume = plan_responses_scope_continuation_match(&json!({
+            "mode": "resume",
+            "candidates": [
+                {
+                    "scopeKey": "entry:responses|owner:direct|session:s",
+                    "requestId": "req_direct",
+                    "lastResponseId": "resp_direct",
+                    "allowContinuation": true,
+                    "continuationOwner": "direct"
+                }
+            ]
+        }));
+        assert_eq!(
+            direct_resume,
+            json!({
+                "action": "none",
+                "reason": "no_match",
+                "matchCount": 0
+            })
+        );
+
+        let mixed_materialize = plan_responses_scope_continuation_match(&json!({
+            "mode": "materialize",
+            "candidates": [
+                {
+                    "scopeKey": "entry:responses|owner:relay|session:s",
+                    "requestId": "req_relay",
+                    "lastResponseId": "resp_relay",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay"
+                },
+                {
+                    "scopeKey": "entry:responses|owner:direct|session:s",
+                    "requestId": "req_direct",
+                    "lastResponseId": "resp_direct",
+                    "allowContinuation": true,
+                    "continuationOwner": "direct"
+                }
+            ]
+        }));
+        assert_eq!(
+            mixed_materialize,
+            json!({
+                "action": "none",
+                "reason": "mixed_owner_ambiguous"
+            })
+        );
+
+        let ambiguous_resume = plan_responses_scope_continuation_match(&json!({
+            "mode": "resume",
+            "candidates": [
+                {
+                    "scopeKey": "entry:responses|owner:relay|session:s1",
+                    "requestId": "req_one",
+                    "lastResponseId": "resp_one",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay"
+                },
+                {
+                    "scopeKey": "entry:responses|owner:relay|session:s2",
+                    "requestId": "req_two",
+                    "lastResponseId": "resp_two",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay"
+                }
+            ]
+        }));
+        assert_eq!(
+            ambiguous_resume,
+            json!({
+                "action": "none",
+                "reason": "ambiguous",
+                "matchCount": 2
+            })
+        );
+    }
+
+    #[test]
+    fn resume_entry_match_plan_preserves_index_recover_scope_and_expired_semantics() {
+        let indexed = plan_responses_conversation_resume_entry_match(&json!({
+            "responseId": "resp_1",
+            "options": { "entryKind": "responses", "continuationOwner": "relay" },
+            "candidates": [
+                {
+                    "source": "response_index",
+                    "requestId": "req_index",
+                    "lastResponseId": "resp_1",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay",
+                    "entryKind": "responses"
+                },
+                {
+                    "source": "scope",
+                    "scopeKey": "entry:responses|owner:relay|session:s",
+                    "requestId": "req_scope",
+                    "lastResponseId": "resp_1",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay",
+                    "entryKind": "responses"
+                }
+            ]
+        }));
+        assert_eq!(indexed["action"], json!("select"));
+        assert_eq!(indexed["source"], json!("response_index"));
+        assert_eq!(indexed["requestId"], json!("req_index"));
+
+        let recovered = plan_responses_conversation_resume_entry_match(&json!({
+            "responseId": "resp_2",
+            "candidates": [
+                {
+                    "source": "request_map",
+                    "requestId": "req_recovered",
+                    "lastResponseId": "resp_2",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay",
+                    "entryKind": "responses"
+                }
+            ]
+        }));
+        assert_eq!(recovered["action"], json!("select"));
+        assert_eq!(recovered["source"], json!("request_map"));
+        assert_eq!(recovered["requestId"], json!("req_recovered"));
+
+        let ambiguous = plan_responses_conversation_resume_entry_match(&json!({
+            "responseId": "resp_3",
+            "candidates": [
+                {
+                    "source": "request_map",
+                    "requestId": "req_a",
+                    "lastResponseId": "resp_3",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay",
+                    "entryKind": "responses"
+                },
+                {
+                    "source": "request_map",
+                    "requestId": "req_b",
+                    "lastResponseId": "resp_3",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay",
+                    "entryKind": "responses"
+                }
+            ]
+        }));
+        assert_eq!(
+            ambiguous,
+            json!({
+                "action": "ambiguous",
+                "reason": "ambiguous_response_id_index",
+                "responseId": "resp_3",
+                "matchCount": 2
+            })
+        );
+
+        let scope_fallback = plan_responses_conversation_resume_entry_match(&json!({
+            "responseId": "resp_4",
+            "requestedPortScopeKey": "port:5555",
+            "candidates": [
+                {
+                    "source": "scope",
+                    "scopeKey": "port:5555|entry:responses|owner:relay|session:s",
+                    "requestId": "req_scope",
+                    "lastResponseId": "resp_4",
+                    "allowContinuation": true,
+                    "continuationOwner": "relay",
+                    "entryKind": "responses",
+                    "portScopeKey": "port:5555"
+                }
+            ]
+        }));
+        assert_eq!(scope_fallback["action"], json!("select"));
+        assert_eq!(scope_fallback["source"], json!("scope"));
+        assert_eq!(scope_fallback["requestId"], json!("req_scope"));
+
+        let expired = plan_responses_conversation_resume_entry_match(&json!({
+            "responseId": "resp_5",
+            "candidates": [
+                {
+                    "source": "response_index",
+                    "requestId": "req_expired",
+                    "lastResponseId": "resp_5",
+                    "allowContinuation": false,
+                    "continuationOwner": "relay",
+                    "entryKind": "responses"
+                }
+            ]
+        }));
+        assert_eq!(
+            expired,
+            json!({
+                "action": "none",
+                "reason": "expired_or_unknown_response_id"
+            })
+        );
+    }
+
+    #[test]
+    fn continuation_lookup_plan_selects_only_matching_entry_scope_and_owner() {
+        let selected = plan_responses_continuation_lookup_by_response_id(&json!({
+            "responseId": "resp_lookup",
+            "requestedPortScopeKey": "port:5555",
+            "options": { "entryKind": "responses", "continuationOwner": "relay" },
+            "entry": {
+                "requestId": "req_lookup",
+                "lastResponseId": "resp_lookup",
+                "providerKey": "provider.key.model",
+                "continuationOwner": "relay",
+                "entryKind": "responses",
+                "portScopeKey": "port:5555"
+            }
+        }));
+        assert_eq!(
+            selected,
+            json!({
+                "action": "select",
+                "reason": "matched",
+                "responseId": "resp_lookup",
+                "providerKey": "provider.key.model",
+                "continuationOwner": "relay",
+                "entryKind": "responses",
+                "requestId": "req_lookup"
+            })
+        );
+
+        for input in [
+            json!({
+                "responseId": "resp_lookup",
+                "requestedPortScopeKey": "port:5555",
+                "entry": {
+                    "requestId": "req_wrong_port",
+                    "lastResponseId": "resp_lookup",
+                    "continuationOwner": "relay",
+                    "entryKind": "responses",
+                    "portScopeKey": "port:5520"
+                }
+            }),
+            json!({
+                "responseId": "resp_lookup",
+                "options": { "continuationOwner": "direct" },
+                "entry": {
+                    "requestId": "req_wrong_owner",
+                    "lastResponseId": "resp_lookup",
+                    "continuationOwner": "relay",
+                    "entryKind": "responses"
+                }
+            }),
+            json!({
+                "responseId": "resp_lookup",
+                "options": { "entryKind": "chat" },
+                "entry": {
+                    "requestId": "req_wrong_kind",
+                    "lastResponseId": "resp_lookup",
+                    "continuationOwner": "relay",
+                    "entryKind": "responses"
+                }
+            }),
+            json!({
+                "responseId": "resp_lookup"
+            }),
+        ] {
+            assert_eq!(
+                plan_responses_continuation_lookup_by_response_id(&input)["action"],
+                json!("none")
+            );
+        }
     }
 }

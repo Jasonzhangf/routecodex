@@ -20,6 +20,15 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
     }),
   })),
   isToolCallContinuationResponseNative: jest.fn(() => false),
+  projectSseErrorEventPayloadNative: jest.fn(
+    (args: { requestId?: string; status?: number; message?: string; code?: string }) => ({
+      type: 'error',
+      request_id: args.requestId,
+      status: args.status ?? 500,
+      message: args.message ?? 'sse error',
+      code: args.code ?? 'ERR_SSE_ERROR',
+    })
+  ),
   recordResponsesResponseForRequest: jest.fn(async () => undefined),
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),
   requireCoreDist: jest.fn(() => ({})),
@@ -34,6 +43,7 @@ jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
 class MockResponse extends PassThrough {
   public statusCode = 200;
   public headers = new Map<string, string>();
+  public flushCount = 0;
 
   status(code: number): this {
     this.statusCode = code;
@@ -46,6 +56,10 @@ class MockResponse extends PassThrough {
 
   flushHeaders(): void {
     // no-op for tests
+  }
+
+  flush(): void {
+    this.flushCount += 1;
   }
 }
 
@@ -85,5 +99,43 @@ describe('responses SSE keepalive protocol', () => {
     expect(output).not.toContain('"type":"ping"');
     expect(output).toContain('event: response.completed');
     expect(output).toContain('event: response.done');
+  });
+
+  it('flushes keepalive and upstream frames without adding protocol events', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const res = new MockResponse();
+    const stream = new PassThrough();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        metadata: { outboundStream: true, stream: true },
+        sseStream: stream,
+      } as any,
+      'req_responses_keepalive_flush',
+      {
+        forceSSE: true,
+        entryEndpoint: '/v1/responses',
+      }
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const flushCountAfterKeepalive = res.flushCount;
+    stream.write('data: {"type":"response.created","response":{"id":"resp_keepalive_flush","object":"response","status":"in_progress"}}\n\n');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const flushCountAfterFrame = res.flushCount;
+    stream.end();
+    await new Promise<void>((resolve) => res.on('finish', () => resolve()));
+
+    const output = chunks.join('');
+    expect(output).toContain(': keepalive');
+    expect(output).toContain('"type":"response.created"');
+    expect(output).not.toContain('event: ping');
+    expect(output).not.toContain('"type":"ping"');
+    expect(flushCountAfterKeepalive).toBeGreaterThanOrEqual(1);
+    expect(flushCountAfterFrame).toBeGreaterThan(flushCountAfterKeepalive);
   });
 });

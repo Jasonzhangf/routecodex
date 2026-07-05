@@ -11,6 +11,7 @@ node_ids:
   - ErrorErr01SourceRaised
   - ErrorErr02HostCaptured
   - ErrorErr03RuntimeClassified
+  - ErrorErr04RouterPolicyApplied
   - ErrorErr05ExecutionDecision
   - ErrorErr06ClientProjected
 edges:
@@ -30,12 +31,19 @@ edges:
     split_binding_id: null
   - step_id: err-03
     from_node: ErrorErr03RuntimeClassified
-    to_node: ErrorErr05ExecutionDecision
-    status: partial
-    owner_feature_id: error.execution_decision_consumer
+    to_node: ErrorErr04RouterPolicyApplied
+    status: anchored
+    owner_feature_id: error.pipeline_contract
     binding_pending: null
     split_binding_id: null
   - step_id: err-04
+    from_node: ErrorErr04RouterPolicyApplied
+    to_node: ErrorErr05ExecutionDecision
+    status: anchored
+    owner_feature_id: error.execution_decision_consumer
+    binding_pending: null
+    split_binding_id: null
+  - step_id: err-05
     from_node: ErrorErr05ExecutionDecision
     to_node: ErrorErr06ClientProjected
     status: anchored

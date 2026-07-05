@@ -10,7 +10,10 @@ import {
   normalizeProviderType
 } from '../utils/provider-type-utils.js';
 import { resolveProviderContextExtensions } from './provider-runtime-utils.js';
-import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
+import {
+  bindRuntimeCarrierFromSource,
+  readRuntimeRequestTruthPortNumber
+} from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 type RequestEnvelope = UnknownObject & { data?: UnknownObject };
 
@@ -37,12 +40,9 @@ function readEntryPortTruth(metadata?: Record<string, unknown>): number | undefi
   if (!metadata) {
     return undefined;
   }
-  const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
-  if (typeof requestTruthPortScope === 'string') {
-    const parsed = Number.parseInt(requestTruthPortScope, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
+  const requestTruthPort = readRuntimeRequestTruthPortNumber(metadata);
+  if (typeof requestTruthPort === 'number') {
+    return requestTruthPort;
   }
   for (const value of [
     metadata.entryPort,
@@ -75,7 +75,6 @@ export function createProviderContext(options: {
   const mergedMetadata = {
     ...(runtimeMetadataRecord ?? {})
   };
-  const runtimeMetadataCenter = runtimeMetadataRecord ? MetadataCenter.read(runtimeMetadataRecord) : undefined;
   const entryPort = readEntryPortTruth(mergedMetadata);
   if (typeof entryPort === 'number') {
     mergedMetadata.entryPort = entryPort;
@@ -85,9 +84,7 @@ export function createProviderContext(options: {
       runtimeMetadataRecord.matchedPort = entryPort;
     }
   }
-  if (runtimeMetadataCenter) {
-    MetadataCenter.bind(mergedMetadata, runtimeMetadataCenter);
-  }
+  bindRuntimeCarrierFromSource({ target: mergedMetadata, source: runtimeMetadataRecord });
   const runtimeModel = typeof runtimeMetadata?.target?.modelId === 'string'
     ? runtimeMetadata.target.modelId
     : typeof runtimeMetadata?.target?.model === 'string'
@@ -138,9 +135,10 @@ export function createProviderContext(options: {
         ? (runtimeMetadata.abortSignal as AbortSignal)
         : undefined
   };
-  if (runtimeMetadataCenter) {
-    MetadataCenter.bind(context.metadata ?? mergedMetadata, runtimeMetadataCenter);
-  }
+  bindRuntimeCarrierFromSource({
+    target: context.metadata ?? mergedMetadata,
+    source: runtimeMetadataRecord
+  });
   return { context, runtimeMetadata };
 }
 

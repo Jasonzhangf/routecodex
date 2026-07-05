@@ -9,18 +9,15 @@ import { normalizeKnownProviderError, PROVIDER_NETWORK_CODES } from './provider-
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
-import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
+import { readRuntimeRequestTruthPortNumber } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 function readSnapshotEntryPort(metadata?: Record<string, unknown>): number | undefined {
   if (!metadata || typeof metadata !== 'object') {
     return undefined;
   }
-  const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
-  if (typeof requestTruthPortScope === 'string') {
-    const parsed = Number.parseInt(requestTruthPortScope, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
+  const requestTruthPort = readRuntimeRequestTruthPortNumber(metadata);
+  if (typeof requestTruthPort === 'number') {
+    return requestTruthPort;
   }
   for (const value of [
     metadata.portScope,

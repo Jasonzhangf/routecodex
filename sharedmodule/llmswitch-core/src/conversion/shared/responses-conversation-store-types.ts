@@ -48,7 +48,7 @@ export interface ContinuationLookupOptions {
   routingPolicyGroup?: string;
 }
 
-export interface ContinuationLookupResult {
+export interface ResponsesStoreLookupResult {
   responseId: string;
   providerKey?: string;
   continuationOwner?: 'direct' | 'relay';

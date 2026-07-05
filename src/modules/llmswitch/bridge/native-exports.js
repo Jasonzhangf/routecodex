@@ -396,6 +396,33 @@ export async function planResponsesHandlerEntry(payload, entryEndpoint, response
     }
     return fn(payload, entryEndpoint, responseIdFromPath);
 }
+export async function materializeProviderOwnedSubmitContext(input) {
+    await assertSharedBindings();
+    const mod = await getSharedConversionSemantics();
+    const fn = mod.materializeProviderOwnedSubmitContextWithNative;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson not available');
+    }
+    return fn(input.payload);
+}
+export async function planResponsesRequestContext(input) {
+    await assertSharedBindings();
+    const mod = await getSharedConversionSemantics();
+    const fn = mod.planResponsesRequestContextWithNative;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] planResponsesRequestContextJson not available');
+    }
+    return fn(input);
+}
+export async function planResponsesContinuationRequestAction(input) {
+    await assertSharedBindings();
+    const mod = await getSharedConversionSemantics();
+    const fn = mod.planResponsesContinuationRequestActionWithNative;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] planResponsesContinuationRequestActionJson not available');
+    }
+    return fn(input);
+}
 export async function buildAnthropicResponseFromChatJson(chatResponse, aliasMap) {
     await assertRespBindings();
     const mod = await getRespSemantics();

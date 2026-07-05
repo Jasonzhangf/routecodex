@@ -8,7 +8,6 @@ import {
 } from '../../../../modules/llmswitch/bridge.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
-import { MetadataCenter } from '../metadata-center/metadata-center.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
 import { applyProviderConfiguredErrorMapping } from '../../../../providers/core/runtime/provider-configured-error-mapping.js';
@@ -22,6 +21,7 @@ import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
 import {
+  bindRuntimeCarrierFromSource,
   readRuntimeControlProjection,
   readRuntimeDebugSnapshotProjection,
   readRuntimeServerToolProjection,
@@ -109,10 +109,7 @@ function buildBridgeAdapterContext(args: {
     ...(args.providerProtocol ? { providerProtocol: args.providerProtocol } : {}),
     ...(args.serverToolsEnabled !== undefined ? { serverToolsEnabled: args.serverToolsEnabled } : {}),
   };
-  const center = MetadataCenter.read(args.metadata);
-  if (center) {
-    MetadataCenter.bind(context, center);
-  }
+  bindRuntimeCarrierFromSource({ target: context, source: args.metadata });
   return context;
 }
 
@@ -194,10 +191,7 @@ export function buildResponseMetadataBagForProviderResponseConverter(args: {
     ...metadataBag,
     providerFamily
   };
-  const metadataCenter = MetadataCenter.read(metadataBag);
-  if (metadataCenter) {
-    MetadataCenter.bind(responseMetadataBag, metadataCenter);
-  }
+  bindRuntimeCarrierFromSource({ target: responseMetadataBag, source: metadataBag });
   return responseMetadataBag;
 }
 

@@ -10,13 +10,13 @@ describe('provider.debug_example_hooks_surface', () => {
     disableDebugMode();
   });
 
-  it('records response metadata observations without changing the payload in read()', () => {
+  it('records response debug metadata observations without changing the payload in read()', () => {
     const now = Date.now();
     const result = responsePostProcessingMonitoringHook.read!(
       {
         data: {
           status: 200,
-          metadata: {
+          _debugMetadata: {
             requestId: 'req-debug-1',
             usage: {
               prompt_tokens: 3,
@@ -46,7 +46,7 @@ describe('provider.debug_example_hooks_surface', () => {
 
     expect(result.observations).toEqual(
       expect.arrayContaining([
-        '📋 响应包含元数据',
+        '📋 响应包含调试元数据',
         '🆔 请求ID: req-debug-1',
         '🔧 Hook执行指标已记录',
       ])
@@ -61,13 +61,13 @@ describe('provider.debug_example_hooks_surface', () => {
     );
   });
 
-  it('writes finalProcessingTimestamp into metadata during transform()', () => {
+  it('writes finalProcessingTimestamp into debug metadata during transform()', () => {
     const before = Date.now() - 50;
     const result = responsePostProcessingMonitoringHook.transform!(
       {
         data: {
           status: 200,
-          metadata: {
+          _debugMetadata: {
             requestId: 'req-debug-2',
           },
         },
@@ -90,7 +90,7 @@ describe('provider.debug_example_hooks_surface', () => {
 
     expect(result.data).toEqual(
       expect.objectContaining({
-        metadata: expect.objectContaining({
+        _debugMetadata: expect.objectContaining({
           requestId: 'req-debug-2',
           finalProcessingTimestamp: expect.any(Number),
           performanceMetrics: expect.objectContaining({
@@ -102,10 +102,10 @@ describe('provider.debug_example_hooks_surface', () => {
     expect(result.changes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: 'metadata.finalProcessingTimestamp',
+          path: '_debugMetadata.finalProcessingTimestamp',
         }),
         expect.objectContaining({
-          path: 'metadata.performanceMetrics',
+          path: '_debugMetadata.performanceMetrics',
         }),
       ])
     );

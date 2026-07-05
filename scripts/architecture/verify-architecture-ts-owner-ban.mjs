@@ -45,6 +45,11 @@ const TS_OWNER_WHITELIST = new Set([
   'server.response_inspection_helpers', // TS pure inspection helpers pending native downshift
   'server.servertool_followup_dispatch_surface', // TS followup execution glue over Rust/servertool truth
   'server.servertool_followup_metadata_surface', // TS nested followup metadata projection shell
+  'server.runtime_key_resolution', // TS runtime-handle binding shell; policy/selection remains VR/ErrorErr truth
+  'hub.metadata_center_dualwrite_api', // transitional dual-write API shell during Rust migration
+  'debug.unified_surface', // debug authoring/diag surface is TS governance shell pending Rust migration
+  'debug.internal_error_numbering', // debug-only internal error registry surface, not runtime/provider payload truth
+  'manager.health_runtime', // TS health snapshot persistence bridge; Rust VR owns cooldown semantics
 ]);
 
 function parseOwners(text) {

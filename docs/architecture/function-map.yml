@@ -1967,7 +1967,7 @@ owners:
     status: active
     summary: "Post-servertool response action planning after HubRespChatProcess03Governed; HubRespOutbound04ClientSemantic is projection-only"
     owner_kind: rust_ssot
-    owner_scope: "Post-servertool response runtime action planning after HubRespChatProcess03Governed; HubRespOutbound04ClientSemantic is projection-only"
+    owner_scope: "Post-servertool response runtime action planning after HubRespChatProcess03Governed; HubRespOutbound04ClientSemantic projection Rust scope"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - HubRespChatProcess03Governed
@@ -2898,6 +2898,55 @@ owners:
     notes:
       - "Provider config writes must go through one writer owner regardless of JSON/TOML extension."
 
+  - feature_id: webui.config_editor_surface
+    status: planned
+    summary: "WebUI online config editor surface for provider cards, per-port routing tabs, and fwd aggregation configuration"
+    owner_kind: ts_ui_surface
+    owner_scope: "WebUI may render and submit config editor intent only; provider/config writes stay in shared writers and fwd selection stays Rust-owned"
+    owner_module: webui/src/App.tsx
+    canonical_types:
+      - MainTab
+      - ProviderPage
+      - RoutingPage
+    canonical_builders:
+      - apiFetch
+      - ProviderPage
+      - RoutingPage
+    allowed_paths:
+      - webui/src/App.tsx
+      - webui/src/styles.css
+      - tests/frontend/webui-app.integration.spec.tsx
+      - tests/frontend/webui-app.pages.spec.tsx
+      - tests/frontend/webui-app.edge.spec.tsx
+      - tests/frontend/webui-app.render.spec.tsx
+      - tests/frontend/webui-app.utils.spec.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts
+      - src/server/handlers/config-admin-handler.ts
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+    required_tests:
+      - tests/frontend/webui-app.integration.spec.tsx
+      - tests/frontend/webui-app.pages.spec.tsx
+      - tests/frontend/webui-app.edge.spec.tsx
+      - tests/config/config-writer.spec.ts
+      - tests/config/routecodex-config-loader.v2-single-source.spec.ts
+      - tests/config/provider-v2-loader.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run test:webui
+      - npm run verify:config-ssot
+      - npm run verify:function-map-compile-gate
+      - npm run verify:runtime-lifecycle-loop-gate-matrix
+    migration_target: ts_ui_thin_surface
+    notes:
+      - "Provider backup/restore must call provider config writer/codec owners; WebUI must not stringify provider config directly."
+      - "Per-port route tabs must write user config through shared user config writer/codec owners."
+      - "`fwd.*` editor may write forwarder config shape but must not implement provider selection, health, priority, weighted, or roundrobin policy."
+      - "Legacy stats/control/restart UI must not remain as required behavior unless Jason explicitly re-approves that scope."
+
   - feature_id: manager.routing_control_surface
     status: active
     summary: "routing instruction / provider health state store managed through Rust VR state store; TS modules/routing is bridge only"
@@ -3376,8 +3425,8 @@ owners:
     status: active
     summary: "/v1/responses continuation save/restore is a Chat Process boundary block, not a handler/SSE concern"
     owner_kind: rust_hub_pipeline
-    owner_scope: "Responses continuation request restore at Chat Process entry and response save at Chat Process end"
-    owner_module: src/modules/llmswitch/bridge
+    owner_scope: "file-scoped Responses continuation request restore at Chat Process entry and response save at Chat Process end"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
     canonical_types:
       - ChatProcReqContinuation01EntryEvidence
       - ChatProcReqContinuation02OwnerResolved
@@ -3388,14 +3437,14 @@ owners:
       - ChatProcRespContinuation07CanonicalSaved
       - ChatProcRespContinuation08Released
     canonical_builders:
-      - resumeResponsesConversation
-      - materializeLatestResponsesContinuationByScope
-      - materializeProviderOwnedSubmitContext
-      - planResponsesRequestContext
-      - planResponsesContinuationRequestAction
-      - planResponsesJsonClientDispatchNative
+      - resume_responses_conversation_payload
+      - plan_responses_scope_continuation_match
+      - materialize_provider_owned_submit_context
+      - plan_responses_request_context
+      - plan_responses_continuation_request_action
+      - plan_responses_handler_entry
     allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
       - src/modules/llmswitch/bridge

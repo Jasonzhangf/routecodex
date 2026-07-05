@@ -86,6 +86,7 @@ large logs into the loop files.
 - Stop-intent lifecycle under `~/.rcc/state/runtime-lifecycle/ports/<port>/`.
 - PID registry trust and stale PID handling.
 - Verification-map coverage for lifecycle/release gates.
+- WebUI config editor ownership before provider/routing/fwd implementation.
 - Dirty-worktree collision with other workers.
 
 ## L2 Gate Matrix
@@ -95,6 +96,7 @@ L2 actions must use exactly one row from `gate-matrix.md`:
 - `release_install_sync`
 - `runtime_lifecycle`
 - `verification_gate_mapping`
+- `webui_config_editor`
 - `worker_collision`
 
 The selected row defines the required owner, whitebox gates, blackbox gates,

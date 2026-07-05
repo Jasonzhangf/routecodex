@@ -3,8 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveRouteCodexConfigPath } from './config-paths.js';
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
-import type { UnknownRecord } from './user-config-loader.js';
-import { collectV2ConfigSourceErrors, materializeRouteCodexConfig } from './user-config-loader.js';
+import type { UnknownRecord } from './user-config-codec.js';
+import { materializeRouteCodexConfig } from './user-config-materializer.js';
 import { parseUserConfigText } from './user-config-codec.js';
 import { detectUserConfigFormat } from './user-config-codec.js';
 
@@ -32,7 +32,8 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   };
 }
 
-export { collectV2ConfigSourceErrors } from './user-config-loader.js';
+export { collectV2ConfigSourceErrors } from './user-config-materializer.js';
+
 
 function resolveProviderRootDirFromEnv(): string | undefined {
   const candidates = [

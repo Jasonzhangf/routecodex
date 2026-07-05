@@ -76,7 +76,7 @@ describe('direct-passthrough-payload', () => {
     expect(findResponsesDirectFunctionCallOutputContentViolation(body)).toBeUndefined();
   });
 
-  it('does not stringify cyclic runtime carriers in direct payload helper', () => {
+  it('fails fast when native direct decision sees non-JSON payload carriers', () => {
     const body: Record<string, unknown> = {
       model: 'gpt-5.5',
       input: [
@@ -93,7 +93,9 @@ describe('direct-passthrough-payload', () => {
     body.__rt = body;
 
     expect(requireDirectPassthroughPayloadObject(body)).toBe(body);
-    expect(findResponsesDirectFunctionCallOutputContentViolation(body)).toBeUndefined();
+    expect(() => findResponsesDirectFunctionCallOutputContentViolation(body)).toThrow(
+      'evaluateResponsesDirectRouteDecisionJson JSON stringify failed',
+    );
   });
 
   it('fails fast when direct payload is not an object', () => {

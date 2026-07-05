@@ -1,6 +1,6 @@
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
-import type { UnknownRecord } from './user-config-loader.js';
-import { materializeRouteCodexConfig } from './user-config-loader.js';
+import type { UnknownRecord } from './user-config-codec.js';
+import { materializeRouteCodexConfig } from './user-config-materializer.js';
 
 export interface SemanticCompareResult {
   equal: boolean;

@@ -11,6 +11,7 @@ function readTrimmedString(value: unknown): string | undefined {
 
 export type RuntimeRequestTruthIdentifiers = {
   requestId?: string;
+  clientRequestId?: string;
   sessionId?: string;
   conversationId?: string;
 };
@@ -23,6 +24,142 @@ export function readRuntimeRequestTruthSessionId(
   }
   const center = MetadataCenter.read(metadata);
   return readTrimmedString(center?.readRequestTruth().sessionId);
+}
+
+export function readRuntimeRequestTruthPortScope(
+  metadata: Record<string, unknown> | undefined
+): string | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  const center = MetadataCenter.read(metadata);
+  return readTrimmedString(center?.readRequestTruth().portScope);
+}
+
+export function readRuntimeRequestTruthPortNumber(
+  metadata: Record<string, unknown> | undefined
+): number | undefined {
+  const portScope = readRuntimeRequestTruthPortScope(metadata);
+  if (!portScope) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(portScope, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return Math.floor(parsed);
+}
+
+export function bindRuntimeCarrierFromSource(args: {
+  target: Record<string, unknown>;
+  source: Record<string, unknown> | undefined;
+}): void {
+  if (!args.source) {
+    return;
+  }
+  const center = MetadataCenter.read(args.source);
+  if (center) {
+    MetadataCenter.bind(args.target, center);
+  }
+}
+
+type RuntimeCarrierWriter = {
+  module: string;
+  symbol: string;
+  stage: string;
+};
+
+function readRuntimeCarrierRequestTruth(
+  center: NonNullable<ReturnType<typeof MetadataCenter.read>> | undefined
+): RuntimeRequestTruthIdentifiers {
+  const requestTruth = center?.readRequestTruth();
+  const requestId = readTrimmedString(requestTruth?.requestId);
+  const clientRequestId = readTrimmedString(requestTruth?.clientRequestId);
+  const sessionId = readTrimmedString(requestTruth?.sessionId);
+  const conversationId = readTrimmedString(requestTruth?.conversationId);
+  return {
+    ...(requestId ? { requestId } : {}),
+    ...(clientRequestId ? { clientRequestId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(conversationId ? { conversationId } : {}),
+  };
+}
+
+export function attachRuntimeCarrier(target: Record<string, unknown>): void {
+  MetadataCenter.attach(target);
+}
+
+export function hasRuntimeCarrier(target: Record<string, unknown> | undefined): boolean {
+  return Boolean(MetadataCenter.read(target));
+}
+
+export function bindSingleRuntimeCarrierFromSources(args: {
+  target: Record<string, unknown>;
+  sources: Array<Record<string, unknown> | undefined>;
+  conflictMessage: string;
+}): RuntimeRequestTruthIdentifiers {
+  const centers: Array<NonNullable<ReturnType<typeof MetadataCenter.read>>> = [];
+  for (const source of args.sources) {
+    const center = MetadataCenter.read(source);
+    if (!center) {
+      continue;
+    }
+    if (!centers.includes(center)) {
+      centers.push(center);
+    }
+  }
+  if (centers.length > 1) {
+    throw new Error(args.conflictMessage);
+  }
+  const center = centers[0];
+  if (!center) {
+    return {};
+  }
+  MetadataCenter.bind(args.target, center);
+  return readRuntimeCarrierRequestTruth(center);
+}
+
+export function readRuntimeContinuationResponsesResume(
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+  return asFlatRecord(MetadataCenter.read(metadata)?.readContinuationContext().responsesResume);
+}
+
+export function writeRuntimeControlSlot(args: {
+  target: Record<string, unknown>;
+  key: string;
+  value: unknown;
+  writer: RuntimeCarrierWriter;
+  reason?: string;
+}): void {
+  writeMetadataCenterSlot({
+    target: args.target,
+    family: 'runtime_control',
+    key: args.key,
+    value: args.value,
+    writer: args.writer,
+    reason: args.reason
+  });
+}
+
+export function writeProviderObservationSlot(args: {
+  target: Record<string, unknown>;
+  key: string;
+  value: unknown;
+  writer: RuntimeCarrierWriter;
+  reason?: string;
+}): void {
+  writeMetadataCenterSlot({
+    target: args.target,
+    family: 'provider_observation',
+    key: args.key,
+    value: args.value,
+    writer: args.writer,
+    reason: args.reason
+  });
 }
 
 export type RuntimeProviderObservationProjection = {

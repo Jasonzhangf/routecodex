@@ -72,6 +72,21 @@ loop action changes runtime behavior.
 | Evidence | run log must include `feature_id`, owner module, allowed path, forbidden path, mainline edge id, and exact required gates. |
 | Escalate | Owner cannot be found in one or two map queries, required gates are absent, or generated review surfaces are stale. |
 
+### `webui_config_editor`
+
+Purpose: rebuild the WebUI as an online `config.toml` editor without moving
+provider, routing, or forwarder truth out of their existing owners.
+
+| Layer | Required gates |
+| --- | --- |
+| Owner | New WebUI surface owner must be mapped before implementation; config reads/writes must stay under `config.user_config_codec`, `config.user_config_write_surface`, `config.provider_config_codec`, and `config.provider_config_write_surface`; `fwd.*` selection truth remains `vr.provider_forwarder_runtime`. |
+| Mainline | Documentation-only L2 may use `not_applicable`; implementation L2 must bind the WebUI API edge to shared config writer/codec owners and must not claim Rust VR selection edges as WebUI-owned. |
+| Whitebox | `npm run test:webui`; `npm run verify:config-ssot`; `npm run verify:function-map-compile-gate`; focused tests for any touched WebUI/admin API/config writer file. |
+| Blackbox | Browser/API smoke against a test config: read existing providers, render one provider card per provider, backup/restore one provider, render one tab per configured port, create a new port tab, select providers from existing provider IDs, edit a `fwd.*` aggregation with `priority`/`weighted`/`roundrobin`, validate/save config, reload and prove semantic equivalence. |
+| Quality | No provider secret exposure, no raw TOML stringify outside shared writer, no WebUI-owned routing/forwarder selection policy, no legacy stats/control/restart surface retained unless explicitly re-approved, no tests that keep removed WebUI functions as required behavior. |
+| Evidence | run log must include WebUI feature id, owner files, config writer/codec owners, `fwd` owner, old WebUI functions removed or intentionally retained, whitebox gates, blackbox smoke target, and residual risks. |
+| Escalate | Any target owner file has unrelated dirty edits, feature map/mainline/verification rows are missing, blackbox config save cannot run safely, provider backup/restore semantics are ambiguous, or implementation would touch secrets/live production config. |
+
 ### `worker_collision`
 
 Purpose: protect multi-worker worktrees while lifecycle/release fixes are in

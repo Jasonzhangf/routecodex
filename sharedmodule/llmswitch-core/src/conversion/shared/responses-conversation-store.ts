@@ -6,21 +6,32 @@ import { isRecord } from '../../shared/common-utils.js';
 import {
   assertResponsesConversationStoreNativeAvailable,
   buildConversationScopePlan,
+  collectPendingToolCallIds,
   convertOutputToInputItems,
   materializeContinuationPayload,
   pickPersistedFields,
+  planCapturePendingCleanup,
+  planContinuationLookupByResponseId,
+  planConversationRetention,
+  planPersistenceEligibility,
+  planReleaseRequestPayload,
+  planRecordScopeCleanup,
+  planRecordScopeEntryMatch,
+  planResumeEntryMatch,
+  planStoreSweep,
+  planScopeContinuationMatch,
   prepareConversationEntry,
   restoreContinuationPayload,
   resumeConversationPayload,
-  stripStoredContextInputMedia
+  shouldAllowContinuation
 } from './responses-conversation-store-native.js';
 import type {
   AnyRecord,
   CaptureContextArgs,
   ConversationEntry,
   ContinuationLookupOptions,
-  ContinuationLookupResult,
   RecordResponseArgs,
+  ResponsesStoreLookupResult,
   ResponsesContinuationEntryKind,
   RestoreByScopeArgs,
   ResumeOptions,
@@ -136,14 +147,6 @@ function readScopeToken(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function readToolCallId(item: AnyRecord): string | undefined {
-  for (const key of ['call_id', 'tool_call_id', 'id']) {
-    const value = item[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
 function normalizeEntryKind(value: unknown): ResponsesContinuationEntryKind {
   if (value === 'chat' || value === 'messages') {
     return value;
@@ -153,64 +156,6 @@ function normalizeEntryKind(value: unknown): ResponsesContinuationEntryKind {
 
 function normalizeContinuationOwner(value: unknown): 'direct' | 'relay' | undefined {
   return value === 'direct' || value === 'relay' ? value : undefined;
-}
-
-function shouldPersistLocally(entry: ConversationEntry): boolean {
-  return normalizeContinuationOwner(entry.continuationOwner) !== 'direct';
-}
-
-function entryMatchesIsolation(
-  entry: ConversationEntry,
-  options: { entryKind?: unknown; continuationOwner?: unknown } | undefined
-): boolean {
-  if (!options) {
-    return true;
-  }
-  const requestedEntryKind = options.entryKind === undefined
-    ? undefined
-    : normalizeEntryKind(options.entryKind);
-  if (requestedEntryKind && normalizeEntryKind(entry.entryKind) !== requestedEntryKind) {
-    return false;
-  }
-  const requestedOwner = normalizeContinuationOwner(options.continuationOwner);
-  if (requestedOwner && normalizeContinuationOwner(entry.continuationOwner) !== requestedOwner) {
-    return false;
-  }
-  return true;
-}
-
-function shouldAllowContinuation(payload: AnyRecord | undefined): boolean {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return false;
-  }
-  if (payload.store === false) {
-    return false;
-  }
-  if (payload.store === true) {
-    return true;
-  }
-  const previousResponseId = typeof payload.previous_response_id === 'string' ? payload.previous_response_id.trim() : '';
-  const responseId = typeof payload.response_id === 'string' ? payload.response_id.trim() : '';
-  const toolOutputs = Array.isArray(payload.tool_outputs) ? payload.tool_outputs : [];
-  return Boolean((previousResponseId || responseId) && toolOutputs.length > 0);
-}
-
-function collectPendingToolCallIds(input: AnyRecord[]): string[] {
-  const pending: string[] = [];
-  for (const item of input) {
-    const type = typeof item.type === 'string' ? item.type.trim().toLowerCase() : '';
-    const callId = readToolCallId(item);
-    if (!callId) continue;
-    if (type === 'function_call') {
-      if (!pending.includes(callId)) pending.push(callId);
-      continue;
-    }
-    if (type === 'function_call_output' || type === 'tool_result' || type === 'tool_message') {
-      const index = pending.indexOf(callId);
-      if (index >= 0) pending.splice(index, 1);
-    }
-  }
-  return pending;
 }
 
 function readPortScopeKey(scope: { matchedPort?: unknown; routingPolicyGroup?: unknown } | undefined): string | undefined {
@@ -255,11 +200,6 @@ function buildRequestedScopeKeys(scope: {
   return buildConversationScopePlan({ mode: 'requested', scope }).keys;
 }
 
-function entryMatchesPortScope(entry: ConversationEntry, requestedPortScopeKey: string | undefined): boolean {
-  if (!requestedPortScopeKey) return true;
-  return entry.portScopeKey === requestedPortScopeKey;
-}
-
 function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): string[] {
   return buildConversationScopePlan({ mode: 'submit_payload', payload }).keys;
 }
@@ -279,6 +219,70 @@ function ensureMetaProviderKey(meta: AnyRecord | undefined, entry: ConversationE
     baseMeta.entryKind = entry.entryKind;
   }
   return baseMeta;
+}
+
+type ScopeMatchCandidate = {
+  scopeKey: string;
+  requestId?: string;
+  lastResponseId?: string;
+  allowContinuation?: boolean;
+  continuationOwner?: 'direct' | 'relay';
+};
+
+type ResumeEntryMatchCandidate = ScopeMatchCandidate & {
+  source: 'response_index' | 'request_map' | 'scope';
+  portScopeKey?: string;
+  entryKind?: ResponsesContinuationEntryKind;
+};
+
+type CapturePendingCleanupCandidate = {
+  requestId?: string;
+  lastResponseId?: string;
+  scopeKeys?: string[];
+};
+
+type RecordScopeCleanupCandidate = {
+  requestId?: string;
+  lastResponseId?: string;
+  scopeKeys?: string[];
+};
+
+function collectScopeMatchCandidates(scopeIndex: Map<string, ConversationEntry>, scopeKeys: string[]): {
+  entriesByScopeKey: Map<string, ConversationEntry>;
+  candidates: ScopeMatchCandidate[];
+} {
+  const entriesByScopeKey = new Map<string, ConversationEntry>();
+  const candidates: ScopeMatchCandidate[] = [];
+  for (const scopeKey of scopeKeys) {
+    const entry = scopeIndex.get(scopeKey);
+    if (!entry) continue;
+    entriesByScopeKey.set(scopeKey, entry);
+    candidates.push({
+      scopeKey,
+      requestId: entry.requestId,
+      lastResponseId: entry.lastResponseId,
+      allowContinuation: entry.allowContinuation,
+      continuationOwner: normalizeContinuationOwner(entry.continuationOwner)
+    });
+  }
+  return { entriesByScopeKey, candidates };
+}
+
+function projectResumeEntryCandidate(
+  entry: ConversationEntry,
+  source: ResumeEntryMatchCandidate['source'],
+  scopeKey?: string
+): ResumeEntryMatchCandidate {
+  return {
+    source,
+    scopeKey: scopeKey ?? '',
+    requestId: entry.requestId,
+    lastResponseId: entry.lastResponseId,
+    allowContinuation: entry.allowContinuation,
+    continuationOwner: normalizeContinuationOwner(entry.continuationOwner),
+    portScopeKey: entry.portScopeKey,
+    entryKind: normalizeEntryKind(entry.entryKind)
+  };
 }
 
 class ResponsesConversationStore {
@@ -307,14 +311,11 @@ class ResponsesConversationStore {
     const now = Date.now();
     for (const row of parsed.entries) {
       const entry = deserializeEntry(row);
-      if (
-        !entry
-        || !entry.lastResponseId
-        || now - entry.updatedAt > TTL_MS
-        || !shouldPersistLocally(entry)
-      ) continue;
+      if (!entry) continue;
+      const plan = planPersistenceEligibility(entry, { mode: 'load', nowMs: now, ttlMs: TTL_MS });
+      if (plan.action !== 'persist' || !plan.lastResponseId) continue;
       this.requestMap.set(entry.requestId, entry);
-      this.responseIndex.set(entry.lastResponseId, entry);
+      this.responseIndex.set(plan.lastResponseId, entry);
       this.attachEntryScopes(entry);
     }
   }
@@ -325,12 +326,9 @@ class ResponsesConversationStore {
     const persistFilePath = resolvePersistFilePath();
     const seen = new Set<ConversationEntry>();
     for (const entry of this.responseIndex.values()) {
-      if (
-        seen.has(entry)
-        || entry.allowContinuation !== true
-        || !entry.lastResponseId
-        || !shouldPersistLocally(entry)
-      ) continue;
+      if (seen.has(entry)) continue;
+      const plan = planPersistenceEligibility(entry, { mode: 'flush' });
+      if (plan.action !== 'persist' || !plan.lastResponseId) continue;
       seen.add(entry);
       const serialized = serializeEntry(entry);
       if (serialized) entries.push(serialized);
@@ -399,14 +397,21 @@ class ResponsesConversationStore {
     });
     const portScopeKey = readPortScopeKey(args);
     const prepared = prepareConversationEntry(payload, context);
-    for (const candidate of scopeKeys.length ? this.requestMap.values() : []) {
-      if (
-        candidate
-        && candidate.requestId !== requestId
-        && (!candidate.lastResponseId || !String(candidate.lastResponseId).trim())
-        && Array.isArray(candidate.scopeKeys)
-        && candidate.scopeKeys.some((k) => scopeKeys.includes(k))
-      ) this.detachEntry(candidate);
+    const cleanupCandidates: CapturePendingCleanupCandidate[] = scopeKeys.length
+      ? [...this.requestMap.values()].map((candidate) => ({
+        requestId: candidate.requestId,
+        lastResponseId: candidate.lastResponseId,
+        scopeKeys: Array.isArray(candidate.scopeKeys) ? candidate.scopeKeys : []
+      }))
+      : [];
+    const cleanupPlan = planCapturePendingCleanup({
+      requestId,
+      scopeKeys,
+      candidates: cleanupCandidates
+    });
+    for (const detachRequestId of cleanupPlan.detachRequestIds) {
+      const candidate = this.requestMap.get(detachRequestId);
+      if (candidate) this.detachEntry(candidate);
     }
     const entry: ConversationEntry = {
       requestId,
@@ -458,12 +463,13 @@ class ResponsesConversationStore {
         matchedPort: args.matchedPort,
         routingPolicyGroup: args.routingPolicyGroup
       });
-      for (const scopeKey of fallbackScopeKeys) {
-        const candidate = this.scopeIndex.get(scopeKey);
-        if (candidate) {
-          entry = candidate;
-          break;
-        }
+      const { entriesByScopeKey, candidates } = collectScopeMatchCandidates(this.scopeIndex, fallbackScopeKeys);
+      const fallbackPlan = planRecordScopeEntryMatch({
+        scopeKeys: fallbackScopeKeys,
+        candidates
+      });
+      if (fallbackPlan.action === 'select' && fallbackPlan.scopeKey) {
+        entry = entriesByScopeKey.get(fallbackPlan.scopeKey);
       }
     }
     if (!entry) {
@@ -539,22 +545,34 @@ class ResponsesConversationStore {
     entry.lastResponseId = responseId;
     entry.updatedAt = Date.now();
     this.responseIndex.set(responseId, entry);
+    const recordCleanupCandidates = new Map<string, RecordScopeCleanupCandidate>();
     for (const scopeKey of entry.scopeKeys) {
       const previous = this.scopeIndex.get(scopeKey);
-      if (previous && previous !== entry && previous.lastResponseId && previous.requestId !== entry.requestId) {
-        this.detachEntry(previous);
+      if (previous) {
+        recordCleanupCandidates.set(previous.requestId, {
+          requestId: previous.requestId,
+          lastResponseId: previous.lastResponseId,
+          scopeKeys: Array.isArray(previous.scopeKeys) ? previous.scopeKeys : []
+        });
       }
+    }
+    for (const candidate of this.requestMap.values()) {
+      recordCleanupCandidates.set(candidate.requestId, {
+        requestId: candidate.requestId,
+        lastResponseId: candidate.lastResponseId,
+        scopeKeys: Array.isArray(candidate.scopeKeys) ? candidate.scopeKeys : []
+      });
+    }
+    const recordCleanupPlan = planRecordScopeCleanup({
+      requestId: entry.requestId,
+      scopeKeys: entry.scopeKeys,
+      candidates: [...recordCleanupCandidates.values()]
+    });
+    for (const detachRequestId of recordCleanupPlan.detachRequestIds) {
+      const candidate = this.requestMap.get(detachRequestId);
+      if (candidate) this.detachEntry(candidate);
     }
     this.attachEntryScopes(entry);
-    for (const [requestKey, candidate] of this.requestMap.entries()) {
-      if (candidate === entry) continue;
-      if (!candidate.lastResponseId) continue;
-      if (!candidate.scopeKeys.some((scopeKey) => entry.scopeKeys.includes(scopeKey))) continue;
-      this.detachEntry(candidate);
-      if (requestKey === candidate.requestId) {
-        break;
-      }
-    }
     this.flushPersistence();
   }
 
@@ -573,35 +591,46 @@ class ResponsesConversationStore {
     }
     this.prune();
     const requestedPortScopeKey = readPortScopeKey(options);
-    let entry = this.responseIndex.get(responseId);
-    if (!entry) {
-      entry = this.recoverResponseIndexEntry(responseId, requestedPortScopeKey, options);
-    }
-    if (
-      entry
-      && (
-        !entryMatchesPortScope(entry, requestedPortScopeKey)
-        || !entryMatchesIsolation(entry, options)
-      )
-    ) {
-      entry = undefined;
-    }
-    if (!entry) {
-      for (const scopeKey of readResumeScopeKeysFromSubmitPayload(submitPayload)) {
-        const candidate = this.scopeIndex.get(scopeKey);
-        if (
-          candidate
-          && typeof candidate.lastResponseId === 'string'
-          && candidate.lastResponseId === responseId
-          && entryMatchesPortScope(candidate, requestedPortScopeKey)
-          && entryMatchesIsolation(candidate, options)
-        ) {
-          entry = candidate;
-          break;
-        }
+    const entriesByRequestId = new Map<string, ConversationEntry>();
+    const candidates: ResumeEntryMatchCandidate[] = [];
+    const indexedEntry = this.responseIndex.get(responseId);
+    if (indexedEntry) {
+      entriesByRequestId.set(indexedEntry.requestId, indexedEntry);
+      candidates.push(projectResumeEntryCandidate(indexedEntry, 'response_index'));
+    } else {
+      for (const candidate of this.requestMap.values()) {
+        entriesByRequestId.set(candidate.requestId, candidate);
+        candidates.push(projectResumeEntryCandidate(candidate, 'request_map'));
       }
     }
-    if (!entry || entry.allowContinuation !== true) {
+    for (const scopeKey of readResumeScopeKeysFromSubmitPayload(submitPayload)) {
+      const candidate = this.scopeIndex.get(scopeKey);
+      if (!candidate) continue;
+      entriesByRequestId.set(candidate.requestId, candidate);
+      candidates.push(projectResumeEntryCandidate(candidate, 'scope', scopeKey));
+    }
+    const plan = planResumeEntryMatch({
+      responseId,
+      requestedPortScopeKey,
+      options,
+      candidates
+    });
+    if (plan.action === 'ambiguous') {
+      throw new ProviderProtocolError('Responses conversation response_id index is ambiguous', {
+        code: 'MALFORMED_REQUEST',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.resumeConversation',
+          reason: 'ambiguous_response_id_index',
+          responseId
+        }
+      });
+    }
+    const entry = plan.action === 'select' && plan.requestId
+      ? entriesByRequestId.get(plan.requestId)
+      : undefined;
+    if (!entry) {
       throw new ProviderProtocolError('Responses conversation expired or not found', {
         code: 'MALFORMED_REQUEST',
         protocol: 'openai-responses',
@@ -612,6 +641,9 @@ class ResponsesConversationStore {
           responseId
         }
       });
+    }
+    if (plan.source === 'request_map') {
+      this.responseIndex.set(responseId, entry);
     }
     const toolOutputs = Array.isArray(submitPayload.tool_outputs) ? submitPayload.tool_outputs : [];
     if (!toolOutputs.length) {
@@ -636,44 +668,10 @@ class ResponsesConversationStore {
     };
   }
 
-  private recoverResponseIndexEntry(
-    responseId: string,
-    requestedPortScopeKey: string | undefined,
-    options: ResumeOptions | undefined
-  ): ConversationEntry | undefined {
-    let matched: ConversationEntry | undefined;
-    for (const entry of this.requestMap.values()) {
-      if (
-        entry.lastResponseId !== responseId
-        || !entryMatchesPortScope(entry, requestedPortScopeKey)
-        || !entryMatchesIsolation(entry, options)
-      ) {
-        continue;
-      }
-      if (matched && matched !== entry) {
-        throw new ProviderProtocolError('Responses conversation response_id index is ambiguous', {
-          code: 'MALFORMED_REQUEST',
-          protocol: 'openai-responses',
-          providerType: 'responses',
-          details: {
-            context: 'responses-conversation-store.resumeConversation',
-            reason: 'ambiguous_response_id_index',
-            responseId
-          }
-        });
-      }
-      matched = entry;
-    }
-    if (matched) {
-      this.responseIndex.set(responseId, matched);
-    }
-    return matched;
-  }
-
   lookupContinuationByResponseId(
     responseId: string,
     options?: ContinuationLookupOptions,
-  ): ContinuationLookupResult | null {
+  ): ResponsesStoreLookupResult | null {
     this.ensurePersistenceLoaded();
     if (typeof responseId !== 'string' || !responseId.trim()) {
       return null;
@@ -681,20 +679,21 @@ class ResponsesConversationStore {
     this.prune();
     const requestedPortScopeKey = readPortScopeKey(options);
     const entry = this.responseIndex.get(responseId.trim());
-    if (
-      !entry
-      || !entry.lastResponseId
-      || !entryMatchesPortScope(entry, requestedPortScopeKey)
-      || !entryMatchesIsolation(entry, options)
-    ) {
+    const plan = planContinuationLookupByResponseId({
+      responseId: responseId.trim(),
+      requestedPortScopeKey,
+      options,
+      entry
+    });
+    if (plan.action !== 'select' || !plan.responseId) {
       return null;
     }
     return {
-      responseId: entry.lastResponseId,
-      providerKey: readScopeToken(entry.providerKey),
-      continuationOwner: normalizeContinuationOwner(entry.continuationOwner),
-      entryKind: normalizeEntryKind(entry.entryKind),
-      requestId: entry.requestId,
+      responseId: plan.responseId,
+      providerKey: plan.providerKey,
+      continuationOwner: plan.continuationOwner,
+      entryKind: plan.entryKind,
+      requestId: plan.requestId,
     };
   }
 
@@ -712,11 +711,18 @@ class ResponsesConversationStore {
 
   clearUnresolvedRequests(): number {
     this.ensurePersistenceLoaded();
+    const plan = planStoreSweep({
+      mode: 'clear_unresolved',
+      candidates: [...this.requestMap.values()].map((entry) => ({
+        requestId: entry.requestId,
+        lastResponseId: entry.lastResponseId,
+        updatedAt: entry.updatedAt
+      }))
+    });
     let cleared = 0;
-    for (const entry of [...this.requestMap.values()]) {
-      if (typeof entry.lastResponseId === 'string' && entry.lastResponseId.trim()) {
-        continue;
-      }
+    for (const requestId of plan.detachRequestIds) {
+      const entry = this.requestMap.get(requestId);
+      if (!entry) continue;
       this.detachEntry(entry);
       cleared += 1;
     }
@@ -730,17 +736,11 @@ class ResponsesConversationStore {
     if (!requestId) return;
     const entry = this.requestMap.get(requestId);
     if (!entry) return;
-    const releasedInputPrefixRaw = Array.isArray(entry.input)
-      ? entry.input.map((item) => ({ ...item }))
-      : [];
-    const releasedInputPrefix = stripStoredContextInputMedia(releasedInputPrefixRaw).messages;
-    entry.releasedInputPrefix = releasedInputPrefix;
-    entry.basePayload = {
-      ...(isRecord(entry.basePayload) ? entry.basePayload : {}),
-      ...(entry.lastResponseId ? { previous_response_id: entry.lastResponseId } : {})
-    };
-    entry.releasedPendingToolCallIds = collectPendingToolCallIds(releasedInputPrefix);
-    entry.input = [];
+    const plan = planReleaseRequestPayload(entry);
+    entry.releasedInputPrefix = plan.releasedInputPrefix;
+    entry.basePayload = plan.basePayload;
+    entry.releasedPendingToolCallIds = plan.releasedPendingToolCallIds;
+    entry.input = plan.input;
     entry.updatedAt = Date.now();
     this.attachEntryScopes(entry);
     this.flushPersistence();
@@ -757,32 +757,22 @@ class ResponsesConversationStore {
     if (!entry) {
       return;
     }
-    if (
-      typeof entry.lastResponseId !== 'string' ||
-      !String(entry.lastResponseId).trim()
-    ) {
-      if (RESPONSES_DEBUG) {
-        console.log('[responses-store] finalize.clear_missing_response', requestId);
-      }
-      this.clearRequest(requestId);
-      return;
-    }
-    if (options?.keepForSubmitToolOutputs === true) {
-      if (RESPONSES_DEBUG) {
-        console.log('[responses-store] finalize.keep_for_submit', requestId, entry.lastResponseId);
-      }
-      this.releaseRequestPayload(requestId);
-      return;
-    }
-    if (!Array.isArray(entry.scopeKeys) || entry.scopeKeys.length <= 0) {
-      if (RESPONSES_DEBUG) {
-        console.log('[responses-store] finalize.clear_missing_scope', requestId, entry.lastResponseId);
-      }
-      this.clearRequest(requestId);
-      return;
-    }
+    const plan = planConversationRetention(entry, options);
+    if (plan.action === 'noop') return;
     if (RESPONSES_DEBUG) {
-      console.log('[responses-store] finalize.release', requestId, entry.lastResponseId);
+      if (plan.reason === 'missing_response') {
+        console.log('[responses-store] finalize.clear_missing_response', requestId);
+      } else if (plan.reason === 'missing_scope') {
+        console.log('[responses-store] finalize.clear_missing_scope', requestId, plan.lastResponseId);
+      } else if (plan.reason === 'keep_for_submit') {
+        console.log('[responses-store] finalize.keep_for_submit', requestId, plan.lastResponseId);
+      } else {
+        console.log('[responses-store] finalize.release', requestId, plan.lastResponseId);
+      }
+    }
+    if (plan.action === 'clear') {
+      this.clearRequest(requestId);
+      return;
     }
     this.releaseRequestPayload(requestId);
   }
@@ -794,34 +784,27 @@ class ResponsesConversationStore {
       ...args,
       entryKind: normalizeEntryKind(args.entryKind)
     });
-    const matches = new Map<string, { entry: ConversationEntry; scopeKey: string }>();
-    for (const scopeKey of scopeKeys) {
-      const entry = this.scopeIndex.get(scopeKey);
-      if (
-        !entry
-        || entry.allowContinuation !== true
-        || !entry.lastResponseId
-        || normalizeContinuationOwner(entry.continuationOwner) === 'direct'
-      ) {
-        continue;
-      }
-      const dedupeKey = `${entry.requestId}:${entry.lastResponseId}`;
-      if (!matches.has(dedupeKey)) {
-        matches.set(dedupeKey, { entry, scopeKey });
-      }
-    }
-    if (matches.size !== 1) {
+    const { entriesByScopeKey, candidates } = collectScopeMatchCandidates(this.scopeIndex, scopeKeys);
+    const plan = planScopeContinuationMatch({
+      mode: 'resume',
+      candidates,
+      options: { continuationOwner: normalizeContinuationOwner(args.continuationOwner) }
+    });
+    if (plan.action !== 'restore' || !plan.scopeKey) {
       return null;
     }
-    const match = [...matches.values()][0];
+    const match = entriesByScopeKey.get(plan.scopeKey);
+    if (!match) {
+      return null;
+    }
     assertResponsesConversationStoreNativeAvailable();
-    const restored = restoreContinuationPayload(match.entry, args.payload, args.requestId, match.scopeKey);
+    const restored = restoreContinuationPayload(match, args.payload, args.requestId, plan.scopeKey);
     if (!restored) {
       return null;
     }
     return {
       payload: restored.payload,
-      meta: ensureMetaProviderKey(restored.meta, match.entry)
+      meta: ensureMetaProviderKey(restored.meta, match)
     };
   }
 
@@ -833,38 +816,27 @@ class ResponsesConversationStore {
       ...args,
       entryKind: normalizeEntryKind(args.entryKind)
     });
-    const matches = new Map<string, { entry: ConversationEntry; scopeKey: string }>();
-    const matchedOwners = new Set<'direct' | 'relay'>();
-    for (const scopeKey of scopeKeys) {
-      const entry = this.scopeIndex.get(scopeKey);
-      const owner = normalizeContinuationOwner(entry?.continuationOwner);
-      if (!entry || entry.allowContinuation !== true || !owner) {
-        continue;
-      }
-      matchedOwners.add(owner);
-      if (owner === 'direct') {
-        continue;
-      }
-      const dedupeKey = `${entry.requestId}:${entry.lastResponseId ?? ''}`;
-      if (!matches.has(dedupeKey)) {
-        matches.set(dedupeKey, { entry, scopeKey });
-      }
-    }
-    if (!requestedOwner && matchedOwners.has('direct') && matchedOwners.has('relay')) {
+    const { entriesByScopeKey, candidates } = collectScopeMatchCandidates(this.scopeIndex, scopeKeys);
+    const plan = planScopeContinuationMatch({
+      mode: 'materialize',
+      candidates,
+      options: { continuationOwner: requestedOwner }
+    });
+    if (plan.action !== 'materialize' || !plan.scopeKey) {
       return null;
     }
-    if (matches.size !== 1) {
+    const match = entriesByScopeKey.get(plan.scopeKey);
+    if (!match) {
       return null;
     }
-    const match = [...matches.values()][0];
     assertResponsesConversationStoreNativeAvailable();
-    const materialized = materializeContinuationPayload(match.entry, args.payload, args.requestId, match.scopeKey);
+    const materialized = materializeContinuationPayload(match, args.payload, args.requestId, plan.scopeKey);
     if (!materialized) {
       return null;
     }
     return {
       payload: materialized.payload,
-      meta: ensureMetaProviderKey(materialized.meta, match.entry)
+      meta: ensureMetaProviderKey(materialized.meta, match)
     };
   }
 
@@ -899,11 +871,20 @@ class ResponsesConversationStore {
   private prune(): void {
     this.ensurePersistenceLoaded();
     this.lastPruneAt = Date.now();
-    const now = Date.now();
-    for (const [, entry] of this.requestMap.entries()) {
-      if (now - entry.updatedAt > TTL_MS) {
-        this.detachEntry(entry);
-      }
+    const plan = planStoreSweep({
+      mode: 'prune_expired',
+      nowMs: this.lastPruneAt,
+      ttlMs: TTL_MS,
+      candidates: [...this.requestMap.values()].map((entry) => ({
+        requestId: entry.requestId,
+        lastResponseId: entry.lastResponseId,
+        updatedAt: entry.updatedAt
+      }))
+    });
+    for (const requestId of plan.detachRequestIds) {
+      const entry = this.requestMap.get(requestId);
+      if (!entry) continue;
+      this.detachEntry(entry);
     }
     this.pruneIndexes();
     this.flushPersistence();
@@ -1060,7 +1041,7 @@ export function resumeResponsesConversation(
 export function lookupResponsesContinuationByResponseId(
   responseId: string,
   options?: ContinuationLookupOptions,
-): ContinuationLookupResult | null {
+): ResponsesStoreLookupResult | null {
   return store.lookupContinuationByResponseId(responseId, options);
 }
 

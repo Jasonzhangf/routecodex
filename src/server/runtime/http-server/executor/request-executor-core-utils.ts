@@ -83,7 +83,7 @@ export interface ResolvePrimaryExhaustedPlanInput {
   tiers: Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
 }
 
-export interface ErrorErr05RouteAvailabilityDecisionInput {
+export interface RouteAvailabilityDecisionNativeArgs {
   routeName?: string;
   routePool?: string[];
   routeTiers?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
@@ -93,7 +93,7 @@ export interface ErrorErr05RouteAvailabilityDecisionInput {
   routingDecisionRoutePoolPresent?: boolean;
 }
 
-export interface ErrorErr05RouteAvailabilityDecision {
+export interface RouteAvailabilityDecisionNativeResult {
   routePoolRemainingAfterExclusion: string[];
   remainingRouteCandidates: number;
   defaultPoolAvailable: boolean;
@@ -241,8 +241,8 @@ export function resolveErrorErr05RoutingPolicyGroup(args: {
 }
 
 export function resolveErrorErr05RouteAvailabilityDecision(
-  input: ErrorErr05RouteAvailabilityDecisionInput
-): ErrorErr05RouteAvailabilityDecision {
+  input: RouteAvailabilityDecisionNativeArgs
+): RouteAvailabilityDecisionNativeResult {
   return resolveErrorErr05RouteAvailabilityDecisionNative({
     routeName: input.routeName,
     routePool: input.routePool ?? [],

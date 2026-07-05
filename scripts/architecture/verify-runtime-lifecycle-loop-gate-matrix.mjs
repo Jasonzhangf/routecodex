@@ -33,6 +33,7 @@ const rowIds = [
   'release_install_sync',
   'runtime_lifecycle',
   'verification_gate_mapping',
+  'webui_config_editor',
   'worker_collision',
 ];
 
@@ -104,6 +105,22 @@ requireIncludes('verification_gate_mapping row', sectionFor(matrix, 'verificatio
   'npm run verify:function-map-compile-gate',
   'npm run verify:architecture-mainline-call-map',
   'No invented symbols',
+]);
+
+requireIncludes('webui_config_editor row', sectionFor(matrix, 'webui_config_editor'), [
+  'config.user_config_codec',
+  'config.user_config_write_surface',
+  'config.provider_config_codec',
+  'config.provider_config_write_surface',
+  'vr.provider_forwarder_runtime',
+  'npm run test:webui',
+  'npm run verify:config-ssot',
+  'npm run verify:function-map-compile-gate',
+  'priority',
+  'weighted',
+  'roundrobin',
+  'No provider secret exposure',
+  'no raw TOML stringify outside shared writer',
 ]);
 
 requireIncludes('worker_collision row', sectionFor(matrix, 'worker_collision'), [

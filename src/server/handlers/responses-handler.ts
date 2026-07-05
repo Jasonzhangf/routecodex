@@ -274,7 +274,7 @@ export async function handleResponses(
         writer: {
           module: 'src/server/handlers/responses-handler.ts',
           symbol: 'handleResponses',
-          stage: 'HubReqInbound02Standardized'
+          stage: 'responses_handler_port_runtime_control'
         },
         reason: 'responses port stop-message enablement'
       });
@@ -288,7 +288,7 @@ export async function handleResponses(
         writer: {
           module: 'src/server/handlers/responses-handler.ts',
           symbol: 'handleResponses',
-          stage: 'HubReqInbound02Standardized'
+          stage: 'responses_handler_port_runtime_control'
         },
         reason: 'responses port stop-message direct exclusion'
       });

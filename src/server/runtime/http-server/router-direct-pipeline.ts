@@ -39,12 +39,12 @@ import {
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
   symbol: 'executeRouterDirectPipeline:modelOverride',
-  stage: 'HubReqOutbound05ProviderSemantic',
+  stage: 'router_direct_model_override',
 };
 const HTTP_DIRECT_MODEL_RESTORE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
   symbol: 'executeRouterDirectPipeline:modelRestore',
-  stage: 'HubRespOutbound04ClientSemantic',
+  stage: 'router_direct_model_restore',
 };
 
 /** Context snapshot for a single router-direct request — feeds snapshot hooks and logs. */

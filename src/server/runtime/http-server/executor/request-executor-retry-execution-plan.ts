@@ -57,15 +57,17 @@ export function resolveProviderRetryExecutionPlanExhaustionGate(args: {
 } {
   const decision = resolveErrorErr05RouteAvailabilityDecisionNative({
     routePool: args.routePool ?? [],
-    routeTiers: args.defaultPoolAvailable ? [{ targets: ['__routecodex_default_pool_available__'], backup: true }] : [],
+    defaultRouteTiers: args.defaultPoolAvailable ? [{ id: 'default', targets: ['default.pool.available'], backup: true }] : [],
     excludedProviderKeys: args.excludedProviderKeys,
     routingDecisionRoutePoolPresent: Array.isArray(args.routePool) && args.routePool.length > 0,
   });
+  const defaultPoolAvailable = args.defaultPoolAvailable === true || decision.defaultPoolAvailable === true;
+  const policyExhausted = decision.routePoolRemainingAfterExclusion.length === 0 && !defaultPoolAvailable;
   return {
     routePoolRemainingAfterExclusion: decision.routePoolRemainingAfterExclusion,
-    defaultPoolAvailable: args.defaultPoolAvailable === true,
-    policyExhausted: decision.policyExhausted,
-    mayProject: decision.mayProject,
+    defaultPoolAvailable,
+    policyExhausted,
+    mayProject: policyExhausted,
   };
 }
 

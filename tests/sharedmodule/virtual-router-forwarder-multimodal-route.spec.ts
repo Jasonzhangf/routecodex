@@ -104,6 +104,7 @@ describe('VirtualRouter multimodal forwarder routing', () => {
       },
       {
         requestId: 'req-forwarder-mm',
+        metadataCenterSnapshot: {},
         entryEndpoint: '/v1/responses',
         routecodexRoutingPolicyGroup: 'default'
       }

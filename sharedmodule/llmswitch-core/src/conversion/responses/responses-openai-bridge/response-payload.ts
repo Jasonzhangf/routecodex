@@ -3,9 +3,9 @@ import { normalizeMessageReasoningTools } from '../../shared/reasoning-tool-norm
 import { createBridgeActionState, runBridgeActionPipeline } from '../../bridge-actions.js';
 import { resolveBridgePolicy, resolvePolicyActions } from '../../bridge-policies.js';
 import {
-  consumeResponsesPayloadSnapshotByAliases,
-  consumeResponsesPassthroughByAliases
-} from '../../shared/responses-reasoning-registry.js';
+  consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
+  consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases
+} from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import {
   stripInternalToolingMetadata
 } from '../../shared/responses-tool-utils.js';

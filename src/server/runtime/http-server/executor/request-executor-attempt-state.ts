@@ -7,8 +7,13 @@ import { cloneClientHeaders, decorateMetadataForAttempt } from '../executor-meta
 import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js';
 import { resolveClientAbortSignalFromCarrier } from './request-executor-client-abort-block.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
-import { MetadataCenter } from '../metadata-center/metadata-center.js';
-import { writeMetadataCenterSlot } from '../metadata-center/dualwrite-api.js';
+import {
+  attachRuntimeCarrier,
+  bindSingleRuntimeCarrierFromSources,
+  readRuntimeContinuationResponsesResume,
+  readRuntimeControlProjection,
+  writeRuntimeControlSlot
+} from '../metadata-center/request-truth-readers.js';
 
 const ATTEMPT_STATE_RUNTIME_CONTROL_WRITER = {
   module: 'src/server/runtime/http-server/executor/request-executor-attempt-state.ts',
@@ -27,23 +32,19 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function resolveAttemptRetryProviderKey(args: {
-  metadataCenter: MetadataCenter | undefined;
+  metadataForAttempt: Record<string, unknown>;
   explicitRetryProviderKey?: unknown;
 }): string | undefined {
   const explicit = readTrimmedString(args.explicitRetryProviderKey);
   if (explicit) {
     return explicit;
   }
-  const metadataCenter = args.metadataCenter;
-  if (!metadataCenter) {
-    return undefined;
-  }
-  const runtimeControl = metadataCenter.readRuntimeControl();
+  const runtimeControl = readRuntimeControlProjection(args.metadataForAttempt);
   const existing = readTrimmedString(runtimeControl.retryProviderKey);
   if (existing) {
     return existing;
   }
-  const responsesResume = readRecord(metadataCenter.readContinuationContext().responsesResume);
+  const responsesResume = readRecord(readRuntimeContinuationResponsesResume(args.metadataForAttempt));
   if (!responsesResume) {
     return undefined;
   }
@@ -88,26 +89,26 @@ export function prepareRequestExecutorAttemptState(args: {
     args.excludedProviderKeys
   );
   delete metadataForAttempt.__routecodexRetryProviderKey;
-  const metadataCenter = MetadataCenter.attach(metadataForAttempt);
+  attachRuntimeCarrier(metadataForAttempt);
   const retryProviderKey = resolveAttemptRetryProviderKey({
-    metadataCenter,
+    metadataForAttempt,
     explicitRetryProviderKey: args.retryProviderKey
   });
   if (retryProviderKey) {
     delete metadataForAttempt.excludedProviderKeys;
-    metadataCenter.writeRuntimeControl(
-      'retryProviderKey',
-      retryProviderKey,
-      ATTEMPT_STATE_RUNTIME_CONTROL_WRITER
-    );
+    writeRuntimeControlSlot({
+      target: metadataForAttempt,
+      key: 'retryProviderKey',
+      value: retryProviderKey,
+      writer: ATTEMPT_STATE_RUNTIME_CONTROL_WRITER
+    });
   }
   const clientAbortSignal = resolveClientAbortSignalFromCarrier(metadataForAttempt);
   args.throwIfClientAbortSignalAborted(clientAbortSignal);
 
   if (args.forcedRouteHint) {
-    writeMetadataCenterSlot({
+    writeRuntimeControlSlot({
       target: metadataForAttempt,
-      family: 'runtime_control',
       key: 'routeHint',
       value: args.forcedRouteHint,
       writer: ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
@@ -156,30 +157,19 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
 } {
   const pipelineMetadata = args.pipelineResult.metadata ?? {};
   const mergedMetadata = mergeMetadataPreservingDefined(args.metadataForAttempt, pipelineMetadata);
-  const requestMetadataCenter = MetadataCenter.read(args.metadataForAttempt);
-  const pipelineMetadataCenter =
-    pipelineMetadata && typeof pipelineMetadata === 'object' && !Array.isArray(pipelineMetadata)
-      ? MetadataCenter.read(pipelineMetadata as Record<string, unknown>)
-      : undefined;
-  if (
-    requestMetadataCenter
-    && pipelineMetadataCenter
-    && requestMetadataCenter !== pipelineMetadataCenter
-  ) {
-    throw new Error(
-      'request-executor attempt metadata violated single-center contract: pipeline result returned a second MetadataCenter'
-    );
+  const pipelineMetadataRecord = pipelineMetadata && typeof pipelineMetadata === 'object' && !Array.isArray(pipelineMetadata)
+    ? pipelineMetadata as Record<string, unknown>
+    : undefined;
+  const requestTruth = bindSingleRuntimeCarrierFromSources({
+    target: mergedMetadata,
+    sources: [args.metadataForAttempt, pipelineMetadataRecord],
+    conflictMessage: 'request-executor attempt metadata violated single-center contract: pipeline result returned a second runtime carrier'
+  });
+  if (requestTruth.requestId) {
+    mergedMetadata.requestId = requestTruth.requestId;
   }
-  const metadataCenter = requestMetadataCenter ?? pipelineMetadataCenter;
-  if (metadataCenter) {
-    MetadataCenter.bind(mergedMetadata, metadataCenter);
-    const requestTruth = metadataCenter.readRequestTruth();
-    if (requestTruth.requestId) {
-      mergedMetadata.requestId = requestTruth.requestId;
-    }
-    if (requestTruth.clientRequestId) {
-      mergedMetadata.clientRequestId = requestTruth.clientRequestId;
-    }
+  if (requestTruth.clientRequestId) {
+    mergedMetadata.clientRequestId = requestTruth.clientRequestId;
   }
   const sessionId =
     typeof args.sessionId === 'string' && args.sessionId.trim()

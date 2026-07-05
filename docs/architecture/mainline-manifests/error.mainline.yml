@@ -10,6 +10,7 @@ node_ids:
   - ErrorErr01SourceRaised
   - ErrorErr02HostCaptured
   - ErrorErr03RuntimeClassified
+  - ErrorErr04RouterPolicyApplied
   - ErrorErr05ExecutionDecision
   - ErrorErr06ClientProjected
 step_ids:
@@ -17,11 +18,12 @@ step_ids:
   - err-02
   - err-03
   - err-04
+  - err-05
 edge_status_counts:
-  anchored: 3
-  partial: 1
+  anchored: 5
+  partial: 0
   binding_pending: 0
-  total: 4
+  total: 5
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

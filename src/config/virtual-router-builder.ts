@@ -7,7 +7,6 @@ import type {
 import { loadProviderConfigsV2, type ProviderConfigV2 } from './provider-v2-loader.js';
 import { isRecord } from '../utils/common-utils.js';
 
-
 function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingConfig): Set<string> {
   const providerIds = new Set<string>();
   for (const entries of Object.values(routing)) {
@@ -57,10 +56,6 @@ function resolveReferencedProviderIdsFromRouting(routing: VirtualRouterRoutingCo
   return providerIds;
 }
 
-/**
- * 收集 routing target 中引用的 forwarder id（`fwd.*`）。
- * 这些 id 必须在 `virtualrouter.forwarders` 中存在，否则 bootstrap 失败。
- */
 function resolveReferencedForwarderIdsFromRouting(routing: VirtualRouterRoutingConfig): Set<string> {
   const ids = new Set<string>();
   for (const entries of Object.values(routing)) {
@@ -107,7 +102,6 @@ function resolveProviderIdsFromProviderPorts(userConfig: UnknownRecord): Set<str
   return ids;
 }
 
-
 function extractApplyPatchConfigFromUserConfig(userConfig: UnknownRecord): UnknownRecord | undefined {
   const candidates: unknown[] = [];
   const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;
@@ -148,9 +142,6 @@ function withRoutePolicyGroupTag(routeEntry: unknown, groupId: string): unknown 
   };
 }
 
-/**
- * Per-port routing: build one VirtualRouterInput for one routingPolicyGroup.
- */
 export type BuildVirtualRouterInputV2Options = {
   routingPolicyGroup?: string;
   includeAllRoutingPolicyGroups?: boolean;
@@ -182,15 +173,13 @@ function extractRoutingFromUserConfig(
   if (groupEntries.length === 0) {
     throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups with at least one group');
   }
-  // Collect routing into a flat RoutingPools config for exactly one selected group.
-  // Multi-port servers build one isolated VirtualRouterInput per port/group.
   const routing: VirtualRouterRoutingConfig = {};
   for (const [groupId, groupNode] of groupEntries) {
     const groupRouting = isRecord(groupNode.routing) ? (groupNode.routing as VirtualRouterRoutingConfig) : undefined;
     if (!groupRouting) continue;
     for (const [routeType, routeEntry] of Object.entries(groupRouting)) {
       if (!routeEntry || typeof routeEntry !== 'object') continue;
-            const taggedRouteEntry = withRoutePolicyGroupTag(routeEntry, groupId) as any;
+      const taggedRouteEntry = withRoutePolicyGroupTag(routeEntry, groupId) as any;
       const taggedRouteArray = Array.isArray(taggedRouteEntry) ? taggedRouteEntry : [taggedRouteEntry];
       const existing = Array.isArray(routing[routeType]) ? routing[routeType] as any[] : [];
       routing[routeType] = [...existing, ...taggedRouteArray] as any;
@@ -223,14 +212,6 @@ function extractPolicyGroupOptionFromUserConfig(
   return isRecord(vrNode[key]) ? (vrNode[key] as UnknownRecord) : undefined;
 }
 
-/**
- * Build a VirtualRouterInput in "v2" mode by combining:
- * - Provider v2 configs loaded from ~/.rcc/provider (or a custom root)
- * - RoutingPools selected from one routingPolicyGroup; multi-port runtime builds one router per group
- *
- * V2 config is the single source of truth: no legacy routing fallback and no
- * auto-synthesized capability routes are injected here.
- */
 export async function buildVirtualRouterInputV2(
   userConfig: UnknownRecord,
   providerRootDir?: string,
@@ -243,7 +224,6 @@ export async function buildVirtualRouterInputV2(
     referencedProviderIds.add(providerId);
   }
 
-  // 收集 forwarder 引用 + forwarder 定义。配置态禁止要求用户写 auth key。
   const referencedForwarderIds = resolveReferencedForwarderIdsFromRouting(routing);
   const forwardersSource = extractForwardersFromUserConfig(userConfig);
   if (forwardersSource) {
@@ -257,7 +237,6 @@ export async function buildVirtualRouterInputV2(
         throw new Error(`[forwarder-config] routing references unknown forwarder '${refId}'`);
       }
     }
-    // 收集 forwarder targets 引用的 provider id。
     for (const fwdNode of Object.values(forwardersSource)) {
       const targets = Array.isArray((fwdNode as UnknownRecord).targets)
         ? ((fwdNode as UnknownRecord).targets as Array<UnknownRecord>)
@@ -265,7 +244,7 @@ export async function buildVirtualRouterInputV2(
       for (const t of targets) {
         const providerId = pickString(t.providerId) ?? parseProviderIdFromProviderKeyForLegacyConfig(pickString(t.providerKey));
         if (providerId) {
-            referencedProviderIds.add(providerId);
+          referencedProviderIds.add(providerId);
         }
       }
     }
@@ -444,10 +423,6 @@ function providerAuthAliases(provider: UnknownRecord): string[] {
 }
 
 function providerDeclaresModel(provider: UnknownRecord, modelId: string): boolean {
-  // Per Jason 2026-06-20, `provider.models.<id>.aliases` is display-only for
-  // `/v1/models`. Forwarder / VR / provider wire must only accept canonical
-  // model keys declared under `provider.models` (or, for legacy array form,
-  // each entry's `id`). Aliases must never define a routable / wire model.
   const normalizedModelId = typeof modelId === 'string' ? modelId.trim() : '';
   if (!normalizedModelId) {
     return false;
@@ -502,7 +477,6 @@ function extractForwardersFromUserConfig(userConfig: UnknownRecord): Record<stri
   ];
   for (const c of candidates) {
     if (isRecord(c)) {
-      // 仅保留 fwd. 前缀的
       const filtered: Record<string, UnknownRecord> = {};
       for (const [k, v] of Object.entries(c)) {
         if (k.startsWith('fwd.') && isRecord(v)) {

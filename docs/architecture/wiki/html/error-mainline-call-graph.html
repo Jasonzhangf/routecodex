@@ -141,20 +141,23 @@
         <pre class="mermaid">flowchart LR
           ErrorErr06ClientProjected[&quot;ErrorErr06ClientProjected&quot;]
           ErrorErr05ExecutionDecision[&quot;ErrorErr05ExecutionDecision&quot;]
+          ErrorErr04RouterPolicyApplied[&quot;ErrorErr04RouterPolicyApplied&quot;]
           ErrorErr03RuntimeClassified[&quot;ErrorErr03RuntimeClassified&quot;]
           ErrorErr02HostCaptured[&quot;ErrorErr02HostCaptured&quot;]
           ErrorErr01SourceRaised[&quot;ErrorErr01SourceRaised&quot;]
           ErrorErr01SourceRaised --&gt;|err-01| ErrorErr02HostCaptured
           ErrorErr02HostCaptured --&gt;|err-02| ErrorErr03RuntimeClassified
-          ErrorErr03RuntimeClassified -.-&gt;|err-03| ErrorErr05ExecutionDecision
-          ErrorErr05ExecutionDecision --&gt;|err-04| ErrorErr06ClientProjected
+          ErrorErr03RuntimeClassified --&gt;|err-03| ErrorErr04RouterPolicyApplied
+          ErrorErr04RouterPolicyApplied --&gt;|err-04| ErrorErr05ExecutionDecision
+          ErrorErr05ExecutionDecision --&gt;|err-05| ErrorErr06ClientProjected
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
           class ErrorErr01SourceRaised anchored;
           class ErrorErr02HostCaptured anchored;
-          class ErrorErr03RuntimeClassified partial;
-          class ErrorErr05ExecutionDecision partial;
+          class ErrorErr03RuntimeClassified anchored;
+          class ErrorErr04RouterPolicyApplied anchored;
+          class ErrorErr05ExecutionDecision anchored;
           class ErrorErr06ClientProjected anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
@@ -162,12 +165,13 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>err-01</td><td><code>ErrorErr01SourceRaised -&gt; ErrorErr02HostCaptured</code></td><td>anchored</td><td><code>reportProviderErrorToRouterPolicy -&gt; reportProviderErrorToRouterPolicy</code></td><td></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td></tr>
         <tr><td>err-02</td><td><code>ErrorErr02HostCaptured -&gt; ErrorErr03RuntimeClassified</code></td><td>anchored</td><td><code>classifyProviderFailure -&gt; classifyProviderFailure</code></td><td></td><td><code>error.provider_failure_policy</code>&lt;br/&gt;provider/server error cataloging, runtime classification, router policy application, and availability/cooldown truth; session-local storm semantics are explicitly separate</td></tr>
-        <tr><td>err-03</td><td><code>ErrorErr03RuntimeClassified -&gt; ErrorErr05ExecutionDecision</code></td><td>partial</td><td><code>resolveProviderRetryExecutionPlan -&gt; resolveProviderRetryExecutionPlan</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
-        <tr><td>err-04</td><td><code>ErrorErr05ExecutionDecision -&gt; ErrorErr06ClientProjected</code></td><td>anchored</td><td><code>project_error_err_06_client_from_error_err_05_execution_decision -&gt; mapErrorToHttp</code></td><td></td><td><code>error.client_projection</code>&lt;br/&gt;ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames</td></tr>
+        <tr><td>err-03</td><td><code>ErrorErr03RuntimeClassified -&gt; ErrorErr04RouterPolicyApplied</code></td><td>anchored</td><td><code>apply_error_err_04_router_policy_from_error_err_03_runtime -&gt; report_internal_error_err_02_host_to_router_policy</code></td><td></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td></tr>
+        <tr><td>err-04</td><td><code>ErrorErr04RouterPolicyApplied -&gt; ErrorErr05ExecutionDecision</code></td><td>anchored</td><td><code>resolveProviderRetryExecutionPlan -&gt; resolveProviderRetryExecutionPlan</code></td><td></td><td><code>error.execution_decision_consumer</code>&lt;br/&gt;Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute</td></tr>
+        <tr><td>err-05</td><td><code>ErrorErr05ExecutionDecision -&gt; ErrorErr06ClientProjected</code></td><td>anchored</td><td><code>project_error_err_06_client_from_error_err_05_execution_decision -&gt; mapErrorToHttp</code></td><td></td><td><code>error.client_projection</code>&lt;br/&gt;ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames</td></tr>
         </tbody>
         </table>
         <h2>Other Chains</h2>
-        <p>[servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [request.mainline](docs/architecture/wiki/request-mainline-call-graph.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [internal_error_numbering.mainline](docs/architecture/wiki/internal_error_numbering-mainline.md) · [vr.route_availability.mainline](docs/architecture/wiki/vr-route_availability-mainline.md) · [vr.online_diagnostics.mainline](docs/architecture/wiki/vr-online_diagnostics-mainline.md) · [runtime.lifecycle.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md) · [sse.chat_stream_projection.mainline](docs/architecture/wiki/sse-chat_stream_projection-mainline.md) · [stage_a.p0_rust_migration.mainline](docs/architecture/wiki/stage_a-p0_rust_migration-mainline.md)</p>
+        <p>[webui.config_editor_surface.mainline](docs/architecture/wiki/webui-config_editor_surface-mainline.md) · [servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [request.mainline](docs/architecture/wiki/request-mainline-call-graph.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [internal_error_numbering.mainline](docs/architecture/wiki/internal_error_numbering-mainline.md) · [vr.route_availability.mainline](docs/architecture/wiki/vr-route_availability-mainline.md) · [vr.online_diagnostics.mainline](docs/architecture/wiki/vr-online_diagnostics-mainline.md) · [runtime.lifecycle.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md) · [sse.chat_stream_projection.mainline](docs/architecture/wiki/sse-chat_stream_projection-mainline.md) · [stage_a.p0_rust_migration.mainline](docs/architecture/wiki/stage_a-p0_rust_migration-mainline.md)</p>
       </article>
     </section>
   </main>

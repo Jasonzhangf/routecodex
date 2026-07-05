@@ -14,7 +14,7 @@ import {
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { Readable } from 'node:stream';
 import { sanitizeProviderOutboundPayload } from '../../../modules/llmswitch/bridge.js';
-import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
+import { readRuntimeRequestTruthPortNumber } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 const formatUnknownError = (error: unknown): string => {
   if (error instanceof Error) {
@@ -86,12 +86,7 @@ function readProviderSnapshotEntryPort(context: ProviderContext): number | undef
     if (!metadata) {
       return undefined;
     }
-    const requestTruthPortScope = MetadataCenter.read(metadata)?.readRequestTruth().portScope;
-    if (typeof requestTruthPortScope !== 'string') {
-      return undefined;
-    }
-    const parsed = Number.parseInt(requestTruthPortScope, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+    return readRuntimeRequestTruthPortNumber(metadata);
   };
   const runtimeMetadataRecord =
     context.runtimeMetadata?.metadata && typeof context.runtimeMetadata.metadata === 'object' && !Array.isArray(context.runtimeMetadata.metadata)

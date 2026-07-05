@@ -715,7 +715,6 @@ describe('executor metadata session daemon extraction', () => {
     });
 
     expect(mergedMetadata.__routecodexRetryProviderKey).toBeUndefined();
-    expect(mergedMetadata.__routecodexPreselectedRoute).toBeUndefined();
     expect(MetadataCenter.read(mergedMetadata)?.readRuntimeControl()).toMatchObject({
       retryProviderKey: 'provider.key.model',
       preselectedRoute: {
@@ -1182,7 +1181,6 @@ describe('client connection timeout hint', () => {
       }
     };
     const baseMetadata = {
-      __routecodexPreselectedRoute: preselectedRoute,
       __rt: {
         preselectedRoute
       }
@@ -1213,7 +1211,6 @@ describe('client connection timeout hint', () => {
     });
 
     const firstAttempt = decorateMetadataForAttempt(baseMetadata, 1, new Set<string>());
-    expect(firstAttempt.__routecodexPreselectedRoute).toEqual(preselectedRoute);
     expect((firstAttempt.__rt as { preselectedRoute?: unknown }).preselectedRoute).toEqual(preselectedRoute);
     expect(MetadataCenter.read(firstAttempt)?.readRuntimeControl().preselectedRoute).toEqual(preselectedRoute);
 
@@ -1224,13 +1221,11 @@ describe('client connection timeout hint', () => {
     );
 
     expect(retryAttempt.excludedProviderKeys).toEqual(['minimax.key1.MiniMax-M3']);
-    expect(retryAttempt.__routecodexPreselectedRoute).toBeUndefined();
     expect((retryAttempt.__rt as { preselectedRoute?: unknown }).preselectedRoute).toBeUndefined();
     expect(MetadataCenter.read(retryAttempt)?.readRuntimeControl().preselectedRoute).toBeUndefined();
     expect(MetadataCenter.read(retryAttempt)?.readRuntimeControl().providerProtocol).toBe('openai-responses');
     expect(buildMetadataCenterRustSnapshot(retryAttempt).runtimeControl?.preselectedRoute).toBeUndefined();
     expect(buildMetadataCenterRustSnapshot(retryAttempt).runtimeControl?.providerProtocol).toBe('openai-responses');
-    expect(baseMetadata.__routecodexPreselectedRoute).toBe(preselectedRoute);
     expect((baseMetadata.__rt as { preselectedRoute?: unknown }).preselectedRoute).toBe(preselectedRoute);
   });
 });

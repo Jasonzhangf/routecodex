@@ -2,7 +2,7 @@ lifecycle_id: vr.route_availability.mainline
 summary: Virtual Router ordinary-route filtering, default-pool availability
   floor, and primary_exhausted planning remain Rust-owned; TS may only consume
   the floor/plan output and must not locally re-decide terminal no-provider.
-owner_feature_id: vr.provider_forwarder_runtime
+owner_feature_id: vr.route_availability_floor
 entrypoint:
   node_id: VrAvail01RouteCandidates
   wiki_page: null
@@ -38,8 +38,8 @@ edges:
   - step_id: vra-04
     from_node: VrAvail04PrimaryExhaustedPlanned
     to_node: ErrorErr05ExecutionDecision
-    status: partial
-    owner_feature_id: error.execution_decision_consumer
+    status: anchored
+    owner_feature_id: vr.route_availability_floor
     binding_pending: null
     split_binding_id: null
 verification:

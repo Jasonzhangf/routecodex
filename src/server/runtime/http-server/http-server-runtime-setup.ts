@@ -7,7 +7,7 @@ import type { HubPipeline, HubPipelineConfig, HubPipelineCtor, VirtualRouterArti
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
 import { clearUnresolvedResponsesConversationRequests, preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
-import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-builder.js';
+import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-types.js';
 import { trafficGovernorIsAtCapacity } from '../../../modules/traffic-governor/index.js';
 
 type RoutingProviderScope = {

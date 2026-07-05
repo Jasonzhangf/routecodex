@@ -56,13 +56,6 @@ carrier_runtime_surfaces:
         owner_queryability: unique-owner
         verification_state: present
         note: "server contract help documents current boundary token."
-      - path: src/modules/llmswitch/bridge/responses-response-bridge.ts
-        owner_feature_id: server.responses_response_handler_bridge_surface
-        category: guard_surface
-        semantic_family: response_metadata_protocol_guard
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "direct passthrough SSE metadata isolation guard."
       - path: src/server/handlers/handler-response-common.ts
         owner_feature_id: server.responses_handler_family
         category: guard_surface
@@ -91,6 +84,13 @@ carrier_runtime_surfaces:
         owner_queryability: unique-owner
         verification_state: present
         note: "stale retry provider pin delete guard after MetadataCenter runtime_control migration."
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs
+        owner_feature_id: hub.pipeline_contract_surface
+        category: guard_surface
+        semantic_family: request_route_control_contract
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "provider outbound payload guard rejects internal carrier key prefixes without allowing them as normal payload."
   - carrier_id: response_metadata
     description: "response.metadata runtime residues still present before full response projection cleanup."
     files:
@@ -108,17 +108,3 @@ carrier_runtime_surfaces:
         owner_queryability: unique-owner
         verification_state: present
         note: "server contract help names response.metadata event."
-      - path: src/modules/llmswitch/bridge/responses-response-bridge.ts
-        owner_feature_id: server.responses_response_handler_bridge_surface
-        category: guard_surface
-        semantic_family: response_metadata_protocol_guard
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "direct passthrough response.metadata protocol/guard owner."
-      - path: src/providers/core/hooks/debug-example-hooks.ts
-        owner_feature_id: provider.debug_example_hooks_surface
-        category: local_runtime_marker
-        semantic_family: provider_debug_observation
-        owner_queryability: unique-owner
-        verification_state: present
-        note: "debug hook example mentions response.metadata without making it client truth owner."

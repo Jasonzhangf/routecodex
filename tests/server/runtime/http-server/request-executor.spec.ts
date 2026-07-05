@@ -3053,11 +3053,13 @@ describe('HubRequestExecutor failover', () => {
         body: {},
         headers: {},
         metadata: {
-          __routecodexPreselectedRoute: {
-            decision: {
-              routeName: 'thinking',
-              providerKey: firstProviderKey,
-              pool: [firstProviderKey, secondProviderKey]
+          __rt: {
+            preselectedRoute: {
+              decision: {
+                routeName: 'thinking',
+                providerKey: firstProviderKey,
+                pool: [firstProviderKey, secondProviderKey]
+              }
             }
           }
         }
@@ -3073,7 +3075,7 @@ describe('HubRequestExecutor failover', () => {
 
       const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
       expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
-      expect(secondCallMetadata.__routecodexPreselectedRoute).toBeUndefined();
+      expect((secondCallMetadata.__rt as { preselectedRoute?: unknown } | undefined)?.preselectedRoute).toBeUndefined();
     } finally {
       jest.useRealTimers();
     }

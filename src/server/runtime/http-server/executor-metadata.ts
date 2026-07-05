@@ -720,12 +720,10 @@ export function decorateMetadataForAttempt(
     } else {
       delete clone.excludedProviderKeys;
     }
-    delete clone.__routecodexPreselectedRoute;
   } else if (clone.excludedProviderKeys) {
     delete clone.excludedProviderKeys;
   }
   if (attempt > 1) {
-    delete clone.__routecodexPreselectedRoute;
     const rt = clone.__rt && typeof clone.__rt === 'object' && !Array.isArray(clone.__rt)
       ? { ...(clone.__rt as Record<string, unknown>) }
       : undefined;

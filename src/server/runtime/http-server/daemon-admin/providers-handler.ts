@@ -35,6 +35,7 @@ import {
 import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
 import { updateUserConfigStringScalar, writeUserConfigFile } from '../../../../config/user-config-writer.js';
 
+// feature_id: webui.config_editor_surface
 interface ProviderRuntimeView {
   providerKey: string;
   runtimeKey: string;
