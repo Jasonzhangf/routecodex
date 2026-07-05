@@ -228,6 +228,12 @@ mod tests {
             first_frame.contains("event: response.created"),
             "Responses SSE encoder must accept snake_case request_id and emit frames"
         );
+        let last_frame = parsed["frames"]
+            .as_array()
+            .and_then(|frames| frames.last())
+            .and_then(|frame| frame.as_str())
+            .unwrap();
+        assert_eq!(last_frame, "data: [DONE]\n\n");
     }
 
     #[test]

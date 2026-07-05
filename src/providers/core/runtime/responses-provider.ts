@@ -273,6 +273,46 @@ async function readDirectResponsesChunkWithSemanticTimeout(
   }
 }
 
+function readDataOnlyDirectResponseEventName(block: string): string | undefined {
+  const lines = block.split(/\r?\n/);
+  if (lines.some((line) => line.startsWith('event:'))) {
+    return undefined;
+  }
+  const dataText = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice('data:'.length).trim())
+    .join('\n');
+  if (!dataText || dataText === '[DONE]') {
+    return undefined;
+  }
+  try {
+    const data = JSON.parse(dataText) as unknown;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return undefined;
+    }
+    const type = (data as Record<string, unknown>).type;
+    if (typeof type !== 'string' || !type.startsWith('response.')) {
+      return undefined;
+    }
+    return type;
+  } catch {
+    return undefined;
+  }
+}
+
+function prefixDataOnlyDirectResponseEventName(block: string): string {
+  const eventType = readDataOnlyDirectResponseEventName(block);
+  return eventType ? `event: ${eventType}\n${block}` : block;
+}
+
+function isDirectResponsesSseDoneTokenBlock(block: string): boolean {
+  return block
+    .split(/\r?\n/)
+    .some((line) => line.trim() === 'data: [DONE]');
+}
+
+const DIRECT_RESPONSES_SSE_DONE_FRAME = Buffer.from('data: [DONE]\n\n');
+
 async function prepareDirectResponsesSsePassthroughStream(
   stream: NodeJS.ReadableStream,
   options?: {
@@ -285,6 +325,7 @@ async function prepareDirectResponsesSsePassthroughStream(
   let pending = '';
   let sawSemanticFrame = false;
   let sawTerminalFrame = false;
+  let sawDoneTokenFrame = false;
   let lastSemanticActivityAt = Date.now();
 
   const processBlock = async (part: string): Promise<Buffer | null> => {
@@ -302,12 +343,15 @@ async function prepareDirectResponsesSsePassthroughStream(
     if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
       return null;
     }
+    if (isDirectResponsesSseDoneTokenBlock(part)) {
+      sawDoneTokenFrame = true;
+    }
     if (isResponsesSseTerminalBlock(part)) {
       sawTerminalFrame = true;
     }
     sawSemanticFrame = true;
     lastSemanticActivityAt = Date.now();
-    return Buffer.from(`${part}\n\n`);
+    return Buffer.from(`${prefixDataOnlyDirectResponseEventName(part)}\n\n`);
   };
 
   const startStreamingRemainder = (output: PassThrough): void => {
@@ -351,6 +395,9 @@ async function prepareDirectResponsesSsePassthroughStream(
         if (!sawTerminalFrame) {
           output.destroy(buildResponsesSseIncompleteError());
           return;
+        }
+        if (!sawDoneTokenFrame && !closed) {
+          output.write(DIRECT_RESPONSES_SSE_DONE_FRAME);
         }
         if (!closed) {
           output.end();
@@ -409,6 +456,9 @@ async function prepareDirectResponsesSsePassthroughStream(
     if (!sawTerminalFrame) {
       output.destroy(buildResponsesSseIncompleteError());
       return output;
+    }
+    if (!sawDoneTokenFrame) {
+      output.write(DIRECT_RESPONSES_SSE_DONE_FRAME);
     }
     output.end();
     return output;

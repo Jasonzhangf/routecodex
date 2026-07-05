@@ -12,6 +12,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ id: 'unused' }),
   }),
+  buildResponsesJsonFromSseStreamWithNative: async () => ({ status: 'completed', output: [] }),
   convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
     request: {
       model: payload.model,
@@ -48,6 +49,14 @@ function createProvider(): any {
   return provider;
 }
 
+async function readSseStreamText(stream: AsyncIterable<unknown>): Promise<string> {
+  let text = '';
+  for await (const chunk of stream) {
+    text += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+  }
+  return text;
+}
+
 describe('ResponsesProvider direct SSE terminal validation', () => {
   it('rejects direct passthrough upstream SSE that closes before response.completed', async () => {
     const provider = createProvider();
@@ -60,11 +69,13 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
       ]),
     };
 
-    await expect(provider.processIncomingDirect({
+    const response = await provider.processIncomingDirect({
       model: 'gpt-5.5',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
       stream: true,
-    })).rejects.toMatchObject({
+    });
+
+    await expect(readSseStreamText(response.sseStream)).rejects.toMatchObject({
       code: 'UPSTREAM_STREAM_INCOMPLETE',
       statusCode: 502,
       retryable: true,
@@ -83,11 +94,13 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
       ]),
     };
 
-    await expect(provider.processIncomingDirect({
+    const response = await provider.processIncomingDirect({
       model: 'gpt-5.5',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
       stream: true,
-    })).rejects.toMatchObject({
+    });
+
+    await expect(readSseStreamText(response.sseStream)).rejects.toMatchObject({
       code: 'UPSTREAM_STREAM_INCOMPLETE',
       statusCode: 502,
       retryable: true,
@@ -111,11 +124,9 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
       stream: true,
     });
-    let text = '';
-    for await (const chunk of response.sseStream) {
-      text += String(chunk);
-    }
+    const text = await readSseStreamText(response.sseStream);
     expect(text).toContain('event: response.created');
     expect(text).toContain('event: response.completed');
+    expect(text).toContain('data: [DONE]');
   });
 });

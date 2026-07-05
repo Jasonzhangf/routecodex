@@ -2406,11 +2406,12 @@ pub fn build_responses_sse_stream_frames_json(input_json: String) -> Result<Stri
         .get("stats")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
-    let mut frames: Vec<String> = Vec::with_capacity(events.len());
+    let mut frames: Vec<String> = Vec::with_capacity(events.len() + 1);
     for event in events {
         let frame = serialize_responses_sse_event_to_wire(event.clone())?;
         frames.push(frame);
     }
+    frames.push("data: [DONE]\n\n".to_string());
     let output = serde_json::json!({
         "frames": frames,
         "stats": stats,
@@ -2566,6 +2567,37 @@ mod tests {
         )
         .unwrap());
         assert!(!validate_responses_sse_wire_format("event: response.done\n").unwrap());
+    }
+
+    #[test]
+    fn builds_responses_sse_stream_frames_with_done_sentinel() {
+        let output = build_responses_sse_stream_frames_json(
+            json!({
+                "request_id": "req_responses_stream_done",
+                "config": {
+                    "enableTimestampGeneration": false,
+                    "includeSequenceNumbers": true,
+                    "chunkSize": 0
+                },
+                "response": {
+                    "id": "resp_stream_done",
+                    "object": "response",
+                    "created_at": 1781149537,
+                    "status": "completed",
+                    "model": "gpt-test",
+                    "output": []
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        let frames = parsed["frames"].as_array().unwrap();
+        assert!(frames
+            .iter()
+            .any(|frame| frame.as_str().unwrap().contains("event: response.done")));
+        assert_eq!(frames.last().unwrap(), "data: [DONE]\n\n");
     }
 
     #[test]

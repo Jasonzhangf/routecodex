@@ -31,4 +31,4 @@ HTTP 路由处理器仅负责：
 ## 调试
 - 请求快照：`http-request` 节点记录原始 body。
 - 错误帧：未开始 SSE 时返回 JSON；已开始则输出显式 SSE error frame。
-- `/v1/responses` 只输出 OpenAI Responses 事件流，不追加 chat-style `[DONE]` sentinel。
+- `/v1/responses` 只输出 OpenAI Responses 事件流；handler 不合成业务终态，传输闭合 `data: [DONE]` 由 Rust encoder 或 direct provider passthrough 边界负责。

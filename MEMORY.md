@@ -1,3 +1,11 @@
+# 2026-07-05: Responses SSE terminal closeout is transport sentinel, not business event
+
+- Direct `/v1/responses` provider passthrough must append final `data: [DONE]\n\n` after a valid terminal Responses SSE event when upstream omits it. It must not synthesize `response.done`, request id, required_action, continuation, stopless/servertool state, or tool history.
+- Relay/JSON-to-SSE projection closeout belongs in Rust `build_responses_sse_stream_frames_json`; the Rust/native encoder must end its frame list with `data: [DONE]\n\n`.
+- Handler/SSE remains transport-only. Do not move terminal parsing, continuation repair, or protocol business semantics into `handler-response-sse.ts`.
+- Current config fact from 2026-07-05: 5520/5555/4444 are explicit `sameProtocolBehavior="direct"` and 10000 defaults to direct. Do not call 5520 symptoms relay without a relay-configured port or relay ownership sample.
+- Verified evidence: focused Rust tests for Responses SSE frame closeout passed; focused direct provider Jest passed; `build:base`, `pack:rcc`, release install verification, global install `routecodex/rcc@0.90.3583`, managed restart, and `/health.version` on all configured ports passed. Live 5520 smoke and latest sample `req_1783240882820_e055cb52` ended with `response.completed` plus `data: [DONE]`. Installed native probe proved global Rust encoder returns `last="data: [DONE]\n\n"`.
+
 # 2026-07-04: Responses store released prefix is not live input
 - Verified rule: `responses-conversation-store-native.ts` must pass current live `entry.input` to Rust and keep `releasedInputPrefix` as a separate side-channel. Treating released prefix as current input hides the store's released/pending branch truth and can let duplicate pending function_call batches or stale stopless tool history survive.
 - Rust owner: `shared_responses_conversation_utils.rs` owns materialize/resume collapse for replayed pending tool batches, duplicate output batches, and completed stopless auto-hook pairs. TS store/bridge may marshal opaque payloads only; it must not reconstruct continuation history or use released prefix as a semantic fallback input.

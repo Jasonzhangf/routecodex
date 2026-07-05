@@ -1,3 +1,12 @@
+# 2026-07-05: Responses SSE direct terminal closeout and relay boundary
+
+- Symptom split: 5520 observed direct streams ended at `response.completed` without transport `data: [DONE]`, causing clients to keep waiting or retry. Current `~/.rcc/config.toml` has `sameProtocolBehavior="direct"` on 5520/5555/4444 and 10000 defaults to direct, so the observed 5520 loop was not a live relay sample.
+- Fix: direct provider passthrough appends transport `data: [DONE]\n\n` after a valid terminal Responses event when upstream omitted it, and keeps data-only `response.*` event-name normalization. Rust `build_responses_sse_stream_frames_json` also appends the same transport closeout for relay/JSON-to-SSE projection.
+- Boundary: handler/SSE remains transport-only and does not synthesize `response.done`, request id, required_action, continuation, stopless/servertool state, or business semantics. `[DONE]` is a transport sentinel, not a business terminal event.
+- Build/release evidence: `build:base`, `pack:rcc`, `verify:rcc-release-install`, global install of `routecodex/rcc@0.90.3583`, managed `routecodex restart --port 5520`, and `/health.version` on 4444/5520/5555/10000 all passed.
+- Live direct evidence: 5520 curl SSE smoke returned `response.completed` and final `data: [DONE]`; latest sample `req_1783240882820_e055cb52` has `hasCompleted=true` and `hasDONE=true`.
+- Relay evidence: no active relay port exists in the current config, so live relay was not claimed. Installed global native probe from `/opt/homebrew/lib/node_modules/rcc/sharedmodule/llmswitch-core/dist/native/router-hotpath/native-responses-sse-event-payload.js` returned `last="data: [DONE]\n\n"` for `buildResponsesSseStreamFramesWithNative`.
+
 # 2026-07-05: 5520 `/v1/responses` self-retry loop fixed by `x-stainless-timeout` seconds parsing
 
 - Symptom: live 5520 repeated `/v1/responses` with growing `rawInputItems` and `usage=unreported`; failing sample ended with `response.sse.client_close ... detectedBeforeStreamStart=true`.

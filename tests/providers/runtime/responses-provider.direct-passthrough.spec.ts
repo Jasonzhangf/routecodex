@@ -14,6 +14,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   }),
   sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) =>
     JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>,
+  buildResponsesJsonFromSseStreamWithNative: async () => ({ status: 'completed', output: [] }),
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
   })
@@ -991,5 +992,137 @@ describe('ResponsesProvider direct passthrough', () => {
     expect(text).toContain('event: response.created');
     expect(text).toContain('event: response.completed');
     expect(text).toContain('resp_ok');
+  });
+
+  test('normalizes data-only direct Responses SSE frames into named event frames', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-data-only-sse-event-names',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        `data: ${JSON.stringify({
+          type: 'response.created',
+          response: { id: 'resp_data_only', object: 'response', status: 'in_progress', output: [] }
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: 'response.output_item.added',
+          output_index: 0,
+          item: {
+            id: 'fc_apply_patch_data_only',
+            type: 'function_call',
+            call_id: 'call_apply_patch_data_only',
+            name: 'apply_patch',
+            arguments: '',
+            status: 'in_progress'
+          }
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: 'response.function_call_arguments.done',
+          output_index: 0,
+          item_id: 'fc_apply_patch_data_only',
+          call_id: 'call_apply_patch_data_only',
+          name: 'apply_patch',
+          arguments: '{"patch":"*** Begin Patch\\n*** Add File: tmp/direct-data-only.txt\\n+ok\\n*** End Patch"}'
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: 'response.completed',
+          response: { id: 'resp_data_only', object: 'response', status: 'completed', output: [] }
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: 'response.done',
+          response: { id: 'resp_data_only', object: 'response', status: 'completed', output: [] }
+        })}\n\n`
+      ])
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    const result = await provider.sendRequestInternal(inbound);
+    const chunks: Buffer[] = [];
+    for await (const chunk of result.sseStream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const text = Buffer.concat(chunks).toString('utf8');
+    expect(text).toContain('event: response.created');
+    expect(text).toContain('event: response.output_item.added');
+    expect(text).toContain('event: response.function_call_arguments.done');
+    expect(text).toContain('event: response.completed');
+    expect(text).toContain('event: response.done');
+    expect(text).toContain('call_apply_patch_data_only');
+    expect(text).toContain('tmp/direct-data-only.txt');
+    expect(text).not.toContain('event: message');
+  });
+
+  test('appends direct Responses SSE done token when upstream ends after completed event only', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-completed-needs-done-token',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        `data: ${JSON.stringify({
+          type: 'response.created',
+          response: { id: 'resp_completed_only', object: 'response', status: 'in_progress', output: [] }
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: 'response.completed',
+          response: { id: 'resp_completed_only', object: 'response', status: 'completed', output: [] }
+        })}\n\n`
+      ])
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    const result = await provider.sendRequestInternal(inbound);
+    const chunks: Buffer[] = [];
+    for await (const chunk of result.sseStream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const text = Buffer.concat(chunks).toString('utf8');
+    expect(text).toContain('event: response.completed');
+    expect(text).toContain('data: [DONE]');
+    expect(text.match(/data: \[DONE\]/g)).toHaveLength(1);
+    expect(text).not.toContain('event: response.done');
   });
 });
