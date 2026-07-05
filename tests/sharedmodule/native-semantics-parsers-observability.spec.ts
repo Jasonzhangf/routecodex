@@ -1,7 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import fs from 'node:fs';
 
-import { parseOutput } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-parsers.js';
 import { parseAliasMap } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.js';
 import { parseBoolean as parseReqOutboundBoolean } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.js';
 import { parsePendingToolSyncPayload } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.js';
@@ -36,15 +35,6 @@ async function importWithNativeParseFailureMock<TModule>(
 }
 
 describe('native semantics parser observability', () => {
-  it('logs bridge action parser JSON failures and still returns null', () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    expect(parseOutput('{not-json')).toBeNull();
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseOutput parse failed (non-blocking)');
-
-    warnSpy.mockRestore();
-  });
-
   it('logs resp semantics parser JSON failures and still preserves null contract', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 

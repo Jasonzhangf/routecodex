@@ -4,24 +4,13 @@ import {
 } from './native-router-hotpath-policy.js';
 
 import {
-  parseNativeResultOrFail,
+  parseNativeJsonObjectOrFail,
+  parseNativeJsonValueOrFail,
   readNativeFunction,
   readNativeJsonResult,
   safeStringify,
   shouldRethrowNativeRawError
 } from './native-hub-bridge-action-semantics-shared.js';
-
-import {
-  parseApplyBridgeEnsureSystemInstructionOutput,
-  parseApplyBridgeInjectSystemInstructionOutput,
-  parseApplyBridgeMetadataActionOutput,
-  parseApplyBridgeReasoningExtractOutput,
-  parseApplyBridgeResponsesOutputReasoningOutput,
-  parseBridgeActionState,
-  parseEnsureBridgeOutputFieldsOutput,
-  parseNormalizeMessageReasoningToolsOutput,
-  parseRecord
-} from './native-hub-bridge-action-semantics-parsers.js';
 
 import type {
   NativeApplyBridgeEnsureSystemInstructionInput,
@@ -99,7 +88,7 @@ export function ensureBridgeOutputFieldsWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseEnsureBridgeOutputFieldsOutput);
+    return parseNativeJsonValueOrFail<NativeEnsureBridgeOutputFieldsOutput>(capability, raw, 'parseEnsureBridgeOutputFieldsOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -134,7 +123,7 @@ export function applyBridgeMetadataActionWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseApplyBridgeMetadataActionOutput);
+    return parseNativeJsonValueOrFail<NativeApplyBridgeMetadataActionOutput>(capability, raw, 'parseApplyBridgeMetadataActionOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -166,7 +155,7 @@ export function applyBridgeReasoningExtractWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseApplyBridgeReasoningExtractOutput);
+    return parseNativeJsonValueOrFail<NativeApplyBridgeReasoningExtractOutput>(capability, raw, 'parseApplyBridgeReasoningExtractOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -199,7 +188,7 @@ export function applyBridgeResponsesOutputReasoningWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseApplyBridgeResponsesOutputReasoningOutput);
+    return parseNativeJsonValueOrFail<NativeApplyBridgeResponsesOutputReasoningOutput>(capability, raw, 'parseApplyBridgeResponsesOutputReasoningOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -233,7 +222,7 @@ export function applyBridgeInjectSystemInstructionWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseApplyBridgeInjectSystemInstructionOutput);
+    return parseNativeJsonValueOrFail<NativeApplyBridgeInjectSystemInstructionOutput>(capability, raw, 'parseApplyBridgeInjectSystemInstructionOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -266,7 +255,7 @@ export function applyBridgeEnsureSystemInstructionWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseApplyBridgeEnsureSystemInstructionOutput);
+    return parseNativeJsonValueOrFail<NativeApplyBridgeEnsureSystemInstructionOutput>(capability, raw, 'parseApplyBridgeEnsureSystemInstructionOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -301,11 +290,7 @@ export function runBridgeActionPipelineWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    const parsed = parseBridgeActionState(raw);
-    if (!parsed) {
-      return null;
-    }
-    return parsed;
+    return parseNativeJsonValueOrFail<NativeBridgeActionState>(capability, raw, 'parseBridgeActionState');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -347,7 +332,7 @@ export function normalizeMessageReasoningToolsWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(messageJson, typeof idPrefix === 'string' && idPrefix.trim().length ? idPrefix.trim() : undefined));
-    return parseNativeResultOrFail(capability, raw, parseNormalizeMessageReasoningToolsOutput);
+    return parseNativeJsonValueOrFail<NativeNormalizeMessageReasoningToolsOutput>(capability, raw, 'parseNormalizeMessageReasoningToolsOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -407,7 +392,7 @@ export function normalizeChatResponseReasoningToolsWithNative(
     if (typeof raw !== 'string' || !raw) {
       return fail('empty result');
     }
-    return parseNativeResultOrFail(capability, raw, parseRecord);
+    return parseNativeJsonObjectOrFail<Record<string, unknown>>(capability, raw, 'parseRecord');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;

@@ -1,6 +1,9 @@
 import { failNativeRequired } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 
+const NON_BLOCKING_PARSE_LOG_THROTTLE_MS = 60_000;
+const nonBlockingParseLogState = new Map<string, number>();
+
 export function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -69,14 +72,34 @@ export function shouldRethrowNativeRawError(error: unknown): error is Error {
   return !error.message.startsWith('[virtual-router-native-hotpath] native ');
 }
 
-export function parseNativeResultOrFail<T>(capability: string, raw: string, parse: (value: string) => T | null): T {
-  const parsed = parse(raw);
-  if (parsed) {
-    return parsed;
+function logNativeBridgeActionParserNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingParseLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_PARSE_LOG_THROTTLE_MS) {
+    return;
   }
-  const trimmed = raw.trim();
-  if (trimmed && !trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-    throw new Error(trimmed);
+  nonBlockingParseLogState.set(stage, now);
+  const reason = stringifyNativePayloadForError(error) ?? 'unknown';
+  console.warn(`[native-hub-bridge-action-semantics] ${stage} parse failed (non-blocking): ${reason}`);
+}
+
+export function parseNativeJsonValueOrFail<T>(capability: string, raw: string, stage = capability): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    logNativeBridgeActionParserNonBlocking(stage, error);
+    return failNativeRequired<T>(capability, 'invalid payload');
   }
-  return failNativeRequired<T>(capability, 'invalid payload');
+}
+
+export function parseNativeJsonObjectOrFail<T extends Record<string, unknown>>(
+  capability: string,
+  raw: string,
+  stage = capability
+): T {
+  const parsed = parseNativeJsonValueOrFail<unknown>(capability, raw, stage);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return failNativeRequired<T>(capability, 'invalid payload');
+  }
+  return parsed as T;
 }

@@ -4,20 +4,12 @@ import {
 } from './native-router-hotpath-policy.js';
 
 import {
-  parseNativeResultOrFail,
+  parseNativeJsonValueOrFail,
   readNativeFunction,
   readNativeJsonResult,
   safeStringify,
   shouldRethrowNativeRawError
 } from './native-hub-bridge-action-semantics-shared.js';
-
-import {
-  parseApplyBridgeCaptureToolResultsOutput,
-  parseApplyBridgeEnsureToolPlaceholdersOutput,
-  parseApplyBridgeNormalizeHistoryOutput,
-  parseBridgeInputToChatOutput,
-  parseEnsureMessagesArrayOutput
-} from './native-hub-bridge-action-semantics-parsers.js';
 
 import type {
   NativeApplyBridgeCaptureToolResultsInput,
@@ -56,7 +48,7 @@ export function applyBridgeNormalizeHistoryWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseApplyBridgeNormalizeHistoryOutput);
+    return parseNativeJsonValueOrFail<NativeApplyBridgeNormalizeHistoryOutput>(capability, raw, 'parseApplyBridgeNormalizeHistoryOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -90,7 +82,7 @@ export function applyBridgeCaptureToolResultsWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseApplyBridgeCaptureToolResultsOutput);
+    return parseNativeJsonValueOrFail<NativeApplyBridgeCaptureToolResultsOutput>(capability, raw, 'parseApplyBridgeCaptureToolResultsOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -125,7 +117,7 @@ export function applyBridgeEnsureToolPlaceholdersWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseApplyBridgeEnsureToolPlaceholdersOutput);
+    return parseNativeJsonValueOrFail<NativeApplyBridgeEnsureToolPlaceholdersOutput>(capability, raw, 'parseApplyBridgeEnsureToolPlaceholdersOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -160,7 +152,7 @@ export function convertBridgeInputToChatMessagesWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseBridgeInputToChatOutput);
+    return parseNativeJsonValueOrFail<NativeBridgeInputToChatOutput>(capability, raw, 'parseBridgeInputToChatOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -269,7 +261,7 @@ export function ensureMessagesArrayWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseEnsureMessagesArrayOutput);
+    return parseNativeJsonValueOrFail<NativeEnsureMessagesArrayOutput>(capability, raw, 'parseEnsureMessagesArrayOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;

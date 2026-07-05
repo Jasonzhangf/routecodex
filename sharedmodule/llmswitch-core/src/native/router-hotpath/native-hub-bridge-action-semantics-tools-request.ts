@@ -4,23 +4,12 @@ import {
 } from './native-router-hotpath-policy.js';
 
 import {
-  parseNativeResultOrFail,
+  parseNativeJsonValueOrFail,
   readNativeFunction,
   readNativeJsonResult,
   safeStringify,
   shouldRethrowNativeRawError
 } from './native-hub-bridge-action-semantics-shared.js';
-
-import {
-  parseAppendLocalImageBlockOnLatestUserInputOutput,
-  parseBridgeHistoryOutput,
-  parseFilterBridgeInputForUpstreamOutput,
-  parseNormalizeBridgeHistorySeedOutput,
-  parseOutput,
-  parsePrepareResponsesRequestEnvelopeOutput,
-  parseResolveResponsesBridgeToolsOutput,
-  parseResolveResponsesRequestBridgeDecisionsOutput
-} from './native-hub-bridge-action-semantics-parsers.js';
 
 import type {
   NativeAppendLocalImageBlockOnLatestUserInputInput,
@@ -64,7 +53,7 @@ export function normalizeBridgeToolCallIdsWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseOutput);
+    return parseNativeJsonValueOrFail<NativeBridgeToolCallIdsOutput>(capability, raw, 'parseOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -100,7 +89,7 @@ export function applyBridgeNormalizeToolIdentifiersWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseOutput);
+    return parseNativeJsonValueOrFail<NativeBridgeToolCallIdsOutput>(capability, raw, 'parseOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -132,7 +121,7 @@ export function buildBridgeHistoryWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseBridgeHistoryOutput);
+    return parseNativeJsonValueOrFail<NativeBridgeHistoryOutput>(capability, raw, 'parseBridgeHistoryOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -160,7 +149,7 @@ export function normalizeBridgeHistorySeedWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseNormalizeBridgeHistorySeedOutput);
+    return parseNativeJsonValueOrFail<NativeNormalizeBridgeHistorySeedOutput>(capability, raw, 'parseNormalizeBridgeHistorySeedOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -195,7 +184,7 @@ export function resolveResponsesBridgeToolsWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseResolveResponsesBridgeToolsOutput);
+    return parseNativeJsonValueOrFail<NativeResolveResponsesBridgeToolsOutput>(capability, raw, 'parseResolveResponsesBridgeToolsOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -231,7 +220,7 @@ export function resolveResponsesRequestBridgeDecisionsWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseResolveResponsesRequestBridgeDecisionsOutput);
+    return parseNativeJsonValueOrFail<NativeResolveResponsesRequestBridgeDecisionsOutput>(capability, raw, 'parseResolveResponsesRequestBridgeDecisionsOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -262,7 +251,7 @@ export function filterBridgeInputForUpstreamWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseFilterBridgeInputForUpstreamOutput);
+    return parseNativeJsonValueOrFail<NativeFilterBridgeInputForUpstreamOutput>(capability, raw, 'parseFilterBridgeInputForUpstreamOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -298,7 +287,7 @@ export function prepareResponsesRequestEnvelopeWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parsePrepareResponsesRequestEnvelopeOutput);
+    return parseNativeJsonValueOrFail<NativePrepareResponsesRequestEnvelopeOutput>(capability, raw, 'parsePrepareResponsesRequestEnvelopeOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
@@ -329,7 +318,7 @@ export function appendLocalImageBlockOnLatestUserInputWithNative(
   }
   try {
     const raw = readNativeJsonResult(capability, fn(payloadJson));
-    return parseNativeResultOrFail(capability, raw, parseAppendLocalImageBlockOnLatestUserInputOutput);
+    return parseNativeJsonValueOrFail<NativeAppendLocalImageBlockOnLatestUserInputOutput>(capability, raw, 'parseAppendLocalImageBlockOnLatestUserInputOutput');
   } catch (error) {
     if (shouldRethrowNativeRawError(error)) {
       throw error;
