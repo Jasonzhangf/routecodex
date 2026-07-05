@@ -15,8 +15,10 @@
 
 - Disabled by default.
 - Max one owner-scoped diff.
+- Max one `gate-matrix.md` row.
 - Max three attempts on the same item.
-- Required gates must be listed before editing.
+- Required whitebox, blackbox, quality, and checker gates must be listed before
+  editing.
 - Checker required before approval.
 
 ## L3 Budget

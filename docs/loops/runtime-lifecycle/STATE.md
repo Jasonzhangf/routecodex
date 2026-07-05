@@ -22,6 +22,17 @@ last_run_id: 2026-07-04T00:00:00+08:00
 - `worker_collision`: unrelated dirty files must remain untouched; loop reports
   collisions but does not stage, reset, checkout, or delete.
 
+## L2 Gate Matrix
+
+Canonical matrix: `docs/loops/runtime-lifecycle/gate-matrix.md`.
+
+Allowed `watchlist_id` values:
+
+- `release_install_sync`
+- `runtime_lifecycle`
+- `verification_gate_mapping`
+- `worker_collision`
+
 ## L1 Run Procedure
 
 1. Confirm kill switch is inactive.
@@ -35,6 +46,7 @@ last_run_id: 2026-07-04T00:00:00+08:00
 
 L2 remains blocked until at least one L1 report identifies a concrete item with:
 
+- One `watchlist_id` from `gate-matrix.md`.
 - Unique owner in `function-map.yml`.
 - Adjacent edge in `mainline-call-map.yml` when runtime path is affected.
 - Required gates in `verification-map.yml`.

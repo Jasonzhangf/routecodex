@@ -23,9 +23,11 @@
 ## L2 Action Rules
 
 - One item per run.
+- One `watchlist_id` from `gate-matrix.md`.
 - One owner path per fix.
 - Maximum three attempts per item, then escalate.
-- Required maps and tests must be known before editing.
+- Required maps, whitebox gates, blackbox gates, and quality checks must be
+  known before editing.
 - Checker must verify scope, denylist, intent, tests, and evidence.
 - No auto-merge.
 
@@ -35,6 +37,7 @@
 - Dirty worktree collision affects target files.
 - Owner cannot be found in one or two map queries.
 - Required verification is missing or cannot run.
+- Required `gate-matrix.md` row is missing or ambiguous.
 - Any action would touch auth, secrets, provider accounts, payment, production
   config, migration, or global install state.
 - Same item failed three times.

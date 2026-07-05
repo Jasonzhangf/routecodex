@@ -25157,3 +25157,13 @@ Complete SSE rustification status (34 TS files):
 - Verification: `npm run verify:llmswitch-rustification-audit`, `verify:servertool-rust-only`, `verify:responses-history-protocol-contract`, `verify:responses-direct-tool-shape-contract`, architecture mainline/wiki/function-map gates, `git diff --check`, and full `cargo test -p router-hotpath-napi --lib -- --nocapture` PASS (`2147 passed; 0 failed; 1 ignored`).
 - Release/live: `ROUTECODEX_INSTALL_VERIFY_PORT=5555 npm run install:release` installed snapshot `routecodex-0.90.3570`; `package.json`, `routecodex --version`, `rcc --version`, install current package, and live `/health.version` on 5555/5520 all equal `0.90.3570`. `stopless-5555-live-probe.mjs` on live 5555 produced first-turn `requires_action` with `exec_command` reasoningStop, no stop schema leak, then `submit_tool_outputs` completed.
 - Remaining risk: global completion still depends on keeping non-Hub partials out of the Hub Rustification claim. No fallback/provider-specific branch/metadata normal-payload leak found in the reviewed diff.
+
+# 2026-07-05: runtime lifecycle L2 gate matrix completed
+
+- Added `docs/loops/runtime-lifecycle/gate-matrix.md` for the `runtime-lifecycle-release-watch` L2 approval matrix.
+- Matrix rows cover `release_install_sync`, `runtime_lifecycle`, `verification_gate_mapping`, and `worker_collision`; each row lists owner/mainline, whitebox gates, blackbox gates, quality checks, evidence, and escalation conditions.
+- Wired `LOOP.md`, `STATE.md`, `loop-constraints.md`, and `loop-budget.md` to require one matrix row for L2 action.
+- Added `scripts/architecture/verify-runtime-lifecycle-loop-gate-matrix.mjs` and `npm run verify:runtime-lifecycle-loop-gate-matrix`; wired it into `verify:architecture-ci-longtail`.
+- Evidence: `verify:runtime-lifecycle-loop-gate-matrix`, `verify:runtime-lifecycle-pid-rebase`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and `git diff --check` passed.
+- Known unresolved runtime risk: focused `tests/cli/restart-command.spec.ts -t "uses target port host"` still fails with `exit:1`; the gate-matrix work is governance closure, not that runtime lifecycle bug fix.
+- Aggregate caveat: `verify:architecture-ci-longtail` currently fails before reaching the new gate on existing deleted-path checks for removed servertool orchestration paths.

@@ -30,7 +30,7 @@ global packages, provider config, secrets, or running production processes.
 
 - `L1 report-only`: read files/logs/state and append findings only.
 - `L2 assisted`: one owner-scoped diff only after function map, mainline map,
-  verification map, required tests, and checker are clear.
+  verification map, `gate-matrix.md`, required tests, and checker are clear.
 - `L3 unattended`: disabled until run history, budget, kill switch, and verifier
   evidence exist.
 
@@ -64,6 +64,7 @@ exit without further inspection.
 - `docs/architecture/verification-map.yml`
 - `docs/agent-routing/05-foundation-contract.md`
 - `docs/agent-routing/20-build-test-release-routing.md`
+- `docs/loops/runtime-lifecycle/gate-matrix.md`
 - `MEMORY.md`
 - `note.md`
 
@@ -86,3 +87,15 @@ large logs into the loop files.
 - PID registry trust and stale PID handling.
 - Verification-map coverage for lifecycle/release gates.
 - Dirty-worktree collision with other workers.
+
+## L2 Gate Matrix
+
+L2 actions must use exactly one row from `gate-matrix.md`:
+
+- `release_install_sync`
+- `runtime_lifecycle`
+- `verification_gate_mapping`
+- `worker_collision`
+
+The selected row defines the required owner, whitebox gates, blackbox gates,
+quality checks, evidence, and escalation condition for that run.

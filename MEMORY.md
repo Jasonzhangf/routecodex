@@ -736,3 +736,10 @@
 - Direct Responses continuation truth: direct same-protocol tool-call responses must capture the current entry `/v1/responses` request context before recording the direct response. This capture is data-plane store truth (`input/tools` for the same requestId), not provider payload mutation, MetadataCenter control state, or Hub response conversion.
 - Verified state for Hub Rustification closeout on `0.90.3570`: `servertool.hook_skeleton.mainline` and `responses.continuation.mainline` both report `partial=0 pending=0`; `verify:llmswitch-rustification-audit`, `verify:servertool-rust-only`, Responses continuation gates, architecture/function-map/wiki gates, full `router-hotpath-napi --lib` cargo tests, release install, strict live `/health.version`, and live stopless first-turn `requires_action` -> submit `completed` replay all passed.
 - Reporting boundary: global `error.mainline` and `vr.route_availability` still have non-Hub-adjacent partial edges, so Rustification completion claims must scope them out explicitly instead of calling the whole architecture graph fully closed.
+
+# 2026-07-05: runtime lifecycle L2 gate matrix is machine-gated
+
+- Durable loop truth: `docs/loops/runtime-lifecycle/gate-matrix.md` is the L2 approval matrix for `runtime-lifecycle-release-watch`; L2 remains disabled by default in `STATE.md`.
+- Matrix rows: `release_install_sync`, `runtime_lifecycle`, `verification_gate_mapping`, and `worker_collision`. Each row must define owner/mainline, whitebox, blackbox, quality, evidence, and escalation conditions before a loop action is approved.
+- Gate: `npm run verify:runtime-lifecycle-loop-gate-matrix` checks the matrix rows, run-log required fields, linked loop docs, package script wiring, and JSONL parseability. It is wired into `verify:architecture-ci-longtail`.
+- Current aggregate caveat: `verify:architecture-ci-longtail` is blocked before reaching this new gate by existing `verify:architecture-deleted-path` failures for removed servertool orchestration paths, so the matrix gate should be run directly until that separate map cleanup is closed.
