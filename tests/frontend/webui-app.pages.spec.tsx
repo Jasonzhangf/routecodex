@@ -146,6 +146,13 @@ function installPageFetchMock() {
         forwarders: {}
       });
     }
+    if (path === '/config/editor/forwarders' && method === 'PUT') {
+      return json({
+        ok: true,
+        path: '/tmp/config.json',
+        forwarders: (body.forwarders as JsonRecord) || {}
+      });
+    }
     if (path === '/config/routing/groups' && method === 'GET') {
       return json({
         groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },

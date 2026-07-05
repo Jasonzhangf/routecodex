@@ -2250,14 +2250,22 @@ export function ForwardersPage({
 }) {
   const [path, setPath] = useState('');
   const [forwarders, setForwarders] = useState<ConfigForwarderView[]>([]);
+  const [forwarderRaw, setForwarderRaw] = useState<Record<string, unknown>>({});
+  const [draftId, setDraftId] = useState('fwd.gpt-5.5');
+  const [draftModel, setDraftModel] = useState('gpt-5.5');
+  const [draftProtocol, setDraftProtocol] = useState('openai-responses');
+  const [draftStrategy, setDraftStrategy] = useState('priority');
+  const [draftTargetsText, setDraftTargetsText] = useState('demo:100');
   const [log, setLog] = useState('');
 
   const refreshForwarders = async () => {
     if (!authenticated) return;
     try {
       const out = await loadConfigEditorSnapshot(path);
-      const next = summarizeForwarders(out?.forwarders || {});
+      const raw = recordOf(out?.forwarders || {});
+      const next = summarizeForwarders(raw);
       setForwarders(next);
+      setForwarderRaw(raw);
       setPath(textOf(out?.path || path).trim());
       setLog(`Loaded ${next.length} fwd.* aggregations from ${out?.path || path || 'active config'}.`);
     } catch (error) {
@@ -2272,13 +2280,106 @@ export function ForwardersPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, authEpoch]);
 
+  const loadForwarderDraft = (item: ConfigForwarderView) => {
+    const raw = recordOf(forwarderRaw[item.id]);
+    const targetText = arrayOf(raw.targets)
+      .map((target, index) => {
+        const rec = recordOf(target);
+        const providerId = textOf(rec.providerId || rec.provider || target).trim();
+        const weight = textOf(rec.weight).trim();
+        const priority = textOf(rec.priority).trim();
+        const value = weight || priority || (item.strategy === 'priority' ? String((index + 1) * 100) : '1');
+        return value ? `${providerId}:${value}` : providerId;
+      })
+      .filter(Boolean)
+      .join('\n');
+    setDraftId(item.id);
+    setDraftModel(item.model === '—' ? '' : item.model);
+    setDraftProtocol(item.protocol === '—' ? '' : item.protocol);
+    setDraftStrategy(item.strategy || 'priority');
+    setDraftTargetsText(targetText);
+  };
+
+  const buildDraftForwarder = (): Record<string, unknown> | null => {
+    const id = draftId.trim();
+    const model = draftModel.trim();
+    const protocol = draftProtocol.trim();
+    const strategy = draftStrategy.trim() || 'priority';
+    if (!id.startsWith('fwd.')) {
+      onToast('forwarder id must start with fwd.');
+      return null;
+    }
+    if (!model) {
+      onToast('forwarder model is required');
+      return null;
+    }
+    const targets = draftTargetsText
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item, index) => {
+        const [providerIdRaw, valueRaw] = item.split(':');
+        const providerId = providerIdRaw.trim();
+        const numericValue = Number(valueRaw || (strategy === 'priority' ? (index + 1) * 100 : 1));
+        const target: Record<string, unknown> = { providerId };
+        if (strategy === 'weighted') {
+          target.weight = Number.isFinite(numericValue) && numericValue > 0 ? numericValue : 1;
+        } else if (strategy === 'priority') {
+          target.priority = Number.isFinite(numericValue) && numericValue > 0 ? numericValue : (index + 1) * 100;
+        }
+        return target;
+      });
+    if (!targets.length || targets.some((target) => !textOf(target.providerId).trim())) {
+      onToast('at least one forwarder target is required');
+      return null;
+    }
+    return {
+      protocol,
+      model,
+      strategy,
+      targets
+    };
+  };
+
+  const saveForwarder = async () => {
+    if (!authenticated) return;
+    const id = draftId.trim();
+    const draft = buildDraftForwarder();
+    if (!draft) return;
+    const nextForwarders = {
+      ...forwarderRaw,
+      [id]: draft
+    };
+    try {
+      const out = await apiFetch<{ path?: string; forwarders?: Record<string, unknown> }>(
+        `/config/editor/forwarders${path.trim() ? `?path=${encodeURIComponent(path.trim())}` : ''}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ path: path || undefined, forwarders: nextForwarders })
+        }
+      );
+      const raw = recordOf(out?.forwarders || nextForwarders);
+      const next = summarizeForwarders(raw);
+      setForwarderRaw(raw);
+      setForwarders(next);
+      setPath(textOf(out?.path || path).trim());
+      setLog(`Forwarder saved. path=${out?.path || path || '—'}`);
+      onToast('Forwarder saved.', 'ok');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setLog(`Save forwarder failed: ${msg}`);
+      onToast(msg);
+    }
+  };
+
   return (
     <div className="grid grid-wide-left">
       <div className="panel">
         <SectionHeader title="Forwarder Aggregation" sub="Config-only fwd.* aggregation view; runtime selection stays in Virtual Router." />
         <div className="row" style={{ marginBottom: 8 }}>
-          <label>config</label>
+          <label htmlFor="forwarder-config-path">config</label>
           <input
+            id="forwarder-config-path"
             value={path}
             onChange={(e) => setPath(e.target.value)}
             placeholder="active config path"
@@ -2287,6 +2388,55 @@ export function ForwardersPage({
           <button className="primary" onClick={() => void refreshForwarders()} disabled={!authenticated}>
             Load Forwarders
           </button>
+        </div>
+
+        <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
+          <SectionHeader title="Forwarder Editor" sub="Edit config shape only; runtime policy remains in Virtual Router." />
+          <div className="row" style={{ marginBottom: 8 }}>
+            <input
+              aria-label="forwarder id"
+              value={draftId}
+              onChange={(e) => setDraftId(e.target.value)}
+              placeholder="fwd.model"
+              style={{ minWidth: 180 }}
+            />
+            <input
+              aria-label="forwarder model"
+              value={draftModel}
+              onChange={(e) => setDraftModel(e.target.value)}
+              placeholder="model"
+              style={{ minWidth: 160 }}
+            />
+            <input
+              aria-label="forwarder protocol"
+              value={draftProtocol}
+              onChange={(e) => setDraftProtocol(e.target.value)}
+              placeholder="protocol"
+              style={{ minWidth: 180 }}
+            />
+            <select
+              aria-label="forwarder strategy"
+              value={draftStrategy}
+              onChange={(e) => setDraftStrategy(e.target.value)}
+              style={{ minWidth: 150 }}
+            >
+              <option value="priority">priority</option>
+              <option value="weighted">weighted</option>
+              <option value="roundrobin">roundrobin</option>
+            </select>
+          </div>
+          <div className="row">
+            <textarea
+              aria-label="forwarder targets"
+              value={draftTargetsText}
+              onChange={(e) => setDraftTargetsText(e.target.value)}
+              placeholder="providerId:value, one per line"
+              style={{ minWidth: 420, minHeight: 76, flex: 1 }}
+            />
+            <button className="primary" onClick={() => void saveForwarder()} disabled={!authenticated}>
+              Save Forwarder
+            </button>
+          </div>
         </div>
 
         <div className="grid">
@@ -2306,6 +2456,7 @@ export function ForwardersPage({
                   </span>
                 ))}
                 {!item.targets.length ? <span className="muted">none</span> : null}
+                <button onClick={() => loadForwarderDraft(item)}>Edit</button>
               </div>
             </div>
           ))}
@@ -2314,7 +2465,7 @@ export function ForwardersPage({
       </div>
 
       <div className="panel">
-        <SectionHeader title="Forwarder Log" sub="Read-only structure load output for Slice 2." />
+        <SectionHeader title="Forwarder Log" sub="Config editor output for fwd.* aggregation." />
         <LogBox value={log} />
       </div>
     </div>

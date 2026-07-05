@@ -20,6 +20,9 @@ describe('webui integration flows (feature coverage)', () => {
     'routing.group_create_copy',
     'routing.group_save',
     'routing.activate_local',
+    'forwarder.priority_save',
+    'forwarder.weighted_save',
+    'forwarder.roundrobin_save',
     'auth.logout',
     'auth.login',
     'auth.change_password'
@@ -299,6 +302,11 @@ describe('webui integration flows (feature coverage)', () => {
         return json(configEditorSnapshot());
       }
 
+      if (path === '/config/editor/forwarders' && method === 'PUT') {
+        const forwarders = (body.forwarders as JsonRecord) || {};
+        return json({ ...configEditorSnapshot(), forwarders });
+      }
+
       if (path === '/config/routing/groups' && method === 'GET') {
         return json({
           ok: true,
@@ -478,6 +486,24 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText('Forwarder Aggregation')).toBeTruthy());
     await waitFor(() => expect(screen.getByText('fwd.gpt-5.5')).toBeTruthy());
     expect(screen.getByText('strategy: priority')).toBeTruthy();
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.change(screen.getByLabelText('forwarder strategy'), { target: { value: 'priority' } });
+    fireEvent.change(screen.getByLabelText('forwarder targets'), { target: { value: 'demo:100\npicker:200' } });
+    fireEvent.click(screen.getByText('Save Forwarder'));
+    await waitFor(() => expect(screen.getAllByText(/Forwarder saved\./).length).toBeGreaterThan(0));
+    hit('forwarder.priority_save');
+
+    fireEvent.change(screen.getByLabelText('forwarder strategy'), { target: { value: 'weighted' } });
+    fireEvent.change(screen.getByLabelText('forwarder targets'), { target: { value: 'demo:2\npicker:1' } });
+    fireEvent.click(screen.getByText('Save Forwarder'));
+    await waitFor(() => expect(screen.getByText('strategy: weighted')).toBeTruthy());
+    hit('forwarder.weighted_save');
+
+    fireEvent.change(screen.getByLabelText('forwarder strategy'), { target: { value: 'roundrobin' } });
+    fireEvent.change(screen.getByLabelText('forwarder targets'), { target: { value: 'demo\npicker' } });
+    fireEvent.click(screen.getByText('Save Forwarder'));
+    await waitFor(() => expect(screen.getByText('strategy: roundrobin')).toBeTruthy());
+    hit('forwarder.roundrobin_save');
 
     expect(covered).toEqual(new Set(requiredFeatures));
 

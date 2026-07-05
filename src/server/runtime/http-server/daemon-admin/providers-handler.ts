@@ -120,6 +120,41 @@ function applyConfigEditorPorts(parsed: unknown, ports: Array<Record<string, unk
   };
 }
 
+function cloneConfigEditorForwarders(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    const error = new Error('forwarders must be an object') as Error & { code?: string };
+    error.code = 'invalid_forwarders';
+    throw error;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [id, node] of Object.entries(value)) {
+    if (!id.startsWith('fwd.')) {
+      const error = new Error(`forwarder key must start with fwd.: ${id}`) as Error & { code?: string };
+      error.code = 'invalid_forwarders';
+      throw error;
+    }
+    if (!isRecord(node)) {
+      const error = new Error(`forwarder ${id} must be an object`) as Error & { code?: string };
+      error.code = 'invalid_forwarders';
+      throw error;
+    }
+    out[id] = { ...node };
+  }
+  return out;
+}
+
+function applyConfigEditorForwarders(parsed: unknown, forwarders: Record<string, unknown>): Record<string, unknown> {
+  const root = toRecord(parsed);
+  const virtualrouter = toRecord(root.virtualrouter);
+  return {
+    ...root,
+    virtualrouter: {
+      ...virtualrouter,
+      forwarders: { ...forwarders }
+    }
+  };
+}
+
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
   const rel = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
   return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..');
@@ -271,6 +306,41 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         return;
       }
       if (code === 'invalid_ports') {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(400).json({ error: { message, code: 'bad_request' } });
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'internal_error' } });
+    }
+  });
+
+  app.put('/config/editor/forwarders', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    const body = req.body as Record<string, unknown>;
+    try {
+      const configPath = resolveAllowedAdminFilePath(
+        readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
+      );
+      const decoded = await decodeUserConfigFile(configPath);
+      const forwarders = cloneConfigEditorForwarders(body?.forwarders);
+      const next = applyConfigEditorForwarders(decoded.parsed, forwarders);
+      await backupFile(configPath);
+      await writeUserConfigFile(configPath, next);
+      const snapshot = buildConfigEditorSnapshot(next);
+      res.status(200).json({
+        ok: true,
+        path: configPath,
+        format: decoded.format,
+        ...snapshot
+      });
+    } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
+      if (code === 'invalid_forwarders') {
         const message = error instanceof Error ? error.message : String(error);
         res.status(400).json({ error: { message, code: 'bad_request' } });
         return;
