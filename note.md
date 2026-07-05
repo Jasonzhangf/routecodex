@@ -1,3 +1,11 @@
+# 2026-07-05: stopless contract blackbox aligned to guidance rewrite
+
+- Scope: test-only closure for `scripts/tests/stopless-contract-blackbox.mjs`; runtime owner remains Rust Chat Process stopless, no runtime code changed.
+- Contract correction: auto-projected stopless CLI output is rewritten into current-turn model-visible guidance on the next provider request, not preserved as a model-initiated `reasoningStop -> function_call_output` pair. The latter only applies when the model initiated the hook.
+- Test correction: leakage assertions must inspect the current restored/guidance turn, not the entire historical Responses input, because earlier history may legitimately contain prior client-visible `exec_command` rows before request-side normalization/rewrite.
+- Evidence: `verify:stopless-contract-blackbox`, `verify:stopless-invalid-schema-blackbox`, focused Rust stopless branch tests for non-stop reset / simple_question / missing session, `verify:servertool-rust-only`, `verify:function-map-compile-gate`, `git diff --check`, and live 5555 `0.90.3571` probe evidence all passed or matched.
+- Commit: `2c94d581907ecbb765a26f119db6663a62ff440f` `test(stopless): align guidance rewrite check`.
+
 # 2026-07-05: router-hotpath Rust lib green after response projection fixes
 
 - Slice: Hub response/outbound Rust verification cleanup under full Hub Pipeline rustification goal.
