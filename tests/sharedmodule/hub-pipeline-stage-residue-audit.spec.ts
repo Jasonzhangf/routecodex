@@ -1012,6 +1012,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(registryPath)).toBe(false);
   });
 
+  it('compat result type must stay owned by the native compat shell', () => {
+    const repoRoot = process.cwd();
+    const retiredTypePath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts',
+    );
+    const engineSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts'),
+      'utf8',
+    );
+
+    expect(fs.existsSync(retiredTypePath)).toBe(false);
+    expect(engineSource).not.toContain('./compat-types.js');
+    expect(engineSource).toContain('export interface CompatApplicationResult');
+  });
+
   it('public conversion barrels must not export legacy mapper or adapter implementations', () => {
     const conversionIndexPath = path.join(
       process.cwd(),
@@ -3799,8 +3815,10 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('HubPipeline compat types must not restore retired profile/mapping type shells', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
+    const repoRoot = process.cwd();
+    const retiredTypePath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts');
+    const enginePath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts');
+    const source = fs.readFileSync(enginePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'restores retired compat profile config', pattern: /CompatProfileConfig|CompatStageConfig/ },
       { label: 'restores retired compat mapping shells', pattern: /MappingInstruction|FilterInstruction|FieldMapping/ },
@@ -3808,6 +3826,7 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'restores retired action config aliases', pattern: /ShapeFilterConfig|ResponseBlacklistConfig|RequestRulesConfig|AutoThinkingConfig|ResponseNormalizeConfig|ResponseValidateConfig|HarvestToolCallsFromTextConfig|ToolTextRequestGuidanceConfig|DeepSeekWebResponseConfig/ },
     ]);
 
+    expect(fs.existsSync(retiredTypePath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

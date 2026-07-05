@@ -1,6 +1,5 @@
 import type { JsonObject } from '../../types/json.js';
 import type { AdapterContext } from '../../types/chat-envelope.js';
-import type { CompatApplicationResult } from './compat-types.js';
 import {
   runReqOutboundStage3CompatWithNative,
   runRespInboundStage3CompatWithNative
@@ -17,6 +16,11 @@ import { buildNativeReqOutboundCompatAdapterContext } from './native-adapter-con
 // Rust canonical builders: normalize_responses_tool_parameters / normalize_responses_function_tools / apply_responses_instructions_to_input / apply_responses_crs_request_compat
 // feature_id: responses.crs_request_compat
 // Rust aggregate builder: run_req_outbound_stage3_compat_json
+
+export interface CompatApplicationResult {
+  payload: JsonObject;
+  appliedProfile?: string;
+}
 
 function assertCompatNativeBoundary(): void {
   normalizeProviderProtocolTokenWithNative('openai-responses');
