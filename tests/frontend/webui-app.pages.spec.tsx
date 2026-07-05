@@ -121,6 +121,22 @@ function installPageFetchMock() {
         sources: [{ path: '/tmp/config.json', label: '/tmp/config.json', kind: 'config', location: 'virtualrouter.routing' }]
       });
     }
+    if (path === '/config/editor' && method === 'GET') {
+      return json({
+        ok: true,
+        path: '/tmp/config.json',
+        ports: [{ port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'direct' }],
+        routingPolicyGroups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
+        forwarders: {
+          'fwd.gpt-5.5': {
+            protocol: 'openai-responses',
+            model: 'gpt-5.5',
+            strategy: 'weighted',
+            targets: [{ providerId: 'demo', weight: 1 }]
+          }
+        }
+      });
+    }
     if (path === '/config/routing/groups' && method === 'GET') {
       return json({
         groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },

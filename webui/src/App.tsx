@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-type MainTab = 'providers' | 'routing';
+type MainTab = 'providers' | 'routing' | 'forwarders';
 type DensityMode = 'compact' | 'comfortable';
 
 export type ApiError = Error & {
@@ -37,6 +37,70 @@ export type RoutingSource = {
 export type ProviderRuntimeKeyItem = {
   providerKey?: string;
 };
+
+export type ConfigPortView = {
+  port?: number | string;
+  host?: string;
+  mode?: string;
+  routingPolicyGroup?: string;
+  providerBinding?: string;
+  protocolBehavior?: string;
+  sameProtocolBehavior?: string;
+};
+
+export type ConfigForwarderView = {
+  id: string;
+  protocol: string;
+  model: string;
+  strategy: string;
+  targets: string[];
+};
+
+function recordOf(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function arrayOf(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+export function summarizeForwarders(forwarders: unknown): ConfigForwarderView[] {
+  return Object.entries(recordOf(forwarders))
+    .filter(([id]) => id.startsWith('fwd.'))
+    .map(([id, node]) => {
+      const rec = recordOf(node);
+      const targets = arrayOf(rec.targets)
+        .map((target) => {
+          const targetRec = recordOf(target);
+          const providerId = textOf(targetRec.providerId || targetRec.provider || target).trim();
+          const weight = textOf(targetRec.weight).trim();
+          const priority = textOf(targetRec.priority).trim();
+          const suffix = [weight ? `w=${weight}` : '', priority ? `p=${priority}` : ''].filter(Boolean).join(' ');
+          return suffix ? `${providerId} (${suffix})` : providerId;
+        })
+        .filter(Boolean);
+      return {
+        id,
+        protocol: textOf(rec.protocol || '—'),
+        model: textOf(rec.model || rec.modelId || '—'),
+        strategy: textOf(rec.strategy || rec.mode || rec.loadBalancing || 'priority'),
+        targets
+      };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function loadConfigEditorSnapshot(path?: string): Promise<{
+  path?: string;
+  ports?: ConfigPortView[];
+  routingPolicyGroups?: Record<string, unknown>;
+  forwarders?: Record<string, unknown>;
+  activeRoutingPolicyGroup?: string;
+}> {
+  const query = path && path.trim() ? `?path=${encodeURIComponent(path.trim())}` : '';
+  return apiFetch(`/config/editor${query}`);
+}
 
 
 export async function apiFetch<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -482,8 +546,9 @@ export function App() {
   const activeViewLabel = useMemo(() => {
     if (mainTab === 'providers') return 'Providers / Catalog';
     if (mainTab === 'routing') {
-      return 'Routing / Routing Groups';
+      return 'Routing / Ports + Groups';
     }
+    if (mainTab === 'forwarders') return 'Forwarders / fwd.*';
     return 'Providers / Catalog';
   }, [mainTab]);
 
@@ -517,7 +582,7 @@ export function App() {
       <div className="topbar">
         <div>
           <h1 className="title">RouteCodex WebUI V2</h1>
-          <p className="subtitle">Config editor workspace: Providers / Routing</p>
+          <p className="subtitle">Config editor workspace: Providers / Routing / Forwarders</p>
         </div>
         <div className="pill-row">
           <span className={`pill ${statusClass(serverStatus)}`}>status: {serverStatus}</span>
@@ -593,6 +658,9 @@ export function App() {
             <button className={mainTab === 'routing' ? 'active' : ''} onClick={() => setMainTab('routing')}>
               Routing
             </button>
+            <button className={mainTab === 'forwarders' ? 'active' : ''} onClick={() => setMainTab('forwarders')}>
+              Forwarders
+            </button>
             {mainTab === 'providers' ? (
               <button className="active">
                 Provider Catalog
@@ -601,6 +669,11 @@ export function App() {
             {mainTab === 'routing' ? (
               <button className="active">
                 Routing Groups
+              </button>
+            ) : null}
+            {mainTab === 'forwarders' ? (
+              <button className="active">
+                fwd.* Aggregation
               </button>
             ) : null}
           </div>
@@ -629,6 +702,9 @@ export function App() {
             ) : null}
             {mainTab === 'routing' ? (
               <RoutingPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
+            ) : null}
+            {mainTab === 'forwarders' ? (
+              <ForwardersPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
             ) : null}
           </div>
         </>
@@ -1300,6 +1376,8 @@ export function RoutingPage({
   const [sourcePath, setSourcePath] = useState('');
 
   const [location, setLocation] = useState('virtualrouter.routing');
+  const [ports, setPorts] = useState<ConfigPortView[]>([]);
+  const [selectedPortKey, setSelectedPortKey] = useState('');
   const [groups, setGroups] = useState<Record<string, unknown>>({});
   const [activeGroupId, setActiveGroupId] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('');
@@ -1314,6 +1392,22 @@ export function RoutingPage({
   const currentSourceQuery = () => {
     const path = sourcePath.trim();
     return path ? `?path=${encodeURIComponent(path)}` : '';
+  };
+
+  const loadConfigStructure = async () => {
+    if (!authenticated) return;
+    try {
+      const out = await loadConfigEditorSnapshot(sourcePath);
+      const nextPorts = Array.isArray(out?.ports) ? out.ports : [];
+      setPorts(nextPorts);
+      const current = selectedPortKey.trim();
+      const keys = nextPorts.map((port, index) => `${textOf(port.port || index)}:${textOf(port.routingPolicyGroup || port.providerBinding || port.mode || '')}`);
+      if (!current || !keys.includes(current)) {
+        setSelectedPortKey(keys[0] || '');
+      }
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const normalizedPolicy = useMemo(() => {
@@ -1419,6 +1513,7 @@ export function RoutingPage({
       const policy = toRecord((nextGroups as Record<string, unknown>)[selected]);
       setPolicyDraft(Object.keys(policy).length ? policy : { routing: {} });
       setLog(`Loaded groups from ${out?.path || sourcePath || '—'}\nselected=${selected || '—'} active=${active || '—'}`);
+      await loadConfigStructure();
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setLog(`Load failed: ${msg}`);
@@ -1656,11 +1751,46 @@ export function RoutingPage({
   };
 
   const groupIds = Object.keys(groups || {}).sort((a, b) => a.localeCompare(b));
+  const portTabs = ports.map((port, index) => ({
+    key: `${textOf(port.port || index)}:${textOf(port.routingPolicyGroup || port.providerBinding || port.mode || '')}`,
+    port,
+    label: textOf(port.port || `#${index + 1}`),
+    groupId: textOf(port.routingPolicyGroup || '').trim()
+  }));
+  const selectedPort = portTabs.find((item) => item.key === selectedPortKey) || portTabs[0];
 
   return (
     <div className="grid grid-wide-left">
       <div className="panel">
         <SectionHeader title="Routing Management" sub="Readable route registry cards (route -> pool -> targets), no raw JSON." />
+
+        <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
+          <SectionHeader title="Port Routing Tabs" sub="One config tab per httpserver.ports[] entry." />
+          <div className="row" style={{ marginBottom: 8 }}>
+            {portTabs.map((item) => (
+              <button
+                key={item.key}
+                className={selectedPort?.key === item.key ? 'active' : ''}
+                onClick={() => {
+                  setSelectedPortKey(item.key);
+                  if (item.groupId && groups[item.groupId]) selectGroup(item.groupId);
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+            {!portTabs.length ? <span className="muted">No httpserver.ports[] entries loaded.</span> : null}
+          </div>
+          {selectedPort ? (
+            <div className="row">
+              <span className="pill mono">port: {textOf(selectedPort.port.port || '—')}</span>
+              <span className="pill mono">mode: {textOf(selectedPort.port.mode || '—')}</span>
+              <span className="pill mono">group: {textOf(selectedPort.port.routingPolicyGroup || '—')}</span>
+              <span className="pill mono">provider: {textOf(selectedPort.port.providerBinding || '—')}</span>
+              <span className="pill mono">same-protocol: {textOf(selectedPort.port.sameProtocolBehavior || '—')}</span>
+            </div>
+          ) : null}
+        </div>
 
         <div className="row" style={{ marginBottom: 8 }}>
           <label>source</label>
@@ -1820,6 +1950,88 @@ export function RoutingPage({
           <SectionHeader title="Routing Log" sub="Operation output and API responses." />
           <LogBox value={log} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+export function ForwardersPage({
+  authenticated,
+  authEpoch,
+  onToast
+}: {
+  authenticated: boolean;
+  authEpoch: number;
+  onToast: (message: string, kind?: 'ok' | 'err') => void;
+}) {
+  const [path, setPath] = useState('');
+  const [forwarders, setForwarders] = useState<ConfigForwarderView[]>([]);
+  const [log, setLog] = useState('');
+
+  const refreshForwarders = async () => {
+    if (!authenticated) return;
+    try {
+      const out = await loadConfigEditorSnapshot(path);
+      const next = summarizeForwarders(out?.forwarders || {});
+      setForwarders(next);
+      setPath(textOf(out?.path || path).trim());
+      setLog(`Loaded ${next.length} fwd.* aggregations from ${out?.path || path || 'active config'}.`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setLog(`Load forwarders failed: ${msg}`);
+      onToast(msg);
+    }
+  };
+
+  useEffect(() => {
+    void refreshForwarders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, authEpoch]);
+
+  return (
+    <div className="grid grid-wide-left">
+      <div className="panel">
+        <SectionHeader title="Forwarder Aggregation" sub="Config-only fwd.* aggregation view; runtime selection stays in Virtual Router." />
+        <div className="row" style={{ marginBottom: 8 }}>
+          <label>config</label>
+          <input
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            placeholder="active config path"
+            style={{ minWidth: 380, flex: 1 }}
+          />
+          <button className="primary" onClick={() => void refreshForwarders()} disabled={!authenticated}>
+            Load Forwarders
+          </button>
+        </div>
+
+        <div className="grid">
+          {forwarders.map((item) => (
+            <div key={item.id} className="panel" style={{ padding: 10 }}>
+              <div className="row" style={{ marginBottom: 8 }}>
+                <span className="pill mono">{item.id}</span>
+                <span className="pill mono">model: {item.model}</span>
+                <span className="pill mono">protocol: {item.protocol}</span>
+                <span className="pill mono">strategy: {item.strategy}</span>
+              </div>
+              <div className="row">
+                <span className="muted">targets:</span>
+                {item.targets.map((target) => (
+                  <span key={`${item.id}.${target}`} className="pill mono">
+                    {target}
+                  </span>
+                ))}
+                {!item.targets.length ? <span className="muted">none</span> : null}
+              </div>
+            </div>
+          ))}
+          {!forwarders.length ? <AppNotice>No fwd.* forwarders found in current config.</AppNotice> : null}
+        </div>
+      </div>
+
+      <div className="panel">
+        <SectionHeader title="Forwarder Log" sub="Read-only structure load output for Slice 2." />
+        <LogBox value={log} />
       </div>
     </div>
   );

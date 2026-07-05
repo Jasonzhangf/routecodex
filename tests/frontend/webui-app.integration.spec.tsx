@@ -31,6 +31,24 @@ describe('webui integration flows (feature coverage)', () => {
       loadBalancing: { strategy: 'round-robin' }
     }
   };
+  const configEditorSnapshot = () => ({
+    ok: true,
+    path: '/tmp/config.json',
+    ports: [
+      { port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'direct' },
+      { port: 5555, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'canary', sameProtocolBehavior: 'relay' }
+    ],
+    routingPolicyGroups: routingGroups,
+    activeRoutingPolicyGroup: state.activeGroupId,
+    forwarders: {
+      'fwd.gpt-5.5': {
+        protocol: 'openai-responses',
+        model: 'gpt-5.5',
+        strategy: 'priority',
+        targets: [{ providerId: 'demo', priority: 100 }]
+      }
+    }
+  });
 
   const state = {
     authenticated: true,
@@ -256,6 +274,10 @@ describe('webui integration flows (feature coverage)', () => {
         });
       }
 
+      if (path === '/config/editor' && method === 'GET') {
+        return json(configEditorSnapshot());
+      }
+
       if (path === '/config/routing/groups' && method === 'GET') {
         return json({
           ok: true,
@@ -377,6 +399,8 @@ describe('webui integration flows (feature coverage)', () => {
     // Routing page
     fireEvent.click(screen.getByText('Routing'));
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Port Routing Tabs')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('5520')).toBeTruthy());
 
     fireEvent.change(screen.getByPlaceholderText('new group id'), { target: { value: 'canary' } });
     fireEvent.click(screen.getByText('Create/Copy Group'));
@@ -405,6 +429,11 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(screen.getByText('Change Password'));
     await waitFor(() => expect(screen.getByText(/Password changed\./)).toBeTruthy());
     hit('auth.change_password');
+
+    fireEvent.click(screen.getByText('Forwarders'));
+    await waitFor(() => expect(screen.getByText('Forwarder Aggregation')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('fwd.gpt-5.5')).toBeTruthy());
+    expect(screen.getByText('strategy: priority')).toBeTruthy();
 
     expect(covered).toEqual(new Set(requiredFeatures));
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import {
   App,
+  ForwardersPage,
   ProviderPage,
   RoutingPage
 } from '../../webui/src/App';
@@ -26,5 +27,8 @@ describe('webui render smoke', () => {
 
     const routing = renderToString(<RoutingPage {...common} />);
     expect(routing).toContain('Routing Management');
+
+    const forwarders = renderToString(<ForwardersPage {...common} />);
+    expect(forwarders).toContain('Forwarder Aggregation');
   });
 });

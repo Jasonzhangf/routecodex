@@ -231,6 +231,18 @@ describe('webui edge coverage', () => {
           sources: [{ path: '/tmp/config.json', label: '/tmp/config.json', kind: 'config', location: 'virtualrouter.routing' }]
         });
       }
+      if (path === '/config/editor' && method === 'GET') {
+        return responseJson({
+          ok: true,
+          path: '/tmp/config.json',
+          ports: [{ port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'direct' }],
+          routingPolicyGroups: {
+            default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } },
+            canary: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } }
+          },
+          forwarders: {}
+        });
+      }
       if (path === '/config/routing/groups' && method === 'GET') {
         return responseJson({
           groups: {

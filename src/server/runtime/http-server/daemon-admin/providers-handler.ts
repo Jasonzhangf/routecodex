@@ -34,6 +34,7 @@ import {
 } from './providers-handler-routing-utils.js';
 import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
 import { updateUserConfigStringScalar, writeUserConfigFile } from '../../../../config/user-config-writer.js';
+import { isRecord } from '../../../../utils/common-utils.js';
 
 // feature_id: webui.config_editor_surface
 interface ProviderRuntimeView {
@@ -53,6 +54,35 @@ interface ProviderConfigV2Summary {
   defaultModels?: string[];
   credentialsRef?: string;
   version: string;
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function toArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function buildConfigEditorSnapshot(parsed: unknown): {
+  ports: Array<Record<string, unknown>>;
+  routingPolicyGroups: Record<string, unknown>;
+  forwarders: Record<string, unknown>;
+  activeRoutingPolicyGroup?: string;
+} {
+  const root = toRecord(parsed);
+  const httpserver = toRecord(root.httpserver);
+  const virtualrouter = toRecord(root.virtualrouter);
+  const activeRoutingPolicyGroup =
+    typeof virtualrouter.activeRoutingPolicyGroup === 'string'
+      ? virtualrouter.activeRoutingPolicyGroup
+      : undefined;
+  return {
+    ports: toArray(httpserver.ports).filter((item): item is Record<string, unknown> => isRecord(item)).map((item) => ({ ...item })),
+    routingPolicyGroups: toRecord(virtualrouter.routingPolicyGroups),
+    forwarders: toRecord(virtualrouter.forwarders),
+    ...(activeRoutingPolicyGroup ? { activeRoutingPolicyGroup } : {})
+  };
 }
 
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
@@ -152,6 +182,29 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       }
       res.status(200).json(items);
     } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'internal_error' } });
+    }
+  });
+
+  app.get('/config/editor', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    try {
+      const configPath = resolveAllowedAdminFilePath(readQueryString(req, 'path'));
+      const decoded = await decodeUserConfigFile(configPath);
+      const snapshot = buildConfigEditorSnapshot(decoded.parsed);
+      res.status(200).json({
+        ok: true,
+        path: configPath,
+        format: decoded.format,
+        ...snapshot
+      });
+    } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'internal_error' } });
     }
