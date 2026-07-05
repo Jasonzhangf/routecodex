@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
@@ -58,6 +59,14 @@ export type RestartCommandContext = {
   fsImpl?: Pick<typeof fs, 'existsSync' | 'readFileSync' | 'readdirSync' | 'statSync'>;
   pathImpl?: Pick<typeof path, 'join'>;
   getHomeDir?: () => string;
+  nodeBin?: string;
+  cliEntryPath?: string;
+  spawn?: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions
+  ) => ChildProcess;
+  getExpectedVersion?: () => string;
   exit: (code: number) => never;
 };
 
@@ -396,7 +405,82 @@ function shouldUseHttpRestartTransport(
   return Boolean(normalizeString(restartApiKey.value));
 }
 
-type RestartTarget = { host: string; port: number; oldPids: number[] };
+type RestartTarget = {
+  host: string;
+  port: number;
+  oldPids: number[];
+  observedVersion?: string;
+};
+
+function normalizeOptionalString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveExpectedVersion(ctx: RestartCommandContext): string {
+  const fromContext = normalizeOptionalString(ctx.getExpectedVersion?.());
+  if (fromContext) {
+    return fromContext;
+  }
+  return normalizeOptionalString(ctx.env?.npm_package_version);
+}
+
+function targetsNeedRuntimeAdoption(ctx: RestartCommandContext, targets: RestartTarget[]): boolean {
+  const expectedVersion = resolveExpectedVersion(ctx);
+  if (!expectedVersion) {
+    return false;
+  }
+  return targets.some((target) => {
+    const observedVersion = normalizeOptionalString(target.observedVersion);
+    return observedVersion && observedVersion !== expectedVersion;
+  });
+}
+
+async function adoptCurrentRuntimeViaStart(
+  ctx: RestartCommandContext,
+  options: RestartCommandOptions,
+  targets: RestartTarget[]
+): Promise<void> {
+  const spawnImpl = ctx.spawn;
+  const cliEntryPath = normalizeOptionalString(ctx.cliEntryPath);
+  const nodeBin = normalizeOptionalString(ctx.nodeBin) || process.execPath;
+  if (!spawnImpl || !cliEntryPath) {
+    throw new Error('current runtime adoption is unavailable: missing spawn or cli entry context');
+  }
+  const primaryPort = targets[0]?.port;
+  if (!primaryPort || !Number.isFinite(primaryPort) || primaryPort <= 0) {
+    throw new Error('current runtime adoption is unavailable: missing target port');
+  }
+
+  const args = [cliEntryPath, 'start', '--restart', '--port', String(primaryPort)];
+  if (typeof options.config === 'string' && options.config.trim()) {
+    args.push('--config', options.config.trim());
+  }
+
+  const child = spawnImpl(nodeBin, args, {
+    cwd: process.cwd(),
+    env: {
+      ...ctx.env,
+      ROUTECODEX_START_DAEMON: ctx.env?.ROUTECODEX_START_DAEMON || '1',
+      RCC_START_DAEMON: ctx.env?.RCC_START_DAEMON || '1'
+    },
+    stdio: 'ignore'
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (typeof code === 'number' && code !== 0) {
+        reject(new Error(`current runtime adoption start exited with code=${code}`));
+        return;
+      }
+      if (signal) {
+        reject(new Error(`current runtime adoption start exited by signal=${signal}`));
+        return;
+      }
+      resolve();
+    });
+  });
+}
 
 async function resolveRestartTargets(ctx: RestartCommandContext, options: RestartCommandOptions, spinner: Spinner): Promise<RestartTarget[]> {
   const explicitPort = parsePortOption(ctx, spinner, options.port);
@@ -408,7 +492,7 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
       : resolvePortGroupFromConfig(ctx, {
           configPath: options.config,
           targetPort: explicitPort,
-          includeSiblingsForTarget: true
+          includeSiblingsForTarget: false
         });
     const portsToRestart = grouped?.ports?.length ? grouped.ports : [explicitPort];
     const host = explicitHost || grouped?.host || LOCAL_HOSTS.LOCALHOST;
@@ -435,7 +519,12 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
           `Health probe degraded on ${host}:${port} (${describeHealthProbeFailure(secondaryProbe)}); sending in-place restart signal to managed pid(s).`
         );
       }
-      targets.push({ host, port, oldPids: pids });
+      targets.push({
+        host,
+        port,
+        oldPids: pids,
+        observedVersion: secondaryProbe.ok ? normalizeOptionalString(secondaryProbe.body?.version) : ''
+      });
     }
     targets.sort((a, b) => a.port - b.port);
     if (targets.length > 1) {
@@ -477,12 +566,14 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
       continue;
     }
     let ok = false;
+    let resolvedProbe: RouteCodexHealthProbeResult | null = null;
     let hostUsed: string = explicitHost || LOCAL_HOSTS.LOCALHOST;
     const healthHosts = explicitHost
       ? buildLocalProbeHostCandidates(explicitHost)
       : buildLocalProbeHostCandidates(LOCAL_HOSTS.ANY);
     for (const h of healthHosts) {
       const probe = await probeRouteCodexServer(ctx, h, port);
+      resolvedProbe = probe;
       if (probe.ok) {
         ok = true;
         hostUsed = h;
@@ -499,7 +590,14 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
     if (!ok) {
       continue;
     }
-    targets.push({ host: hostUsed, port, oldPids: pids });
+    targets.push({
+      host: hostUsed,
+      port,
+      oldPids: pids,
+      observedVersion: resolvedProbe && resolvedProbe.ok
+        ? normalizeOptionalString(resolvedProbe.body?.version)
+        : ''
+    });
   }
 
   if (!targets.length) {
@@ -626,6 +724,16 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
         });
 
         spinner.text = 'Requesting RouteCodex restart...';
+        if (!ctx.isDevPackage && targetsNeedRuntimeAdoption(ctx, targets)) {
+          await adoptCurrentRuntimeViaStart(ctx, options, targets);
+          spinner.text = 'Waiting for server to restart...';
+          for (const t of targets) {
+            await waitForRestart(ctx, t.host || LOCAL_HOSTS.LOCALHOST, t.port, t.oldPids);
+          }
+          const ports = targets.map((t) => `${t.host}:${t.port}`).join(', ');
+          spinner.succeed(`RouteCodex server restarted: ${ports}`);
+          return;
+        }
         for (const t of targets) {
           const approved = await ctx.reportGuardianLifecycle?.({
             action: 'restart_request',

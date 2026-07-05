@@ -3,6 +3,8 @@
 //!
 //! All functions are `#[napi]` exported so TS can call via `callNativeJson`.
 //! No mutable state, no external dependencies.
+//!
+//! feature_id: vr.hit_log_projection
 
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
@@ -12,6 +14,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StopMessageRuntimeSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_any: Option<bool>,
@@ -45,6 +48,7 @@ impl Default for StopMessageRuntimeSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VirtualRouterHitRecord {
     pub timestamp_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,6 +73,7 @@ pub struct VirtualRouterHitRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VirtualRouterHitRecordInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
@@ -134,7 +139,7 @@ fn to_safe_text(text: &str) -> Option<String> {
     } else if trimmed.len() <= 24 {
         Some(trimmed.to_string())
     } else {
-        Some(format!("{}...", &trimmed[..21]))
+        Some(format!("{}…", &trimmed[..21]))
     }
 }
 
@@ -532,6 +537,7 @@ pub fn format_virtual_router_hit_json(
         };
 
     let prefix = format!("{}[virtual-router-hit]{}\x1b[0m", session_color, reset);
+    let target_label = format!("{}{}{}", session_color, target_label, reset);
     let line = format!(
         "{} {}{}{} {}{}{}{}{}{}{}",
         prefix,
@@ -560,10 +566,10 @@ pub fn format_continuation_scope_json(scope: Option<String>) -> napi::Result<Str
 }
 
 #[napi]
-pub fn parse_provider_key_json(provider_key: String) -> napi::Result<String> {
+pub fn parse_virtual_router_hit_provider_key_json(provider_key: String) -> napi::Result<String> {
     let trimmed = provider_key.trim();
     if trimmed.is_empty() {
-        return Err(napi::Error::from_reason("empty provider key"));
+        return Ok("null".to_string());
     }
     let parts: Vec<&str> = trimmed.split('.').collect();
     let result = match parts.len() {
@@ -584,16 +590,16 @@ pub fn resolve_session_log_color_key_json(input_json: String) -> napi::Result<St
     let result: Option<String> = if let serde_json::Value::Object(m) = &input {
         let candidates = [
             "logSessionColorKey",
+            "sessionId",
+            "session_id",
+            "conversationId",
+            "conversation_id",
             "clientTmuxSessionId",
             "client_tmux_session_id",
             "tmuxSessionId",
             "tmux_session_id",
             "rccSessionClientTmuxSessionId",
             "rcc_session_client_tmux_session_id",
-            "sessionId",
-            "session_id",
-            "conversationId",
-            "conversation_id",
         ];
         for key in &candidates {
             if let Some(val) = m.get(*key) {
@@ -645,8 +651,11 @@ pub fn build_hit_reason_json(
     route_used: String,
     provider_key: String,
     classification_reasoning: Option<String>,
+    route_changed: bool,
     estimated_tokens: Option<f64>,
     last_assistant_tool_label: Option<String>,
+    provider_max_context_tokens: Option<f64>,
+    context_warn_ratio: Option<f64>,
 ) -> napi::Result<String> {
     let reason = classification_reasoning.as_deref().unwrap_or("");
     let primary = reason.split('|').next().unwrap_or("").trim();
@@ -665,7 +674,7 @@ pub fn build_hit_reason_json(
             (true, Some(d)) if !d.is_empty() => format!("{}({})", route_used, d),
             (true, _) => route_used.to_string(),
         }
-    } else if route_used == "default" {
+    } else if route_used == "default" && route_changed {
         if primary.is_empty() {
             "default:route-selected".to_string()
         } else {
@@ -679,9 +688,14 @@ pub fn build_hit_reason_json(
     let context_detail: Option<String> = estimated_tokens
         .filter(|v| v.is_finite() && *v > 0.0)
         .map(|tokens| {
-            let limit: f64 = 200_000.0;
+            let limit = provider_max_context_tokens
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or(200_000.0);
+            let threshold = context_warn_ratio
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or(0.9);
             let ratio = tokens / limit;
-            if ratio >= 0.9 {
+            if ratio >= threshold {
                 Some(format!("{:.2}/{}", ratio, limit as i64))
             } else {
                 None
@@ -695,4 +709,182 @@ pub fn build_hit_reason_json(
     };
     serde_json::to_string(&result)
         .map_err(|e| napi::Error::from_reason(format!("serialize: {}", e)))
+}
+
+#[napi]
+pub fn to_virtual_router_hit_event_json(
+    record_json: String,
+    meta_json: String,
+) -> napi::Result<String> {
+    let record: VirtualRouterHitRecord = serde_json::from_str(&record_json)
+        .map_err(|e| napi::Error::from_reason(format!("invalid record: {}", e)))?;
+    let meta: serde_json::Value = serde_json::from_str(&meta_json)
+        .map_err(|e| napi::Error::from_reason(format!("invalid meta: {}", e)))?;
+    let request_id = meta
+        .get("requestId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let entry_endpoint = meta
+        .get("entryEndpoint")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .unwrap_or("/v1/chat/completions");
+    let mut event = serde_json::Map::new();
+    event.insert(
+        "requestId".to_string(),
+        serde_json::Value::String(request_id),
+    );
+    event.insert(
+        "timestamp".to_string(),
+        serde_json::Value::Number(record.timestamp_ms.into()),
+    );
+    event.insert(
+        "entryEndpoint".to_string(),
+        serde_json::Value::String(entry_endpoint.to_string()),
+    );
+    event.insert(
+        "routeName".to_string(),
+        serde_json::Value::String(record.route_name.clone()),
+    );
+    event.insert(
+        "pool".to_string(),
+        serde_json::Value::String(
+            record
+                .pool_id
+                .clone()
+                .unwrap_or_else(|| record.route_name.clone()),
+        ),
+    );
+    event.insert(
+        "providerKey".to_string(),
+        serde_json::Value::String(record.provider_key.clone()),
+    );
+    if let Some(model_id) = record.model_id {
+        event.insert("modelId".to_string(), serde_json::Value::String(model_id));
+    }
+    if let Some(reason) = record.hit_reason {
+        event.insert("reason".to_string(), serde_json::Value::String(reason));
+    }
+    if let Some(tokens) = record.request_tokens {
+        event.insert(
+            "requestTokens".to_string(),
+            serde_json::Value::Number(tokens.into()),
+        );
+    }
+    if let Some(penalty) = record.selection_penalty {
+        event.insert(
+            "selectionPenalty".to_string(),
+            serde_json::Value::Number(penalty.into()),
+        );
+    }
+    event.insert(
+        "stopMessageActive".to_string(),
+        serde_json::Value::Bool(record.stop_message.active),
+    );
+    if record.stop_message.mode != "unset" {
+        event.insert(
+            "stopMessageMode".to_string(),
+            serde_json::Value::String(record.stop_message.mode),
+        );
+    }
+    if record.stop_message.remaining >= 0 {
+        event.insert(
+            "stopMessageRemaining".to_string(),
+            serde_json::Value::Number(record.stop_message.remaining.into()),
+        );
+    }
+    serde_json::to_string(&serde_json::Value::Object(event))
+        .map_err(|e| napi::Error::from_reason(format!("serialize event: {}", e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn virtual_router_hit_log_contract_is_native_owned() {
+        let record_json = create_virtual_router_hit_record_json(
+            json!({
+                "requestId": "req-1",
+                "sessionId": "tmux-alpha-01",
+                "routeName": "thinking",
+                "poolId": "thinking-primary",
+                "providerKey": "glm.key1.kimi-k2.5",
+                "modelId": "kimi-k2.5",
+                "hitReason": "thinking:user-input",
+                "continuationScope": "responses:abcdef1234567890",
+                "requestTokens": 1234.6,
+                "selectionPenalty": 3,
+                "timestampMs": 1_700_000_000_000_f64,
+                "stopMessageText": "need more evidence before terminal",
+                "stopMessageStageMode": "auto",
+                "stopMessageUsed": 2,
+            })
+            .to_string(),
+        )
+        .expect("record");
+        let record: serde_json::Value = serde_json::from_str(&record_json).expect("record json");
+        assert_eq!(record["requestId"], "req-1");
+        assert_eq!(record["requestTokens"], 1235);
+        assert_eq!(record["selectionPenalty"], 3);
+        assert_eq!(record["stopMessage"]["mode"], "auto");
+        assert_eq!(record["stopMessage"]["maxRepeats"], 10);
+        assert_eq!(record["stopMessage"]["remaining"], 8);
+        assert_eq!(record["stopMessage"]["active"], true);
+
+        let line = format_virtual_router_hit_json(
+            record_json.clone(),
+            Some(json!({"omit": ["requestId"]}).to_string()),
+        )
+        .expect("line");
+        assert!(line.contains("[virtual-router-hit]"));
+        assert!(line.contains("thinking/thinking-primary -> glm[key1].kimi-k2.5"));
+        assert!(!line.contains("req=req-1"));
+        assert!(line.contains("sid=tmux-alpha-01"));
+        assert!(line.contains("reqTokens=1235"));
+        assert!(line.contains("penalty=3"));
+        assert!(line.contains("[stopMessage:"));
+
+        let event_json = to_virtual_router_hit_event_json(
+            record_json,
+            json!({"requestId": "req-evt", "entryEndpoint": "/v1/messages"}).to_string(),
+        )
+        .expect("event");
+        let event: serde_json::Value = serde_json::from_str(&event_json).expect("event json");
+        assert_eq!(event["requestId"], "req-evt");
+        assert_eq!(event["entryEndpoint"], "/v1/messages");
+        assert_eq!(event["routeName"], "thinking");
+        assert_eq!(event["pool"], "thinking-primary");
+        assert_eq!(event["requestTokens"], 1235);
+        assert_eq!(event["selectionPenalty"], 3);
+        assert_eq!(event["stopMessageActive"], true);
+
+        let scope = format_continuation_scope_json(Some("responses:abcdef1234567890".to_string()))
+            .expect("scope");
+        assert_eq!(scope, "\"responses:abcd...7890\"");
+
+        let parsed_provider =
+            parse_virtual_router_hit_provider_key_json("glm.key1.kimi-k2.5".to_string())
+                .expect("provider");
+        let parsed_provider: serde_json::Value =
+            serde_json::from_str(&parsed_provider).expect("provider json");
+        assert_eq!(parsed_provider["providerId"], "glm");
+        assert_eq!(parsed_provider["keyAlias"], "key1");
+        assert_eq!(parsed_provider["modelId"], "kimi-k2.5");
+
+        let reason = build_hit_reason_json(
+            "thinking".to_string(),
+            "glm.key1.kimi-k2.5".to_string(),
+            Some("thinking:user-input|other".to_string()),
+            false,
+            Some(95_000.0),
+            Some("shell".to_string()),
+            Some(100_000.0),
+            Some(0.9),
+        )
+        .expect("reason");
+        assert_eq!(reason, "\"thinking:user-input(shell)|context:0.95/100000\"");
+    }
 }

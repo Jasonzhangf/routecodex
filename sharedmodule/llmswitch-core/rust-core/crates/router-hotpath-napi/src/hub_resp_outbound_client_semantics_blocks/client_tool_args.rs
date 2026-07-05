@@ -1615,12 +1615,9 @@ fn project_responses_sse_client_event_payload(
 
 fn sanitize_reasoning_sse_payload(value: &Value) -> Value {
     match value {
-        Value::Array(items) => Value::Array(
-            items
-                .iter()
-                .map(sanitize_reasoning_sse_payload)
-                .collect(),
-        ),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(sanitize_reasoning_sse_payload).collect())
+        }
         Value::Object(record) => {
             let mut out = Map::new();
             for (key, child) in record {

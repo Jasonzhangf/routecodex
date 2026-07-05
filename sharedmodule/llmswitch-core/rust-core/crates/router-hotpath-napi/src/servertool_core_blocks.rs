@@ -4437,11 +4437,9 @@ fn builds_cli_projection_runtime_branch_via_servertool_core_bridge() {
         parsed["chatResponse"]["choices"][0]["message"]["content"],
         "继续执行本地 hook web_search。"
     );
-    assert!(
-        parsed["chatResponse"]["choices"][0]["message"]
-            .get("reasoning_text")
-            .is_none()
-    );
+    assert!(parsed["chatResponse"]["choices"][0]["message"]
+        .get("reasoning_text")
+        .is_none());
     assert_eq!(
         parsed["chatResponse"]["choices"][0]["message"]["tool_calls"][1]["id"],
         "call_exec_command_1"

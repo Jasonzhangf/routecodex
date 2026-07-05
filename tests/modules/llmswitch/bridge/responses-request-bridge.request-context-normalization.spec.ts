@@ -765,6 +765,40 @@ describe('responses-request-bridge relay request-context normalization', () => {
     expect(prepared.requestContext.conversationId).toBe('conv_codex_header_1');
   });
 
+  it('materializes request context session truth from request body metadata inside the bridge', async () => {
+    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+      input: [],
+      toolsRaw: []
+    });
+
+    const prepared = await prepareResponsesHandlerRuntimeForHttp({
+      payload: {
+        model: 'gpt-5.4',
+        metadata: {
+          session_id: 'sess_body_bridge_1',
+          conversation_id: 'conv_body_bridge_1'
+        },
+        input: []
+      },
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_body_metadata_bridge_1',
+      requestMetadata: {},
+      acceptsSse: true
+    });
+
+    expect(prepared.kind).toBe('ok');
+    if (prepared.kind !== 'ok') {
+      throw new Error(`expected ok, got ${prepared.kind}`);
+    }
+    expect(prepared.requestBodyMetadata).toMatchObject({
+      session_id: 'sess_body_bridge_1',
+      conversation_id: 'conv_body_bridge_1'
+    });
+    expect(prepared.requestContext.sessionId).toBe('sess_body_bridge_1');
+    expect(prepared.requestContext.conversationId).toBe('conv_body_bridge_1');
+    expect(prepared.payload.metadata).toBeUndefined();
+  });
+
   it('strips request body metadata before persisting relay request context payload', async () => {
     mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
       input: [],

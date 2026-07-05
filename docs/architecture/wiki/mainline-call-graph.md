@@ -34,8 +34,8 @@ flowchart LR
 
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
-| wce-01 | `WebuiConfigEditor01UserIntent -> WebuiConfigEditor02AdminApiRequest` | anchored | `ProviderPage -> apiFetch` |  | `webui.config_editor_surface`<br/>WebUI online config editor surface for provider cards, per-port routing tabs, and fwd aggregation configuration |
-| wce-02 | `WebuiConfigEditor02AdminApiRequest -> WebuiConfigEditor03SharedConfigMutation` | anchored | `registerProviderRoutes -> writeUserConfigFile` |  | `webui.config_editor_surface`<br/>WebUI online config editor surface for provider cards, per-port routing tabs, and fwd aggregation configuration |
+| wce-01 | `WebuiConfigEditor01UserIntent -> WebuiConfigEditor02AdminApiRequest` | anchored | `ProviderPage -> apiFetch` |  | `webui.config_editor_surface`<br/>WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration |
+| wce-02 | `WebuiConfigEditor02AdminApiRequest -> WebuiConfigEditor03SharedConfigMutation` | anchored | `registerProviderRoutes -> writeUserConfigFile` |  | `webui.config_editor_surface`<br/>WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration |
 
 ## servertool.hook_skeleton.mainline
 
@@ -420,6 +420,36 @@ flowchart LR
 | vrd-01 | `VrDiag01StatusSnapshot -> VrDiag02DryRunInput` | anchored | `get_status -> diagnose_route` |  | `vr.online_diagnostics`<br/>Virtual Router online status and dry-run route diagnostics stay Rust-owned |
 | vrd-02 | `VrDiag02DryRunInput -> VrDiag03DryRunDecision` | anchored | `diagnose_route -> route` |  | `vr.online_diagnostics`<br/>Virtual Router online status and dry-run route diagnostics stay Rust-owned |
 | vrd-03 | `VrDiag03DryRunDecision -> ServerRespOutbound05ClientFrame` | anchored | `diagnoseRoute -> registerHttpRoutes` |  | `vr.online_diagnostics`<br/>Virtual Router online status and dry-run route diagnostics stay Rust-owned |
+
+## vr.hit_log_projection.mainline
+
+Virtual Router hit-log diagnostics: host effects collect the route decision context, TS facade calls Rust hit-log projection, and host emits the formatted diagnostic line without owning formatting or telemetry semantics.
+
+Entry contract: `VrHitLog01RouteDecision` via `docs/architecture/wiki/virtual-router-ownership-map.md`
+
+```mermaid
+flowchart LR
+  VrHitLog04TelemetryProjection["VrHitLog04TelemetryProjection"]
+  VrHitLog03HostEmission["VrHitLog03HostEmission"]
+  VrHitLog02NativeProjection["VrHitLog02NativeProjection"]
+  VrHitLog01RouteDecision["VrHitLog01RouteDecision"]
+  VrHitLog01RouteDecision -->|vrh-01| VrHitLog02NativeProjection
+  VrHitLog02NativeProjection -->|vrh-02| VrHitLog03HostEmission
+  VrHitLog02NativeProjection -->|vrh-03| VrHitLog04TelemetryProjection
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class VrHitLog01RouteDecision anchored;
+  class VrHitLog02NativeProjection anchored;
+  class VrHitLog03HostEmission anchored;
+  class VrHitLog04TelemetryProjection anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| vrh-01 | `VrHitLog01RouteDecision -> VrHitLog02NativeProjection` | anchored | `emitVirtualRouterHitLog -> createVirtualRouterHitRecord` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
+| vrh-02 | `VrHitLog02NativeProjection -> VrHitLog03HostEmission` | anchored | `formatVirtualRouterHit -> format_virtual_router_hit_json` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
+| vrh-03 | `VrHitLog02NativeProjection -> VrHitLog04TelemetryProjection` | anchored | `toVirtualRouterHitEvent -> to_virtual_router_hit_event_json` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
 
 ## runtime.lifecycle.mainline
 

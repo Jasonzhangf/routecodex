@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { VirtualRouterError, VirtualRouterErrorCode } from "./virtual-router-contracts.js";
+import { VirtualRouterError, VirtualRouterErrorCode } from "./native-router-hotpath-policy.js";
 import { hasCompleteNativeBinding } from "./native-router-hotpath-policy.js";
 import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from "./native-router-hotpath-required-exports.js";
 

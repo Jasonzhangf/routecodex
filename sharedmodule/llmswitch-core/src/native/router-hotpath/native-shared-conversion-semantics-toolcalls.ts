@@ -278,6 +278,127 @@ export function validateToolArgumentsWithNative(
   }
 }
 
+export function validateExecCommandGuardWithNative(
+  cmd: string,
+  policyJson?: string
+): { ok: boolean; reason?: string; message?: string; normalizedCmd?: string } {
+  const capability = 'validateExecCommandGuardJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ ok: boolean; reason?: string; message?: string; normalizedCmd?: string }>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify({
+    cmd: String(cmd ?? ''),
+    ...(typeof policyJson === 'string' && policyJson.trim() ? { policyJson } : {})
+  });
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed || typeof parsed.ok !== 'boolean') {
+      return fail('invalid payload');
+    }
+    const reason = typeof parsed.reason === 'string' ? parsed.reason : undefined;
+    const message = typeof parsed.message === 'string' ? parsed.message : undefined;
+    const normalizedCmd = typeof parsed.normalizedCmd === 'string' ? parsed.normalizedCmd : undefined;
+    return {
+      ok: parsed.ok,
+      ...(reason ? { reason } : {}),
+      ...(message ? { message } : {}),
+      ...(normalizedCmd ? { normalizedCmd } : {})
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function normalizeExecCommandArgsWithNative(
+  args: unknown,
+  options?: { schemaMode?: 'compat' | 'canonical' }
+): { ok: true; normalized: Record<string, unknown> } | { ok: false; reason: 'missing_cmd'; normalized: Record<string, unknown> } {
+  const capability = 'normalizeExecCommandArgsJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<
+      { ok: true; normalized: Record<string, unknown> } | { ok: false; reason: 'missing_cmd'; normalized: Record<string, unknown> }
+    >(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify({
+    args: args ?? null,
+    schemaMode: options?.schemaMode === 'canonical' ? 'canonical' : 'compat'
+  });
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed || typeof parsed.ok !== 'boolean') {
+      return fail('invalid payload');
+    }
+    const normalizedRaw = parsed.normalized;
+    if (!normalizedRaw || typeof normalizedRaw !== 'object' || Array.isArray(normalizedRaw)) {
+      return fail('invalid normalized payload');
+    }
+    const normalized = normalizedRaw as Record<string, unknown>;
+    if (parsed.ok === true) {
+      return { ok: true, normalized };
+    }
+    if (parsed.reason === 'missing_cmd') {
+      return { ok: false, reason: 'missing_cmd', normalized };
+    }
+    return fail('invalid failure reason');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function parseToolArgsJsonWithArtifactRepairWithNative(input: unknown): unknown {
+  const capability = 'parseToolArgsJsonWithArtifactRepairJson';
+  const fail = (reason?: string) => failNativeRequired<unknown>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(typeof input === 'string' ? input : '');
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseJson(raw) ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function repairToolCallsWithNative(
   toolCalls: Array<{ name?: string; arguments?: unknown }>
 ): Array<{ name?: string; arguments: string }> {

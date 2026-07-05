@@ -461,4 +461,76 @@ describe('cli restart command', () => {
     expect(fetchCalls.some((url) => url.includes('127.0.0.1:10000/health'))).toBe(false);
     expect(signals).toEqual([{ pid: 701, signal: 'SIGUSR2' }]);
   });
+
+  it('adopts the current runtime via start --restart when live version lags behind current release', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const spawnCalls: Array<{ command: string; args: readonly string[] }> = [];
+    let call = 0;
+    createRestartCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        call += 1;
+        if (port !== 5555) {
+          return [];
+        }
+        return call <= 1 ? [71641] : [81641];
+      },
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+      },
+      fetch: (async (url: string) => {
+        if (String(url).includes('/health')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true, version: '0.90.3591' })
+          } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () => [
+          '[httpserver]',
+          'port = 5555',
+          'host = "127.0.0.1"',
+          ''
+        ].join('\n')
+      } as any,
+      nodeBin: 'node',
+      cliEntryPath: '/snapshot/dist/cli.js',
+      spawn: ((command: string, args: readonly string[]) => {
+        spawnCalls.push({ command, args });
+        return {
+          once(event: string, cb: (...args: unknown[]) => void) {
+            if (event === 'exit') {
+              setImmediate(() => cb(0, null));
+            }
+            return this;
+          }
+        } as any;
+      }) as any,
+      getExpectedVersion: () => '0.90.3595',
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5555'], { from: 'node' });
+
+    expect(signals).toEqual([]);
+    expect(spawnCalls).toEqual([
+      {
+        command: 'node',
+        args: ['/snapshot/dist/cli.js', 'start', '--restart', '--port', '5555']
+      }
+    ]);
+  });
 });

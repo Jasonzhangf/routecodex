@@ -416,9 +416,7 @@ fn compact_anthropic_property_schema(schema: &Value) -> Value {
     if let Some(enum_values) = row.get("enum").and_then(Value::as_array) {
         let filtered = enum_values
             .iter()
-            .filter(|entry| {
-                entry.is_string() || entry.is_number() || entry.is_boolean()
-            })
+            .filter(|entry| entry.is_string() || entry.is_number() || entry.is_boolean())
             .take(64)
             .cloned()
             .collect::<Vec<Value>>();
@@ -462,7 +460,10 @@ fn compact_anthropic_property_schema(schema: &Value) -> Value {
     Value::Object(out)
 }
 
-fn sanitize_anthropic_builtin_input_schema(tool_name: &str, schema_source: Option<&Value>) -> Value {
+fn sanitize_anthropic_builtin_input_schema(
+    tool_name: &str,
+    schema_source: Option<&Value>,
+) -> Value {
     if !is_anthropic_stable_tool_schema_name(tool_name) {
         return Value::Object(clone_anthropic_schema(schema_source));
     }
@@ -501,16 +502,16 @@ fn sanitize_anthropic_builtin_input_schema(tool_name: &str, schema_source: Optio
 
     for key in &required {
         if !sanitized_properties.contains_key(key) {
-            sanitized_properties.insert(
-                key.clone(),
-                serde_json::json!({ "type": "string" }),
-            );
+            sanitized_properties.insert(key.clone(), serde_json::json!({ "type": "string" }));
         }
     }
 
     let mut output = Map::<String, Value>::new();
     output.insert("type".to_string(), Value::String("object".to_string()));
-    output.insert("properties".to_string(), Value::Object(sanitized_properties));
+    output.insert(
+        "properties".to_string(),
+        Value::Object(sanitized_properties),
+    );
     output.insert("additionalProperties".to_string(), Value::Bool(false));
     if !required.is_empty() {
         let mut seen = std::collections::HashSet::<String>::new();
@@ -823,9 +824,15 @@ mod apply_patch_tool_schema_tests {
         let questions = &schema["properties"]["questions"];
         assert_eq!(schema["required"], json!(["questions"]));
         assert_eq!(questions["type"], json!("array"));
-        assert_eq!(questions["items"]["required"], json!(["id", "header", "question", "options"]));
+        assert_eq!(
+            questions["items"]["required"],
+            json!(["id", "header", "question", "options"])
+        );
         assert_eq!(questions["items"]["additionalProperties"], json!(false));
-        assert_eq!(questions["items"]["properties"]["options"]["items"]["required"], json!(["label", "description"]));
+        assert_eq!(
+            questions["items"]["properties"]["options"]["items"]["required"],
+            json!(["label", "description"])
+        );
     }
 
     #[test]
@@ -1115,7 +1122,9 @@ fn normalize_anthropic_tool_history(messages: Vec<Value>) -> Vec<Value> {
     split_parallel_tool_use_result_turns(merge_adjacent_anthropic_messages(messages))
 }
 
-pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> NapiResult<Value> {
+pub(crate) fn build_anthropic_request_from_openai_chat_value(
+    chat_request: &Value,
+) -> NapiResult<Value> {
     let Some(request_row) = chat_request.as_object() else {
         return Ok(Value::Object(Map::new()));
     };

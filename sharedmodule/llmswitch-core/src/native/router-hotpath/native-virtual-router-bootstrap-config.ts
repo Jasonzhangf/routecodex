@@ -1,9 +1,8 @@
 import {
-  VirtualRouterError,
-  VirtualRouterErrorCode,
   type VirtualRouterBootstrapInput,
   type VirtualRouterBootstrapResult
 } from './virtual-router-contracts.js';
+import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-policy.js';
 import { callNativeJson } from './native-router-hotpath.js';
 
 export function bootstrapVirtualRouterConfig(

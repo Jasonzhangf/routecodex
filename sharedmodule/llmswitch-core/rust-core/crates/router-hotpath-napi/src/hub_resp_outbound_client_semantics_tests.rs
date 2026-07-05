@@ -1931,7 +1931,10 @@ fn project_responses_sse_frame_for_client_preserves_output_text_delta_spacing() 
     );
     assert_eq!(projected["emit"], true);
     let frame = projected["frame"].as_str().expect("frame");
-    assert_eq!(parse_single_sse_data_json(frame)["delta"], json!("The quick "));
+    assert_eq!(
+        parse_single_sse_data_json(frame)["delta"],
+        json!("The quick ")
+    );
 }
 
 #[test]

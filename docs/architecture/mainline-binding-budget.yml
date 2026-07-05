@@ -112,6 +112,15 @@ chains:
       Virtual Router online diagnostics is fully anchored: HTTP/CLI shells
       project Rust-produced status and dry-run diagnostics without route
       recomputation.
+  - chain_id: vr.hit_log_projection.mainline
+    expected_total_edges: 3
+    min_anchored_edges: 3
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router hit-log projection is fully anchored: TS may only call
+      Rust hit-log projection and emit the returned line/event without owning
+      formatting, color, provider-label, route-summary, or telemetry semantics.
   - chain_id: sse.chat_stream_projection.mainline
     expected_total_edges: 6
     min_anchored_edges: 6

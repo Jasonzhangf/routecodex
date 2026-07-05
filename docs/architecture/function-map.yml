@@ -784,7 +784,6 @@ owners:
       - build_servertool_stop_compare_progress_event_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
       - tests/servertool/servertool-progress-logging.spec.ts
@@ -822,7 +821,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts
       - docs
     forbidden_paths:
       - src/providers
@@ -1293,6 +1292,50 @@ owners:
     notes:
       - "This file-scoped owner keeps VR retry-provider-pin reading queryable without collapsing it into generic route-selection ownership."
 
+  - feature_id: vr.hit_log_projection
+    status: active
+    summary: "Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped Rust owner for Virtual Router hit-log diagnostic projection; TS facade may only marshal JSON/native calls"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
+    canonical_types:
+      - VirtualRouterHitRecord
+      - StopMessageRuntimeSummary
+      - VirtualRouterHitEvent
+    canonical_builders:
+      - create_virtual_router_hit_record_json
+      - format_virtual_router_hit_json
+      - build_hit_reason_json
+      - to_virtual_router_hit_event_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts
+      - sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - tests/sharedmodule/virtual-router-hit-log.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - docs
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - src/client
+      - sharedmodule/llmswitch-core/src/router
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
+      - tests/sharedmodule/virtual-router-hit-log.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    required_gates:
+      - npm run verify:llmswitch-rustification-audit
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:vr-no-ts-runtime
+    migration_target: rust
+    notes:
+      - "Hit-log projection is diagnostic output, not route selection. It must not reselect routes, patch provider payloads, or infer provider policy."
+      - "TS `runtime/virtual-router-hit-log.ts` may keep exported types and fail-fast native facade glue only; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned."
+
   - feature_id: hub.pipeline_contract_surface
     status: active
     summary: "Hub pipeline contract and meta-carrier boundary descriptors stay queryable as one Rust contract surface"
@@ -1656,7 +1699,7 @@ owners:
 
   - feature_id: hub.metadata_center_dualwrite_api
     status: active
-    summary: "single metadata read/write API that dual-writes JS mirror and Rust center during migration"
+    summary: "single metadata slot API that dual-writes JS mirror and Rust center during migration"
     owner_kind: rust_migration
     owner_scope: "all request-scoped metadata control reads/writes must enter through one API before Rust-only closeout"
     owner_module: src/server/runtime/http-server/metadata-center
@@ -1687,7 +1730,6 @@ owners:
       - tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts
       - tests/servertool/stopless-metadata-center.spec.ts
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/metadata_center
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-metadata-center-manifest-code-sync
@@ -2855,7 +2897,7 @@ owners:
     allowed_paths:
       - src/config/routecodex-config-loader.ts
       - src/config/user-config-loader.ts
-      - src/config/virtual-router-builder.ts
+      - src/config/user-config-materializer.ts
       - src/server/handlers/config-admin-handler.ts
     forbidden_paths:
       - src/server/runtime/http-server/daemon-admin
@@ -2932,7 +2974,7 @@ owners:
 
   - feature_id: webui.config_editor_surface
     status: planned
-    summary: "WebUI online config editor surface for provider cards, per-port routing tabs, and fwd aggregation configuration"
+    summary: "WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration"
     owner_kind: ts_ui_surface
     owner_scope: "WebUI may render and submit config editor intent only; provider/config writes stay in shared writers and fwd selection stays Rust-owned"
     owner_module: webui/src/App.tsx

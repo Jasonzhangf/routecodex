@@ -3,9 +3,11 @@ import {
   collectResponsesPendingToolCallIdsWithNative,
   convertResponsesOutputToInputItemsWithNative,
   materializeResponsesContinuationPayloadWithNative,
-  pickResponsesPersistedFieldsWithNative,
   planResponsesCapturePendingCleanupWithNative,
   planResponsesConversationPersistenceEligibilityWithNative,
+  planResponsesConversationPreflightWithNative,
+  planResponsesCapturedEntryWithNative,
+  planResponsesRecordContinuationFlagWithNative,
   planResponsesRecordScopeCleanupWithNative,
   planResponsesRecordScopeEntryMatchWithNative,
   planResponsesPersistedEntryWithNative,
@@ -19,10 +21,8 @@ import {
   planResponsesScopeContinuationMatchWithNative,
   planResponsesContinuationLookupByResponseIdWithNative,
   planResponsesContinuationMetaWithNative,
-  prepareResponsesConversationEntryWithNative,
   restoreResponsesContinuationPayloadWithNative,
   resumeResponsesConversationPayloadWithNative,
-  shouldAllowResponsesConversationContinuationWithNative,
   stripResponsesStoredContextInputMediaWithNative
 } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import type { AnyRecord, ConversationEntry } from './responses-conversation-store-types.js';
@@ -30,18 +30,18 @@ import type { AnyRecord, ConversationEntry } from './responses-conversation-stor
 export function assertResponsesConversationStoreNativeAvailable(): void {
   if (
     typeof buildResponsesConversationScopePlanWithNative !== 'function' ||
-    typeof pickResponsesPersistedFieldsWithNative !== 'function' ||
     typeof convertResponsesOutputToInputItemsWithNative !== 'function' ||
-    typeof prepareResponsesConversationEntryWithNative !== 'function' ||
     typeof materializeResponsesContinuationPayloadWithNative !== 'function' ||
     typeof restoreResponsesContinuationPayloadWithNative !== 'function' ||
     typeof resumeResponsesConversationPayloadWithNative !== 'function' ||
-    typeof shouldAllowResponsesConversationContinuationWithNative !== 'function' ||
     typeof collectResponsesPendingToolCallIdsWithNative !== 'function' ||
     typeof planResponsesCapturePendingCleanupWithNative !== 'function' ||
+    typeof planResponsesConversationPreflightWithNative !== 'function' ||
+    typeof planResponsesCapturedEntryWithNative !== 'function' ||
     typeof planResponsesConversationPersistenceEligibilityWithNative !== 'function' ||
     typeof planResponsesPersistedEntryWithNative !== 'function' ||
     typeof planResponsesStoreTokensWithNative !== 'function' ||
+    typeof planResponsesRecordContinuationFlagWithNative !== 'function' ||
     typeof planResponsesRecordScopeCleanupWithNative !== 'function' ||
     typeof planResponsesRecordScopeEntryMatchWithNative !== 'function' ||
     typeof planResponsesStoreSweepWithNative !== 'function' ||
@@ -61,10 +61,6 @@ export function assertResponsesConversationStoreNativeAvailable(): void {
 
 export function buildConversationScopePlan(input: unknown): { keys: string[]; portScopeKey?: string } {
   return buildResponsesConversationScopePlanWithNative(input);
-}
-
-export function shouldAllowContinuation(payload: AnyRecord | undefined): boolean {
-  return shouldAllowResponsesConversationContinuationWithNative(payload);
 }
 
 export function collectPendingToolCallIds(input: AnyRecord[]): string[] {
@@ -108,6 +104,26 @@ export function planStoreTokens(input: unknown): {
   return planResponsesStoreTokensWithNative(input);
 }
 
+export function planConversationPreflight(input: unknown): {
+  action: 'continue' | 'skip' | 'throw';
+  reason: string;
+  code?: string;
+  requestId?: string;
+  responseId?: string;
+  toolOutputCount?: number;
+} {
+  return planResponsesConversationPreflightWithNative(input);
+}
+
+export function planCapturedEntry(input: unknown): { action: 'entry' | 'skip'; reason: string; entry?: ConversationEntry } {
+  const plan = planResponsesCapturedEntryWithNative(input);
+  return {
+    action: plan.action,
+    reason: plan.reason,
+    ...(plan.entry ? { entry: plan.entry as unknown as ConversationEntry } : {})
+  };
+}
+
 export type CapturePendingCleanupCandidate = {
   requestId?: string;
   lastResponseId?: string;
@@ -134,6 +150,13 @@ export function planRecordScopeCleanup(input: {
   candidates: RecordScopeCleanupCandidate[];
 }): { action: 'noop' | 'detach'; reason: string; detachRequestIds: string[] } {
   return planResponsesRecordScopeCleanupWithNative(input);
+}
+
+export function planRecordContinuationFlag(input: {
+  allowContinuation?: boolean;
+  pendingToolCallIds?: string[];
+}): { allowContinuation: boolean; reason: string; pendingToolCallCount: number } {
+  return planResponsesRecordContinuationFlagWithNative(input);
 }
 
 export function planRecordScopeEntryMatch(input: {
@@ -269,25 +292,8 @@ export function planContinuationLookupByResponseId(input: unknown): Continuation
   return planResponsesContinuationLookupByResponseIdWithNative(input);
 }
 
-export function pickPersistedFields(payload: AnyRecord): AnyRecord {
-  return pickResponsesPersistedFieldsWithNative(payload) as AnyRecord;
-}
-
 export function convertOutputToInputItems(response: AnyRecord): AnyRecord[] {
   return convertResponsesOutputToInputItemsWithNative(response) as AnyRecord[];
-}
-
-export function prepareConversationEntry(payload: AnyRecord, context: AnyRecord): {
-  basePayload: AnyRecord;
-  input: AnyRecord[];
-  tools?: AnyRecord[];
-} {
-  const prepared = prepareResponsesConversationEntryWithNative(payload, context);
-  return {
-    basePayload: prepared.basePayload as AnyRecord,
-    input: Array.isArray(prepared.input) ? (prepared.input as AnyRecord[]) : [],
-    tools: Array.isArray(prepared.tools) ? (prepared.tools as AnyRecord[]) : undefined
-  };
 }
 
 export function resumeConversationPayload(
@@ -323,23 +329,11 @@ export function restoreContinuationPayload(
   requestId: string | undefined,
   scopeKey: string
 ): { payload: AnyRecord; meta: AnyRecord } | null {
-  const useReleasedPrefixSideChannelOnly =
-    entry.continuationOwner === 'direct'
-    && (!Array.isArray(entry.input) || entry.input.length === 0)
-    && Array.isArray(entry.releasedInputPrefix)
-    && entry.releasedInputPrefix.length > 0;
-  const continuationInput = Array.isArray(entry.input) && entry.input.length > 0
-    ? entry.input
-    : (
-      useReleasedPrefixSideChannelOnly
-        ? []
-        : (Array.isArray(entry.releasedInputPrefix) ? entry.releasedInputPrefix : [])
-    );
   const restored = restoreResponsesContinuationPayloadWithNative(
     {
       requestId: entry.requestId,
       basePayload: entry.basePayload,
-      input: continuationInput,
+      input: entry.input,
       releasedInputPrefix: entry.releasedInputPrefix,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,
@@ -366,14 +360,11 @@ export function materializeContinuationPayload(
   requestId: string | undefined,
   scopeKey: string
 ): { payload: AnyRecord; meta: AnyRecord } | null {
-  const continuationInput = Array.isArray(entry.input) && entry.input.length > 0
-    ? entry.input
-    : (Array.isArray(entry.releasedInputPrefix) ? entry.releasedInputPrefix : []);
   const materialized = materializeResponsesContinuationPayloadWithNative(
     {
       requestId: entry.requestId,
       basePayload: entry.basePayload,
-      input: continuationInput,
+      input: entry.input,
       releasedInputPrefix: entry.releasedInputPrefix,
       releasedPendingToolCallIds: entry.releasedPendingToolCallIds,
       tools: entry.tools,

@@ -34,7 +34,7 @@ import {
 } from './log-rollup-format-blocks.js';
 import { computeProtocolAwareCacheHitRatio } from './usage-aggregator.js';
 
-type VirtualRouterHitRecord = {
+type RouterHitRollupEvent = {
   routeName?: string;
   poolId?: string;
   providerKey?: string;
@@ -553,7 +553,7 @@ function updateSessionProjectPath(sessionId: string, incomingProjectPath?: strin
   void sessionId;
 }
 
-export function recordVirtualRouterHitRollup(event: VirtualRouterHitRecord): void {
+export function recordVirtualRouterHitRollup(event: RouterHitRollupEvent): void {
   ensureStarted();
   cleanStaleSessions();
   if (!isRollupEnabled()) {

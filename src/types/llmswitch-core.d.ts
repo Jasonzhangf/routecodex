@@ -96,6 +96,26 @@ declare module 'rcc-llmswitch-core/dist/native/router-hotpath/virtual-router-con
   }
 }
 
+declare module 'rcc-llmswitch-core/dist/native/router-hotpath/native-router-hotpath-policy.js' {
+  export enum VirtualRouterErrorCode {
+    NO_STANDARDIZED_REQUEST = "NO_STANDARDIZED_REQUEST",
+    ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND",
+    PROVIDER_NOT_AVAILABLE = "PROVIDER_NOT_AVAILABLE",
+    HTTP_429 = "HTTP_429",
+    CONFIG_ERROR = "CONFIG_ERROR",
+  }
+
+  export class VirtualRouterError extends Error {
+    constructor(
+      message: string,
+      code: VirtualRouterErrorCode,
+      details?: Record<string, unknown>,
+    );
+    readonly code: VirtualRouterErrorCode;
+    readonly details?: Record<string, unknown>;
+  }
+}
+
 declare module 'rcc-llmswitch-core/dist/conversion/hub/response/provider-response.js' {
   import type { Readable } from 'stream';
   export type ProviderInvoker = (options: {

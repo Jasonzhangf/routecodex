@@ -930,7 +930,6 @@ Canonical builders:
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts`
 - `tests/servertool/servertool-progress-logging.spec.ts`
@@ -975,7 +974,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`
 - `docs`
 
 Forbidden paths:

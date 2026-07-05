@@ -1,7 +1,7 @@
-import type { JsonObject } from '../../conversion/hub/types/json.js';
 import type {
   NativeReqOutboundStage3CompatOutput
 } from './native-hub-pipeline-req-outbound-semantics-types.js';
+import type { JsonObject } from '../../conversion/hub/types/json.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
 
 const NON_BLOCKING_PARSE_LOG_THROTTLE_MS = 60_000;
@@ -40,28 +40,7 @@ function parseRecord(raw: string, stage = 'parseRecord'): Record<string, unknown
 
 function parseReqOutboundCompatOutput(raw: string): NativeReqOutboundStage3CompatOutput | null {
   const row = parseRecord(raw, 'parseReqOutboundCompatOutput');
-  if (!row) {
-    return null;
-  }
-  const payloadRaw = row.payload;
-  if (!payloadRaw || typeof payloadRaw !== 'object' || Array.isArray(payloadRaw)) {
-    return null;
-  }
-  const payload = payloadRaw as JsonObject;
-  const appliedProfileRaw = row.appliedProfile;
-  const appliedProfile = typeof appliedProfileRaw === 'string' && appliedProfileRaw.trim()
-    ? appliedProfileRaw.trim()
-    : undefined;
-  const nativeAppliedRaw = row.nativeApplied;
-  if (typeof nativeAppliedRaw !== 'boolean') {
-    return null;
-  }
-  const nativeApplied = nativeAppliedRaw;
-  return {
-    payload,
-    ...(appliedProfile ? { appliedProfile } : {}),
-    nativeApplied
-  };
+  return row as unknown as NativeReqOutboundStage3CompatOutput | null;
 }
 
 function parseJsonObject(raw: string): JsonObject | null {
@@ -72,17 +51,8 @@ function parseJsonObject(raw: string): JsonObject | null {
   return parsed as JsonObject;
 }
 
-function parseBoolean(raw: string): boolean | null {
-  const parsed = parseJson('parseBoolean', raw);
-  if (parsed === JSON_PARSE_FAILED) {
-    return null;
-  }
-  return typeof parsed === 'boolean' ? parsed : null;
-}
-
 export {
   parseRecord,
   parseReqOutboundCompatOutput,
-  parseJsonObject,
-  parseBoolean
+  parseJsonObject
 };

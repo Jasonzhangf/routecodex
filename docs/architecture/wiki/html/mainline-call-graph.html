@@ -154,8 +154,8 @@
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>wce-01</td><td><code>WebuiConfigEditor01UserIntent -&gt; WebuiConfigEditor02AdminApiRequest</code></td><td>anchored</td><td><code>ProviderPage -&gt; apiFetch</code></td><td></td><td><code>webui.config_editor_surface</code>&lt;br/&gt;WebUI online config editor surface for provider cards, per-port routing tabs, and fwd aggregation configuration</td></tr>
-        <tr><td>wce-02</td><td><code>WebuiConfigEditor02AdminApiRequest -&gt; WebuiConfigEditor03SharedConfigMutation</code></td><td>anchored</td><td><code>registerProviderRoutes -&gt; writeUserConfigFile</code></td><td></td><td><code>webui.config_editor_surface</code>&lt;br/&gt;WebUI online config editor surface for provider cards, per-port routing tabs, and fwd aggregation configuration</td></tr>
+        <tr><td>wce-01</td><td><code>WebuiConfigEditor01UserIntent -&gt; WebuiConfigEditor02AdminApiRequest</code></td><td>anchored</td><td><code>ProviderPage -&gt; apiFetch</code></td><td></td><td><code>webui.config_editor_surface</code>&lt;br/&gt;WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration</td></tr>
+        <tr><td>wce-02</td><td><code>WebuiConfigEditor02AdminApiRequest -&gt; WebuiConfigEditor03SharedConfigMutation</code></td><td>anchored</td><td><code>registerProviderRoutes -&gt; writeUserConfigFile</code></td><td></td><td><code>webui.config_editor_surface</code>&lt;br/&gt;WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration</td></tr>
         </tbody>
         </table>
         <h2>servertool.hook_skeleton.mainline</h2>
@@ -510,6 +510,33 @@
         <tr><td>vrd-01</td><td><code>VrDiag01StatusSnapshot -&gt; VrDiag02DryRunInput</code></td><td>anchored</td><td><code>get_status -&gt; diagnose_route</code></td><td></td><td><code>vr.online_diagnostics</code>&lt;br/&gt;Virtual Router online status and dry-run route diagnostics stay Rust-owned</td></tr>
         <tr><td>vrd-02</td><td><code>VrDiag02DryRunInput -&gt; VrDiag03DryRunDecision</code></td><td>anchored</td><td><code>diagnose_route -&gt; route</code></td><td></td><td><code>vr.online_diagnostics</code>&lt;br/&gt;Virtual Router online status and dry-run route diagnostics stay Rust-owned</td></tr>
         <tr><td>vrd-03</td><td><code>VrDiag03DryRunDecision -&gt; ServerRespOutbound05ClientFrame</code></td><td>anchored</td><td><code>diagnoseRoute -&gt; registerHttpRoutes</code></td><td></td><td><code>vr.online_diagnostics</code>&lt;br/&gt;Virtual Router online status and dry-run route diagnostics stay Rust-owned</td></tr>
+        </tbody>
+        </table>
+        <h2>vr.hit_log_projection.mainline</h2>
+        <p>Virtual Router hit-log diagnostics: host effects collect the route decision context, TS facade calls Rust hit-log projection, and host emits the formatted diagnostic line without owning formatting or telemetry semantics.</p>
+        <p>Entry contract: <code>VrHitLog01RouteDecision</code> via <code>docs/architecture/wiki/virtual-router-ownership-map.md</code></p>
+        <pre class="mermaid">flowchart LR
+          VrHitLog04TelemetryProjection[&quot;VrHitLog04TelemetryProjection&quot;]
+          VrHitLog03HostEmission[&quot;VrHitLog03HostEmission&quot;]
+          VrHitLog02NativeProjection[&quot;VrHitLog02NativeProjection&quot;]
+          VrHitLog01RouteDecision[&quot;VrHitLog01RouteDecision&quot;]
+          VrHitLog01RouteDecision --&gt;|vrh-01| VrHitLog02NativeProjection
+          VrHitLog02NativeProjection --&gt;|vrh-02| VrHitLog03HostEmission
+          VrHitLog02NativeProjection --&gt;|vrh-03| VrHitLog04TelemetryProjection
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class VrHitLog01RouteDecision anchored;
+          class VrHitLog02NativeProjection anchored;
+          class VrHitLog03HostEmission anchored;
+          class VrHitLog04TelemetryProjection anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>vrh-01</td><td><code>VrHitLog01RouteDecision -&gt; VrHitLog02NativeProjection</code></td><td>anchored</td><td><code>emitVirtualRouterHitLog -&gt; createVirtualRouterHitRecord</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
+        <tr><td>vrh-02</td><td><code>VrHitLog02NativeProjection -&gt; VrHitLog03HostEmission</code></td><td>anchored</td><td><code>formatVirtualRouterHit -&gt; format_virtual_router_hit_json</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
+        <tr><td>vrh-03</td><td><code>VrHitLog02NativeProjection -&gt; VrHitLog04TelemetryProjection</code></td><td>anchored</td><td><code>toVirtualRouterHitEvent -&gt; to_virtual_router_hit_event_json</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
         </tbody>
         </table>
         <h2>runtime.lifecycle.mainline</h2>

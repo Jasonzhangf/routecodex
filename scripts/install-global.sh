@@ -138,23 +138,23 @@ prepare_isolated_build_root() {
 # 构建项目
 build_project() {
     if [ "${ROUTECODEX_INSTALL_SKIP_BUILD:-0}" = "1" ]; then
-        echo "🔨 使用 build:dev 已通过审计的产物，跳过 install:global 内部构建"
+        echo "🔨 使用 build:min 已通过审计的产物，跳过 install:global 内部构建"
         INSTALL_BUILD_ROOT="$SOURCE_ROOT"
         if [ ! -f "$INSTALL_BUILD_ROOT/dist/cli.js" ]; then
-            echo "❌ 缺少 build:dev 产物：dist/cli.js"
-            echo "💡 先执行: npm run build:dev"
+            echo "❌ 缺少 build:min 产物：dist/cli.js"
+            echo "💡 先执行: npm run build:min"
             exit 1
         fi
         if [ ! -f "$INSTALL_BUILD_ROOT/dist/error-handling/route-error-hub.js" ]; then
-            echo "❌ 缺少 build:dev 产物：dist/error-handling/route-error-hub.js"
-            echo "💡 先执行: npm run build:dev"
+            echo "❌ 缺少 build:min 产物：dist/error-handling/route-error-hub.js"
+            echo "💡 先执行: npm run build:min"
             exit 1
         fi
         return
     fi
 
     prepare_isolated_build_root
-    echo "🔁 install:global 默认入口切到 build:dev（直面审计 gate）"
+    echo "🔁 install:global 默认入口走 build:min（直面审计 gate）"
     (
         cd "$INSTALL_BUILD_ROOT"
         BUILD_MODE=dev \
@@ -162,7 +162,7 @@ build_project() {
         BUILD_SKIP_AUTO_BUMP="${BUILD_SKIP_AUTO_BUMP:-1}" \
         ROUTECODEX_BUILD_RESTART_ONLY="${ROUTECODEX_BUILD_RESTART_ONLY:-1}" \
         ROUTECODEX_INSTALL_VERIFY_PORT="${ROUTECODEX_INSTALL_VERIFY_PORT:-5555}" \
-        npm run build:dev
+        npm run build:min
     )
 }
 
@@ -206,7 +206,7 @@ global_install() {
 
     # 全局安装后再次修复可执行位（解决偶发 permission denied）
     node "$INSTALL_BUILD_ROOT/scripts/ensure-cli-executable.mjs" || true
-    node "$SOURCE_ROOT/scripts/ensure-cli-command-shim.mjs" || true
+    ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node "$SOURCE_ROOT/scripts/ensure-cli-command-shim.mjs" || true
 
     if [ $? -eq 0 ]; then
         echo "✅ 全局安装成功"
@@ -267,7 +267,7 @@ verify_install() {
     echo "🔍 验证全局安装..."
     if command -v routecodex &> /dev/null; then
         echo "✅ routecodex 已全局安装"
-        node scripts/ensure-cli-command-shim.mjs || true
+        ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node scripts/ensure-cli-command-shim.mjs || true
         routecodex --version
         node -e "const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const pkg=path.join(root,'routecodex','node_modules','rcc-llmswitch-core','package.json');const fs=require('fs');if(fs.existsSync(pkg)){const v=require(pkg).version;console.log('🔎 全局 rcc-llmswitch-core 版本:',v);}else{console.log('⚠️  未找到全局 rcc-llmswitch-core package.json');}"
     else

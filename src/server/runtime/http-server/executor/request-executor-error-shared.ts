@@ -34,6 +34,19 @@ export function isServerToolFollowupErrorCode(value: unknown): boolean {
   return Boolean(normalized && normalized.startsWith('SERVERTOOL_'));
 }
 
+export function isProviderProtocolBoundaryError(error: unknown, retryError?: RetryErrorSnapshot): boolean {
+  const code = normalizeCodeKey(
+    retryError?.errorCode
+    ?? (error && typeof error === 'object' ? (error as Record<string, unknown>).code : undefined)
+  );
+  if (code === 'ERR_PROVIDER_PROTOCOL_MISMATCH') {
+    return true;
+  }
+  const reason = readString(retryError?.reason)
+    ?? (error instanceof Error ? error.message : undefined);
+  return Boolean(reason && reason.includes('runtime_control.providerProtocol conflict'));
+}
+
 export function isRequestExecutorProviderErrorStage(value: unknown): value is RequestExecutorProviderErrorStage {
   return (
     value === 'provider.runtime_resolve'

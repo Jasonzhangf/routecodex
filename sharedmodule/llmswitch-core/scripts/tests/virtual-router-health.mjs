@@ -20,7 +20,7 @@ async function main() {
     reportProviderErrorToRouterPolicy,
     setVirtualRouterPolicyRuntimeRouterHooks
   } = await importModule('router/virtual-router/provider-runtime-ingress.js');
-  const { VirtualRouterError } = await importModule('native/router-hotpath/virtual-router-contracts.js');
+  const { VirtualRouterError } = await importModule('native/router-hotpath/native-router-hotpath-policy.js');
   reportProviderErrorToRouterPolicyRef = reportProviderErrorToRouterPolicy;
   setVirtualRouterPolicyRuntimeRouterHooksRef = setVirtualRouterPolicyRuntimeRouterHooks;
   VirtualRouterErrorRef = VirtualRouterError;

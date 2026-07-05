@@ -25,6 +25,10 @@ description: RouteCodex 调试与架构路由入口
 任何会改实现的任务，先执行且不能跳过：
 
 0. 先用 MemPalace 查项目记忆与旧结论；snippet 只当 locator，必须打开返回源文件再判断。
+   - 例外：Rustification L1 / source-doc-only 审计 / 生成物排除类任务，不得用
+     MemPalace、`.mempalace`、`.local-index`、`dist`、`target`、`coverage`
+     或其他生成物作为当前代码状态证据；文件发现必须从 `git ls-files`
+     加源码/文档 allowlist 和生成物 denylist 开始。
 1. 定位 feature_id（有时来自问题描述关键词）
 2. 在 `docs/architecture/function-map.yml` 查 `feature_id` 的 owner、allowed / forbidden paths。
 3. 在 `docs/architecture/mainline-call-map.yml` 查 `feature_id`、`caller`、`callee`。

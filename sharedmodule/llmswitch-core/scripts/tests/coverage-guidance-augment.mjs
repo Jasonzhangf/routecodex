@@ -47,10 +47,9 @@ async function main() {
     assert.equal(shell.parameters.additionalProperties, false);
 
     const ap = out.find((t) => t?.function?.name === 'apply_patch')?.function;
-    assert.ok(ap && typeof ap.description === 'string' && ap.description.includes('[Codex ApplyPatch Guidance]'));
-    assert.equal(ap.parameters.additionalProperties, false);
-    assert.ok(ap.parameters.properties.patch, 'apply_patch.parameters.properties.patch must exist');
-    assert.ok(Array.isArray(ap.parameters.required) && ap.parameters.required.includes('patch'));
+    assert.ok(ap && typeof ap.description === 'string' && ap.description === 'patch');
+    assert.equal(ap.parameters.properties.patch, undefined);
+    assert.equal(ap.parameters.properties.input, undefined);
   }
 
   // Anthropic tool shape augmentation.
@@ -62,16 +61,16 @@ async function main() {
     ];
     const out = augmentAnthropicTools(input);
     const ap = out.find((t) => t?.name === 'apply_patch');
-    assert.ok(ap && typeof ap.description === 'string' && ap.description.includes('[Codex ApplyPatch Guidance]'));
-    assert.ok(ap.input_schema?.properties?.patch);
-    assert.ok(Array.isArray(ap.input_schema?.required) && ap.input_schema.required.includes('patch'));
+    assert.ok(ap && typeof ap.description === 'string' && ap.description === 'x');
+    assert.equal(ap.input_schema?.properties?.patch, undefined);
+    assert.equal(ap.input_schema?.properties?.input, undefined);
   }
 
   // System tool guidance string (used by hosts/providers).
   {
     const text = buildSystemToolGuidance();
     assert.ok(typeof text === 'string' && text.includes('tool_calls'), 'system tool guidance must mention tool_calls');
-    assert.ok(text.includes('apply_patch') && text.includes('shell'));
+    assert.ok(!text.includes('apply_patch'), 'generic system guidance must not own apply_patch policy');
   }
 
   console.log('✅ coverage-guidance-augment passed');
@@ -81,4 +80,3 @@ main().catch((e) => {
   console.error('❌ coverage-guidance-augment failed:', e);
   process.exit(1);
 });
-

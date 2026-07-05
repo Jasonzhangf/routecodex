@@ -18,10 +18,7 @@ import type {
   VirtualRouterConfig,
   VirtualRouterHealthStore
 } from './virtual-router-contracts.js';
-import {
-  VirtualRouterError,
-  VirtualRouterErrorCode,
-} from './virtual-router-contracts.js';
+import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-policy.js';
 import {
   createVirtualRouterEngineProxy,
   type NativeVirtualRouterEngineProxy

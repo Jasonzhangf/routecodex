@@ -93,7 +93,6 @@ impl VirtualRouterEngineCore {
         self.health_manager.configure(health_config);
         let provider_keys = self.provider_registry.list_keys();
         self.health_manager.register_providers(&provider_keys);
-        self.refresh_provider_health_from_store();
         let load_balancing = config
             .get("loadBalancing")
             .cloned()

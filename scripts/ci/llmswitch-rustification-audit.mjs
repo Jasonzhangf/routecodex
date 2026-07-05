@@ -1,9 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const DEFAULT_BASELINE = 'sharedmodule/llmswitch-core/config/rustification-audit-baseline.json';
 const ROOT = process.cwd();
-const SRC_ROOT = path.join(ROOT, 'sharedmodule/llmswitch-core/src');
+const SRC_PREFIX = 'sharedmodule/llmswitch-core/src/';
+const GENERATED_DIR_NAMES = new Set([
+  'dist',
+  'target',
+  'coverage',
+  'node_modules',
+  '.mempalace',
+  '.local-index',
+  'mempalace',
+  '__snapshots__',
+  'snapshots',
+  'reports',
+]);
 
 function parseArgs(argv) {
   const args = {
@@ -33,25 +46,39 @@ function parseArgs(argv) {
   return args;
 }
 
-function walkTsFiles(dir) {
-  const out = [];
-  const stack = [dir];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    const entries = fs.readdirSync(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(full);
-        continue;
-      }
-      if (entry.isFile() && full.endsWith('.ts')) {
-        out.push(full);
-      }
-    }
-  }
-  out.sort();
-  return out;
+function readGitTrackedFiles() {
+  const raw = execFileSync('git', ['ls-files', '-z'], {
+    cwd: ROOT,
+    encoding: 'buffer',
+  });
+  return raw
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean)
+    .map((p) => p.split(path.sep).join('/'))
+    .sort();
+}
+
+function isGeneratedOrLocalIndexPath(rel) {
+  const parts = rel.split('/');
+  if (parts.some((part) => GENERATED_DIR_NAMES.has(part))) return true;
+  if (rel.endsWith('.html')) return true;
+  if (/\.(bak|backup|orig|tmp)$/u.test(rel)) return true;
+  if (rel.endsWith('~')) return true;
+  if (/generated[-_/].*report|report[-_/].*generated/u.test(rel)) return true;
+  return false;
+}
+
+function listAuditTsFiles() {
+  return readGitTrackedFiles()
+    .filter((rel) => rel.startsWith(SRC_PREFIX))
+    .filter((rel) => !isGeneratedOrLocalIndexPath(rel))
+    .filter((rel) => rel.endsWith('.ts'))
+    .map((rel) => ({
+      abs: path.join(ROOT, rel),
+      rel,
+    }))
+    .filter((file) => fs.existsSync(file.abs));
 }
 
 function isProdTs(rel) {
@@ -79,15 +106,11 @@ function isNativeLinked(content) {
 }
 
 function buildSnapshot() {
-  if (!fs.existsSync(SRC_ROOT)) {
-    throw new Error(`missing source root: ${SRC_ROOT}`);
+  const srcRoot = path.join(ROOT, SRC_PREFIX);
+  if (!fs.existsSync(srcRoot)) {
+    throw new Error(`missing source root: ${srcRoot}`);
   }
-  const files = walkTsFiles(SRC_ROOT)
-    .map((abs) => ({
-      abs,
-      rel: path.relative(ROOT, abs).split(path.sep).join('/'),
-    }))
-    .filter((x) => isProdTs(x.rel));
+  const files = listAuditTsFiles().filter((x) => isProdTs(x.rel));
 
   const byTopDir = new Map();
   const prodTsFiles = [];

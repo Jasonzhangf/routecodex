@@ -132,6 +132,39 @@ function pickNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function extractMaterializedProviderConfigsFromUserConfig(
+  userConfig: UnknownRecord
+): ProviderConfigMap | undefined {
+  const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;
+  const providersNode = isRecord(vrNode?.providers) ? (vrNode!.providers as UnknownRecord) : undefined;
+  if (!providersNode || Object.keys(providersNode).length === 0) return undefined;
+
+  const providerConfigs: ProviderConfigMap = {};
+  for (const [providerIdRaw, providerValue] of Object.entries(providersNode)) {
+    const providerId = providerIdRaw.trim();
+    if (!providerId) {
+      throw new Error('[config] materialized virtualrouter.providers contains empty provider id');
+    }
+    if (!isRecord(providerValue)) {
+      throw new Error(`[config] materialized virtualrouter.providers["${providerId}"] must be an object`);
+    }
+    const provider = structuredClone(providerValue) as UnknownRecord;
+    const providerNodeId = pickString(provider.id);
+    if (providerNodeId && providerNodeId !== providerId) {
+      throw new Error(
+        `[config] materialized virtualrouter.providers["${providerId}"].id="${providerNodeId}" does not match provider id`
+      );
+    }
+    if (!providerNodeId) provider.id = providerId;
+    providerConfigs[providerId] = {
+      version: '2.0.0',
+      providerId,
+      provider
+    };
+  }
+  return providerConfigs;
+}
+
 function resolveReferencedProviderIdsFromRouting(routing: UnknownRecord): Set<string> {
   const providerIds = new Set<string>();
   for (const entries of Object.values(routing)) {
@@ -358,7 +391,8 @@ export async function buildVirtualRouterInputV2(
       if (!forwardersSource[refId]) throw new Error(`[forwarder-config] routing references unknown forwarder '${refId}'`);
     }
   }
-  const providerConfigs = await loadProviderConfigsV2(providerRootDir);
+  const providerConfigs = extractMaterializedProviderConfigsFromUserConfig(userConfig)
+    ?? (await loadProviderConfigsV2(providerRootDir));
   const forwarders = forwardersSource && Object.keys(forwardersSource).length
     ? normalizeForwardersForNative(forwardersSource, providerConfigs)
     : undefined;

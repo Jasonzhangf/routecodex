@@ -48,19 +48,7 @@ export function parseAliasMap(raw: string): Record<string, string> | undefined |
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (typeof key !== 'string' || typeof value !== 'string') {
-      return null;
-    }
-    const trimmedKey = key.trim();
-    const trimmedValue = value.trim();
-    if (!trimmedKey || !trimmedValue) {
-      return null;
-    }
-    out[trimmedKey] = trimmedValue;
-  }
-  return Object.keys(out).length ? out : undefined;
+  return parsed as Record<string, string>;
 }
 
 export function parseClientToolsRaw(raw: string): unknown[] | undefined | null {
@@ -111,88 +99,17 @@ export function parseStringOrUndefined(raw: string): string | undefined | null {
 
 export function parseContextLengthDiagnostics(raw: string): ContextLengthDiagnosticsOutput | null {
   const row = parseRecord(raw, 'parseContextLengthDiagnostics');
-  if (!row) {
-    return null;
-  }
-  const output: ContextLengthDiagnosticsOutput = {};
-  const estimated = row.estimatedPromptTokens;
-  const maxContext = row.maxContextTokens;
-  if (typeof estimated === 'number' && Number.isFinite(estimated)) {
-    output.estimatedPromptTokens = Math.floor(estimated);
-  }
-  if (typeof maxContext === 'number' && Number.isFinite(maxContext)) {
-    output.maxContextTokens = Math.floor(maxContext);
-  }
-  return output;
+  return row as ContextLengthDiagnosticsOutput | null;
 }
 
 export function parseRespInboundSseErrorDescriptor(raw: string): RespInboundSseErrorDescriptor | null {
   const row = parseRecord(raw, 'parseRespInboundSseErrorDescriptor');
-  if (!row) {
-    return null;
-  }
-  const code = row.code;
-  const protocol = row.protocol;
-  const errorMessage = row.errorMessage;
-  const details = row.details;
-  const stageRecord = row.stageRecord;
-  const status = row.status;
-  const providerType = row.providerType;
-  if ((code !== 'SSE_DECODE_ERROR' && code !== 'HTTP_502') || typeof protocol !== 'string' || !protocol.trim()) {
-    return null;
-  }
-  if (typeof errorMessage !== 'string' || !errorMessage.trim()) {
-    return null;
-  }
-  if (!details || typeof details !== 'object' || Array.isArray(details)) {
-    return null;
-  }
-  if (!stageRecord || typeof stageRecord !== 'object' || Array.isArray(stageRecord)) {
-    return null;
-  }
-  if (providerType != null && typeof providerType !== 'string') {
-    return null;
-  }
-  if (status != null && (typeof status !== 'number' || !Number.isFinite(status))) {
-    return null;
-  }
-  return {
-    code,
-    protocol: protocol.trim(),
-    providerType: typeof providerType === 'string' && providerType.trim() ? providerType.trim() : undefined,
-    errorMessage,
-    details: details as Record<string, unknown>,
-    stageRecord: stageRecord as Record<string, unknown>,
-    status: typeof status === 'number' ? Math.floor(status) : undefined
-  };
+  return row as unknown as RespInboundSseErrorDescriptor | null;
 }
 
 export function parseProviderSseStreamReadErrorDescriptor(raw: string): ProviderSseStreamReadErrorDescriptor | null {
   const row = parseRecord(raw, 'parseProviderSseStreamReadErrorDescriptor');
-  if (!row) {
-    return null;
-  }
-  if (
-    row.code !== 'SSE_DECODE_ERROR'
-    || typeof row.message !== 'string'
-    || !row.message.trim()
-    || typeof row.upstreamCode !== 'string'
-    || !row.upstreamCode.trim()
-    || typeof row.statusCode !== 'number'
-    || !Number.isFinite(row.statusCode)
-    || typeof row.retryable !== 'boolean'
-    || row.requestExecutorProviderErrorStage !== 'provider.sse_decode'
-  ) {
-    return null;
-  }
-  return {
-    message: row.message,
-    code: 'SSE_DECODE_ERROR',
-    upstreamCode: row.upstreamCode.trim(),
-    statusCode: Math.floor(row.statusCode),
-    retryable: row.retryable,
-    requestExecutorProviderErrorStage: 'provider.sse_decode'
-  };
+  return row as unknown as ProviderSseStreamReadErrorDescriptor | null;
 }
 
 export function parseJsonObjectCandidate(raw: string): Record<string, unknown> | null | undefined {
@@ -211,61 +128,12 @@ export function parseJsonObjectCandidate(raw: string): Record<string, unknown> |
 
 export function parseResponsesHostPolicyResult(raw: string): ResponsesHostPolicyResult | null {
   const row = parseRecord(raw, 'parseResponsesHostPolicyResult');
-  if (!row || typeof row.shouldStripHostManagedFields !== 'boolean' || typeof row.targetProtocol !== 'string') {
-    return null;
-  }
-  const targetProtocol = row.targetProtocol.trim();
-  if (!targetProtocol.length) {
-    return null;
-  }
-  return {
-    shouldStripHostManagedFields: row.shouldStripHostManagedFields,
-    targetProtocol
-  };
+  return row as unknown as ResponsesHostPolicyResult | null;
 }
 
 export function parseResponsesClientSseFrameProjection(raw: string): ResponsesClientSseFrameProjection | null {
   const row = parseRecord(raw, 'parseResponsesClientSseFrameProjection');
-  if (!row || typeof row.emit !== 'boolean' || typeof row.frame !== 'string') {
-    return null;
-  }
-  const state = row.state;
-  if (!state || typeof state !== 'object' || Array.isArray(state)) {
-    return null;
-  }
-  const stateRecord = state as Record<string, unknown>;
-  const pending = stateRecord.pendingApplyPatchArgumentDeltas;
-  if (pending !== undefined && (!pending || typeof pending !== 'object' || Array.isArray(pending))) {
-    return null;
-  }
-  for (const value of Object.values((pending ?? {}) as Record<string, unknown>)) {
-    if (typeof value !== 'string') {
-      return null;
-    }
-  }
-  const applyPatchCallIds = stateRecord.applyPatchCallIds;
-  const emittedApplyPatchDoneCallIds = stateRecord.emittedApplyPatchDoneCallIds;
-  if (
-    applyPatchCallIds !== undefined
-    && (!Array.isArray(applyPatchCallIds) || !applyPatchCallIds.every((value) => typeof value === 'string'))
-  ) {
-    return null;
-  }
-  if (
-    emittedApplyPatchDoneCallIds !== undefined
-    && (!Array.isArray(emittedApplyPatchDoneCallIds) || !emittedApplyPatchDoneCallIds.every((value) => typeof value === 'string'))
-  ) {
-    return null;
-  }
-  return {
-    emit: row.emit,
-    frame: row.frame,
-    state: {
-      pendingApplyPatchArgumentDeltas: (pending ?? {}) as Record<string, string>,
-      applyPatchCallIds: (applyPatchCallIds ?? []) as string[],
-      emittedApplyPatchDoneCallIds: (emittedApplyPatchDoneCallIds ?? []) as string[],
-    },
-  };
+  return row as unknown as ResponsesClientSseFrameProjection | null;
 }
 
 export function parseRespFormatEnvelopeResult(raw: string): Record<string, unknown> | null {
@@ -274,91 +142,20 @@ export function parseRespFormatEnvelopeResult(raw: string): Record<string, unkno
 
 export function parseAnthropicStopReasonResolution(raw: string): AnthropicStopReasonResolution | null {
   const row = parseRecord(raw, 'parseAnthropicStopReasonResolution');
-  if (
-    !row
-    || typeof row.normalized !== 'string'
-    || typeof row.finishReason !== 'string'
-    || !row.finishReason.trim()
-    || typeof row.isContextOverflow !== 'boolean'
-  ) {
-    return null;
-  }
-  return {
-    normalized: row.normalized.trim().toLowerCase(),
-    finishReason: row.finishReason.trim(),
-    isContextOverflow: row.isContextOverflow
-  };
+  return row as unknown as AnthropicStopReasonResolution | null;
 }
 
 export function parseAnthropicChatCompletionOutcome(raw: string): AnthropicChatCompletionOutcome | null {
   const row = parseRecord(raw, 'parseAnthropicChatCompletionOutcome');
-  if (
-    !row
-    || typeof row.normalized !== 'string'
-    || typeof row.finishReason !== 'string'
-    || !row.finishReason.trim()
-    || typeof row.isContextOverflow !== 'boolean'
-    || typeof row.shouldFailEmptyContextOverflow !== 'boolean'
-  ) {
-    return null;
-  }
-  return {
-    normalized: row.normalized.trim().toLowerCase(),
-    finishReason: row.finishReason.trim(),
-    isContextOverflow: row.isContextOverflow,
-    shouldFailEmptyContextOverflow: row.shouldFailEmptyContextOverflow
-  };
+  return row as unknown as AnthropicChatCompletionOutcome | null;
 }
 
 export function parseProviderResponseToolCallSummary(raw: string): ProviderResponseToolCallSummary | null {
   const row = parseRecord(raw, 'parseProviderResponseToolCallSummary');
-  if (!row) {
-    return null;
-  }
-  const out: ProviderResponseToolCallSummary = {};
-  if ('toolCallCount' in row) {
-    const count = row.toolCallCount;
-    if (typeof count !== 'number' || !Number.isFinite(count) || count < 0) {
-      return null;
-    }
-    out.toolCallCount = Math.floor(count);
-  }
-  if ('toolNames' in row) {
-    const names = row.toolNames;
-    if (!Array.isArray(names)) {
-      return null;
-    }
-    const normalized = names
-      .filter((name) => typeof name === 'string')
-      .map((name) => String(name).trim())
-      .filter((name) => name.length > 0);
-    out.toolNames = normalized.slice(0, 10);
-  }
-  return out;
+  return row as ProviderResponseToolCallSummary | null;
 }
 
 export function parseProviderResponseContextHelpers(raw: string): ProviderResponseContextHelpersOutput | null {
   const row = parseRecord(raw, 'parseProviderResponseContextHelpers');
-  if (!row || typeof row.isServerToolFollowup !== 'boolean' || typeof row.toolSurfaceShadowEnabled !== 'boolean') {
-    return null;
-  }
-  if (
-    row.clientProtocol !== 'openai-chat'
-    && row.clientProtocol !== 'openai-responses'
-    && row.clientProtocol !== 'anthropic-messages'
-  ) {
-    return null;
-  }
-  const output: ProviderResponseContextHelpersOutput = {
-    isServerToolFollowup: row.isServerToolFollowup,
-    toolSurfaceShadowEnabled: row.toolSurfaceShadowEnabled,
-    clientProtocol: row.clientProtocol
-  };
-  if (typeof row.displayModel === 'string' && row.displayModel.trim()) {
-    output.displayModel = row.displayModel.trim();
-  }
-  if (typeof row.clientFacingRequestId === 'string' && row.clientFacingRequestId.trim()) {
-    output.clientFacingRequestId = row.clientFacingRequestId.trim();
-  }
-  return output;
+  return row as unknown as ProviderResponseContextHelpersOutput | null;
 }

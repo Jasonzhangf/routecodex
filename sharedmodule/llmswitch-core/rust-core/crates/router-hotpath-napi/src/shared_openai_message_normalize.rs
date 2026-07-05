@@ -561,6 +561,34 @@ pub(crate) fn normalize_openai_chat_messages_checked(messages: &Value) -> Result
     Ok(output)
 }
 
+fn normalize_openai_chat_request(
+    request: &Value,
+    disable_shell_coerce: bool,
+) -> Result<Value, String> {
+    let Some(row) = request.as_object() else {
+        return Ok(request.clone());
+    };
+    let mut normalized = row.clone();
+
+    if let Some(Value::Array(messages)) = normalized.get("messages") {
+        let message_values = messages
+            .iter()
+            .map(|message| normalize_openai_message(message, disable_shell_coerce))
+            .collect::<Vec<Value>>();
+        let checked = normalize_openai_chat_messages_checked(&Value::Array(message_values))?;
+        normalized.insert("messages".to_string(), checked);
+    }
+
+    if let Some(Value::Array(tools)) = normalized.get("tools") {
+        normalized.insert(
+            "tools".to_string(),
+            Value::Array(tools.iter().map(normalize_openai_tool).collect()),
+        );
+    }
+
+    Ok(Value::Object(normalized))
+}
+
 #[napi_derive::napi]
 pub fn normalize_openai_message_json(
     message_json: String,
@@ -606,11 +634,29 @@ pub fn normalize_openai_chat_messages_json(messages_json: String) -> NapiResult<
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi]
+pub fn normalize_openai_chat_request_json(
+    request_json: String,
+    disable_shell_coerce: bool,
+) -> NapiResult<String> {
+    let request: Value =
+        serde_json::from_str(&request_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = match normalize_openai_chat_request(&request, disable_shell_coerce) {
+        Ok(value) => value,
+        Err(message) => serde_json::json!({
+            "__rccNativeError": true,
+            "code": "MALFORMED_REQUEST",
+            "message": message
+        }),
+    };
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         normalize_openai_chat_messages, normalize_openai_chat_messages_checked,
-        normalize_openai_message, normalize_openai_tool_call,
+        normalize_openai_chat_request, normalize_openai_message, normalize_openai_tool_call,
     };
     use serde_json::json;
 
@@ -769,5 +815,57 @@ mod tests {
 
         let err = normalize_openai_chat_messages_checked(&messages).unwrap_err();
         assert!(err.contains("synthetic_local_control_text"));
+    }
+
+    #[test]
+    fn normalize_openai_chat_request_normalizes_messages_and_tools() {
+        let request = json!({
+            "model": "gpt-test",
+            "messages": [
+                { "role": "developer", "content": "policy" },
+                { "role": "user", "content": "hello" }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "shell_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "cmd": { "type": "string" } }
+                        }
+                    }
+                }
+            ]
+        });
+
+        let out = normalize_openai_chat_request(&request, false).expect("request");
+        assert_eq!(out["messages"][0]["role"], "system");
+        assert_eq!(out["messages"][1]["role"], "user");
+        assert_eq!(out["tools"][0]["function"]["name"], "shell_command");
+    }
+
+    #[test]
+    fn normalize_openai_chat_request_rejects_dangling_tool_history() {
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "hi" },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_missing_1",
+                            "type": "function",
+                            "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                        }
+                    ]
+                },
+                { "role": "assistant", "content": "next turn" }
+            ]
+        });
+
+        let err = normalize_openai_chat_request(&request, false).unwrap_err();
+        assert!(err.contains("dangling_tool_call"));
     }
 }

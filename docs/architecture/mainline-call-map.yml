@@ -21,7 +21,7 @@ chains:
         callee_symbol: apiFetch
         callee_file: webui/src/App.tsx
         owner_feature_id: webui.config_editor_surface
-        semantic_input: "provider card, backup/restore, per-port routing tab, provider picker, or fwd aggregation edit intent"
+        semantic_input: "provider card, backup/restore, single-file httpserver.ports[] entry, provider picker, or fwd aggregation edit intent"
         semantic_output: "authenticated daemon admin/config HTTP request intent without provider secrets in client state"
         status: anchored
       - step_id: wce-02
@@ -695,6 +695,47 @@ chains:
         semantic_input: "Rust-produced diagnostic JSON"
         semantic_output: "HTTP/CLI projected diagnostic JSON; no TS route/health/default-floor recomputation"
         status: anchored
+
+  - chain_id: vr.hit_log_projection.mainline
+    summary: "Virtual Router hit-log diagnostics: host effects collect the route decision context, TS facade calls Rust hit-log projection, and host emits the formatted diagnostic line without owning formatting or telemetry semantics."
+    entry_contract:
+      node: VrHitLog01RouteDecision
+      owner_doc: docs/architecture/wiki/virtual-router-ownership-map.md
+    edges:
+      - step_id: vrh-01
+        from_node: VrHitLog01RouteDecision
+        to_node: VrHitLog02NativeProjection
+        caller_symbol: emitVirtualRouterHitLog
+        caller_file: sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts
+        callee_symbol: createVirtualRouterHitRecord
+        callee_file: sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts
+        owner_feature_id: vr.hit_log_projection
+        semantic_input: "Rust VR target/decision plus request id, session color key, stop-message state, and hit-log config"
+        semantic_output: "native hit-log record request passed through the TS facade without local formatting, provider parsing, color, or reason semantics"
+        status: anchored
+      - step_id: vrh-02
+        from_node: VrHitLog02NativeProjection
+        to_node: VrHitLog03HostEmission
+        caller_symbol: formatVirtualRouterHit
+        caller_file: sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts
+        callee_symbol: format_virtual_router_hit_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
+        owner_feature_id: vr.hit_log_projection
+        semantic_input: "VirtualRouterHitRecord plus omit config"
+        semantic_output: "Rust-owned diagnostic log line; TS host only writes the returned string to console"
+        status: anchored
+      - step_id: vrh-03
+        from_node: VrHitLog02NativeProjection
+        to_node: VrHitLog04TelemetryProjection
+        caller_symbol: toVirtualRouterHitEvent
+        caller_file: sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts
+        callee_symbol: to_virtual_router_hit_event_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
+        owner_feature_id: vr.hit_log_projection
+        semantic_input: "VirtualRouterHitRecord plus request/entry metadata"
+        semantic_output: "Rust-owned telemetry event projection for stats-center consumers"
+        status: anchored
+        note: "Hit-log projection is diagnostics only; it must not reselect routes, mutate provider payload, or implement retry/reroute policy."
 
   - chain_id: runtime.lifecycle.mainline
     summary: "Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."

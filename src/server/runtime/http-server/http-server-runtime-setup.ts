@@ -7,7 +7,7 @@ import type { HubPipeline, HubPipelineConfig, HubPipelineCtor, VirtualRouterArti
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
 import { clearUnresolvedResponsesConversationRequests, preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
-import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-types.js';
+import { buildRouterBootstrapConfigV2 } from '../../../config/virtual-router-types.js';
 import { trafficGovernorIsAtCapacity } from '../../../modules/traffic-governor/index.js';
 
 type RoutingProviderScope = {
@@ -97,7 +97,7 @@ async function buildAllRouterGroupArtifacts(args: {
   const mergedRouting = isRecord(mergedConfig.routing) ? mergedConfig.routing : {};
   mergedConfig.routing = mergedRouting;
   for (const group of groups) {
-    const routerInput = await buildVirtualRouterInputV2(args.server.userConfig as Record<string, unknown>, undefined, {
+  const routerInput = await buildRouterBootstrapConfigV2(args.server.userConfig as Record<string, unknown>, undefined, {
       routingPolicyGroup: group,
     });
     const artifacts = await args.server.bootstrapVirtualRouter(routerInput as UnknownObject);
@@ -220,7 +220,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   applyDefaultStageTimingMode();
   server.userConfig = asRecord(userConfig);
   server.ensureProviderProfilesFromUserConfig();
-  const routerInput = await server.resolveVirtualRouterInput(server.userConfig);
+  const routerInput = await server.resolveRouterBootstrapConfig(server.userConfig);
   const bootstrapArtifacts = await server.bootstrapVirtualRouter(routerInput);
   const providerRuntimeArtifacts = await buildAllRouterGroupArtifacts({
     server,

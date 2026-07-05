@@ -1,3 +1,22 @@
+export enum VirtualRouterErrorCode {
+  NO_STANDARDIZED_REQUEST = "NO_STANDARDIZED_REQUEST",
+  ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND",
+  PROVIDER_NOT_AVAILABLE = "PROVIDER_NOT_AVAILABLE",
+  HTTP_429 = "HTTP_429",
+  CONFIG_ERROR = "CONFIG_ERROR",
+}
+
+export class VirtualRouterError extends Error {
+  constructor(
+    message: string,
+    public readonly code: VirtualRouterErrorCode,
+    public readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "VirtualRouterError";
+  }
+}
+
 export function isNativeDisabledByEnv(): boolean {
   return false;
 }

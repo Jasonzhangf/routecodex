@@ -727,6 +727,30 @@ verification:
     notes:
       - "VR retry-provider-pin reading and forced-target selection must stay queryable as a dedicated file-scoped surface."
 
+  - feature_id: vr.hit_log_projection
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+    contract:
+      - tests/sharedmodule/virtual-router-hit-log.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    integration:
+      - sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts
+    smoke:
+      - npm run verify:llmswitch-rustification-audit
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:vr-no-ts-runtime
+    build:
+      - npm run build:base
+    notes:
+      - "Focused closeout must prove Rust owns create/format/reason/color/session/provider parsing/telemetry projection and TS facade has no local semantic duplicate."
+      - "This is diagnostic projection; live runtime closure is only required if claiming production log behavior, not for code/gate-only rustification."
+
   - feature_id: hub.pipeline_contract_surface
     change_risk: medium
     unit:
@@ -1844,7 +1868,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "WebUI config editor must prove provider cards, provider backup/restore, per-port routing tabs, provider selection, and fwd priority/weighted/roundrobin config without owning runtime selection semantics."
+      - "WebUI config editor must prove provider cards, provider backup/restore, single-file httpserver.ports[] editing, provider selection, and fwd priority/weighted/roundrobin config without owning runtime selection semantics."
       - "Blackbox must use a test config path or disposable fixture; live production config writes require explicit approval."
 
   - feature_id: manager.routing_control_surface

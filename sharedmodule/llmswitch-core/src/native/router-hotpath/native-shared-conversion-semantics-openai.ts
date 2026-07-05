@@ -3,6 +3,7 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import {
+  parseJson,
   parseRecord,
   readNativeFunction,
   safeStringify
@@ -256,6 +257,42 @@ export function normalizeOpenaiMessageWithNative(
     } catch {
       return fail('invalid payload');
     }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function normalizeOpenaiChatRequestWithNative(
+  request: unknown,
+  disableShellCoerce: boolean
+): unknown {
+  const capability = 'normalizeOpenaiChatRequestJson';
+  const fail = (reason?: string) => failNativeRequired<unknown>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(request ?? null);
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, Boolean(disableShellCoerce));
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseJson(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const row = parsed as Record<string, unknown>;
+      if (row.__rccNativeError === true && typeof row.message === 'string' && row.message.trim()) {
+        return fail(row.message.trim());
+      }
+    }
+    return parsed;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

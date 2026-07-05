@@ -882,6 +882,236 @@
 - TS `responses-conversation-store.ts` may project `requestMap` candidates and execute native-selected `detachRequestIds`, but it must not regain unresolved-only cleanup, TTL expiry cleanup, invalid-mode fallback, or dedupe rules for lifecycle sweep.
 - Verified evidence on 2026-07-05: Rust `store_sweep` test, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 66/66, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8351`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
 
+# 2026-07-05: Rustification L1 evidence is source/doc-only
+
+- Rustification L1 audits must not search or cite generated artifacts, local indexes, MemoryPalace output, or generated reports as current code-state evidence.
+- Required discovery boundary: start from `git ls-files`, include only source/docs/tests/scripts/architecture/loop/goal/skill docs, and deny `dist/`, `target/`, `coverage/`, `node_modules/`, `.mempalace/`, `.local-index/`, `mempalace/`, generated HTML, backups, snapshots, and generated reports even if tracked.
+- Current source/doc-only L1 evidence must distinguish script correctness from package-gate state. The audit discovery is source/doc-only and excludes generated/local paths; the latest package gate can still fail on real tracked source growth.
+- 2026-07-06 enforcement update: `scripts/ci/llmswitch-rustification-audit.mjs` now uses `git ls-files -z` instead of recursive directory walking and applies the generated/local-index denylist before reading TS content. `tests/scripts/llmswitch-rustification-audit.spec.ts` proves tracked source TS counts, untracked source TS is ignored, and tracked generated/index artifacts are ignored.
+- 2026-07-06 current dirty-worktree blocker: `npm run verify:llmswitch-rustification-audit` fails on real tracked source growth, not generated artifacts: `prodTsFileCount=165`, `prodTsLocTotal=29384`, `nonNativeFileCount=42`, `nonNativeLocTotal=5217`, error `nonNativeLoc increased in topDir=index.ts: baseline=14, current=15`. The triggering source line is `sharedmodule/llmswitch-core/src/index.ts` exporting `./native/router-hotpath/virtual-router-errors.js`; the target file is currently untracked source. Do not claim the package gate is green until that owning slice resolves or explicitly allows the source growth.
+- 2026-07-06 later same-run current state: after the dirty worktree shifted the Virtual Router error barrel to native hotpath policy, `npm run verify:llmswitch-rustification-audit` passed again with `prodTsFileCount=165`, `prodTsLocTotal=29403`, `nonNativeFileCount=41`, `nonNativeLocTotal=5221`; the source-only audit fixture and llmswitch-core tsc also passed. This proves the L1 gate is green for the current worktree, not total rustification completion.
+- 2026-07-06 deletion-aware update: the source-only audit now ignores tracked files that are deleted in the current working tree. This keeps L1 aligned with current source state during unstaged physical-delete slices and prevents ENOENT from `git ls-files` stale paths. The fixture test covers tracked source, untracked source, generated/local-index artifacts, and tracked-then-deleted source files. Current evidence after compat registry deletion: `verify:llmswitch-rustification-audit` PASS with `prodTsFileCount=160`, `prodTsLocTotal=28882`, `nonNativeFileCount=36`, `nonNativeLocTotal=4700`; compat profile registry TS parallel implementation residue test PASS.
+
+# 2026-07-06: Compat profile registry TS parallel implementation is deleted
+
+- `sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/{registry,types,header-policies,policy-overrides,provider-resolver}.ts` and their local tests are physically deleted from the current working tree.
+- Source-only grep after excluding fixtures/samples/reports shows no active source consumers for `loadCompatProfileRegistry`, `applyHeaderPolicies`, `shouldSkipPolicy`, `detectProviderTypeFromConfig`, `resolveOutboundProfileFromConfig`, `resolveDefaultCompatibilityProfileFromConfig`, `CompatProfileRegistry`, `HeaderPolicyRule`, or `PolicyOverrideConfig`.
+- Residue gate `compat profile registry TS parallel implementation must stay deleted` blocks those files and symbols from returning. This is code/gate closeout only; runtime/live closeout is not claimed.
+
+# 2026-07-06: Responses conversation store preflight guards are Rust-owned
+
+- `conversion.responses.store` capture/record/resume preflight decisions are owned by Rust `planResponsesConversationPreflightJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may execute Map/FS/global singleton/timer IO, non-blocking logging, and `ProviderProtocolError` projection, but it must not locally decide capture missing request/payload skip, record missing request/response id, or resume missing response id / missing `tool_outputs`.
+- Verified on 2026-07-06: Rust focused `conversation_preflight_plan_owns_store_entry_guards` passed; `cargo fmt --check`, native hotpath build, llmswitch-core build, focused responses store/residue Jest, `verify:responses-history-protocol-contract` 74/74, required native export subtest, `verify:llmswitch-rustification-audit` (`prodTsFileCount=160`, `prodTsLocTotal=29008`, `nonNativeFileCount=36`, `nonNativeLocTotal=4753`), function-map gate, mainline call-map gate, and touched-file diff check passed. No managed live restart/replay was claimed.
+
+# 2026-07-05: Responses release request payload is Rust-owned
+
+- `conversion.responses.store` `releaseRequestPayload()` semantics are owned by Rust `planResponsesReleaseRequestPayloadJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may execute store IO after the native plan, but it must not regain stored-context media stripping, `previous_response_id` projection, pending tool-call id extraction, or entry input clearing semantics.
+- Verified evidence on 2026-07-05: Rust `release_request_payload` test, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 67/67, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8345`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses attach-scope collision policy is Rust-owned
+
+- `conversion.responses.store` `attachEntryScopes()` scope collision policy is owned by Rust `planResponsesAttachEntryScopesJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may read `scopeIndex`, project candidate `{scopeKey, requestId}` rows, detach native-selected request ids, and write native-returned scope keys; it must not regain scope-key dedupe, same-entry exclusion, conflict detection, or detach selection.
+- Verified evidence on 2026-07-05: Rust `attach_entry_scopes` test, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 68/68, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8354`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses continuation meta projection is Rust-owned
+
+- `conversion.responses.store` continuation meta projection is owned by Rust `planResponsesContinuationMetaJson` / `plan_responses_continuation_meta` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may pass returned native resume/restore/materialize meta plus the selected entry into native and return native meta, but it must not locally decide providerKey, continuationOwner, or entryKind fill/override policy.
+- Verified evidence on 2026-07-05: Rust `continuation_meta_plan` and `persisted_entry_plan` tests, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 72/72, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8286`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses persisted-entry shaping is Rust-owned
+
+- `conversion.responses.store` persistence serialize/deserialize entry shaping is owned by Rust `planResponsesPersistedEntryJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may JSON-clone disk/Map values and perform file/Map IO, but must not decide persisted entry required fields, canonical field allowlist, entryKind defaults, continuationOwner validity, timestamp defaults, or string/record array cleanup.
+- Verified evidence on 2026-07-05: Rust `persisted_entry_plan` tests 2/2, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 71/71, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8297`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses request-id rebind policy is Rust-owned
+
+- `conversion.responses.store` `rebindRequestId()` provider-switch request id rebinding policy is owned by Rust `planResponsesRebindRequestIdJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may read `requestMap` existence and execute the native-selected rebind, but it must not decide missing old/new id, same id, missing old entry, new id conflict, or successful rebind policy.
+- Verified evidence on 2026-07-05: Rust `rebind_request_id` test, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 197/197, `verify:responses-history-protocol-contract` 69/69, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=54`, `nonNativeLocTotal=8359`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses store token normalization is Rust-owned
+
+- `conversion.responses.store` scope token, `entryKind`, and `continuationOwner` normalization is owned by Rust `planResponsesStoreTokensJson` in `shared_responses_conversation_utils.rs`.
+- TS `responses-conversation-store.ts` may call `planStoreTokens()` and use returned tokens while reading/writing Maps, but must not locally trim scope tokens, default relay/direct entry kinds, or validate continuation owners.
+- Verified evidence on 2026-07-05: Rust `store_tokens_plan` test, native hotpath rebuild, llmswitch-core build, focused responses store/residue Jest 198/198, `verify:responses-history-protocol-contract` 73/73, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Bridge policy action descriptor parsing is Rust-owned
+
+- Phase 1-C `conversion.bridge.action_parsing` current residue was not the old deleted `native-hub-bridge-action-semantics-parsers.ts`; it was TS parsing of Rust-returned bridge policy/action descriptor JSON in `native-hub-bridge-policy-semantics.ts`.
+- Bridge policy shape, phase selection, action descriptor `name/options`, and unknown policy/stage null projection are owned by Rust `hub_bridge_policies.rs`. TS native policy wrappers may invoke native capabilities and parse JSON through shared native fail-fast helpers, but must not reintroduce local `parseActionDescriptor()`, `parseActionDescriptors()`, `parsePhase()`, `parsePolicy()`, or local parse-failure sentinel/logger policy.
+- Verified evidence on 2026-07-05: Rust `hub_bridge_policies` tests 4/4, native hotpath rebuild, llmswitch-core build, residue Jest 160/160 with bridge policy parser ban, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses response_outbound bridge pipeline must call native directly
+
+- `conversion/responses/responses-openai-bridge/response-payload.ts` must not use `createBridgeActionState()` / `runBridgeActionPipeline()` or swallow bridge action pipeline errors for `response_outbound`.
+- The allowed TS role is resolving policy actions, calling `runBridgeActionPipelineWithNative()`, and applying the native-returned message shape. Bridge action execution semantics and failure behavior belong to Rust `hub_bridge_actions` plus required native wrapper fail-fast behavior.
+- Verified evidence on 2026-07-05: residue Jest 161/161 with the response payload native-pipeline ban, llmswitch-core build, native hotpath rebuild, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses request-side bridge action filtering is Rust-owned
+
+- `conversion/responses/responses-openai-bridge.ts` request-side bridge action filtering is owned by Rust `planResponsesBridgePolicyActionsJson` / `plan_responses_bridge_policy_actions` in `hub_bridge_policies.rs`.
+- TS may resolve the bridge policy, pass `stage/actions/messages` to `planResponsesBridgePolicyActionsWithNative()`, and execute `runBridgeActionPipelineWithNative()`, but it must not locally filter `reasoning.extract`, detect tool signals, or drop `tools.normalize-call-ids` / `tools.ensure-placeholders`.
+- Verified evidence on 2026-07-05: Rust `responses_bridge_policy_action_plan` tests 2/2, native hotpath rebuild, llmswitch-core build, residue Jest 162/162 with the TS action-filter ban, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses response payload reasoning normalization must be native fail-fast
+
+- `conversion/responses/responses-openai-bridge/response-payload.ts` must not use the shared TS wrapper `normalizeMessageReasoningTools()` or swallow reasoning normalization failures with best-effort `try/catch`.
+- Allowed TS role: call `normalizeMessageReasoningToolsWithNative()` directly and apply the returned message object; assistant reasoning/tool-call extraction and normalized message shaping stay owned by Rust `normalizeMessageReasoningToolsJson`.
+- Verified evidence on 2026-07-05: llmswitch-core build, focused residue + reasoning-normalizer Jest 164/164, native hotpath rebuild, `verify:llmswitch-rustification-audit` (`nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Dead bridge policy/action TS wrapper files are deleted
+
+- `sharedmodule/llmswitch-core/src/conversion/bridge-policies.ts` and `sharedmodule/llmswitch-core/src/conversion/bridge-actions.ts` are dead TS wrapper layers and must stay physically deleted after the live Responses bridge files move to direct native policy/action facades.
+- `responses-openai-bridge.ts` and `responses-openai-bridge/response-payload.ts` may import native bridge policy helpers directly, but they must not reintroduce a separate TS bridge-policy/action wrapper layer in `src/conversion/`.
+- Verified evidence on 2026-07-05: llmswitch-core build, residue Jest 165/165 with deletion/import bans, native hotpath rebuild, `verify:llmswitch-rustification-audit` (`prodTsFileCount=172`, `prodTsLocTotal=30840`, `nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Dead reasoning-tool-normalizer TS wrapper file is deleted
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.ts` is deleted after zero production consumers remained. Tests should call native `normalizeMessageReasoningToolsWithNative()` directly and assert returned native message truth, not old TS wrapper in-place mutation.
+- Reasoning tool normalization remains owned by Rust `normalizeMessageReasoningToolsJson`; do not reintroduce a shared TS wrapper for it under `conversion/shared/`.
+- Verified evidence on 2026-07-05: llmswitch-core build, native hotpath rebuild, `verify:llmswitch-rustification-audit` (`prodTsFileCount=171`, `prodTsLocTotal=30793`, `nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, focused residue/red/native Jest 170/170, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Zero-consumer shared native wrappers are deleted
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-response.ts`, `chat-output-normalizer.ts`, and `output-content-normalizer.ts` are deleted after repository search showed no production/test consumers.
+- Do not keep zero-consumer TS native wrapper files merely because they are thin; if live callers need the capability, they should import the native facade directly or add a justified owner-specific shell.
+- Verified evidence on 2026-07-05: llmswitch-core build, native hotpath rebuild, `verify:llmswitch-rustification-audit` (`prodTsFileCount=168`, `prodTsLocTotal=30736`, `nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, residue/red Jest 169/169, and touched-file `git diff --check` passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Zero-consumer native router facade files are deleted
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-semantic-mappers.ts` and `native-rcc-fence-semantics.ts` are deleted after repository search showed no production/test consumers outside checked dist, docs/audit baselines, and residue gates.
+- Keep Rust/NAPI exports unless separately proven retired; this slice proved only the TS facade files were dead. `native-failure-policy.ts` is not a deletion candidate while bridge/native exports and provider/executor failure policy still consume it.
+- Verified evidence on 2026-07-05: llmswitch-core build, native hotpath rebuild, focused residue/red Jest 169/169, `verify:llmswitch-rustification-audit` (`prodTsFileCount=166`, `prodTsLocTotal=30604`, `nonNativeFileCount=49`, `nonNativeLocTotal=7219`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses captured input sanitize is Rust-owned
+
+- `conversion/responses/responses-openai-bridge/utils.ts::sanitizeCapturedResponsesInput` no longer owns function_call/function_call_output cleanup policy in TS. It calls Rust `sanitizeCapturedResponsesInputJson` via `sanitizeCapturedResponsesInputWithNative`.
+- Rust `hub_bridge_actions` owns function_call name sanitization, accepted call id collection, invalid function_call drop, orphan `function_call_output` drop when captured function calls exist, and preserving outputs when no function calls were captured.
+- Verified evidence on 2026-07-05: Rust focused test 2/2, llmswitch-core build, residue Jest 166/166, native hotpath build, `verify:llmswitch-rustification-audit` (`prodTsFileCount=166`, `prodTsLocTotal=30585`, `nonNativeFileCount=48`, `nonNativeLocTotal=6983`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Responses bridge utility policy is native-owned
+
+- `conversion/responses/responses-openai-bridge/utils.ts` no longer owns request parameter allowlists, tool passthrough allowlists, slim bridge context selection, decision metadata selection, metadata extra-field extraction, tool-control field stripping, data unwrap, or retained request-parameter merge in TS.
+- Those policies are delegated to Rust/native `hub_bridge_actions` surfaces: `pickResponsesRequestParametersWithNative`, `pickResponsesToolPassthroughFieldsWithNative`, `pickResponsesBridgeDecisionMetadataWithNative`, `extractResponsesMetadataExtraFieldsWithNative`, `buildSlimResponsesBridgeContextWithNative`, `stripResponsesToolControlFieldsWithNative`, `unwrapResponsesDataWithNative`, and `mergeRetainedResponsesRequestParametersWithNative`.
+- `responses-openai-bridge.ts` must not reintroduce `RESPONSES_REQUEST_PARAMETER_KEYS`, `RESPONSES_TOOL_PASSTHROUGH_KEYS`, `pickObjectFields`, or retained-parameter loops; it may call the native-backed wrappers and execute returned plans.
+- Verified evidence on 2026-07-05: Rust `hub_bridge_actions` tests 94/94, llmswitch-core build, residue Jest 166/166, native hotpath build, `verify:responses-history-protocol-contract` 73/73, `verify:llmswitch-rustification-audit` (`prodTsFileCount=166`, `prodTsLocTotal=30627`, `nonNativeFileCount=48`, `nonNativeLocTotal=7006`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: OpenAI chat request normalization is Rust-owned at full request level
+
+- `conversion/shared/openai-message-normalize.ts::normalizeChatRequest()` no longer owns package-level message/tool traversal or tool-history validation in TS. It only reads the existing shell-coerce env switch and calls `normalizeOpenaiChatRequestWithNative()`.
+- Rust `shared_openai_message_normalize.rs` owns `normalizeOpenaiChatRequestJson`, including request clone, message normalization, tool normalization, and final OpenAI chat tool-history validation.
+- Residue gates must keep `openai-message-normalize.ts` from reintroducing `messages.map`, `tools.map`, `normalizeOpenaiMessageWithNative`, `normalizeOpenaiToolWithNative`, or `normalizeOpenaiChatMessagesWithNative` orchestration.
+- Verified evidence on 2026-07-05: Rust `shared_openai_message_normalize` tests 12/12, native hotpath rebuild, llmswitch-core build, focused OpenAI normalize + residue Jest 170/170, `verify:llmswitch-rustification-audit` (`prodTsFileCount=165`, `prodTsLocTotal=30625`, `nonNativeFileCount=47`, `nonNativeLocTotal=6999`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: rcc startup must not call deleted Virtual Router builder on materialized config
+
+- Verified root cause: `loadRouteCodexConfig()` materializes v2 provider files into `userConfig.virtualrouter.providers`; server runtime bootstrap then re-read that materialized config and called the deleted `buildVirtualRouterInputFromUserConfig()` guard when `routingPolicyGroups` and `providers` were both present.
+- Fix rule: `resolveVirtualRouterInput()` must route every `routingPolicyGroups` config through `buildVirtualRouterInputV2()`. The deleted `buildVirtualRouterInputFromUserConfig()` stays a stale-caller guard only.
+- Fix rule: `buildVirtualRouterInputV2()` accepts already-materialized `virtualrouter.providers` as the current provider config source; only raw single-source v2 configs read provider files through `loadProviderConfigsV2()`.
+- Verified evidence: red focused runtime provider-merge test reproduced the exact stale-guard error; after the fix, focused config/runtime/auth Jest 35/35, function-map gate, mainline call-map gate, `build:base`, `pack:rcc`, and `verify:rcc-release-install` passed. Real global install of synchronized `routecodex/rcc@0.90.3590` passed; live `/health` on 5520/4444/5555/10000 returned ready version `0.90.3590`; `/daemon/auth/status` returned `authRequired:false`, `authenticated:true`, `isRemote:false`; `/daemon/admin` returned HTTP 200.
+
+# 2026-07-05: Hub/VR/Chat Process rustification is not complete at the LOC threshold
+
+- `verify:llmswitch-rustification-audit` reaching `47 files / 6999 LOC` is a Phase 2 numeric gate and L1 audit baseline only. It is not proof that Hub Pipeline / Virtual Router / Chat Process rustification is complete.
+- Completion requires every remaining non-native TS file in scope to be classified with evidence as `rust_ssot`, `native_shell_ok`, or `ts_io_shell_ok`; any `ts_semantic_debt` keeps the total goal open.
+- Server Rustification is required only where server code owns Hub/VR/Chat Process semantics. TS server HTTP/SSE/process code may remain only as IO shell, with no continuation/tool governance/payload repair/provider projection semantics.
+- Future reports must say “threshold met” or “slice closed” rather than “rustification complete” until fresh L1 classification, all L2 semantic debts, closeout gates, and runtime replay evidence pass.
+
+# 2026-07-05: Responses continuation input source selection is Rust-owned
+
+- `responses-conversation-store-native.ts` must not choose restore/materialize continuation input from `entry.input` vs `entry.releasedInputPrefix`, and must not branch on `entry.continuationOwner === 'direct'` for that selection.
+- TS restore/materialize facades may pass the complete entry snapshot to native and project returned `{ payload, meta }`; Rust `shared_responses_conversation_utils.rs::{restore_responses_continuation_payload, materialize_responses_continuation_payload}` owns live input vs released prefix, direct/relay behavior, pending tool output replay, and delta construction.
+- Residue gate now forbids `useReleasedPrefixSideChannelOnly`, local `continuationInput`, direct-owner selection, and `Array.isArray(entry.input) ... releasedInputPrefix` patterns inside restore/materialize facade blocks.
+- Verified evidence on 2026-07-05: llmswitch-core build, focused Responses store + residue Jest 207/207, native hotpath build, `verify:responses-history-protocol-contract` 73/73, `verify:llmswitch-rustification-audit` (`prodTsFileCount=165`, `prodTsLocTotal=30610`, `nonNativeFileCount=47`, `nonNativeLocTotal=6999`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Response native parser facade is parse-only, not semantic validator
+
+- `native-hub-pipeline-resp-semantics-parsers.ts` must not own response semantic validation or normalization. It may keep JSON parse, basic object/array/null contract, and type projection of Rust native output.
+- The following belong to Rust response semantics owners, not TS parser facade: alias map key/value trim, token count flooring, SSE descriptor code/stage validation, Responses host policy target normalization, Responses SSE projection state validation, Anthropic stop reason normalization, provider tool summary filtering, and provider response context protocol/display/request id normalization.
+- Residue gate `resp native parser facade must not own response semantic validation` blocks those TS patterns from returning.
+- Verified evidence on 2026-07-05: llmswitch-core build, focused parser observability + residue Jest 179/179, native hotpath build, `verify:llmswitch-rustification-audit` (`prodTsFileCount=165`, `prodTsLocTotal=30407`, `nonNativeFileCount=47`, `nonNativeLocTotal=6796`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Req outbound native parser facade is parse-only for compat output
+
+- `native-hub-pipeline-req-outbound-semantics-parsers.ts` must not own req_outbound compat output semantic validation. It may parse JSON, enforce basic object/null parse contract, and type-project Rust native output.
+- `parseReqOutboundCompatOutput()` must not locally validate/rebuild `payload`, trim/filter `appliedProfile`, or validate `nativeApplied`; those are Rust req_outbound compat owner semantics.
+- The zero-runtime `parseBoolean()` parser surface is removed; parser observability uses live `parseJsonObject()`.
+- Residue gate `req outbound native parser facade must not own compat output semantic validation` blocks these TS patterns from returning.
+- Verified evidence on 2026-07-05: llmswitch-core build, focused parser observability + residue Jest 180/180, native hotpath build, `verify:llmswitch-rustification-audit` (`prodTsFileCount=165`, `prodTsLocTotal=30377`, `nonNativeFileCount=47`, `nonNativeLocTotal=6766`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: Req inbound native parser facade is parse-only for tool-output snapshot result
+
+- `native-hub-pipeline-req-inbound-semantics-parsers.ts` must not own tool-output snapshot result semantic validation. It may parse Rust native JSON as an object and type-project the returned result.
+- `parseToolOutputSnapshotBuildResult()` must not locally validate/rebuild nested `snapshot` or `payload`; the `ToolOutputSnapshotBuildResult { snapshot, payload }` contract belongs to Rust `hub_req_inbound_tool_output_snapshot.rs`.
+- Residue gate `req inbound native parser facade must not own tool output snapshot semantic validation` blocks local snapshot/payload object checks, array rejection, and local rebuild from returning.
+- Verified evidence on 2026-07-05: llmswitch-core build, focused parser observability + residue Jest 181/181, native hotpath build, `verify:llmswitch-rustification-audit` (`prodTsFileCount=165`, `prodTsLocTotal=30366`, `nonNativeFileCount=47`, `nonNativeLocTotal=6755`), `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and touched-file diff check passed. No live managed install/restart or upstream replay was claimed.
+
+# 2026-07-05: System tool guidance text is Rust-owned
+
+- `guidance/index.ts::buildSystemToolGuidance()` must not locally construct the generic OpenAI tool_calls guidance text. It calls native `buildSystemToolGuidanceJson` and fail-fast parses the Rust string.
+- Rust `req_outbound_stage3_compat.rs::build_system_tool_guidance_json()` owns the current generic system tool guidance text and must remain apply_patch-policy-free; apply_patch guidance/schema policy remains owned by dedicated Chat Process/apply_patch owners, not generic guidance.
+- Residue gate `system tool guidance text must be native-owned` blocks local TS `const bullet`, `lines.push`, and `lines.join` reconstruction inside `buildSystemToolGuidance()`.
+- Verified evidence on 2026-07-05: Rust focused test `system_tool_guidance_is_native_owned_and_apply_patch_free`, native hotpath build, llmswitch-core build, focused tool-guidance + residue Jest 178/178, required-export subtest, `verify:llmswitch-rustification-audit` (`prodTsFileCount=165`, `prodTsLocTotal=30270`, `nonNativeFileCount=45`, `nonNativeLocTotal=6137`), function-map gate, mainline gate, and touched-file diff check passed. Full required-export spec still has unrelated servertool/req_inbound assertion failures; full cargo fmt remains blocked by unrelated `exec_command_guard.rs` formatting. No live managed restart/replay was claimed.
+
+# 2026-07-05: RouteCodex MemPalace artifact exclusion gate
+
+- RouteCodex must not add root `mempalace.yaml`; root governance treats root MemPalace files as forbidden local/tool residue and `repo-sanity` rejects them.
+- `mempalace mine .` from repo root does not read `.local-index/mempalace/mempalace.yaml`; it uses auto-detected defaults plus MemPalace built-in skips and `.gitignore`.
+- `scripts/ci/mempalace-scan-artifact-audit.mjs` is the project gate for current scanner behavior. It imports MemPalace's own `scan_project(..., respect_gitignore=True)` and fails if any scanned file is under `dist`, `node_modules`, `target`, `coverage`, `build`, `.next`, `.turbo`, `.local-index`, or `.mempalace`.
+- Verified on 2026-07-05: `npm run verify:mempalace-scan-artifacts` passed with `scannedFiles=7015 artifactHits=0`. This proves current scanning excludes build/local artifacts; it does not prove old `routecodex` wing drawers were purged.
+- Historical `wing=routecodex` Chroma metadata was also audited on 2026-07-05: `26679` drawer rows, `975` distinct `source_file` values, and zero `source_file` hits for `dist`, `node_modules`, `target`, `coverage`, `build`, `.next`, `.turbo`, `.local-index`, and `.mempalace`. This proves the existing wing source metadata has no generated/local artifact paths, but not a full semantic vector-content purge.
+
+# 2026-07-06: Tool guidance augmentation is Rust-owned
+
+- `guidance/index.ts::augmentOpenAITools()` and `augmentAnthropicTools()` no longer own tool description/schema mutation. They fail-fast call native `augmentOpenAIToolsJson` / `augmentAnthropicToolsJson` and parse the returned array.
+- Rust `req_outbound_stage3_compat.rs` owns OpenAI/Anthropic generic tool guidance augmentation for `shell`, `exec_command`, `update_plan`, `view_image`, and MCP resource tools. Generic guidance continues to leave `apply_patch` unchanged; apply_patch policy belongs to dedicated Chat Process/apply_patch owners, not generic guidance.
+- Residue gate `system tool guidance text must be native-owned` now also bans local TS guidance markers, `appendOnce`, `ensureObjectSchema`, and local `.parameters` / `.input_schema` mutation inside the TS augment facades.
+- Verified on 2026-07-06: Rust focused guidance tests passed, native hotpath build passed, llmswitch-core build passed, focused tool-guidance + residue Jest passed 179/179, required-export subtest passed, `coverage-guidance-augment.mjs` passed, `cargo fmt --check` passed, `verify:llmswitch-rustification-audit` passed with `prodTsLocTotal=29960` and `nonNativeFileCount=45/nonNativeLocTotal=6137`, function-map gate and mainline call-map gate passed. No live restart/replay was claimed.
+
+# 2026-07-06: Tool args JSON artifact repair is Rust-owned
+
+- `tools/args-json.ts::parseToolArgsJson()` no longer owns `<arg_key>/<arg_value>` JSON/key/value artifact repair. It is a fail-fast native facade over `parseToolArgsJsonWithArtifactRepairJson`.
+- Rust `resp_process_stage1_tool_governance_blocks::json_args` owns lenient raw malformed JSON repair, recursive artifact key normalization, injected arg pair extraction, primitive coercion, and the invalid/non-string empty-object behavior used by tool registry callers.
+- `tool-registry.ts` must call `validateApplyPatchArgumentsJson` with the native binding envelope `{ arguments: <source> }`; passing the raw value directly collapses valid apply_patch requests to `empty_patch`.
+- Residue gate `tool args JSON artifact repair must be native-owned` blocks local TS arg artifact regex, XML tag stripping, primitive coercion, recursive repair, and parse-failure warning fallback from returning.
+- Verified on 2026-07-06: Rust focused parser test passed, Rust `resp_process_stage1_tool_governance` passed 214/1 ignored, native hotpath build passed, llmswitch-core build passed, focused apply_patch tool-registry + residue Jest passed 183/183, required-export subtest passed, `cargo fmt --check` passed, `verify:llmswitch-rustification-audit` passed with `prodTsFileCount=165`, `prodTsLocTotal=29818`, `nonNativeFileCount=44`, `nonNativeLocTotal=5956`, function-map gate, mainline call-map gate, servertool rust-only gate, and touched-file diff check passed. No managed live restart/replay was claimed.
+
+# 2026-07-06: Exec command argument normalization is Rust-owned
+
+- `tools/exec-command/normalize.ts::normalizeExecCommandArgs()` no longer owns exec_command argument normalization. It is a fail-fast native facade over `normalizeExecCommandArgsJson`.
+- Rust `resp_process_stage1_tool_governance_blocks::exec_command_args` owns compat-mode nested `input` / `arguments` unwrap, canonical `cmd`-only behavior, aliases `cmd` / `command` / `toon` / `script`, command arrays, option aliases `cwd` / `workDir` / `timeoutMs` / `max_tokens` / `yield_ms` / `wait_ms`, `with_escalated_permissions` mapping, `read_command_from_args` metadata repair, and removal of legacy `toon` from normalized/missing shapes.
+- Residue gate `exec_command argument normalization must be native-owned` blocks local TS exec_command normalization aliases, compat unwrap, option alias repair, and legacy `toon` normalization from returning.
+- Verified on 2026-07-06: Rust focused normalization test passed, Rust `resp_process_stage1_tool_governance` passed 215/1 ignored, native hotpath build passed, llmswitch-core build passed, focused exec-command/tool-registry/residue Jest passed 201/201, required-export subtest passed, `cargo fmt --check` passed, `verify:llmswitch-rustification-audit` passed with `prodTsFileCount=165`, `prodTsLocTotal=29768`, `nonNativeFileCount=43`, `nonNativeLocTotal=5832`, function-map gate, mainline call-map gate, servertool rust-only gate, and touched-file diff check passed. No managed live restart/replay was claimed.
+
+# 2026-07-06: Virtual Router hit-log formatting is Rust-owned
+
+- `runtime/virtual-router-hit-log.ts` no longer owns Virtual Router hit-log formatting, stop-message runtime summary, hit record normalization, telemetry event projection, provider key parsing, target display label, session color key/color, route color, continuation scope truncation, hit reason/context summary, omit filtering, or formatted log-line construction.
+- Rust `virtual_router_hit_log.rs` owns those contracts through required native exports: `createVirtualRouterHitRecordJson`, `toVirtualRouterHitEventJson`, `formatVirtualRouterHitJson`, `formatContinuationScopeJson`, `parseVirtualRouterHitProviderKeyJson`, `describeTargetProviderJson`, `resolveRouteColorStr`, `resolveSessionColorStr`, `resolveSessionLogColorKeyJson`, and `buildHitReasonJson`.
+- TS `runtime/virtual-router-hit-log.ts` may only load the required native binding, flatten `routingState` into the native input contract, parse native JSON, return native strings, and keep exported TS types.
+- Residue gate `virtual router hit-log formatting must be native-owned` blocks local TS stop-message summary, omit normalization, provider parsing, color maps/hash state, context summary, hit reason building, timestamp formatting, and stopMessage label formatting from returning.
+- Verified on 2026-07-06: Rust focused hit-log contract test passed, native hotpath build passed, llmswitch-core build passed, focused hit-log/required-export/residue Jest passed, `cargo fmt --check` passed, `verify:llmswitch-rustification-audit` passed with `prodTsFileCount=165`, `prodTsLocTotal=29421`, `nonNativeFileCount=42`, `nonNativeLocTotal=5251`, function-map gate, mainline call-map gate, and touched-file diff check passed. No managed live restart/replay was claimed.
+
+# 2026-07-05: exec_command hardcoded guard Phase 3A is Rust-owned, not total rustification
+
+- `exec_command` hardcoded guard Phase 3A is native-owned by `resp_process_stage1_tool_governance_blocks/exec_command_guard.rs` through `validateExecCommandGuardJson`.
+- Rust owns `git reset --hard` blocking, `git checkout` scope blocking, wrapped `bash/sh/zsh -c/-lc` inspection, and persistent shell write detection for exec/shell tool governance.
+- TS `exec-command/validator.ts` and `tools/tool-registry.ts` may call the native guard and keep only normalization, IO-facing validation plumbing, policy-file checks, and the remaining Phase 3B shell-wrapper shape/repair shell. They must not restore TS reset/checkout regex/tokenizer/write-detector semantics.
+- Verified evidence on 2026-07-05: Rust `exec_command_guard` 21/21, Rust `resp_process_stage1_tool_governance` 211 passed / 1 ignored, native hotpath build, llmswitch-core tsc, focused exec-command/tool-registry/residue Jest 204/204, rustification audit (`prodTsFileCount=165`, `prodTsLocTotal=30270`, `nonNativeFileCount=45`, `nonNativeLocTotal=6137`), function-map gate, mainline-call-map gate, servertool rust-only gate, and `git diff --check` all passed.
+- This closes only the Phase 3A slice. Full Hub/VR/Chat Process rustification remains open because Phase 3B `exec_command` TS policy/shape debt and other L1 `ts_semantic_debt` items still require owner-scoped closeout and runtime replay before runtime completion can be claimed.
+
+# 2026-07-05: exec_command guard Phase 3B policy and shell-wrapper are Rust-owned
+
+- `exec_command` guard Phase 3B moved shell-wrapper shape validation, zero-ambiguity shell-wrapper repair, wrapped-shell policy matching, and policy-file regex rule evaluation into Rust `validateExecCommandGuardJson`.
+- TS `exec-command/validator.ts` no longer owns policy regex parsing/evaluation or shell-wrapper shape/repair semantics. It may read an optional policy file as IO, pass raw `policyJson` to native, and project native `normalizedCmd`.
+- Residue gate `exec_command hardcoded guard rules must be native-owned` now also bans TS policy regex loader/evaluator and shell-wrapper helper patterns from returning.
+- Verified evidence on 2026-07-05: Rust `exec_command_guard` 23/23, Rust `resp_process_stage1_tool_governance` 213 passed / 1 ignored, native hotpath build, llmswitch-core tsc, focused exec-command/tool-registry/servertool/residue Jest 204/204, rustification audit (`prodTsFileCount=165`, `prodTsLocTotal=30110`, `nonNativeFileCount=45`, `nonNativeLocTotal=6137`), function-map gate, mainline-call-map gate, servertool rust-only gate, `build:base`, and `git diff --check` all passed.
+- This closes only the Phase 3B policy/shape slice. Full Hub/VR/Chat Process rustification remains open because TS `tools/exec-command/normalize.ts`, `tools/args-json.ts`, compat profile registry, guidance tool schema mutation, VR contracts, and hit-log debt still require owner-scoped closeout.
+
 # 2026-07-05: Responses direct passthrough must not provider-wire preflight live bodies
 
 - Marker: responses-direct-no-wire-preflight-stackfix-20260705.
@@ -890,3 +1120,89 @@
 - Provider-specific or historical Responses tool-output shape rejection belongs to the provider/runtime or Hub relay owner that actually transforms the protocol. Server same-protocol direct must not sanitize, repair, force relay, replay raw metadata, or fail-fast because of historical `function_call_output.content`.
 - Verified closeout on 2026-07-05: focused route-level red/green test, direct payload spec, direct architecture gates, function-map gate, mainline-call-map gate, `build:base`, `pack:rcc`, `verify:rcc-release-install`, global `routecodex/rcc 0.90.3591` install, managed `rcc restart --port 5520`, all configured `/health` endpoints ready, and live same-shape `/v1/responses` smoke returned HTTP 200 with no new post-restart stack-overflow logs.
 - Caveat: the exact original request sample directory for `...3225` was unavailable; replay used the same entry and same problematic body shape.
+
+# 2026-07-06: Virtual Router contracts file is type-only bridge surface
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` no longer owns TS runtime route constants or Virtual Router error values.
+- Removed `DEFAULT_MODEL_CONTEXT_TOKENS`, `DEFAULT_ROUTE`, and `ROUTE_PRIORITY` from the TS contracts file. Route/default/priority truth remains in Rust `virtual_router_engine`.
+- `VirtualRouterError` and `VirtualRouterErrorCode` now live in the existing native-linked `native-router-hotpath-policy.ts` shell. Production, test, and script imports must not import those value exports from `virtual-router-contracts.ts`.
+- Residue gate `virtual router contracts must stay type-only bridge surface` blocks TS route constants and error value exports from returning to the contracts file.
+- Verified on 2026-07-06: `npm --prefix sharedmodule/llmswitch-core run build`, `npm run build:native-hotpath`, focused routing/error/websearch/residue Jest, `verify:llmswitch-rustification-audit` (`prodTsFileCount=165`, `prodTsLocTotal=29403`, `nonNativeFileCount=41`, `nonNativeLocTotal=5221`), function-map gate, mainline call-map gate, and touched-file diff check passed. No managed live restart/replay was claimed.
+
+# 2026-07-06: Responses store continuation-allow flag is Rust-owned
+
+- `responses-conversation-store.ts::recordResponse()` no longer decides whether a saved `/v1/responses` entry may continue based on pending tool calls. It only collects `pendingToolCallIds` from the current canonical `entry.input`, calls native `planResponsesRecordContinuationFlagJson`, and projects the returned `allowContinuation`.
+- Rust `shared_responses_conversation_utils.rs::plan_responses_record_continuation_flag` owns the branch contract:
+  - non-empty trimmed pending tool call ids => `allowContinuation=true`, reason `pending_tool_calls`
+  - otherwise keep existing `allowContinuation=true`, reason `already_allowed`
+  - otherwise `allowContinuation=false`, reason `no_pending_tool_calls`
+- The old TS branch `entry.allowContinuation === true && args.allowScopeContinuation === true && entry.scopeKeys.length > 0` was a semantic no-op and must not return as an alternate continuation owner.
+- Verified on 2026-07-06: focused Rust test for `record_continuation_flag_plan_owns_pending_tool_decision`, native hotpath build, llmswitch-core build, focused responses store/residue Jest, `verify:responses-history-protocol-contract` (`75` tests), required native export subtest, rustification audit (`prodTsFileCount=160`, `prodTsLocTotal=29066`, `nonNativeFileCount=36`, `nonNativeLocTotal=4752`), function-map gate, mainline gate, and touched-file diff check all passed. No managed live restart/replay was claimed.
+
+# 2026-07-06: Responses store capture entry construction is Rust-owned
+
+- `responses-conversation-store.ts::captureRequestContext()` no longer owns `ConversationEntry` construction semantics. TS computes scope keys and executes Map/FS persistence, but the entry fields are planned by native `planResponsesCapturedEntryJson`.
+- Rust `shared_responses_conversation_utils.rs::plan_responses_captured_entry` owns capture-time `basePayload`, normalized `input`, optional `tools`, `allowContinuation`, provider/session/conversation tokens, `entryKind`, `continuationOwner=null`, scope keys, port scope, and timestamps.
+- Important contract: when `basePayload` already contains `tools`, Rust does not duplicate them into separate `entry.tools`; resume helpers read tools from full base payload when needed.
+- Verified on 2026-07-06: focused Rust test `captured_entry_plan_owns_capture_entry_construction`, native hotpath build, llmswitch-core build, focused responses store/residue Jest, required native export subtest, `verify:responses-history-protocol-contract` (`76` tests), rustification audit (`prodTsFileCount=160`, `prodTsLocTotal=29117`, `nonNativeFileCount=36`, `nonNativeLocTotal=4747`), function-map gate, mainline gate, and touched-file diff check all passed. No managed live restart/replay was claimed.
+
+# 2026-07-06: Responses store dead TS wrappers/required exports can be deleted after source-only consumer proof
+
+- For `conversion.responses.store`, deleting a TS/native facade pair is allowed only after source-only search proves no active consumer under `sharedmodule/llmswitch-core/src` and tests/scripts/docs are treated as evidence only after opening the source files.
+- On 2026-07-06 the following zero-consumer TS wrappers were safely deleted:
+  - `pickPersistedFields`
+  - `prepareConversationEntry`
+  - `shouldAllowContinuation`
+  - `pickResponsesPersistedFieldsWithNative`
+  - `prepareResponsesConversationEntryWithNative`
+  - `shouldAllowResponsesConversationContinuationWithNative`
+  - required exports `pickResponsesPersistedFieldsJson`, `prepareResponsesConversationEntryJson`, `shouldAllowResponsesConversationContinuationJson`
+- Boundary: the underlying Rust internal functions still exist and may still appear in `lib.rs` / architecture docs. Do not delete the Rust NAPI shells in the same slice unless map/wiki/export surfaces are updated together; otherwise this is no longer a pure dead-facade cleanup.
+- Verified on 2026-07-06: source-only `rg` found no active consumer beyond fixture text, native build passed, llmswitch-core build passed, focused responses store/residue Jest passed, required export subtest passed, `verify:responses-history-protocol-contract` passed (`76` tests), rustification audit passed (`prodTsLocTotal=28969`, `nonNativeLocTotal=4747`), function-map gate passed, mainline call-map gate passed, and touched-file diff check passed.
+
+# 2026-07-06: Responses conversation store TS file is an IO shell locked by residue gate
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts` is classified as `ts_io_shell_ok/native_plan_io_shell_ok` after L2 closeout evidence.
+- Allowed TS roles in this file: filesystem persistence, process/env path resolution, global singleton/timer lifecycle, Map/index mutation, candidate projection for native plans, non-blocking logging, diagnostics counters, and `ProviderProtocolError` projection from native plan reasons.
+- Forbidden TS roles in this file: manual scope-key construction, continuation owner comparisons, continuation allow true/false branches, local response output-to-input conversion, retired `pick/prepare/shouldAllow` wrappers, history reconstruction, released-prefix fallback, and continuation payload repair.
+- Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` test `responses conversation store TS surface must stay a native-plan IO shell` requires native plan calls and blocks those forbidden patterns.
+- Verified on 2026-07-06: focused store residue Jest passed, native hotpath build passed, llmswitch-core build passed, `verify:responses-history-protocol-contract` passed (`76` Rust tests), rustification audit passed (`prodTsFileCount=160`, `prodTsLocTotal=28969`, `nonNativeFileCount=36`, `nonNativeLocTotal=4747`), function-map gate passed, and mainline call-map gate passed. No managed live restart/replay was claimed.
+# 2026-07-06: Rustification L1 currently has no Hub/VR semantic TS debt, MemPalace scan excludes artifacts
+
+- Fresh source/doc-only rustification audit (`node scripts/ci/llmswitch-rustification-audit.mjs --json`) reports `prodTsFileCount=160`, `prodTsLocTotal=28969`, `nonNativeFileCount=36`, `nonNativeLocTotal=4747`.
+- The current 36 nonNative TS files classify as `ts_io_shell_ok`, `native_shell_ok`, `type_shell_ok`, or diagnostics/process IO for the Hub Pipeline / Virtual Router semantic watchlist; no current `ts_semantic_debt` remains in that list. This is code/L1 classification only and does not claim managed runtime closure.
+- `conversion/shared/responses-conversation-store.ts` is classified as `ts_io_shell_ok/native_plan_io_shell_ok` because the remaining TS surface executes Map/FS/global singleton/timer/logging/error-projection IO over Rust native plans, with residue gates blocking continuation owner/scope/allowContinuation semantics from returning.
+- MemPalace project scanning is verified to exclude generated/local artifacts by `npm run verify:mempalace-scan-artifacts` (`scannedFiles=7008`, `artifactHits=0`). Representative `dist/`, package `dist/`, Rust `target/`, `node_modules/`, `coverage/`, `.local-index/`, and `.mempalace/` paths are ignored; root `mempalace.yaml` and root `mempalace/` are absent.
+
+# 2026-07-06: Responses handler request-body metadata belongs behind the bridge
+
+- `src/server/handlers/responses-handler.ts` must not read request body metadata directly. HTTP request-body metadata preprocessing for `/v1/responses` belongs behind `src/modules/llmswitch/bridge/responses-request-bridge.ts`.
+- `prepareResponsesHandlerRuntimeForHttp()` owns reading body metadata, merging request metadata, deriving session/conversation request context, stripping payload metadata, and returning `requestBodyMetadata` to the handler for logging/projection.
+- Gate: `npm run verify:responses-handler-single-bridge-surface` blocks handler imports/calls that bypass the bridge. Verified on 2026-07-06 with the single-bridge gate, focused Responses bridge/handler Jest 23/23, and `npx tsc --noEmit --pretty false`.
+
+# 2026-07-06: ProviderProtocol boundary conflicts are not provider availability failures
+
+- Provider protocol boundary conflicts such as `ERR_PROVIDER_PROTOCOL_MISMATCH` or `runtime_control.providerProtocol conflict` must be classified as protocol boundary errors, not provider availability failures.
+- Retry planning must fail fast/project them without retry/reroute, without `retrySwitchPlan`, and without excluding the current provider from Virtual Router route hits.
+- Gate: `npm run verify:route-metadata-preselected-route-owner` requires `isProviderProtocolBoundaryError()`, protocol-boundary short-circuit, `excludedCurrentProvider: false`, and a regression named `protocol boundary conflicts never exclude providers from VR route hits`. Verified on 2026-07-06 with the gate, focused provider failure Jest 8/8, `npx tsc --noEmit --pretty false`, and `npm run verify:architecture-ci-longtail`.
+
+# 2026-07-06: Architecture maps and install build tiering closeout facts
+
+- `function-map.yml` `required_tests` entries must be concrete file paths, not directories; directory paths can crash `verify:function-map-test-coverage-integrity` with `EISDIR`.
+- `scripts/install-global.sh` must run `npm run build:min` for its default build path; `build:dev` is not accepted by `verify:build-script-tiering`.
+- Deleted source paths must not remain in function-map `allowed_paths`; `verify:architecture-deleted-path` is the guard for stale map paths after physical deletions.
+- Duplicate-owner summary text can trigger cross-family owner collisions; summary wording must avoid claiming another feature's action such as `metadata:read` when the owner is a slot/API surface.
+- Verified on 2026-07-06: `verify:build-script-tiering`, `verify:function-map-test-coverage-integrity`, `verify:function-map-required-tests-bidir`, `verify:function-map-compile-gate`, `verify:architecture-deleted-path`, `verify:architecture-duplicate-owner`, `verify:architecture-ts-owner-ban`, full `verify:architecture-ci`, `build:base`, and rustification audit all passed. No managed live restart/replay was claimed.
+# 2026-07-06: managed restart must stay single-port and snapshot-first for runtime adoption
+
+- `src/cli/commands/restart.ts` explicit `routecodex restart --port <port>` is a single-target lifecycle action. It may use the matched config port entry only to resolve the probe host; it must not expand into sibling port-group restarts. Otherwise stale/missing sibling listeners can block managed runtime adoption on the requested port.
+- Release-package restart must compare live `/health.version` with the current CLI/package version and, when they differ, adopt the current runtime through `start --restart --port <target>` instead of accepting in-place `SIGUSR2` reload on the old process.
+- `scripts/install-global.sh` must keep `ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1` on every shim rewrite. Without snapshot-first shims, `routecodex` and `rcc` can resolve different binaries (`routecodex` from newer global package, `rcc` from stale global package), while managed live/runtime truth must converge on `~/.rcc/install/current`.
+- Verified 2026-07-06:
+  - restart focused Jest + probe-host Jest PASS
+  - root `tsc` PASS
+  - `build:min` PASS
+  - `install-release-snapshot.mjs` installed `routecodex-0.90.3596-2026-07-05T221943Z`
+  - snapshot-first shims made both `routecodex --version` and `rcc --version` report `0.90.3596`
+  - managed `routecodex restart --port 5555` moved live `/health.version` on both `5555` and `5520` to `0.90.3596`
+  - same-entry `/v1/responses` probe `/tmp/p0-rust-live-5555-after-restart.json` showed first-turn stopless `exec_command`, no leaked stop schema, and continuation completion

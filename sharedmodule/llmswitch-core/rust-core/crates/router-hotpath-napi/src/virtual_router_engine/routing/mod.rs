@@ -21,6 +21,9 @@ pub(crate) use config::{
 pub(crate) use direct_model::{
     direct_model_media_requirement_error, parse_direct_provider_model, select_direct_provider_model,
 };
+pub(crate) use error_err05_availability::{
+    resolve_error_err05_route_availability_decision, ErrorErr05RouteAvailabilityDecisionInput,
+};
 pub(crate) use key_utils::{extract_key_alias, extract_provider_id};
 #[allow(unused_imports)]
 pub(crate) use metadata::{
@@ -31,9 +34,6 @@ pub(crate) use metadata::{
 pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,
     resolve_instruction_target, InstructionTargetMatchMode,
-};
-pub(crate) use error_err05_availability::{
-    resolve_error_err05_route_availability_decision, ErrorErr05RouteAvailabilityDecisionInput,
 };
 
 #[allow(unused_imports)]

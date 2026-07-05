@@ -10,8 +10,9 @@ import {
   convertOutputToInputItems,
   materializeContinuationPayload,
   planAttachEntryScopes,
-  pickPersistedFields,
   planCapturePendingCleanup,
+  planCapturedEntry,
+  planConversationPreflight,
   planContinuationLookupByResponseId,
   planContinuationMeta,
   planConversationRetention,
@@ -20,15 +21,14 @@ import {
   planRebindRequestId,
   planReleaseRequestPayload,
   planRecordScopeCleanup,
+  planRecordContinuationFlag,
   planRecordScopeEntryMatch,
   planResumeEntryMatch,
   planStoreSweep,
   planStoreTokens,
   planScopeContinuationMatch,
-  prepareConversationEntry,
   restoreContinuationPayload,
   resumeConversationPayload,
-  shouldAllowContinuation
 } from './responses-conversation-store-native.js';
 import type {
   AnyRecord,
@@ -312,8 +312,14 @@ class ResponsesConversationStore {
 
   captureRequestContext(args: CaptureContextArgs): void {
     this.ensurePersistenceLoaded();
-    const { requestId, payload, context } = args;
-    if (!requestId || !payload) return;
+    const { payload, context } = args;
+    const capturePreflight = planConversationPreflight({
+      mode: 'capture_request',
+      requestId: args.requestId,
+      payload
+    });
+    if (capturePreflight.action !== 'continue') return;
+    const requestId = capturePreflight.requestId ?? args.requestId;
     this.prune();
     assertResponsesConversationStoreNativeAvailable();
     const existing = this.requestMap.get(requestId);
@@ -326,7 +332,6 @@ class ResponsesConversationStore {
       continuationOwner: 'relay'
     });
     const portScopeKey = readPortScopeKey(args);
-    const prepared = prepareConversationEntry(payload, context);
     const cleanupCandidates: CapturePendingCleanupCandidate[] = scopeKeys.length
       ? [...this.requestMap.values()].map((candidate) => ({
         requestId: candidate.requestId,
@@ -350,22 +355,20 @@ class ResponsesConversationStore {
       conversationId: args.conversationId,
       entryKind: args.entryKind
     });
-    const entry: ConversationEntry = {
+    const entryPlan = planCapturedEntry({
       requestId,
-      basePayload: isRecord(prepared.basePayload) ? prepared.basePayload : pickPersistedFields(payload),
-      input: Array.isArray(prepared.input) ? prepared.input : [],
-      allowContinuation: shouldAllowContinuation(payload),
-      tools: Array.isArray(prepared.tools) ? prepared.tools : undefined,
       providerKey: entryTokens.providerKey,
-      entryKind: entryTokens.entryKind,
-      continuationOwner: undefined,
       sessionId: entryTokens.sessionId,
       conversationId: entryTokens.conversationId,
+      entryKind: entryTokens.entryKind,
+      payload,
+      context,
       scopeKeys,
       portScopeKey,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    };
+      nowMs: Date.now()
+    });
+    if (entryPlan.action !== 'entry' || !entryPlan.entry) return;
+    const entry = entryPlan.entry;
     this.requestMap.set(requestId, entry);
     this.flushPersistence();
   }
@@ -373,9 +376,14 @@ class ResponsesConversationStore {
   recordResponse(args: RecordResponseArgs): void {
     this.ensurePersistenceLoaded();
     const response = args.response;
-    const responseId = typeof response.id === 'string' ? response.id : undefined;
-    const requestId = typeof args.requestId === 'string' ? args.requestId.trim() : '';
-    if (!requestId) {
+    const recordPreflight = planConversationPreflight({
+      mode: 'record_response',
+      requestId: args.requestId,
+      response
+    });
+    const responseId = recordPreflight.responseId;
+    const requestId = recordPreflight.requestId ?? '';
+    if (recordPreflight.action === 'throw' && recordPreflight.reason === 'missing_request_id') {
       throw new ProviderProtocolError('Responses conversation response capture requires request context', {
         code: 'MALFORMED_RESPONSE',
         protocol: 'openai-responses',
@@ -438,7 +446,7 @@ class ResponsesConversationStore {
         }
       });
     }
-    if (!responseId) {
+    if (recordPreflight.action === 'throw' && recordPreflight.reason === 'missing_response_id') {
       throw new ProviderProtocolError('Responses conversation response capture requires response id', {
         code: 'MALFORMED_RESPONSE',
         protocol: 'openai-responses',
@@ -447,6 +455,19 @@ class ResponsesConversationStore {
           context: 'responses-conversation-store.recordResponse',
           reason: 'missing_response_id',
           requestId
+        }
+      });
+    }
+    if (recordPreflight.action !== 'continue' || !responseId) {
+      throw new ProviderProtocolError('Responses conversation response capture preflight failed', {
+        code: 'MALFORMED_RESPONSE',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.recordResponse',
+          reason: recordPreflight.reason,
+          requestId,
+          responseId
         }
       });
     }
@@ -483,13 +504,11 @@ class ResponsesConversationStore {
     if (assistantBlocks.length) {
       entry.input.push(...assistantBlocks);
     }
-    const hasPendingToolCalls = collectPendingToolCallIds(entry.input).length > 0;
-    if (hasPendingToolCalls) {
-      entry.allowContinuation = true;
-    }
-    if (entry.allowContinuation === true && args.allowScopeContinuation === true && entry.scopeKeys.length > 0) {
-      entry.allowContinuation = true;
-    }
+    const continuationPlan = planRecordContinuationFlag({
+      allowContinuation: entry.allowContinuation,
+      pendingToolCallIds: collectPendingToolCallIds(entry.input)
+    });
+    entry.allowContinuation = continuationPlan.allowContinuation;
     entry.lastResponseId = responseId;
     entry.updatedAt = Date.now();
     this.responseIndex.set(responseId, entry);
@@ -526,7 +545,12 @@ class ResponsesConversationStore {
 
   resumeConversation(responseId: string, submitPayload: AnyRecord, options?: ResumeOptions): ResumeResult {
     this.ensurePersistenceLoaded();
-    if (typeof responseId !== 'string' || !responseId.trim()) {
+    const resumePreflight = planConversationPreflight({
+      mode: 'resume_conversation',
+      responseId,
+      submitPayload
+    });
+    if (resumePreflight.action === 'throw' && resumePreflight.reason === 'missing_or_empty_response_id') {
       throw new ProviderProtocolError('Responses conversation requires valid response_id', {
         code: 'MALFORMED_REQUEST',
         protocol: 'openai-responses',
@@ -537,11 +561,23 @@ class ResponsesConversationStore {
         }
       });
     }
+    const normalizedResponseId = resumePreflight.responseId;
+    if (!normalizedResponseId) {
+      throw new ProviderProtocolError('Responses conversation resume preflight failed', {
+        code: 'MALFORMED_REQUEST',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.resumeConversation',
+          reason: resumePreflight.reason
+        }
+      });
+    }
     this.prune();
     const requestedPortScopeKey = readPortScopeKey(options);
     const entriesByRequestId = new Map<string, ConversationEntry>();
     const candidates: ResumeEntryMatchCandidate[] = [];
-    const indexedEntry = this.responseIndex.get(responseId);
+    const indexedEntry = this.responseIndex.get(normalizedResponseId);
     if (indexedEntry) {
       entriesByRequestId.set(indexedEntry.requestId, indexedEntry);
       candidates.push(projectResumeEntryCandidate(indexedEntry, 'response_index'));
@@ -558,7 +594,7 @@ class ResponsesConversationStore {
       candidates.push(projectResumeEntryCandidate(candidate, 'scope', scopeKey));
     }
     const plan = planResumeEntryMatch({
-      responseId,
+      responseId: normalizedResponseId,
       requestedPortScopeKey,
       options,
       candidates
@@ -571,7 +607,7 @@ class ResponsesConversationStore {
         details: {
           context: 'responses-conversation-store.resumeConversation',
           reason: 'ambiguous_response_id_index',
-          responseId
+          responseId: normalizedResponseId
         }
       });
     }
@@ -586,15 +622,14 @@ class ResponsesConversationStore {
         details: {
           context: 'responses-conversation-store.resumeConversation',
           reason: 'expired_or_unknown_response_id',
-          responseId
+          responseId: normalizedResponseId
         }
       });
     }
     if (plan.source === 'request_map') {
-      this.responseIndex.set(responseId, entry);
+      this.responseIndex.set(normalizedResponseId, entry);
     }
-    const toolOutputs = Array.isArray(submitPayload.tool_outputs) ? submitPayload.tool_outputs : [];
-    if (!toolOutputs.length) {
+    if (resumePreflight.action === 'throw' && resumePreflight.reason === 'missing_tool_outputs') {
       throw new ProviderProtocolError('tool_outputs array is required when submitting Responses tool results', {
         code: 'MALFORMED_REQUEST',
         protocol: 'openai-responses',
@@ -602,13 +637,25 @@ class ResponsesConversationStore {
         details: {
           context: 'responses-conversation-store.resumeConversation',
           reason: 'missing_tool_outputs',
-          responseId
+          responseId: normalizedResponseId
+        }
+      });
+    }
+    if (resumePreflight.action !== 'continue') {
+      throw new ProviderProtocolError('Responses conversation resume preflight failed', {
+        code: 'MALFORMED_REQUEST',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.resumeConversation',
+          reason: resumePreflight.reason,
+          responseId: normalizedResponseId
         }
       });
     }
     assertResponsesConversationStoreNativeAvailable();
-    const resumed = resumeConversationPayload(entry, responseId, submitPayload, options?.requestId);
-    this.cleanupEntry(entry, responseId);
+    const resumed = resumeConversationPayload(entry, normalizedResponseId, submitPayload, options?.requestId);
+    this.cleanupEntry(entry, normalizedResponseId);
     this.flushPersistence();
     return {
       payload: resumed.payload,

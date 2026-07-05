@@ -10,6 +10,22 @@
   `ts_semantic_debt`.
 - Recommend L2 escalation when evidence is concrete.
 
+## Source/Doc-Only Discovery Contract
+
+- L1 file discovery must start from `git ls-files`, then apply both an allowlist
+  and a generated-artifact denylist before any content search.
+- Allowed evidence paths are source code, tests-as-code, scripts, architecture
+  maps, loop docs, goal/design docs, and project skill docs.
+- Generated or local index paths are forbidden even when they are tracked by Git:
+  `dist/`, `target/`, `coverage/`, `node_modules/`, `.mempalace/`,
+  `.local-index/`, `mempalace/`, generated HTML, backup files, and generated
+  snapshots or reports.
+- MemoryPalace, local indexes, generated audit output files, and built artifacts
+  may not be used as L1 search evidence. They can only be mentioned as excluded
+  sources when explaining the audit boundary.
+- If a search accidentally reads a generated artifact, discard that result,
+  record the mistake, and rerun the query through the source/doc-only allowlist.
+
 ## Forbidden In L1
 
 - Runtime code edits.

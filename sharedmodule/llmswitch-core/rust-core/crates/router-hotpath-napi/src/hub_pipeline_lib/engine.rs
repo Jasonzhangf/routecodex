@@ -239,6 +239,7 @@ impl HubPipelineEngine {
                         ),
                     )
                 })?;
+            router.refresh_provider_health_from_store();
             Ok(router.is_provider_available(
                 unsafe { Env::from_raw(std::ptr::null_mut()) },
                 provider_key,

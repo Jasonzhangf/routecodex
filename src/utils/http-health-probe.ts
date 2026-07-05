@@ -35,6 +35,7 @@ export type RouteCodexHealthBody = {
   status?: string;
   ready?: boolean;
   pipelineReady?: boolean;
+  version?: string;
 };
 
 export type RouteCodexHealthProbeResult = ProbeResult<RouteCodexHealthBody>;

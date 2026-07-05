@@ -1,8 +1,8 @@
 # HubPipeline Rust 化剩余 Phase 1/2 执行计划
 
 **日期**: 2026-07-05
-**状态**: active
-**基于**: Jason 给定的目标 (pasted-text-1.txt), 当前审计 (57 nonNative files, 8481 LOC)
+**状态**: closeout-auditing
+**基于**: Jason 给定的目标 (pasted-text-1.txt), 初始审计 (57 nonNative files, 8481 LOC)
 **目标**: Rust 化 Hub Pipeline 剩余的 TypeScript 语义变换模块
 
 ---
@@ -18,6 +18,17 @@
 | 主线边 partial | 1 (1.2%, 非 Hub 域) |
 | 主线边 pending | 0 |
 | servertool | 完全 Rust-only |
+
+## 2026-07-06 当前收口基线
+
+| 维度 | 值 |
+|------|-----|
+| 最新 source/doc-only L1 | `prodTsFileCount=160`, `prodTsLocTotal=28969`, `nonNativeFileCount=36`, `nonNativeLocTotal=4747` |
+| 当前 Hub/VR semantic watchlist | `0` open `ts_semantic_debt` |
+| `conversion.responses.store` | `ts_io_shell_ok/native_plan_io_shell_ok` |
+| Phase 1-C / 2-D / 2-E / 2-F | 已各自完成 L2 owner slice，降为 `native_shell_ok` / `type_shell_ok` |
+| closeout-level code gates | `cargo test -p router-hotpath-napi --lib`, `verify:llmswitch-rustification-audit`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:responses-history-protocol-contract`, `build:base`, `verify:architecture-ci` 全部 PASS |
+| live/runtime closeout | `routecodex restart --port 5555` 后 `5555/5520 /health.version = 0.90.3596`；same-entry `/v1/responses` live replay 见 `/tmp/p0-rust-live-5555-after-restart.json` |
 
 ---
 
@@ -147,3 +158,177 @@ npm run verify:architecture-mainline-call-map
 node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
 cargo test -p router-hotpath-napi --lib
 ```
+
+---
+
+## 2026-07-05 追加：最终 closeout 执行补充
+
+### 当前已闭合切片
+
+`conversion.responses.store` 已经有以下 Rust-owned action plans，并已通过对应 Rust 白盒、native build、focused Jest、responses history contract、rustification audit、function-map 和 mainline gates：
+
+- scope continuation match: `planResponsesScopeContinuationMatchJson`
+- submit resume entry match: `planResponsesConversationResumeEntryMatchJson`
+- lookup by response id projection: `planResponsesContinuationLookupByResponseIdJson`
+- persistence eligibility: `planResponsesConversationPersistenceEligibilityJson`
+- capture-time pending cleanup: `planResponsesCapturePendingCleanupJson`
+- record-time completed cleanup: `planResponsesRecordScopeCleanupJson`
+- record-time fallback scope entry match: `planResponsesRecordScopeEntryMatchJson`
+- lifecycle sweep: `planResponsesStoreSweepJson`
+- release request payload: `planResponsesReleaseRequestPayloadJson`
+- attach-scope collision: `planResponsesAttachEntryScopesJson`
+
+### Final Target
+
+把 Hub Pipeline / Chat Process / Responses continuation / servertool followup 相关的剩余 TypeScript 语义全部收口为 Rust-owned plans。TS 只能保留以下角色：
+
+- native binding facade
+- unavoidable filesystem / Map / HTTP / process IO shell
+- type-only declarations
+- diagnostics and test-only harness
+
+不得保留：
+
+- continuation/session/scope/owner policy
+- payload transformation or repair
+- provider/client semantic projection
+- fallback / compatibility branch / silent cleanup
+- duplicated helper or old generic facade
+
+### Scope
+
+In scope:
+
+- Continue `conversion.responses.store` until every remaining TS branch is classified as IO-only or moved to Rust.
+- Then move to `conversion.bridge.action_parsing`, `conversion.openai.control_text + tool_history`, `conversion.marker_lifecycle`, and `conversion.responses.bridge + reasoning` in this order unless gate evidence shows a different P0 blocker.
+- Keep `docs/architecture/function-map.yml`, `docs/architecture/verification-map.yml`, and mainline call map aligned whenever feature ownership changes.
+- Physically delete dead TS semantics and stale native exports after repository search proves zero production consumers.
+
+Out of scope without explicit Jason approval:
+
+- Provider-specific behavior in Hub Pipeline or Virtual Router.
+- Direct passthrough remap/fallback/shape repair.
+- Live release/install/restart claims without managed `routecodex restart --port <port>` and real replay evidence.
+- Broad cleanup of unrelated dirty files.
+
+### Required Verification Matrix
+
+Minimum per slice:
+
+- Rust focused unit for the exact native plan.
+- `npm run build:native-hotpath`
+- `npm --prefix sharedmodule/llmswitch-core run build`
+- focused Jest for affected TS shell.
+- `npm run verify:responses-history-protocol-contract` when touching Responses continuation/store.
+- `npm run verify:llmswitch-rustification-audit`
+- `npm run verify:function-map-compile-gate`
+- `npm run verify:architecture-mainline-call-map`
+- touched-file `git diff --check`
+
+Closeout-level verification:
+
+- `cargo test -p router-hotpath-napi --lib -- --nocapture`
+- `npm run build:base`
+- `npm run verify:architecture-ci` if architecture docs/gates changed broadly.
+- managed live install/restart/replay only when claiming runtime closure.
+
+Known current blocker:
+
+- Root `npx tsc --noEmit --pretty false` can fail on unrelated dirty files `src/server/runtime/http-server/http-server-runtime-setup.ts` and `src/server/runtime/http-server/index.ts` syntax breakage. Do not claim global TS closure until those are fixed or isolated. For `llmswitch-core` slices, `npm --prefix sharedmodule/llmswitch-core run build` is the local TS gate.
+
+### Completion Definition
+
+The final goal is complete only when:
+
+- `conversion.responses.store` is either Rust-owned or explicitly documented as IO-only TS shell.
+- Phase 1-C and Phase 2-D/E/F semantic residues are moved to Rust or deleted as dead code.
+- `verify:llmswitch-rustification-audit` meets the active threshold in this plan or a newer recorded threshold.
+- function-map, verification-map, mainline map, MEMORY, note, and relevant local skill lessons are updated.
+- Required gates pass with exact command evidence.
+- If runtime closure is claimed, managed live restart and real sample replay evidence are included.
+
+## 2026-07-06 closeout audit update
+
+The conditions above are now evidenced on the current worktree:
+
+- `conversion.responses.store` is closed as `ts_io_shell_ok/native_plan_io_shell_ok` with residue gate evidence and no remaining continuation semantics in TS.
+- Phase 1-C (`conversion.bridge.action_parsing`) and Phase 2-D/E/F semantic residues were moved to Rust/native shells and are recorded in `docs/loops/rustification/loop-run-log.md`.
+- Fresh source/doc-only L1 records no open `ts_semantic_debt` in the Hub Pipeline / Virtual Router semantic watchlist.
+- Closeout-level gates passed on the current state:
+  - `cargo test -p router-hotpath-napi --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml --lib -- --nocapture`
+  - `npm run verify:llmswitch-rustification-audit`
+  - `npm run verify:function-map-compile-gate`
+  - `npm run verify:architecture-mainline-call-map`
+  - `npm run verify:responses-history-protocol-contract`
+  - `npm run build:base`
+  - `npm run verify:architecture-ci`
+- Managed runtime closure was re-verified on the current installed runtime:
+  - `routecodex restart --port 5555`
+  - `http://127.0.0.1:5555/health` => `version=0.90.3596`
+  - `http://127.0.0.1:5520/health` => `version=0.90.3596`
+  - same-entry live `/v1/responses` replay via `scripts/tests/stopless-5555-live-probe.mjs` wrote `/tmp/p0-rust-live-5555-after-restart.json` with first-turn stopless `exec_command`, no leaked stop schema, and continuation completion.
+
+Non-goal boundary still open:
+
+- MemoryPalace re-mine/search closure is still blocked by an external palace lock and is not part of the Hub Pipeline rustification completion proof.
+
+## 2026-07-05 correction: threshold is not completion
+
+Current state is **not complete**. `verify:llmswitch-rustification-audit` reaching `47 files / 6999 LOC` is only a Phase 2 numeric gate and an L1 audit baseline. It does not prove complete Rustification.
+
+The total goal remains open until every remaining non-native TypeScript file in the Hub Pipeline / Virtual Router / Chat Process / servertool followup scope is explicitly classified and evidenced as one of:
+
+- `rust_ssot`: semantics are owned by Rust, with tests/gates proving the owner.
+- `native_shell_ok`: TypeScript is only a fail-fast native binding facade or type shell, with residue gates blocking semantic revival.
+- `ts_io_shell_ok`: TypeScript owns only unavoidable filesystem / Map / HTTP / process / diagnostics IO, with no semantic decisions.
+
+Any remaining `ts_semantic_debt` means the overall rustification goal is still incomplete, regardless of LOC threshold.
+
+Additional closeout requirements before any completion claim:
+
+- Run a fresh L1 classification over the current `verify:llmswitch-rustification-audit` file list and record every remaining file classification in `docs/loops/rustification/loop-run-log.md`.
+- Promote each `ts_semantic_debt` item through one owner-scoped L2 slice using `docs/loops/rustification/gate-matrix.md`.
+- Keep server HTTP/IO in TypeScript only where it is IO shell. Server Rustification is required only if server code owns Hub/VR/Chat Process semantics.
+- Closeout-level gates must pass after the final L2 slice, including full Rust `router-hotpath-napi --lib`, llmswitch-core build, function-map/mainline gates, rustification audit, and relevant protocol/history/servertool gates.
+- Runtime completion requires managed install/restart plus same-entry real replay evidence. Without that evidence, only code/gate closure may be claimed.
+
+## 2026-07-05 correction: source/doc-only search boundary
+
+Rustification audit evidence must exclude generated artifacts and local indexes.
+The current L1 process must:
+
+- build candidate paths from `git ls-files`;
+- include only source code, tests-as-code, scripts, architecture maps, loop docs,
+  goal/design docs, and project skill docs;
+- exclude `dist/`, `target/`, `coverage/`, `node_modules/`, `.mempalace/`,
+  `.local-index/`, `mempalace/`, generated HTML, backups, snapshots, and
+  generated reports even if they are tracked;
+- not use MemoryPalace or generated audit output as evidence for current code
+  state.
+
+Fresh source/doc-only L1 evidence:
+
+- `node scripts/ci/llmswitch-rustification-audit.mjs --json` PASS:
+  `prodTsFileCount=165`, `prodTsLocTotal=29818`,
+  `nonNativeFileCount=44`, `nonNativeLocTotal=5956`.
+- `npm run verify:llmswitch-core-tsc` PASS.
+- `git ls-files` plus generated denylist produced zero generated/local-index
+  matches after filtering.
+
+Current remaining closeout classes:
+
+- `ts_semantic_debt`: compat profile registry
+  (`header-policies.ts`, `policy-overrides.ts`, `provider-resolver.ts`,
+  `registry.ts`, `types.ts`), `tools/exec-command/normalize.ts`,
+  `native/router-hotpath/virtual-router-contracts.ts`,
+  `runtime/virtual-router-hit-log.ts`.
+- `native_plan_io_shell_candidate_needs_L2_closeout_evidence`:
+  `conversion/shared/responses-conversation-store.ts`.
+- `native_shell_ok` / `type_shell_ok` / `ts_io_shell_ok`: remaining type
+  declarations, native parser facades, timing/diagnostic IO, user-data paths,
+  progress-file IO, telemetry stats, servertool orchestration/types, and shared
+  common utilities.
+
+This means the overall goal is still open: every `ts_semantic_debt` item above
+must be migrated to Rust/native truth or proven to be a pure IO/type/native shell
+with gates before completion can be claimed.

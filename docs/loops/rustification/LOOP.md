@@ -75,6 +75,15 @@ exit without further inspection.
 - `MEMORY.md`
 - `note.md`
 
+## Search Boundary
+
+Rustification L1 evidence is source/doc-only. Build candidate paths from
+`git ls-files`, then exclude generated and local-index paths before searching:
+`dist/`, `target/`, `coverage/`, `node_modules/`, `.mempalace/`,
+`.local-index/`, `mempalace/`, generated HTML, backups, snapshots, and generated
+reports. Do not use MemoryPalace or generated artifacts as proof for current
+rustification state.
+
 ## Classification Terms
 
 - `rust_ssot`: Rust owns the semantic contract, state machine, builder/parser,

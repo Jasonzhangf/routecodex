@@ -22,6 +22,7 @@ const TS_OWNER_WHITELIST = new Set([
   'server.responses_response_handler_bridge_surface', // response-side opaque bridge shell
   'cli.command_surface', // CLI dispatch shell
   'config.path_resolution_surface', // path resolution surface is TS config glue
+  'config.virtual_router_types', // deprecated VR type shim; Rust bootstrap owns runtime semantics
   'config.user_config_codec', // user config codec is TS config glue
   'config.provider_config_codec', // provider config codec is TS config glue
   'config.user_config_materialization', // user config materialization is TS config glue

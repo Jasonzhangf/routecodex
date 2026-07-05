@@ -1,9 +1,9 @@
 import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import {
-  VirtualRouterErrorCode,
   type VirtualRouterConfig
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
+import { VirtualRouterErrorCode } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.js';
 
 describe('provider.model with real config structure', () => {
   it('should work with glm provider.model when routing.default has targets', async () => {

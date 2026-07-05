@@ -372,6 +372,10 @@ registerRestartCommand(program, {
   registerGuardianProcess: registerGuardianLifecycle,
   env: process.env,
   reportGuardianLifecycle,
+  nodeBin: process.execPath,
+  cliEntryPath: process.argv[1],
+  spawn,
+  getExpectedVersion: () => cliVersion,
   exit: (code) => process.exit(code)
 });
 

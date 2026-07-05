@@ -43,7 +43,7 @@ describe('http server runtime setup provider merge', () => {
     }));
 
     const { setupRuntime } = await import('../../../../src/server/runtime/http-server/http-server-runtime-setup.ts');
-    const { resolveVirtualRouterInput } = await import(BOOTSTRAP_MODULE_PATH);
+    const { resolveRouterBootstrapConfig } = await import(BOOTSTRAP_MODULE_PATH);
 
     const routerInput = {
       providers: {
@@ -78,7 +78,7 @@ describe('http server runtime setup provider merge', () => {
       routingProviderScope: null,
       hubPolicyMode: 'off',
       ensureProviderProfilesFromUserConfig: () => {},
-      resolveVirtualRouterInput: async function (userConfig: any) { return await resolveVirtualRouterInput(this, userConfig); },
+      resolveRouterBootstrapConfig: async function (userConfig: any) { return await resolveRouterBootstrapConfig(this, userConfig); },
       bootstrapVirtualRouter: async (input: any) => {
         capturedInputs.push(JSON.parse(JSON.stringify(input)));
         return { config: input, runtime: {}, targetRuntime: {} };
@@ -141,7 +141,7 @@ describe('http server runtime setup provider merge', () => {
   });
 
   it('preserves already materialized virtualrouter.providers when routingPolicyGroups exist', async () => {
-    const { resolveVirtualRouterInput } = await import(BOOTSTRAP_MODULE_PATH);
+    const { resolveRouterBootstrapConfig } = await import(BOOTSTRAP_MODULE_PATH);
 
     const materializedConfig = {
       virtualrouter: {
@@ -170,7 +170,7 @@ describe('http server runtime setup provider merge', () => {
     };
 
     const server: any = {};
-    const input = await resolveVirtualRouterInput(server, materializedConfig as any);
+    const input = await resolveRouterBootstrapConfig(server, materializedConfig as any);
 
     expect(input).toMatchObject({
       providers: {
@@ -271,7 +271,7 @@ describe('http server runtime setup provider merge', () => {
       routingProviderScope: null,
       hubPolicyMode: 'off',
       ensureProviderProfilesFromUserConfig: () => {},
-      resolveVirtualRouterInput: async () => ({ routing: { default: [] } }),
+      resolveRouterBootstrapConfig: async () => ({ routing: { default: [] } }),
       bootstrapVirtualRouter: async () => providerRuntimeArtifacts,
       ensureHubPipelineCtor: async () =>
         class HubPipelineMock {
@@ -447,7 +447,7 @@ describe('http server runtime setup provider merge', () => {
           virtualRouter: artifacts.config,
         };
       },
-      resolveVirtualRouterInput: async () => ({ routing: { provider: [] } }),
+      resolveRouterBootstrapConfig: async () => ({ routing: { provider: [] } }),
       bootstrapVirtualRouter: async (input: any) => {
         const defaultTargets =
           Array.isArray(input?.routing?.default)
@@ -594,7 +594,7 @@ describe('http server runtime setup provider merge', () => {
       routingProviderScope: null,
       hubPolicyMode: 'off',
       ensureProviderProfilesFromUserConfig: () => {},
-      resolveVirtualRouterInput: async () => ({ routing: { default: [] } }),
+      resolveRouterBootstrapConfig: async () => ({ routing: { default: [] } }),
       bootstrapVirtualRouter: async () => providerRuntimeArtifacts,
       ensureHubPipelineCtor: async () =>
         class HubPipelineMock {

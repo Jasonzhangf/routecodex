@@ -5,6 +5,68 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   ...createBridgeHttpServerMock(),
 }));
 
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-request-bridge.js', () => ({
+  buildResponsesConversationPortScopeForHttp: jest.fn(() => ({})),
+  buildResponsesPipelineMetadataForHttp: jest.fn(() => ({})),
+  captureResponsesInboundToolHistoryErrorsampleForHttp: jest.fn(),
+  clearResponsesConversationOnHandlerFailureForHttp: jest.fn(),
+  clearResponsesConversationByRequestIdForHttp: jest.fn(),
+  captureResponsesRequestContextForHttp: jest.fn(),
+  recordResponsesResponseForHttp: jest.fn(),
+  finalizeResponsesHandlerPayloadForHttp: jest.fn((args: { payload: Record<string, unknown> }) => args.payload),
+  prepareResponsesHandlerEntryForHttp: jest.fn(),
+  buildResponsesScopeContinuationExpiredErrorForHttp: jest.fn(() => ({
+    error: {
+      message: 'Responses continuation expired or not found for local scope materialization',
+      type: 'invalid_request_error',
+      code: 'responses_continuation_expired',
+    },
+  })),
+  buildResponsesResumeClientErrorForHttp: jest.fn(() => ({
+    status: 422,
+    body: { error: { message: 'Unable to resume Responses conversation' } },
+  })),
+  shouldProjectResponsesResumeClientErrorForHttp: jest.fn(() => true),
+  finalizeResponsesPipelineResultForHttp: jest.fn((args: { result: unknown }) => args.result),
+  planResponsesHandlerStreamForHttp: jest.fn(() => ({
+    originalStream: false,
+    outboundStream: false,
+    inboundStream: false,
+    acceptsSse: false,
+    requestStartMeta: {}
+  })),
+  prepareResponsesRequestBodyForHttp: jest.fn((payload: Record<string, unknown>) => ({
+    requestBodyMetadata: undefined,
+    pipelineBody: payload,
+  })),
+  prepareResponsesHandlerRuntimeForHttp: jest.fn(async (args: { entryEndpoint: string; payload: Record<string, unknown> }) => {
+    const streamPlan = {
+      originalStream: false,
+      outboundStream: false,
+      inboundStream: false,
+      acceptsSse: false,
+      requestStartMeta: {},
+    };
+    if (args.entryEndpoint === '/v1/responses.submit_tool_outputs') {
+      return {
+        kind: 'client_error',
+        status: 400,
+        body: { error: { message: 'response_id is required for submit_tool_outputs' } },
+        streamPlan,
+      };
+    }
+    return {
+      kind: 'ok',
+      payload: args.payload,
+      requestContext: { payload: args.payload, context: { input: [] } },
+      pipelineEntryEndpoint: args.entryEndpoint,
+      isSubmitToolOutputs: false,
+      plannedEntryMode: 'none',
+      streamPlan,
+    };
+  }),
+}));
+
 function makeReq(body: Record<string, unknown> = {}) {
   return {
     method: 'POST',

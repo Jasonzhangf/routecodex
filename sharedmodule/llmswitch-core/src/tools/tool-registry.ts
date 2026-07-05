@@ -3,6 +3,7 @@
 import { parseToolArgsJson } from './args-json.js';
 import { validateExecCommandArgs } from './exec-command/validator.js';
 import { readNativeFunction } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
+import { validateExecCommandGuardWithNative } from '../native/router-hotpath/native-shared-conversion-semantics-toolcalls.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -80,29 +81,6 @@ const toJson = (value: unknown): string => {
   }
 };
 
-const detectForbiddenWrite = (script: string): boolean => {
-  const normalized = script.toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  if (/>\s*[^\s<]/.test(normalized)) {
-    return true;
-  }
-  if (/<<</.test(normalized) || /<</.test(normalized)) {
-    return true;
-  }
-  if (/\bsed\b[^\n]*-i\b/.test(normalized)) {
-    return true;
-  }
-  if (/\bed\b[^\n]*-s\b/.test(normalized)) {
-    return true;
-  }
-  if (/\btee\b\s+/.test(normalized)) {
-    return true;
-  }
-  return false;
-};
-
 const isImagePath = (value: unknown): boolean => typeof value === 'string' && /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/i.test(value.trim());
 
 const validateApplyPatchArgumentsWithNative = (applyPatchArgsSource: unknown): ToolValidationResult => {
@@ -110,7 +88,7 @@ const validateApplyPatchArgumentsWithNative = (applyPatchArgsSource: unknown): T
   if (!fn) {
     throw new Error('[llmswitch-core] validateApplyPatchArgumentsJson not available');
   }
-  const resultJson = fn(JSON.stringify(applyPatchArgsSource ?? null));
+  const resultJson = fn(JSON.stringify({ arguments: applyPatchArgsSource ?? null }));
   if (typeof resultJson !== 'string') {
     throw new Error('[llmswitch-core] validateApplyPatchArgumentsJson returned non-string result');
   }
@@ -251,8 +229,13 @@ export function validateToolCall(
         return { ok: false, reason: 'invalid_command' };
       }
       const scriptJoined = normalizedCommand.join(' ');
-      if (detectForbiddenWrite(scriptJoined)) {
-        return { ok: false, reason: 'forbidden_write_redirection' };
+      const shellGuard = validateExecCommandGuardWithNative(scriptJoined);
+      if (!shellGuard.ok) {
+        return {
+          ok: false,
+          reason: shellGuard.reason || 'forbidden_shell_command',
+          message: shellGuard.message
+        };
       }
       const looksBashLc = (arr: string[]) => arr.length >= 2 && arr[0] === 'bash' && arr[1] === '-lc';
       const hasMetaChars = (script: string) => /[|;&]/.test(script) || script.includes('&&') || script.includes('||');

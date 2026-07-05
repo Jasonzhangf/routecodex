@@ -170,7 +170,7 @@ describe('tool-registry validateToolCall (all tools)', () => {
     const result = validateToolCall('exec_command', args);
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('forbidden_git_checkout_scope');
-    expect(result.message).toContain('single file');
+    expect(result.message).toContain('single-file restore');
   });
 
   it('rejects git checkout with multiple files in exec_command', () => {
@@ -192,6 +192,23 @@ describe('tool-registry validateToolCall (all tools)', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('forbidden_git_checkout_scope');
     expect(result.message).toContain('standalone');
+  });
+
+  it('rejects persistent shell writes through native guard', () => {
+    const args = JSON.stringify({
+      command: ['bash', '-lc', 'printf hello > src/out.txt']
+    });
+    const result = validateToolCall('shell', args);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('forbidden_shell_write');
+  });
+
+  it('allows shell stderr redirection to dev null through native guard', () => {
+    const args = JSON.stringify({
+      command: ['bash', '-lc', 'tail -50 app.log 2>/dev/null || echo none']
+    });
+    const result = validateToolCall('shell', args);
+    expect(result.ok).toBe(true);
   });
 
   it('rejects pkill-based mass kill in exec_command', () => {

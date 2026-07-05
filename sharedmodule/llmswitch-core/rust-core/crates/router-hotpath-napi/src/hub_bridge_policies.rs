@@ -495,7 +495,8 @@ pub(crate) fn plan_responses_bridge_policy_actions(input: &Value) -> Value {
         .and_then(|value| value.as_str())
         .map(|value| value.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    let has_tool_signals = messages_have_tool_signal(input.get("messages").and_then(|value| value.as_array()));
+    let has_tool_signals =
+        messages_have_tool_signal(input.get("messages").and_then(|value| value.as_array()));
     let mut filtered: Vec<Value> = Vec::new();
     for action in actions {
         let name = read_action_name(action);
@@ -506,7 +507,10 @@ pub(crate) fn plan_responses_bridge_policy_actions(input: &Value) -> Value {
         }
         if stage == "request_inbound"
             && !has_tool_signals
-            && matches!(name.as_str(), "tools.normalize-call-ids" | "tools.ensure-placeholders")
+            && matches!(
+                name.as_str(),
+                "tools.normalize-call-ids" | "tools.ensure-placeholders"
+            )
         {
             continue;
         }
@@ -656,6 +660,9 @@ mod tests {
             .iter()
             .map(read_action_name)
             .collect();
-        assert_eq!(names, vec!["tools.normalize-call-ids", "tools.ensure-placeholders"]);
+        assert_eq!(
+            names,
+            vec!["tools.normalize-call-ids", "tools.ensure-placeholders"]
+        );
     }
 }

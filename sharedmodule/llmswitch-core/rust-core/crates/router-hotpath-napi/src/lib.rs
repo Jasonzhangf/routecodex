@@ -684,8 +684,30 @@ pub fn validate_tool_arguments_json(input_json: String) -> NapiResult<String> {
 }
 
 #[napi]
+pub fn validate_exec_command_guard_json(input_json: String) -> NapiResult<String> {
+    resp_process_stage1_tool_governance_blocks::exec_command_guard::validate_exec_command_guard_json(
+        &input_json,
+    )
+    .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "normalizeExecCommandArgsJson")]
+pub fn normalize_exec_command_args_json(input_json: String) -> NapiResult<String> {
+    resp_process_stage1_tool_governance_blocks::exec_command_args::normalize_exec_command_args_json(
+        input_json,
+    )
+}
+
+#[napi]
 pub fn repair_tool_calls_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::repair_tool_calls_json(input_json)
+}
+
+#[napi(js_name = "parseToolArgsJsonWithArtifactRepairJson")]
+pub fn parse_tool_args_json_with_artifact_repair_json(input_json: String) -> NapiResult<String> {
+    resp_process_stage1_tool_governance_blocks::json_args::parse_tool_args_json_with_artifact_repair_json(
+        input_json,
+    )
 }
 
 #[napi]
@@ -2678,6 +2700,21 @@ pub fn apply_tool_text_request_guidance_json(
     req_outbound_stage3_compat::apply_tool_text_request_guidance_json(payload_json, config_json)
 }
 
+#[napi(js_name = "buildSystemToolGuidanceJson")]
+pub fn build_system_tool_guidance_json() -> NapiResult<String> {
+    req_outbound_stage3_compat::build_system_tool_guidance_json()
+}
+
+#[napi(js_name = "augmentOpenAIToolsJson")]
+pub fn augment_openai_tools_json(tools_json: String) -> NapiResult<String> {
+    req_outbound_stage3_compat::augment_openai_tools_json(tools_json)
+}
+
+#[napi(js_name = "augmentAnthropicToolsJson")]
+pub fn augment_anthropic_tools_json(tools_json: String) -> NapiResult<String> {
+    req_outbound_stage3_compat::augment_anthropic_tools_json(tools_json)
+}
+
 #[napi(js_name = "harvestToolCallsFromTextJson")]
 pub fn harvest_tool_calls_from_text_json_bridge(
     payload_json: String,
@@ -2927,9 +2964,11 @@ pub fn format_continuation_scope_json_bridge(scope: Option<String>) -> napi::Res
     crate::virtual_router_hit_log::format_continuation_scope_json(scope)
 }
 
-#[napi(js_name = "parseProviderKeyJson")]
-pub fn parse_provider_key_json_bridge(provider_key: String) -> napi::Result<String> {
-    crate::virtual_router_hit_log::parse_provider_key_json(provider_key)
+#[napi(js_name = "parseVirtualRouterHitProviderKeyJson")]
+pub fn parse_virtual_router_hit_provider_key_json_bridge(
+    provider_key: String,
+) -> napi::Result<String> {
+    crate::virtual_router_hit_log::parse_virtual_router_hit_provider_key_json(provider_key)
 }
 
 #[napi(js_name = "resolveSessionLogColorKeyJson")]
@@ -2960,16 +2999,30 @@ pub fn build_hit_reason_json_bridge(
     route_used: String,
     provider_key: String,
     classification_reasoning: Option<String>,
+    route_changed: bool,
     estimated_tokens: Option<f64>,
     last_assistant_tool_label: Option<String>,
+    provider_max_context_tokens: Option<f64>,
+    context_warn_ratio: Option<f64>,
 ) -> napi::Result<String> {
     crate::virtual_router_hit_log::build_hit_reason_json(
         route_used,
         provider_key,
         classification_reasoning,
+        route_changed,
         estimated_tokens,
         last_assistant_tool_label,
+        provider_max_context_tokens,
+        context_warn_ratio,
     )
+}
+
+#[napi(js_name = "toVirtualRouterHitEventJson")]
+pub fn to_virtual_router_hit_event_json_bridge(
+    record_json: String,
+    meta_json: String,
+) -> napi::Result<String> {
+    crate::virtual_router_hit_log::to_virtual_router_hit_event_json(record_json, meta_json)
 }
 #[napi(js_name = "classifyProviderFailureJson")]
 pub fn classify_provider_failure_json(
@@ -3059,8 +3112,9 @@ pub use responses_reasoning_registry::{
 };
 pub use shared_responses_conversation_utils::{
     materialize_provider_owned_submit_context_json,
-    materialize_responses_continuation_payload_json,
-    plan_responses_continuation_request_action_json, plan_responses_handler_entry_json,
+    materialize_responses_continuation_payload_json, plan_responses_captured_entry_json,
+    plan_responses_continuation_request_action_json, plan_responses_conversation_preflight_json,
+    plan_responses_handler_entry_json, plan_responses_record_continuation_flag_json,
     plan_responses_request_context_json, prepare_responses_conversation_entry_json,
     publish_responses_record_plan_json, resume_responses_conversation_payload_json,
 };

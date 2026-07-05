@@ -100,6 +100,7 @@ export type PrepareResponsesHandlerRuntimeForHttpResult =
       pipelineEntryEndpoint: string;
       isSubmitToolOutputs: boolean;
       plannedEntryMode: 'none' | 'submit_tool_outputs' | 'scope_materialize';
+      requestBodyMetadata?: Record<string, unknown>;
       resumeMeta?: Record<string, unknown>;
       streamPlan: ResponsesHandlerStreamPlanForHttp;
     }
@@ -107,6 +108,7 @@ export type PrepareResponsesHandlerRuntimeForHttpResult =
       kind: 'client_error';
       status: number;
       body: Record<string, unknown>;
+      requestBodyMetadata?: Record<string, unknown>;
       streamPlan: ResponsesHandlerStreamPlanForHttp;
     };
 
@@ -810,14 +812,19 @@ export async function prepareResponsesHandlerEntryForHttp(
 export async function prepareResponsesHandlerRuntimeForHttp(
   args: PrepareResponsesHandlerRuntimeForHttpArgs
 ): Promise<PrepareResponsesHandlerRuntimeForHttpResult> {
+  const requestBodyMetadata = readRequestBodyMetadataForHttp(args.payload);
+  const requestMetadata = {
+    ...(requestBodyMetadata ?? {}),
+    ...(args.requestMetadata ?? {}),
+  };
   const streamPlan = planResponsesHandlerStreamForHttp({
     payload: args.payload,
     forceStream: args.forceStream,
     acceptsSse: args.acceptsSse,
     requestTimeoutMs: args.requestTimeoutMs,
   });
-  const sessionId = readResponsesSessionIdFromHttp(args.requestMetadata);
-  const conversationId = readResponsesConversationIdFromHttp(args.requestMetadata);
+  const sessionId = readResponsesSessionIdFromHttp(requestMetadata);
+  const conversationId = readResponsesConversationIdFromHttp(requestMetadata);
   try {
     const preparedEntry = await prepareResponsesHandlerEntryForHttp({
       payload: args.payload,
@@ -835,6 +842,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
         kind: 'client_error',
         status: 400,
         body: clientError as unknown as Record<string, unknown>,
+        requestBodyMetadata,
         streamPlan,
       };
     }
@@ -847,7 +855,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
     const requestContext = await buildResponsesRequestContextForHttp({
       payload,
       requestId: args.requestId,
-      metadata: args.requestMetadata,
+      metadata: requestMetadata,
       resumeMeta: preparedEntry.resumeMeta,
       matchedPort: args.portScope?.matchedPort,
       routingPolicyGroup: args.portScope?.routingPolicyGroup,
@@ -859,6 +867,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
       pipelineEntryEndpoint: preparedEntry.pipelineEntryEndpoint,
       isSubmitToolOutputs: preparedEntry.isSubmitToolOutputs,
       plannedEntryMode: preparedEntry.plannedEntryMode,
+      requestBodyMetadata,
       resumeMeta: preparedEntry.resumeMeta,
       streamPlan,
     };
@@ -881,6 +890,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
       kind: 'client_error',
       status: clientError.status,
       body: clientError.body as unknown as Record<string, unknown>,
+      requestBodyMetadata,
       streamPlan,
     };
   }

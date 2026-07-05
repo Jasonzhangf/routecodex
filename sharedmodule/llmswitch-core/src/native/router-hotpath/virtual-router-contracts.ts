@@ -5,22 +5,6 @@
 import type { ChatContinuationSemantics } from "../../conversion/hub/types/chat-envelope.js";
 import type { StandardizedRequest } from "../../conversion/hub/types/standardized.js";
 
-export const DEFAULT_MODEL_CONTEXT_TOKENS = 200_000;
-
-export const DEFAULT_ROUTE = "default";
-export const ROUTE_PRIORITY: string[] = [
-  "video",
-  "multimodal",
-  "longcontext",
-  "web_search",
-  "thinking",
-  "coding",
-  "search",
-  "tools",
-  "background",
-  DEFAULT_ROUTE,
-];
-
 export type RoutingInstructionMode = "force" | "none";
 
 export type RoutePoolMode = "round-robin" | "priority";
@@ -542,25 +526,6 @@ export interface TargetMetadata {
 
 export interface ResponsesProviderConfig {
   toolCallIdStyle?: "fc" | "preserve";
-}
-
-export enum VirtualRouterErrorCode {
-  NO_STANDARDIZED_REQUEST = "NO_STANDARDIZED_REQUEST",
-  ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND",
-  PROVIDER_NOT_AVAILABLE = "PROVIDER_NOT_AVAILABLE",
-  HTTP_429 = "HTTP_429",
-  CONFIG_ERROR = "CONFIG_ERROR",
-}
-
-export class VirtualRouterError extends Error {
-  constructor(
-    message: string,
-    public readonly code: VirtualRouterErrorCode,
-    public readonly details?: Record<string, unknown>,
-  ) {
-    super(message);
-    this.name = "VirtualRouterError";
-  }
 }
 
 export interface RoutingDiagnostics {

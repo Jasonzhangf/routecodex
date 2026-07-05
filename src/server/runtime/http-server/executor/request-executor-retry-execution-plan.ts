@@ -2,6 +2,7 @@ import {
   isHostRequestExecutorErrorStage,
 } from './request-executor-provider-failure.js';
 import {
+  isProviderProtocolBoundaryError,
   readString
 } from './request-executor-error-shared.js';
 import {
@@ -171,6 +172,18 @@ export async function resolveProviderRetryExecutionPlan(args: {
     promptTooLong: args.promptTooLong,
   });
   args.recordAttempt({ error: true });
+  const protocolBoundaryFailure = isProviderProtocolBoundaryError(args.error, args.retryError);
+  if (protocolBoundaryFailure) {
+    return {
+      shouldRetry: false,
+      excludedCurrentProvider: false,
+      allowRetryBeyondAttemptBudget: false,
+      routePoolRemainingAfterExclusion: args.routePool ?? [],
+      defaultPoolAvailable: args.defaultTierAvailable === true,
+      policyExhausted: false,
+      mayProject: true,
+    };
+  }
 
   const preExclusionHasAlternativeCandidate = hasAlternativeRouteCandidate({
     providerKey: args.providerKey,

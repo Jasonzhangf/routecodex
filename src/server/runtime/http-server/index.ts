@@ -113,7 +113,7 @@ import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
 import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-gate.js';
 import {
-  resolveVirtualRouterInput,
+  resolveRouterBootstrapConfig,
   getModuleDependencies,
   registerDaemonAdminUiRoute,
   getErrorHandlingShim,
@@ -142,7 +142,7 @@ import {
   stopSessionDaemonInjectLoop
 } from './http-server-session-daemon.js';
 import { setupRuntime } from './http-server-runtime-setup.js';
-import { buildVirtualRouterInputV2 } from '../../../config/virtual-router-types.js';
+import { buildRouterBootstrapConfigV2 } from '../../../config/virtual-router-types.js';
 import {
   initializeProviderRuntimes,
   createProviderHandle,
@@ -515,8 +515,8 @@ export class RouteCodexHttpServer {
     console.log('[RouteCodexHttpServer] Initialized (pipeline=hub)');
   }
 
-  private async resolveVirtualRouterInput(userConfig: UnknownObject): Promise<UnknownObject> {
-    return await resolveVirtualRouterInput(this, userConfig);
+  private async resolveRouterBootstrapConfig(userConfig: UnknownObject): Promise<UnknownObject> {
+    return await resolveRouterBootstrapConfig(this, userConfig);
   }
 
   private getModuleDependencies(): ModuleDependencies {
@@ -650,7 +650,7 @@ export class RouteCodexHttpServer {
     routingPolicyGroup: string,
     baseConfig: HubPipelineConfig,
   ): Promise<HubPipelineConfig> {
-    const routerInput = await buildVirtualRouterInputV2(this.userConfig as Record<string, unknown>, undefined, {
+    const routerInput = await buildRouterBootstrapConfigV2(this.userConfig as Record<string, unknown>, undefined, {
       routingPolicyGroup,
     });
     const artifacts = await this.bootstrapVirtualRouter(routerInput as UnknownObject);

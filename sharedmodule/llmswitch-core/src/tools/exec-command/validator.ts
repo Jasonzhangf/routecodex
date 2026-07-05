@@ -1,5 +1,6 @@
 import { parseToolArgsJson } from '../args-json.js';
 import { normalizeExecCommandArgs } from './normalize.js';
+import { validateExecCommandGuardWithNative } from '../../native/router-hotpath/native-shared-conversion-semantics-toolcalls.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,233 +31,9 @@ export type ExecCommandValidationOptions = {
 };
 
 type PolicyViolation = {
-  reason:
-    | 'invalid_shell_wrapper_shape'
-    | 'forbidden_git_reset_hard'
-    | 'forbidden_git_checkout_scope'
-    | 'forbidden_exec_command_policy';
+  reason: 'forbidden_exec_command_policy';
   message: string;
 };
-
-type ExecCommandGuardRule = {
-  id: string;
-  regex: RegExp;
-  reason: string;
-};
-
-type ExecCommandGuardPolicyCacheEntry = {
-  mtimeMs: number;
-  rules: ExecCommandGuardRule[];
-};
-
-const POLICY_CACHE = new Map<string, ExecCommandGuardPolicyCacheEntry>();
-
-const GIT_RESET_HARD_PATTERN = /\bgit\s+reset\s+--hard(?:\s|$)/i;
-const GIT_CHECKOUT_PATTERN = /\bgit\s+checkout\b/i;
-const SHELL_SEPARATORS = new Set([';', '&&', '||', '|', '&']);
-
-function detectInvalidShellWrapperShape(command: string): PolicyViolation | null {
-  const trimmed = String(command || '').trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const shellWrapperPrefixes = [
-    "bash -lc '",
-    "bash -c '",
-    "sh -lc '",
-    "sh -c '",
-    "zsh -lc '",
-    "zsh -c '"
-  ] as const;
-
-  for (const prefix of shellWrapperPrefixes) {
-    if (!trimmed.startsWith(prefix)) {
-      continue;
-    }
-    if (!trimmed.endsWith("'")) {
-      return {
-        reason: 'invalid_shell_wrapper_shape',
-        message:
-          `Malformed shell wrapper: ${prefix.trim()}... requires a balanced closing single quote. ` +
-          'Closing-quote or tail-truncated wrappers are not auto-repaired.'
-      };
-    }
-  }
-
-  return null;
-}
-
-function repairZeroAmbiguityShellWrapper(command: string): string {
-  const trimmed = String(command || '').trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-  const shellWrapperPrefixes = [
-    "bash -lc '",
-    "bash -c '",
-    "sh -lc '",
-    "sh -c '",
-    "zsh -lc '",
-    "zsh -c '"
-  ] as const;
-  for (const prefix of shellWrapperPrefixes) {
-    if (!trimmed.startsWith(prefix) || trimmed.endsWith("'")) {
-      continue;
-    }
-    const body = trimmed.slice(prefix.length);
-    if (body.includes("'")) {
-      return trimmed;
-    }
-    return `${trimmed}'`;
-  }
-  return trimmed;
-}
-
-
-function extractWrappedShellCommand(command: string): string | null {
-  const trimmed = String(command || '').trim();
-  const wrappers = [/^(?:bash|sh|zsh)\s+-lc\s+([\s\S]+)$/i, /^(?:bash|sh|zsh)\s+-c\s+([\s\S]+)$/i];
-  for (const re of wrappers) {
-    const m = re.exec(trimmed);
-    if (!m) continue;
-    const raw = (m[1] || '').trim();
-    if (!raw) return '';
-    const first = raw[0];
-    const last = raw[raw.length - 1];
-    if ((first === "'" && last === "'") || (first === '"' && last === '"') || (first === '`' && last === '`')) {
-      return raw.slice(1, -1);
-    }
-    return raw;
-  }
-  return null;
-}
-
-function splitShellTokens(command: string): string[] {
-  const tokens: string[] = [];
-  let current = '';
-  let quote: '"' | "'" | null = null;
-  let escaped = false;
-
-  const pushCurrent = (): void => {
-    if (current.length > 0) {
-      tokens.push(current);
-      current = '';
-    }
-  };
-
-  for (let i = 0; i < command.length; i += 1) {
-    const ch = command[i];
-    if (escaped) {
-      current += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === '\\') {
-      escaped = true;
-      continue;
-    }
-    if (quote) {
-      if (ch === quote) {
-        quote = null;
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      pushCurrent();
-      continue;
-    }
-    if (ch === ';') {
-      pushCurrent();
-      tokens.push(';');
-      continue;
-    }
-    if (ch === '|' || ch === '&') {
-      pushCurrent();
-      const next = command[i + 1];
-      if ((ch === '|' || ch === '&') && next === ch) {
-        tokens.push(ch + next);
-        i += 1;
-      } else {
-        tokens.push(ch);
-      }
-      continue;
-    }
-    current += ch;
-  }
-
-  pushCurrent();
-  return tokens;
-}
-
-function evaluateGitCheckoutScope(command: string): PolicyViolation | null {
-  const match = GIT_CHECKOUT_PATTERN.exec(command);
-  if (!match) {
-    return null;
-  }
-  const checkoutText = command.slice(match.index);
-  const tokens = splitShellTokens(checkoutText);
-  if (tokens.length < 3 || tokens[0]?.toLowerCase() !== 'git' || tokens[1]?.toLowerCase() !== 'checkout') {
-    return {
-      reason: 'forbidden_git_checkout_scope',
-      message:
-        'Command blocked: git checkout is restricted to a single file path. Use `git checkout -- <file>` or `git checkout <ref> -- <file>`.'
-    };
-  }
-
-  const separatorIdx = tokens.findIndex((token, idx) => idx >= 2 && SHELL_SEPARATORS.has(token));
-  if (separatorIdx >= 0) {
-    return {
-      reason: 'forbidden_git_checkout_scope',
-      message:
-        'Command blocked: git checkout must be a standalone single-file command (no chained commands).'
-    };
-  }
-  const checkoutTokens = separatorIdx >= 0 ? tokens.slice(0, separatorIdx) : tokens;
-  const dashDashIdx = checkoutTokens.indexOf('--', 2);
-  if (dashDashIdx < 0) {
-    return {
-      reason: 'forbidden_git_checkout_scope',
-      message:
-        'Command blocked: git checkout is restricted to a single file path. Use `git checkout -- <file>` or `git checkout <ref> -- <file>`.'
-    };
-  }
-
-  const beforeDashDash = checkoutTokens.slice(2, dashDashIdx);
-  if (beforeDashDash.length > 1 || beforeDashDash.some((token) => token.startsWith('-'))) {
-    return {
-      reason: 'forbidden_git_checkout_scope',
-      message:
-        'Command blocked: git checkout is restricted to a single file path. Use `git checkout -- <file>` or `git checkout <ref> -- <file>`.'
-    };
-  }
-
-  const paths = checkoutTokens.slice(dashDashIdx + 1);
-  if (paths.length !== 1) {
-    return {
-      reason: 'forbidden_git_checkout_scope',
-      message:
-        'Command blocked: git checkout is restricted to a single file path. Use `git checkout -- <file>` or `git checkout <ref> -- <file>`.'
-    };
-  }
-
-  const path = paths[0];
-  if (!path || path === '.' || path === '/' || path === '*' || path.endsWith('/')) {
-    return {
-      reason: 'forbidden_git_checkout_scope',
-      message:
-        'Command blocked: git checkout is restricted to one concrete file path (directory/pathset restore is not allowed).'
-    };
-  }
-
-  return null;
-}
 
 function resolvePolicyPath(rawPath: string): string {
   const trimmed = rawPath.trim();
@@ -269,105 +46,21 @@ function resolvePolicyPath(rawPath: string): string {
   return path.resolve(trimmed);
 }
 
-function loadPolicyRules(policyFile?: string): ExecCommandGuardRule[] {
+function readPolicyJson(policyFile?: string): string | undefined {
   const resolved = typeof policyFile === 'string' ? resolvePolicyPath(policyFile) : '';
   if (!resolved) {
-    return [];
+    return undefined;
   }
   try {
     const stat = fs.statSync(resolved);
     if (!stat.isFile()) {
-      return [];
-    }
-    const cached = POLICY_CACHE.get(resolved);
-    if (cached && cached.mtimeMs === stat.mtimeMs) {
-      return cached.rules;
+      return undefined;
     }
     const raw = fs.readFileSync(resolved, 'utf8');
-    const parsed = raw.trim() ? JSON.parse(raw) : {};
-    const rulesNode = isRecord(parsed) && Array.isArray(parsed.rules) ? parsed.rules : [];
-    const rules: ExecCommandGuardRule[] = [];
-    for (const item of rulesNode) {
-      if (!isRecord(item)) {
-        continue;
-      }
-      const type = typeof item.type === 'string' ? item.type.trim().toLowerCase() : '';
-      if (type !== 'regex') {
-        continue;
-      }
-      const pattern = typeof item.pattern === 'string' ? item.pattern : '';
-      if (!pattern.trim()) {
-        continue;
-      }
-      const id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `rule_${rules.length + 1}`;
-      const reason =
-        typeof item.reason === 'string' && item.reason.trim()
-          ? item.reason.trim()
-          : `policy rule "${id}" blocked this command`;
-      const flagsRaw = typeof item.flags === 'string' ? item.flags.trim() : '';
-      let regex: RegExp;
-      try {
-        regex = new RegExp(pattern, flagsRaw || 'i');
-      } catch {
-        continue;
-      }
-      rules.push({ id, regex, reason });
-    }
-    POLICY_CACHE.set(resolved, { mtimeMs: stat.mtimeMs, rules });
-    return rules;
+    return raw.trim() ? raw : undefined;
   } catch {
-    return [];
+    return undefined;
   }
-}
-
-function detectPolicyRuleViolation(command: string, options?: ExecCommandValidationOptions): PolicyViolation | null {
-  const rules = loadPolicyRules(options?.policyFile);
-  if (!rules.length) {
-    return null;
-  }
-  for (const rule of rules) {
-    if (rule.regex.test(command)) {
-      return {
-        reason: 'forbidden_exec_command_policy',
-        message: rule.reason
-      };
-    }
-  }
-  return null;
-}
-
-function detectPolicyViolation(command: string, options?: ExecCommandValidationOptions): PolicyViolation | null {
-  if (!command || !command.trim()) {
-    return null;
-  }
-  const invalidShellWrapper = detectInvalidShellWrapperShape(command);
-  if (invalidShellWrapper) {
-    return invalidShellWrapper;
-  }
-
-  const candidates = [command];
-  const wrapped = extractWrappedShellCommand(command);
-  if (wrapped) candidates.push(wrapped);
-
-  for (const candidate of candidates) {
-    const policyViolation = detectPolicyRuleViolation(candidate, options);
-    if (policyViolation) {
-      return policyViolation;
-    }
-    if (GIT_RESET_HARD_PATTERN.test(candidate)) {
-      return {
-        reason: 'forbidden_git_reset_hard',
-        message:
-          'Command blocked: `git reset --hard` is destructive. Use `git reset --mixed <ref>` or file-scoped restore commands instead.'
-      };
-    }
-    const checkoutViolation = evaluateGitCheckoutScope(candidate);
-    if (checkoutViolation) {
-      return checkoutViolation;
-    }
-  }
-
-  return null;
 }
 
 export function validateExecCommandArgs(
@@ -396,12 +89,15 @@ export function validateExecCommandArgs(
     return { ok: false, reason: normalized.reason };
   }
 
-  const rawCommand = typeof normalized.normalized.cmd === 'string' ? normalized.normalized.cmd : '';
-  const command = repairZeroAmbiguityShellWrapper(rawCommand);
-  const violation = detectPolicyViolation(command, options);
-  if (violation) {
-    return { ok: false, reason: violation.reason, message: violation.message };
+  const command = typeof normalized.normalized.cmd === 'string' ? normalized.normalized.cmd : '';
+  const nativeGuard = validateExecCommandGuardWithNative(command, readPolicyJson(options?.policyFile));
+  if (!nativeGuard.ok) {
+    return {
+      ok: false,
+      reason: nativeGuard.reason || 'forbidden_exec_command',
+      message: nativeGuard.message
+    };
   }
 
-  return { ok: true, normalizedArgs: toJson({ ...normalized.normalized, cmd: command }) };
+  return { ok: true, normalizedArgs: toJson({ ...normalized.normalized, cmd: nativeGuard.normalizedCmd ?? command }) };
 }

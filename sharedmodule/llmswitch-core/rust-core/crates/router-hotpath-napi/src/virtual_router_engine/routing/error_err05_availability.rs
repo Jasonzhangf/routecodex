@@ -61,7 +61,10 @@ pub fn resolve_error_err05_route_availability_decision(
     let excluded: HashSet<String> = normalize_string_list(&input.excluded_provider_keys)
         .into_iter()
         .collect();
-    let provider_key = input.provider_key.as_ref().and_then(|value| trim_nonempty(value));
+    let provider_key = input
+        .provider_key
+        .as_ref()
+        .and_then(|value| trim_nonempty(value));
     let default_pool_available = resolve_default_pool_available(input, &route_pool, &excluded);
     let remaining: Vec<String> = route_pool
         .iter()
@@ -75,15 +78,11 @@ pub fn resolve_error_err05_route_availability_decision(
     });
     let configured_candidates = configured_route_candidates(&input.route_tiers);
     let route_pool_authoritative = input.routing_decision_route_pool_present
-        && (
-            route_pool.len() > 1
-            || (
-                route_pool.len() == 1
+        && (route_pool.len() > 1
+            || (route_pool.len() == 1
                 && configured_candidates.len() == 1
                 && !default_pool_available
-                && excluded.is_empty()
-            )
-        );
+                && excluded.is_empty()));
     let verified_last_provider = provider_key.as_ref().is_some_and(|provider| {
         route_pool.len() == 1
             && route_pool.first() == Some(provider)
@@ -128,7 +127,9 @@ fn resolve_default_pool_available(
         .and_then(|value| trim_nonempty(value))
         .map(|value| value.to_ascii_lowercase());
     let mut tiers = input.route_tiers.clone();
-    if route_name.as_deref().is_some_and(|route| route != "default")
+    if route_name
+        .as_deref()
+        .is_some_and(|route| route != "default")
         && !input.default_route_tiers.is_empty()
     {
         tiers.extend(input.default_route_tiers.iter().cloned().map(|mut tier| {
@@ -266,7 +267,10 @@ mod tests {
             },
         );
         assert!(decision.has_alternative_candidate);
-        assert_eq!(decision.route_pool_remaining_after_exclusion, vec!["b".to_string()]);
+        assert_eq!(
+            decision.route_pool_remaining_after_exclusion,
+            vec!["b".to_string()]
+        );
         assert!(decision.route_pool_authoritative);
     }
 }

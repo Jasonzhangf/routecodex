@@ -473,6 +473,7 @@ impl VirtualRouterEngineCore {
         bound_alias_prefix: Option<&str>,
         env: Env,
     ) -> Result<SelectionResult, String> {
+        self.refresh_provider_health_from_store();
         let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
             .into_iter()
             .collect();

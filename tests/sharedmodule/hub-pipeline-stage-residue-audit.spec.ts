@@ -2960,6 +2960,188 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('resp native parser facade must not own response semantic validation', () => {
+    const repoRoot = process.cwd();
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts'),
+      'utf8'
+    );
+    const forbiddenPatterns = [
+      { label: 'alias map key/value normalization', pattern: /Object\.entries\([\s\S]{0,240}trimmedKey/u },
+      { label: 'context diagnostics numeric flooring', pattern: /estimatedPromptTokens[\s\S]{0,240}Math\.floor/u },
+      { label: 'SSE descriptor code enum validation', pattern: /code\s*!==\s*['"]SSE_DECODE_ERROR['"]/u },
+      { label: 'provider SSE descriptor stage validation', pattern: /requestExecutorProviderErrorStage\s*!==\s*['"]provider\.sse_decode['"]/u },
+      { label: 'Responses host policy target trimming', pattern: /targetProtocol[\s\S]{0,180}\.trim\(\)/u },
+      { label: 'Responses SSE state array element validation', pattern: /\.every\(\(value\)\s*=>\s*typeof value === ['"]string['"]\)/u },
+      { label: 'Anthropic stop reason normalization', pattern: /normalized:\s*row\.normalized\.trim\(\)\.toLowerCase\(\)/u },
+      { label: 'provider tool summary name filtering', pattern: /toolNames[\s\S]{0,260}\.filter\(\(name\)/u },
+      { label: 'provider context protocol enum validation', pattern: /clientProtocol\s*!==\s*['"]openai-chat['"]/u },
+    ];
+    const findings = forbiddenPatterns
+      .filter(({ pattern }) => pattern.test(source))
+      .map(({ label }) => label);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('req outbound native parser facade must not own compat output semantic validation', () => {
+    const repoRoot = process.cwd();
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts'),
+      'utf8'
+    );
+    const forbiddenPatterns = [
+      { label: 'payload object validation', pattern: /const payloadRaw = row\.payload/u },
+      { label: 'appliedProfile trimming', pattern: /appliedProfileRaw[\s\S]{0,180}\.trim\(\)/u },
+      { label: 'nativeApplied boolean validation', pattern: /typeof nativeAppliedRaw !== ['"]boolean['"]/u },
+      { label: 'local compat output rebuild', pattern: /return\s*\{\s*payload,[\s\S]{0,180}nativeApplied/u },
+      { label: 'zero-consumer boolean parser surface', pattern: /function parseBoolean\(/u },
+    ];
+    const findings = forbiddenPatterns
+      .filter(({ pattern }) => pattern.test(source))
+      .map(({ label }) => label);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('req inbound native parser facade must not own tool output snapshot semantic validation', () => {
+    const repoRoot = process.cwd();
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts'),
+      'utf8'
+    );
+    const forbiddenPatterns = [
+      { label: 'snapshot object validation', pattern: /const snapshot = parsed\.snapshot/u },
+      { label: 'payload object validation', pattern: /const payload = parsed\.payload/u },
+      { label: 'snapshot array rejection', pattern: /Array\.isArray\(snapshot\)/u },
+      { label: 'payload array rejection', pattern: /Array\.isArray\(payload\)/u },
+      { label: 'local snapshot payload rebuild', pattern: /return\s*\{\s*snapshot:[\s\S]{0,140}payload:/u },
+    ];
+    const findings = forbiddenPatterns
+      .filter(({ pattern }) => pattern.test(source))
+      .map(({ label }) => label);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('exec_command hardcoded guard rules must be native-owned', () => {
+    const repoRoot = process.cwd();
+    const validatorSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts'),
+      'utf8'
+    );
+    const registrySource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/tool-registry.ts'),
+      'utf8'
+    );
+
+    expect(validatorSource).toContain('validateExecCommandGuardWithNative');
+    expect(registrySource).toContain('validateExecCommandGuardWithNative');
+
+    const forbiddenValidatorPatterns = [
+      { label: 'git reset hard TS regex', pattern: /GIT_RESET_HARD_PATTERN/u },
+      { label: 'git checkout TS regex', pattern: /GIT_CHECKOUT_PATTERN/u },
+      { label: 'git checkout TS evaluator', pattern: /function evaluateGitCheckoutScope/u },
+      { label: 'shell token splitter for checkout scope', pattern: /function splitShellTokens/u },
+      { label: 'TS shell wrapper shape detector', pattern: /function detectInvalidShellWrapperShape/u },
+      { label: 'TS shell wrapper repair helper', pattern: /function repairZeroAmbiguityShellWrapper/u },
+      { label: 'TS wrapped shell extraction policy helper', pattern: /function extractWrappedShellCommand/u },
+      { label: 'TS policy rule loader', pattern: /function loadPolicyRules/u },
+      { label: 'TS policy regex rule type', pattern: /type ExecCommandGuardRule/u },
+      { label: 'TS policy regex construction', pattern: /new RegExp\(pattern/u },
+      { label: 'TS policy violation evaluator', pattern: /function detectPolicyRuleViolation/u },
+      { label: 'TS policy violation orchestrator', pattern: /function detectPolicyViolation/u },
+      { label: 'hardcoded git reset reason in TS', pattern: /forbidden_git_reset_hard/u },
+      { label: 'hardcoded git checkout reason in TS', pattern: /forbidden_git_checkout_scope/u },
+    ];
+    const forbiddenRegistryPatterns = [
+      { label: 'TS shell write detector', pattern: /detectForbiddenWrite/u },
+      { label: 'TS write-redirection reason', pattern: /forbidden_write_redirection/u },
+      { label: 'TS sed in-place write regex', pattern: /\\bsed\\b\[\\\^\\n\]\*-i\\b/u },
+      { label: 'TS tee write regex', pattern: /\\btee\\b\\s\+/u },
+    ];
+    const findings = [
+      ...forbiddenValidatorPatterns
+        .filter(({ pattern }) => pattern.test(validatorSource))
+        .map(({ label }) => `validator:${label}`),
+      ...forbiddenRegistryPatterns
+        .filter(({ pattern }) => pattern.test(registrySource))
+        .map(({ label }) => `registry:${label}`),
+    ];
+
+    expect(findings).toEqual([]);
+  });
+
+  it('exec_command argument normalization must be native-owned', () => {
+    const repoRoot = process.cwd();
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/exec-command/normalize.ts'),
+      'utf8'
+    );
+
+    expect(source).toContain('normalizeExecCommandArgsWithNative');
+    const forbiddenPatterns = [
+      { label: 'local command key list', pattern: /COMMAND_KEYS/u },
+      { label: 'local command field detector', pattern: /hasCommandField/u },
+      { label: 'local unwrap implementation', pattern: /unwrapExecArgsShape/u },
+      { label: 'local primitive coercion', pattern: /asPrimitiveString/u },
+      { label: 'local numeric coercion', pattern: /asFiniteNumber/u },
+      { label: 'local string array join', pattern: /asStringArray/u },
+      { label: 'local toon deletion', pattern: /dropToon/u },
+      { label: 'local repair find meta call', pattern: /repairFindMeta/u },
+      { label: 'local escalated permission mapping', pattern: /with_escalated_permissions/u },
+      { label: 'local alias field mapping', pattern: /timeoutMs|max_tokens|yield_ms|wait_ms|workDir/u },
+    ];
+    const findings = forbiddenPatterns
+      .filter(({ pattern }) => pattern.test(source))
+      .map(({ label }) => label);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('virtual router hit-log formatting must be native-owned', () => {
+    const repoRoot = process.cwd();
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts'),
+      'utf8'
+    );
+
+    const requiredNativeExports = [
+      'createVirtualRouterHitRecordJson',
+      'toVirtualRouterHitEventJson',
+      'formatVirtualRouterHitJson',
+      'formatContinuationScopeJson',
+      'parseVirtualRouterHitProviderKeyJson',
+      'describeTargetProviderJson',
+      'resolveRouteColorStr',
+      'resolveSessionColorStr',
+      'resolveSessionLogColorKeyJson',
+      'buildHitReasonJson',
+    ];
+    for (const exportName of requiredNativeExports) {
+      expect(source).toContain(exportName);
+    }
+
+    const forbiddenPatterns = [
+      { label: 'local stop-message summary', pattern: /function summarizeStopMessageRuntime/u },
+      { label: 'local hit-log omit normalization', pattern: /function normalizeHitLogOmit/u },
+      { label: 'local provider key parser', pattern: /providerKey\.trim\(\)|\.split\('\\.'\)/u },
+      { label: 'local target provider descriptor', pattern: /const aliasLabel|parsed\.keyAlias|parsed\.modelId/u },
+      { label: 'local route color map', pattern: /multimodal:\s*'\\x1b|thinking:\s*'\\x1b/u },
+      { label: 'local session color hash', pattern: /function hashSessionLogColorToken/u },
+      { label: 'local session color map state', pattern: /SESSION_LOG_COLOR_ASSIGNMENTS|SESSION_LOG_COLOR_USAGE/u },
+      { label: 'local context usage summary', pattern: /function describeContextUsage/u },
+      { label: 'local hit reason builder', pattern: /reasoning\.split\(['"]\|['"]\)|routeUsed === 'tools'|context:\$\{contextDetail\}/u },
+      { label: 'local formatted line timestamp', pattern: /padStart\(2,\s*'0'\)|toLocaleTimeString/u },
+      { label: 'local stopMessage label formatter', pattern: /stopMessage:\$\{parts\.join/u },
+    ];
+    const findings = forbiddenPatterns
+      .filter(({ pattern }) => pattern.test(source))
+      .map(({ label }) => label);
+
+    expect(findings).toEqual([]);
+  });
+
   it('retired request-governance public bridge must stay deleted from TS and Rust exports', () => {
     const repoRoot = process.cwd();
     const retiredFiles = [
@@ -3759,8 +3941,14 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'discovers MCP servers from tool result text in TS', pattern: /list_mcp_resources|resourceTemplates|extractFromOutput/ },
       { label: 'keeps non-blocking normalize logger', pattern: /logNormalizeNonBlocking|formatUnknownError/ },
       { label: 'swallows native normalize failure', pattern: /catch\s*\(error\)\s*\{[\s\S]*?chat_messages\.normalize_native/ },
+      { label: 'maps messages in TS normalize path', pattern: /\.messages\s*=\s*[^;]*\.map\s*\(/ },
+      { label: 'maps tools in TS normalize path', pattern: /\.tools\s*=\s*[^;]*\.map\s*\(/ },
+      { label: 'calls per-message native wrapper from TS normalize path', pattern: /normalizeOpenaiMessageWithNative/ },
+      { label: 'calls per-tool native wrapper from TS normalize path', pattern: /normalizeOpenaiToolWithNative/ },
+      { label: 'calls message-array native wrapper from TS normalize path', pattern: /normalizeOpenaiChatMessagesWithNative/ },
     ]);
 
+    expect(source).toContain('normalizeOpenaiChatRequestWithNative');
     expect(findings).toEqual([]);
   });
 
@@ -4145,6 +4333,76 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('system tool guidance text must be native-owned', () => {
+    const guidePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/guidance/index.ts');
+    const source = fs.readFileSync(guidePath, 'utf8');
+
+    expect(source).toContain('buildSystemToolGuidanceJson');
+    expect(source).toContain('augmentOpenAIToolsJson');
+    expect(source).toContain('augmentAnthropicToolsJson');
+    const buildSystemBlock = source.match(
+      /export function buildSystemToolGuidance\(\): string \{[\s\S]*?\n\}/u
+    )?.[0] ?? '';
+    const augmentOpenAIBlock = source.match(
+      /export function augmentOpenAITools\(tools: unknown\[\]\): unknown\[\] \{[\s\S]*?\n\}/u
+    )?.[0] ?? '';
+    const augmentAnthropicBlock = source.match(
+      /export function augmentAnthropicTools\(tools: unknown\[\]\): unknown\[\] \{[\s\S]*?\n\}/u
+    )?.[0] ?? '';
+    const forbiddenPatterns = [
+      { label: 'local bullet formatter', pattern: /const bullet\s*=/u },
+      { label: 'local guidance line array', pattern: /const lines:\s*string\[\]/u },
+      { label: 'local guidance line push', pattern: /lines\.push/u },
+      { label: 'local guidance join', pattern: /lines\.join\(/u },
+    ];
+    const findings = forbiddenPatterns
+      .filter(({ pattern }) => pattern.test(buildSystemBlock))
+      .map(({ label }) => label);
+
+    const augmentForbiddenPatterns = [
+      { label: 'local exec guidance', pattern: /Codex ExecCommand Guidance/u },
+      { label: 'local shell guidance', pattern: /Codex Shell Guidance/u },
+      { label: 'local plan guidance', pattern: /Codex Plan Guidance/u },
+      { label: 'local mcp guidance', pattern: /Codex MCP Guidance/u },
+      { label: 'local view image guidance', pattern: /Codex ViewImage Guidance/u },
+      { label: 'local append once', pattern: /appendOnce/u },
+      { label: 'local object schema mutation', pattern: /ensureObjectSchema/u },
+      { label: 'local parameters mutation', pattern: /\.parameters\s*=/u },
+      { label: 'local input schema mutation', pattern: /\.input_schema\s*=/u },
+    ];
+    for (const block of [augmentOpenAIBlock, augmentAnthropicBlock]) {
+      for (const rule of augmentForbiddenPatterns) {
+        if (rule.pattern.test(block)) {
+          findings.push(rule.label);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('tool args JSON artifact repair must be native-owned', () => {
+    const argsJsonPath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/tools/args-json.ts');
+    const source = fs.readFileSync(argsJsonPath, 'utf8');
+
+    expect(source).toContain('parseToolArgsJsonWithArtifactRepairWithNative');
+    const forbiddenPatterns = [
+      { label: 'local arg key regex', pattern: /arg_key\\s\*|arg_key\\s\*>|<arg_key/u },
+      { label: 'local arg value regex', pattern: /arg_value\\s\*|arg_value\\s\*>|<arg_value/u },
+      { label: 'local xml tag stripper', pattern: /stripXmlLikeTags|<\[\^>\]\+>/u },
+      { label: 'local primitive coercion', pattern: /coercePrimitive/u },
+      { label: 'local injected pair extraction', pattern: /extractInjectedArgPairs/u },
+      { label: 'local recursive key repair', pattern: /repairArgKeyArtifactsInKeys/u },
+      { label: 'local recursive object repair', pattern: /repairArgKeyArtifactsInObject/u },
+      { label: 'local parse fallback warning', pattern: /JSON\.parse failed after repair|console\.warn/u },
+    ];
+    const findings = forbiddenPatterns
+      .filter(({ pattern }) => pattern.test(source))
+      .map(({ label }) => label);
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy shared responses request adapter must stay deleted from active docs and source', () => {
     const adapterPath = path.join(
       process.cwd(),
@@ -4232,6 +4490,100 @@ describe('hub pipeline stage residue audit', () => {
     expect(storeSource).not.toMatch(/owner:\$\{[^`]+conversation:\$\{/u);
     expect(storeSource).not.toContain('const owners: Array');
     expect(storeSource).not.toContain('responsesResume');
+  });
+
+  it('responses conversation store TS surface must stay a native-plan IO shell', () => {
+    const repoRoot = process.cwd();
+    const storeSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts'),
+      'utf8'
+    );
+
+    for (const nativePlan of [
+      'buildConversationScopePlan',
+      'planPersistedEntry',
+      'planStoreTokens',
+      'planContinuationMeta',
+      'planPersistenceEligibility',
+      'planRebindRequestId',
+      'planConversationPreflight',
+      'planCapturePendingCleanup',
+      'planCapturedEntry',
+      'planRecordScopeEntryMatch',
+      'planRecordContinuationFlag',
+      'planRecordScopeCleanup',
+      'planResumeEntryMatch',
+      'planContinuationLookupByResponseId',
+      'planStoreSweep',
+      'planReleaseRequestPayload',
+      'planConversationRetention',
+      'planScopeContinuationMatch',
+      'planAttachEntryScopes',
+    ]) {
+      expect(storeSource).toContain(nativePlan);
+    }
+
+    const forbidden = collectMatches(storeSource, [
+      {
+        label: 'retired shouldAllow TS facade',
+        pattern: /function\s+shouldAllowContinuation\b|shouldAllowResponsesConversationContinuationWithNative/u,
+      },
+      {
+        label: 'retired prepare entry TS facade',
+        pattern: /function\s+prepareConversationEntry\b|prepareResponsesConversationEntryWithNative/u,
+      },
+      {
+        label: 'retired persisted field TS facade',
+        pattern: /function\s+pickPersistedFields\b|pickResponsesPersistedFieldsWithNative/u,
+      },
+      {
+        label: 'manual continuation owner branch',
+        pattern: /continuationOwner\s*===|continuationOwner\s*!==/u,
+      },
+      {
+        label: 'manual scope-key string builder',
+        pattern: /entry:\$\{[^`]+owner:\$\{|owner:\$\{[^`]+session:\$\{|owner:\$\{[^`]+conversation:\$\{/u,
+      },
+      {
+        label: 'manual continuation allow true branch',
+        pattern: /allowContinuation\s*=\s*true|allowContinuation:\s*true/u,
+      },
+      {
+        label: 'manual continuation allow false branch',
+        pattern: /allowContinuation\s*=\s*false|allowContinuation:\s*false/u,
+      },
+      {
+        label: 'local response output to input conversion',
+        pattern: /function_call_output[\s\S]{0,120}\.map\(|previous_response_id[\s\S]{0,160}input/u,
+      },
+    ]);
+
+    expect(forbidden).toEqual([]);
+    expect(storeSource).toContain('entry.allowContinuation = continuationPlan.allowContinuation');
+  });
+
+  it('responses conversation continuation input source selection must be native-owned', () => {
+    const repoRoot = process.cwd();
+    const nativeStoreSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts'),
+      'utf8'
+    );
+
+    expect(nativeStoreSource).toContain('restoreResponsesContinuationPayloadWithNative');
+    expect(nativeStoreSource).toContain('materializeResponsesContinuationPayloadWithNative');
+    const restoreBlock = nativeStoreSource.match(
+      /export function restoreContinuationPayload\([\s\S]*?export function materializeContinuationPayload/u
+    )?.[0] ?? '';
+    const materializeBlock = nativeStoreSource.match(
+      /export function materializeContinuationPayload\([\s\S]*?export function stripStoredContextInputMedia/u
+    )?.[0] ?? '';
+
+    for (const block of [restoreBlock, materializeBlock]) {
+      expect(block).not.toContain('useReleasedPrefixSideChannelOnly');
+      expect(block).not.toContain('const continuationInput');
+      expect(block).not.toMatch(/continuationOwner\s*===\s*['"]direct['"]/u);
+      expect(block).not.toMatch(/Array\.isArray\(entry\.input\)[\s\S]{0,220}releasedInputPrefix/u);
+    }
   });
 
   it('responses provider-owned submit context materialization must be native-owned', () => {
@@ -4555,6 +4907,75 @@ describe('hub pipeline stage residue audit', () => {
     expect(verificationMap).not.toContain('hub.resp_chatprocess_orchestration_v2');
     expect(functionMap).not.toContain('plan_provider_response_orchestration_v2');
     expect(verificationMap).not.toContain('plan_provider_response_orchestration_v2');
+  });
+
+  it('virtual router contracts must stay type-only bridge surface', () => {
+    const contractsPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts',
+    );
+    const sourceRoots = [
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
+      path.join(process.cwd(), 'src'),
+    ];
+    const contractsSource = fs.readFileSync(contractsPath, 'utf8');
+    const findings = collectMatches(contractsSource, [
+      { label: 'TS owns default model context token constant', pattern: /DEFAULT_MODEL_CONTEXT_TOKENS/ },
+      { label: 'TS owns default route constant', pattern: /DEFAULT_ROUTE/ },
+      { label: 'TS owns route priority ordering', pattern: /ROUTE_PRIORITY/ },
+      { label: 'virtual router error code lives in contracts', pattern: /enum\s+VirtualRouterErrorCode/ },
+      { label: 'virtual router error class lives in contracts', pattern: /class\s+VirtualRouterError/ },
+    ]);
+
+    for (const root of sourceRoots) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
+        const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
+          continue;
+        }
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (
+          /import\s*\{[^}]*\bVirtualRouterError(Code)?\b[^}]*\}\s*from\s*['"][^'"]*virtual-router-contracts\.js['"]/.test(source)
+        ) {
+          findings.push(`${relativePath}:virtual-router error imported from contracts`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
+  it('compat profile registry TS parallel implementation must stay deleted', () => {
+    const deletedFiles = [
+      'sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/header-policies.ts',
+      'sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/policy-overrides.ts',
+      'sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/provider-resolver.ts',
+      'sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/registry.ts',
+      'sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/types.ts',
+    ];
+    const existingFiles = deletedFiles.filter((relPath) => fs.existsSync(path.join(process.cwd(), relPath)));
+    const sourceRoots = [
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
+      path.join(process.cwd(), 'src'),
+    ];
+    const findings = [...existingFiles];
+
+    for (const root of sourceRoots) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
+        const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
+          continue;
+        }
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (
+          /applyHeaderPolicies|shouldSkipPolicy|detectProviderTypeFromConfig|resolveOutboundProfileFromConfig|resolveDefaultCompatibilityProfileFromConfig|loadCompatProfileRegistry|CompatProfileRegistry|HeaderPolicyRule|PolicyOverrideConfig/.test(source)
+        ) {
+          findings.push(relativePath);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
   });
 
   it('stop_message schema budget must be restored from MetadataCenter stopless runtime control only', () => {

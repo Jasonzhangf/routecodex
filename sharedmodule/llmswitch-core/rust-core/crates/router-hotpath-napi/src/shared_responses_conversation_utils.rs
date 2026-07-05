@@ -446,6 +446,223 @@ fn plan_responses_store_tokens(input: &Value) -> Value {
     })
 }
 
+fn plan_responses_conversation_preflight(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let mode = read_trimmed_string(obj.get("mode")).unwrap_or_default();
+    match mode.as_str() {
+        "capture_request" => {
+            let request_id = read_trimmed_string(obj.get("requestId"));
+            let payload_is_record = obj.get("payload").and_then(Value::as_object).is_some();
+            if request_id.is_none() {
+                return serde_json::json!({
+                    "action": "skip",
+                    "reason": "missing_request_id",
+                });
+            }
+            if !payload_is_record {
+                return serde_json::json!({
+                    "action": "skip",
+                    "reason": "missing_payload",
+                    "requestId": request_id,
+                });
+            }
+            serde_json::json!({
+                "action": "continue",
+                "reason": "valid",
+                "requestId": request_id,
+            })
+        }
+        "record_response" => {
+            let request_id = read_trimmed_string(obj.get("requestId"));
+            let response_id = obj
+                .get("response")
+                .and_then(Value::as_object)
+                .and_then(|response| read_trimmed_string(response.get("id")));
+            if request_id.is_none() {
+                return serde_json::json!({
+                    "action": "throw",
+                    "reason": "missing_request_id",
+                    "code": "MALFORMED_RESPONSE",
+                    "responseId": response_id,
+                });
+            }
+            if response_id.is_none() {
+                return serde_json::json!({
+                    "action": "throw",
+                    "reason": "missing_response_id",
+                    "code": "MALFORMED_RESPONSE",
+                    "requestId": request_id,
+                });
+            }
+            serde_json::json!({
+                "action": "continue",
+                "reason": "valid",
+                "requestId": request_id,
+                "responseId": response_id,
+            })
+        }
+        "resume_conversation" => {
+            let response_id = read_trimmed_string(obj.get("responseId"));
+            let tool_output_count = obj
+                .get("submitPayload")
+                .and_then(Value::as_object)
+                .and_then(|payload| payload.get("tool_outputs"))
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0);
+            if response_id.is_none() {
+                return serde_json::json!({
+                    "action": "throw",
+                    "reason": "missing_or_empty_response_id",
+                    "code": "MALFORMED_REQUEST",
+                });
+            }
+            if tool_output_count == 0 {
+                return serde_json::json!({
+                    "action": "throw",
+                    "reason": "missing_tool_outputs",
+                    "code": "MALFORMED_REQUEST",
+                    "responseId": response_id,
+                });
+            }
+            serde_json::json!({
+                "action": "continue",
+                "reason": "valid",
+                "responseId": response_id,
+                "toolOutputCount": tool_output_count,
+            })
+        }
+        _ => serde_json::json!({
+            "action": "throw",
+            "reason": "unsupported_mode",
+            "code": "INTERNAL_ERROR",
+        }),
+    }
+}
+
+fn plan_responses_record_continuation_flag(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let existing_allow = obj
+        .get("allowContinuation")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let pending_tool_call_count = obj
+        .get("pendingToolCallIds")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| read_trimmed_string(Some(item)).is_some())
+                .count()
+        })
+        .unwrap_or(0);
+    if pending_tool_call_count > 0 {
+        return serde_json::json!({
+            "allowContinuation": true,
+            "reason": "pending_tool_calls",
+            "pendingToolCallCount": pending_tool_call_count,
+        });
+    }
+    if existing_allow {
+        return serde_json::json!({
+            "allowContinuation": true,
+            "reason": "already_allowed",
+            "pendingToolCallCount": 0,
+        });
+    }
+    serde_json::json!({
+        "allowContinuation": false,
+        "reason": "no_pending_tool_calls",
+        "pendingToolCallCount": 0,
+    })
+}
+
+fn plan_responses_captured_entry(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let request_id = read_trimmed_string(obj.get("requestId")).unwrap_or_default();
+    let payload = obj.get("payload").cloned().unwrap_or(Value::Null);
+    let context = obj.get("context").cloned().unwrap_or(Value::Null);
+    let prepared = prepare_responses_conversation_entry(&payload, &context);
+    let prepared_obj = prepared.as_object();
+    let base_payload = prepared_obj
+        .and_then(|row| row.get("basePayload"))
+        .and_then(Value::as_object)
+        .map(|row| Value::Object(row.clone()))
+        .unwrap_or_else(|| pick_responses_persisted_fields(&payload));
+    let input_items = prepared_obj
+        .and_then(|row| row.get("input"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let tools = prepared_obj
+        .and_then(|row| row.get("tools"))
+        .and_then(Value::as_array)
+        .cloned()
+        .filter(|items| !items.is_empty());
+    let scope_keys: Vec<Value> = obj
+        .get("scopeKeys")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| read_trimmed_string(Some(&item)).map(Value::String))
+        .collect();
+    let port_scope_key = read_trimmed_string(obj.get("portScopeKey"));
+    let entry_tokens = plan_responses_store_tokens(&serde_json::json!({
+        "providerKey": obj.get("providerKey").cloned().unwrap_or(Value::Null),
+        "fallbackProviderKey": payload
+            .as_object()
+            .and_then(|row| row.get("providerKey"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "sessionId": obj.get("sessionId").cloned().unwrap_or(Value::Null),
+        "conversationId": obj.get("conversationId").cloned().unwrap_or(Value::Null),
+        "entryKind": obj.get("entryKind").cloned().unwrap_or(Value::Null),
+    }));
+    let tokens_obj = entry_tokens.as_object().cloned().unwrap_or_default();
+    let now_ms = obj.get("nowMs").cloned().unwrap_or(Value::Null);
+
+    let mut entry = Map::new();
+    entry.insert("requestId".to_string(), Value::String(request_id));
+    entry.insert("basePayload".to_string(), base_payload);
+    entry.insert("input".to_string(), Value::Array(input_items));
+    entry.insert(
+        "allowContinuation".to_string(),
+        Value::Bool(should_allow_responses_conversation_continuation(&payload)),
+    );
+    if let Some(tools) = tools {
+        entry.insert("tools".to_string(), Value::Array(tools));
+    }
+    if let Some(provider_key) = tokens_obj.get("providerKey").cloned() {
+        entry.insert("providerKey".to_string(), provider_key);
+    }
+    entry.insert(
+        "entryKind".to_string(),
+        tokens_obj
+            .get("entryKind")
+            .cloned()
+            .unwrap_or_else(|| Value::String("responses".to_string())),
+    );
+    entry.insert("continuationOwner".to_string(), Value::Null);
+    if let Some(session_id) = tokens_obj.get("sessionId").cloned() {
+        entry.insert("sessionId".to_string(), session_id);
+    }
+    if let Some(conversation_id) = tokens_obj.get("conversationId").cloned() {
+        entry.insert("conversationId".to_string(), conversation_id);
+    }
+    entry.insert("scopeKeys".to_string(), Value::Array(scope_keys));
+    if let Some(port_scope_key) = port_scope_key {
+        entry.insert("portScopeKey".to_string(), Value::String(port_scope_key));
+    }
+    entry.insert("createdAt".to_string(), now_ms.clone());
+    entry.insert("updatedAt".to_string(), now_ms);
+    serde_json::json!({
+        "action": "entry",
+        "reason": "captured",
+        "entry": Value::Object(entry),
+    })
+}
+
 fn plan_responses_persisted_entry(input: &Value) -> Value {
     let obj = input.as_object().cloned().unwrap_or_default();
     let mode = read_trimmed_string(obj.get("mode")).unwrap_or_else(|| "serialize".to_string());
@@ -3986,6 +4203,30 @@ pub fn plan_responses_store_tokens_json(input_json: String) -> NapiResult<String
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi(js_name = "planResponsesConversationPreflightJson")]
+pub fn plan_responses_conversation_preflight_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_conversation_preflight(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesRecordContinuationFlagJson")]
+pub fn plan_responses_record_continuation_flag_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_record_continuation_flag(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "planResponsesCapturedEntryJson")]
+pub fn plan_responses_captured_entry_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_captured_entry(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi_derive::napi(js_name = "planResponsesCapturePendingCleanupJson")]
 pub fn plan_responses_capture_pending_cleanup_json(input_json: String) -> NapiResult<String> {
     let input: Value =
@@ -4352,17 +4593,19 @@ mod tests {
         build_responses_conversation_scope_plan, build_stop_hook_guidance_text_from_output,
         convert_responses_output_to_input_items, materialize_provider_owned_submit_context,
         materialize_responses_continuation_payload, plan_responses_attach_entry_scopes,
-        plan_responses_capture_pending_cleanup, plan_responses_continuation_lookup_by_response_id,
-        plan_responses_continuation_meta, plan_responses_continuation_request_action,
-        plan_responses_conversation_persistence_eligibility,
+        plan_responses_capture_pending_cleanup, plan_responses_captured_entry,
+        plan_responses_continuation_lookup_by_response_id, plan_responses_continuation_meta,
+        plan_responses_continuation_request_action,
+        plan_responses_conversation_persistence_eligibility, plan_responses_conversation_preflight,
         plan_responses_conversation_resume_entry_match, plan_responses_conversation_retention,
         plan_responses_handler_entry, plan_responses_persisted_entry,
-        plan_responses_rebind_request_id, plan_responses_record_scope_cleanup,
-        plan_responses_record_scope_entry_match, plan_responses_release_request_payload,
-        plan_responses_request_context, plan_responses_scope_continuation_match,
-        plan_responses_store_sweep, plan_responses_store_tokens,
-        prepare_responses_conversation_entry, publish_responses_record_plan_json,
-        restore_responses_continuation_payload, resume_responses_conversation_payload,
+        plan_responses_rebind_request_id, plan_responses_record_continuation_flag,
+        plan_responses_record_scope_cleanup, plan_responses_record_scope_entry_match,
+        plan_responses_release_request_payload, plan_responses_request_context,
+        plan_responses_scope_continuation_match, plan_responses_store_sweep,
+        plan_responses_store_tokens, prepare_responses_conversation_entry,
+        publish_responses_record_plan_json, restore_responses_continuation_payload,
+        resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
 
@@ -7203,6 +7446,236 @@ mod tests {
                 "action": "none",
                 "reason": "expired_or_unknown_response_id"
             })
+        );
+    }
+
+    #[test]
+    fn conversation_preflight_plan_owns_store_entry_guards() {
+        assert_eq!(
+            plan_responses_conversation_preflight(&json!({
+                "mode": "capture_request",
+                "requestId": " req_capture ",
+                "payload": { "model": "gpt" }
+            })),
+            json!({
+                "action": "continue",
+                "reason": "valid",
+                "requestId": "req_capture"
+            })
+        );
+        assert_eq!(
+            plan_responses_conversation_preflight(&json!({
+                "mode": "capture_request",
+                "requestId": "req_capture",
+                "payload": null
+            })),
+            json!({
+                "action": "skip",
+                "reason": "missing_payload",
+                "requestId": "req_capture"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_preflight(&json!({
+                "mode": "record_response",
+                "requestId": " req_record ",
+                "response": { "id": " resp_record " }
+            })),
+            json!({
+                "action": "continue",
+                "reason": "valid",
+                "requestId": "req_record",
+                "responseId": "resp_record"
+            })
+        );
+        assert_eq!(
+            plan_responses_conversation_preflight(&json!({
+                "mode": "record_response",
+                "requestId": "",
+                "response": { "id": "resp_missing_request" }
+            })),
+            json!({
+                "action": "throw",
+                "reason": "missing_request_id",
+                "code": "MALFORMED_RESPONSE",
+                "responseId": "resp_missing_request"
+            })
+        );
+        assert_eq!(
+            plan_responses_conversation_preflight(&json!({
+                "mode": "record_response",
+                "requestId": "req_missing_response",
+                "response": {}
+            })),
+            json!({
+                "action": "throw",
+                "reason": "missing_response_id",
+                "code": "MALFORMED_RESPONSE",
+                "requestId": "req_missing_response"
+            })
+        );
+
+        assert_eq!(
+            plan_responses_conversation_preflight(&json!({
+                "mode": "resume_conversation",
+                "responseId": " resp_resume ",
+                "submitPayload": {
+                    "tool_outputs": [{ "call_id": "call_1", "output": "ok" }]
+                }
+            })),
+            json!({
+                "action": "continue",
+                "reason": "valid",
+                "responseId": "resp_resume",
+                "toolOutputCount": 1
+            })
+        );
+        assert_eq!(
+            plan_responses_conversation_preflight(&json!({
+                "mode": "resume_conversation",
+                "responseId": "",
+                "submitPayload": { "tool_outputs": [] }
+            })),
+            json!({
+                "action": "throw",
+                "reason": "missing_or_empty_response_id",
+                "code": "MALFORMED_REQUEST"
+            })
+        );
+        assert_eq!(
+            plan_responses_conversation_preflight(&json!({
+                "mode": "resume_conversation",
+                "responseId": "resp_no_tools",
+                "submitPayload": { "tool_outputs": [] }
+            })),
+            json!({
+                "action": "throw",
+                "reason": "missing_tool_outputs",
+                "code": "MALFORMED_REQUEST",
+                "responseId": "resp_no_tools"
+            })
+        );
+    }
+
+    #[test]
+    fn record_continuation_flag_plan_owns_pending_tool_decision() {
+        assert_eq!(
+            plan_responses_record_continuation_flag(&json!({
+                "allowContinuation": false,
+                "pendingToolCallIds": [" call_1 ", "", "call_2"]
+            })),
+            json!({
+                "allowContinuation": true,
+                "reason": "pending_tool_calls",
+                "pendingToolCallCount": 2
+            })
+        );
+
+        assert_eq!(
+            plan_responses_record_continuation_flag(&json!({
+                "allowContinuation": true,
+                "pendingToolCallIds": []
+            })),
+            json!({
+                "allowContinuation": true,
+                "reason": "already_allowed",
+                "pendingToolCallCount": 0
+            })
+        );
+
+        assert_eq!(
+            plan_responses_record_continuation_flag(&json!({
+                "allowContinuation": false,
+                "pendingToolCallIds": []
+            })),
+            json!({
+                "allowContinuation": false,
+                "reason": "no_pending_tool_calls",
+                "pendingToolCallCount": 0
+            })
+        );
+    }
+
+    #[test]
+    fn captured_entry_plan_owns_capture_entry_construction() {
+        let plan = plan_responses_captured_entry(&json!({
+            "requestId": "req_capture",
+            "payload": {
+                "model": " gpt-5 ",
+                "stream": true,
+                "providerKey": " payload-provider ",
+                "store": true,
+                "tools": [{ "type": "function", "name": "run" }]
+            },
+            "context": {
+                "input": [{ "type": "message", "role": "user", "content": "hi" }],
+                "providerKey": " context-provider "
+            },
+            "providerKey": " args-provider ",
+            "sessionId": " session-1 ",
+            "conversationId": " conv-1 ",
+            "entryKind": "responses",
+            "scopeKeys": ["scope:a", " scope:b "],
+            "portScopeKey": "port:5520",
+            "nowMs": 1234
+        }));
+        let entry = plan
+            .get("entry")
+            .and_then(Value::as_object)
+            .expect("captured entry");
+        assert_eq!(plan.get("action"), Some(&json!("entry")));
+        assert_eq!(entry.get("requestId"), Some(&json!("req_capture")));
+        assert_eq!(entry.get("allowContinuation"), Some(&json!(true)));
+        assert_eq!(entry.get("providerKey"), Some(&json!("args-provider")));
+        assert_eq!(entry.get("sessionId"), Some(&json!("session-1")));
+        assert_eq!(entry.get("conversationId"), Some(&json!("conv-1")));
+        assert_eq!(entry.get("entryKind"), Some(&json!("responses")));
+        assert_eq!(entry.get("continuationOwner"), Some(&Value::Null));
+        assert_eq!(entry.get("scopeKeys"), Some(&json!(["scope:a", "scope:b"])));
+        assert_eq!(entry.get("portScopeKey"), Some(&json!("port:5520")));
+        assert_eq!(entry.get("createdAt"), Some(&json!(1234)));
+        assert_eq!(entry.get("updatedAt"), Some(&json!(1234)));
+        assert_eq!(
+            entry
+                .get("basePayload")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("model")),
+            Some(&json!("gpt-5"))
+        );
+        assert!(entry
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.len() == 1));
+        assert_eq!(
+            entry.get("tools").and_then(Value::as_array).map(Vec::len),
+            None
+        );
+        assert!(entry
+            .get("basePayload")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("tools"))
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.len() == 1));
+
+        let fallback = plan_responses_captured_entry(&json!({
+            "requestId": "req_minimal",
+            "payload": { "model": "gpt-5" },
+            "context": null,
+            "scopeKeys": [],
+            "nowMs": 5
+        }));
+        let fallback_entry = fallback
+            .get("entry")
+            .and_then(Value::as_object)
+            .expect("fallback entry");
+        assert_eq!(fallback_entry.get("allowContinuation"), Some(&json!(false)));
+        assert_eq!(
+            fallback_entry
+                .get("tools")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            None
         );
     }
 

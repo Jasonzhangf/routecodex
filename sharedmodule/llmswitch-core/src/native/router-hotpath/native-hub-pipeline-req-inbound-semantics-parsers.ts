@@ -69,18 +69,7 @@ function parseToolOutputSnapshotBuildResult(
   if (!parsed) {
     return null;
   }
-  const snapshot = parsed.snapshot;
-  const payload = parsed.payload;
-  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
-    return null;
-  }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return null;
-  }
-  return {
-    snapshot: snapshot as Record<string, unknown>,
-    payload: payload as Record<string, unknown>
-  };
+  return parsed as { snapshot: Record<string, unknown>; payload: Record<string, unknown> };
 }
 
 export {

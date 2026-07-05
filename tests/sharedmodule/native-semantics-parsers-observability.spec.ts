@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import fs from 'node:fs';
 
 import { parseAliasMap } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.js';
-import { parseBoolean as parseReqOutboundBoolean } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.js';
+import { parseJsonObject as parseReqOutboundJsonObject } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.js';
 import { parsePendingToolSyncPayload } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.js';
 
 async function importWithNativeParseFailureMock<TModule>(
@@ -56,8 +56,8 @@ describe('native semantics parser observability', () => {
   it('logs req outbound parser JSON failures and still returns null', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(parseReqOutboundBoolean('{not-json')).toBeNull();
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseBoolean parse failed (non-blocking)');
+    expect(parseReqOutboundJsonObject('{not-json')).toBeNull();
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseJsonObject parse failed (non-blocking)');
 
     warnSpy.mockRestore();
   });
@@ -141,7 +141,7 @@ describe('native semantics parser observability', () => {
     );
 
     expect(() => mod.resolveBridgePolicyWithNative({ protocol: 'openai-chat' })).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parsePolicy failed (non-blocking)');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('resolveBridgePolicyWithNative parse failed (non-blocking)');
 
     warnSpy.mockRestore();
   });

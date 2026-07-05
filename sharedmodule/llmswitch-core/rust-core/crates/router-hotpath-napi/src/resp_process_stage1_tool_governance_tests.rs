@@ -14,7 +14,9 @@ use crate::resp_process_stage1_tool_governance_blocks::display_sanitize::{
     strip_tool_call_marker_payload,
 };
 use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::read_command_from_args;
-use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
+use crate::resp_process_stage1_tool_governance_blocks::json_args::{
+    parse_json_record, parse_tool_args_json_with_artifact_repair,
+};
 use crate::resp_process_stage1_tool_governance_blocks::message_content::read_message_text_candidates;
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::{
     collect_harvest_text_variants, extract_reasoning_inline_exec_command_arg_key,
@@ -1752,7 +1754,38 @@ fn test_normalize_tool_args_variants() {
 }
 
 #[test]
-fn test_normalize_tool_args_exec_command_preserves_large_heredoc_file_generation() {
+fn test_parse_tool_args_json_artifact_repair_is_native_owned() {
+    let parsed = parse_tool_args_json_with_artifact_repair(&Value::String(
+        r#"{"cmd<arg_value>pwd</arg_value><arg_key>command":"pwd"}"#.to_string(),
+    ));
+    assert_eq!(parsed["command"], "pwd");
+    assert!(parsed.get("cmd").is_none());
+
+    let parsed = parse_tool_args_json_with_artifact_repair(&Value::String(
+        r#"{"nested":{"<arg_key>file</arg_key>":"a.ts"}}"#.to_string(),
+    ));
+    assert_eq!(parsed["nested"]["file"], "a.ts");
+
+    let parsed = parse_tool_args_json_with_artifact_repair(&Value::String(
+        r#"{"meta":"prefix</arg_key><arg_value>workdir</arg_key><arg_value>/repo</arg_key><arg_value>tty</arg_key><arg_value>true"}"#.to_string(),
+    ));
+    assert_eq!(parsed["meta"], "prefix");
+    assert_eq!(parsed["workdir"], "/repo");
+    assert_eq!(parsed["tty"], true);
+
+    let parsed = parse_tool_args_json_with_artifact_repair(&Value::String(
+        r#"{"file":"a.ts","changes":[{"kind":"create_file","lines":["x"],"file</arg_key><arg_value>a.ts"}]}"#.to_string(),
+    ));
+    assert_eq!(parsed["changes"][0]["file"], "a.ts");
+
+    let parsed = parse_tool_args_json_with_artifact_repair(&Value::String("not json".to_string()));
+    assert_eq!(parsed, json!({}));
+    let parsed = parse_tool_args_json_with_artifact_repair(&Value::Null);
+    assert_eq!(parsed, json!({}));
+}
+
+#[test]
+fn test_normalize_tool_args_exec_command_blocks_large_heredoc_file_generation() {
     let large_body = "x".repeat(5000);
     let command = format!(
         "cat > /tmp/FileSheet.tsx << 'ENDOFFILE'\n{}\nENDOFFILE",
@@ -1764,7 +1797,10 @@ fn test_normalize_tool_args_exec_command_preserves_large_heredoc_file_generation
     });
     let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(parsed["cmd"], raw_args["cmd"]);
+    let cmd = parsed["cmd"].as_str().unwrap_or("");
+    assert!(cmd.contains("blocked by exec_command guard"));
+    assert!(cmd.contains("forbidden_shell_write"));
+    assert!(cmd.contains("exit 2"));
     assert_eq!(parsed["workdir"], "/workspace");
 }
 
