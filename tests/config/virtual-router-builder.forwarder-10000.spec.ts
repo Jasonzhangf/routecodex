@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { readFileSync } from 'node:fs';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-builder.js';
+import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
 import { extractProviderKeysForRoutingGroup } from '../../src/server/runtime/http-server/http-server-bootstrap.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
 

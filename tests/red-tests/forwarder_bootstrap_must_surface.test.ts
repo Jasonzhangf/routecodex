@@ -23,7 +23,7 @@ import { describe, it, expect } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-builder.js';
+import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
 
 const LIVE_CONFIG = '/Users/fanzhang/.rcc/config.toml';

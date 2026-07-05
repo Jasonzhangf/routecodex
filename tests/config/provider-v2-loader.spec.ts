@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadProviderConfigsV2 } from '../../src/config/provider-v2-loader.js';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-builder.js';
+import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
 import { materializeRouteCodexConfig } from '../../src/config/user-config-loader.js';
 import type { UnknownRecord } from '../../src/config/virtual-router-types.js';
 

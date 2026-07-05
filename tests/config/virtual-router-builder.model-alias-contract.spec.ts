@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-builder.js';
+import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
 
 async function createTempProviderRoot(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vr-builder-alias-contract-'));

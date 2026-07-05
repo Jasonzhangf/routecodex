@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-builder.js';
+import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
 
 describe('virtual-router-builder: routing policy group tagging', () => {
   it('requires an explicit routing policy group when multiple groups exist', async () => {
