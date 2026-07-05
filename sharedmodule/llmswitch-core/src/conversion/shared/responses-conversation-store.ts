@@ -9,11 +9,15 @@ import {
   collectPendingToolCallIds,
   convertOutputToInputItems,
   materializeContinuationPayload,
+  planAttachEntryScopes,
   pickPersistedFields,
   planCapturePendingCleanup,
   planContinuationLookupByResponseId,
+  planContinuationMeta,
   planConversationRetention,
+  planPersistedEntry,
   planPersistenceEligibility,
+  planRebindRequestId,
   planReleaseRequestPayload,
   planRecordScopeCleanup,
   planRecordScopeEntryMatch,
@@ -62,81 +66,18 @@ function cloneJsonRecord(value: unknown): AnyRecord | undefined {
   }
 }
 
-function cloneJsonRecordArray(value: unknown): AnyRecord[] {
-  if (!Array.isArray(value)) return [];
-  const rows: AnyRecord[] = [];
-  for (const item of value) {
-    const cloned = cloneJsonRecord(item);
-    if (cloned) rows.push(cloned);
-  }
-  return rows;
-}
-
 function serializeEntry(entry: ConversationEntry): ConversationEntry | undefined {
-  const basePayload = cloneJsonRecord(entry.basePayload);
-  if (!basePayload) return undefined;
-  return {
-    requestId: entry.requestId,
-    basePayload,
-    input: cloneJsonRecordArray(entry.input),
-    allowContinuation: entry.allowContinuation,
-    releasedInputPrefix: cloneJsonRecordArray(entry.releasedInputPrefix),
-    releasedPendingToolCallIds: Array.isArray(entry.releasedPendingToolCallIds)
-      ? entry.releasedPendingToolCallIds.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-      : undefined,
-    inputPrefixDigest: typeof entry.inputPrefixDigest === 'string' ? entry.inputPrefixDigest : undefined,
-    inputItemCount: typeof entry.inputItemCount === 'number' ? entry.inputItemCount : undefined,
-    tools: cloneJsonRecordArray(entry.tools),
-    providerKey: typeof entry.providerKey === 'string' ? entry.providerKey : undefined,
-    entryKind: normalizeEntryKind(entry.entryKind),
-    continuationOwner:
-      entry.continuationOwner === 'direct' || entry.continuationOwner === 'relay'
-        ? entry.continuationOwner
-        : undefined,
-    createdAt: entry.createdAt,
-    updatedAt: entry.updatedAt,
-    lastResponseId: typeof entry.lastResponseId === 'string' ? entry.lastResponseId : undefined,
-    sessionId: typeof entry.sessionId === 'string' ? entry.sessionId : undefined,
-    conversationId: typeof entry.conversationId === 'string' ? entry.conversationId : undefined,
-    scopeKeys: Array.isArray(entry.scopeKeys) ? entry.scopeKeys.filter((v): v is string => typeof v === 'string' && v.trim().length > 0) : [],
-    portScopeKey: typeof entry.portScopeKey === 'string' ? entry.portScopeKey : undefined
-  };
+  const cloned = cloneJsonRecord(entry);
+  if (!cloned) return undefined;
+  const plan = planPersistedEntry({ mode: 'serialize', entry: cloned });
+  return plan.action === 'entry' ? plan.entry : undefined;
 }
 
 function deserializeEntry(value: unknown): ConversationEntry | undefined {
-  if (!isRecord(value)) return undefined;
-  const requestId = readScopeToken(value.requestId);
-  const basePayload = cloneJsonRecord(value.basePayload);
-  const lastResponseId = readScopeToken(value.lastResponseId);
-  if (!requestId || !basePayload || !lastResponseId) return undefined;
-  const createdAt = typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : Date.now();
-  const updatedAt = typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt) ? value.updatedAt : createdAt;
-  return {
-    requestId,
-    basePayload,
-    input: cloneJsonRecordArray(value.input),
-    allowContinuation: value.allowContinuation === true,
-    releasedInputPrefix: cloneJsonRecordArray(value.releasedInputPrefix),
-    releasedPendingToolCallIds: Array.isArray(value.releasedPendingToolCallIds)
-      ? value.releasedPendingToolCallIds.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-      : undefined,
-    inputPrefixDigest: readScopeToken(value.inputPrefixDigest),
-    inputItemCount: typeof value.inputItemCount === 'number' && Number.isFinite(value.inputItemCount) ? value.inputItemCount : undefined,
-    tools: cloneJsonRecordArray(value.tools),
-    providerKey: readScopeToken(value.providerKey),
-    entryKind: normalizeEntryKind(value.entryKind),
-    continuationOwner:
-      value.continuationOwner === 'direct' || value.continuationOwner === 'relay'
-        ? value.continuationOwner
-        : undefined,
-    createdAt,
-    updatedAt,
-    lastResponseId,
-    sessionId: readScopeToken(value.sessionId),
-    conversationId: readScopeToken(value.conversationId),
-    scopeKeys: Array.isArray(value.scopeKeys) ? value.scopeKeys.filter((v): v is string => typeof v === 'string' && v.trim().length > 0) : [],
-    portScopeKey: readScopeToken(value.portScopeKey)
-  };
+  const cloned = cloneJsonRecord(value);
+  if (!cloned) return undefined;
+  const plan = planPersistedEntry({ mode: 'deserialize', entry: cloned, nowMs: Date.now() });
+  return plan.action === 'entry' ? plan.entry : undefined;
 }
 
 function readScopeToken(value: unknown): string | undefined {
@@ -206,19 +147,7 @@ function readResumeScopeKeysFromSubmitPayload(payload: AnyRecord | undefined): s
 
 
 function ensureMetaProviderKey(meta: AnyRecord | undefined, entry: ConversationEntry): AnyRecord {
-  const baseMeta: AnyRecord = isRecord(meta) ? { ...meta } : {};
-  const metaProviderKey = readScopeToken(baseMeta.providerKey);
-  const entryProviderKey = readScopeToken(entry.providerKey);
-  if (!metaProviderKey && entryProviderKey) {
-    baseMeta.providerKey = entryProviderKey;
-  }
-  if (!readScopeToken(baseMeta.continuationOwner) && entry.continuationOwner) {
-    baseMeta.continuationOwner = entry.continuationOwner;
-  }
-  if (!readScopeToken(baseMeta.entryKind) && entry.entryKind) {
-    baseMeta.entryKind = entry.entryKind;
-  }
-  return baseMeta;
+  return planContinuationMeta({ meta, entry }).meta;
 }
 
 type ScopeMatchCandidate = {
@@ -368,16 +297,20 @@ class ResponsesConversationStore {
   }
 
   rebindRequestId(oldId: string | undefined, newId: string | undefined): void {
-    if (!oldId || !newId || oldId === newId) {
+    const plan = planRebindRequestId({
+      oldId,
+      newId,
+      oldEntryExists: Boolean(oldId && this.requestMap.has(oldId)),
+      newEntryExists: Boolean(newId && this.requestMap.has(newId))
+    });
+    if (plan.action !== 'rebind' || !plan.oldId || !plan.newId) {
       return;
     }
-    const entry = this.requestMap.get(oldId);
-    if (!entry) {
-      return;
-    }
-    this.requestMap.delete(oldId);
-    entry.requestId = newId;
-    this.requestMap.set(newId, entry);
+    const entry = this.requestMap.get(plan.oldId);
+    if (!entry) return;
+    this.requestMap.delete(plan.oldId);
+    entry.requestId = plan.newId;
+    this.requestMap.set(plan.newId, entry);
   }
 
   captureRequestContext(args: CaptureContextArgs): void {
@@ -846,11 +779,19 @@ class ResponsesConversationStore {
   }
 
   private attachEntryScopes(entry: ConversationEntry): void {
-    for (const key of entry.scopeKeys) {
-      const previous = this.scopeIndex.get(key);
-      if (previous && previous !== entry) {
-        this.detachEntry(previous);
-      }
+    const attachPlan = planAttachEntryScopes({
+      requestId: entry.requestId,
+      scopeKeys: entry.scopeKeys,
+      candidates: entry.scopeKeys.map((scopeKey) => ({
+        scopeKey,
+        requestId: this.scopeIndex.get(scopeKey)?.requestId
+      }))
+    });
+    for (const detachRequestId of attachPlan.detachRequestIds) {
+      const previous = this.requestMap.get(detachRequestId);
+      if (previous) this.detachEntry(previous);
+    }
+    for (const key of attachPlan.scopeKeys) {
       this.scopeIndex.set(key, entry);
     }
   }

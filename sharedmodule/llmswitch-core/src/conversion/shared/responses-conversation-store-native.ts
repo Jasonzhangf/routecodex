@@ -8,12 +8,16 @@ import {
   planResponsesConversationPersistenceEligibilityWithNative,
   planResponsesRecordScopeCleanupWithNative,
   planResponsesRecordScopeEntryMatchWithNative,
+  planResponsesPersistedEntryWithNative,
   planResponsesStoreSweepWithNative,
+  planResponsesAttachEntryScopesWithNative,
+  planResponsesRebindRequestIdWithNative,
   planResponsesReleaseRequestPayloadWithNative,
   planResponsesConversationRetentionWithNative,
   planResponsesConversationResumeEntryMatchWithNative,
   planResponsesScopeContinuationMatchWithNative,
   planResponsesContinuationLookupByResponseIdWithNative,
+  planResponsesContinuationMetaWithNative,
   prepareResponsesConversationEntryWithNative,
   restoreResponsesContinuationPayloadWithNative,
   resumeResponsesConversationPayloadWithNative,
@@ -35,13 +39,17 @@ export function assertResponsesConversationStoreNativeAvailable(): void {
     typeof collectResponsesPendingToolCallIdsWithNative !== 'function' ||
     typeof planResponsesCapturePendingCleanupWithNative !== 'function' ||
     typeof planResponsesConversationPersistenceEligibilityWithNative !== 'function' ||
+    typeof planResponsesPersistedEntryWithNative !== 'function' ||
     typeof planResponsesRecordScopeCleanupWithNative !== 'function' ||
     typeof planResponsesRecordScopeEntryMatchWithNative !== 'function' ||
     typeof planResponsesStoreSweepWithNative !== 'function' ||
+    typeof planResponsesAttachEntryScopesWithNative !== 'function' ||
+    typeof planResponsesRebindRequestIdWithNative !== 'function' ||
     typeof planResponsesReleaseRequestPayloadWithNative !== 'function' ||
     typeof planResponsesConversationRetentionWithNative !== 'function' ||
     typeof planResponsesConversationResumeEntryMatchWithNative !== 'function' ||
     typeof planResponsesContinuationLookupByResponseIdWithNative !== 'function' ||
+    typeof planResponsesContinuationMetaWithNative !== 'function' ||
     typeof planResponsesScopeContinuationMatchWithNative !== 'function' ||
     typeof stripResponsesStoredContextInputMediaWithNative !== 'function'
   ) {
@@ -73,6 +81,19 @@ export function planPersistenceEligibility(
   options: { mode: 'load' | 'flush'; nowMs?: number; ttlMs?: number }
 ): { action: 'persist' | 'skip'; reason: string; lastResponseId?: string } {
   return planResponsesConversationPersistenceEligibilityWithNative(entry, options);
+}
+
+export function planPersistedEntry(input: {
+  mode: 'serialize' | 'deserialize';
+  entry: unknown;
+  nowMs?: number;
+}): { action: 'entry' | 'skip'; reason: string; entry?: ConversationEntry } {
+  const plan = planResponsesPersistedEntryWithNative(input);
+  return {
+    action: plan.action,
+    reason: plan.reason,
+    ...(plan.entry ? { entry: plan.entry as unknown as ConversationEntry } : {})
+  };
 }
 
 export type CapturePendingCleanupCandidate = {
@@ -123,6 +144,40 @@ export function planStoreSweep(input: {
   candidates: StoreSweepCandidate[];
 }): { action: 'noop' | 'detach'; reason: string; detachRequestIds: string[] } {
   return planResponsesStoreSweepWithNative(input);
+}
+
+export type AttachEntryScopeCandidate = {
+  scopeKey?: string;
+  requestId?: string;
+};
+
+export function planAttachEntryScopes(input: {
+  requestId: string;
+  scopeKeys: string[];
+  candidates: AttachEntryScopeCandidate[];
+}): { action: 'noop' | 'attach' | 'detach_and_attach'; reason: string; scopeKeys: string[]; detachRequestIds: string[] } {
+  return planResponsesAttachEntryScopesWithNative(input);
+}
+
+export function planRebindRequestId(input: {
+  oldId?: string;
+  newId?: string;
+  oldEntryExists: boolean;
+  newEntryExists: boolean;
+}): { action: 'noop' | 'rebind'; reason: string; oldId?: string; newId?: string } {
+  return planResponsesRebindRequestIdWithNative(input);
+}
+
+export function planContinuationMeta(input: {
+  meta?: unknown;
+  entry: ConversationEntry;
+}): { action: 'meta'; reason: string; meta: AnyRecord } {
+  const plan = planResponsesContinuationMetaWithNative(input);
+  return {
+    action: plan.action,
+    reason: plan.reason,
+    meta: plan.meta as AnyRecord
+  };
 }
 
 export function planReleaseRequestPayload(entry: ConversationEntry): {
