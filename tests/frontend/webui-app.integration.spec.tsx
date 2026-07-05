@@ -13,6 +13,7 @@ describe('webui integration flows (feature coverage)', () => {
     'provider.test_model',
     'provider.manage_models',
     'provider.authfile_create',
+    'provider.backup_restore',
     'provider.delete',
     'routing.group_create_copy',
     'routing.group_save',
@@ -369,6 +370,7 @@ describe('webui integration flows (feature coverage)', () => {
 
     const providerEditorPanel = panelByTitle('Provider Editor');
     const modelPanel = panelByTitle('Models + Test + Authfile');
+    fireEvent.change(within(providerEditorPanel).getByLabelText('baseURL'), { target: { value: 'https://example.com/v1' } });
     fireEvent.change(within(modelPanel).getByPlaceholderText('new model id'), { target: { value: 'demo-model' } });
     fireEvent.click(within(modelPanel).getByText('Add Model'));
     fireEvent.click(within(providerEditorPanel).getByText('Save'));
@@ -392,6 +394,14 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(within(modelPanel).getByText('Apply to provider'));
     await waitFor(() => expect(screen.getByText(/secretRef applied to provider auth\./)).toBeTruthy());
     hit('provider.authfile_create');
+
+    fireEvent.click(within(providerEditorPanel).getByText('Backup'));
+    await waitFor(() => expect(screen.getByText(/Provider backup captured\./)).toBeTruthy());
+    fireEvent.change(within(providerEditorPanel).getByLabelText('baseURL'), { target: { value: 'https://changed.example/v1' } });
+    fireEvent.click(within(providerEditorPanel).getByText('Restore'));
+    await waitFor(() => expect(screen.getByText(/Provider restored from backup\./)).toBeTruthy());
+    expect(within(providerEditorPanel).getByDisplayValue('https://example.com/v1')).toBeTruthy();
+    hit('provider.backup_restore');
 
     fireEvent.click(within(providerEditorPanel).getByText('Delete'));
     await waitFor(() => expect(screen.getByText(/Provider deleted\./)).toBeTruthy());

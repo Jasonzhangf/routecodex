@@ -203,6 +203,10 @@ describe('webui page-level coverage', () => {
     onToast.mockClear();
     fireEvent.click(within(providerEditorPanel).getByText('Save'));
     await waitFor(() => expect(hasToast('Provider saved.')).toBe(true));
+    fireEvent.click(within(providerEditorPanel).getByText('Backup'));
+    await waitFor(() => expect(hasToast('Provider backup captured.')).toBe(true));
+    fireEvent.click(within(providerEditorPanel).getByText('Restore'));
+    await waitFor(() => expect(hasToast('Provider restored from backup.')).toBe(true));
     fireEvent.change(within(modelPanel).getByPlaceholderText('new model id'), { target: { value: 'demo-next' } });
     fireEvent.click(within(modelPanel).getByText('Add Model'));
     onToast.mockClear();

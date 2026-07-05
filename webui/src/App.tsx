@@ -784,6 +784,7 @@ export function ProviderPage({
   const [providers, setProviders] = useState<ProviderCatalogItem[]>([]);
   const [providerSourceById, setProviderSourceById] = useState<Record<string, ProviderSource>>({});
   const [providerVersionById, setProviderVersionById] = useState<Record<string, string>>({});
+  const [providerBackups, setProviderBackups] = useState<Record<string, { source: ProviderSource; provider: Record<string, unknown> }>>({});
   const [runtimeViews, setRuntimeViews] = useState<RuntimeView[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('');
@@ -956,6 +957,78 @@ export function ProviderPage({
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setLog(`Delete failed: ${msg}`);
+      onToast(msg);
+    }
+  };
+
+  const backupProvider = async (idRaw?: string) => {
+    if (!authenticated) return;
+    const id = (idRaw || providerIdInput).trim();
+    if (!id) {
+      onToast('provider id is required');
+      return;
+    }
+    const source = providerSourceById[id] || 'v2';
+    const endpoint = source === 'v2' ? `/config/providers/v2/${encodeURIComponent(id)}` : `/config/providers/${encodeURIComponent(id)}`;
+    try {
+      const out = await apiFetch<{ provider?: Record<string, unknown> }>(endpoint);
+      const provider = structuredClone(toRecord(out?.provider));
+      if (!Object.keys(provider).length) {
+        throw new Error('provider backup source is empty');
+      }
+      setProviderBackups((prev) => ({
+        ...prev,
+        [id]: { source, provider }
+      }));
+      setLog(`Backed up provider ${id} (${source}) in browser session.`);
+      onToast('Provider backup captured.', 'ok');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setLog(`Backup failed: ${msg}`);
+      onToast(msg);
+    }
+  };
+
+  const restoreProvider = async (idRaw?: string) => {
+    if (!authenticated) return;
+    const id = (idRaw || providerIdInput).trim();
+    if (!id) {
+      onToast('provider id is required');
+      return;
+    }
+    const backup = providerBackups[id];
+    if (!backup) {
+      onToast('No provider backup captured for this provider.');
+      return;
+    }
+    if (!window.confirm(`Restore provider "${id}" from session backup?`)) return;
+    try {
+      const provider: Record<string, unknown> = structuredClone(backup.provider);
+      provider.id = id;
+      if (backup.source === 'v2') {
+        await apiFetch<{ path?: string }>('/config/providers/v2', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerId: id,
+            version: providerVersionById[id] || '2.0.0',
+            provider
+          })
+        });
+      } else {
+        await apiFetch<{ path?: string }>(`/config/providers/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ provider })
+        });
+      }
+      setDraft(provider);
+      setProviderIdInput(id);
+      setSelectedId(id);
+      setLog(`Restored provider ${id} (${backup.source}) from session backup.`);
+      onToast('Provider restored from backup.', 'ok');
+      await refreshProviders();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setLog(`Restore failed: ${msg}`);
       onToast(msg);
     }
   };
@@ -1150,6 +1223,12 @@ export function ProviderPage({
                   </div>
                   <div className="row">
                     <button onClick={() => void loadProvider(textOf(item.id))}>Edit</button>
+                    <button onClick={() => void backupProvider(textOf(item.id))} disabled={!authenticated}>
+                      Backup
+                    </button>
+                    <button onClick={() => void restoreProvider(textOf(item.id))} disabled={!authenticated || !providerBackups[textOf(item.id)]}>
+                      Restore
+                    </button>
                     <button onClick={() => void testProvider(textOf(item.id))} disabled={!authenticated}>
                       Test
                     </button>
@@ -1200,6 +1279,12 @@ export function ProviderPage({
           <button className="primary" onClick={() => void saveProvider()} disabled={!authenticated}>
             Save
           </button>
+          <button onClick={() => void backupProvider()} disabled={!authenticated || !providerIdInput.trim()}>
+            Backup
+          </button>
+          <button onClick={() => void restoreProvider()} disabled={!authenticated || !providerBackups[providerIdInput.trim()]}>
+            Restore
+          </button>
           <button className="danger" onClick={() => void deleteProvider()} disabled={!authenticated}>
             Delete
           </button>
@@ -1230,8 +1315,9 @@ export function ProviderPage({
           </div>
 
           <div className="row">
-            <label>baseURL</label>
+            <label htmlFor="provider-base-url">baseURL</label>
             <input
+              id="provider-base-url"
               value={textOf(draft.baseURL || '')}
               onChange={(e) => patchDraft((obj) => { obj.baseURL = e.target.value; })}
               style={{ minWidth: 260, flex: 1 }}
