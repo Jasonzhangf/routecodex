@@ -21,6 +21,15 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
     projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
   })),
   isToolCallContinuationResponseNative: jest.fn(() => false),
+  projectSseErrorEventPayloadNative: jest.fn(
+    (args: { requestId?: string; status?: number; message?: string; code?: string }) => ({
+      type: 'error',
+      request_id: args.requestId,
+      status: args.status ?? 500,
+      message: args.message ?? 'sse error',
+      code: args.code ?? 'ERR_SSE_ERROR',
+    })
+  ),
   recordResponsesResponseForRequest: jest.fn(async () => undefined),
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),
   requireCoreDist: jest.fn(() => ({})),
@@ -73,13 +82,12 @@ describe('responses SSE prestart close guard', () => {
         },
         continuationOwner: 'direct',
         sseStream: Readable.from([
-            'event: response.completed\n',
-            'data: {"type":"response.completed","response":{"id":"resp_prestart_state_only","object":"response","status":"completed"}}\n\n',
-            'event: response.done\n',
-            'data: {"type":"response.done","response":{"id":"resp_prestart_state_only","object":"response","status":"completed"}}\n\n',
-            'data: [DONE]\n\n',
-          ]),
-        },
+          'event: response.completed\n',
+          'data: {"type":"response.completed","response":{"id":"resp_prestart_state_only","object":"response","status":"completed"}}\n\n',
+          'event: response.done\n',
+          'data: {"type":"response.done","response":{"id":"resp_prestart_state_only","object":"response","status":"completed"}}\n\n',
+          'data: [DONE]\n\n',
+        ]),
       } as any,
       'req-stream-prestart-state-only',
       { forceSSE: true, entryEndpoint: '/v1/responses' }

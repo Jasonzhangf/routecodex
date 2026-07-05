@@ -983,7 +983,7 @@ describe('HTTP Responses SSE projection timeout', () => {
     upstream.on('error', () => {});
     const app = express();
     app.get('/responses', (req, res) => {
-      req.headers['x-stainless-timeout'] = '5';
+      req.headers['x-request-timeout-ms'] = '5';
       const clientConnectionState = trackClientConnectionState(req as any, res as any);
       setTimeout(() => {
         void sendPipelineResponse(

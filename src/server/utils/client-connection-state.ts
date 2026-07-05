@@ -44,7 +44,7 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
 function resolveClientTimeoutHintMs(req: Request): number | undefined {
   const stainlessTimeout = parsePositiveInteger(readHeaderValue(req.headers, 'x-stainless-timeout'));
   if (stainlessTimeout !== undefined) {
-    return stainlessTimeout;
+    return stainlessTimeout * 1000;
   }
   const genericTimeout = parsePositiveInteger(readHeaderValue(req.headers, 'x-request-timeout-ms'));
   if (genericTimeout !== undefined) {

@@ -95,6 +95,18 @@ export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMo
     buildResponsesRequestLogContextForHttp: () => ({}),
     buildResponsesSseErrorPayloadForHttp: () => ({ error: { message: 'sse error' } }),
     buildResponsesStructuredSseErrorPayloadForHttp: () => ({ error: { message: 'structured sse error' } }),
+    projectSseErrorEventPayloadNative: (args: {
+      requestId?: string;
+      status?: number;
+      message?: string;
+      code?: string;
+    }) => ({
+      type: 'error',
+      request_id: args.requestId,
+      status: args.status ?? 500,
+      message: args.message ?? 'sse error',
+      code: args.code ?? 'ERR_SSE_ERROR',
+    }),
     createResponsesJsonToSseConverterForHttp: async () => ({
       convertResponseToJsonToSse: async () => ({})
     }),

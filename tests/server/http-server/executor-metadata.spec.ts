@@ -1066,9 +1066,9 @@ describe('executor metadata session daemon extraction', () => {
 });
 
 describe('client connection timeout hint', () => {
-  it('marks disconnected after x-stainless-timeout hint', async () => {
+  it('marks disconnected after x-request-timeout-ms hint', async () => {
     const req = new EventEmitter() as any;
-    req.headers = { 'x-stainless-timeout': '5' };
+    req.headers = { 'x-request-timeout-ms': '5' };
     const res = new EventEmitter() as any;
     res.writableFinished = false;
     res.writableEnded = false;
@@ -1077,6 +1077,23 @@ describe('client connection timeout hint', () => {
     expect(state.disconnected).toBe(false);
 
     await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(state.disconnected).toBe(true);
+  });
+
+  it('treats x-stainless-timeout as seconds, not milliseconds', async () => {
+    const req = new EventEmitter() as any;
+    req.headers = { 'x-stainless-timeout': '1' };
+    const res = new EventEmitter() as any;
+    res.writableFinished = false;
+    res.writableEnded = false;
+
+    const state = trackClientConnectionState(req, res);
+    expect(state.disconnected).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(state.disconnected).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 980));
     expect(state.disconnected).toBe(true);
   });
 
@@ -1101,7 +1118,7 @@ describe('client connection timeout hint', () => {
 
   it('clears timeout hint watcher on normal finish', async () => {
     const req = new EventEmitter() as any;
-    req.headers = { 'x-stainless-timeout': '5' };
+    req.headers = { 'x-request-timeout-ms': '5' };
     const res = new EventEmitter() as any;
     res.writableFinished = false;
     res.writableEnded = false;
@@ -1119,7 +1136,7 @@ describe('client connection timeout hint', () => {
 
   it('does not clear timeout hint watcher on request close before response completes', async () => {
     const req = new EventEmitter() as any;
-    req.headers = { 'x-stainless-timeout': '5' };
+    req.headers = { 'x-request-timeout-ms': '5' };
     const res = new EventEmitter() as any;
     res.writableFinished = false;
     res.writableEnded = false;

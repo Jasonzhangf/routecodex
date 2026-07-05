@@ -1,3 +1,14 @@
+# 2026-07-05: 5520 `/v1/responses` self-retry loop fixed by `x-stainless-timeout` seconds parsing
+
+- Symptom: live 5520 repeated `/v1/responses` with growing `rawInputItems` and `usage=unreported`; failing sample ended with `response.sse.client_close ... detectedBeforeStreamStart=true`.
+- Root cause: `src/server/utils/client-connection-state.ts` treated `x-stainless-timeout` as milliseconds. Codex sends seconds (`900` -> 900s); RouteCodex was expiring after about 1.15s.
+- Fix: multiply `x-stainless-timeout` by 1000; keep `x-request-timeout-ms` as millisecond-only override. Updated focused timeout/SSE tests and bridge mocks.
+- Verification: red `x-stainless-timeout: 1` test failed before fix; after fix, `executor-metadata.spec.ts -t "client connection timeout hint"`, `sse-projection-timeout.blackbox.spec.ts -t "timeout-hint disconnect"`, and `handler-response-utils.prestart-client-close-guard.spec.ts` pass. Root `tsc`, `verify:function-map-compile-gate`, `verify:server-function-map-boundary`, `build:base`, and `git diff --check` pass.
+- Release/live: `ROUTECODEX_INSTALL_VERIFY_PORT=5520 npm run install:release`, `npm run pack:rcc`, `npm run verify:rcc-release-install`, and real global `npm install -g artifacts/pack/routecodex-0.90.3573.tgz artifacts/pack/rcc-0.90.3573.tgz --no-audit --no-fund` passed. `/Users/fanzhang/.local/bin/rcc`, `/opt/homebrew/bin/rcc`, bare `rcc`, `routecodex`, and `/health` on 4444/5520/5555/10000 all report `0.90.3573`. Active process root is `/opt/homebrew/lib/node_modules/rcc/dist/index.js`.
+- Installed global verification: importing `/opt/homebrew/lib/node_modules/rcc/dist/server/utils/client-connection-state.js` with `x-stainless-timeout: 1` returns `{early:false,late:true}`.
+- Live log proof: post-install 5520 log after request `openai-responses-router-gpt-5.4-20260705T110541731-462969-4740` has no new `response.sse.client_close` / `detectedBeforeStreamStart`; requests complete over 4s-70s instead of the previous 160ms/2s loop.
+- Caveats: full `verify:architecture-ci` still fails on existing forbidden-path debt unrelated to this timeout fix; `verify:responses-handler-single-bridge-surface` still fails on pre-existing `readRequestBodyMetadata` token debt.
+
 # 2026-07-05: stopless contract blackbox aligned to guidance rewrite
 
 - Scope: test-only closure for `scripts/tests/stopless-contract-blackbox.mjs`; runtime owner remains Rust Chat Process stopless, no runtime code changed.
