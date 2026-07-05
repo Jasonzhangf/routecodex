@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StopMessageMarkerParseLog {
     pub request_id: String,
     pub marker_detected: bool,
@@ -55,7 +56,7 @@ const STOP_MESSAGE_SCOPED_TYPES: &[&str] = &[
 // ---------------------------------------------------------------------------
 
 fn has_marker_syntax(text: &str) -> bool {
-    text.contains('\u{200B}') // zero-width space marker
+    text.contains("<**") || text.contains('\u{200B}') || text.contains('\u{200C}')
 }
 
 fn extract_stop_message_text(content: &serde_json::Value) -> String {
@@ -330,25 +331,117 @@ pub fn emit_stop_message_marker_parse_log_json(log_json: Option<String>) -> napi
 // ---------------------------------------------------------------------------
 
 fn clean_marker_syntax(request: &mut serde_json::Value) {
-    // Remove zero-width spaces and markers from messages content
+    fn compact_marker_whitespace(input: &str) -> String {
+        let without_inline_space = regex::Regex::new(r"[ \t]+\n")
+            .expect("valid inline marker whitespace regex")
+            .replace_all(input, "\n")
+            .to_string();
+        regex::Regex::new(r"\n{3,}")
+            .expect("valid repeated newline regex")
+            .replace_all(without_inline_space.trim(), "\n\n")
+            .to_string()
+    }
+
+    fn strip_marker_syntax_from_text(raw: &str) -> String {
+        let without_zero_width = raw
+            .chars()
+            .filter(|ch| *ch != '\u{200B}' && *ch != '\u{200C}')
+            .collect::<String>();
+        if !without_zero_width.contains("<**") {
+            return without_zero_width;
+        }
+
+        let source = without_zero_width.as_str();
+        let mut output = String::with_capacity(source.len());
+        let mut cursor = 0usize;
+
+        while cursor < source.len() {
+            let marker_start = match source[cursor..].find("<**") {
+                Some(offset) => cursor + offset,
+                None => {
+                    output.push_str(&source[cursor..]);
+                    break;
+                }
+            };
+            output.push_str(&source[cursor..marker_start]);
+
+            let body_start = marker_start + 3;
+            let close_index = source[body_start..]
+                .find("**>")
+                .map(|offset| body_start + offset);
+            let newline_index = source[body_start..]
+                .find('\n')
+                .map(|offset| body_start + offset);
+            let has_closed_marker = match (close_index, newline_index) {
+                (Some(close), Some(newline)) => close < newline,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            cursor = if has_closed_marker {
+                close_index.expect("closed marker index") + 3
+            } else {
+                newline_index.unwrap_or(source.len())
+            };
+        }
+
+        compact_marker_whitespace(output.as_str())
+    }
+
+    fn clean_content_value(content: &mut serde_json::Value) {
+        match content {
+            serde_json::Value::String(text) => {
+                *text = strip_marker_syntax_from_text(text);
+            }
+            serde_json::Value::Array(parts) => {
+                for entry in parts.iter_mut() {
+                    match entry {
+                        serde_json::Value::String(text) => {
+                            *text = strip_marker_syntax_from_text(text);
+                        }
+                        serde_json::Value::Object(record) => {
+                            for key in ["text", "content"] {
+                                if let Some(serde_json::Value::String(text)) = record.get_mut(key) {
+                                    *text = strip_marker_syntax_from_text(text);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     if let Some(messages) = request.get_mut("messages").and_then(|v| v.as_array_mut()) {
         for msg in messages.iter_mut() {
             if let Some(content) = msg.get_mut("content") {
-                match content {
-                    serde_json::Value::String(s) => {
-                        s.retain(|c| c != '\u{200B}' && c != '\u{200C}');
-                    }
-                    serde_json::Value::Array(arr) => {
-                        for entry in arr.iter_mut() {
-                            if let serde_json::Value::String(s) = entry {
-                                s.retain(|c| c != '\u{200B}' && c != '\u{200C}');
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                clean_content_value(content);
             }
         }
+    }
+
+    let Some(context_input) = request
+        .get_mut("semantics")
+        .and_then(|v| v.as_object_mut())
+        .and_then(|semantics| semantics.get_mut("responses"))
+        .and_then(|v| v.as_object_mut())
+        .and_then(|responses| responses.get_mut("context"))
+        .and_then(|v| v.as_object_mut())
+        .and_then(|context| context.get_mut("input"))
+        .and_then(|v| v.as_array_mut())
+    else {
+        return;
+    };
+
+    for entry in context_input.iter_mut() {
+        let Some(entry_obj) = entry.as_object_mut() else {
+            continue;
+        };
+        let Some(content) = entry_obj.get_mut("content") else {
+            continue;
+        };
+        clean_content_value(content);
     }
 }
 
@@ -359,4 +452,71 @@ pub fn clean_stop_message_markers_in_place_json(request_json: String) -> napi::R
     clean_marker_syntax(&mut request);
     serde_json::to_string(&request)
         .map_err(|e| napi::Error::from_reason(format!("serialize: {}", e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_stop_message_marker_parse_log_json, clean_stop_message_markers_in_place_json,
+    };
+    use serde_json::{json, Value};
+
+    #[test]
+    fn marker_parse_log_detects_angle_marker_and_uses_camel_case_contract() {
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "<**stopMessage:\"继续执行\",3**> hello" }
+            ]
+        });
+        let metadata = json!({ "requestId": "req-stop-marker" });
+        let parsed_kinds = json!(["stopMessageSet"]);
+
+        let raw = build_stop_message_marker_parse_log_json(
+            request.to_string(),
+            metadata.to_string(),
+            parsed_kinds.to_string(),
+            Some("session:s1".to_string()),
+        )
+        .expect("marker parse log");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse log json");
+
+        assert_eq!(parsed["requestId"], "req-stop-marker");
+        assert_eq!(parsed["markerDetected"], true);
+        assert_eq!(parsed["stopMessageTypes"], json!(["stopMessageSet"]));
+        assert_eq!(parsed["stopScope"], "session:s1");
+    }
+
+    #[test]
+    fn marker_cleanup_strips_messages_and_responses_context_input() {
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "<**stopMessage:\"继续执行\",3**> hello" },
+                { "role": "user", "content": [{ "type": "text", "text": "before <**preCommandSet:\"pwd\"**> after" }] }
+            ],
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "input": [
+                            { "role": "user", "content": [{ "type": "input_text", "text": "<**stopMessage:on,3**> hello" }] }
+                        ]
+                    }
+                }
+            }
+        });
+
+        let raw =
+            clean_stop_message_markers_in_place_json(request.to_string()).expect("clean markers");
+        let cleaned: Value = serde_json::from_str(&raw).expect("parse cleaned request");
+
+        assert_eq!(cleaned["messages"][0]["content"], "hello");
+        assert_eq!(
+            cleaned["messages"][1]["content"][0]["text"],
+            "before  after"
+        );
+        assert_eq!(
+            cleaned["semantics"]["responses"]["context"]["input"][0]["content"][0]["text"],
+            "hello"
+        );
+        assert!(!raw.contains("<**"));
+    }
 }

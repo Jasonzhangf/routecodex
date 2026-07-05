@@ -117,8 +117,7 @@ mod web_search_mode;
 use crate::virtual_router_engine::routing::resolve_routing_state_key as resolve_virtual_router_routing_state_key;
 use crate::virtual_router_engine::routing::resolve_stop_message_scope as resolve_virtual_router_stop_message_scope;
 use crate::virtual_router_engine::routing::{
-    resolve_error_err05_route_availability_decision,
-    ErrorErr05RouteAvailabilityDecisionInput,
+    resolve_error_err05_route_availability_decision, ErrorErr05RouteAvailabilityDecisionInput,
 };
 use crate::virtual_router_engine::{
     evaluate_singleton_route_pool_exhaustion, SingletonRoutePoolExhaustionDecision,
@@ -2819,40 +2818,50 @@ pub fn report_provider_success_to_router_policy_json_bridge(
 #[napi(js_name = "resetProviderRuntimeIngressForTestsJson")]
 
 pub fn reset_provider_runtime_ingress_for_tests_json_bridge() -> NapiResult<String> {
-    #[napi(js_name = "buildStopMessageMarkerParseLogJson")]
-    pub fn build_stop_message_marker_parse_log_json_bridge(
-        request_json: String,
-        metadata_json: String,
-        parsed_kinds_json: String,
-        stop_scope: Option<String>,
-    ) -> napi::Result<String> {
-        crate::virtual_router_engine::virtual_router_host_effects::build_stop_message_marker_parse_log_json(request_json, metadata_json, parsed_kinds_json, stop_scope)
-    }
-
-    #[napi(js_name = "formatStopMessageStatusLabelJson")]
-    pub fn format_stop_message_status_label_json_bridge(
-        snapshot_json: Option<String>,
-        scope: Option<String>,
-        force_show: bool,
-    ) -> napi::Result<String> {
-        crate::virtual_router_engine::virtual_router_host_effects::format_stop_message_status_label_json(snapshot_json, scope, force_show)
-    }
-
-    #[napi(js_name = "emitStopMessageMarkerParseLogJson")]
-    pub fn emit_stop_message_marker_parse_log_json_bridge(
-        log_json: Option<String>,
-    ) -> napi::Result<()> {
-        crate::virtual_router_engine::virtual_router_host_effects::emit_stop_message_marker_parse_log_json(log_json)
-    }
-
-    #[napi(js_name = "cleanStopMessageMarkersInPlaceJson")]
-    pub fn clean_stop_message_markers_in_place_json_bridge(
-        request_json: String,
-    ) -> napi::Result<String> {
-        crate::virtual_router_engine::virtual_router_host_effects::clean_stop_message_markers_in_place_json(request_json)
-    }
     virtual_router_engine::provider_runtime_ingress::reset_for_tests();
     Ok("true".to_string())
+}
+
+#[napi(js_name = "buildStopMessageMarkerParseLogJson")]
+pub fn build_stop_message_marker_parse_log_json_bridge(
+    request_json: String,
+    metadata_json: String,
+    parsed_kinds_json: String,
+    stop_scope: Option<String>,
+) -> napi::Result<String> {
+    crate::virtual_router_engine::virtual_router_host_effects::build_stop_message_marker_parse_log_json(
+        request_json,
+        metadata_json,
+        parsed_kinds_json,
+        stop_scope,
+    )
+}
+
+#[napi(js_name = "formatStopMessageStatusLabelJson")]
+pub fn format_stop_message_status_label_json_bridge(
+    snapshot_json: Option<String>,
+    scope: Option<String>,
+    force_show: bool,
+) -> napi::Result<String> {
+    crate::virtual_router_engine::virtual_router_host_effects::format_stop_message_status_label_json(
+        snapshot_json,
+        scope,
+        force_show,
+    )
+}
+
+#[napi(js_name = "emitStopMessageMarkerParseLogJson")]
+pub fn emit_stop_message_marker_parse_log_json_bridge(
+    log_json: Option<String>,
+) -> napi::Result<()> {
+    crate::virtual_router_engine::virtual_router_host_effects::emit_stop_message_marker_parse_log_json(log_json)
+}
+
+#[napi(js_name = "cleanStopMessageMarkersInPlaceJson")]
+pub fn clean_stop_message_markers_in_place_json_bridge(
+    request_json: String,
+) -> napi::Result<String> {
+    crate::virtual_router_engine::virtual_router_host_effects::clean_stop_message_markers_in_place_json(request_json)
 }
 
 #[napi(js_name = "createVirtualRouterHitRecordJson")]

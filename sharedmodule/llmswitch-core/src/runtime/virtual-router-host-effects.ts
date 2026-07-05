@@ -13,7 +13,12 @@ import {
 } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import { formatVirtualRouterHit, createVirtualRouterHitRecord, resolveSessionLogColorKey, type VirtualRouterHitLogConfig } from './virtual-router-hit-log.js';
 import type { RoutingInstruction } from '../native/router-hotpath/native-virtual-router-routing-state.js';
-import { cleanMarkerSyntaxInPlace, hasMarkerSyntax } from '../conversion/shared/marker-lifecycle.js';
+import { failNativeRequired } from '../native/router-hotpath/native-router-hotpath-policy.js';
+import {
+  parseRecord,
+  readNativeFunction,
+  safeStringify
+} from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 
 export type VirtualRouterRouteHostEffects = {
   finalize: (
@@ -21,10 +26,6 @@ export type VirtualRouterRouteHostEffects = {
     getStopMessageState: (metadata: RouterMetadataInput) => StopMessageStateSnapshot | null
   ) => void;
 };
-
-const STOP_MESSAGE_INSTRUCTION_TYPES = new Set(['stopMessageSet', 'stopMessageMode', 'stopMessageClear']);
-const STOP_MESSAGE_SCOPED_TYPES = new Set(['stopMessageSet', 'stopMessageMode', 'stopMessageClear', 'preCommandSet', 'preCommandClear']);
-const STOP_MESSAGE_KEYWORD_PATTERN = /stopmessage/i;
 
 export type StopMessageMarkerParseLog = {
   requestId: string;
@@ -58,45 +59,94 @@ export function buildStopMessageMarkerParseLog(
   request: StandardizedRequest | ProcessedRequest,
   metadata: RouterMetadataInput
 ): StopMessageMarkerParseLog | null {
-  const messages = Array.isArray((request as { messages?: unknown }).messages)
-    ? (((request as { messages?: unknown[] }).messages ?? []) as Array<{ role?: unknown; content?: unknown }>)
-    : [];
-  const latest = [...messages].reverse().find((message) => message?.role === 'user');
-  const latestText = latest ? extractStopMessageText(latest.content).trim() : '';
-  const latestHasMarker = hasMarkerSyntax(latestText);
-  const hasStopKeyword = STOP_MESSAGE_KEYWORD_PATTERN.test(latestText);
-  if (!hasStopKeyword && !latestHasMarker) return null;
+  const capability = 'buildStopMessageMarkerParseLogJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) return failNativeRequired<StopMessageMarkerParseLog | null>(capability);
   const parsedKinds = parseRoutingInstructionKindsWithNative(request as unknown as Record<string, unknown>);
-  const stopMessageTypes = parsedKinds.filter((type) => STOP_MESSAGE_INSTRUCTION_TYPES.has(type));
-  const scopedTypes = parsedKinds.filter((type) => STOP_MESSAGE_SCOPED_TYPES.has(type));
-  if (!hasStopKeyword && stopMessageTypes.length === 0 && scopedTypes.length === 0) return null;
-  return {
-    requestId: metadata.requestId || 'n/a',
-    markerDetected: latestHasMarker,
-    preview: latestText.replace(/\s+/g, ' ').slice(0, 120),
-    stopMessageTypes,
-    scopedTypes,
-    stopScope: resolveStopMessageScope(metadata)
-  };
+  const requestJson = safeStringify(request ?? null);
+  const metadataJson = safeStringify(metadata ?? null);
+  const parsedKindsJson = safeStringify(parsedKinds);
+  if (!requestJson || !metadataJson || !parsedKindsJson) {
+    return failNativeRequired<StopMessageMarkerParseLog | null>(capability, 'json stringify failed');
+  }
+  const stopScope = resolveStopMessageScope(metadata);
+  try {
+    const raw = fn(requestJson, metadataJson, parsedKindsJson, stopScope);
+    if (typeof raw !== 'string' || !raw) {
+      return failNativeRequired<StopMessageMarkerParseLog | null>(capability, 'empty result');
+    }
+    if (raw === 'null') return null;
+    const parsed = parseRecord(raw);
+    if (!parsed) return failNativeRequired<StopMessageMarkerParseLog | null>(capability, 'invalid payload');
+    return {
+      requestId: typeof parsed.requestId === 'string' ? parsed.requestId : 'n/a',
+      markerDetected: parsed.markerDetected === true,
+      preview: typeof parsed.preview === 'string' ? parsed.preview : '',
+      stopMessageTypes: Array.isArray(parsed.stopMessageTypes)
+        ? parsed.stopMessageTypes.filter((entry): entry is string => typeof entry === 'string')
+        : [],
+      scopedTypes: Array.isArray(parsed.scopedTypes)
+        ? parsed.scopedTypes.filter((entry): entry is string => typeof entry === 'string')
+        : [],
+      ...(typeof parsed.stopScope === 'string' ? { stopScope: parsed.stopScope } : {})
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<StopMessageMarkerParseLog | null>(capability, reason);
+  }
 }
 
 export function emitStopMessageMarkerParseLog(log: StopMessageMarkerParseLog | null): void {
-  if (!log) return;
-  const reset = '\x1b[0m';
-  const tagColor = '\x1b[38;5;39m';
-  const scopeColor = '\x1b[38;5;220m';
-  console.log(
-    `${tagColor}[virtual-router][stop_message_parse]${reset} requestId=${log.requestId} marker=${log.markerDetected ? 'detected' : 'missing'} parsed=${log.stopMessageTypes.join(',') || 'none'} preview=${log.preview}`
-  );
-  if (log.scopedTypes.length > 0) {
-    console.log(log.stopScope
-      ? `${scopeColor}[virtual-router][stop_scope]${reset} requestId=${log.requestId} stage=apply scope=${log.stopScope} instructions=${log.scopedTypes.join(',')}`
-      : `${scopeColor}[virtual-router][stop_scope]${reset} requestId=${log.requestId} stage=drop reason=missing_session_scope instructions=${log.scopedTypes.join(',')}`);
+  const capability = 'emitStopMessageMarkerParseLogJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    failNativeRequired<void>(capability);
+    return;
+  }
+  const logJson = log ? safeStringify(log) : undefined;
+  if (log && !logJson) {
+    failNativeRequired<void>(capability, 'json stringify failed');
+    return;
+  }
+  try {
+    fn(logJson);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    failNativeRequired<void>(capability, reason);
   }
 }
 
 export function cleanStopMessageMarkersInPlace(request: Record<string, unknown>): void {
-  cleanMarkerSyntaxInPlace(request);
+  const capability = 'cleanStopMessageMarkersInPlaceJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    failNativeRequired<void>(capability);
+    return;
+  }
+  const requestJson = safeStringify(request ?? null);
+  if (!requestJson) {
+    failNativeRequired<void>(capability, 'json stringify failed');
+    return;
+  }
+  try {
+    const raw = fn(requestJson);
+    if (typeof raw !== 'string' || !raw) {
+      failNativeRequired<void>(capability, 'empty result');
+      return;
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed) {
+      failNativeRequired<void>(capability, 'invalid payload');
+      return;
+    }
+    for (const key of Object.keys(request)) {
+      delete request[key];
+    }
+    Object.assign(request, parsed);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    failNativeRequired<void>(capability, reason);
+  }
 }
 
 export function formatStopMessageStatusLabel(
@@ -118,20 +168,6 @@ export function formatStopMessageStatusLabel(
   const remaining = maxRepeats > 0 ? Math.max(0, maxRepeats - used) : -1;
   const active = mode !== 'off' && Boolean(text) && maxRepeats > 0;
   return `[stopMessage:scope=${scopeLabel} text="${safeText}" mode=${mode} round=${maxRepeats > 0 ? `${used}/${maxRepeats}` : `${used}/-`} left=${remaining >= 0 ? String(remaining) : 'n/a'} active=${active ? 'yes' : 'no'}]`;
-}
-
-function extractStopMessageText(content: unknown): string {
-  if (typeof content === 'string' && content.trim()) return content;
-  if (!Array.isArray(content)) return '';
-  const parts = content.flatMap((entry) => {
-    if (typeof entry === 'string' && entry.trim()) return [entry];
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
-    const record = entry as { text?: unknown; content?: unknown };
-    if (typeof record.text === 'string' && record.text.trim()) return [record.text];
-    if (typeof record.content === 'string' && record.content.trim()) return [record.content];
-    return [];
-  });
-  return parts.join('\n').trim();
 }
 
 export function createVirtualRouterRouteHostEffects(args: {

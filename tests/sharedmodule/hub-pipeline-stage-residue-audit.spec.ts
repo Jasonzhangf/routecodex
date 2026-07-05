@@ -3789,19 +3789,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain("from '../../../native/router-hotpath/native-virtual-router-routing-state.js'");
   });
 
-  it('marker lifecycle shared helper must not expose internal TS marker parsers as public API', () => {
+  it('marker lifecycle shared helper must stay physically deleted', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'exports marker match type', pattern: /export\s+interface\s+MarkerSyntaxMatch\b/ },
-      { label: 'exports marker strip result type', pattern: /export\s+interface\s+StripMarkerSyntaxResult\b/ },
-      { label: 'exports text marker parser', pattern: /export\s+function\s+stripMarkerSyntaxFromText\b/ },
-      { label: 'exports content marker parser', pattern: /export\s+function\s+stripMarkerSyntaxFromContent\b/ },
-      { label: 'exports message marker parser', pattern: /export\s+function\s+stripMarkerSyntaxFromMessages\b/ },
-      { label: 'exports request marker parser', pattern: /export\s+function\s+stripMarkerSyntaxFromRequest\b/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('chat SSE serializer must have been physically deleted', () => {
