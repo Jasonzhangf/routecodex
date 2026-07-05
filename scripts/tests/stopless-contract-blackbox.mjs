@@ -294,10 +294,6 @@ function extractInputJson(command) {
   return JSON.parse(match?.[1] ?? '{}');
 }
 
-function extractResponsesInputItems(body) {
-  return Array.isArray(body?.input) ? body.input : [];
-}
-
 function hasStopSchemaContractText(text) {
   const value = String(text || '');
   return value.includes('<rcc_stop_schema>')
@@ -310,36 +306,6 @@ function hasStopSchemaContractText(text) {
       || value.includes('Fields are conditionally required, not globally required')
     )
     && value.includes('next_step');
-}
-
-function findFunctionCall(items, predicate) {
-  return items.find((item) =>
-    item
-    && item.type === 'function_call'
-    && predicate(item)
-  ) ?? null;
-}
-
-function findFunctionCallOutput(items, predicate) {
-  return items.find((item) =>
-    item
-    && item.type === 'function_call_output'
-    && predicate(item)
-  ) ?? null;
-}
-
-function findLastFunctionCall(items, predicate) {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
-    if (
-      item
-      && item.type === 'function_call'
-      && predicate(item)
-    ) {
-      return item;
-    }
-  }
-  return null;
 }
 
 function runCliCommand(command) {
@@ -397,7 +363,7 @@ const CASES = [
     expectedReasonCode: 'stop_schema_missing',
     expectedTriggerHint: 'no_schema',
     expectCliSchemaFeedback: false,
-    expectedProviderText: 'stop_schema_missing',
+    expectedProviderText: '上一轮执行结果：repeatCount=1/3',
     expectedMissingFields: ['stopreason']
   },
   {
@@ -604,28 +570,9 @@ async function runCase(testCase) {
     const secondInput = extractInputJson(secondExec?.command ?? '');
     const secondProviderPayload = upstreamHits[1] ?? {};
     const secondProviderText = JSON.stringify(secondProviderPayload);
+    const secondProviderInput = Array.isArray(secondProviderPayload.input) ? secondProviderPayload.input : [];
+    const secondProviderCurrentTurnText = JSON.stringify(secondProviderInput.slice(-2));
     const secondProviderTools = extractToolNames(secondProviderPayload.tools);
-    const secondProviderInput = extractResponsesInputItems(secondProviderPayload);
-    const restoredReasoningStopCall = findLastFunctionCall(
-      secondProviderInput,
-      (item) => item.name === 'reasoningStop'
-    );
-    const restoredReasoningStopOutput = restoredReasoningStopCall
-      ? findFunctionCallOutput(
-        secondProviderInput,
-        (item) => item.call_id === restoredReasoningStopCall.call_id
-      )
-      : null;
-    const restoredReasoningStopOutputJson = (() => {
-      if (typeof restoredReasoningStopOutput?.output !== 'string' || !restoredReasoningStopOutput.output.trim()) {
-        return null;
-      }
-      try {
-        return JSON.parse(restoredReasoningStopOutput.output);
-      } catch {
-        return null;
-      }
-    })();
 
     assert.equal(submit.status, 200, `case=${testCase.id} expected submit_tool_outputs 200, body=${submitText}`);
     assert.equal(upstreamHits.length, 2, `case=${testCase.id} expected 2 upstream hits, hits=${JSON.stringify(upstreamHits)}`);
@@ -640,26 +587,15 @@ async function runCase(testCase) {
     assert.equal(secondInput.repeatCount, 2, `case=${testCase.id} unexpected client exec_command repeatCount: ${JSON.stringify(secondInput)}`);
     assert.equal(secondInput.maxRepeats, 3, `case=${testCase.id} unexpected client exec_command maxRepeats: ${JSON.stringify(secondInput)}`);
     assert.ok(
-      restoredReasoningStopOutput,
-      `case=${testCase.id} second provider-request must restore CLI result as function_call_output paired for reasoningStop: ${JSON.stringify(secondProviderPayload)}`
+      secondProviderCurrentTurnText.includes('上一轮执行结果：repeatCount=1/3')
+        && secondProviderCurrentTurnText.includes(testCase.expectedProviderText),
+      `case=${testCase.id} second provider-request must rewrite CLI output into current-turn model-visible stopless guidance: ${secondProviderCurrentTurnText}`
     );
     assert.ok(
-      restoredReasoningStopCall,
-      `case=${testCase.id} second provider-request must keep paired function_call for restored stopless result: ${JSON.stringify(secondProviderPayload)}`
-    );
-    assert.equal(
-      restoredReasoningStopCall?.name,
-      'reasoningStop',
-      `case=${testCase.id} second provider-request must restore reasoningStop instead of raw exec_command pair: ${JSON.stringify(secondProviderPayload)}`
-    );
-    assert.equal(
-      restoredReasoningStopOutputJson?.input?.triggerHint,
-      testCase.expectedTriggerHint,
-      `case=${testCase.id} second provider-request reasoningStop output must preserve triggerHint: ${JSON.stringify(secondProviderPayload)}`
-    );
-    assert.ok(
-      !String(restoredReasoningStopOutput?.output ?? '').includes('stop_message_auto'),
-      `case=${testCase.id} restored provider-facing output must not leak raw stop_message_auto CLI payload: ${JSON.stringify(secondProviderPayload)}`
+      !secondProviderCurrentTurnText.includes('"name":"exec_command"')
+        && !secondProviderCurrentTurnText.includes('stop_message_auto')
+        && !secondProviderCurrentTurnText.includes('routecodex hook run'),
+      `case=${testCase.id} second provider-request current-turn guidance must not replay raw shell/stop_message_auto history: ${secondProviderCurrentTurnText}`
     );
   } finally {
     if (upstreamServer) {
