@@ -4281,6 +4281,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('OpenAI message normalize semantic helper shells must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const forbiddenFiles = [
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-contract.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-control-text.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-tool-history.ts',
+    ];
+    const existing = forbiddenFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+
+    expect(existing).toEqual([]);
+  });
+
   it('responses bridge wrappers must not run TS synthetic control-text inspectors', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts');
     const source = fs.readFileSync(filePath, 'utf8');

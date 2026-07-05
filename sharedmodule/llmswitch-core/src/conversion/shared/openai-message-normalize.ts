@@ -3,20 +3,6 @@ import {
   normalizeOpenaiMessageWithNative,
   normalizeOpenaiToolWithNative
 } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
-export type {
-  ToolHistoryContractViolation,
-  ToolHistoryContractViolationCode
-} from './openai-message-normalize-contract.js';
-export { isSyntheticRouteCodexToolCallId } from './openai-message-normalize-contract.js';
-export {
-  inspectSyntheticRouteCodexAssistantMessages,
-  inspectSyntheticRouteCodexBridgeInput,
-  isSyntheticRouteCodexControlText
-} from './openai-message-normalize-control-text.js';
-export {
-  inspectBridgeInputToolHistory,
-  inspectOpenAiChatToolHistory
-} from './openai-message-normalize-tool-history.js';
 
 // Message normalization utilities for OpenAI chat payloads (renamed to avoid confusion
 // with the deprecated "openai-normalizer" module entry). This file contains the
