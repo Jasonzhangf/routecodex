@@ -85,6 +85,41 @@ function buildConfigEditorSnapshot(parsed: unknown): {
   };
 }
 
+function cloneConfigEditorPorts(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    const error = new Error('ports must be an array') as Error & { code?: string };
+    error.code = 'invalid_ports';
+    throw error;
+  }
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      const error = new Error(`ports[${index}] must be an object`) as Error & { code?: string };
+      error.code = 'invalid_ports';
+      throw error;
+    }
+    const portNode = (item as Record<string, unknown>).port;
+    const portNumber = typeof portNode === 'number' ? portNode : Number(portNode);
+    if (!Number.isInteger(portNumber) || portNumber <= 0 || portNumber > 65535) {
+      const error = new Error(`ports[${index}].port must be a TCP port number`) as Error & { code?: string };
+      error.code = 'invalid_ports';
+      throw error;
+    }
+    return { ...item, port: portNumber };
+  });
+}
+
+function applyConfigEditorPorts(parsed: unknown, ports: Array<Record<string, unknown>>): Record<string, unknown> {
+  const root = toRecord(parsed);
+  const httpserver = toRecord(root.httpserver);
+  return {
+    ...root,
+    httpserver: {
+      ...httpserver,
+      ports: ports.map((port) => ({ ...port }))
+    }
+  };
+}
+
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
   const rel = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
   return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..');
@@ -203,6 +238,41 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       const code = (error as { code?: string } | null)?.code;
       if (code === 'forbidden_path') {
         res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'internal_error' } });
+    }
+  });
+
+  app.put('/config/editor/ports', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    const body = req.body as Record<string, unknown>;
+    try {
+      const configPath = resolveAllowedAdminFilePath(
+        readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
+      );
+      const decoded = await decodeUserConfigFile(configPath);
+      const ports = cloneConfigEditorPorts(body?.ports);
+      const next = applyConfigEditorPorts(decoded.parsed, ports);
+      await backupFile(configPath);
+      await writeUserConfigFile(configPath, next);
+      const snapshot = buildConfigEditorSnapshot(next);
+      res.status(200).json({
+        ok: true,
+        path: configPath,
+        format: decoded.format,
+        ...snapshot
+      });
+    } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
+      if (code === 'invalid_ports') {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(400).json({ error: { message, code: 'bad_request' } });
         return;
       }
       const message = error instanceof Error ? error.message : String(error);

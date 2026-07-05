@@ -38,6 +38,11 @@ export type ProviderRuntimeKeyItem = {
   providerKey?: string;
 };
 
+type ConfigProviderPickerItem = {
+  id: string;
+  targets: string[];
+};
+
 export type ConfigPortView = {
   port?: number | string;
   host?: string;
@@ -100,6 +105,40 @@ async function loadConfigEditorSnapshot(path?: string): Promise<{
 }> {
   const query = path && path.trim() ? `?path=${encodeURIComponent(path.trim())}` : '';
   return apiFetch(`/config/editor${query}`);
+}
+
+function buildProviderPickerItems(v2Raw: unknown, v1Raw: unknown): ConfigProviderPickerItem[] {
+  const byId = new Map<string, Set<string>>();
+  const addTargets = (idRaw: unknown, modelsRaw: unknown) => {
+    const id = textOf(idRaw).trim();
+    if (!id) return;
+    const models = Array.isArray(modelsRaw)
+      ? modelsRaw.map((item) => textOf(item).trim()).filter(Boolean)
+      : [];
+    const bucket = byId.get(id) || new Set<string>();
+    if (!models.length) {
+      bucket.add(id);
+    } else {
+      for (const model of models) {
+        bucket.add(`${id}.default.${model}`);
+      }
+    }
+    byId.set(id, bucket);
+  };
+
+  for (const item of Array.isArray(v2Raw) ? v2Raw : []) {
+    const rec = recordOf(item);
+    addTargets(rec.id, rec.defaultModels);
+  }
+  const v1Providers = recordOf(v1Raw).providers;
+  for (const item of Array.isArray(v1Providers) ? v1Providers : []) {
+    const rec = recordOf(item);
+    addTargets(rec.id, rec.modelsPreview);
+  }
+
+  return Array.from(byId.entries())
+    .map(([id, targets]) => ({ id, targets: Array.from(targets).sort((a, b) => a.localeCompare(b)) }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 
@@ -1464,6 +1503,7 @@ export function RoutingPage({
   const [location, setLocation] = useState('virtualrouter.routing');
   const [ports, setPorts] = useState<ConfigPortView[]>([]);
   const [selectedPortKey, setSelectedPortKey] = useState('');
+  const [providerPickerItems, setProviderPickerItems] = useState<ConfigProviderPickerItem[]>([]);
   const [groups, setGroups] = useState<Record<string, unknown>>({});
   const [activeGroupId, setActiveGroupId] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('');
@@ -1471,9 +1511,16 @@ export function RoutingPage({
   const [newGroupId, setNewGroupId] = useState('');
   const [log, setLog] = useState('');
 
+  const [newPortNumber, setNewPortNumber] = useState('');
+  const [newPortGroup, setNewPortGroup] = useState('');
+  const [newPortProvider, setNewPortProvider] = useState('');
+  const [newPortSameProtocol, setNewPortSameProtocol] = useState('direct');
   const [newRouteName, setNewRouteName] = useState('');
   const [poolRoute, setPoolRoute] = useState('');
   const [poolTargetsText, setPoolTargetsText] = useState('');
+
+  const makePortKey = (port: ConfigPortView, index: number) =>
+    `${textOf(port.port || index)}:${textOf(port.routingPolicyGroup || port.providerBinding || port.mode || '')}`;
 
   const currentSourceQuery = () => {
     const path = sourcePath.trim();
@@ -1486,11 +1533,26 @@ export function RoutingPage({
       const out = await loadConfigEditorSnapshot(sourcePath);
       const nextPorts = Array.isArray(out?.ports) ? out.ports : [];
       setPorts(nextPorts);
+      const loadedPath = textOf(out?.path || '').trim();
+      if (loadedPath && !sourcePath.trim()) setSourcePath(loadedPath);
       const current = selectedPortKey.trim();
-      const keys = nextPorts.map((port, index) => `${textOf(port.port || index)}:${textOf(port.routingPolicyGroup || port.providerBinding || port.mode || '')}`);
+      const keys = nextPorts.map(makePortKey);
       if (!current || !keys.includes(current)) {
         setSelectedPortKey(keys[0] || '');
       }
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const refreshProviderPicker = async () => {
+    if (!authenticated) return;
+    try {
+      const [v2Raw, v1Raw] = await Promise.all([
+        apiFetch<unknown>('/config/providers/v2').catch(() => [] as unknown[]),
+        apiFetch<unknown>('/config/providers').catch(() => ({ providers: [] }))
+      ]);
+      setProviderPickerItems(buildProviderPickerItems(v2Raw, v1Raw));
     } catch (error) {
       onToast(error instanceof Error ? error.message : String(error));
     }
@@ -1610,6 +1672,7 @@ export function RoutingPage({
   useEffect(() => {
     void (async () => {
       await refreshSources();
+      await refreshProviderPicker();
       await loadGroups();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1625,6 +1688,78 @@ export function RoutingPage({
     setSelectedGroupId(groupId);
     const next = toRecord(groups[groupId]);
     setPolicyDraft(Object.keys(next).length ? next : { routing: {} });
+  };
+
+  const savePorts = async (nextPorts: ConfigPortView[], successMessage: string, preferredKey?: string) => {
+    const out = await apiFetch<{
+      path?: string;
+      ports?: ConfigPortView[];
+    }>(`/config/editor/ports${currentSourceQuery()}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        path: sourcePath || undefined,
+        ports: nextPorts
+      })
+    });
+    const savedPorts = Array.isArray(out?.ports) ? out.ports : nextPorts;
+    setPorts(savedPorts);
+    const savedPath = textOf(out?.path || '').trim();
+    if (savedPath) setSourcePath(savedPath);
+    const keys = savedPorts.map(makePortKey);
+    setSelectedPortKey(preferredKey && keys.includes(preferredKey) ? preferredKey : keys[0] || '');
+    setLog(`${successMessage} path=${out?.path || sourcePath || '—'}`);
+    onToast(successMessage, 'ok');
+  };
+
+  const createPortTab = async () => {
+    if (!authenticated) return;
+    const portNumber = Number(newPortNumber);
+    if (!Number.isInteger(portNumber) || portNumber <= 0 || portNumber > 65535) {
+      onToast('port must be a TCP port number');
+      return;
+    }
+    if (ports.some((item) => Number(item.port) === portNumber)) {
+      onToast('port already exists');
+      return;
+    }
+    const groupId = newPortGroup.trim() || selectedGroupId.trim() || activeGroupId.trim() || 'default';
+    const nextPort: ConfigPortView = {
+      port: portNumber,
+      host: '0.0.0.0',
+      mode: 'router',
+      routingPolicyGroup: groupId,
+      sameProtocolBehavior: newPortSameProtocol || 'direct'
+    };
+    if (newPortProvider.trim()) {
+      nextPort.providerBinding = newPortProvider.trim();
+    }
+    const nextPorts = [...ports, nextPort];
+    try {
+      await savePorts(nextPorts, 'Port tab saved.', makePortKey(nextPort, nextPorts.length - 1));
+      setNewPortNumber('');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setLog(`Port save failed: ${msg}`);
+      onToast(msg);
+    }
+  };
+
+  const updateSelectedPortGroup = async (groupId: string) => {
+    if (!authenticated || !selectedPort) return;
+    const selectedIndex = portTabs.findIndex((item) => item.key === selectedPort.key);
+    if (selectedIndex < 0) return;
+    const nextPorts = ports.map((port, index) => (
+      index === selectedIndex ? { ...port, routingPolicyGroup: groupId } : port
+    ));
+    const nextKey = makePortKey(nextPorts[selectedIndex], selectedIndex);
+    try {
+      await savePorts(nextPorts, 'Port routing group saved.', nextKey);
+      if (groups[groupId]) selectGroup(groupId);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setLog(`Port group save failed: ${msg}`);
+      onToast(msg);
+    }
   };
 
   const saveGroup = async () => {
@@ -1838,12 +1973,13 @@ export function RoutingPage({
 
   const groupIds = Object.keys(groups || {}).sort((a, b) => a.localeCompare(b));
   const portTabs = ports.map((port, index) => ({
-    key: `${textOf(port.port || index)}:${textOf(port.routingPolicyGroup || port.providerBinding || port.mode || '')}`,
+    key: makePortKey(port, index),
     port,
     label: textOf(port.port || `#${index + 1}`),
     groupId: textOf(port.routingPolicyGroup || '').trim()
   }));
   const selectedPort = portTabs.find((item) => item.key === selectedPortKey) || portTabs[0];
+  const providerTargetOptions = providerPickerItems.flatMap((item) => item.targets.map((target) => ({ providerId: item.id, target })));
 
   return (
     <div className="grid grid-wide-left">
@@ -1868,19 +2004,63 @@ export function RoutingPage({
             {!portTabs.length ? <span className="muted">No httpserver.ports[] entries loaded.</span> : null}
           </div>
           {selectedPort ? (
-            <div className="row">
-              <span className="pill mono">port: {textOf(selectedPort.port.port || '—')}</span>
-              <span className="pill mono">mode: {textOf(selectedPort.port.mode || '—')}</span>
-              <span className="pill mono">group: {textOf(selectedPort.port.routingPolicyGroup || '—')}</span>
-              <span className="pill mono">provider: {textOf(selectedPort.port.providerBinding || '—')}</span>
-              <span className="pill mono">same-protocol: {textOf(selectedPort.port.sameProtocolBehavior || '—')}</span>
-            </div>
+            <>
+              <div className="row">
+                <span className="pill mono">port: {textOf(selectedPort.port.port || '—')}</span>
+                <span className="pill mono">mode: {textOf(selectedPort.port.mode || '—')}</span>
+                <span className="pill mono">group: {textOf(selectedPort.port.routingPolicyGroup || '—')}</span>
+                <span className="pill mono">provider: {textOf(selectedPort.port.providerBinding || '—')}</span>
+                <span className="pill mono">same-protocol: {textOf(selectedPort.port.sameProtocolBehavior || '—')}</span>
+              </div>
+              <div className="row" style={{ marginTop: 8 }}>
+                <label htmlFor="port-routing-group">port group</label>
+                <select
+                  id="port-routing-group"
+                  value={textOf(selectedPort.port.routingPolicyGroup || '')}
+                  onChange={(e) => void updateSelectedPortGroup(e.target.value)}
+                  style={{ minWidth: 180 }}
+                >
+                  {groupIds.map((id) => (
+                    <option key={id} value={id}>{id}</option>
+                  ))}
+                </select>
+              </div>
+            </>
           ) : null}
+          <div className="row" style={{ marginTop: 8 }}>
+            <input
+              aria-label="new port"
+              value={newPortNumber}
+              onChange={(e) => setNewPortNumber(e.target.value)}
+              placeholder="new port"
+              style={{ width: 120 }}
+            />
+            <select aria-label="new port routing group" value={newPortGroup} onChange={(e) => setNewPortGroup(e.target.value)} style={{ minWidth: 180 }}>
+              <option value="">selected/default group</option>
+              {groupIds.map((id) => (
+                <option key={id} value={id}>{id}</option>
+              ))}
+            </select>
+            <select aria-label="new port provider binding" value={newPortProvider} onChange={(e) => setNewPortProvider(e.target.value)} style={{ minWidth: 180 }}>
+              <option value="">provider binding optional</option>
+              {providerPickerItems.map((item) => (
+                <option key={item.id} value={item.id}>{item.id}</option>
+              ))}
+            </select>
+            <select aria-label="new port same protocol" value={newPortSameProtocol} onChange={(e) => setNewPortSameProtocol(e.target.value)} style={{ minWidth: 150 }}>
+              <option value="direct">direct</option>
+              <option value="relay">relay</option>
+            </select>
+            <button onClick={() => void createPortTab()} disabled={!authenticated}>
+              Add Port Tab
+            </button>
+          </div>
         </div>
 
         <div className="row" style={{ marginBottom: 8 }}>
-          <label>source</label>
+          <label htmlFor="routing-source">source</label>
           <select
+            id="routing-source"
             value={sourcePath}
             onChange={(e) => setSourcePath(e.target.value)}
             style={{ minWidth: 380, flex: 1 }}
@@ -1905,8 +2085,9 @@ export function RoutingPage({
         </div>
 
         <div className="row" style={{ marginBottom: 8 }}>
-          <label>group</label>
+          <label htmlFor="routing-group">group</label>
           <select
+            id="routing-group"
             value={selectedGroupId}
             onChange={(e) => selectGroup(e.target.value)}
             style={{ width: 220 }}
@@ -1959,6 +2140,23 @@ export function RoutingPage({
               {routeRows.map((row) => (
                 <option key={row.name} value={row.name}>
                   {row.name}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="provider target picker"
+              value=""
+              onChange={(e) => {
+                const target = e.target.value;
+                if (!target) return;
+                setPoolTargetsText((prev) => prev.trim() ? `${prev.trim()}, ${target}` : target);
+              }}
+              style={{ minWidth: 260 }}
+            >
+              <option value="">choose existing provider target</option>
+              {providerTargetOptions.map((item) => (
+                <option key={item.target} value={item.target}>
+                  {item.target}
                 </option>
               ))}
             </select>

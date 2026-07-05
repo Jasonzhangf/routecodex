@@ -323,8 +323,7 @@ describe('webui edge coverage', () => {
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
 
     const routingPanel = screen.getByText('Routing Management').closest('.panel') as HTMLElement;
-    const routingSelects = routingPanel.querySelectorAll('select');
-    const groupSelect = routingSelects[1] as HTMLSelectElement;
+    const groupSelect = within(routingPanel).getByLabelText('group') as HTMLSelectElement;
     fireEvent.change(groupSelect, { target: { value: 'canary' } });
     await waitFor(() => expect(groupSelect.value).toBe('canary'));
 

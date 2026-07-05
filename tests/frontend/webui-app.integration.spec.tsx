@@ -15,6 +15,8 @@ describe('webui integration flows (feature coverage)', () => {
     'provider.authfile_create',
     'provider.backup_restore',
     'provider.delete',
+    'routing.port_tab_save',
+    'routing.provider_picker',
     'routing.group_create_copy',
     'routing.group_save',
     'routing.activate_local',
@@ -32,13 +34,11 @@ describe('webui integration flows (feature coverage)', () => {
       loadBalancing: { strategy: 'round-robin' }
     }
   };
+  let configPorts: JsonRecord[] = [];
   const configEditorSnapshot = () => ({
     ok: true,
     path: '/tmp/config.json',
-    ports: [
-      { port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'direct' },
-      { port: 5555, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'canary', sameProtocolBehavior: 'relay' }
-    ],
+    ports: configPorts,
     routingPolicyGroups: routingGroups,
     activeRoutingPolicyGroup: state.activeGroupId,
     forwarders: {
@@ -96,6 +96,10 @@ describe('webui integration flows (feature coverage)', () => {
     }
 
     providers.clear();
+    configPorts = [
+      { port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'direct' },
+      { port: 5555, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'canary', sameProtocolBehavior: 'relay' }
+    ];
 
     providers.set('demo', {
       id: 'demo',
@@ -107,6 +111,17 @@ describe('webui integration flows (feature coverage)', () => {
       models: {
         'demo-max': {},
         'demo-plus': {}
+      }
+    });
+    providers.set('picker', {
+      id: 'picker',
+      type: 'openai',
+      enabled: true,
+      baseURL: 'https://picker.example/v1',
+      compatibilityProfile: 'openai',
+      auth: { type: 'apikey', apiKey: '' },
+      models: {
+        'picker-model': {}
       }
     });
 
@@ -279,6 +294,11 @@ describe('webui integration flows (feature coverage)', () => {
         return json(configEditorSnapshot());
       }
 
+      if (path === '/config/editor/ports' && method === 'PUT') {
+        configPorts = Array.isArray(body.ports) ? body.ports as JsonRecord[] : [];
+        return json(configEditorSnapshot());
+      }
+
       if (path === '/config/routing/groups' && method === 'GET') {
         return json({
           ok: true,
@@ -412,10 +432,24 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText('Port Routing Tabs')).toBeTruthy());
     await waitFor(() => expect(screen.getByText('5520')).toBeTruthy());
 
+    fireEvent.change(screen.getByLabelText('new port'), { target: { value: '7777' } });
+    fireEvent.change(screen.getByLabelText('new port routing group'), { target: { value: 'canary' } });
+    fireEvent.change(screen.getByLabelText('new port provider binding'), { target: { value: 'picker' } });
+    fireEvent.change(screen.getByLabelText('new port same protocol'), { target: { value: 'relay' } });
+    fireEvent.click(screen.getByText('Add Port Tab'));
+    await waitFor(() => expect(screen.getAllByText(/Port tab saved\./).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByText('7777')).toBeTruthy());
+    hit('routing.port_tab_save');
+
     fireEvent.change(screen.getByPlaceholderText('new group id'), { target: { value: 'canary' } });
     fireEvent.click(screen.getByText('Create/Copy Group'));
     await waitFor(() => expect(screen.getByText(/Routing group created\./)).toBeTruthy());
     hit('routing.group_create_copy');
+
+    fireEvent.change(screen.getByLabelText('provider target picker'), { target: { value: 'picker.default.picker-model' } });
+    fireEvent.click(screen.getByText('Add Pool'));
+    await waitFor(() => expect(screen.getAllByText('picker.default.picker-model').length).toBeGreaterThan(0));
+    hit('routing.provider_picker');
 
     fireEvent.click(screen.getByText('Save Group'));
     await waitFor(() => expect(screen.getByText(/Routing group saved\./)).toBeTruthy());

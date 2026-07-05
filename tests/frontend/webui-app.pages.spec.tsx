@@ -137,6 +137,15 @@ function installPageFetchMock() {
         }
       });
     }
+    if (path === '/config/editor/ports' && method === 'PUT') {
+      return json({
+        ok: true,
+        path: '/tmp/config.json',
+        ports: Array.isArray(body.ports) ? body.ports : [],
+        routingPolicyGroups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
+        forwarders: {}
+      });
+    }
     if (path === '/config/routing/groups' && method === 'GET') {
       return json({
         groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
@@ -215,6 +224,12 @@ describe('webui page-level coverage', () => {
     providerView.unmount();
     const routingView = render(<RoutingPage authenticated authEpoch={1} onToast={onToast} />);
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
+    fireEvent.change(screen.getByLabelText('new port'), { target: { value: '7777' } });
+    fireEvent.change(screen.getByLabelText('new port provider binding'), { target: { value: 'demo' } });
+    fireEvent.click(screen.getByText('Add Port Tab'));
+    await waitFor(() => expect(hasToast('Port tab saved.')).toBe(true));
+    fireEvent.change(screen.getByLabelText('provider target picker'), { target: { value: 'demo.default.demo-max' } });
+    expect((screen.getByPlaceholderText('targets: provider.alias.model, provider.alias.model') as HTMLInputElement).value).toContain('demo.default.demo-max');
     routingView.unmount();
   });
 });
