@@ -284,7 +284,7 @@ export function attachStopMessageCompareContext(
   });
 }
 
-export function readStopMessageCompareContext(adapterContext: unknown): StopMessageCompareContext | undefined {
+export function readStopMessageCompareContext(adapterContext: unknown): StopMessageCompareContext | null {
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(adapterContext);
   const raw = runtimeControl?.[STOP_MESSAGE_COMPARE_KEY];
   return normalizeStopMessageCompareContextWithNative(raw);

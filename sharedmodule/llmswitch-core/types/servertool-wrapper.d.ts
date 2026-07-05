@@ -377,7 +377,7 @@ export declare function planServertoolAutoHookQueueItemsWithNative<T>(input: unk
 
 export declare function inspectStopGatewaySignalWithNative(payload: unknown): ServertoolStopGatewayContext;
 
-export declare function normalizeStopMessageCompareContextWithNative(value: unknown): ServertoolStopMessageCompareContext;
+export declare function normalizeStopMessageCompareContextWithNative(value: unknown): ServertoolStopMessageCompareContext | null;
 export declare function formatStopMessageCompareContextWithNative(value: unknown): string;
 
 export declare function buildServertoolCliProjectionRuntimeBranchWithNative(input: unknown): Record<string, unknown>;

@@ -156,7 +156,7 @@ function mockRegistryLookupFromSkeleton(input: any): any {
 }
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => skeletonDocument),
     planServertoolToolCallDispatchWithNative: jest.fn(() => ({
@@ -338,6 +338,25 @@ jest.unstable_mockModule(
         autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40, order: -1 }
       }]
     })),
+    resolveServertoolRegistryHandlerWithNative: jest.fn((input: any) => {
+      const name = String(input?.name ?? '').trim().toLowerCase();
+      return name === 'stop_message_auto'
+        ? {
+            name,
+            trigger: 'auto',
+            execution: { kind: 'builtin', builtinName: name },
+            registration: {
+              name,
+              enabled: true,
+              trigger: 'auto',
+              executionMode: 'auto_hook',
+              stripAfterExecute: true,
+              autoHook: { id: name, phase: 'default', priority: 40 }
+            },
+            autoHook: { id: name, phase: 'default', priority: 40, order: -1 }
+          }
+        : null;
+    }),
     planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({
       entries: [{
         name: 'stop_message_auto',
@@ -354,6 +373,74 @@ jest.unstable_mockModule(
         autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40, order: -1 }
       }]
     })),
+    planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn((input: any) =>
+      Array.isArray(input?.hooks)
+        ? input.hooks.map((hook: any, sourceIndex: number) => ({
+            id: String(hook?.id ?? '').trim().toLowerCase(),
+            phase:
+              hook?.phase === 'pre' || hook?.phase === 'post'
+                ? hook.phase
+                : 'default',
+            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
+            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
+            sourceIndex
+          }))
+        : []
+    ),
+    planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn((input: any) =>
+      Array.isArray(input?.hooks)
+        ? input.hooks.map((hook: any) => ({
+            id: String(hook?.id ?? '').trim().toLowerCase(),
+            phase:
+              hook?.phase === 'pre' || hook?.phase === 'post'
+                ? hook.phase
+                : 'default',
+            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
+            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
+            registration: hook?.registration,
+            execution: hook?.execution
+          }))
+        : []
+    ),
+    planServertoolRegistryProjectionWithNative: jest.fn((input: any) => {
+      const registeredNames = [...new Set(
+        Array.isArray(input?.registeredNames)
+          ? input.registeredNames.map((name: any) => String(name ?? '').trim().toLowerCase()).filter(Boolean)
+          : []
+      )].sort();
+      const autoHandlerNames = Array.isArray(input?.autoHandlerNames)
+        ? input.autoHandlerNames.map((name: any) => String(name ?? '').trim().toLowerCase()).filter(Boolean)
+        : [];
+      const registeredRecords = Array.isArray(input?.registeredRecords)
+        ? input.registeredRecords
+            .map((record: any) => ({
+              name: String(record?.name ?? '').trim().toLowerCase(),
+              trigger: String(record?.trigger ?? '').trim(),
+              sourceIndex: Number(record?.sourceIndex)
+            }))
+            .filter((record: any) =>
+              record.name &&
+              (record.trigger === 'tool_call' || record.trigger === 'auto') &&
+              Number.isInteger(record.sourceIndex) &&
+              record.sourceIndex >= 0
+            )
+            .sort((left: any, right: any) => {
+              const rank = (value: string) => (value === 'tool_call' ? 0 : 1);
+              return rank(left.trigger) - rank(right.trigger) || left.sourceIndex - right.sourceIndex;
+            })
+        : [];
+      return {
+        registeredNames,
+        registeredRecords,
+        autoHandlerNames
+      };
+    }),
+    planServertoolRegistrySourceProjectionWithNative: jest.fn(mockRegistrySourceProjection),
+    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => ({
+      kind: 'stopless',
+      stdout: '{}'
+    })),
+    planServertoolHookScheduleWithNative,
     extractCapturedChatSeedWithNative: jest.fn(() => null),
     normalizeFollowupParametersWithNative: jest.fn((value: any) => value ?? undefined),
     resolveFollowupModelWithNative: jest.fn((seedModel: any) => String(seedModel ?? 'gpt-test')),
@@ -377,228 +464,6 @@ jest.unstable_mockModule(
   })
 );
 
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts',
-  () => ({
-    getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => skeletonDocument),
-    planServertoolToolCallDispatchWithNative: jest.fn(() => ({
-      executableToolCalls: [],
-      skippedToolCalls: [],
-      noopToolCalls: []
-    })),
-    planServertoolOutcomeWithNative: jest.fn(() => ({
-      outcomeMode: 'servertool_only',
-      requiresPendingInjection: false,
-      remainingToolCallIds: [],
-      flowId: 'servertool_multi'
-    })),
-    planServertoolNoopOutcomeWithNative: jest.fn((input: any) => ({
-      flowId: `${String(input.toolName ?? 'noop')}_noop`,
-      followup: {
-        requestIdSuffix: ':servertool_followup',
-        injection: {
-          ops: [
-            { op: 'append_assistant_message', required: true },
-            { op: 'append_tool_messages_from_tool_outputs', required: true }
-          ]
-        }
-      },
-      executionContext: {},
-      chatResponse: input.base ?? {}
-    })),
-    planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
-      document: skeletonDocument,
-      toolSpecs: skeletonDocument.servertool.internalTools,
-      toolSpecList: Object.values(skeletonDocument.servertool.internalTools),
-      autoHookQueueConfig: {
-        optionalPrimaryOrder: ['vision_auto', 'stop_message_auto'],
-        mandatoryOrder: []
-      },
-      pendingInjectionConfig: {
-        messageKinds: ['assistant_tool_calls', 'tool_outputs']
-      },
-      followupConfig: {
-        genericInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
-        nativeSupportedOps: [],
-        flowPolicy: {
-          profilesByFlowId: {
-            stop_message_flow: {
-              seedLoopPayload: true
-            }
-          },
-          noFollowupFlowIds: [],
-          autoLimitFlowIds: [],
-          flowOnlyLoopLimitFlowIds: [],
-          clientInjectOnlyFlowIds: [],
-          seedLoopPayloadFlowIds: [],
-          clientInjectSourceByFlowId: {},
-          transparentReplayRequestSuffixByFlowId: {},
-          ignoreRequiresActionFollowupFlowIds: []
-        }
-      },
-      stateConfig: {
-        scopePriority: [],
-        pendingInjection: { enabled: true, strictContract: true }
-      }
-    })),
-    normalizeServertoolRegistrationSpecWithNative: jest.fn((input: any) => {
-      const name = String(input.name ?? '').trim().toLowerCase();
-      if (!name) {
-        return null;
-      }
-      const toolSpec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name] ?? null;
-      const trigger = toolSpec?.trigger?.type ?? input.options?.trigger ?? 'tool_call';
-      const executionMode =
-        toolSpec?.execution?.mode ??
-        input.options?.executionMode ??
-        (trigger === 'auto' ? 'auto_hook' : 'guarded');
-      return {
-        name,
-        enabled: toolSpec?.enabled ?? true,
-        trigger,
-        executionMode,
-        stripAfterExecute: toolSpec?.execution?.stripAfterExecute ?? true,
-        ...(trigger === 'auto'
-          ? {
-              autoHook: {
-                id: name,
-                phase: toolSpec?.trigger?.phase ?? input.options?.hook?.phase ?? input.options?.phase ?? 'default',
-                priority:
-                  toolSpec?.trigger?.priority ??
-                  input.options?.hook?.priority ??
-                  input.options?.priority ??
-                  100
-              }
-            }
-          : {})
-      };
-    }),
-    resolveServertoolToolSpecWithNative: jest.fn((input: any) => {
-      return mockToolSpec(input.name);
-    }),
-    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(
-      mockRegistryLookupFromSkeleton
-    ),
-    planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
-      const name = String(input.name ?? '').trim().toLowerCase();
-      if (name !== 'stop_message_auto') {
-        return { action: 'return_none' };
-      }
-      const spec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name];
-      return {
-        action: 'return_entry',
-        entry: {
-          name,
-          trigger: spec.trigger.type,
-          execution: { kind: 'builtin', builtinName: name },
-          registration: {
-            name,
-            enabled: true,
-            trigger: spec.trigger.type,
-            executionMode: spec.execution.mode,
-            stripAfterExecute: spec.execution.stripAfterExecute,
-            autoHook: {
-              id: name,
-              phase: spec.trigger.phase ?? 'default',
-              priority: spec.trigger.priority ?? 100
-            }
-          },
-          autoHook: {
-            id: name,
-            phase: spec.trigger.phase ?? 'default',
-            priority: spec.trigger.priority ?? 100,
-            order: -1
-          }
-        }
-      };
-    }),
-    planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({
-      names: ['stop_message_auto']
-    })),
-    resolveServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
-      const name = String(input.name ?? '').trim().toLowerCase();
-      if (name !== 'stop_message_auto') {
-        return null;
-      }
-      const spec = (skeletonDocument.servertool.internalTools as Record<string, any>)[name];
-      return {
-        name,
-        trigger: spec.trigger.type,
-        execution: { kind: 'builtin', builtinName: name },
-        registration: {
-          name,
-          enabled: true,
-          trigger: spec.trigger.type,
-          executionMode: spec.execution.mode,
-          stripAfterExecute: spec.execution.stripAfterExecute,
-          autoHook: {
-            id: name,
-            phase: spec.trigger.phase ?? 'default',
-            priority: spec.trigger.priority ?? 100
-          }
-        },
-        autoHook: {
-          id: name,
-          phase: spec.trigger.phase ?? 'default',
-          priority: spec.trigger.priority ?? 100,
-          order: -1
-        }
-      };
-    }),
-    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
-      entries: [{
-        name: 'stop_message_auto',
-        trigger: 'auto',
-        execution: { kind: 'builtin', builtinName: 'stop_message_auto' },
-        registration: {
-          name: 'stop_message_auto',
-          enabled: true,
-          trigger: 'auto',
-          executionMode: 'auto_hook',
-          stripAfterExecute: true,
-          autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40 }
-        },
-        autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40, order: -1 }
-      }]
-    })),
-    planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({
-      entries: [{
-        name: 'stop_message_auto',
-        trigger: 'auto',
-        execution: { kind: 'builtin', builtinName: 'stop_message_auto' },
-        registration: {
-          name: 'stop_message_auto',
-          enabled: true,
-          trigger: 'auto',
-          executionMode: 'auto_hook',
-          stripAfterExecute: true,
-          autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40 }
-        },
-        autoHook: { id: 'stop_message_auto', phase: 'default', priority: 40, order: -1 }
-      }]
-    })),
-    extractCapturedChatSeedWithNative: jest.fn(() => null),
-    normalizeFollowupParametersWithNative: jest.fn((value: any) => value ?? undefined),
-    resolveFollowupModelWithNative: jest.fn((seedModel: any) => String(seedModel ?? 'gpt-test')),
-    buildServertoolToolOutputPayloadWithNative: jest.fn((payload: any) => payload),
-    webSearchIsGeminiEngineWithNative: jest.fn(() => false),
-    webSearchIsGlmEngineWithNative: jest.fn(() => false),
-    webSearchExtractAssistantMessageWithNative: jest.fn(() => 'null'),
-    webSearchBuildToolMessagesWithNative: jest.fn(() => '[]'),
-    webSearchCollectHitsWithNative: jest.fn(() => '[]'),
-    webSearchLimitHitsWithNative: jest.fn(() => '[]'),
-    webSearchFormatHitsSummaryWithNative: jest.fn(() => ''),
-    webSearchNormalizeResultCountWithNative: jest.fn(() => 5),
-    webSearchSanitizeBackendErrorWithNative: jest.fn((message: string) => message),
-    webSearchBuildSystemPromptWithNative: jest.fn(() => ''),
-    visionBuildAnalysisPayloadWithNative: jest.fn(() => 'null'),
-    visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
-    visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
-    planServertoolAutoHookQueuesWithNative,
-    planServertoolAutoHookQueueItemsWithNative,
-    runServertoolOrchestrationMutationWithNative
-  })
-);
 
 const planServertoolHookScheduleWithNative = jest.fn((input: any) => ({
   events: (input.hooks ?? []).map((hook: any) => ({
@@ -618,163 +483,7 @@ const planServertoolHookScheduleWithNative = jest.fn((input: any) => ({
   }
 }));
 
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
-  () => ({
-    planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
-      action: input?.builtinEntryPresent
-        ? 'return_builtin'
-        : 'return_none'
-    })),
-    planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn((input: any) =>
-      Array.isArray(input?.hooks)
-        ? input.hooks.map((hook: any, sourceIndex: number) => ({
-            id: String(hook?.id ?? '').trim().toLowerCase(),
-            phase:
-              hook?.phase === 'pre' || hook?.phase === 'post'
-                ? hook.phase
-                : 'default',
-            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
-            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
-            sourceIndex
-          }))
-        : []
-    ),
-    planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn((input: any) =>
-      Array.isArray(input?.hooks)
-        ? input.hooks.map((hook: any) => ({
-            id: String(hook?.id ?? '').trim().toLowerCase(),
-            phase:
-              hook?.phase === 'pre' || hook?.phase === 'post'
-                ? hook.phase
-                : 'default',
-            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
-            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
-            registration: hook?.registration,
-            execution: hook?.execution
-          }))
-        : []
-    ),
-    planServertoolRegistryProjectionWithNative: jest.fn((input: any) => {
-      const registeredNames = [...new Set(
-        Array.isArray(input?.registeredNames)
-          ? input.registeredNames.map((name: any) => String(name ?? '').trim().toLowerCase()).filter(Boolean)
-          : []
-      )].sort();
-      const autoHandlerNames = Array.isArray(input?.autoHandlerNames)
-        ? input.autoHandlerNames.map((name: any) => String(name ?? '').trim().toLowerCase()).filter(Boolean)
-        : [];
-      const registeredRecords = Array.isArray(input?.registeredRecords)
-        ? input.registeredRecords
-            .map((record: any) => ({
-              name: String(record?.name ?? '').trim().toLowerCase(),
-              trigger: String(record?.trigger ?? '').trim(),
-              sourceIndex: Number(record?.sourceIndex)
-            }))
-            .filter((record: any) =>
-              record.name &&
-              (record.trigger === 'tool_call' || record.trigger === 'auto') &&
-              Number.isInteger(record.sourceIndex) &&
-              record.sourceIndex >= 0
-            )
-            .sort((left: any, right: any) => {
-              const rank = (value: string) => (value === 'tool_call' ? 0 : 1);
-              return rank(left.trigger) - rank(right.trigger) || left.sourceIndex - right.sourceIndex;
-            })
-        : [];
-      return {
-        registeredNames,
-        registeredRecords,
-        autoHandlerNames
-      };
-    }),
-    planServertoolRegistrySourceProjectionWithNative: jest.fn(mockRegistrySourceProjection),
-    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => ({
-      kind: 'stopless',
-      stdout: '{}'
-    })),
-    planServertoolHookScheduleWithNative
-  })
-);
 
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
-  () => ({
-    planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
-      action: input?.builtinEntryPresent
-        ? 'return_builtin'
-        : 'return_none'
-    })),
-    planServertoolRegistryAutoHookDescriptorsWithNative: jest.fn((input: any) =>
-      Array.isArray(input?.hooks)
-        ? input.hooks.map((hook: any, sourceIndex: number) => ({
-            id: String(hook?.id ?? '').trim().toLowerCase(),
-            phase:
-              hook?.phase === 'pre' || hook?.phase === 'post'
-                ? hook.phase
-                : 'default',
-            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
-            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
-            sourceIndex
-          }))
-        : []
-    ),
-    planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn((input: any) =>
-      Array.isArray(input?.hooks)
-        ? input.hooks.map((hook: any) => ({
-            id: String(hook?.id ?? '').trim().toLowerCase(),
-            phase:
-              hook?.phase === 'pre' || hook?.phase === 'post'
-                ? hook.phase
-                : 'default',
-            priority: Number.isFinite(hook?.priority) ? Number(hook.priority) : 100,
-            order: Number.isFinite(hook?.order) ? Number(hook.order) : 0,
-            registration: hook?.registration,
-            execution: hook?.execution
-          }))
-        : []
-    ),
-    planServertoolRegistryProjectionWithNative: jest.fn((input: any) => {
-      const registeredNames = [...new Set(
-        Array.isArray(input?.registeredNames)
-          ? input.registeredNames.map((name: any) => String(name ?? '').trim().toLowerCase()).filter(Boolean)
-          : []
-      )].sort();
-      const autoHandlerNames = Array.isArray(input?.autoHandlerNames)
-        ? input.autoHandlerNames.map((name: any) => String(name ?? '').trim().toLowerCase()).filter(Boolean)
-        : [];
-      const registeredRecords = Array.isArray(input?.registeredRecords)
-        ? input.registeredRecords
-            .map((record: any) => ({
-              name: String(record?.name ?? '').trim().toLowerCase(),
-              trigger: String(record?.trigger ?? '').trim(),
-              sourceIndex: Number(record?.sourceIndex)
-            }))
-            .filter((record: any) =>
-              record.name &&
-              (record.trigger === 'tool_call' || record.trigger === 'auto') &&
-              Number.isInteger(record.sourceIndex) &&
-              record.sourceIndex >= 0
-            )
-            .sort((left: any, right: any) => {
-              const rank = (value: string) => (value === 'tool_call' ? 0 : 1);
-              return rank(left.trigger) - rank(right.trigger) || left.sourceIndex - right.sourceIndex;
-            })
-        : [];
-      return {
-        registeredNames,
-        registeredRecords,
-        autoHandlerNames
-      };
-    }),
-    planServertoolRegistrySourceProjectionWithNative: jest.fn(mockRegistrySourceProjection),
-    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => ({
-      kind: 'stopless',
-      stdout: '{}'
-    })),
-    planServertoolHookScheduleWithNative
-  })
-);
 
 let buildServertoolAutoHookQueueConfig: any;
 let buildServertoolFollowupConfig: any;
@@ -783,7 +492,7 @@ let normalizeServerToolRegistrationSpec: any;
 let listAutoServerToolHooks: any;
 
 beforeAll(async () => {
-  const nativeServertoolOrchestration = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js');
+  const nativeServertoolOrchestration = await import('rcc-llmswitch-core/native/servertool-wrapper');
   buildServertoolAutoHookQueueConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().autoHookQueueConfig;
   buildServertoolFollowupConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().followupConfig;
   buildServertoolPendingInjectionConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().pendingInjectionConfig;

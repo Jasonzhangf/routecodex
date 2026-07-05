@@ -124,7 +124,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     materializeServertoolPlannedResultWithNative: materializeServertoolPlannedResult,
     materializeNativeToolCallExecutionOutcomeWithNative: materializeNativeToolCallExecutionOutcomeNative,
@@ -179,13 +179,7 @@ jest.unstable_mockModule(
       status: 500,
       message: '[servertool] stop message fetch failed',
       details: input ?? {}
-    }))
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
-  () => ({
+    })),
     planServertoolNoopOutcomeWithNative: jest.fn(),
     planServertoolOutcomeWithNative,
     buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
@@ -560,9 +554,7 @@ describe('execution queue dispatch runtime', () => {
   });
 
   test('uses Rust-owned execution loop effect planning for noop tool-call records', async () => {
-    const { planServertoolNoopOutcomeWithNative } = await import(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js'
-    );
+    const { planServertoolNoopOutcomeWithNative } = await import('rcc-llmswitch-core/native/servertool-wrapper');
     (planServertoolNoopOutcomeWithNative as jest.Mock).mockReturnValue({
       chatResponse: {
         id: 'chatcmpl-noop',

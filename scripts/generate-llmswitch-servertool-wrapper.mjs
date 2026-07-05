@@ -483,7 +483,7 @@ export declare function planServertoolAutoHookQueueItemsWithNative<T>(input: unk
 export declare function extractTextFromChatLikeWithNative(payload: unknown): string;
 export declare function inspectStopGatewaySignalWithNative(payload: unknown): ServertoolStopGatewayContext;
 export declare function normalizeStopGatewayContextWithNative(value: unknown): ServertoolStopGatewayContext | undefined;
-export declare function normalizeStopMessageCompareContextWithNative(value: unknown): ServertoolStopMessageCompareContext;
+export declare function normalizeStopMessageCompareContextWithNative(value: unknown): ServertoolStopMessageCompareContext | null;
 export declare function formatStopMessageCompareContextWithNative(value: unknown): string;
 export declare function resolveRuntimeStopMessageStateWithNative(metadata: unknown): ServertoolRuntimeStopMessageState;
 export declare function readRuntimeStopMessageStageModeWithNative(input: unknown): string | undefined;

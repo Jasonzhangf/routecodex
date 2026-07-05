@@ -13,6 +13,7 @@ const registryHooks: Array<{
   phase: string;
   priority: number;
   order: number;
+  registration?: Record<string, unknown>;
   execution: ServerToolExecutionDescriptor & { __testHandler?: (ctx: ServerToolHandlerContext) => Promise<any> };
 }> = [];
 
@@ -104,7 +105,7 @@ const resolveAutoHookCallerFinalizationDecisionWithNativeMock = jest.fn((input: 
 });
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     materializeServertoolPlannedResultWithNative: jest.fn(async (planned: any) => {
       if (!planned) {
@@ -129,20 +130,7 @@ jest.unstable_mockModule(
         requestId: input?.requestId,
         runtimeMetadata: input?.runtimeMetadata
       } as any);
-    })
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js',
-  () => ({
-    listAutoServerToolHooks: jest.fn(() => registryHooks)
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
-  () => ({
+    }),
     planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
       autoHookQueueConfig: {
         optionalPrimaryOrder: [],
@@ -150,8 +138,13 @@ jest.unstable_mockModule(
       }
     })),
     planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => {
-      const optionalQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority < 100);
-      const mandatoryQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority >= 100);
+      const toNativeEntry = (hook: any) => ({
+        ...hook,
+        registration: hook.registration ?? { name: hook.id, trigger: 'auto', executionMode: 'auto_hook' },
+        execution: hook.execution
+      });
+      const optionalQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority < 100).map(toNativeEntry);
+      const mandatoryQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority >= 100).map(toNativeEntry);
       return {
         optionalQueue,
         mandatoryQueue,
@@ -162,8 +155,13 @@ jest.unstable_mockModule(
       };
     }),
     planServertoolAutoHookQueueItemsWithNative: jest.fn((input: any) => {
-      const optionalQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority < 100);
-      const mandatoryQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority >= 100);
+      const toNativeEntry = (hook: any) => ({
+        ...hook,
+        registration: hook.registration ?? { name: hook.id, trigger: 'auto', executionMode: 'auto_hook' },
+        execution: hook.execution
+      });
+      const optionalQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority < 100).map(toNativeEntry);
+      const mandatoryQueue = [...(input?.hooks ?? [])].filter((hook: any) => hook.priority >= 100).map(toNativeEntry);
       return {
         queueOrder: [
           { queue: 'A_optional', entries: optionalQueue },
@@ -171,6 +169,13 @@ jest.unstable_mockModule(
         ]
       };
     })
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js',
+  () => ({
+    listAutoServerToolHooks: jest.fn(() => registryHooks)
   })
 );
 
@@ -445,7 +450,7 @@ describe('servertool auto hook trace', () => {
       ),
       import('node:fs/promises').then((fs) =>
         fs.readFile(
-          'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
+          'src/modules/llmswitch/bridge/native-exports.ts',
           'utf8'
         )
       )
@@ -506,21 +511,12 @@ describe('servertool auto hook trace', () => {
     expect(callerSource).not.toContain('error instanceof Error ? error.message');
     expect(callerSource).not.toContain("typeof error === 'string' ? error");
     expect(callerSource).toContain('error');
-    expect(nativeWrapperSource).toContain(
-      'planAutoHookRuntimeAttemptJson native returned result disposition without materialized result'
-    );
-    expect(nativeWrapperSource).toContain(
-      'planAutoHookRuntimeAttemptJson native returned rethrow disposition without error input'
-    );
-    expect(nativeWrapperSource).toContain(
-      'planAutoHookRuntimeAttemptJson native returned action/disposition mismatch'
-    );
-    expect(nativeWrapperSource).toContain(
-      'planAutoHookCallerFinalizationJson native returned result disposition without queue result'
-    );
-    expect(nativeWrapperSource).toContain(
-      'planAutoHookCallerResultProjectionJson native requested missing metadataWritePlan'
-    );
+    expect(nativeWrapperSource).toContain('planAutoHookRuntimeAttemptWithNative');
+    expect(nativeWrapperSource).toContain('resolveAutoHookRuntimeAttemptDecisionWithNative');
+    expect(nativeWrapperSource).toContain("throw new Error('[servertool] invalid auto-hook attempt action')");
+    expect(nativeWrapperSource).toContain('planAutoHookCallerFinalizationWithNative');
+    expect(nativeWrapperSource).toContain('resolveAutoHookCallerFinalizationDecisionWithNative');
+    expect(nativeWrapperSource).toContain("throw new Error('[servertool] invalid auto-hook caller finalization action')");
   });
 
   test('passes raw auto-hook handler errors to native attempt planning', async () => {

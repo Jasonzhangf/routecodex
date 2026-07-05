@@ -7,7 +7,7 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js';
 import {
   formatStopMessageCompareContextWithNative
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.ts';
 
 const BASE_CONTEXT: StopMessageCompareContext = {
@@ -194,7 +194,7 @@ describe('servertool stop-message compare context', () => {
       reason: 'bad'
     }));
 
-    expect(invalid).toBeUndefined();
+    expect(invalid).toBeNull();
     expect(formatStopMessageCompareContextWithNative(invalid)).toBe('decision=unknown reason=no_context');
   });
 });

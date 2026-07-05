@@ -30,7 +30,7 @@ const skeletonDocument = {
 };
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => skeletonDocument),
     planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({

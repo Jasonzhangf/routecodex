@@ -93,7 +93,7 @@ const runServertoolAutoHookCaller = jest.fn();
 const createServertoolProviderProtocolErrorFromPlan = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     planServertoolResponseStageRuntimeActionWithNative,
     planServertoolRequiredResponseHookEmptyErrorWithNative,

@@ -18,15 +18,9 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     containsSyntheticRouteCodexControlTextWithNative: containsSyntheticRouteCodexControlTextMock,
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
-  () => ({
     planServertoolEnginePreflightWithNative: planServertoolEnginePreflightWithNativeMock,
     resolveServertoolEnginePreflightDecisionWithNative: resolveServertoolEnginePreflightDecisionWithNativeMock,
   })

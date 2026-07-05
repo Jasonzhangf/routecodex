@@ -24,9 +24,13 @@ const planServertoolToolCallDispatchWithNativeMock = jest.fn((input: any) => ({
 }));
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     buildServertoolDispatchPlanInputWithNative: buildServertoolDispatchPlanInputMock,
+    inspectStopGatewaySignalWithNative: jest.fn((input: any) => input),
+    normalizeStopMessageCompareContextWithNative: jest.fn((input: any) =>
+      input && typeof input === 'object' ? input : null
+    ),
     planServertoolToolCallDispatchWithNative: planServertoolToolCallDispatchWithNativeMock
   })
 );

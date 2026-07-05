@@ -2,7 +2,7 @@ import { describe, expect, jest, test } from '@jest/globals';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     buildServertoolAutoHookTraceProgressEventWithNative: jest.fn((event) => ({
       flowId: event.flowId || `hook:${event.hookId}`,
@@ -43,7 +43,10 @@ jest.unstable_mockModule(
     normalizeServertoolProgressTokenWithNative: jest.fn(() => 'native_token'),
     resolveServertoolProgressStageWithNative: jest.fn(() => 'followup'),
     resolveServertoolProgressToolNameWithNative: jest.fn(() => 'fixture_tool'),
-    shouldUseServertoolGoldProgressHighlightWithNative: jest.fn(() => false)
+    shouldUseServertoolGoldProgressHighlightWithNative: jest.fn(() => false),
+    formatStopMessageCompareContextWithNative: jest.fn(
+      () => 'decision=trigger reason=matched used=1 left=1 active=true'
+    )
   })
 );
 
@@ -65,15 +68,6 @@ jest.unstable_mockModule(
       used: 1,
       left: 1
     }))
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
-  () => ({
-    formatStopMessageCompareContextWithNative: jest.fn(
-      () => 'decision=trigger reason=matched used=1 left=1 active=true'
-    )
   })
 );
 
@@ -154,9 +148,7 @@ describe('progress-log-block fail-fast behavior', () => {
         providerProtocol: 'openai-responses'
       })
     );
-    const { buildServertoolMatchSkippedProgressEventWithNative } = await import(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js'
-    );
+    const { buildServertoolMatchSkippedProgressEventWithNative } = await import('rcc-llmswitch-core/native/servertool-wrapper');
     expect(buildServertoolMatchSkippedProgressEventWithNative).toHaveBeenCalledWith({
       skipReason: 'passthrough'
     });

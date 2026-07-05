@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { planServertoolOutcomeWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+import { planServertoolOutcomeWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 describe('execution-shell native outcome contract', () => {
   test('native outcome plan returns execution contract without followup payload', () => {

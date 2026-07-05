@@ -7,7 +7,7 @@ import {
 import {
   planServertoolClientDisconnectedErrorWithNative,
   planServertoolTimeoutErrorWithNative
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 describe('servertool timeout/error block native shell', () => {
   test('does not retain adapter disconnect facade wrapper', async () => {

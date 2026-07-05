@@ -95,7 +95,7 @@ function readDisconnectedFlag(adapterContext: any): boolean {
 }
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     planServertoolRegistryLookupActionWithNative: jest.fn((input: any) => ({
       action: input?.builtinEntryPresent
@@ -136,6 +136,28 @@ jest.unstable_mockModule(
           }))
         : []
     ),
+    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
+      entries: [{
+        name: 'stop_message_auto',
+        trigger: 'auto',
+        execution: {
+          kind: 'builtin',
+          builtinName: 'stop_message_auto'
+        },
+        autoHook: {
+          flowId: 'stop_message_flow',
+          trigger: { type: 'auto', phase: 'default', priority: 40 },
+          execution: { mode: 'auto_hook', stripAfterExecute: true }
+        },
+        registration: {
+          name: 'stop_message_auto',
+          enabled: true,
+          trigger: 'auto',
+          executionMode: 'auto_hook',
+          stripAfterExecute: true
+        }
+      }]
+    })),
     planServertoolRegistryProjectionWithNative: jest.fn((input: any) => {
       const registeredNames = [...new Set(
         Array.isArray(input?.registeredNames)
@@ -203,6 +225,19 @@ jest.unstable_mockModule(
     normalizeStopGatewayContextWithNative: jest.fn((value: any) => value),
     normalizeStopMessageCompareContextWithNative: jest.fn((value: any) => value),
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(() => null),
+    runServertoolResponseStageWithNative: jest.fn((chatResponse: any) => {
+      const toolCalls = Array.isArray(chatResponse?.choices?.[0]?.message?.tool_calls)
+        ? chatResponse.choices[0].message.tool_calls.map((toolCall: any) => ({
+            id: String(toolCall?.id ?? ''),
+            name: String(toolCall?.function?.name ?? ''),
+            arguments: String(toolCall?.function?.arguments ?? '{}')
+          }))
+        : [];
+      return {
+        normalizedPayload: chatResponse,
+        toolCalls
+      };
+    }),
     parseServertoolCliProjectionToolArgumentsWithNative: jest.fn((input: any) => {
       const raw = String(input?.arguments ?? '').trim();
       const parsed = raw ? JSON.parse(raw) : {};
@@ -223,6 +258,18 @@ jest.unstable_mockModule(
       excludeToolCallNames: input?.excludeToolCallHandlerNames,
       includeAutoHookIds: input?.includeAutoHookIds,
       excludeAutoHookIds: input?.excludeAutoHookIds,
+    })),
+    buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
+    planServertoolToolCallDispatchWithNative: jest.fn((input: any) => ({
+      executableToolCalls: (input?.toolCalls ?? []).map((toolCall: any) => ({
+        id: toolCall.id,
+        name: toolCall.name,
+        arguments: toolCall.arguments,
+        executionMode: 'guarded',
+        stripAfterExecute: true
+      })),
+      skippedToolCalls: [],
+      noopToolCalls: []
     })),
     planServertoolEntryPreflightWithNative: planServertoolEntryPreflightWithNativeMock,
     readServertoolEntryBaseObjectWithNative: jest.fn((value: any) =>
@@ -253,6 +300,16 @@ jest.unstable_mockModule(
         };
       }
       return { action: 'continue_to_tool_flow' };
+    }),
+    resolveServertoolEntryPreflightApplicationWithNative: jest.fn((input: any) => {
+      const decision = input?.entryPreflight ?? input?.decision;
+      if (decision?.action === 'return_result') {
+        return { returnResult: true, result: decision.result };
+      }
+      if (decision?.action === 'throw_error') {
+        return { throwError: true, errorPlan: decision.errorPlan };
+      }
+      return { returnResult: false, baseObject: decision?.baseObject };
     }),
     isServertoolClientExecCliProjectionToolCallWithNative: jest.fn((input: any) => {
       const executionMode = typeof input?.executionMode === 'string' ? input.executionMode.trim() : '';
@@ -344,6 +401,7 @@ jest.unstable_mockModule(
       message: 'fetch failed: network error',
       details: {}
     })),
+    planServertoolResponseStageGateWithNative: planServertoolResponseStageGateWithNativeMock,
     planServertoolHandlerMaterializationForPlannedWithNative: jest.fn((planned: any, requestId: string) => {
       const execution = planned?.execution;
       if (typeof planned?.finalize === 'function') {
@@ -441,9 +499,27 @@ jest.unstable_mockModule(
       }
       return { action: 'continue_next_queue', returnResult: false, continueNextQueue: true, returnNull: false };
     }),
+    planServertoolAutoHookQueueItemsWithNative: jest.fn((input: any) => ({
+      queueOrder: [
+        {
+          queue: 'A_optional',
+          entries: Array.isArray(input?.hooks) ? [...input.hooks] : []
+        },
+        {
+          queue: 'B_mandatory',
+          entries: []
+        }
+      ]
+    })),
     resolveServertoolResponseStagePrepassInitialDecisionWithNative: jest.fn(() => ({
       action: 'run_auto_hooks'
     })),
+    resolveServertoolResponseStagePrepassInitialApplicationWithNative: jest.fn((input: any) => {
+      if (input?.decision?.action === 'run_auto_hooks') {
+        return { runAutoHook: true };
+      }
+      return { runAutoHook: false, result: input?.decision?.result };
+    }),
     resolveServertoolResponseStagePrepassAfterAutoHookWithNative: jest.fn((input: any) => ({
       action: 'return_prepass_result',
       result: {
@@ -462,6 +538,13 @@ jest.unstable_mockModule(
             baseObject: input?.entryPreflight?.baseObject
           }
     ),
+    resolveServertoolRunEngineEntryPreflightApplicationWithNative: jest.fn((input: any) => {
+      const decision = input?.entryPreflight;
+      if (decision?.action === 'return_result') {
+        return { returnResult: true, result: decision.result };
+      }
+      return { returnResult: false, baseObject: decision?.baseObject };
+    }),
     resolveServertoolRunEnginePrepassDecisionWithNative: jest.fn((input: any) =>
       input?.hasPrepassResult === true
         ? {
@@ -470,13 +553,40 @@ jest.unstable_mockModule(
           }
         : { action: 'continue_to_execution' }
     ),
+    resolveServertoolRunEnginePrepassApplicationWithNative: jest.fn((input: any) => {
+      const decision = input?.decision;
+      if (decision?.action === 'return_result') {
+        return { returnResult: true, result: decision.result };
+      }
+      return { returnResult: false };
+    }),
     resolveServertoolResponseStageAutoHookPreDecisionWithNative: jest.fn(() => ({
       action: 'run_auto_hooks'
+    })),
+    resolveServertoolResponseStageAutoHookPreApplicationWithNative: jest.fn((input: any) => ({
+      returnPassResult: input?.decision?.action === 'return_pass_result',
+      runAutoHooks: input?.decision?.action === 'run_auto_hooks',
+      result: input?.decision?.result
     })),
     resolveServertoolResponseStageAutoHookPostDecisionWithNative: jest.fn((input: any) => ({
       action: 'return_pass_result',
       result: input?.autoHookResult ?? null
     })),
+    resolveServertoolResponseStageAutoHookPostApplicationWithNative: jest.fn((input: any) => {
+      const decision = input?.decision;
+      if (decision?.action === 'return_required_response_hook_empty') {
+        return {
+          throwRequiredResponseHookEmpty: true,
+          returnPassResult: false,
+          errorPlan: decision.errorPlan
+        };
+      }
+      return {
+        throwRequiredResponseHookEmpty: false,
+        returnPassResult: true,
+        result: decision?.result
+      };
+    }),
     finalizeServertoolResponseStageWithNative: jest.fn((input: any) => ({
       mode: 'passthrough',
       finalChatResponse: input?.baseObject ?? {}
@@ -560,407 +670,6 @@ jest.unstable_mockModule(
         };
       }
       return input?.base ?? {};
-    })
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
-  () => ({
-    bindServertoolContractWithNative: jest.fn(() => null),
-    planServertoolResponseStageGateWithNative: planServertoolResponseStageGateWithNativeMock,
-    runServertoolResponseStageWithNative: jest.fn((chatResponse: any) => {
-      const toolCalls = Array.isArray(chatResponse?.choices?.[0]?.message?.tool_calls)
-        ? chatResponse.choices[0].message.tool_calls.map((toolCall: any) => ({
-            id: String(toolCall?.id ?? ''),
-            name: String(toolCall?.function?.name ?? ''),
-            arguments: String(toolCall?.function?.arguments ?? '{}')
-          }))
-        : [];
-      return {
-        normalizedPayload: chatResponse,
-        toolCalls
-      };
-    }),
-    buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
-    planServertoolToolCallDispatchWithNative: jest.fn((input: any) => ({
-      executableToolCalls: (input?.toolCalls ?? []).map((toolCall: any) => ({
-        id: toolCall.id,
-        name: toolCall.name,
-        arguments: toolCall.arguments,
-        executionMode: 'guarded',
-        stripAfterExecute: true
-      })),
-      skippedToolCalls: [],
-      noopToolCalls: []
-    })),
-    buildServertoolHandlerErrorToolOutputPayloadWithNative: jest.fn((input: any) => ({
-      choices: [
-        {
-          message: {
-            tool_calls: [],
-            tool_outputs: [
-              {
-                tool_call_id: String(input?.toolCallId ?? ''),
-                output: String(input?.message ?? '')
-              }
-            ]
-          }
-        }
-      ]
-    })),
-    buildServertoolOutcomePlanInputWithNative: jest.fn((input: any) => input),
-    planServertoolOutcomeWithNative: jest.fn((input: any) => {
-      const executed = Array.isArray(input?.executionState?.executedToolCalls)
-        ? input.executionState.executedToolCalls[0]
-        : null;
-      const toolName = String(executed?.toolCall?.name ?? 'tool');
-      return {
-        outcomeMode: 'servertool_only',
-        flowId: `${toolName}_error`,
-        requiresPendingInjection: false,
-        remainingToolCallIds: []
-      };
-    }),
-    planServertoolHandlerMaterializationForPlannedWithNative: jest.fn((_planned: any, requestId: string) => {
-      return {
-        action: 'throw_handler_error',
-        errorPlan: {
-          code: 'SERVERTOOL_HANDLER_FAILED',
-          category: 'INTERNAL_ERROR',
-          status: 500,
-          message: '[servertool] invalid handler plan/result contract',
-          details: {
-            requestId
-          }
-        }
-      };
-    }),
-    planServertoolNoopOutcomeWithNative: jest.fn((input: any) => ({
-      flowId: `${String(input?.toolName ?? 'noop')}_noop`,
-      followup: {
-        requestIdSuffix: ':servertool_followup',
-        injection: { ops: [] }
-      },
-      chatResponse: input?.base ?? {}
-    })),
-    planServertoolHandlerContractWithNative: jest.fn((input: any) => {
-      if (input?.hasPlanMarkers || input?.hasFinalizeFunction) {
-        return { action: 'handler_plan' };
-      }
-      if (input?.hasChatResponseObject && input?.hasExecutionObject && input?.hasExecutionFlowId) {
-        return { action: 'handler_result' };
-      }
-      return { action: 'invalid_plan_missing_finalize' };
-    }),
-    planServertoolAutoHookQueuesWithNative: jest.fn((input: any) => ({
-      optionalQueue: Array.isArray(input?.hooks) ? [...input.hooks] : [],
-      mandatoryQueue: [],
-      queueOrder: [
-        {
-          queue: 'A_optional',
-          entries: Array.isArray(input?.hooks) ? [...input.hooks] : []
-        },
-        {
-          queue: 'B_mandatory',
-          entries: []
-        }
-      ]
-    })),
-    planServertoolAutoHookQueueItemsWithNative: jest.fn((input: any) => ({
-      queueOrder: [
-        {
-          queue: 'A_optional',
-          entries: Array.isArray(input?.hooks) ? [...input.hooks] : []
-        },
-        {
-          queue: 'B_mandatory',
-          entries: []
-        }
-      ]
-    })),
-    resolveServertoolRegistryHandlerWithNative: jest.fn((input: any) => ({
-      action: 'return_entry',
-      entry: input?.entry
-    })),
-    runServertoolOrchestrationMutationWithNative: jest.fn((input: any) => {
-      const op = String(input?.op ?? '').trim();
-      if (op === 'append_tool_output') {
-        const base = JSON.parse(JSON.stringify(input?.base ?? {}));
-        const outputs = Array.isArray((base as any).tool_outputs) ? (base as any).tool_outputs : [];
-        outputs.push({
-          tool_call_id: input?.toolCallId,
-          name: input?.name,
-          content: input?.content
-        });
-        (base as any).tool_outputs = outputs;
-        return base;
-      }
-      if (op === 'build_assistant_tool_call_message') {
-        return {
-          role: 'assistant',
-          tool_calls: Array.isArray(input?.toolCalls) ? input.toolCalls : []
-        };
-      }
-      return input?.base ?? {};
-    }),
-    getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => ({
-      servertool: {
-        skeleton: {
-          autoHooks: {
-            optionalPrimaryOrder: ['vision_auto', 'stop_message_auto'],
-            mandatoryOrder: []
-          },
-          pendingInjection: { messageKinds: ['assistant_tool_calls', 'tool_outputs'] },
-          followup: {
-            genericInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
-            nativeSupportedOps: [],
-            flowPolicy: { profilesByFlowId: {} }
-          }
-        },
-        state: {
-          scopePriority: [],
-          pendingInjection: { enabled: true, strictContract: true }
-        },
-        internalTools: {}
-      }
-    })),
-    planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
-      document: {
-        servertool: {
-          skeleton: {
-            autoHooks: {
-              optionalPrimaryOrder: ['vision_auto', 'stop_message_auto'],
-              mandatoryOrder: []
-            }
-          }
-        }
-      },
-      toolSpecs: {},
-      toolSpecList: [],
-      autoHookQueueConfig: {
-        optionalPrimaryOrder: ['vision_auto', 'stop_message_auto'],
-        mandatoryOrder: []
-      },
-      pendingInjectionConfig: {
-        messageKinds: ['assistant_tool_calls', 'tool_outputs']
-      },
-      followupConfig: {
-        genericInjectionOps: ['append_assistant_message', 'append_tool_messages_from_tool_outputs'],
-        nativeSupportedOps: [],
-        flowPolicy: {
-          profilesByFlowId: {},
-          noFollowupFlowIds: [],
-          autoLimitFlowIds: [],
-          flowOnlyLoopLimitFlowIds: [],
-          clientInjectOnlyFlowIds: [],
-          seedLoopPayloadFlowIds: [],
-          clientInjectSourceByFlowId: {},
-          transparentReplayRequestSuffixByFlowId: {},
-          ignoreRequiresActionFollowupFlowIds: []
-        }
-      },
-      stateConfig: {
-        scopePriority: [],
-        pendingInjection: { enabled: true, strictContract: true }
-      }
-    })),
-    extractCapturedChatSeedWithNative: jest.fn(() => null),
-    normalizeFollowupParametersWithNative: jest.fn((value: any) => value ?? undefined),
-    resolveFollowupModelWithNative: jest.fn((seedModel: any) => String(seedModel ?? 'gpt-test')),
-    buildServertoolToolOutputPayloadWithNative: jest.fn((payload: any) => payload),
-    collectServertoolAdditionalClientToolCallsWithNative: jest.fn((input: any) => {
-      const choices = Array.isArray(input?.base?.choices) ? input.base.choices : [];
-      const first = choices[0] ?? {};
-      const message = first?.message ?? {};
-      const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
-      return toolCalls.filter((toolCall: any) => {
-        const id = typeof toolCall?.id === 'string' ? toolCall.id : '';
-        const name = typeof toolCall?.function?.name === 'string' ? toolCall.function.name.trim() : '';
-        return Boolean(id) && id !== input?.projectedToolCallId && name !== 'stop_message_auto';
-      });
-    }),
-    isServertoolClientExecCliProjectionToolCallWithNative: jest.fn((input: any) => {
-      const executionMode = typeof input?.executionMode === 'string' ? input.executionMode.trim() : '';
-      return executionMode === 'client_exec_cli_projection';
-    }),
-    webSearchIsGeminiEngineWithNative: jest.fn(() => false),
-    webSearchIsGlmEngineWithNative: jest.fn(() => false),
-    webSearchExtractAssistantMessageWithNative: jest.fn(() => 'null'),
-    webSearchBuildToolMessagesWithNative: jest.fn(() => '[]'),
-    webSearchCollectHitsWithNative: jest.fn(() => '[]'),
-    webSearchLimitHitsWithNative: jest.fn(() => '[]'),
-    webSearchFormatHitsSummaryWithNative: jest.fn(() => ''),
-    webSearchNormalizeResultCountWithNative: jest.fn(() => 5),
-    webSearchSanitizeBackendErrorWithNative: jest.fn((message: string) => message),
-    webSearchBuildSystemPromptWithNative: jest.fn(() => ''),
-    visionBuildAnalysisPayloadWithNative: jest.fn(() => 'null'),
-    visionBuildPinnedMetadataWithNative: jest.fn(() => 'null'),
-    visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
-    resolveServertoolToolSpecWithNative: jest.fn(() => null),
-    planServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
-      const name = String(input?.name ?? '').trim().toLowerCase();
-      if (name === TOOL_NAME) {
-        return {
-          action: 'return_entry',
-          entry: {
-            name,
-            trigger: 'tool_call',
-            execution: {
-              kind: 'builtin',
-              builtinName: name
-            },
-            registration: {
-              name,
-              enabled: true,
-              trigger: 'tool_call',
-              executionMode: 'guarded',
-              stripAfterExecute: true
-            }
-          }
-        };
-      }
-      return name === 'stop_message_auto'
-        ? {
-            action: 'return_entry',
-            entry: {
-              name,
-              trigger: 'auto',
-              execution: {
-                kind: 'builtin',
-                builtinName: name
-              },
-              autoHook: {
-                flowId: 'stop_message_flow',
-                trigger: { type: 'auto', phase: 'default', priority: 40 },
-                execution: { mode: 'auto_hook', stripAfterExecute: true }
-              },
-              registration: {
-                name,
-                enabled: true,
-                trigger: 'auto',
-                executionMode: 'auto_hook',
-                stripAfterExecute: true
-              }
-            }
-          }
-        : { action: 'return_none' };
-    }),
-    planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({ names: ['stop_message_auto'] })),
-    resolveServertoolBuiltinHandlerEntryWithNative: jest.fn((input: any) => {
-      const name = String(input?.name ?? '').trim().toLowerCase();
-      if (name === TOOL_NAME) {
-        return {
-          name,
-          trigger: 'tool_call',
-          execution: {
-            kind: 'builtin',
-            builtinName: name
-          },
-          registration: {
-            name,
-            enabled: true,
-            trigger: 'tool_call',
-            executionMode: 'guarded',
-            stripAfterExecute: true
-          }
-        };
-      }
-      return name === 'stop_message_auto'
-        ? {
-            name,
-            trigger: 'auto',
-            execution: {
-              kind: 'builtin',
-              builtinName: name
-            },
-            autoHook: {
-              flowId: 'stop_message_flow',
-              trigger: { type: 'auto', phase: 'default', priority: 40 },
-              execution: { mode: 'auto_hook', stripAfterExecute: true }
-            },
-            registration: {
-              name,
-              enabled: true,
-              trigger: 'auto',
-              executionMode: 'auto_hook',
-              stripAfterExecute: true
-            }
-          }
-        : null;
-    }),
-    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
-      entries: [{
-        name: 'stop_message_auto',
-        trigger: 'auto',
-        execution: {
-          kind: 'builtin',
-          builtinName: 'stop_message_auto'
-        },
-        autoHook: {
-          flowId: 'stop_message_flow',
-          trigger: { type: 'auto', phase: 'default', priority: 40 },
-          execution: { mode: 'auto_hook', stripAfterExecute: true }
-        },
-        registration: {
-          name: 'stop_message_auto',
-          enabled: true,
-          trigger: 'auto',
-          executionMode: 'auto_hook',
-          stripAfterExecute: true
-        }
-      }]
-    })),
-    planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({
-      entries: [{
-        name: 'stop_message_auto',
-        trigger: 'auto',
-        execution: {
-          kind: 'builtin',
-          builtinName: 'stop_message_auto'
-        },
-        autoHook: {
-          flowId: 'stop_message_flow',
-          trigger: { type: 'auto', phase: 'default', priority: 40 },
-          execution: { mode: 'auto_hook', stripAfterExecute: true }
-        },
-        registration: {
-          name: 'stop_message_auto',
-          enabled: true,
-          trigger: 'auto',
-          executionMode: 'auto_hook',
-          stripAfterExecute: true
-        }
-      }]
-    })),
-    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn((input: any) => {
-      const name = String(input?.name ?? '').trim().toLowerCase();
-      return name === TOOL_NAME || name === 'stop_message_auto'
-        ? { action: 'return_builtin', canonicalName: name }
-        : { action: 'return_none', canonicalName: name };
-    }),
-    normalizeServertoolRegistrationSpecWithNative: jest.fn((input: any) => {
-      const name = String(input?.name ?? '').trim().toLowerCase();
-      if (!name) {
-        return null;
-      }
-      const trigger = input?.options?.trigger === 'auto' ? 'auto' : 'tool_call';
-      return {
-        name,
-        enabled: true,
-        trigger,
-        executionMode: trigger === 'auto' ? 'auto_hook' : 'guarded',
-        stripAfterExecute: true,
-        ...(trigger === 'auto'
-          ? {
-              autoHook: {
-                id: name,
-                phase: 'default',
-                priority: 100
-              }
-            }
-          : {})
-      };
     })
   })
 );

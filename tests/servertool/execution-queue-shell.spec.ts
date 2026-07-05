@@ -89,7 +89,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     materializeServertoolPlannedResultWithNative: materializeServertoolPlannedResult,
     createServertoolProviderProtocolErrorFromPlanWithNative,

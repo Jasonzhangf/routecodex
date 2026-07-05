@@ -2,9 +2,9 @@ import { describe, expect, test } from '@jest/globals';
 import {
   planServertoolOutcomeWithNative,
   planServertoolToolCallDispatchWithNative
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { buildServertoolDispatchPlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
-import { buildServertoolOutcomePlanInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js';
+} from 'rcc-llmswitch-core/native/servertool-wrapper';
+import { buildServertoolDispatchPlanInputWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
+import { buildServertoolOutcomePlanInputWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 const EXECUTABLE_TOOL_NAME = 'web_search';
 const EXECUTABLE_TOOL_EXECUTION_MODE = 'backend';

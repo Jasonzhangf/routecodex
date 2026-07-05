@@ -19,18 +19,12 @@ const resolveServertoolRegistryHandlerWithNativeMock = jest.fn((input: any) => {
 const planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     planServertoolBuiltinAutoHandlerEntriesWithNative: listBuiltinAutoHandlerEntriesMock,
     planServertoolRegistryLookupFromSkeletonWithNative: planServertoolRegistryLookupFromSkeletonWithNativeMock,
     resolveServertoolBuiltinHandlerEntryWithNative: getBuiltinHandlerEntryMock,
     resolveServertoolRegistryHandlerWithNative: resolveServertoolRegistryHandlerWithNativeMock,
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
-  () => ({
     planServertoolRegistryBuiltinAutoHookEntriesWithNative:
       planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock,
   })

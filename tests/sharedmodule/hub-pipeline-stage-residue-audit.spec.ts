@@ -4366,7 +4366,7 @@ describe('hub pipeline stage residue audit', () => {
   it('stop_message schema budget must be restored from MetadataCenter stopless runtime control only', () => {
     const nativeWrapperPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts',
+      'src/modules/llmswitch/bridge/native-exports.ts',
     );
     const stopMessageNativePath = path.join(
       process.cwd(),

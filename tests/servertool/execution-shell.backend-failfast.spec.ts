@@ -3,7 +3,7 @@ import type { ServerSideToolEngineOptions } from '../../sharedmodule/llmswitch-c
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js',
+  'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     createServertoolProviderProtocolErrorFromPlanWithNative: jest.fn((plan: any) => {
       const error = new Error(String(plan?.message ?? '[servertool] error')) as Error & {
@@ -147,7 +147,7 @@ jest.unstable_mockModule(
   })
 );
 
-let materializeServertoolPlannedResult: typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js').materializeServertoolPlannedResultWithNative;
+let materializeServertoolPlannedResult: typeof import('rcc-llmswitch-core/native/servertool-wrapper').materializeServertoolPlannedResultWithNative;
 
 function buildOptions(overrides: Partial<ServerSideToolEngineOptions> = {}): ServerSideToolEngineOptions {
   return {
@@ -172,7 +172,7 @@ function buildOptions(overrides: Partial<ServerSideToolEngineOptions> = {}): Ser
 beforeAll(async () => {
   ({
     materializeServertoolPlannedResultWithNative: materializeServertoolPlannedResult
-  } = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.js'));
+  } = await import('rcc-llmswitch-core/native/servertool-wrapper'));
 });
 
 describe('execution-shell handler materialization', () => {
