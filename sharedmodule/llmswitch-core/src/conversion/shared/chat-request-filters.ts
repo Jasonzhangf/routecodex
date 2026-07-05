@@ -39,35 +39,14 @@ export async function runStandardChatRequestFilters(
   };
   snapshotStage('req_process_filters_input', chatRequest);
 
-  const incomingProtocol = (profile.incomingProtocol || '').toLowerCase();
-  const entryEndpointLower = endpoint.toLowerCase();
-  const originalToolCount =
-    chatRequest && typeof chatRequest === 'object' && Array.isArray((chatRequest as any).tools)
-      ? ((chatRequest as any).tools as any[]).length
-      : 0;
-  const isAnthropicProfile =
-    incomingProtocol === 'anthropic-messages' ||
-    entryEndpointLower.includes('/v1/messages');
-  const skipAutoToolInjection = isAnthropicProfile && originalToolCount === 0;
-
-  const nativeGovernedPayload = buildGovernedFilterPayloadWithNative(chatRequest);
-  if (skipAutoToolInjection && nativeGovernedPayload && typeof nativeGovernedPayload === 'object') {
-    if (!Array.isArray((nativeGovernedPayload as any).tools)) {
-      (nativeGovernedPayload as Record<string, unknown>).tools = [];
-    }
-    (nativeGovernedPayload as Record<string, unknown>).__rcc_disable_mcp_tools = true;
-  }
+  const nativeGovernedPayload = buildGovernedFilterPayloadWithNative(chatRequest, {
+    incomingProtocol: profile.incomingProtocol,
+    entryEndpoint: endpoint,
+  });
   snapshotStage('req_process_filters_native_payload', nativeGovernedPayload);
 
   let normalized = normalizeChatRequest(nativeGovernedPayload);
   snapshotStage('req_process_filters_normalized', normalized);
-
-  if (skipAutoToolInjection && normalized && typeof normalized === 'object') {
-    if (!Array.isArray((normalized as any).tools)) {
-      (normalized as Record<string, unknown>).tools = [];
-    }
-    (normalized as Record<string, unknown>).__rcc_disable_mcp_tools = true;
-  }
 
   const preserveStreamField =
     profile.incomingProtocol === 'openai-chat' && profile.outgoingProtocol === 'openai-chat';

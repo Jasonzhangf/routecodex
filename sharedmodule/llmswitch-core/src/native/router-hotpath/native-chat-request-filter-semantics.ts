@@ -31,9 +31,12 @@ function parseOutputRecord(raw: string): Record<string, unknown> | null {
 }
 
 export function buildGovernedFilterPayloadWithNative(
-  request: unknown
+  request: unknown,
+  context?: unknown
 ): Record<string, unknown> {
-  const capability = 'buildGovernedFilterPayloadJson';
+  const capability = context === undefined
+    ? 'buildGovernedFilterPayloadJson'
+    : 'buildGovernedFilterPayloadWithContextJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
   if (isNativeDisabledByEnv()) {
     return fail('native disabled');
@@ -46,9 +49,13 @@ export function buildGovernedFilterPayloadWithNative(
   if (!requestJson) {
     return fail('json stringify failed');
   }
+  const contextJson = context === undefined ? undefined : safeStringify(context);
+  if (context !== undefined && !contextJson) {
+    return fail('context json stringify failed');
+  }
 
   try {
-    const raw = fn(requestJson);
+    const raw = contextJson === undefined ? fn(requestJson) : fn(requestJson, contextJson);
     if (typeof raw !== 'string' || !raw) {
       return fail('empty result');
     }

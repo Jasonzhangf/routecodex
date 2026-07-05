@@ -5,6 +5,22 @@
 
 version: 1
 verification:
+  - feature_id: config.virtual_router_types
+    change_risk: low
+    unit:
+      - src/config/virtual-router-types.ts
+    contract:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Deprecated TS type shim only; runtime Virtual Router bootstrap remains Rust-owned."
+      - "Any future restoration of TS config materialization must fail architecture review unless explicitly remapped and tested."
+
   - feature_id: hub.servertool_followup
     change_risk: high
     unit:

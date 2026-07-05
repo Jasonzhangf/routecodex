@@ -5,6 +5,37 @@
 # - bind feature to canonical types/builders/tests
 version: 1
 owners:
+  - feature_id: config.virtual_router_types
+    status: deprecated
+    summary: "deprecated Virtual Router TS config type shim after Rust bootstrap migration"
+    owner_kind: ts_shell
+    owner_scope: "file-scoped backward-compatible type shim only; runtime Virtual Router bootstrap is Rust-owned"
+    owner_module: src/config/virtual-router-types.ts
+    canonical_types:
+      - VirtualRouterInput
+      - VirtualRouterProvidersConfig
+      - VirtualRouterRoutingConfig
+    canonical_builders:
+      - config_virtual_router_types_deprecated_shim_boundary
+    allowed_paths:
+      - src/config/virtual-router-types.ts
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+      - src/server/runtime/http-server
+      - src/providers
+    required_tests:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "This file is a deprecated compatibility/type shim and must not regain Virtual Router config materialization logic."
+      - "`buildVirtualRouterInputFromUserConfig` is a throwing stale-caller guard; `buildVirtualRouterInputV2` is a transition bridge to Rust bootstrap, not a canonical builder."
+      - "Runtime bootstrap truth belongs to Rust `bootstrapVirtualRouterConfig`; do not add TS fallback or provider/config shaping here."
+
   - feature_id: hub.servertool_followup
     status: active
     summary: "servertool followup orchestration and governed response truth"
