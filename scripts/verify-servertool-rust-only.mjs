@@ -129,6 +129,30 @@ const DIST_SERVERTOOL_WRAPPER_JS = `${ROOT}/sharedmodule/llmswitch-core/dist/nat
 const DIST_SERVERTOOL_WRAPPER_DTS = `${ROOT}/sharedmodule/llmswitch-core/dist/native/servertool-wrapper.d.ts`;
 const PACKAGE_SERVERTOOL_WRAPPER_DTS = `${ROOT}/sharedmodule/llmswitch-core/types/servertool-wrapper.d.ts`;
 const NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`;
+const DELETED_SERVERTOOL_DIST_RESIDUE_FILES = [
+  `${ROOT}/sharedmodule/llmswitch-core/dist/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/stop-message-loop-payload-block.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/stop-message-loop-payload-block.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/cli-projection-runtime-shell.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/cli-projection-runtime-shell.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/backend-route-seed.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/backend-route-seed.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/orchestration-policy-block.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/orchestration-policy-block.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/skeleton-config.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/skeleton-config.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/backend-route-origin-delta.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/backend-route-origin-delta.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/backend-route-flow-policy.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/backend-route-flow-policy.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/registry-registration-shell.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/registry-registration-shell.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/builtin-handler-catalog.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/builtin-handler-catalog.d.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/loop-state-block.js`,
+  `${ROOT}/sharedmodule/llmswitch-core/dist/servertool/loop-state-block.d.ts`,
+];
 const NATIVE_REQUIRED_EXPORTS = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`;
 const NATIVE_STOP_MESSAGE_AUTO = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`;
 const NATIVE_BUILD_SCRIPT = `${ROOT}/sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs`;
@@ -809,6 +833,18 @@ function checkNativeServertoolWrapperConsolidated() {
     DELETED_NATIVE_SERVERTOOL_CORE_WRAPPER,
     `${DELETED_NATIVE_SERVERTOOL_CORE_WRAPPER.replace(`${ROOT}/`, '')} must stay physically deleted; src/modules/llmswitch/bridge/native-exports.ts is the package-shim wrapper truth`
   );
+  assertMissingFile(
+    'native-chat-process-servertool-orchestration-wrapper-deleted',
+    NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER,
+    `${NATIVE_CHAT_PROCESS_SERVERTOOL_ORCHESTRATION_WRAPPER.replace(`${ROOT}/`, '')} must stay physically deleted; src/modules/llmswitch/bridge/native-exports.ts is the package-shim wrapper truth`
+  );
+  for (const file of DELETED_SERVERTOOL_DIST_RESIDUE_FILES) {
+    assertMissingFile(
+      'servertool-dist-residue-deleted',
+      file,
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; stale dist residues must not keep removed TS servertool semantics reachable`
+    );
+  }
   const activeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   assertContains(
     'native-servertool-core-wrapper-consolidated',
@@ -827,12 +863,18 @@ function checkNativeServertoolWrapperConsolidated() {
     DIST_SERVERTOOL_WRAPPER_DTS,
     PACKAGE_SERVERTOOL_WRAPPER_DTS,
   ]) {
-    assertMissing(
-      'native-servertool-core-wrapper-consolidated',
-      file,
-      readRequired(file),
-      'native-servertool-core-semantics'
-    );
+    const content = readRequired(file);
+    for (const forbidden of [
+      'native-servertool-core-semantics',
+      'native-chat-process-servertool-orchestration-semantics',
+    ]) {
+      assertMissing(
+        'native-servertool-core-wrapper-consolidated',
+        file,
+        content,
+        forbidden
+      );
+    }
   }
 }
 
@@ -1688,22 +1730,6 @@ function checkStopMessagePersistedLookupRustOwner() {
       needle
     );
   }
-  assertContains(
-    'stop-message-persisted-lookup-bridge',
-    STOP_MESSAGE_RUNTIME_UTILS,
-    runtimeUtils,
-    'native-servertool-core-semantics.js'
-  );
-  for (const [file, content] of [
-    [STOP_MESSAGE_RUNTIME_UTILS, runtimeUtils],
-  ]) {
-    if (content.includes('native-chat-process-servertool-orchestration-semantics.js')) {
-      fail(
-        'stop-message-persisted-lookup-bridge-owner',
-        `${file.replace(`${ROOT}/`, '')} must import stop-message lookup/scope helpers from native-servertool-core-semantics.js`
-      );
-  }
-  }
   for (const symbol of [
     'planStopMessagePersistedLookupWithNative',
     'resolveStopMessageSessionScopeWithNative',
@@ -1863,7 +1889,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!stateKeyBlock.includes('resolveServertoolStateKeyWithNative')) {
     fail(
       'stop-message-state-key-ts-thin-shell',
-      'runtime-utils.ts resolveStateKey must call resolveServertoolStateKeyWithNative'
     );
   }
   for (const keyword of [
@@ -1877,7 +1902,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (stateKeyBlock.includes(keyword)) {
       fail(
         'stop-message-state-key-ts-thin-shell',
-        `runtime-utils.ts resolveStateKey must not contain TS state-key semantic "${keyword}"`
       );
     }
   }
@@ -1886,7 +1910,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!runtimeStateBlock.includes('resolveRuntimeStopMessageStateWithNative')) {
     fail(
       'stop-message-runtime-state-ts-thin-shell',
-      'runtime-utils.ts resolveRuntimeStopMessageState must call resolveRuntimeStopMessageStateWithNative'
     );
   }
   for (const keyword of [
@@ -1904,7 +1927,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (runtimeStateBlock.includes(keyword)) {
       fail(
         'stop-message-runtime-state-ts-thin-shell',
-        `runtime-utils.ts resolveRuntimeStopMessageState must not contain TS runtime-state semantic "${keyword}"`
       );
     }
   }
@@ -1913,7 +1935,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!metadataCenterRuntimeStateBlock.includes('resolveRuntimeStopMessageStateFromMetadataCenterWithNative')) {
     fail(
       'stop-message-cli-result-state-ts-thin-shell',
-      'runtime-utils.ts resolveRuntimeStopMessageStateFromMetadataCenter must call resolveRuntimeStopMessageStateFromMetadataCenterWithNative'
     );
   }
   for (const keyword of [
@@ -1934,7 +1955,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (metadataCenterRuntimeStateBlock.includes(keyword)) {
       fail(
         'stop-message-cli-result-state-ts-thin-shell',
-        `runtime-utils.ts resolveRuntimeStopMessageStateFromMetadataCenter must not contain TS CLI-result semantic "${keyword}"`
       );
     }
   }
@@ -1949,7 +1969,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (runtimeUtils.includes(keyword)) {
       fail(
         'stop-message-cli-result-state-no-ts-owner',
-        `runtime-utils.ts must not restore TS CLI-result state owner "${keyword}"`
       );
     }
   }
@@ -1958,7 +1977,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!runtimeStageBlock.includes('readRuntimeStopMessageStageModeWithNative')) {
     fail(
       'stop-message-runtime-stage-ts-thin-shell',
-      'runtime-utils.ts readRuntimeStopMessageStageMode must call readRuntimeStopMessageStageModeWithNative'
     );
   }
   for (const keyword of [
@@ -1970,7 +1988,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (runtimeStageBlock.includes(keyword)) {
       fail(
         'stop-message-runtime-stage-ts-thin-shell',
-        `runtime-utils.ts readRuntimeStopMessageStageMode must not contain TS stage-mode semantic "${keyword}"`
       );
     }
   }
@@ -2031,7 +2048,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!bdWorkingDirectoryBlock.includes('resolveBdWorkingDirectoryForRecordWithNative')) {
     fail(
       'servertool-bd-working-directory-ts-thin-shell',
-      'runtime-utils.ts resolveBdWorkingDirectoryForRecord must call resolveBdWorkingDirectoryForRecordWithNative'
     );
   }
   for (const keyword of [
@@ -2046,7 +2062,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (bdWorkingDirectoryBlock.includes(keyword)) {
       fail(
         'servertool-bd-working-directory-ts-thin-shell',
-        `runtime-utils.ts resolveBdWorkingDirectoryForRecord must not contain TS working-directory semantic "${keyword}"`
       );
     }
   }
@@ -2055,7 +2070,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!followupProviderKeyBlock.includes('resolveStopMessageFollowupProviderKeyWithNative')) {
     fail(
       'servertool-followup-provider-key-ts-thin-shell',
-      'runtime-utils.ts resolveStopMessageFollowupProviderKey must call resolveStopMessageFollowupProviderKeyWithNative'
     );
   }
   for (const keyword of [
@@ -2067,7 +2081,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (followupProviderKeyBlock.includes(keyword)) {
       fail(
         'servertool-followup-provider-key-ts-thin-shell',
-        `runtime-utils.ts resolveStopMessageFollowupProviderKey must not contain TS provider-key semantic "${keyword}"`
       );
     }
   }
@@ -2080,7 +2093,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (runtimeUtils.includes(keyword)) {
       fail(
         'stop-message-runtime-utils-no-ts-metadata-walker',
-        `runtime-utils.ts must not restore TS metadata walker "${keyword}"`
       );
     }
   }
@@ -2089,7 +2101,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!clientConnectionBlock.includes('resolveClientConnectionStateWithNative')) {
     fail(
       'servertool-client-connection-state-ts-thin-shell',
-      'runtime-utils.ts resolveClientConnectionState must call resolveClientConnectionStateWithNative'
     );
   }
   for (const keyword of [
@@ -2099,7 +2110,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (clientConnectionBlock.includes(keyword)) {
       fail(
         'servertool-client-connection-state-ts-thin-shell',
-        `runtime-utils.ts resolveClientConnectionState must not contain TS connection-state semantic "${keyword}"`
       );
     }
   }
@@ -2108,7 +2118,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!compactionFlagBlock.includes('hasCompactionFlagWithNative')) {
     fail(
       'servertool-compaction-flag-ts-thin-shell',
-      'runtime-utils.ts hasCompactionFlag must call hasCompactionFlagWithNative'
     );
   }
   for (const keyword of [
@@ -2119,7 +2128,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (compactionFlagBlock.includes(keyword)) {
       fail(
         'servertool-compaction-flag-ts-thin-shell',
-        `runtime-utils.ts hasCompactionFlag must not contain TS compaction semantic "${keyword}"`
       );
     }
   }
@@ -2128,7 +2136,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!entryEndpointBlock.includes('resolveEntryEndpointWithNative')) {
     fail(
       'servertool-entry-endpoint-ts-thin-shell',
-      'runtime-utils.ts resolveEntryEndpoint must call resolveEntryEndpointWithNative'
     );
   }
   for (const keyword of [
@@ -2139,7 +2146,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (entryEndpointBlock.includes(keyword)) {
       fail(
         'servertool-entry-endpoint-ts-thin-shell',
-        `runtime-utils.ts resolveEntryEndpoint must not contain TS entry-endpoint semantic "${keyword}"`
       );
     }
   }
@@ -2148,7 +2154,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!followupToolContentMaxCharsBlock.includes('resolveStopMessageFollowupToolContentMaxCharsWithNative')) {
     fail(
       'servertool-followup-tool-content-max-chars-ts-thin-shell',
-      'runtime-utils.ts resolveStopMessageFollowupToolContentMaxChars must call resolveStopMessageFollowupToolContentMaxCharsWithNative'
     );
   }
   for (const keyword of [
@@ -2161,7 +2166,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (followupToolContentMaxCharsBlock.includes(keyword)) {
       fail(
         'servertool-followup-tool-content-max-chars-ts-thin-shell',
-        `runtime-utils.ts resolveStopMessageFollowupToolContentMaxChars must not contain TS content-limit semantic "${keyword}"`
       );
     }
   }
@@ -2170,12 +2174,10 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (persistStopMessageStateBlock.trim()) {
     fail(
       'servertool-persist-stop-message-state-ts-thin-shell',
-      'runtime-utils.ts persistStopMessageState must stay physically deleted'
     );
   }
   pass(
     'servertool-persist-stop-message-state-ts-thin-shell',
-    'runtime-utils.ts persistStopMessageState TS shell is absent'
   );
 
   for (const forbidden of [
@@ -2212,7 +2214,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (runtimeUtils.includes(keyword)) {
       fail(
         'servertool-snapshot-resolver-ts-thin-shell',
-        `runtime-utils.ts must not restore snapshot/empty-reply TS semantic "${keyword}"`
       );
     }
   }
@@ -2221,7 +2222,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!defaultSnapshotBlock.includes('resolveDefaultStopMessageSnapshotWithNative')) {
     fail(
       'servertool-default-stop-message-snapshot-ts-thin-shell',
-      'runtime-utils.ts resolveDefaultStopMessageSnapshot must call resolveDefaultStopMessageSnapshotWithNative'
     );
   }
   for (const keyword of [
@@ -2235,7 +2235,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (defaultSnapshotBlock.includes(keyword)) {
       fail(
         'servertool-default-stop-message-snapshot-ts-thin-shell',
-        `runtime-utils.ts resolveDefaultStopMessageSnapshot must not contain TS default snapshot semantic "${keyword}"`
       );
     }
   }
@@ -2244,7 +2243,6 @@ function checkStopMessagePersistedLookupRustOwner() {
   if (!implicitGeminiSnapshotBlock.includes('resolveImplicitGeminiStopMessageSnapshotWithNative')) {
     fail(
       'servertool-implicit-gemini-snapshot-ts-thin-shell',
-      'runtime-utils.ts resolveImplicitGeminiStopMessageSnapshot must call resolveImplicitGeminiStopMessageSnapshotWithNative'
     );
   }
   for (const keyword of [
@@ -2267,7 +2265,6 @@ function checkStopMessagePersistedLookupRustOwner() {
     if (implicitGeminiSnapshotBlock.includes(keyword)) {
       fail(
         'servertool-implicit-gemini-snapshot-ts-thin-shell',
-        `runtime-utils.ts resolveImplicitGeminiStopMessageSnapshot must not contain TS implicit snapshot semantic "${keyword}"`
       );
     }
   }
@@ -2878,7 +2875,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     assertMissingFile(
       'servertool-execution-materialization-shell-deleted',
       file,
-      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import native-servertool-core-semantics.ts directly`
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; materialization now routes through rcc-llmswitch-core/native/servertool-wrapper`
     );
   }
   const executionQueueShell = readRequired(TS_EXECUTION_QUEUE_SHELL);
@@ -3050,7 +3047,7 @@ function checkServertoolExecutionDispatchRustOwner() {
   assertMissingFile(
     'servertool-execution-shell-deleted',
     TS_EXECUTION_SHELL,
-    'execution-shell.ts must stay physically deleted after moving pre-command wrappers to pre-command-hooks.ts and materialization imports directly to native-servertool-core-semantics.ts'
+    'execution-shell.ts must stay physically deleted after moving pre-command wrappers to pre-command-hooks.ts and materialization through rcc-llmswitch-core/native/servertool-wrapper'
   );
 
   assertMissingFile(
@@ -7024,7 +7021,7 @@ function checkServertoolActiveOrchestrationAuditRedGate() {
     assertMissingFile(
       'servertool-active-orchestration-audit',
       file,
-      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; materialization now routes through native-servertool-core-semantics.ts`
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; materialization now routes through rcc-llmswitch-core/native/servertool-wrapper`
     );
   }
   const forbiddenByFile = new Map([
