@@ -81,10 +81,41 @@ export interface NativeFilterBridgeInputForUpstreamOutput {
   input: Array<Record<string, unknown>>;
 }
 
+export interface NativeSanitizeCapturedResponsesInputInput {
+  input: unknown[];
+}
+
+export interface NativeSanitizeCapturedResponsesInputOutput {
+  input: Array<Record<string, unknown>>;
+}
+
+export interface NativePickResponsesRequestParametersInput {
+  payload?: Record<string, unknown>;
+  streamHint?: boolean;
+}
+
+export interface NativePickResponsesRequestParametersOutput {
+  [key: string]: unknown;
+}
+
+export interface NativeResponsesValueInput {
+  value?: Record<string, unknown>;
+}
+
+export interface NativeStripResponsesToolControlFieldsInput extends NativeResponsesValueInput {
+  nestedExtraFields?: boolean;
+}
+
+export interface NativeMergeRetainedResponsesRequestParametersInput {
+  request?: Record<string, unknown>;
+  retainedParameters?: Record<string, unknown>;
+}
+
 export interface NativePrepareResponsesRequestEnvelopeInput {
   request: Record<string, unknown>;
   extraSystemInstruction?: unknown;
   combinedSystemInstruction?: unknown;
+  reasoningInstructionSegments?: unknown;
   chatParameters?: unknown;
   chatStream?: unknown;
   chatParametersStream?: unknown;

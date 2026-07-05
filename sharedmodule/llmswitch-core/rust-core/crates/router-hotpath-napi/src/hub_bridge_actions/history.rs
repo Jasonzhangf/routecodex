@@ -2,6 +2,7 @@ use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
+use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::hub_tool_session_compat::{normalize_tool_session_payload, ToolSessionCompatInput};
 use crate::shared_json_utils::{
     clone_non_empty_object, clone_plain_object, read_optional_bool, read_trimmed_string,
@@ -27,6 +28,7 @@ use super::types::{
     PrepareResponsesRequestEnvelopeInput, PrepareResponsesRequestEnvelopeOutput,
     ResolveResponsesBridgeToolsInput, ResolveResponsesBridgeToolsOutput,
     ResolveResponsesRequestBridgeDecisionsInput, ResolveResponsesRequestBridgeDecisionsOutput,
+    SanitizeCapturedResponsesInputInput, SanitizeCapturedResponsesInputOutput,
 };
 use super::utils::{
     coerce_bridge_role, flatten_content_to_string, is_stopless_cli_result_content,
@@ -581,12 +583,15 @@ pub(crate) fn resolve_responses_bridge_tools(
         .and_then(Value::as_object)
         .map(|_| Map::new());
     if let Some(request_obj) = request.as_mut() {
-        if let Some(keys) = input.passthrough_keys.as_ref() {
-            if let Some(chat_request) = input.request.as_ref().and_then(Value::as_object) {
-                for key in keys {
-                    if let Some(value) = chat_request.get(key).cloned() {
-                        request_obj.insert(key.clone(), value);
-                    }
+        let default_keys: Vec<String> = RESPONSES_TOOL_PASSTHROUGH_KEYS
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect();
+        let keys = input.passthrough_keys.as_ref().unwrap_or(&default_keys);
+        if let Some(chat_request) = input.request.as_ref().and_then(Value::as_object) {
+            for key in keys {
+                if let Some(value) = chat_request.get(key).cloned() {
+                    request_obj.insert(key.clone(), value);
                 }
             }
         }
@@ -749,6 +754,241 @@ fn read_previous_response_id_from_request_semantics(
         .or_else(|| read_trimmed_string(resume_from.and_then(|row| row.get("responseId"))))
 }
 
+const RESPONSES_TOOL_PASSTHROUGH_KEYS: &[&str] = &[
+    "temperature",
+    "tool_choice",
+    "parallel_tool_calls",
+    "response_format",
+    "user",
+    "top_p",
+    "prompt_cache_key",
+    "reasoning",
+    "logit_bias",
+    "seed",
+];
+
+const RESPONSES_REQUEST_PARAMETER_KEYS: &[&str] = &[
+    "model",
+    "temperature",
+    "top_p",
+    "top_k",
+    "prompt_cache_key",
+    "reasoning",
+    "max_tokens",
+    "max_output_tokens",
+    "response_format",
+    "tool_choice",
+    "parallel_tool_calls",
+    "service_tier",
+    "truncation",
+    "include",
+    "store",
+    "text",
+    "user",
+    "logit_bias",
+    "seed",
+    "stop",
+    "stop_sequences",
+    "modalities",
+];
+
+fn pick_object_fields(value: Option<&Value>, keys: &[&str]) -> Value {
+    let Some(row) = value.and_then(Value::as_object) else {
+        return Value::Null;
+    };
+    let mut out = Map::new();
+    for key in keys {
+        if let Some(value) = row.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+    if out.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(out)
+    }
+}
+
+pub(crate) fn pick_responses_request_parameters(input: &Value) -> Value {
+    let payload = input
+        .as_object()
+        .and_then(|row| row.get("payload"))
+        .or(Some(input));
+    let mut picked = match pick_object_fields(payload, RESPONSES_REQUEST_PARAMETER_KEYS) {
+        Value::Object(row) => row,
+        _ => Map::new(),
+    };
+    if let Some(stream_hint) = input
+        .as_object()
+        .and_then(|row| row.get("streamHint"))
+        .and_then(Value::as_bool)
+    {
+        picked.insert("stream".to_string(), Value::Bool(stream_hint));
+    }
+    if picked.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(picked)
+    }
+}
+
+pub(crate) fn pick_responses_tool_passthrough_fields(input: &Value) -> Value {
+    let value = input
+        .as_object()
+        .and_then(|row| row.get("value"))
+        .or(Some(input));
+    pick_object_fields(value, RESPONSES_TOOL_PASSTHROUGH_KEYS)
+}
+
+pub(crate) fn pick_responses_bridge_decision_metadata(input: &Value) -> Value {
+    let value = input
+        .as_object()
+        .and_then(|row| row.get("metadata"))
+        .or(Some(input));
+    pick_object_fields(value, &["toolCallIdStyle", "bridgeHistory"])
+}
+
+pub(crate) fn extract_responses_metadata_extra_fields(input: &Value) -> Value {
+    input
+        .as_object()
+        .and_then(|row| row.get("metadata"))
+        .or(Some(input))
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("extraFields"))
+        .and_then(Value::as_object)
+        .map(|row| Value::Object(row.clone()))
+        .unwrap_or(Value::Null)
+}
+
+pub(crate) fn strip_responses_tool_control_fields(input: &Value) -> Value {
+    let Some(input_row) = input.as_object() else {
+        return Value::Null;
+    };
+    let nested_extra_fields = input_row
+        .get("nestedExtraFields")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let Some(mut cloned) = input_row.get("value").and_then(Value::as_object).cloned() else {
+        return Value::Null;
+    };
+    if nested_extra_fields {
+        if let Some(extra_fields) = cloned.get_mut("extraFields").and_then(Value::as_object_mut) {
+            extra_fields.remove("tool_choice");
+            extra_fields.remove("parallel_tool_calls");
+            if extra_fields.is_empty() {
+                cloned.remove("extraFields");
+            }
+        }
+        return Value::Object(cloned);
+    }
+    cloned.remove("tool_choice");
+    cloned.remove("parallel_tool_calls");
+    if cloned.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(cloned)
+    }
+}
+
+pub(crate) fn unwrap_responses_data(input: &Value) -> Value {
+    let mut current = input
+        .as_object()
+        .and_then(|row| row.get("value"))
+        .unwrap_or(input);
+    for _ in 0..32 {
+        let Some(row) = current.as_object() else {
+            break;
+        };
+        if row.contains_key("choices") || row.contains_key("message") {
+            break;
+        }
+        let Some(next) = row.get("data").filter(|value| value.is_object()) else {
+            break;
+        };
+        current = next;
+    }
+    current.clone()
+}
+
+pub(crate) fn build_slim_responses_bridge_context(input: &Value) -> Value {
+    let Some(row) = input.as_object() else {
+        return Value::Null;
+    };
+    let mut slim = Map::new();
+    if row
+        .get("input")
+        .and_then(Value::as_array)
+        .map(|items| !items.is_empty())
+        .unwrap_or(false)
+    {
+        slim.insert(
+            "input".to_string(),
+            row.get("input").cloned().unwrap_or(Value::Null),
+        );
+    }
+    if row
+        .get("originalSystemMessages")
+        .and_then(Value::as_array)
+        .map(|items| !items.is_empty())
+        .unwrap_or(false)
+    {
+        slim.insert(
+            "originalSystemMessages".to_string(),
+            row.get("originalSystemMessages")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+    }
+    if let Some(system_instruction) = read_trimmed_string(row.get("systemInstruction")) {
+        slim.insert(
+            "systemInstruction".to_string(),
+            Value::String(system_instruction),
+        );
+    }
+    if let Some(tool_call_id_style) = read_trimmed_string(row.get("toolCallIdStyle")) {
+        slim.insert(
+            "toolCallIdStyle".to_string(),
+            Value::String(tool_call_id_style),
+        );
+    }
+    if let Some(metadata) = row.get("metadata").and_then(Value::as_object) {
+        slim.insert("metadata".to_string(), Value::Object(metadata.clone()));
+    }
+    if slim.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(slim)
+    }
+}
+
+pub(crate) fn merge_retained_responses_request_parameters(input: &Value) -> Value {
+    let Some(row) = input.as_object() else {
+        return Value::Object(Map::new());
+    };
+    let mut request = row
+        .get("request")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let retained = row
+        .get("retainedParameters")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    for key in RESPONSES_REQUEST_PARAMETER_KEYS {
+        if matches!(*key, "temperature" | "top_p") {
+            continue;
+        }
+        if request.contains_key(*key) {
+            continue;
+        }
+        if let Some(value) = retained.get(*key).cloned() {
+            request.insert((*key).to_string(), value);
+        }
+    }
+    Value::Object(request)
+}
+
 pub(crate) fn resolve_responses_request_bridge_decisions(
     input: ResolveResponsesRequestBridgeDecisionsInput,
 ) -> ResolveResponsesRequestBridgeDecisionsOutput {
@@ -836,6 +1076,82 @@ pub(crate) fn filter_bridge_input_for_upstream(
         normalized.push(Value::Object(row));
     }
     FilterBridgeInputForUpstreamOutput { input: normalized }
+}
+
+fn read_response_input_item_type(row: &Map<String, Value>) -> String {
+    row.get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn read_first_trimmed_string(row: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        row.get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    })
+}
+
+pub(crate) fn sanitize_captured_responses_input(
+    input: SanitizeCapturedResponsesInputInput,
+) -> SanitizeCapturedResponsesInputOutput {
+    let mut accepted_call_ids: HashSet<String> = HashSet::new();
+    let mut saw_function_calls = false;
+    for item in &input.input {
+        let Some(row) = item.as_object() else {
+            continue;
+        };
+        if read_response_input_item_type(row) != "function_call" {
+            continue;
+        }
+        saw_function_calls = true;
+        let sanitized_name =
+            normalize_responses_function_name(row.get("name").and_then(Value::as_str));
+        if sanitized_name.is_none() {
+            continue;
+        }
+        if let Some(call_id) = read_first_trimmed_string(row, &["call_id", "tool_call_id", "id"]) {
+            accepted_call_ids.insert(call_id);
+        }
+    }
+
+    let mut output = Vec::new();
+    for item in input.input {
+        let Some(mut row) = item.as_object().cloned() else {
+            continue;
+        };
+        let item_type = read_response_input_item_type(&row);
+        if item_type == "function_call" {
+            let Some(sanitized_name) =
+                normalize_responses_function_name(row.get("name").and_then(Value::as_str))
+            else {
+                continue;
+            };
+            let raw_name = row.get("name").and_then(Value::as_str).unwrap_or("");
+            if raw_name != sanitized_name {
+                row.insert("name".to_string(), Value::String(sanitized_name));
+            }
+            output.push(Value::Object(row));
+            continue;
+        }
+        if item_type == "function_call_output" {
+            let call_id = read_first_trimmed_string(&row, &["call_id", "tool_call_id", "id"]);
+            let allowed = call_id
+                .as_ref()
+                .map(|value| !saw_function_calls || accepted_call_ids.contains(value))
+                .unwrap_or(false);
+            if !allowed {
+                continue;
+            }
+        }
+        output.push(Value::Object(row));
+    }
+
+    SanitizeCapturedResponsesInputOutput { input: output }
 }
 
 fn collect_reasoning_instruction_segments(value: Option<&Value>) -> Vec<String> {

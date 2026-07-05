@@ -21,13 +21,20 @@ import type {
   NativeBridgeToolCallIdsOutput,
   NativeFilterBridgeInputForUpstreamInput,
   NativeFilterBridgeInputForUpstreamOutput,
+  NativeMergeRetainedResponsesRequestParametersInput,
   NativeNormalizeBridgeHistorySeedOutput,
+  NativePickResponsesRequestParametersInput,
+  NativePickResponsesRequestParametersOutput,
   NativePrepareResponsesRequestEnvelopeInput,
   NativePrepareResponsesRequestEnvelopeOutput,
   NativeResolveResponsesBridgeToolsInput,
   NativeResolveResponsesBridgeToolsOutput,
   NativeResolveResponsesRequestBridgeDecisionsInput,
-  NativeResolveResponsesRequestBridgeDecisionsOutput
+  NativeResolveResponsesRequestBridgeDecisionsOutput,
+  NativeResponsesValueInput,
+  NativeSanitizeCapturedResponsesInputInput,
+  NativeSanitizeCapturedResponsesInputOutput,
+  NativeStripResponsesToolControlFieldsInput
 } from './native-hub-bridge-action-semantics-types.js';
 
 export function normalizeBridgeToolCallIdsWithNative(
@@ -261,6 +268,126 @@ export function filterBridgeInputForUpstreamWithNative(
   }
 }
 
+export function sanitizeCapturedResponsesInputWithNative(
+  input: NativeSanitizeCapturedResponsesInputInput
+): NativeSanitizeCapturedResponsesInputOutput {
+  const capability = 'sanitizeCapturedResponsesInputJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<NativeSanitizeCapturedResponsesInputOutput>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify({
+    input: input.input
+  });
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
+    return parseNativeJsonValueOrFail<NativeSanitizeCapturedResponsesInputOutput>(capability, raw, 'parseSanitizeCapturedResponsesInputOutput');
+  } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+function invokeNullableRecordCapability(
+  capability: string,
+  input: unknown,
+  parseStage: string
+): Record<string, unknown> | undefined {
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | undefined>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(input);
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = readNativeJsonResult(capability, fn(payloadJson));
+    const parsed = parseNativeJsonValueOrFail<Record<string, unknown> | null>(capability, raw, parseStage);
+    return parsed ?? undefined;
+  } catch (error) {
+    if (shouldRethrowNativeRawError(error)) {
+      throw error;
+    }
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function pickResponsesRequestParametersWithNative(
+  input: NativePickResponsesRequestParametersInput
+): NativePickResponsesRequestParametersOutput | undefined {
+  return invokeNullableRecordCapability('pickResponsesRequestParametersJson', input, 'parsePickResponsesRequestParametersOutput');
+}
+
+export function pickResponsesToolPassthroughFieldsWithNative(
+  input: NativeResponsesValueInput
+): Record<string, unknown> | undefined {
+  return invokeNullableRecordCapability('pickResponsesToolPassthroughFieldsJson', input, 'parsePickResponsesToolPassthroughFieldsOutput');
+}
+
+export function pickResponsesBridgeDecisionMetadataWithNative(
+  input: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  return input
+    ? invokeNullableRecordCapability('pickResponsesBridgeDecisionMetadataJson', { metadata: input }, 'parsePickResponsesBridgeDecisionMetadataOutput')
+    : undefined;
+}
+
+export function extractResponsesMetadataExtraFieldsWithNative(
+  input: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  return input
+    ? invokeNullableRecordCapability('extractResponsesMetadataExtraFieldsJson', { metadata: input }, 'parseExtractResponsesMetadataExtraFieldsOutput')
+    : undefined;
+}
+
+export function stripResponsesToolControlFieldsWithNative(
+  input: NativeStripResponsesToolControlFieldsInput
+): Record<string, unknown> | undefined {
+  return invokeNullableRecordCapability('stripResponsesToolControlFieldsJson', input, 'parseStripResponsesToolControlFieldsOutput');
+}
+
+export function buildSlimResponsesBridgeContextWithNative(
+  input: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  return input
+    ? invokeNullableRecordCapability('buildSlimResponsesBridgeContextJson', input, 'parseBuildSlimResponsesBridgeContextOutput')
+    : undefined;
+}
+
+export function mergeRetainedResponsesRequestParametersWithNative(
+  input: NativeMergeRetainedResponsesRequestParametersInput
+): Record<string, unknown> {
+  return invokeNullableRecordCapability('mergeRetainedResponsesRequestParametersJson', input, 'parseMergeRetainedResponsesRequestParametersOutput') ?? {};
+}
+
+export function unwrapResponsesDataWithNative(
+  input: NativeResponsesValueInput
+): Record<string, unknown> {
+  const capability = 'unwrapResponsesDataJson';
+  const result = invokeNullableRecordCapability(capability, input, 'parseUnwrapResponsesDataOutput');
+  if (!result) {
+    return failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
+  }
+  return result;
+}
+
 export function prepareResponsesRequestEnvelopeWithNative(
   input: NativePrepareResponsesRequestEnvelopeInput
 ): NativePrepareResponsesRequestEnvelopeOutput {
@@ -273,10 +400,11 @@ export function prepareResponsesRequestEnvelopeWithNative(
   if (!fn) {
     return fail();
   }
-  const payloadJson = safeStringify({
+    const payloadJson = safeStringify({
     request: input.request,
     extraSystemInstruction: input.extraSystemInstruction,
     combinedSystemInstruction: input.combinedSystemInstruction,
+    reasoningInstructionSegments: input.reasoningInstructionSegments,
     chatParameters: input.chatParameters,
     chatStream: input.chatStream,
     chatParametersStream: input.chatParametersStream,

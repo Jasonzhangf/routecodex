@@ -1,10 +1,14 @@
 use super::bridge_input::convert_bridge_input_to_chat_messages;
 use super::history::{
     apply_bridge_capture_tool_results, apply_bridge_ensure_tool_placeholders,
-    apply_bridge_normalize_history, build_bridge_history, ensure_bridge_output_fields,
-    filter_bridge_input_for_upstream, normalize_bridge_history_seed,
+    apply_bridge_normalize_history, build_bridge_history, build_slim_responses_bridge_context,
+    ensure_bridge_output_fields, extract_responses_metadata_extra_fields,
+    filter_bridge_input_for_upstream, merge_retained_responses_request_parameters,
+    normalize_bridge_history_seed, pick_responses_bridge_decision_metadata,
+    pick_responses_request_parameters, pick_responses_tool_passthrough_fields,
     prepare_responses_request_envelope, resolve_responses_bridge_tools,
-    resolve_responses_request_bridge_decisions,
+    resolve_responses_request_bridge_decisions, sanitize_captured_responses_input,
+    strip_responses_tool_control_fields, unwrap_responses_data,
 };
 use super::local_image::append_local_image_block_on_latest_user_input;
 use super::metadata::{
@@ -53,6 +57,193 @@ fn normalize_bridge_tool_call_ids_does_not_invent_missing_ids() {
     let tool_message = output.messages[1].as_object().unwrap();
     assert!(tool_message.get("tool_call_id").is_none());
     assert!(tool_message.get("call_id").is_none());
+}
+
+#[test]
+fn sanitize_captured_responses_input_sanitizes_names_and_drops_orphan_outputs() {
+    let output = sanitize_captured_responses_input(SanitizeCapturedResponsesInputInput {
+        input: vec![
+            json!({
+                "type": "function_call",
+                "call_id": "call_keep",
+                "name": "mail box.status",
+                "arguments": "{}"
+            }),
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_keep",
+                "output": "ok"
+            }),
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_orphan",
+                "output": "stale"
+            }),
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": "keep"
+            }),
+            json!({
+                "type": "function_call",
+                "call_id": "call_bad",
+                "name": "tool",
+                "arguments": "{}"
+            }),
+        ],
+    });
+
+    assert_eq!(output.input.len(), 3);
+    assert_eq!(output.input[0]["type"], "function_call");
+    assert_eq!(output.input[0]["name"], "mailbox.status");
+    assert_eq!(output.input[1]["type"], "function_call_output");
+    assert_eq!(output.input[1]["call_id"], "call_keep");
+    assert_eq!(output.input[2]["type"], "message");
+}
+
+#[test]
+fn sanitize_captured_responses_input_preserves_outputs_when_no_calls_were_seen() {
+    let output = sanitize_captured_responses_input(SanitizeCapturedResponsesInputInput {
+        input: vec![json!({
+            "type": "function_call_output",
+            "tool_call_id": "call_existing",
+            "output": "ok"
+        })],
+    });
+
+    assert_eq!(output.input.len(), 1);
+    assert_eq!(output.input[0]["tool_call_id"], "call_existing");
+}
+
+#[test]
+fn responses_bridge_utils_are_native_owned() {
+    assert_eq!(
+        pick_responses_request_parameters(&json!({
+            "payload": {
+                "model": "gpt-5.5",
+                "max_tokens": 10,
+                "metadata": { "drop": true },
+                "tool_choice": "required"
+            },
+            "streamHint": true
+        })),
+        json!({
+            "model": "gpt-5.5",
+            "max_tokens": 10,
+            "tool_choice": "required",
+            "stream": true
+        })
+    );
+
+    assert_eq!(
+        pick_responses_tool_passthrough_fields(&json!({
+            "value": {
+                "temperature": 0.2,
+                "parallel_tool_calls": true,
+                "metadata": { "drop": true }
+            }
+        })),
+        json!({
+            "temperature": 0.2,
+            "parallel_tool_calls": true
+        })
+    );
+
+    assert_eq!(
+        pick_responses_bridge_decision_metadata(&json!({
+            "metadata": {
+                "toolCallIdStyle": "preserve",
+                "bridgeHistory": { "input": [] },
+                "extraFields": { "drop": true }
+            }
+        })),
+        json!({
+            "toolCallIdStyle": "preserve",
+            "bridgeHistory": { "input": [] }
+        })
+    );
+
+    assert_eq!(
+        extract_responses_metadata_extra_fields(&json!({
+            "metadata": { "extraFields": { "store": false } }
+        })),
+        json!({ "store": false })
+    );
+}
+
+#[test]
+fn responses_bridge_utils_strip_unwrap_and_merge_in_native() {
+    assert_eq!(
+        strip_responses_tool_control_fields(&json!({
+            "value": {
+                "extraFields": {
+                    "tool_choice": "required",
+                    "parallel_tool_calls": true,
+                    "store": false
+                },
+                "keep": true
+            },
+            "nestedExtraFields": true
+        })),
+        json!({
+            "extraFields": { "store": false },
+            "keep": true
+        })
+    );
+
+    assert_eq!(
+        strip_responses_tool_control_fields(&json!({
+            "value": {
+                "tool_choice": "required",
+                "parallel_tool_calls": true,
+                "store": false
+            }
+        })),
+        json!({ "store": false })
+    );
+
+    assert_eq!(
+        unwrap_responses_data(&json!({
+            "value": { "data": { "data": { "message": { "content": "ok" } } } }
+        })),
+        json!({ "message": { "content": "ok" } })
+    );
+
+    assert_eq!(
+        build_slim_responses_bridge_context(&json!({
+            "input": [{ "role": "user" }],
+            "originalSystemMessages": ["sys"],
+            "systemInstruction": " keep ",
+            "toolCallIdStyle": " preserve ",
+            "metadata": { "providerKey": "p" },
+            "__captured_tool_results": [{ "drop": true }]
+        })),
+        json!({
+            "input": [{ "role": "user" }],
+            "originalSystemMessages": ["sys"],
+            "systemInstruction": "keep",
+            "toolCallIdStyle": "preserve",
+            "metadata": { "providerKey": "p" }
+        })
+    );
+
+    assert_eq!(
+        merge_retained_responses_request_parameters(&json!({
+            "request": { "temperature": 0.1, "model": "gpt" },
+            "retainedParameters": {
+                "temperature": 0.9,
+                "max_output_tokens": 128,
+                "metadata": { "drop": true },
+                "store": false
+            }
+        })),
+        json!({
+            "temperature": 0.1,
+            "model": "gpt",
+            "max_output_tokens": 128,
+            "store": false
+        })
+    );
 }
 
 #[test]

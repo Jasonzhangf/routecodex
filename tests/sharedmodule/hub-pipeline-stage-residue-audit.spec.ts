@@ -808,6 +808,37 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('responses bridge utils must be native-only policy wrappers', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'keeps TS request parameter whitelist', pattern: /RESPONSES_REQUEST_PARAMETER_KEYS/ },
+      { label: 'keeps TS tool passthrough whitelist', pattern: /RESPONSES_TOOL_PASSTHROUGH_KEYS/ },
+      { label: 'keeps TS field picker policy', pattern: /function pickObjectFields/ },
+      { label: 'keeps TS accepted call id set', pattern: /acceptedCallIds/ },
+      { label: 'keeps TS saw function call policy', pattern: /sawFunctionCalls/ },
+      { label: 'keeps TS call id candidate policy', pattern: /callIdCandidates/ },
+      { label: 'keeps TS function name sanitizer import', pattern: /sanitizeResponsesFunctionName/ },
+      { label: 'keeps TS tool-control deletion policy', pattern: /delete .*tool_choice|parallel_tool_calls/ },
+      { label: 'keeps TS data unwrap loop policy', pattern: /while\s*\(current/ },
+      { label: 'keeps TS retained parameter merge loop', pattern: /for \(const key of RESPONSES_REQUEST_PARAMETER_KEYS\)/ },
+    ]);
+
+    expect(source).toContain('sanitizeCapturedResponsesInputWithNative');
+    expect(source).toContain('pickResponsesRequestParametersWithNative');
+    expect(source).toContain('pickResponsesToolPassthroughFieldsWithNative');
+    expect(source).toContain('pickResponsesBridgeDecisionMetadataWithNative');
+    expect(source).toContain('extractResponsesMetadataExtraFieldsWithNative');
+    expect(source).toContain('buildSlimResponsesBridgeContextWithNative');
+    expect(source).toContain('stripResponsesToolControlFieldsWithNative');
+    expect(source).toContain('unwrapResponsesDataWithNative');
+    expect(source).toContain('mergeRetainedResponsesRequestParametersWithNative');
+    expect(findings).toEqual([]);
+  });
+
   it('responses bridge files must not import deleted TS bridge wrappers', () => {
     const files = [
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',

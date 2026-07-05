@@ -48,13 +48,12 @@ export type {
 
 import { logHubStageTiming } from '../hub/pipeline/hub-stage-timing.js';
 import {
-  RESPONSES_TOOL_PASSTHROUGH_KEYS,
-  RESPONSES_REQUEST_PARAMETER_KEYS,
   buildSlimBridgeDecisionMetadata,
   buildSlimResponsesBridgeContext,
   collectResponsesRequestParameters,
   extractMetadataExtraFields,
-  pickObjectFields,
+  mergeRetainedResponsesRequestParameters,
+  pickResponsesToolPassthroughFields,
   sanitizeCapturedResponsesInput,
   stripToolControlFieldsFromContextMetadata,
   stripToolControlFieldsFromParameterObject,
@@ -443,8 +442,7 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     chatTools: Array.isArray(responsesToolsFromChat) ? (responsesToolsFromChat as Array<Record<string, unknown>>) : undefined,
     allowBuiltinWebSearch: bridgeDecisions.allowBuiltinWebSearch === true,
     hasServerSideWebSearch: true,
-    passthroughKeys: [...RESPONSES_TOOL_PASSTHROUGH_KEYS],
-    request: pickObjectFields(chat as Record<string, unknown>, RESPONSES_TOOL_PASSTHROUGH_KEYS)
+    request: pickResponsesToolPassthroughFields(chat as Record<string, unknown>)
   });
   const mergedTools = resolvedBridgeTools.mergedTools as BridgeToolDefinition[] | undefined;
 
@@ -521,6 +519,7 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     request: out as Record<string, unknown>,
     extraSystemInstruction: extras?.systemInstruction,
     combinedSystemInstruction,
+    reasoningInstructionSegments: (ctx as Record<string, unknown> | undefined)?.__rcc_reasoning_instructions_segments,
     chatParameters: Object.keys(mergedChatParameters).length ? mergedChatParameters : undefined,
     chatStream: streamFromChat,
     chatParametersStream: streamFromParameters,
@@ -532,15 +531,7 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   const retainedParameters: Record<string, unknown> = {
     ...(Object.keys(mergedChatParameters).length ? mergedChatParameters : {})
   };
-  for (const key of RESPONSES_REQUEST_PARAMETER_KEYS) {
-    if (key === 'temperature' || key === 'top_p') {
-      continue;
-    }
-    if (out[key] !== undefined || retainedParameters[key] === undefined) {
-      continue;
-    }
-    out[key] = jsonClone(retainedParameters[key] as JsonValue);
-  }
+  Object.assign(out, mergeRetainedResponsesRequestParameters(out as Record<string, unknown>, retainedParameters));
   if (out.stream === undefined) {
     const retainedStream =
       streamFromChat ??

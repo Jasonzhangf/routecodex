@@ -160,6 +160,19 @@ pub struct FilterBridgeInputForUpstreamOutput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SanitizeCapturedResponsesInputInput {
+    #[serde(default)]
+    pub input: Vec<Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SanitizeCapturedResponsesInputOutput {
+    pub input: Vec<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrepareResponsesRequestEnvelopeInput {
     #[serde(default)]
     pub request: Value,

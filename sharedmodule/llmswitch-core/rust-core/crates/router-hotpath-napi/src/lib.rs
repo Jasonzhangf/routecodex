@@ -519,6 +519,51 @@ pub fn filter_bridge_input_for_upstream_json(input_json: String) -> NapiResult<S
 }
 
 #[napi]
+pub fn sanitize_captured_responses_input_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::sanitize_captured_responses_input_json(input_json)
+}
+
+#[napi]
+pub fn pick_responses_request_parameters_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::pick_responses_request_parameters_json(input_json)
+}
+
+#[napi]
+pub fn pick_responses_tool_passthrough_fields_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::pick_responses_tool_passthrough_fields_json(input_json)
+}
+
+#[napi]
+pub fn pick_responses_bridge_decision_metadata_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::pick_responses_bridge_decision_metadata_json(input_json)
+}
+
+#[napi]
+pub fn extract_responses_metadata_extra_fields_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::extract_responses_metadata_extra_fields_json(input_json)
+}
+
+#[napi]
+pub fn strip_responses_tool_control_fields_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::strip_responses_tool_control_fields_json(input_json)
+}
+
+#[napi]
+pub fn unwrap_responses_data_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::unwrap_responses_data_json(input_json)
+}
+
+#[napi]
+pub fn build_slim_responses_bridge_context_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::build_slim_responses_bridge_context_json(input_json)
+}
+
+#[napi]
+pub fn merge_retained_responses_request_parameters_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::merge_retained_responses_request_parameters_json(input_json)
+}
+
+#[napi]
 pub fn prepare_responses_request_envelope_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::prepare_responses_request_envelope_json(input_json)
 }

@@ -10,10 +10,14 @@ use super::bridge_input::{
 };
 use super::history::{
     apply_bridge_capture_tool_results, apply_bridge_ensure_tool_placeholders,
-    apply_bridge_normalize_history, build_bridge_history, ensure_bridge_output_fields,
-    filter_bridge_input_for_upstream, normalize_bridge_history_seed,
+    apply_bridge_normalize_history, build_bridge_history, build_slim_responses_bridge_context,
+    ensure_bridge_output_fields, extract_responses_metadata_extra_fields,
+    filter_bridge_input_for_upstream, merge_retained_responses_request_parameters,
+    normalize_bridge_history_seed, pick_responses_bridge_decision_metadata,
+    pick_responses_request_parameters, pick_responses_tool_passthrough_fields,
     prepare_responses_request_envelope, resolve_responses_bridge_tools,
-    resolve_responses_request_bridge_decisions,
+    resolve_responses_request_bridge_decisions, sanitize_captured_responses_input,
+    strip_responses_tool_control_fields, unwrap_responses_data,
 };
 use super::local_image::append_local_image_block_on_latest_user_input;
 use super::metadata::{
@@ -296,6 +300,105 @@ pub fn filter_bridge_input_for_upstream_json(input_json: String) -> NapiResult<S
     let input: FilterBridgeInputForUpstreamInput = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
     let output = filter_bridge_input_for_upstream(input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn sanitize_captured_responses_input_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: SanitizeCapturedResponsesInputInput = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = sanitize_captured_responses_input(input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn pick_responses_request_parameters_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = pick_responses_request_parameters(&input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn pick_responses_tool_passthrough_fields_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = pick_responses_tool_passthrough_fields(&input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn pick_responses_bridge_decision_metadata_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = pick_responses_bridge_decision_metadata(&input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn extract_responses_metadata_extra_fields_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = extract_responses_metadata_extra_fields(&input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn strip_responses_tool_control_fields_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = strip_responses_tool_control_fields(&input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn unwrap_responses_data_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = unwrap_responses_data(&input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn build_slim_responses_bridge_context_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = build_slim_responses_bridge_context(&input);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+pub fn merge_retained_responses_request_parameters_json(input_json: String) -> NapiResult<String> {
+    if input_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Input JSON is empty"));
+    }
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = merge_retained_responses_request_parameters(&input);
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
