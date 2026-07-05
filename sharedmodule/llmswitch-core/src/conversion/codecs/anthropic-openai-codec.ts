@@ -18,6 +18,16 @@ export function buildOpenAIChatFromAnthropic(
   } & Record<string, unknown>;
 }
 
+export function buildOpenAIChatFromAnthropicFull(
+  payload: unknown,
+  options?: { includeToolCallIds?: boolean }
+): Record<string, unknown> {
+  return buildOpenAIChatFromAnthropicWithNative(
+    (payload ?? {}) as Record<string, unknown>,
+    options as Record<string, unknown> | undefined
+  );
+}
+
 export function buildAnthropicFromOpenAIChat(
   payload: unknown,
   options?: { toolNameMap?: Record<string, string>; requestId?: string; entryEndpoint?: string }

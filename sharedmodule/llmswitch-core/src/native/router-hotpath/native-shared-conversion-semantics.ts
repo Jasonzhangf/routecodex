@@ -115,6 +115,7 @@ export {
 } from './native-hub-pipeline-req-inbound-semantics-tools.js';
 export {
   flattenChatToolsForFunctionCallingWithNative,
+  mapChatToolsToAnthropicToolsWithNative,
   mapBridgeToolsToChatWithNative,
   mapChatToolsToBridgeWithNative
 } from './native-shared-conversion-semantics-tool-definitions.js';

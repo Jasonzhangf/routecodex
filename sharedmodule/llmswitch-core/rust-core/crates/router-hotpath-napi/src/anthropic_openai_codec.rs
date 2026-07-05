@@ -69,6 +69,30 @@ fn is_likely_url(value: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("ftp://")
 }
 
+fn normalize_anthropic_tool_choice(value: &Value) -> Value {
+    let Some(row) = value.as_object() else {
+        return value.clone();
+    };
+    let selector_type = read_trimmed_string(row.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if selector_type != "function" {
+        return value.clone();
+    }
+    let name = row
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| read_trimmed_string(function.get("name")))
+        .or_else(|| read_trimmed_string(row.get("name")));
+    match name {
+        Some(name) => Value::Object(Map::from_iter([
+            ("type".to_string(), Value::String("tool".to_string())),
+            ("name".to_string(), Value::String(name)),
+        ])),
+        None => value.clone(),
+    }
+}
+
 fn text_needs_separator(left: &str, right: &str) -> bool {
     let Some(left_char) = left.chars().next_back() else {
         return false;
@@ -289,6 +313,221 @@ fn normalize_anthropic_tool_input_schema(raw: Option<&Value>) -> Value {
     }
 }
 
+fn is_anthropic_stable_tool_schema_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "exec_command"
+            | "write_stdin"
+            | "apply_patch"
+            | "request_user_input"
+            | "update_plan"
+            | "view_image"
+            | "web_search"
+            | "continue_execution"
+    )
+}
+
+fn allowed_anthropic_stable_schema_key(tool_name: &str, key: &str) -> bool {
+    match tool_name.trim().to_ascii_lowercase().as_str() {
+        "exec_command" => matches!(
+            key,
+            "cmd"
+                | "command"
+                | "workdir"
+                | "justification"
+                | "login"
+                | "max_output_tokens"
+                | "sandbox_permissions"
+                | "shell"
+                | "yield_time_ms"
+                | "tty"
+                | "prefix_rule"
+        ),
+        "write_stdin" => matches!(
+            key,
+            "session_id" | "chars" | "text" | "yield_time_ms" | "max_output_tokens"
+        ),
+        "apply_patch" => matches!(
+            key,
+            "patch"
+                | "input"
+                | "instructions"
+                | "text"
+                | "file"
+                | "changes"
+                | "filePath"
+                | "file_path"
+                | "fileContent"
+                | "file_content"
+        ),
+        "request_user_input" => key == "questions",
+        "update_plan" => matches!(key, "explanation" | "plan"),
+        "view_image" => key == "path",
+        "web_search" => matches!(key, "query" | "q" | "domains" | "recency"),
+        "continue_execution" => true,
+        _ => true,
+    }
+}
+
+fn clone_anthropic_schema(value: Option<&Value>) -> Map<String, Value> {
+    value
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_else(|| {
+            Map::from_iter([
+                ("type".to_string(), Value::String("object".to_string())),
+                ("properties".to_string(), Value::Object(Map::new())),
+            ])
+        })
+}
+
+fn normalize_anthropic_schema_type(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(text)) => {
+            let trimmed = text.trim().to_ascii_lowercase();
+            if matches!(
+                trimmed.as_str(),
+                "string" | "number" | "integer" | "boolean" | "object" | "array"
+            ) {
+                Some(trimmed)
+            } else {
+                None
+            }
+        }
+        Some(Value::Array(items)) => items
+            .iter()
+            .find_map(|entry| normalize_anthropic_schema_type(Some(entry))),
+        _ => None,
+    }
+}
+
+fn compact_anthropic_property_schema(schema: &Value) -> Value {
+    let Some(row) = schema.as_object() else {
+        return serde_json::json!({ "type": "string" });
+    };
+
+    let mut out = Map::<String, Value>::new();
+    if let Some(schema_type) = normalize_anthropic_schema_type(row.get("type")) {
+        out.insert("type".to_string(), Value::String(schema_type));
+    }
+    if let Some(description) = read_trimmed_string(row.get("description")) {
+        out.insert("description".to_string(), Value::String(description));
+    }
+    if let Some(enum_values) = row.get("enum").and_then(Value::as_array) {
+        let filtered = enum_values
+            .iter()
+            .filter(|entry| {
+                entry.is_string() || entry.is_number() || entry.is_boolean()
+            })
+            .take(64)
+            .cloned()
+            .collect::<Vec<Value>>();
+        if !filtered.is_empty() {
+            if !out.contains_key("type") {
+                let inferred = if filtered[0].is_boolean() {
+                    "boolean"
+                } else if filtered[0].is_number() {
+                    "number"
+                } else {
+                    "string"
+                };
+                out.insert("type".to_string(), Value::String(inferred.to_string()));
+            }
+            out.insert("enum".to_string(), Value::Array(filtered));
+        }
+    }
+
+    match out.get("type").and_then(Value::as_str) {
+        Some("array") => {
+            let item_type = row
+                .get("items")
+                .and_then(Value::as_object)
+                .and_then(|items| normalize_anthropic_schema_type(items.get("type")))
+                .unwrap_or_else(|| "string".to_string());
+            out.insert(
+                "items".to_string(),
+                serde_json::json!({ "type": item_type }),
+            );
+        }
+        Some("object") => {
+            out.insert("properties".to_string(), Value::Object(Map::new()));
+            out.insert("additionalProperties".to_string(), Value::Bool(false));
+        }
+        _ => {}
+    }
+
+    if !out.contains_key("type") {
+        out.insert("type".to_string(), Value::String("string".to_string()));
+    }
+    Value::Object(out)
+}
+
+fn sanitize_anthropic_builtin_input_schema(tool_name: &str, schema_source: Option<&Value>) -> Value {
+    if !is_anthropic_stable_tool_schema_name(tool_name) {
+        return Value::Object(clone_anthropic_schema(schema_source));
+    }
+
+    let source = clone_anthropic_schema(schema_source);
+    let source_properties = source
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut sanitized_properties = Map::<String, Value>::new();
+
+    for (key, value) in source_properties {
+        if !allowed_anthropic_stable_schema_key(tool_name, key.as_str()) {
+            continue;
+        }
+        let next_value = if tool_name.eq_ignore_ascii_case("request_user_input") {
+            value
+        } else {
+            compact_anthropic_property_schema(&value)
+        };
+        sanitized_properties.insert(key, next_value);
+    }
+
+    let required = source
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|entry| read_trimmed_string(Some(entry)))
+                .filter(|key| allowed_anthropic_stable_schema_key(tool_name, key))
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+
+    for key in &required {
+        if !sanitized_properties.contains_key(key) {
+            sanitized_properties.insert(
+                key.clone(),
+                serde_json::json!({ "type": "string" }),
+            );
+        }
+    }
+
+    let mut output = Map::<String, Value>::new();
+    output.insert("type".to_string(), Value::String("object".to_string()));
+    output.insert("properties".to_string(), Value::Object(sanitized_properties));
+    output.insert("additionalProperties".to_string(), Value::Bool(false));
+    if !required.is_empty() {
+        let mut seen = std::collections::HashSet::<String>::new();
+        output.insert(
+            "required".to_string(),
+            Value::Array(
+                required
+                    .into_iter()
+                    .filter(|key| seen.insert(key.clone()))
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(output)
+}
+
 fn read_chat_tool_schema_source<'a>(
     row: &'a Map<String, Value>,
     function_row: &'a Map<String, Value>,
@@ -336,7 +575,10 @@ pub(crate) fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Op
                 "additionalProperties": true
             })
         } else {
-            normalize_anthropic_tool_input_schema(read_chat_tool_schema_source(row, function_row))
+            sanitize_anthropic_builtin_input_schema(
+                name.as_str(),
+                read_chat_tool_schema_source(row, function_row),
+            )
         };
         let mut tool = Map::<String, Value>::new();
         tool.insert("name".to_string(), Value::String(name));
@@ -351,6 +593,13 @@ pub(crate) fn map_chat_tools_to_anthropic_tools(raw_tools: Option<&Value>) -> Op
         return None;
     }
     Some(Value::Array(out))
+}
+
+pub(crate) fn map_chat_tools_to_anthropic_tools_json(tools_json: String) -> NapiResult<String> {
+    let tools: Value =
+        serde_json::from_str(&tools_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = map_chat_tools_to_anthropic_tools(Some(&tools)).unwrap_or(Value::Array(vec![]));
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[cfg(test)]
@@ -406,7 +655,7 @@ mod apply_patch_tool_schema_tests {
         for tool in tools {
             assert_eq!(tool["input_schema"]["type"], json!("object"));
             assert_eq!(tool["input_schema"]["properties"], json!({}));
-            assert_eq!(tool["input_schema"]["additionalProperties"], json!(true));
+            assert_eq!(tool["input_schema"]["additionalProperties"], json!(false));
         }
     }
 
@@ -451,6 +700,174 @@ mod apply_patch_tool_schema_tests {
             tools[1]["input_schema"]["properties"]["path"]["type"],
             json!("string")
         );
+    }
+
+    #[test]
+    fn map_chat_tools_to_anthropic_tools_sanitizes_stable_exec_schema() {
+        let input = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "description": "run shell command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cmd": {"type": "string", "description": "command"},
+                            "workdir": {
+                                "oneOf": [{"type": "string"}, {"type": "null"}],
+                                "description": "working directory"
+                            },
+                            "extra": {
+                                "type": "object",
+                                "properties": {"nested": {"type": "string"}}
+                            }
+                        },
+                        "required": ["cmd"],
+                        "additionalProperties": true,
+                        "oneOf": [{"required": ["cmd"]}]
+                    }
+                }
+            }
+        ]);
+
+        let out = map_chat_tools_to_anthropic_tools(Some(&input)).unwrap();
+        let tools = out.as_array().unwrap();
+        let schema = &tools[0]["input_schema"];
+        assert_eq!(schema["type"], json!("object"));
+        assert_eq!(schema["additionalProperties"], json!(false));
+        assert_eq!(schema["required"], json!(["cmd"]));
+        assert!(schema.get("oneOf").is_none());
+        let mut keys = schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<String>>();
+        keys.sort();
+        assert_eq!(keys, vec!["cmd".to_string(), "workdir".to_string()]);
+        assert_eq!(schema["properties"]["cmd"]["type"], json!("string"));
+    }
+
+    #[test]
+    fn map_chat_tools_to_anthropic_tools_preserves_custom_schema() {
+        let input = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "custom_tool",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "payload": {
+                                "anyOf": [{"type": "string"}, {"type": "number"}]
+                            }
+                        },
+                        "required": ["payload"]
+                    }
+                }
+            }
+        ]);
+
+        let out = map_chat_tools_to_anthropic_tools(Some(&input)).unwrap();
+        let schema = &out.as_array().unwrap()[0]["input_schema"];
+        assert!(schema["properties"]["payload"].get("anyOf").is_some());
+        assert_eq!(schema["required"], json!(["payload"]));
+    }
+
+    #[test]
+    fn map_chat_tools_to_anthropic_tools_preserves_request_user_input_nested_schema() {
+        let input = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "request_user_input",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "questions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "header": {"type": "string"},
+                                        "question": {"type": "string"},
+                                        "options": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "label": {"type": "string"},
+                                                    "description": {"type": "string"}
+                                                },
+                                                "required": ["label", "description"],
+                                                "additionalProperties": false
+                                            }
+                                        }
+                                    },
+                                    "required": ["id", "header", "question", "options"],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": ["questions"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        ]);
+
+        let out = map_chat_tools_to_anthropic_tools(Some(&input)).unwrap();
+        let schema = &out.as_array().unwrap()[0]["input_schema"];
+        let questions = &schema["properties"]["questions"];
+        assert_eq!(schema["required"], json!(["questions"]));
+        assert_eq!(questions["type"], json!("array"));
+        assert_eq!(questions["items"]["required"], json!(["id", "header", "question", "options"]));
+        assert_eq!(questions["items"]["additionalProperties"], json!(false));
+        assert_eq!(questions["items"]["properties"]["options"]["items"]["required"], json!(["label", "description"]));
+    }
+
+    #[test]
+    fn map_chat_tools_to_anthropic_tools_preserves_apply_patch_line_edit_fields() {
+        let input = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "apply_patch",
+                    "description": "Edit files through servertool apply_patch.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "patch": {"type": "string"},
+                            "filePath": {"type": "string"},
+                            "fileContent": {"type": "string"}
+                        },
+                        "required": ["patch"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        ]);
+
+        let out = map_chat_tools_to_anthropic_tools(Some(&input)).unwrap();
+        let schema = &out.as_array().unwrap()[0]["input_schema"];
+        let mut keys = schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<String>>();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                "fileContent".to_string(),
+                "filePath".to_string(),
+                "patch".to_string(),
+            ]
+        );
+        assert_eq!(schema["required"], json!(["patch"]));
     }
 }
 
@@ -698,9 +1115,9 @@ fn normalize_anthropic_tool_history(messages: Vec<Value>) -> Vec<Value> {
     split_parallel_tool_use_result_turns(merge_adjacent_anthropic_messages(messages))
 }
 
-pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> Value {
+pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Value) -> NapiResult<Value> {
     let Some(request_row) = chat_request.as_object() else {
-        return Value::Object(Map::new());
+        return Ok(Value::Object(Map::new()));
     };
 
     let model =
@@ -860,6 +1277,7 @@ pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Valu
         }
 
         let mut blocks: Vec<Value> = Vec::new();
+        let mut image_blocks: Vec<Value> = Vec::new();
         let content_node = row.get("content").unwrap_or(&Value::Null);
         if let Some(content_parts) = content_node.as_array() {
             for part in content_parts {
@@ -921,10 +1339,12 @@ pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Valu
                                 read_trimmed_string(source.get("media_type")).unwrap_or_default();
                             let data = read_trimmed_string(source.get("data")).unwrap_or_default();
                             if media_type.is_empty() || data.is_empty() {
-                                panic!("Anthropic bridge constraint violated: embedded image source must include non-empty base64 data and media_type");
+                                return Err(napi::Error::from_reason(
+                                    "Anthropic bridge constraint violated: embedded image source must include non-empty base64 data and media_type",
+                                ));
                             }
                         }
-                        blocks.push(Value::Object(Map::from_iter([
+                        image_blocks.push(Value::Object(Map::from_iter([
                             ("type".to_string(), Value::String("image".to_string())),
                             ("source".to_string(), Value::Object(source.clone())),
                         ])));
@@ -946,7 +1366,9 @@ pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Valu
                     }
                     let source = if url.to_ascii_lowercase().starts_with("data:") {
                         let Some(comma_idx) = url.find(',') else {
-                            panic!("Anthropic bridge constraint violated: malformed data URL image payload");
+                            return Err(napi::Error::from_reason(
+                                "Anthropic bridge constraint violated: malformed data URL image payload",
+                            ));
                         };
                         let header = &url[..comma_idx];
                         let data = &url[comma_idx + 1..];
@@ -969,9 +1391,11 @@ pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Valu
                             ("url".to_string(), Value::String(url)),
                         ]))
                     } else {
-                        panic!("Anthropic bridge constraint violated: image_url must be a valid URL or data URL");
+                        return Err(napi::Error::from_reason(
+                            "Anthropic bridge constraint violated: image_url must be a valid URL or data URL",
+                        ));
                     };
-                    blocks.push(Value::Object(Map::from_iter([
+                    image_blocks.push(Value::Object(Map::from_iter([
                         ("type".to_string(), Value::String("image".to_string())),
                         ("source".to_string(), source),
                     ])));
@@ -985,6 +1409,10 @@ pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Valu
                         ])));
                     }
                 }
+            }
+            if !image_blocks.is_empty() {
+                image_blocks.extend(blocks);
+                blocks = image_blocks;
             }
         } else {
             let text = collect_openai_chat_text(content_node);
@@ -1081,7 +1509,12 @@ pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Valu
         "stream",
     ] {
         if let Some(value) = request_row.get(key) {
-            out.insert(key.to_string(), value.clone());
+            let next_value = if key == "tool_choice" {
+                normalize_anthropic_tool_choice(value)
+            } else {
+                value.clone()
+            };
+            out.insert(key.to_string(), next_value);
         }
     }
     if let Some(stop) = request_row.get("stop") {
@@ -1105,7 +1538,7 @@ pub(crate) fn build_anthropic_request_from_openai_chat_value(chat_request: &Valu
             pruned.insert((*key).to_string(), value.clone());
         }
     }
-    Value::Object(pruned)
+    Ok(Value::Object(pruned))
 }
 
 fn append_system_messages(raw_system: Option<&Value>, messages: &mut Vec<Value>) {
@@ -2310,7 +2743,7 @@ pub(crate) fn build_anthropic_from_openai_chat_json(
     };
 
     if is_request_like_openai_chat_payload(&chat_response) {
-        let output = build_anthropic_request_from_openai_chat_value(&chat_response);
+        let output = build_anthropic_request_from_openai_chat_value(&chat_response)?;
         return serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()));
     }
 

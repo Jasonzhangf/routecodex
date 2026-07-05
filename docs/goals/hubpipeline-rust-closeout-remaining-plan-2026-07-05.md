@@ -2,7 +2,7 @@
 
 **日期**: 2026-07-05
 **状态**: active
-**基于**: Jason 给定的目标 (pasted-text-1.txt), 实际审计 (58 nonNative files, 9333 LOC)
+**基于**: Jason 给定的目标 (pasted-text-1.txt), 当前审计 (57 nonNative files, 8481 LOC)
 **目标**: Rust 化 Hub Pipeline 剩余的 TypeScript 语义变换模块
 
 ---
@@ -11,42 +11,43 @@
 
 | 维度 | 值 |
 |------|-----|
-| 非 Native TS 文件 | 58 |
-| 非 Native LOC | 9,333 |
+| 非 Native TS 文件 | 57 |
+| 非 Native LOC | 8,481 |
 | 主线边 total | 86 |
-| 主线边 anchored | 84 (97.7%) |
-| 主线边 partial | 2 (2.3%, 非 Hub 域) |
+| 主线边 anchored | 85 (98.8%) |
+| 主线边 partial | 1 (1.2%, 非 Hub 域) |
 | 主线边 pending | 0 |
 | servertool | 完全 Rust-only |
 
 ---
 
-## Phase 1 (P0) — 3 个 feature_id, 7 文件, 2,770 LOC
+## Phase 1 (P0) — Anthropic 已闭合；剩余 2 个 P0 feature
 
-### Phase 1-A: conversion.shared.anthropic (865 LOC)
+### Phase 1-A: conversion.shared.anthropic (closed as native shells)
 
 | 文件 | LOC | 语义命中 | 现有 Rust owner |
 |------|-----|---------|---------------|
-| `conversion/shared/anthropic-message-utils.ts` | 344 | 40 | `anthropic_openai_codec.rs` (2,344 LOC) |
-| `conversion/shared/anthropic-message-utils-core.ts` | 248 | 28 | 同上 |
-| `conversion/shared/anthropic-message-utils-tool-schema.ts` | 273 | 18 | 同上 |
+| `conversion/shared/anthropic-message-utils.ts` | thin barrel | 0 | `anthropic_openai_codec.rs` |
+| `conversion/shared/anthropic-message-utils-core.ts` | thin export | 0 | 同上 |
+| `conversion/shared/anthropic-message-utils-tool-schema.ts` | native shell | 0 | 同上 |
 
-**现有 Rust 覆盖**:
-- `build_openai_chat_from_anthropic_json` / `build_anthropic_from_openai_chat_json` 已通过 #napi 导出
-- `build_anthropic_tool_alias_map` 已实现
-- 19 个 Rust 单元测试覆盖消息转换路径
-- `anthropic_openai_codec.rs` 已有 2,344 LOC
+**闭合状态**:
+- TS 三个 shared util 不再拥有 Anthropic protocol/tool schema 语义；只保留 re-export / native wrapper。
+- Rust `anthropic_openai_codec.rs` 拥有 stable tool schema sanitize、image block ordering、OpenAI function `tool_choice` 到 Anthropic tool choice 映射，以及 malformed image fail-fast。
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 已加 residue gate，阻止 `buildAnthropicToolAliasMap`、TS tool schema sanitizer、tool name normalization、text flattening 等语义复活。
 
-**剩余 TS 语义需迁移**:
-- `anthropic-message-utils.ts` — `buildOpenAIChatFromAnthropic` 中间补丁: bridge action police, tool_call_id strip, alias map logic
-- `anthropic-message-utils-core.ts` — `normalizeShellLikeToolInput`, `normalizeAnthropicToolName`, `denormalizeAnthropicToolName`, `requireTrimmedString`, `normalizeToolResultContent`, `safeJson`, `flattenAnthropicText`
-- `anthropic-message-utils-tool-schema.ts` — `mapAnthropicToolsToChat`, `mapChatToolsToAnthropicTools`, schema 归一化, built-in tool schema sanitize
-
-**验证栈**:
+**已跑验证栈**:
+- `cargo test -p router-hotpath-napi anthropic_openai_codec --lib -- --nocapture`
+- `cargo test -p router-hotpath-napi hub_protocol_spec_semantics --lib -- --nocapture`
 - `npm run verify:anthropic-roundtrip`
 - `npm run verify:hub-response-anthropic-native`
 - `npm run verify:function-map-compile-gate`
-- `cargo test -p router-hotpath-napi --lib -- --nocapture` (现有 19 个 anthropic codec test)
+- `npm run verify:llmswitch-core-tsc`
+- `npm run verify:llmswitch-rustification-audit`
+- `npm run build:base`
+
+**剩余风险**:
+- 本 slice 没有 live replay；`verify:anthropic-roundtrip` 当前提示 codex samples 缺失并跳过样本重放。
 
 ---
 
@@ -129,8 +130,8 @@
 
 ## 执行顺序
 
-1. Phase 1-A (conversion.shared.anthropic) → commit: `feat(rustify): conversion.shared.anthropic owned by rust`
-2. Phase 1-B (conversion.responses.store) → commit: `feat(rustify): conversion.responses.store owned by rust`
+1. Phase 1-A (conversion.shared.anthropic) → closed; next commit records native-shell collapse
+2. Phase 1-B (conversion.responses.store) → next target, commit: `feat(rustify): conversion.responses.store owned by rust`
 3. Phase 1-C (conversion.bridge.action_parsing) → commit: `feat(rustify): conversion.bridge.action_parsing owned by rust`
 4. Phase 2-D (conversion.openai.control_text + tool_history) → commit
 5. Phase 2-E (conversion.marker_lifecycle) → commit

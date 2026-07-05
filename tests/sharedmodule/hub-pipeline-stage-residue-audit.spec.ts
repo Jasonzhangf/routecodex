@@ -3963,6 +3963,39 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('conversion.shared.anthropic TS files must remain native shells only', () => {
+    const repoRoot = process.cwd();
+    const files = [
+      'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-tool-schema.ts',
+    ];
+    const forbidden = [
+      { label: 'public TS alias builder', pattern: /buildAnthropicToolAliasMap\b/ },
+      { label: 'TS anthropic inbound converter', pattern: /buildOpenAIChatFromAnthropic\s*\(/ },
+      { label: 'TS anthropic text flattening', pattern: /flattenAnthropicText\b/ },
+      { label: 'TS anthropic tool-result normalization', pattern: /normalizeToolResultContent\b/ },
+      { label: 'TS shell-like input normalization', pattern: /normalizeShellLikeToolInput\b/ },
+      { label: 'TS tool name normalization', pattern: /normalizeAnthropicToolName\b|denormalizeAnthropicToolName\b/ },
+      { label: 'TS builtin schema sanitizer', pattern: /sanitizeAnthropicBuiltinInputSchema\b/ },
+      { label: 'TS anthropic stable schema allowlist', pattern: /ANTHROPIC_STABLE_TOOL_SCHEMA_/ },
+      { label: 'TS bridge tools-to-chat mapper', pattern: /export\s+function\s+mapAnthropicToolsToChat\b/ },
+      { label: 'TS local bridge mapping composition', pattern: /mapChatToolsToBridge\b|mapBridgeToolsToChat\b|flattenChatToolsForFunctionCalling\b/ },
+    ];
+    const findings: string[] = [];
+
+    for (const relativePath of files) {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      for (const rule of forbidden) {
+        if (rule.pattern.test(source)) {
+          findings.push(`${relativePath}: ${rule.label}`);
+        }
+      }
+    }
+
+    expect(findings).toEqual([]);
+  });
+
   it('legacy shared responses request adapter must stay deleted from active docs and source', () => {
     const adapterPath = path.join(
       process.cwd(),

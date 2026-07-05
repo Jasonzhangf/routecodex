@@ -25178,3 +25178,13 @@ Complete SSE rustification status (34 TS files):
 - Evidence: `verify:runtime-lifecycle-loop-gate-matrix`, `verify:runtime-lifecycle-pid-rebase`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and `git diff --check` passed.
 - Known unresolved runtime risk: focused `tests/cli/restart-command.spec.ts -t "uses target port host"` still fails with `exit:1`; the gate-matrix work is governance closure, not that runtime lifecycle bug fix.
 - Aggregate caveat: `verify:architecture-ci-longtail` currently fails before reaching the new gate on existing deleted-path checks for removed servertool orchestration paths.
+
+# 2026-07-05: conversion.shared.anthropic TS semantics collapsed to Rust native shell
+
+- Target slice: `conversion.shared.anthropic` Phase 1-A in `docs/goals/hubpipeline-rust-closeout-remaining-plan-2026-07-05.md`.
+- Owner lock: function map and stage-a-p0-02 mainline keep Rust `anthropic_openai_codec.rs` as SSOT; TS `anthropic-message-utils*.ts` are forbidden semantic paths.
+- Change: `anthropic-message-utils.ts` is now a thin barrel, `anthropic-message-utils-core.ts` only re-exports `isObject`, and `anthropic-message-utils-tool-schema.ts` delegates `mapChatToolsToAnthropicTools` to native `mapChatToolsToAnthropicToolsJson`.
+- Rust additions: stable Anthropic tool schema sanitizer/allowlist, image block ordering and malformed-image fail-fast, OpenAI function `tool_choice` to Anthropic `{type:"tool", name}` mapping, and provider outbound fail-fast propagation for Anthropic conversion errors.
+- Gate: added `conversion.shared.anthropic TS files must remain native shells only` to `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`.
+- Evidence: Rust `anthropic_openai_codec` PASS 24/24; Rust `hub_protocol_spec_semantics` PASS 19/19; native hotpath build PASS; focused Anthropic Jest PASS 4 suites / 11 tests; stage residue focused gate PASS; `verify:hub-response-anthropic-native` PASS 100/100; `verify:llmswitch-core-tsc` PASS; `verify:anthropic-roundtrip` PASS with missing codex samples skipped; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `verify:llmswitch-rustification-audit` PASS with `nonNativeFileCount=57`, `nonNativeLocTotal=8481`; `build:base` PASS.
+- Remaining gap: no live Anthropic replay was claimed because local codex Anthropic samples are absent; unrelated SSE keepalive dirty files remain unstaged.

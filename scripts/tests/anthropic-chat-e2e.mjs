@@ -58,25 +58,25 @@ function shallowHash(value) {
 async function loadCoreHelpers() {
   const distRoot = path.resolve('sharedmodule', 'llmswitch-core', 'dist');
   const runtimePath = path.join(distRoot, 'conversion', 'hub', 'response', 'response-runtime.js');
-  const utilsPath = path.join(distRoot, 'conversion', 'shared', 'anthropic-message-utils.js');
+  const codecPath = path.join(distRoot, 'conversion', 'codecs', 'anthropic-openai-codec.js');
   if (!fs.existsSync(runtimePath)) {
     throw new Error('sharedmodule/llmswitch-core/dist/conversion/hub/response/response-runtime.js 不存在，请先运行 npm run build:dev');
   }
-  if (!fs.existsSync(utilsPath)) {
-    throw new Error('sharedmodule/llmswitch-core/dist/conversion/shared/anthropic-message-utils.js 不存在');
+  if (!fs.existsSync(codecPath)) {
+    throw new Error('sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js 不存在');
   }
   const runtime = await import(pathToFileURL(runtimePath).href);
-  const utils = await import(pathToFileURL(utilsPath).href);
+  const codec = await import(pathToFileURL(codecPath).href);
   if (typeof runtime.buildAnthropicResponseFromChat !== 'function' || typeof runtime.buildOpenAIChatFromAnthropicMessage !== 'function') {
     throw new Error('llmswitch-core 缺少 anthropic response 构造辅助函数');
   }
-  if (typeof utils.buildAnthropicToolAliasMap !== 'function') {
-    throw new Error('anthropic-message-utils 缺少 buildAnthropicToolAliasMap');
+  if (typeof codec.buildOpenAIChatFromAnthropicFull !== 'function') {
+    throw new Error('anthropic-openai-codec 缺少 buildOpenAIChatFromAnthropicFull');
   }
   return {
     buildAnthropicResponseFromChat: runtime.buildAnthropicResponseFromChat,
     buildOpenAIChatFromAnthropicMessage: runtime.buildOpenAIChatFromAnthropicMessage,
-    buildAnthropicToolAliasMap: utils.buildAnthropicToolAliasMap
+    buildOpenAIChatFromAnthropicFull: codec.buildOpenAIChatFromAnthropicFull
   };
 }
 
@@ -95,7 +95,7 @@ async function main() {
   const {
     buildAnthropicResponseFromChat,
     buildOpenAIChatFromAnthropicMessage,
-    buildAnthropicToolAliasMap
+    buildOpenAIChatFromAnthropicFull
   } = await loadCoreHelpers();
   let checked = 0;
   let failures = 0;
@@ -110,7 +110,7 @@ async function main() {
     }
     checked += 1;
     const requestFile = responseFile.replace(RESPONSE_SUFFIX, REQUEST_SUFFIX);
-    const aliasFromRequest = loadAliasMap(requestFile, buildAnthropicToolAliasMap);
+    const aliasFromRequest = loadAliasMap(requestFile, buildOpenAIChatFromAnthropicFull);
     const canonical = buildOpenAIChatFromAnthropicMessage(providerPayload);
     const mergedAliasMap = mergeAliasSources(aliasFromRequest, canonical?.anthropicToolNameMap);
     const rebuilt = buildAnthropicResponseFromChat(
@@ -169,14 +169,15 @@ function pickProviderPayload(doc) {
   return doc;
 }
 
-function loadAliasMap(requestFile, buildAnthropicToolAliasMap) {
+function loadAliasMap(requestFile, buildOpenAIChatFromAnthropicFull) {
   try {
     const requestDoc = readJsonWithRepair(requestFile);
-    const tools =
-      (requestDoc?.body && Array.isArray(requestDoc.body.tools) ? requestDoc.body.tools : null) ??
-      (Array.isArray(requestDoc?.tools) ? requestDoc.tools : null);
-    if (tools && tools.length) {
-      return buildAnthropicToolAliasMap(tools);
+    const payload = requestDoc?.body && typeof requestDoc.body === 'object'
+      ? requestDoc.body
+      : requestDoc;
+    if (payload && typeof payload === 'object' && Array.isArray(payload.tools) && payload.tools.length) {
+      const converted = buildOpenAIChatFromAnthropicFull(payload);
+      return converted?.anthropicToolNameMap;
     }
   } catch {
     // ignore alias map failures

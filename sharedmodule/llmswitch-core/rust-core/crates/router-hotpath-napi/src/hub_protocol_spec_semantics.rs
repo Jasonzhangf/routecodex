@@ -689,7 +689,7 @@ fn apply_provider_outbound_policy(
     protocol: &str,
     compatibility_profile: Option<&str>,
     mut payload: Map<String, Value>,
-) -> Map<String, Value> {
+) -> NapiResult<Map<String, Value>> {
     let spec = resolve_hub_protocol_spec(ResolveHubProtocolSpecInput {
         protocol: Some(protocol.to_string()),
         allowlists: default_allowlists_for_input(),
@@ -708,7 +708,7 @@ fn apply_provider_outbound_policy(
         if let Value::Object(mapped_payload) =
             crate::anthropic_openai_codec::build_anthropic_request_from_openai_chat_value(
                 &Value::Object(payload.clone()),
-            )
+            )?
         {
             payload = mapped_payload;
         }
@@ -723,7 +723,7 @@ fn apply_provider_outbound_policy(
         }
     }
     if !spec.provider_outbound.enforce_enabled {
-        return payload;
+        return Ok(payload);
     }
 
     let reserved_prefixes = spec.provider_outbound.reserved_key_prefixes;
@@ -789,7 +789,7 @@ fn apply_provider_outbound_policy(
         }
     }
 
-    payload
+    Ok(payload)
 }
 
 fn build_default_allowlists() -> HubProtocolAllowlistsOutput {
@@ -985,7 +985,7 @@ pub fn sanitize_provider_outbound_payload_json(input_json: String) -> NapiResult
             .map_err(|e| napi::Error::from_reason(e.to_string()));
     }
     let output =
-        apply_provider_outbound_policy(&protocol, input.compatibility_profile.as_deref(), payload);
+        apply_provider_outbound_policy(&protocol, input.compatibility_profile.as_deref(), payload)?;
     assert_no_provider_wire_internal_carrier(&Value::Object(output.clone()), "$")
         .map_err(napi::Error::from_reason)?;
     assert_no_namespace_tool_aggregate(&Value::Object(output.clone()), "$")
@@ -1056,7 +1056,7 @@ mod tests {
         let Value::Object(payload) = payload else {
             panic!("object payload expected");
         };
-        let output = apply_provider_outbound_policy("openai-responses", None, payload);
+        let output = apply_provider_outbound_policy("openai-responses", None, payload).unwrap();
         assert!(!output.contains_key("__private"));
         assert!(!output.contains_key("unknown"));
         assert_eq!(
@@ -1089,7 +1089,7 @@ mod tests {
         let Value::Object(payload) = payload else {
             panic!("object payload expected");
         };
-        let output = apply_provider_outbound_policy("openai-responses", None, payload);
+        let output = apply_provider_outbound_policy("openai-responses", None, payload).unwrap();
         assert_eq!(
             output.get("metadata"),
             Some(&serde_json::json!({ "request": "must-not-leak" }))
@@ -1120,7 +1120,7 @@ mod tests {
         let Value::Object(payload) = payload else {
             panic!("object payload expected");
         };
-        let output = apply_provider_outbound_policy("openai-chat", None, payload);
+        let output = apply_provider_outbound_policy("openai-chat", None, payload).unwrap();
         assert_eq!(
             output.get("metadata"),
             Some(&serde_json::json!({ "request": "must-not-leak" }))
@@ -1203,7 +1203,8 @@ mod tests {
             panic!("object payload expected");
         };
         let output =
-            apply_provider_outbound_policy("openai-responses", Some("chat:deepseek"), payload);
+            apply_provider_outbound_policy("openai-responses", Some("chat:deepseek"), payload)
+                .unwrap();
         let input_items = output.get("input").and_then(Value::as_array).unwrap();
         let reasoning = input_items[0].as_object().unwrap();
         assert!(reasoning.contains_key("content"));
@@ -1232,7 +1233,7 @@ mod tests {
         let Value::Object(payload) = payload else {
             panic!("object payload expected");
         };
-        let output = apply_provider_outbound_policy("openai-responses", None, payload);
+        let output = apply_provider_outbound_policy("openai-responses", None, payload).unwrap();
         let input_items = output.get("input").and_then(Value::as_array).unwrap();
         let content = input_items[0]
             .get("content")

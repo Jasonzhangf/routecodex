@@ -3,6 +3,7 @@ import {
   isNativeDisabledByEnv,
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { extractNativeErrorMessage } from './native-hub-pipeline-resp-semantics-shared.js';
 
 function toNapiExportName(name: string): string {
   return name.replace(/_([a-z])/g, (_match, char: string) => char.toUpperCase());
@@ -58,13 +59,18 @@ function invokeRecordCapability(
   }
   try {
     const raw = fn(...encodedArgs);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      throw new Error(nativeErrorMessage);
+    }
     if (typeof raw !== 'string' || !raw) return fail('empty result');
     const parsed = parseRecord(raw);
     return parsed ?? fail('invalid payload');
   } catch (error: unknown) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
+    const nativeErrorMessage = extractNativeErrorMessage(error);
+    throw new Error(
+      nativeErrorMessage || (error instanceof Error ? error.message : String(error ?? 'unknown'))
+    );
   }
 }
 
