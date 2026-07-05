@@ -1,4 +1,5 @@
 import express from 'express';
+import { jest } from '@jest/globals';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 
@@ -368,7 +369,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
               outboundProfile: 'openai-chat',
               runtimeKey: 'primary.key1'
             },
-            routingDecision: { routeName: 'default', pool: [providerKey] },
+            routingDecision: { routeName: 'default', pool: [providerKey], providerProtocol: 'openai-chat' },
             metadata: {}
           };
         }),
@@ -397,22 +398,22 @@ describe('responses handler virtual-router empty-pool guard', () => {
     await withServer(app, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/v1/responses`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
         body: JSON.stringify({
           model: 'gpt-test',
           input: 'hi'
         })
       });
-      const body = await response.json();
+      const text = await response.text();
 
       if (response.status !== 200) {
-        throw new Error(`singleton-empty-pool unexpected status=${response.status} pipelineCalls=${pipelineCalls} body=${JSON.stringify(body)} logs=${JSON.stringify(logStages)}`);
+        throw new Error(`singleton-empty-pool unexpected status=${response.status} pipelineCalls=${pipelineCalls} body=${text} logs=${JSON.stringify(logStages)}`);
       }
-      expect(body.output_text ?? body.choices?.[0]?.message?.content).toBeTruthy();
+      expect(text).toContain('ok_after_block');
       expect(pipelineCalls).toBe(3);
       expect(logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait')).toHaveLength(2);
       expect(logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait.completed')).toHaveLength(2);
-      expect(body.error?.code).not.toBe('PROVIDER_NOT_AVAILABLE');
+      expect(text).not.toContain('PROVIDER_NOT_AVAILABLE');
     });
   });
 

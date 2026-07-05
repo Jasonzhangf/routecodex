@@ -67,6 +67,7 @@ import {
   resolveErrorErr05RouteAvailabilityDecision,
   resolvePrimaryExhaustedRoutingContextFromError,
   resolvePrimaryExhaustedPlan,
+  resolveSingletonRoutePoolExhaustionDecision,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
 import {
@@ -302,7 +303,8 @@ function shouldRebindResponsesConversationForEntry(entryEndpoint: string | undef
 }
 
 import {
-  throwIfClientAbortSignalAborted
+  throwIfClientAbortSignalAborted,
+  waitWithClientAbortSignal
 } from './executor/request-executor-abort.js';
 import {
   resetErrorActionBackoffByScopePrefix,
@@ -850,6 +852,38 @@ export class HubRequestExecutor implements RequestExecutor {
               logStage('provider.primary_exhausted_to_default_pool.applied', providerRequestId, {
                 defaultPoolTargets: plan.defaultPoolTargets,
                 fromTierId: plan.fromTierId ?? null
+              });
+              allowPrimaryExhaustedReplayBeyondAttemptBudget = true;
+              continue;
+            }
+            const singletonPoolDecision = resolveSingletonRoutePoolExhaustionDecision({
+              pipelineError,
+              initialRoutePoolLen: initialRoutePool?.length ?? null,
+              explicitSingletonPool: false,
+              excludedProviderCount: excludedProviderKeys.size,
+            });
+            if (singletonPoolDecision.shouldBlock) {
+              const waitMs = singletonPoolDecision.waitMs ?? 0;
+              logStage('provider.route_pool_cooldown_wait', providerRequestId, {
+                routeName: primaryExhaustedRoute,
+                waitMs,
+                candidateProviderCount: singletonPoolDecision.candidateProviderCount,
+                excludedProviderKeys: Array.from(excludedProviderKeys),
+                attempt,
+              });
+              if (waitMs > 0) {
+                await waitWithClientAbortSignal(
+                  waitMs,
+                  clientAbortSignal,
+                  logRequestExecutorNonBlockingError,
+                );
+              }
+              logStage('provider.route_pool_cooldown_wait.completed', providerRequestId, {
+                routeName: primaryExhaustedRoute,
+                waitMs,
+                candidateProviderCount: singletonPoolDecision.candidateProviderCount,
+                excludedProviderKeys: Array.from(excludedProviderKeys),
+                attempt,
               });
               allowPrimaryExhaustedReplayBeyondAttemptBudget = true;
               continue;

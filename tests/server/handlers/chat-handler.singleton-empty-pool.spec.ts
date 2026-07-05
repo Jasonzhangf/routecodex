@@ -1,4 +1,5 @@
 import express from 'express';
+import { jest } from '@jest/globals';
 import type { AddressInfo } from 'node:net';
 
 import { handleChatCompletions } from '../../../src/server/handlers/chat-handler.js';
@@ -78,7 +79,7 @@ describe('chat handler singleton empty pool blocking retry', () => {
               outboundProfile: 'openai-chat',
               runtimeKey: 'deepseek.key1'
             },
-            routingDecision: { routeName: 'default', pool: [providerKey] },
+            routingDecision: { routeName: 'default', pool: [providerKey], providerProtocol: 'openai-chat' },
             metadata: {}
           };
         }),
