@@ -1,9 +1,15 @@
-import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
 import { buildAnthropicRequestFromOpenAIChat } from '../shared/anthropic-message-utils-openai-request.js';
 import {
   buildAnthropicFromOpenAIChatWithNative,
   buildOpenAIChatFromAnthropicWithNative
 } from '../../native/router-hotpath/native-compat-action-semantics.js';
+
+type AnthropicOpenAICodecContext = {
+  requestId?: string;
+  endpoint?: string;
+  entryEndpoint?: string;
+  metadata?: Record<string, unknown>;
+};
 
 export function buildOpenAIChatFromAnthropic(
   payload: unknown,
@@ -40,7 +46,7 @@ export function buildAnthropicFromOpenAIChat(
 
 export { buildAnthropicRequestFromOpenAIChat };
 
-export class AnthropicOpenAIConversionCodec implements ConversionCodec {
+export class AnthropicOpenAIConversionCodec {
   readonly id = 'anthropic-openai';
   private initialized = false;
 
@@ -51,7 +57,7 @@ export class AnthropicOpenAIConversionCodec implements ConversionCodec {
     this.initialized = true;
   }
 
-  async convertRequest(payload: any, _profile: ConversionProfile, context: ConversionContext): Promise<any> {
+  async convertRequest(payload: any, _profile: unknown, context: AnthropicOpenAICodecContext): Promise<any> {
     if (!this.initialized) await this.initialize();
 
     const native = buildOpenAIChatFromAnthropicWithNative(payload ?? {}, {
@@ -74,7 +80,7 @@ export class AnthropicOpenAIConversionCodec implements ConversionCodec {
     return request;
   }
 
-  async convertResponse(payload: any, _profile: ConversionProfile, context: ConversionContext): Promise<any> {
+  async convertResponse(payload: any, _profile: unknown, context: AnthropicOpenAICodecContext): Promise<any> {
     if (!this.initialized) await this.initialize();
 
     const aliasMap =

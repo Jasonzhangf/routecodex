@@ -1,4 +1,3 @@
-import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
 import type { JsonObject, JsonValue } from '../hub/types/json.js';
 import { ProviderProtocolError } from '../provider-protocol-error.js';
 import {
@@ -200,7 +199,7 @@ export function buildGeminiFromOpenAIChat(chatResp: unknown): JsonObject {
   return payload;
 }
 
-export class GeminiOpenAIConversionCodec implements ConversionCodec {
+export class GeminiOpenAIConversionCodec {
   readonly id = 'gemini-openai';
   private initialized = false;
 
@@ -215,12 +214,12 @@ export class GeminiOpenAIConversionCodec implements ConversionCodec {
     if (!this.initialized) await this.initialize();
   }
 
-  async convertRequest(payload: any, _profile: ConversionProfile, _context: ConversionContext): Promise<any> {
+  async convertRequest(payload: any, _profile: unknown, _context: unknown): Promise<any> {
     await this.ensureInit();
     return buildOpenAIChatFromGeminiRequest(payload);
   }
 
-  async convertResponse(payload: any, _profile: ConversionProfile, _context: ConversionContext): Promise<any> {
+  async convertResponse(payload: any, _profile: unknown, _context: unknown): Promise<any> {
     await this.ensureInit();
     return buildGeminiFromOpenAIChat(payload);
   }

@@ -1,10 +1,17 @@
-import type { ConversionCodec, ConversionContext, ConversionProfile } from '../types.js';
 import {
   runOpenAIRequestCodecWithNative,
   runOpenAIResponseCodecWithNative
 } from '../../native/router-hotpath/native-compat-action-semantics.js';
 
-export class OpenAIOpenAIConversionCodec implements ConversionCodec {
+type OpenAICodecContext = {
+  requestId?: string;
+  endpoint?: string;
+  entryEndpoint?: string;
+  stream?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export class OpenAIOpenAIConversionCodec {
   readonly id = 'openai-openai';
   private initialized = false;
   private ctxMap: Map<string, { stream?: boolean; entryEndpoint?: string; createdAt?: number }> = new Map();
@@ -18,7 +25,7 @@ export class OpenAIOpenAIConversionCodec implements ConversionCodec {
     this.initialized = true;
   }
 
-  async convertRequest(payload: any, _profile: ConversionProfile, context: ConversionContext): Promise<any> {
+  async convertRequest(payload: any, _profile: unknown, context: OpenAICodecContext): Promise<any> {
     await this.ensureInit();
     this.pruneCtxMap();
 
@@ -45,7 +52,7 @@ export class OpenAIOpenAIConversionCodec implements ConversionCodec {
     });
   }
 
-  async convertResponse(payload: any, _profile: ConversionProfile, context: ConversionContext): Promise<any> {
+  async convertResponse(payload: any, _profile: unknown, context: OpenAICodecContext): Promise<any> {
     await this.ensureInit();
     this.pruneCtxMap();
     const ctx = context.requestId ? this.ctxMap.get(context.requestId) : undefined;

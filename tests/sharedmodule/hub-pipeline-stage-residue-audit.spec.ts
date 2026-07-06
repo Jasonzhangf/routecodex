@@ -4146,14 +4146,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('export interface ProcessedRequest');
   });
 
-  it('legacy conversion type surface must not restore zero-consumer result shell', () => {
+  it('legacy conversion type surface must stay physically deleted after codec owner split', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/types.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
 
-    expect(source).not.toMatch(/\binterface\s+ConversionResult\b/);
-    expect(source).toContain('export interface ConversionProfile');
-    expect(source).toContain('export interface ConversionContext');
-    expect(source).toContain('export interface ConversionCodec');
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('chat process session usage TS shell must stay physically deleted', () => {

@@ -1,16 +1,27 @@
-import type { ConversionContext, ConversionProfile } from '../types.js';
 import { normalizeChatRequest } from './openai-message-normalize.js';
 import { createSnapshotWriter } from '../snapshot-utils.js';
 import { buildGovernedFilterPayloadWithNative } from '../../native/router-hotpath/native-chat-request-filter-semantics.js';
 import { pruneChatRequestPayloadWithNative } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+
+type ChatRequestFilterProfile = {
+  incomingProtocol: string;
+  outgoingProtocol: string;
+};
+
+type ChatRequestFilterContext = {
+  requestId?: string;
+  endpoint?: string;
+  entryEndpoint?: string;
+  metadata?: Record<string, unknown>;
+};
 
 /**
  * Native-primary Chat request filters.
  */
 export async function runStandardChatRequestFilters(
   chatRequest: any,
-  profile: ConversionProfile,
-  context: ConversionContext
+  profile: ChatRequestFilterProfile,
+  context: ChatRequestFilterContext
 ): Promise<any> {
   const existingMetadata = context.metadata ?? {};
   if (!context.metadata) {
