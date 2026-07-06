@@ -1,6 +1,6 @@
 import type { BridgeInputItem } from '../../types/bridge-message-types.js';
 import type { JsonObject } from '../../hub/types/json.js';
-import type { ResponsesRequestContext } from './types.js';
+import type { ResponsesRequestContext } from '../responses-openai-bridge.js';
 import {
   buildSlimResponsesBridgeContextWithNative,
   extractResponsesMetadataExtraFieldsWithNative,

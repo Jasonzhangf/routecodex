@@ -4510,6 +4510,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-host-policy.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.js',
       'sharedmodule/llmswitch-core/src/conversion/runtime-metadata.d.ts',

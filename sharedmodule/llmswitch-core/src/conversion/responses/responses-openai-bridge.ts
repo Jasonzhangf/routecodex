@@ -35,16 +35,6 @@ import {
   resolveBridgePolicyWithNative,
   planResponsesBridgePolicyActionsWithNative
 } from '../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
-import type {
-  BuildChatRequestResult,
-  BuildResponsesRequestResult,
-  ResponsesRequestContext
-} from './responses-openai-bridge/types.js';
-export type {
-  BuildChatRequestResult,
-  BuildResponsesRequestResult,
-  ResponsesRequestContext
-} from './responses-openai-bridge/types.js';
 
 import { logHubStageTiming } from '../hub/pipeline/hub-stage-timing.js';
 import {
@@ -59,6 +49,35 @@ import {
   stripToolControlFieldsFromParameterObject,
   unwrapData
 } from './responses-openai-bridge/utils.js';
+
+export type Unknown = Record<string, unknown>;
+
+export interface ResponsesRequestContext extends Unknown {
+  requestId?: string;
+  targetProtocol?: string;
+  originalSystemMessages?: string[];
+  input?: BridgeInputItem[];
+  metadata?: JsonObject;
+  isChatPayload?: boolean;
+  isResponsesPayload?: boolean;
+  historyMessages?: Array<{ role: string; content: string }>;
+  currentMessage?: { role: string; content: string } | null;
+  toolsRaw?: BridgeToolDefinition[];
+  toolsNormalized?: Array<Record<string, unknown>>;
+  parameters?: Record<string, unknown>;
+  systemInstruction?: string;
+  toolCallIdStyle?: import('../shared/responses-tool-utils.js').ToolCallIdStyle;
+}
+
+export interface BuildChatRequestResult {
+  request: Record<string, unknown>;
+  toolsNormalized?: ChatToolDefinition[];
+}
+
+export interface BuildResponsesRequestResult {
+  request: Record<string, unknown>;
+  originalSystemMessages?: string[];
+}
 
 function readCapturedToolResults(context: ResponsesRequestContext): Array<Record<string, unknown>> | undefined {
   const raw = (context as Record<string, unknown>).__captured_tool_results;

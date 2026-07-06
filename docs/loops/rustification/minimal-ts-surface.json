@@ -108,14 +108,6 @@
       "forbiddenSemantics": ["standardization execution", "route decision", "provider wire build"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.response_responses_chat_projection",
-      "minimumTsRole": "Responses bridge TS host type declarations.",
-      "cannotShrinkFurtherBecause": "Only compile-time shape declarations remain; further removal requires generated Rust/NAPI declaration replacement.",
-      "forbiddenSemantics": ["Responses request build", "history repair", "metadata projection"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts",
       "classification": "ts_io_shell_ok",
       "ownerFeature": "hub.chat_process_responses_continuation",

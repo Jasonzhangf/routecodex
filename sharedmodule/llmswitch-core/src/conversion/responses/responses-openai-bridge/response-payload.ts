@@ -7,7 +7,7 @@ import {
 import {
   stripInternalToolingMetadata
 } from '../../shared/responses-tool-utils.js';
-import type { ResponsesRequestContext } from './types.js';
+import type { ResponsesRequestContext } from '../responses-openai-bridge.js';
 import {
   buildResponsesPayloadFromChatWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
