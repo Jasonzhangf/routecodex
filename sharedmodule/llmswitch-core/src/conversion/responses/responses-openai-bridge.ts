@@ -15,7 +15,7 @@ import {
 } from '../shared/responses-tool-utils.js';
 import { mapChatToolsToBridge, type BridgeToolDefinition } from '../shared/tool-mapping.js';
 import { ProviderProtocolError } from '../provider-protocol-error.js';
-import { isJsonObject, jsonClone } from '../hub/types/json.js';
+import { isRecord } from '../../shared/common-utils.js';
 import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,
@@ -51,6 +51,14 @@ import {
 } from './responses-openai-bridge/utils.js';
 
 export type Unknown = Record<string, unknown>;
+
+function isJsonObject(value: JsonValue | null | undefined): value is JsonObject {
+  return isRecord(value);
+}
+
+function jsonClone<T extends JsonValue>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
 export interface ResponsesRequestContext extends Unknown {
   requestId?: string;

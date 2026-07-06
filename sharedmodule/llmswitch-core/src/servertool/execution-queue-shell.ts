@@ -1,4 +1,5 @@
-import { isJsonObject, type JsonObject, type JsonValue } from '../conversion/hub/types/json.js';
+import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
+import { isRecord } from '../shared/common-utils.js';
 import type { ServerSideToolEngineOptions } from './types.js';
 import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {
@@ -124,10 +125,10 @@ export async function runServertoolIoExecutionQueue(args: {
           toolName: toolCall.name,
           message: errorEffectPlan.handlerErrorMessage
         }) as JsonValue;
-        if (!isJsonObject(toolOutputPayload)) {
+        if (!isRecord(toolOutputPayload)) {
           throw new Error('[servertool] native handler-error tool output payload must be a JSON object');
         }
-        replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload);
+        replaceJsonObjectInPlace(args.baseForExecution, toolOutputPayload as JsonObject);
         executionState = appendServertoolExecutedRecordWithNative({
           state: executionState,
           toolCall: errorEffectPlan.toolCall,

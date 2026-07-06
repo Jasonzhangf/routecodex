@@ -1,4 +1,5 @@
-import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from './hub/types/json.js';
+import type { JsonObject, JsonValue } from './hub/types/json.js';
+import { isRecord } from '../shared/common-utils.js';
 import {
   cloneRuntimeMetadataWithNative,
   ensureRuntimeMetadataCarrierWithNative,
@@ -11,6 +12,10 @@ import { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL } from './hub/metadata-cen
 
 // re-export for consumers that need it
 export { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL };
+
+function isJsonObject(value: JsonValue | null | undefined): value is JsonObject {
+  return isRecord(value);
+}
 
 function preserveMetadataCenterBinding(
   source: Record<string, unknown>,
@@ -67,5 +72,5 @@ export function ensureRuntimeMetadata(carrier: Record<string, unknown>): JsonObj
 
 export function cloneRuntimeMetadata(carrier?: Record<string, unknown> | null): JsonObject | undefined {
   const rt = cloneRuntimeMetadataWithNative(carrier);
-  return rt && isJsonObject(rt as JsonValue) ? (jsonClone(rt as JsonValue) as JsonObject) : undefined;
+  return rt && isJsonObject(rt as JsonValue) ? (JSON.parse(JSON.stringify(rt)) as JsonObject) : undefined;
 }

@@ -95,9 +95,9 @@
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.pipeline_contract_surface",
-      "minimumTsRole": "Shared JSON structural type and clone helper for TS-only IO/tests.",
-      "cannotShrinkFurtherBecause": "It is a TypeScript compile-time/public utility for JS JSON values; Rust migration cannot replace TS type checking without generated declaration adoption.",
-      "forbiddenSemantics": ["protocol validation", "payload sanitization", "fallback"]
+      "minimumTsRole": "Shared JSON structural type declarations for TS host boundaries.",
+      "cannotShrinkFurtherBecause": "It is a TypeScript compile-time/public type surface for JS JSON values; Rust migration cannot replace TS type checking without generated declaration adoption.",
+      "forbiddenSemantics": ["runtime JSON guards", "clone helpers", "protocol validation", "payload sanitization", "fallback"]
     },
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts",

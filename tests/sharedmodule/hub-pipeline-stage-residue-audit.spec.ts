@@ -1235,7 +1235,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(hubPipelineTypesSource).toContain('export interface StageRecorder');
   });
 
-  it('hub json helper public surface must not restore zero-consumer array helpers', () => {
+  it('hub json type surface must stay type-only without runtime helper exports', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts'),
       'utf8',
@@ -1245,12 +1245,13 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'exports zero-consumer JsonPrimitive alias', pattern: /export\s+type\s+JsonPrimitive\b/ },
       { label: 'exports zero-consumer JsonArray alias', pattern: /export\s+type\s+JsonArray\b/ },
       { label: 'exports zero-consumer isJsonArray helper', pattern: /export\s+function\s+isJsonArray\b/ },
+      { label: 'exports runtime JSON object guard from type shell', pattern: /export\s+function\s+isJsonObject\b/ },
+      { label: 'exports runtime JSON clone helper from type shell', pattern: /export\s+function\s+jsonClone\b/ },
     ]);
 
     expect(findings).toEqual([]);
     expect(source).toContain('export type JsonValue');
-    expect(source).toContain('export function isJsonObject');
-    expect(source).toContain('export function jsonClone');
+    expect(source).toContain('export interface JsonObject');
   });
 
   it('snapshot stage recorder must not restore TS hotpath trimming semantics', () => {
