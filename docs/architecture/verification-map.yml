@@ -1479,6 +1479,7 @@ verification:
       - tests/servertool/execution-stage-shell.spec.ts
       - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
     smoke:
+      - npm run verify:responses-history-protocol-contract
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:architecture-mainline-manifest-sync
@@ -1491,6 +1492,7 @@ verification:
       - "Validation must prove the save->restore interval is immutable: no handler, bridge, req_inbound, resp_outbound, SSE, or store helper may clean, convert, reorder, patch, or otherwise mutate saved request/response history between canonical save and canonical restore."
       - "Validation must prove cross-boundary control state is carried by MetadataCenter families, not by request/response payload or history fields."
       - "Tests must lock current-request explicit evidence, owner resolution, canonical restore, stopless CLI result restore, response schema judgment/projection, post-projection canonical save, stale transient request-id clearing, and released retained state."
+      - "Tests must lock response save request-id priority: the current active provider request label passed to the Rust record planner wins over stale `requestTruth.requestId` after request-executor rebind."
       - "SSE tests are not continuation gates. `handler-response-sse.ts` and `responses-sse-bridge.ts` must not contain continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic."
 
   - feature_id: tool.apply_patch_freeform_contract

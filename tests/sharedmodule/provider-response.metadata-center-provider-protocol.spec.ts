@@ -10,6 +10,7 @@ const normalizeProviderResponseEffectPlanWithNativeMock = jest.fn(() => ({
   servertoolRuntimeActions: []
 }));
 const materializeProviderResponseSsePayloadWithNativeMock = jest.fn(async ({ payload }: { payload: unknown }) => payload);
+const planChatProcessSessionUsageMock = jest.fn();
 const buildSseFramesFromJsonWithNativeMock = jest.fn(() => ({
   frames: ['event: response.completed\ndata: {"type":"response.completed"}\n\n'],
   stats: { protocol: 'openai-responses' }
@@ -117,9 +118,9 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js',
   () => ({
-    saveChatProcessSessionActualUsage: jest.fn(),
+    planChatProcessSessionUsage: planChatProcessSessionUsageMock,
   })
 );
 
@@ -174,6 +175,7 @@ describe('provider response metadata center providerProtocol contract', () => {
     executeHubPipelineWithNativeMock.mockReset();
     normalizeProviderResponseEffectPlanWithNativeMock.mockClear();
     materializeProviderResponseSsePayloadWithNativeMock.mockClear();
+    planChatProcessSessionUsageMock.mockClear();
     buildSseFramesFromJsonWithNativeMock.mockClear();
     recordResponsesResponse.mockClear();
     executeHubPipelineWithNativeMock.mockReturnValue({
@@ -253,7 +255,7 @@ describe('provider response metadata center providerProtocol contract', () => {
       })
     }));
     expect(recordResponsesResponse).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'openai-responses-router-20260628T184855563-416867-1902'
+      requestId: 'openai-responses-provider-20260628T184855563-416867-1902'
     }));
     expect(result.body?.choices?.[0]?.message?.content).toBe('center protocol wins');
   });

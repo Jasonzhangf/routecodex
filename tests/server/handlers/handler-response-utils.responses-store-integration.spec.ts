@@ -184,6 +184,7 @@ jest.unstable_mockModule(
         return next;
       }),
       buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
+      projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
       importCoreDist: jest.fn(async (subpath?: string) => {
         if (subpath !== "native/router-hotpath/native-hub-pipeline-resp-semantics") {
           return {};

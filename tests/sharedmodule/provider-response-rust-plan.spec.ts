@@ -262,7 +262,7 @@ describe('provider response Rust native plan', () => {
 
   it('records Responses response capture under the active response request id when request truth was rebound', async () => {
     const context: Record<string, unknown> = {
-      requestId: 'openai-responses-router-gpt-5.5-20260629T203754219-423335-3618',
+      requestId: 'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618',
       entryEndpoint: '/v1/responses',
       providerProtocol: 'openai-chat',
       sessionId: 'responses-rebound-request-context-session',
@@ -270,7 +270,7 @@ describe('provider response Rust native plan', () => {
       routecodexPortStopMessageEnabled: false
     };
     const center = MetadataCenter.attach(context);
-    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('requestId', 'openai-responses-router-gpt-5.5-20260629T203754219-423335-3618', TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRequestTruth('sessionId', context.sessionId, TEST_METADATA_WRITER, 'test-request-truth');
     center.writeRuntimeControl('providerProtocol', 'openai-chat', TEST_METADATA_WRITER, 'test-runtime-control');
@@ -294,10 +294,10 @@ describe('provider response Rust native plan', () => {
     });
 
     expect(recordResponsesResponseMock).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'openai-responses-router-gpt-5.5-20260629T203754219-423335-3618'
+      requestId: 'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618'
     }));
     expect(recordResponsesResponseMock).not.toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618'
+      requestId: 'openai-responses-router-gpt-5.5-20260629T203754219-423335-3618'
     }));
   });
 

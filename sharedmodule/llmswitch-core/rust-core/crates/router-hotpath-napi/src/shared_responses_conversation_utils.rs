@@ -4515,18 +4515,23 @@ pub fn publish_responses_record_plan_json(
         .and_then(|v| read_trimmed_string(Some(v)));
     let route_hint = read_runtime_control_field(&context, "routeHint")
         .and_then(|v| read_trimmed_string(Some(v)));
-    let entry_request_id = read_request_truth_field(&context, "requestId")
-        .and_then(|v| read_trimmed_string(Some(v)))
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            read_request_truth_field(&context, "entryRequestId")
-                .and_then(|v| read_trimmed_string(Some(v)))
-        })
-        .or_else(|| {
-            read_request_truth_field(&context, "originalRequestId")
-                .and_then(|v| read_trimmed_string(Some(v)))
-        })
-        .unwrap_or_else(|| request_id.clone());
+    let current_request_id = request_id.trim();
+    let entry_request_id = if !current_request_id.is_empty() {
+        current_request_id.to_string()
+    } else {
+        read_request_truth_field(&context, "requestId")
+            .and_then(|v| read_trimmed_string(Some(v)))
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                read_request_truth_field(&context, "entryRequestId")
+                    .and_then(|v| read_trimmed_string(Some(v)))
+            })
+            .or_else(|| {
+                read_request_truth_field(&context, "originalRequestId")
+                    .and_then(|v| read_trimmed_string(Some(v)))
+            })
+            .unwrap_or_default()
+    };
 
     let usage = read_optional_object(&runtime_state_write, "usage");
     let provider_key = usage
@@ -4629,7 +4634,7 @@ mod tests {
     }
 
     #[test]
-    fn publish_responses_record_plan_uses_request_truth_request_id() {
+    fn publish_responses_record_plan_uses_current_request_id_before_stale_request_truth() {
         let planned: Value = serde_json::from_str(
             &publish_responses_record_plan_json(
                 "openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103"
@@ -4669,11 +4674,11 @@ mod tests {
 
         assert_eq!(
             planned["recordArgs"]["requestId"],
-            json!("openai-responses-router-gpt-5.5-20260703T120957051-453706-103")
+            json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
         );
         assert_eq!(
             planned["finalizeArgs"]["requestId"],
-            json!("openai-responses-router-gpt-5.5-20260703T120957051-453706-103")
+            json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
         );
         assert_eq!(planned["recordArgs"]["matchedPort"], json!(5555));
         assert_eq!(
@@ -5347,7 +5352,7 @@ mod tests {
     }
 
     #[test]
-    fn publish_responses_record_plan_uses_request_truth_over_client_response_request_id() {
+    fn publish_responses_record_plan_uses_current_request_id_over_client_response_request_id() {
         let planned: Value = serde_json::from_str(
             &publish_responses_record_plan_json(
                 "openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103"

@@ -3539,6 +3539,7 @@ owners:
       - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/servertool/stopless-cli-continuation.spec.ts
     required_gates:
+      - npm run verify:responses-history-protocol-contract
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:architecture-mainline-manifest-sync
@@ -3557,6 +3558,7 @@ owners:
       - "All response/request content-changing logic must happen before continuation save in response Chat Process or after continuation restore in request Chat Process."
       - "Continuation store save/restore may persist and return canonical truth, but must not rewrite it to compensate for downstream shape expectations."
       - "Control semantics required across the boundary must be carried in MetadataCenter; payload/history are data-plane truth and must not receive route/provider/protocol/control pins."
+      - "Response save must use the current active provider request label passed to `publishResponsesRecordPlanJson` before any stale `requestTruth.requestId`; provider request-id rebind must not record under the old router id."
 
   - feature_id: server.responses_sse_bridge_surface
     status: active
