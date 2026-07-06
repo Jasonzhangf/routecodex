@@ -1245,6 +1245,7 @@ describe('hub pipeline stage residue audit', () => {
 
     const findings = collectMatches(source, [
       { label: 'exports zero-consumer JsonPrimitive alias', pattern: /export\s+type\s+JsonPrimitive\b/ },
+      { label: 'declares zero-consumer JsonPrimitive alias', pattern: /(?:export\s+)?type\s+JsonPrimitive\b/ },
       { label: 'exports zero-consumer JsonArray alias', pattern: /export\s+type\s+JsonArray\b/ },
       { label: 'exports zero-consumer isJsonArray helper', pattern: /export\s+function\s+isJsonArray\b/ },
       { label: 'exports runtime JSON object guard from type shell', pattern: /export\s+function\s+isJsonObject\b/ },
