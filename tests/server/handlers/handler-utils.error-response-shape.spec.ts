@@ -209,4 +209,81 @@ describe('resolveReportedRouteErrorHttpResponse', () => {
     expect(mapped.body?.error?.message).toBe('Internal provider response error');
     expect(mapped.body?.error?.request_id).toBe('req_internal_bad_response_status_1');
   });
+
+  it('does not send screenshot request cycles into route error details', async () => {
+    mockReportRouteError.mockImplementationOnce(async (payload: any) => {
+      expect(payload.details).toMatchObject({
+        endpoint: '/v1/responses',
+        requestId: 'req_screenshot_error_projection',
+        status: 524,
+        statusCode: 524,
+        code: 'HTTP_524',
+        providerKey: 'asxs.crsa.gpt-5.4-mini',
+        requestExecutorProviderErrorStage: 'provider.send',
+      });
+      expect(payload.details.response).toBeUndefined();
+      expect(payload.details.request).toBeUndefined();
+      expect(payload.details.input).toBeUndefined();
+      expect(payload.originalError.response).toBeUndefined();
+      expect(payload.originalError.request).toBeUndefined();
+      expect(payload.originalError.details.response).toBeUndefined();
+      return undefined;
+    });
+
+    const imageUrl = `data:image/png;base64,${'A'.repeat(256 * 1024)}`;
+    const cyclicResponseData: any = {
+      error: {
+        code: 'HTTP_524',
+        message: 'upstream timed out',
+      },
+      request: {
+        input: [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_text', text: 'describe this screenshot' },
+              { type: 'input_image', image_url: imageUrl },
+            ],
+          },
+        ],
+      },
+    };
+    cyclicResponseData.self = cyclicResponseData;
+    const normalizedError = Object.assign(new Error('HTTP 524: upstream timed out'), {
+      code: 'HTTP_524',
+      status: 524,
+      statusCode: 524,
+      providerKey: 'asxs.crsa.gpt-5.4-mini',
+      requestExecutorProviderErrorStage: 'provider.send',
+      response: { data: cyclicResponseData },
+    }) as Error & Record<string, unknown>;
+
+    const res = {
+      statusCode: 200,
+      body: undefined as unknown,
+      status(code: number) {
+        this.statusCode = code;
+        return this;
+      },
+      json(body: unknown) {
+        this.body = body;
+        return this;
+      },
+    };
+
+    const { respondWithPipelineError } = await import('../../../src/server/handlers/handler-utils.js');
+    await respondWithPipelineError(
+      res as never,
+      {} as never,
+      normalizedError,
+      '/v1/responses',
+      'req_screenshot_error_projection',
+      { forceSse: false }
+    );
+
+    expect(res.statusCode).toBe(502);
+    const rendered = JSON.stringify(res.body);
+    expect(rendered).toContain('HTTP_524');
+    expect(rendered).not.toContain(imageUrl);
+  });
 });

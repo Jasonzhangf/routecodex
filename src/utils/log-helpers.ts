@@ -3,6 +3,8 @@ import { Buffer } from 'node:buffer';
 const DEFAULT_ERROR_LOG_LIMIT = 500;
 const RAW_CAPTURE_LIMIT = 1024;
 const MISSING_CODE_LOG_LIMIT = 100;
+const LOG_SERIALIZE_MAX_DEPTH = 12;
+const DATA_URL_LOG_PREFIX_MAX = 48;
 
 function coerceToString(value: unknown): string | undefined {
   if (typeof value === 'string') {
@@ -24,22 +26,49 @@ function coerceToString(value: unknown): string | undefined {
   return undefined;
 }
 
-function stripInternalErrorCarriers(value: unknown): unknown {
+function stripInternalErrorCarriers(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0
+): unknown {
+  if (typeof value === 'string') {
+    if (/^data:image\/[^;,]+;base64,/i.test(value)) {
+      return `${value.slice(0, DATA_URL_LOG_PREFIX_MAX)}...[image data url omitted ${Math.max(0, value.length - DATA_URL_LOG_PREFIX_MAX)} chars]`;
+    }
+    return value;
+  }
   if (Array.isArray(value)) {
-    return value.map((entry) => stripInternalErrorCarriers(entry));
+    if (seen.has(value)) {
+      return '[Circular]';
+    }
+    if (depth >= LOG_SERIALIZE_MAX_DEPTH) {
+      return '[MaxDepth]';
+    }
+    seen.add(value);
+    return value.map((entry) => stripInternalErrorCarriers(entry, seen, depth + 1));
   }
   if (!value || typeof value !== 'object') {
     return value;
   }
+  if (seen.has(value)) {
+    return '[Circular]';
+  }
+  if (depth >= LOG_SERIALIZE_MAX_DEPTH) {
+    return '[MaxDepth]';
+  }
+  seen.add(value);
   const record = value as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(record)) {
     if (
       key === 'sseStream'
+      || key === 'request'
+      || key === 'socket'
+      || key === 'client'
     ) {
       continue;
     }
-    out[key] = stripInternalErrorCarriers(entry);
+    out[key] = stripInternalErrorCarriers(entry, seen, depth + 1);
   }
   return out;
 }

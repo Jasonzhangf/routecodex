@@ -25,7 +25,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "buildRouterMetadataInputJson",
   "bootstrapVirtualRouterConfigJson",
   "bootstrapVirtualRouterProvidersJson",
-  "compileRouteCodexRuntimeManifestJson",
   "estimateVirtualRouterRequestTokensJson",
   "evaluateSingletonRoutePoolExhaustionJson",
   "resolveErrorErr05RouteAvailabilityDecisionJson",

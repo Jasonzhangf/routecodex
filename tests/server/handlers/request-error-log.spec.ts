@@ -104,6 +104,44 @@ describe('logRequestError diagnostics', () => {
     expect(firstLine).toContain('code=UPSTREAM_STREAM_INCOMPLETE');
   });
 
+  it('does not recurse through screenshot payload cycles while logging provider errors', () => {
+    const imageUrl = `data:image/png;base64,${'A'.repeat(256 * 1024)}`;
+    const err: any = new Error('HTTP 524: upstream timed out');
+    err.statusCode = 524;
+    err.code = 'HTTP_524';
+    err.providerKey = 'asxs.crsa.gpt-5.4-mini';
+    err.requestExecutorProviderErrorStage = 'provider.send';
+    err.response = {
+      data: {
+        error: {
+          code: 'HTTP_524',
+          message: 'upstream timed out',
+        },
+        request: {
+          input: [
+            {
+              role: 'user',
+              content: [
+                { type: 'input_text', text: 'describe this screenshot' },
+                { type: 'input_image', image_url: imageUrl },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    err.response.data.self = err.response.data;
+
+    expect(() => logRequestError('/v1/responses', 'req_screenshot_cycle_error', err)).not.toThrow();
+
+    const rendered = errorSpy.mock.calls.map((call) => String(call[0] ?? '')).join('\n');
+    expect(rendered).toContain('status=524');
+    expect(rendered).toContain('code=HTTP_524');
+    expect(rendered).toContain('provider=asxs.crsa.gpt-5.4-mini');
+    expect(rendered).toContain('stage=provider.send');
+    expect(rendered).not.toContain(imageUrl);
+  });
+
   it('prints internalCode for RouteCodex-owned virtual-router retry route failures', () => {
     const err: any = new Error(
       'Rust HubPipeline explicit provider retry VR route failed: VIRTUAL_ROUTER_ERROR:PROVIDER_NOT_AVAILABLE:No available providers after applying routing instructions'

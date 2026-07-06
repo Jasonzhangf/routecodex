@@ -612,11 +612,8 @@ export async function respondWithPipelineError(
     providerKey: (normalizedError as Record<string, unknown>).providerKey as string | undefined,
     providerType: (normalizedError as Record<string, unknown>).providerType as string | undefined,
     routeName: (normalizedError as Record<string, unknown>).routeName as string | undefined,
-    details: {
-      ...(normalizedError as Record<string, unknown>),
-      endpoint: entryEndpoint
-    },
-    originalError: normalizedError
+    details: buildRouteErrorDetails(normalizedError, entryEndpoint, effectiveRequestId),
+    originalError: buildRouteErrorOriginalError(normalizedError, entryEndpoint, effectiveRequestId)
   };
   const mapped = await resolveReportedRouteErrorHttpResponse({
     routePayload,
@@ -703,11 +700,8 @@ export async function writeStartedSsePipelineError(
     providerKey: (normalizedError as Record<string, unknown>).providerKey as string | undefined,
     providerType: (normalizedError as Record<string, unknown>).providerType as string | undefined,
     routeName: (normalizedError as Record<string, unknown>).routeName as string | undefined,
-    details: {
-      ...(normalizedError as Record<string, unknown>),
-      endpoint: entryEndpoint
-    },
-    originalError: normalizedError
+    details: buildRouteErrorDetails(normalizedError, entryEndpoint, effectiveRequestId),
+    originalError: buildRouteErrorOriginalError(normalizedError, entryEndpoint, effectiveRequestId)
   };
   const mapped = await resolveReportedRouteErrorHttpResponse({
     routePayload,
@@ -805,9 +799,6 @@ function buildClientHttpProjectionSource(
     providerType: routePayload.providerType ?? normalizedError.providerType,
     routeName: routePayload.routeName ?? normalizedError.routeName,
     details: {
-      ...(normalizedError.details && typeof normalizedError.details === 'object' && !Array.isArray(normalizedError.details)
-        ? normalizedError.details as Record<string, unknown>
-        : {}),
       ...(routePayload.details ?? {}),
       ...(typeof status === 'number' ? { status, statusCode: status } : {}),
       requestId: routePayload.requestId ?? normalizedError.requestId,
@@ -816,6 +807,79 @@ function buildClientHttpProjectionSource(
       routeName: routePayload.routeName ?? normalizedError.routeName
     }
   });
+}
+
+function readSafeErrorDetail(value: unknown): unknown {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  return undefined;
+}
+
+function readSafeStringRecordField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function buildRouteErrorDetails(
+  normalizedError: Error & Record<string, unknown>,
+  endpoint: string,
+  requestId: string
+): Record<string, unknown> {
+  const details =
+    normalizedError.details && typeof normalizedError.details === 'object' && !Array.isArray(normalizedError.details)
+      ? (normalizedError.details as Record<string, unknown>)
+      : {};
+  const safe: Record<string, unknown> = {
+    endpoint,
+    requestId,
+  };
+  for (const key of [
+    'status',
+    'statusCode',
+    'code',
+    'errorCode',
+    'upstreamCode',
+    'upstreamStatus',
+    'catalogCode',
+    'catalogKey',
+    'providerKey',
+    'providerType',
+    'providerFamily',
+    'routeName',
+    'requestExecutorProviderErrorStage',
+    'reason',
+    'retryable',
+  ]) {
+    const value = readSafeErrorDetail(normalizedError[key]) ?? readSafeErrorDetail(details[key]);
+    if (value !== undefined) {
+      safe[key] = value;
+    }
+  }
+  const rawErrorSnippet =
+    readSafeStringRecordField(normalizedError, 'rawErrorSnippet')
+    ?? readSafeStringRecordField(details, 'rawErrorSnippet');
+  if (rawErrorSnippet) {
+    safe.rawErrorSnippet = rawErrorSnippet;
+  }
+  return safe;
+}
+
+function buildRouteErrorOriginalError(
+  normalizedError: Error & Record<string, unknown>,
+  endpoint: string,
+  requestId: string
+): Error & Record<string, unknown> {
+  const safe = new Error(normalizedError.message) as Error & Record<string, unknown>;
+  safe.name = normalizedError.name;
+  safe.endpoint = endpoint;
+  safe.requestId = requestId;
+  const safeDetails = buildRouteErrorDetails(normalizedError, endpoint, requestId);
+  for (const [key, value] of Object.entries(safeDetails)) {
+    safe[key] = value;
+  }
+  safe.details = safeDetails;
+  return safe;
 }
 
 export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): Record<string, string> {
