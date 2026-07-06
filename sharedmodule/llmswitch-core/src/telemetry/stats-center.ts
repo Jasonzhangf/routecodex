@@ -21,7 +21,7 @@ export interface VirtualRouterHitEvent {
   stopMessageRemaining?: number;
 }
 
-export interface ProviderUsageEvent {
+interface ProviderUsageEvent {
   requestId: string;
   timestamp: number;
   providerKey: string;
@@ -37,7 +37,7 @@ export interface ProviderUsageEvent {
   totalTokens?: number;
 }
 
-export interface StatsSnapshot {
+interface StatsSnapshot {
   router: {
     global: ReturnType<typeof createEmptyRouterBucket>;
     byEntryEndpoint: Record<string, ReturnType<typeof createEmptyRouterBucket>>;
