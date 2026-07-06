@@ -21,10 +21,6 @@ export function isNativeDisabledByEnv(): boolean {
   return false;
 }
 
-export function isNativeRequiredByEnv(): boolean {
-  return true;
-}
-
 export function hasCompleteNativeBinding(binding: unknown, requiredExports: readonly string[]): boolean {
   if (!binding || typeof binding !== 'object') return false;
   const row = binding as Record<string, unknown>;

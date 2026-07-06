@@ -1,4 +1,4 @@
-export type JsonToolArgumentAliasMap = Record<string, string[]>;
+type JsonToolArgumentAliasMap = Record<string, string[]>;
 
 export type JsonToolRepairConfig = {
   toolNameAliases?: Record<string, string>;

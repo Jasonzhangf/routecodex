@@ -10,11 +10,6 @@ export interface ConversionProfile {
   trace?: boolean;
 }
 
-export interface ConversionConfigFile {
-  profiles: Record<string, Omit<ConversionProfile, 'id'>>;
-  endpointBindings?: Record<string, string>;
-}
-
 export interface ConversionContext {
   requestId?: string;
   endpoint?: string;
@@ -35,4 +30,3 @@ export interface ConversionCodec {
   convertRequest(payload: any, profile: ConversionProfile, context: ConversionContext): Promise<any>;
   convertResponse(payload: any, profile: ConversionProfile, context: ConversionContext): Promise<any>;
 }
-

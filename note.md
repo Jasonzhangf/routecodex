@@ -1,3 +1,9 @@
+# 2026-07-06: rustification dead native facade/type export cleanup
+
+- Source-only TypeScript resolver over the 35 minimal TS manifest entries found no zero-consumer files after accounting for ESM `.js` imports resolving to source `.ts`.
+- Removed dead exports only: `isNativeRequiredByEnv`, `NativeReqInboundSemanticLiftApplyInput`, `NativeReqInboundReasoningNormalizeInput`, `ConversionConfigFile`, `BridgeNativeEnvelope`, `BridgeContentPart`, and `JsonToolArgumentAliasMap`. `BridgeContentPart` / `JsonToolArgumentAliasMap` remain as same-file local types because exported shapes still need them.
+- Verification: deleted symbols scan has 0 matches; llmswitch-core tsc PASS; focused native/parser + residue Jest PASS 190/190; `verify:llmswitch-minimal-ts-surface` PASS; `verify:llmswitch-rustification-audit` PASS with nonNative `34 / 4698`; root TypeScript PASS; touched-file `git diff --check` PASS.
+
 # 2026-07-06: rcc start restored foreground logs and explicit daemon mode
 
 - Root cause of the bad observed behavior: commit `fe6fea444 fix(cli): daemonize release start by default` made release `rcc start --snap` default to daemon mode, so the command returned with only supervisor information instead of showing runtime startup logs. My previous `7a30349` fixed lock/health waiting but preserved that wrong daemon default.

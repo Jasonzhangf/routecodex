@@ -1,4 +1,4 @@
-export type BridgeContentPart = {
+type BridgeContentPart = {
   type: string;
   text?: string;
   content?: unknown;
@@ -48,5 +48,3 @@ export type BridgeToolDefinition = {
     parameters?: unknown;
   };
 };
-
-export type BridgeNativeEnvelope = Record<string, unknown>;

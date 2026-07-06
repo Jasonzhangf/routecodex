@@ -2,26 +2,11 @@ export type {
   NativeContextToolOutput
 } from './native-hub-pipeline-inbound-outbound-semantics.js';
 
-export interface NativeReqInboundSemanticLiftApplyInput {
-  chatEnvelope: Record<string, unknown>;
-  payload?: Record<string, unknown>;
-  protocol?: string;
-  entryEndpoint?: string;
-  responsesResume?: Record<string, unknown>;
-  sessionId?: string;
-  conversationId?: string;
-}
-export type NativeProviderProtocolToken =
-  NonNullable<NativeReqInboundSemanticLiftApplyInput['protocol']>;
+export type NativeProviderProtocolToken = string;
 
 export interface NativeReqInboundChatToStandardizedInput {
   chatEnvelope: Record<string, unknown>;
   adapterContext: Record<string, unknown>;
   endpoint: string;
   requestId?: string;
-}
-
-export interface NativeReqInboundReasoningNormalizeInput {
-  payload: Record<string, unknown>;
-  protocol: string;
 }
