@@ -1274,6 +1274,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('export function appendServerToolProgressFileEvent(event: {');
   });
 
+  it('stats center shell must not retain zero-consumer bucket or option type shells', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/telemetry/stats-center.ts'),
+      'utf8',
+    );
+
+    const findings = collectMatches(source, [
+      { label: 'declares RouterStatsBucket shell', pattern: /(?:export\s+)?interface\s+RouterStatsBucket\b/ },
+      { label: 'declares RouterStatsSnapshot shell', pattern: /(?:export\s+)?interface\s+RouterStatsSnapshot\b/ },
+      { label: 'declares ProviderStatsBucket shell', pattern: /(?:export\s+)?interface\s+ProviderStatsBucket\b/ },
+      { label: 'declares ProviderStatsSnapshot shell', pattern: /(?:export\s+)?interface\s+ProviderStatsSnapshot\b/ },
+      { label: 'declares StatsCenterOptions shell', pattern: /(?:export\s+)?interface\s+StatsCenterOptions\b/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('snapshot stage recorder must not restore TS hotpath trimming semantics', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts'),

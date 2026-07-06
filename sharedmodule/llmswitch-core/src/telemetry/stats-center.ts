@@ -37,51 +37,17 @@ export interface ProviderUsageEvent {
   totalTokens?: number;
 }
 
-interface RouterStatsBucket {
-  requestCount: number;
-  poolHitCount: Record<string, number>;
-  routeHitCount: Record<string, number>;
-  providerHitCount: Record<string, number>;
-  reasonHitCount: Record<string, number>;
-  penaltyHitCount: Record<string, number>;
-  stopMessageActiveCount: number;
-}
-
-interface RouterStatsSnapshot {
-  global: RouterStatsBucket;
-  byEntryEndpoint: Record<string, RouterStatsBucket>;
-}
-
-interface ProviderStatsBucket {
-  requestCount: number;
-  successCount: number;
-  errorCount: number;
-  latencySumMs: number;
-  minLatencyMs: number;
-  maxLatencyMs: number;
-  usage: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
-
-interface ProviderStatsSnapshot {
-  global: ProviderStatsBucket;
-  byProviderKey: Record<string, ProviderStatsBucket>;
-  byRoute: Record<string, ProviderStatsBucket>;
-  byEntryEndpoint: Record<string, ProviderStatsBucket>;
-}
-
 export interface StatsSnapshot {
-  router: RouterStatsSnapshot;
-  providers: ProviderStatsSnapshot;
-}
-
-interface StatsCenterOptions {
-  enable?: boolean;
-  autoPrintOnExit?: boolean;
-  persistPath?: string | null;
+  router: {
+    global: ReturnType<typeof createEmptyRouterBucket>;
+    byEntryEndpoint: Record<string, ReturnType<typeof createEmptyRouterBucket>>;
+  };
+  providers: {
+    global: ReturnType<typeof createEmptyProviderBucket>;
+    byProviderKey: Record<string, ReturnType<typeof createEmptyProviderBucket>>;
+    byRoute: Record<string, ReturnType<typeof createEmptyProviderBucket>>;
+    byEntryEndpoint: Record<string, ReturnType<typeof createEmptyProviderBucket>>;
+  };
 }
 
 interface StatsCenter {
@@ -102,19 +68,19 @@ function logStatsCenterNonBlockingError(stage: string, error: unknown, details?:
   }
 }
 
-function createEmptyRouterBucket(): RouterStatsBucket {
+function createEmptyRouterBucket() {
   return {
     requestCount: 0,
-    poolHitCount: {},
-    routeHitCount: {},
-    providerHitCount: {},
-    reasonHitCount: {},
-    penaltyHitCount: {},
+    poolHitCount: {} as Record<string, number>,
+    routeHitCount: {} as Record<string, number>,
+    providerHitCount: {} as Record<string, number>,
+    reasonHitCount: {} as Record<string, number>,
+    penaltyHitCount: {} as Record<string, number>,
     stopMessageActiveCount: 0
   };
 }
 
-function createEmptyProviderBucket(): ProviderStatsBucket {
+function createEmptyProviderBucket() {
   return {
     requestCount: 0,
     successCount: 0,
@@ -240,7 +206,7 @@ class DefaultStatsCenter implements StatsCenter {
     }
   }
 
-  private applyRouterHitToBucket(bucket: RouterStatsBucket, ev: VirtualRouterHitEvent): void {
+  private applyRouterHitToBucket(bucket: ReturnType<typeof createEmptyRouterBucket>, ev: VirtualRouterHitEvent): void {
     bucket.requestCount += 1;
     if (ev.pool) {
       bucket.poolHitCount[ev.pool] = (bucket.poolHitCount[ev.pool] || 0) + 1;
@@ -264,7 +230,7 @@ class DefaultStatsCenter implements StatsCenter {
     }
   }
 
-  private applyProviderUsageToBucket(bucket: ProviderStatsBucket, ev: ProviderUsageEvent): void {
+  private applyProviderUsageToBucket(bucket: ReturnType<typeof createEmptyProviderBucket>, ev: ProviderUsageEvent): void {
     bucket.requestCount += 1;
     if (ev.success) {
       bucket.successCount += 1;
@@ -374,7 +340,11 @@ function printStatsToConsole(snapshot: StatsSnapshot): void {
   );
 }
 
-function initStatsCenter(options?: StatsCenterOptions): StatsCenter {
+function initStatsCenter(options?: {
+  enable?: boolean;
+  autoPrintOnExit?: boolean;
+  persistPath?: string | null;
+}): StatsCenter {
   if (instance) {
     return instance;
   }
