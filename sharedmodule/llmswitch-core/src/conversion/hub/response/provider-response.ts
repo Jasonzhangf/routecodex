@@ -44,7 +44,6 @@ import {
 } from '../metadata-center-runtime-control-writer.js';
 
 import {
-  type MetadataCenterLike,
   readBoundMetadataCenter,
   readContinuationContextFromBoundMetadataCenter,
   readRequestTruthFromBoundMetadataCenter,
@@ -101,21 +100,6 @@ function writeRustStopGatewayContextToMetadataCenter(args: {
     reason: args.reason
   });
   ensureRuntimeMetadata(args.metadata).stopGatewayContext = args.stopGatewayContext as JsonObject;
-}
-
-interface ProviderResponseConversionOptions {
-  providerProtocol: ProviderProtocol;
-  providerResponse: JsonObject;
-  context: AdapterContext;
-  entryEndpoint: string;
-  wantsStream: boolean;
-  stageRecorder?: StageRecorder;
-}
-
-interface ProviderResponseConversionResult {
-  body?: JsonObject;
-  sseStream?: Readable;
-  format?: string;
 }
 
 function runProviderResponseRustHubPipeline(nativeOptions: Parameters<typeof executeHubPipelineWithNative>[0]) {
@@ -386,8 +370,19 @@ async function readProviderResponseSseStreamText(stream: Readable): Promise<stri
 }
 
 export async function convertProviderResponse(
-  options: ProviderResponseConversionOptions
-): Promise<ProviderResponseConversionResult> {
+  options: {
+    providerProtocol: ProviderProtocol;
+    providerResponse: JsonObject;
+    context: AdapterContext;
+    entryEndpoint: string;
+    wantsStream: boolean;
+    stageRecorder?: StageRecorder;
+  }
+): Promise<{
+  body?: JsonObject;
+  sseStream?: Readable;
+  format?: string;
+}> {
   const requestId = readProviderResponseRequestId(options.context);
   const metadataCenterSnapshot = readMetadataCenterSnapshotForRust(options.context);
   const providerProtocol = resolveProviderProtocolWithNative({

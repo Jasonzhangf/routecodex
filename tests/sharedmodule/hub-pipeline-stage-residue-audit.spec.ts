@@ -672,6 +672,8 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts-marker-missing-body-error-owner', pattern: /throw\s+new\s+Error\(['"]Provider SSE marker did not include materializable stream or bodyText/ },
       { label: 'ts-stream-error-terminated-classifier', pattern: /normalizedMessage\.includes\(['"]terminated['"]\)|normalizedCode\.includes\(['"]terminated['"]\)/ },
       { label: 'ts-stream-error-hardcoded-status', pattern: /wrapped\.statusCode\s*=\s*502|wrapped\.retryable\s*=\s*true|wrapped\.requestExecutorProviderErrorStage\s*=\s*['"]provider\.sse_decode['"]/ },
+      { label: 'declares zero-consumer provider response options type shell', pattern: /(?:export\s+)?interface\s+ProviderResponseConversionOptions\b/ },
+      { label: 'declares zero-consumer provider response result type shell', pattern: /(?:export\s+)?interface\s+ProviderResponseConversionResult\b/ },
     ]);
 
     expect(source).toContain('materializeProviderResponseSsePayloadWithNative');
