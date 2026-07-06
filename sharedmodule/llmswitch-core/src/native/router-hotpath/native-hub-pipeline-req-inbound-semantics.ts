@@ -7,13 +7,12 @@ import { sanitizeFormatEnvelopeWithNative } from './native-hub-pipeline-edge-sta
 import { formatUnknownError } from '../../shared/common-utils.js';
 
 
-import type {
-  NativeReqInboundChatToStandardizedInput
-} from './native-hub-pipeline-req-inbound-semantics-types.js';
-
-export type {
-  NativeReqInboundChatToStandardizedInput
-} from './native-hub-pipeline-req-inbound-semantics-types.js';
+export interface NativeReqInboundChatToStandardizedInput {
+  chatEnvelope: Record<string, unknown>;
+  adapterContext: Record<string, unknown>;
+  endpoint: string;
+  requestId?: string;
+}
 
 const NON_BLOCKING_REQ_INBOUND_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingReqInboundParseLogState = new Map<string, number>();

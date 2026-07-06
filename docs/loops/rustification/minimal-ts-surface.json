@@ -164,14 +164,6 @@
       "forbiddenSemantics": ["bridge action parsing", "policy filtering", "message mutation"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-types.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.req_inbound_responses_context_capture",
-      "minimumTsRole": "Req inbound native facade type declarations.",
-      "cannotShrinkFurtherBecause": "TS native callers require compile-time shapes until generated bindings replace handwritten declarations.",
-      "forbiddenSemantics": ["req_inbound parsing", "context restoration", "tool result repair"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.req_outbound_provider_semantic",

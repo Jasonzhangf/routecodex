@@ -3409,11 +3409,11 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const retiredFiles = [
       'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-semantic-lift.mjs',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-types.ts',
     ];
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-types.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs',
