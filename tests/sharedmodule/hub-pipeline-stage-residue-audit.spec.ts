@@ -3066,13 +3066,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('req inbound native parser facade must not own tool output snapshot semantic validation', () => {
+  it('req inbound native parser facade must stay physically deleted', () => {
     const repoRoot = process.cwd();
+    const parserPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts'
+    );
     const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts'),
+      'utf8'
+    );
+    const toolsSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts'),
       'utf8'
     );
     const forbiddenPatterns = [
+      { label: 'imports deleted parser facade', pattern: /native-hub-pipeline-req-inbound-semantics-parsers/u },
       { label: 'snapshot object validation', pattern: /const snapshot = parsed\.snapshot/u },
       { label: 'payload object validation', pattern: /const payload = parsed\.payload/u },
       { label: 'snapshot array rejection', pattern: /Array\.isArray\(snapshot\)/u },
@@ -3080,9 +3089,10 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'local snapshot payload rebuild', pattern: /return\s*\{\s*snapshot:[\s\S]{0,140}payload:/u },
     ];
     const findings = forbiddenPatterns
-      .filter(({ pattern }) => pattern.test(source))
+      .filter(({ pattern }) => pattern.test(source) || pattern.test(toolsSource))
       .map(({ label }) => label);
 
+    expect(fs.existsSync(parserPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

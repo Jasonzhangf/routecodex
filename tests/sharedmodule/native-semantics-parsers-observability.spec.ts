@@ -70,6 +70,15 @@ describe('native semantics parser observability', () => {
     expect(() => fs.statSync(retiredWrapperPath)).toThrow();
   });
 
+  it('keeps retired req inbound parser facade deleted', () => {
+    const retiredWrapperPath = new URL(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts',
+      import.meta.url
+    );
+
+    expect(() => fs.statSync(retiredWrapperPath)).toThrow();
+  });
+
   it('keeps retired chat-process servertool orchestration parser wrappers deleted', () => {
     const retiredWrapperPath = new URL(
       '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts',
@@ -143,6 +152,38 @@ describe('native semantics parser observability', () => {
       'native applyClaudeThinkingToolSchemaCompatJson execution failed: invalid payload'
     );
     expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseJsonObject parse failed (non-blocking)');
+
+    warnSpy.mockRestore();
+  });
+
+  it('logs req inbound parser JSON failures before fail-fasting native capability', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const mod = await importWithNativeParseFailureMock<{
+      normalizeProviderProtocolTokenWithNative: (value: string | undefined) => string | undefined;
+    }>(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js',
+      'normalizeProviderProtocolTokenJson'
+    );
+
+    expect(() => mod.normalizeProviderProtocolTokenWithNative('openai-chat')).toThrow('native-fail:invalid payload');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseOptionalString parse failed (non-blocking)');
+
+    warnSpy.mockRestore();
+  });
+
+  it('logs req inbound tools parser JSON failures before fail-fasting native capability', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const mod = await importWithNativeParseFailureMock<{
+      mapReqInboundBridgeToolsToChatWithNative: (rawTools: unknown) => Array<Record<string, unknown>>;
+    }>(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.js',
+      'mapBridgeToolsToChatJson'
+    );
+
+    expect(() => mod.mapReqInboundBridgeToolsToChatWithNative([])).toThrow('native-fail:invalid payload');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseArray parse failed (non-blocking)');
 
     warnSpy.mockRestore();
   });

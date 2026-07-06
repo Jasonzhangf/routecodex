@@ -172,14 +172,6 @@
       "forbiddenSemantics": ["bridge action parsing", "policy filtering", "message mutation"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts",
-      "classification": "parser_io_ok",
-      "ownerFeature": "hub.req_inbound_responses_context_capture",
-      "minimumTsRole": "Parse native JSON string and project Rust-owned req_inbound result shape.",
-      "cannotShrinkFurtherBecause": "NAPI currently returns JSON strings to TS; a parser facade is required until the binding API changes to typed JS objects.",
-      "forbiddenSemantics": ["nested snapshot validation", "payload rebuild", "tool output policy"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-types.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.req_inbound_responses_context_capture",

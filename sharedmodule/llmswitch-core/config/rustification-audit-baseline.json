@@ -671,12 +671,6 @@
       "topDir": "native"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts",
-      "loc": 93,
-      "nativeLinked": false,
-      "topDir": "native"
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts",
       "loc": 285,
       "nativeLinked": true,

@@ -4,12 +4,11 @@ import {
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { collectToolOutputsWithNative } from './native-hub-pipeline-inbound-outbound-semantics.js';
-import {
-  parseOptionalString,
-  parseRecord,
-  parseArray,
-  parseToolOutputSnapshotBuildResult
-} from './native-hub-pipeline-req-inbound-semantics-parsers.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
+
+const NON_BLOCKING_REQ_INBOUND_TOOLS_PARSE_LOG_THROTTLE_MS = 60_000;
+const nonBlockingReqInboundToolsParseLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-req-inbound-semantics-tools.parse-failed');
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
@@ -23,6 +22,68 @@ function safeStringify(value: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function logNativeReqInboundToolsParserNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingReqInboundToolsParseLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_REQ_INBOUND_TOOLS_PARSE_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingReqInboundToolsParseLogState.set(stage, now);
+  console.warn(
+    `[native-hub-pipeline-req-inbound-semantics-tools] ${stage} parse failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeReqInboundToolsParserNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
+function parseOptionalString(raw: string): string | undefined | null {
+  const parsed = parseJson('parseOptionalString', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return null;
+  }
+  if (parsed === null) {
+    return undefined;
+  }
+  if (typeof parsed !== 'string') {
+    return null;
+  }
+  const normalized = parsed.trim();
+  return normalized ? normalized : undefined;
+}
+
+function parseRecord(raw: string): Record<string, unknown> | null {
+  const parsed = parseJson('parseRecord', raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseArray(raw: string): unknown[] | null {
+  const parsed = parseJson('parseArray', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return null;
+  }
+  return Array.isArray(parsed) ? parsed : null;
+}
+
+function parseToolOutputSnapshotBuildResult(
+  raw: string
+): { snapshot: Record<string, unknown>; payload: Record<string, unknown> } | null {
+  const parsed = parseRecord(raw);
+  if (!parsed) {
+    return null;
+  }
+  return parsed as { snapshot: Record<string, unknown>; payload: Record<string, unknown> };
 }
 
 function replaceRecord(target: Record<string, unknown>, source: Record<string, unknown>): void {
