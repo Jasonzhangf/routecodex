@@ -398,6 +398,149 @@ fn build_responses_payload_from_chat_sanitizes_existing_response_shape_before_em
 }
 
 #[test]
+fn plan_responses_payload_closeout_normalizes_existing_response_payload() {
+    let payload = serde_json::json!({
+        "data": {
+            "id": "resp_existing_plan",
+            "object": "response",
+            "created_at": 1780550359,
+            "status": "completed",
+            "output": [{
+                "id": "fc_existing_plan_1",
+                "type": "function_call",
+                "status": "in_progress",
+                "name": "apply_patch",
+                "call_id": "call_existing_plan_1",
+                "arguments": "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"
+            }]
+        }
+    });
+
+    let plan = plan_responses_payload_from_chat_closeout(
+        &payload,
+        &serde_json::json!({
+            "requestId": "req_existing_plan",
+            "toolsRaw": freeform_apply_patch_tool_fixture()
+        }),
+    );
+
+    assert_eq!(
+        plan["kind"],
+        Value::String("existing_responses_payload".to_string())
+    );
+    assert_eq!(
+        plan["response"]["id"],
+        Value::String("resp_existing_plan".to_string())
+    );
+    let output = plan["payload"]["output"].as_array().expect("output array");
+    assert_eq!(
+        output[0]["type"],
+        Value::String("custom_tool_call".to_string())
+    );
+    assert_eq!(
+        output[0]["input"],
+        Value::String("*** Begin Patch\n*** End Patch".to_string())
+    );
+    assert!(output[0].get("status").is_none());
+}
+
+#[test]
+fn plan_responses_payload_closeout_collects_deduped_snapshot_lookup_keys() {
+    let payload = serde_json::json!({
+        "data": {
+            "id": "resp_lookup_1",
+            "request_id": "req_lookup_1",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "ok"
+                }
+            }]
+        }
+    });
+
+    let plan = plan_responses_payload_from_chat_closeout(
+        &payload,
+        &serde_json::json!({
+            "requestId": "req_lookup_1",
+            "toolsRaw": []
+        }),
+    );
+
+    assert_eq!(
+        plan["snapshotLookupKeys"],
+        serde_json::json!(["req_lookup_1", "resp_lookup_1"])
+    );
+    assert_eq!(plan["choicesLength"], Value::from(1));
+    assert_eq!(
+        plan["kind"],
+        Value::String("chat_completion_payload".to_string())
+    );
+}
+
+#[test]
+fn plan_responses_payload_closeout_exposes_inline_retention_payloads() {
+    let payload = serde_json::json!({
+        "id": "chatcmpl_inline_1",
+        "choices": [],
+        "__responses_passthrough": {
+            "metadata": { "pass": true },
+            "parallel_tool_calls": false
+        },
+        "__responses_payload_snapshot": {
+            "metadata": { "snap": true },
+            "service_tier": "default"
+        }
+    });
+
+    let plan = plan_responses_payload_from_chat_closeout(
+        &payload,
+        &serde_json::json!({
+            "requestId": "req_inline_1",
+            "metadata": { "internal": true },
+            "stripHostManagedFields": true,
+            "toolsRaw": []
+        }),
+    );
+
+    assert_eq!(
+        plan["snapshotLookupKeys"],
+        serde_json::json!(["req_inline_1", "chatcmpl_inline_1"])
+    );
+    assert_eq!(
+        plan["inlinePassthrough"]["metadata"]["pass"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        plan["inlineSnapshot"]["metadata"]["snap"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        plan["retentionContext"]["metadata"]["internal"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        plan["retentionContext"]["stripHostManagedFields"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        plan["kind"],
+        Value::String("nonstandard_chat_payload".to_string())
+    );
+}
+
+#[test]
+fn plan_responses_payload_closeout_passthroughs_non_object_payload() {
+    let plan = plan_responses_payload_from_chat_closeout(
+        &Value::String("raw".to_string()),
+        &serde_json::json!({ "requestId": "req_raw" }),
+    );
+
+    assert_eq!(plan["kind"], Value::String("passthrough".to_string()));
+    assert_eq!(plan["response"], Value::String("raw".to_string()));
+}
+
+#[test]
 fn build_responses_payload_from_chat_preserves_client_model_over_upstream_provider_model() {
     let payload = serde_json::json!({
         "id": "chatcmpl_minimax_provider_model",

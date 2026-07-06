@@ -22,6 +22,7 @@ use crate::hub_resp_outbound_client_semantics_blocks::provider_outcome::{
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_payload::{
     build_responses_payload_from_chat_core, normalize_responses_function_name,
+    plan_responses_payload_from_chat_closeout,
     project_post_servertool_hub_resp_outbound_04_client_semantic,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::responses_usage::{
@@ -374,6 +375,19 @@ pub fn build_responses_payload_from_chat_json(
     let output =
         build_responses_payload_from_chat_core(&payload, request_id_hint.as_deref(), &context)
             .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn plan_responses_payload_from_chat_closeout_json(
+    payload_json: String,
+    context_json: String,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let context: Value =
+        serde_json::from_str(&context_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_payload_from_chat_closeout(&payload, &context);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

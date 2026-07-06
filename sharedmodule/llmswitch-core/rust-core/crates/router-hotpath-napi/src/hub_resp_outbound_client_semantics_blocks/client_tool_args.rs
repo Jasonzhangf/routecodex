@@ -1021,7 +1021,7 @@ fn restore_client_visible_response_payload(payload: &Value, metadata: &Value) ->
     Value::Object(out)
 }
 
-fn project_responses_client_body_for_client_core(
+pub(crate) fn project_responses_client_body_for_client_core(
     responses_payload: &Value,
     tools_raw: &Value,
 ) -> Value {

@@ -1,273 +1,71 @@
 import { evaluateResponsesHostPolicy } from '../responses-host-policy.js';
 import {
   consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
-  consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases
+  consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases,
+  planResponsesPayloadFromChatCloseoutWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import {
   stripInternalToolingMetadata
 } from '../../shared/responses-tool-utils.js';
-import { ProviderProtocolError } from '../../provider-protocol-error.js';
 import type { ResponsesRequestContext } from './types.js';
 import {
-  buildResponsesPayloadFromChatWithNative,
-  normalizeResponsesToolCallArgumentsForClientWithNative
+  buildResponsesPayloadFromChatWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
-import {
-  normalizeChatResponseReasoningToolsWithNative,
-  normalizeMessageReasoningToolsWithNative,
-  runBridgeActionPipelineWithNative
-} from '../../../native/router-hotpath/native-hub-bridge-action-semantics.js';
-import {
-  resolveBridgePolicyActionsWithNative,
-  resolveBridgePolicyWithNative,
-} from '../../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
-
-function normalizeResponsesToolCallArgumentsForClient(responsesPayload: Record<string, unknown>, context?: ResponsesRequestContext): void {
-  const toolsRaw = Array.isArray(context?.toolsRaw) ? (context?.toolsRaw as unknown[]) : [];
-  const normalized = normalizeResponsesToolCallArgumentsForClientWithNative(responsesPayload, toolsRaw);
-  for (const key of Object.keys(responsesPayload)) {
-    if (!Object.prototype.hasOwnProperty.call(normalized, key)) {
-      delete (responsesPayload as Record<string, unknown>)[key];
-    }
-  }
-  Object.assign(responsesPayload, normalized);
-}
-
-function normalizeResponsesClientOutputItems(payload: Record<string, unknown>): void {
-  const output = Array.isArray(payload.output) ? payload.output : undefined;
-  if (!output?.length) {
-    return;
-  }
-  payload.output = output.map((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      return item;
-    }
-    const record = item as Record<string, unknown>;
-    const type = typeof record.type === 'string' ? record.type.trim().toLowerCase() : '';
-    if (type === 'custom_tool_call') {
-      return {
-        ...record,
-        type: 'function_call',
-        ...(typeof record.name === 'string' && record.name.trim().length
-          ? { name: record.name.trim() }
-          : {}),
-      };
-    }
-    if (type === 'custom_tool_call_output') {
-      return {
-        ...record,
-        type: 'function_call_output',
-      };
-    }
-    return item;
-  });
-}
-
-function unwrapData(value: Record<string, unknown>): Record<string, unknown> {
-  let current: any = value;
-  const seen = new Set<any>();
-  while (current && typeof current === 'object' && !Array.isArray(current) && !seen.has(current)) {
-    seen.add(current);
-    if ('choices' in current || 'message' in current) break;
-    if ('data' in current && typeof (current as any).data === 'object') {
-      current = (current as any).data;
-      continue;
-    }
-    break;
-  }
-  return current as Record<string, unknown>;
-}
-
-function resolveSnapshotLookupKeys(response: Record<string, unknown>, context?: ResponsesRequestContext): string[] {
-  const keys: string[] = [];
-  if (typeof (response as any)?.request_id === 'string') {
-    keys.push((response as any).request_id as string);
-  }
-  if (typeof context?.requestId === 'string') {
-    keys.push(context.requestId);
-  }
-  if (typeof (response as any)?.id === 'string') {
-    keys.push((response as any).id as string);
-  }
-  return Array.from(new Set(keys.map((value) => value.trim()).filter((value) => value.length > 0)));
-}
 
 function shouldStripHostManagedFields(context?: ResponsesRequestContext): boolean {
   const result = evaluateResponsesHostPolicy(context, typeof context?.targetProtocol === 'string' ? context?.targetProtocol : undefined);
   return result.shouldStripHostManagedFields;
 }
 
-function collectRetentionContext(context?: ResponsesRequestContext): {
-  metadata?: Record<string, unknown>;
-  stripHostManagedFields: boolean;
-} {
-  const stripHostManagedFields = shouldStripHostManagedFields(context);
-  return {
-    metadata: context?.metadata,
-    stripHostManagedFields
-  };
-}
-
-function readInlineRetentionPayload(
-  response: Record<string, unknown>,
-  key: '__responses_passthrough' | '__responses_payload_snapshot'
-): Record<string, unknown> | undefined {
-  const candidate = response[key];
-  return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
-    ? (candidate as Record<string, unknown>)
-    : undefined;
-}
-
 export function buildResponsesPayloadFromChat(payload: unknown, context?: ResponsesRequestContext): Record<string, unknown> | unknown {
   if (!payload || typeof payload !== 'object') return payload;
-  const response = unwrapData(payload as Record<string, unknown>);
+  const stripHostManagedFields = shouldStripHostManagedFields(context);
+  const closeoutPlan = planResponsesPayloadFromChatCloseoutWithNative(payload, {
+    requestId: context?.requestId,
+    toolsRaw: Array.isArray(context?.toolsRaw) ? context.toolsRaw : [],
+    metadata: context?.metadata,
+    stripHostManagedFields
+  });
+  const response = closeoutPlan.response as Record<string, unknown> | undefined;
   if (!response || typeof response !== 'object') return payload;
 
-  if ((response as any).object === 'response' && Array.isArray((response as any).output)) {
-    normalizeResponsesClientOutputItems(response);
-    if ((response as any).metadata) {
-      stripInternalToolingMetadata((response as any).metadata);
+  if (closeoutPlan.kind === 'existing_responses_payload') {
+    const plannedPayload = closeoutPlan.payload;
+    if (plannedPayload && typeof plannedPayload === 'object' && !Array.isArray(plannedPayload)) {
+      if ((plannedPayload as any).metadata) {
+        stripInternalToolingMetadata((plannedPayload as any).metadata);
+      }
+      return plannedPayload;
     }
-    return response;
+    return payload;
   }
 
-  const snapshotLookupKeys = resolveSnapshotLookupKeys(response as Record<string, unknown>, context);
+  const snapshotLookupKeys = Array.isArray(closeoutPlan.snapshotLookupKeys)
+    ? (closeoutPlan.snapshotLookupKeys as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
   const snapshotPayload = snapshotLookupKeys.length ? consumeResponsesPayloadSnapshotByAliases(snapshotLookupKeys) : undefined;
   const passthroughPayload = snapshotLookupKeys.length ? consumeResponsesPassthroughByAliases(snapshotLookupKeys) : undefined;
   const sourceForRetention =
     (passthroughPayload && typeof passthroughPayload === 'object' ? passthroughPayload : undefined) ??
-    readInlineRetentionPayload(response as Record<string, unknown>, '__responses_passthrough') ??
+    (closeoutPlan.inlinePassthrough && typeof closeoutPlan.inlinePassthrough === 'object' && !Array.isArray(closeoutPlan.inlinePassthrough)
+      ? (closeoutPlan.inlinePassthrough as Record<string, unknown>)
+      : undefined) ??
     (snapshotPayload && typeof snapshotPayload === 'object' ? snapshotPayload : undefined) ??
-    readInlineRetentionPayload(response as Record<string, unknown>, '__responses_payload_snapshot');
-  const retentionContext = collectRetentionContext(context);
+    (closeoutPlan.inlineSnapshot && typeof closeoutPlan.inlineSnapshot === 'object' && !Array.isArray(closeoutPlan.inlineSnapshot)
+      ? (closeoutPlan.inlineSnapshot as Record<string, unknown>)
+      : undefined);
 
-  const hasChoicesArray = Array.isArray((response as any).choices);
-  const choicesLength = hasChoicesArray ? ((response as any).choices as unknown[]).length : 0;
-
-  if (!hasChoicesArray || choicesLength === 0) {
-    const rawStatus = (response as any).status;
-    const statusCode =
-      typeof rawStatus === 'string' && rawStatus.trim().length
-        ? rawStatus.trim()
-        : typeof rawStatus === 'number'
-          ? String(rawStatus)
-          : undefined;
-    const message =
-      typeof (response as any).msg === 'string' && (response as any).msg.trim().length
-        ? (response as any).msg.trim()
-        : typeof (response as any).message === 'string' && (response as any).message.trim().length
-          ? (response as any).message.trim()
-          : 'Upstream returned non-standard Chat completion payload (missing choices).';
-
-    const mergedFallback = buildResponsesPayloadFromChatWithNative(
-      response as Record<string, unknown>,
-      {
-        requestId: context?.requestId,
-        toolsRaw: Array.isArray(context?.toolsRaw) ? context?.toolsRaw : [],
-        metadata: retentionContext.metadata,
-        stripHostManagedFields: retentionContext.stripHostManagedFields,
-        sourceForRetention: sourceForRetention as Record<string, unknown> | undefined
-      }
-    );
-    if ((mergedFallback as any).metadata) {
-      stripInternalToolingMetadata((mergedFallback as any).metadata);
-    }
-    return mergedFallback;
-  }
-
-  const canonical = normalizeChatResponseReasoningToolsWithNative(response as any) as any;
-  const choices = Array.isArray(canonical?.choices) ? (canonical.choices as any[]) : [];
-  const primaryChoice = choices[0] && typeof choices[0] === 'object' ? (choices[0] as Record<string, unknown>) : undefined;
-  const message = primaryChoice && typeof primaryChoice.message === 'object' ? (primaryChoice.message as Record<string, unknown>) : undefined;
-  if (!message) {
-    throw new ProviderProtocolError('Responses bridge could not locate assistant message in Chat completion', {
-      code: 'MALFORMED_RESPONSE',
-      protocol: 'openai-chat',
-      providerType: 'openai',
-      details: {
-        context: 'buildResponsesPayloadFromChat',
-        choicesLength: choices.length,
-        requestId: context?.requestId
-      }
-    });
-  }
-  if (message) {
-    const policyActions = resolveBridgePolicyActionsWithNative(
-      resolveBridgePolicyWithNative({ protocol: 'openai-responses', moduleType: 'openai-responses' }),
-      'response_outbound'
-    );
-    if (policyActions?.length) {
-      const actionState = runBridgeActionPipelineWithNative({
-        stage: 'response_outbound',
-        actions: policyActions,
-        protocol: 'openai-responses',
-        moduleType: 'openai-responses',
-        requestId: context?.requestId,
-        state: { messages: [message] }
-      });
-      const nextMessage = Array.isArray(actionState?.messages) ? actionState.messages[0] : undefined;
-      if (nextMessage && typeof nextMessage === 'object' && !Array.isArray(nextMessage)) {
-        for (const key of Object.keys(message)) {
-          if (!Object.prototype.hasOwnProperty.call(nextMessage, key)) {
-            delete message[key];
-          }
-        }
-        Object.assign(message, nextMessage);
-      }
-    }
-  }
-  if (message) {
-    const normalizedReasoning = normalizeMessageReasoningToolsWithNative(
-      message,
-      `responses_reasoning_${context?.requestId ?? 'canonical'}`
-    );
-    if (normalizedReasoning?.message && typeof normalizedReasoning.message === 'object' && !Array.isArray(normalizedReasoning.message)) {
-      for (const key of Object.keys(message)) {
-        if (!Object.prototype.hasOwnProperty.call(normalizedReasoning.message, key)) {
-          delete message[key];
-        }
-      }
-      Object.assign(message, normalizedReasoning.message);
-    }
-  }
   const nativeBuilt = buildResponsesPayloadFromChatWithNative(response as Record<string, unknown>, {
     requestId: context?.requestId,
     toolsRaw: Array.isArray(context?.toolsRaw) ? context?.toolsRaw : [],
-    metadata: retentionContext.metadata,
-    stripHostManagedFields: retentionContext.stripHostManagedFields,
+    metadata: context?.metadata,
+    stripHostManagedFields,
     sourceForRetention: sourceForRetention as Record<string, unknown> | undefined
   });
 
   const out: any = {
     ...nativeBuilt
   };
-  if (!retentionContext.stripHostManagedFields) {
-    const contextToolChoice =
-      (context as any)?.tool_choice !== undefined ? (context as any).tool_choice : (context as any)?.toolChoice;
-    const contextParallelToolCalls =
-      typeof (context as any)?.parallel_tool_calls === 'boolean'
-        ? (context as any).parallel_tool_calls
-        : typeof (context as any)?.parallelToolCalls === 'boolean'
-          ? (context as any).parallelToolCalls
-          : undefined;
-    const contextInclude = Array.isArray((context as any)?.include) ? ((context as any).include as unknown[]) : undefined;
-    const contextStore = typeof (context as any)?.store === 'boolean' ? ((context as any).store as boolean) : undefined;
-
-    if (out.tool_choice === undefined && contextToolChoice !== undefined) {
-      out.tool_choice = contextToolChoice;
-    }
-    if (out.parallel_tool_calls === undefined && contextParallelToolCalls !== undefined) {
-      out.parallel_tool_calls = contextParallelToolCalls;
-    }
-    if (out.include === undefined && contextInclude !== undefined) {
-      out.include = contextInclude;
-    }
-    if (out.store === undefined && contextStore !== undefined) {
-      out.store = contextStore;
-    }
-  }
-  normalizeResponsesToolCallArgumentsForClient(out, context);
-  normalizeResponsesClientOutputItems(out);
   if ((out as any).metadata) {
     stripInternalToolingMetadata((out as any).metadata);
   }

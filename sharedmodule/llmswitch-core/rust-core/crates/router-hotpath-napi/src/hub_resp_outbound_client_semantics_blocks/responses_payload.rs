@@ -6,9 +6,8 @@ use crate::hub_reasoning_tool_normalizer::{
     build_message_reasoning_value, normalize_message_reasoning_ssot,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::client_tool_args::{
-    build_client_tool_index, normalize_call_args,
-    normalize_responses_tool_call_arguments_for_client, resolve_client_tool_name,
-    sanitize_responses_client_payload_for_replay_safety,
+    build_client_tool_index, normalize_call_args, project_responses_client_body_for_client_core,
+    resolve_client_tool_name, sanitize_responses_client_payload_for_replay_safety,
 };
 use crate::hub_resp_outbound_client_semantics_blocks::context_helpers::resolve_client_protocol_for_response_entry;
 use crate::hub_resp_outbound_client_semantics_blocks::responses_reasoning::{
@@ -667,7 +666,7 @@ fn finalize_client_responses_payload(
         .cloned()
         .unwrap_or_else(|| Value::Array(Vec::new()));
     let mut normalized =
-        normalize_responses_tool_call_arguments_for_client(&Value::Object(out), &tools_raw);
+        project_responses_client_body_for_client_core(&Value::Object(out), &tools_raw);
     strip_stop_schema_control_payload(&mut normalized);
     normalized
 }
@@ -696,6 +695,12 @@ pub(crate) fn build_responses_payload_from_chat_core(
             response_row.clone(),
         ));
         ensure_response_created_at(&mut sanitized, response_row);
+        let tools_raw = context
+            .as_object()
+            .and_then(|v| v.get("toolsRaw"))
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        sanitized = project_responses_client_body_for_client_core(&sanitized, &tools_raw);
         strip_stop_schema_control_payload(&mut sanitized);
         return Ok(sanitized);
     }
@@ -1255,4 +1260,113 @@ pub(crate) fn project_post_servertool_hub_resp_outbound_04_client_semantic(
     }
     context.insert("responseSemantics".to_string(), response_semantics.clone());
     build_responses_payload_from_chat_core(payload, request_id, &Value::Object(context))
+}
+
+fn read_response_payload_snapshot_key(response: &Map<String, Value>, key: &str) -> Option<Value> {
+    response
+        .get(key)
+        .and_then(Value::as_object)
+        .map(|row| Value::Object(row.clone()))
+}
+
+fn normalize_existing_responses_payload(response: &Map<String, Value>) -> Value {
+    let mut sanitized =
+        sanitize_responses_client_payload_for_replay_safety(&Value::Object(response.clone()));
+    ensure_response_created_at(&mut sanitized, response);
+    strip_stop_schema_control_payload(&mut sanitized);
+    sanitized
+}
+
+pub(crate) fn plan_responses_payload_from_chat_closeout(payload: &Value, context: &Value) -> Value {
+    let response = unwrap_responses_data_node(payload);
+    let mut out = Map::new();
+    out.insert("response".to_string(), response.clone());
+
+    let Some(response_row) = response.as_object() else {
+        out.insert("kind".to_string(), Value::String("passthrough".to_string()));
+        return Value::Object(out);
+    };
+
+    let mut lookup_keys = Vec::<Value>::new();
+    for candidate in [
+        response_row.get("request_id").and_then(Value::as_str),
+        context_value(context, "requestId").and_then(Value::as_str),
+        response_row.get("id").and_then(Value::as_str),
+    ] {
+        if let Some(value) = candidate.map(str::trim).filter(|value| !value.is_empty()) {
+            let next = Value::String(value.to_string());
+            if !lookup_keys.contains(&next) {
+                lookup_keys.push(next);
+            }
+        }
+    }
+    out.insert("snapshotLookupKeys".to_string(), Value::Array(lookup_keys));
+
+    if let Some(inline_passthrough) =
+        read_response_payload_snapshot_key(response_row, "__responses_passthrough")
+    {
+        out.insert("inlinePassthrough".to_string(), inline_passthrough);
+    }
+    if let Some(inline_snapshot) =
+        read_response_payload_snapshot_key(response_row, "__responses_payload_snapshot")
+    {
+        out.insert("inlineSnapshot".to_string(), inline_snapshot);
+    }
+
+    let retention_context = Value::Object(Map::from_iter([
+        (
+            "metadata".to_string(),
+            context_value(context, "metadata")
+                .cloned()
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "stripHostManagedFields".to_string(),
+            Value::Bool(context_bool(context, "stripHostManagedFields")),
+        ),
+    ]));
+    out.insert("retentionContext".to_string(), retention_context);
+
+    let is_existing_responses_payload = response_row
+        .get("object")
+        .and_then(Value::as_str)
+        .map(|value| value == "response")
+        .unwrap_or(false)
+        && response_row
+            .get("output")
+            .and_then(Value::as_array)
+            .is_some();
+
+    if is_existing_responses_payload {
+        let tools_raw = context
+            .as_object()
+            .and_then(|v| v.get("toolsRaw"))
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let mut payload = normalize_existing_responses_payload(response_row);
+        payload = project_responses_client_body_for_client_core(&payload, &tools_raw);
+        strip_stop_schema_control_payload(&mut payload);
+        out.insert(
+            "kind".to_string(),
+            Value::String("existing_responses_payload".to_string()),
+        );
+        out.insert("payload".to_string(), payload);
+        return Value::Object(out);
+    }
+
+    let choices_len = response_row
+        .get("choices")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    out.insert("choicesLength".to_string(), Value::from(choices_len));
+    out.insert(
+        "kind".to_string(),
+        if choices_len == 0 {
+            Value::String("nonstandard_chat_payload".to_string())
+        } else {
+            Value::String("chat_completion_payload".to_string())
+        },
+    );
+    Value::Object(out)
 }

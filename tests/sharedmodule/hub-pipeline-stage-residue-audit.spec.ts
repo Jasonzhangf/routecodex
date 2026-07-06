@@ -711,11 +711,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('__responses_payload_snapshot');
     expect(source).not.toContain('__responses_passthrough');
 
-    const barrel = fs.readFileSync(
+    expect(fs.existsSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.ts'),
-      'utf8',
-    );
-    expect(barrel).not.toContain('AnthropicResponseFromChatOptions');
+    )).toBe(false);
   });
 
   it('Hub Anthropic response scripts must not restore ignored includeToolCallIds option', () => {
@@ -765,11 +763,12 @@ describe('hub pipeline stage residue audit', () => {
     const findings = collectMatches(source, [
       { label: 'uses TS bridge action state wrapper', pattern: /createBridgeActionState/ },
       { label: 'uses TS bridge action pipeline wrapper', pattern: /runBridgeActionPipeline\(/ },
+      { label: 'keeps response outbound bridge action owner in TS', pattern: /runBridgeActionPipelineWithNative/ },
       { label: 'swallows response outbound bridge action errors', pattern: /bridge action pipeline failed/ },
       { label: 'keeps ignored bridge logging failure catch', pattern: /ignore logging failures/ },
     ]);
 
-    expect(source).toContain('runBridgeActionPipelineWithNative');
+    expect(source).toContain('planResponsesPayloadFromChatCloseoutWithNative');
     expect(findings).toEqual([]);
   });
 
@@ -781,11 +780,13 @@ describe('hub pipeline stage residue audit', () => {
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'uses shared TS reasoning normalizer wrapper', pattern: /normalizeMessageReasoningTools\b/ },
+      { label: 'keeps response reasoning pre-normalization owner in TS', pattern: /normalizeMessageReasoningToolsWithNative/ },
+      { label: 'keeps chat response reasoning pre-normalization owner in TS', pattern: /normalizeChatResponseReasoningToolsWithNative/ },
       { label: 'keeps best-effort reasoning swallow comment', pattern: /best-effort reasoning normalization/ },
       { label: 'swallows reasoning normalization errors', pattern: /catch\s*\{\s*\/\/ best-effort reasoning normalization/s },
     ]);
 
-    expect(source).toContain('normalizeMessageReasoningToolsWithNative');
+    expect(source).toContain('planResponsesPayloadFromChatCloseoutWithNative');
     expect(findings).toEqual([]);
   });
 
@@ -4933,11 +4934,21 @@ describe('hub pipeline stage residue audit', () => {
         if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
           continue;
         }
+        if (relativePath === 'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts') {
+          continue;
+        }
         const source = fs.readFileSync(fullPath, 'utf8');
         if (
           /import\s*\{[^}]*\bVirtualRouterError(Code)?\b[^}]*\}\s*from\s*['"][^'"]*virtual-router-contracts\.js['"]/.test(source)
         ) {
           findings.push(`${relativePath}:virtual-router error imported from contracts`);
+        }
+        if (
+          /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"][^'"]*virtual-router-contracts\.js['"]/.test(source)
+          && !relativePath.startsWith('sharedmodule/llmswitch-core/src/native/router-hotpath/')
+          && relativePath !== 'sharedmodule/llmswitch-core/src/index.ts'
+        ) {
+          findings.push(`${relativePath}:upper layer imports virtual-router contracts directly`);
         }
       }
     }

@@ -635,6 +635,40 @@ export function buildResponsesPayloadFromChatWithNative(
   }
 }
 
+export function planResponsesPayloadFromChatCloseoutWithNative(
+  payload: unknown,
+  context: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const capability = 'planResponsesPayloadFromChatCloseoutJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(payload);
+  const contextJson = safeStringify(context);
+  if (!payloadJson || !contextJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson, contextJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return parseRecord(raw) ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function projectPostServertoolHubRespOutbound04ClientSemanticWithNative(input: {
   payload: unknown;
   entryEndpoint?: string;
