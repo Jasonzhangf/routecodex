@@ -30,12 +30,6 @@ export interface ChatToolDefinition {
   [key: string]: unknown;
 }
 
-export interface MissingField extends JsonObject {
-  path: string;
-  reason: string;
-  originalValue?: JsonValue;
-}
-
 export interface AdapterContext {
   requestId: string;
   entryEndpoint: string;
@@ -194,7 +188,11 @@ export interface ChatEnvelope {
   semantics?: ChatSemantics;
   metadata: {
     context: AdapterContext;
-    missingFields?: MissingField[];
+    missingFields?: Array<JsonObject & {
+      path: string;
+      reason: string;
+      originalValue?: JsonValue;
+    }>;
     [key: string]: unknown;
   };
 }

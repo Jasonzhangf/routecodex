@@ -4167,6 +4167,7 @@ describe('hub pipeline stage residue audit', () => {
       'ChatContinuationPointer',
       'ChatToolContinuation',
       'ChatToolOutput',
+      'MissingField',
       'ChatProtocolMappingDisposition',
       'ChatProtocolMappingAuditEntry',
       'ChatSemanticAudit',
