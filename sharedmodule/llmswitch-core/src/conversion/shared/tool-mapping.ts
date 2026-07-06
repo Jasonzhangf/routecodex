@@ -1,10 +1,38 @@
 import type { ChatToolDefinition } from '../hub/types/chat-envelope.js';
-import type { BridgeToolDefinition } from '../types/bridge-message-types.js';
 import {
   flattenChatToolsForFunctionCallingWithNative,
   mapBridgeToolsToChatWithNative,
   mapChatToolsToBridgeWithNative
 } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
+
+export type BridgeToolDefinition = {
+  type: string;
+  name?: string;
+  description?: string;
+  strict?: boolean;
+  defer_loading?: boolean;
+  parameters?: unknown;
+  tools?: Array<{
+    type?: string;
+    name?: string;
+    description?: string;
+    strict?: boolean;
+    defer_loading?: boolean;
+    parameters?: unknown;
+    function?: {
+      name?: string;
+      description?: string;
+      strict?: boolean;
+      parameters?: unknown;
+    };
+  }>;
+  function?: {
+    name?: string;
+    description?: string;
+    strict?: boolean;
+    parameters?: unknown;
+  };
+};
 
 interface BridgeToolMapOptions {
   sanitizeName?: (name: string) => string | undefined;

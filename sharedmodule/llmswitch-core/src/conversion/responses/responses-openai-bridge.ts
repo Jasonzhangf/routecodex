@@ -1,11 +1,11 @@
 import { ensureBridgeInstructions } from '../bridge-instructions.js';
 import { evaluateResponsesHostPolicy } from './responses-host-policy.js';
-import type { BridgeInputItem, BridgeToolDefinition } from '../types/bridge-message-types.js';
 import type { ChatToolDefinition } from '../hub/types/chat-envelope.js';
 import type { JsonObject, JsonValue } from '../hub/types/json.js';
 import {
   convertMessagesToBridgeInput,
-  convertBridgeInputToChatMessages
+  convertBridgeInputToChatMessages,
+  type BridgeInputItem
 } from '../bridge-message-utils.js';
 import type { BridgeInputBuildResult } from '../bridge-message-utils.js';
 import {
@@ -13,7 +13,7 @@ import {
   enforceToolCallIdStyle,
   sanitizeResponsesFunctionName
 } from '../shared/responses-tool-utils.js';
-import { mapChatToolsToBridge } from '../shared/tool-mapping.js';
+import { mapChatToolsToBridge, type BridgeToolDefinition } from '../shared/tool-mapping.js';
 import { ProviderProtocolError } from '../provider-protocol-error.js';
 import { isJsonObject, jsonClone } from '../hub/types/json.js';
 import { ensureRuntimeMetadata } from '../runtime-metadata.js';

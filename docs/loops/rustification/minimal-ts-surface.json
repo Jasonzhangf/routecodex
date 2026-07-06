@@ -124,14 +124,6 @@
       "forbiddenSemantics": ["conversion execution", "provider runtime", "routing"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/types/bridge-message-types.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.pipeline_contract_surface",
-      "minimumTsRole": "Bridge message TS declarations for host compile boundary.",
-      "cannotShrinkFurtherBecause": "Current bridge host code and tests compile against these TS declarations; only generated bindings or full TS bridge removal can eliminate them.",
-      "forbiddenSemantics": ["bridge action execution", "tool normalization", "message repair"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.ts",
       "classification": "native_shell_ok",
       "ownerFeature": "error.provider_failure_policy",
