@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process';
 
 const ROOT = process.cwd();
 const MANIFEST_PATH = path.join(ROOT, 'docs/loops/rustification/minimal-ts-surface.json');
+const FUNCTION_MAP_PATH = path.join(ROOT, 'docs/architecture/function-map.yml');
+const VERIFICATION_MAP_PATH = path.join(ROOT, 'docs/architecture/verification-map.yml');
 const SRC_PREFIX = 'sharedmodule/llmswitch-core/src/';
 const GENERATED_DIR_NAMES = new Set([
   'dist',
@@ -178,6 +180,26 @@ function readManifest() {
   return JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
 }
 
+function readFeatureIds(filePath) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`missing feature map: ${path.relative(ROOT, filePath)}`);
+  }
+  const source = fs.readFileSync(filePath, 'utf8');
+  const ids = new Set();
+  const featureIdPattern = /^\s*-\s+feature_id:\s*([^\s#]+)/gmu;
+  let match;
+  while ((match = featureIdPattern.exec(source))) {
+    ids.add(match[1]);
+  }
+  return ids;
+}
+
+function hasFeatureOrDescendant(featureIds, ownerFeature) {
+  if (featureIds.has(ownerFeature)) return true;
+  const childPrefix = `${ownerFeature}.`;
+  return Array.from(featureIds).some((featureId) => featureId.startsWith(childPrefix));
+}
+
 function hasUsefulReason(value) {
   return typeof value === 'string' && value.trim().length >= 40;
 }
@@ -219,6 +241,8 @@ function main() {
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
   const errors = [];
   const current = new Set(listCurrentNonNativeProdTsFiles());
+  const functionMapFeatureIds = readFeatureIds(FUNCTION_MAP_PATH);
+  const verificationMapFeatureIds = readFeatureIds(VERIFICATION_MAP_PATH);
   const explicitNativeLinkedShells = new Set();
   const manifestPaths = new Set();
 
@@ -254,6 +278,13 @@ function main() {
     }
     if (typeof entry.ownerFeature !== 'string' || !entry.ownerFeature.trim()) {
       errors.push(`missing ownerFeature for ${rel}`);
+    } else {
+      if (!hasFeatureOrDescendant(functionMapFeatureIds, entry.ownerFeature)) {
+        errors.push(`ownerFeature is missing from function-map feature ids: ${rel} -> ${entry.ownerFeature}`);
+      }
+      if (!hasFeatureOrDescendant(verificationMapFeatureIds, entry.ownerFeature)) {
+        errors.push(`ownerFeature is missing from verification-map feature ids: ${rel} -> ${entry.ownerFeature}`);
+      }
     }
     if (!Array.isArray(entry.forbiddenSemantics) || entry.forbiddenSemantics.length === 0) {
       errors.push(`missing forbiddenSemantics for ${rel}`);
