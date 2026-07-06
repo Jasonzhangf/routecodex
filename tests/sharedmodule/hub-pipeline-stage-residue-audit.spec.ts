@@ -4539,6 +4539,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize-tool-history.js',
       'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.js',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.d.ts',

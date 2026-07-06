@@ -29,19 +29,17 @@ import {
   planScopeContinuationMatch,
   restoreContinuationPayload,
   resumeConversationPayload,
+  type AnyRecord,
+  type CaptureContextArgs,
+  type ConversationEntry,
+  type ContinuationLookupOptions,
+  type RecordResponseArgs,
+  type ResponsesStoreLookupResult,
+  type ResponsesContinuationEntryKind,
+  type RestoreByScopeArgs,
+  type ResumeOptions,
+  type ResumeResult,
 } from './responses-conversation-store-native.js';
-import type {
-  AnyRecord,
-  CaptureContextArgs,
-  ConversationEntry,
-  ContinuationLookupOptions,
-  RecordResponseArgs,
-  ResponsesStoreLookupResult,
-  ResponsesContinuationEntryKind,
-  RestoreByScopeArgs,
-  ResumeOptions,
-  ResumeResult
-} from './responses-conversation-store-types.js';
 
 const TTL_MS = 1000 * 60 * 30; // 30min
 const PERSIST_SCHEMA_VERSION = 1;

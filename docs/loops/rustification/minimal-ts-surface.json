@@ -124,14 +124,6 @@
       "forbiddenSemantics": ["Responses request build", "history repair", "metadata projection"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.chat_process_responses_continuation",
-      "minimumTsRole": "Responses store TS interface declarations consumed by the IO shell and tests.",
-      "cannotShrinkFurtherBecause": "Rust owns continuation decisions, but the current TS IO shell needs compile-time entry/result shapes until the store IO itself moves out of Node.",
-      "forbiddenSemantics": ["scope matching", "owner policy", "payload materialization"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts",
       "classification": "ts_io_shell_ok",
       "ownerFeature": "hub.chat_process_responses_continuation",
