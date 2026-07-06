@@ -193,6 +193,36 @@ function buildResponsesRequestContextFromOriginalPayload(
   };
 }
 
+function summarizeRecordKeys(value: Record<string, unknown> | undefined): string[] {
+  return value ? Object.keys(value).sort() : [];
+}
+
+function createResponsesRequestContextMissingError(args: {
+  input: PipelineExecutionInput;
+  metadata: Record<string, unknown>;
+  providerKey?: string;
+  currentPayload?: Record<string, unknown>;
+  rawEntryPayload?: Record<string, unknown>;
+}): Error {
+  const error = new Error('RESPONSES_STORE_MISSING_REQUEST_CONTEXT');
+  Object.assign(error, {
+    code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+    internalCode: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
+    stage: 'responsesConversation.capture',
+    details: {
+      requestId: args.input.requestId,
+      entryEndpoint: args.input.entryEndpoint,
+      providerKey: args.providerKey,
+      hasCurrentPayload: Boolean(args.currentPayload),
+      hasRawEntryPayload: Boolean(args.rawEntryPayload),
+      hasContextSnapshot: Boolean(readContextSnapshot(args.metadata)),
+      currentPayloadKeys: summarizeRecordKeys(args.currentPayload),
+      rawEntryPayloadKeys: summarizeRecordKeys(args.rawEntryPayload)
+    }
+  });
+  return error;
+}
+
 function readResponsesConversationMatchedPort(metadata: Record<string, unknown>): number | undefined {
   const candidates = [
     metadata.portScope,
@@ -242,7 +272,11 @@ export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntr
     ? readContextSnapshot(args.metadata) ?? buildResponsesRequestContextFromOriginalPayload(payload)
     : undefined;
   if (!payload || !context) {
-    return null;
+    throw createResponsesRequestContextMissingError({
+      ...args,
+      currentPayload,
+      rawEntryPayload
+    });
   }
   const {
     requestId: _requestTruthRequestId,

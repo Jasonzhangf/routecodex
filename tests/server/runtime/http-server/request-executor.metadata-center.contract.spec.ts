@@ -516,6 +516,28 @@ describe('request-executor metadata center contract', () => {
     });
   });
 
+  it('fails before provider send when Responses raw entry payload is already missing after provider wire rewrite', () => {
+    const metadata: Record<string, unknown> = {
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      portScope: '5555'
+    };
+
+    expect(() => resolveResponsesConversationRequestCaptureArgsForChatProcessEntry({
+      input: {
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_missing_raw_capture_1',
+        body: {
+          data: {
+            model: 'glm-5.2',
+            messages: [{ role: 'user', content: 'continue' }]
+          }
+        }
+      },
+      metadata,
+      providerKey: 'orangeai.key1.glm-5.2'
+    })).toThrow('RESPONSES_STORE_MISSING_REQUEST_CONTEXT');
+  });
+
   it('captures Responses request context with active provider request id after provider request id enhancement', () => {
     const metadata: Record<string, unknown> = {
       routecodexRoutingPolicyGroup: 'gateway_priority_5555',
