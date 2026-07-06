@@ -19,7 +19,6 @@ type ProgressFileLoggerModule = {
     providerProtocol?: string;
   }) => void;
   flushServerToolProgressFileLoggerForTests?: () => Promise<void>;
-  resetServerToolProgressFileLoggerForTests?: () => void;
 };
 
 const progressFileLoggerRuntimePath = path.join(
@@ -36,7 +35,6 @@ const supportsProgressFileLogger = fs.existsSync(progressFileLoggerRuntimePath);
 const testIfProgressFileLogger = supportsProgressFileLogger ? test : test.skip;
 
 let flushServerToolProgressFileLoggerForTests: () => Promise<void> = async () => {};
-let resetServerToolProgressFileLoggerForTests: () => void = () => {};
 
 function bindMetadataCenter<T extends Record<string, unknown>>(context: T): T {
   MetadataCenter.attach(context);
@@ -95,8 +93,6 @@ beforeAll(async () => {
   )) as ProgressFileLoggerModule;
   flushServerToolProgressFileLoggerForTests =
     mod.flushServerToolProgressFileLoggerForTests ?? (async () => {});
-  resetServerToolProgressFileLoggerForTests =
-    mod.resetServerToolProgressFileLoggerForTests ?? (() => {});
 });
 
 afterAll(() => {
@@ -354,8 +350,6 @@ describe('servertool progress logging', () => {
     process.env.ROUTECODEX_SESSION_DIR = sessionDir;
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG = '1';
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH = logPath;
-    resetServerToolProgressFileLoggerForTests();
-
     const sessionId = `sess-stop-lifecycle-${Date.now()}`;
     fs.mkdirSync(sessionDir, { recursive: true });
     const sessionFile = path.join(sessionDir, `tmux-${sessionId}.json`);
@@ -508,7 +502,6 @@ describe('servertool progress logging', () => {
       ).toBe(true);
     } finally {
       spy.mockRestore();
-      resetServerToolProgressFileLoggerForTests();
       if (originalSessionDir === undefined) {
         delete process.env.ROUTECODEX_SESSION_DIR;
       } else {
@@ -546,8 +539,6 @@ describe('servertool progress logging', () => {
     process.env.ROUTECODEX_SESSION_DIR = sessionDir;
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG = '1';
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH = logPath;
-    resetServerToolProgressFileLoggerForTests();
-
     const sessionId = `sess-filelog-enabled-${Date.now()}`;
     fs.mkdirSync(sessionDir, { recursive: true });
     const sessionFile = path.join(sessionDir, `tmux-${sessionId}.json`);
@@ -629,7 +620,6 @@ describe('servertool progress logging', () => {
       expect(events.some((event) => event.requestId === 'req-filelog-enabled' && event.stage === 'compare' && event.tool === 'stop_message_auto')).toBe(true);
       expect(events.some((event) => event.requestId === 'req-filelog-enabled' && event.stage === 'final' && event.tool === 'stop_message_auto')).toBe(true);
     } finally {
-      resetServerToolProgressFileLoggerForTests();
       if (originalSessionDir === undefined) {
         delete process.env.ROUTECODEX_SESSION_DIR;
       } else {
@@ -667,8 +657,6 @@ describe('servertool progress logging', () => {
     process.env.ROUTECODEX_SESSION_DIR = sessionDir;
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG = '0';
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH = logPath;
-    resetServerToolProgressFileLoggerForTests();
-
     const sessionId = `sess-filelog-disabled-${Date.now()}`;
     fs.mkdirSync(sessionDir, { recursive: true });
     const sessionFile = path.join(sessionDir, `tmux-${sessionId}.json`);
@@ -743,7 +731,6 @@ describe('servertool progress logging', () => {
       await flushServerToolProgressFileLoggerForTests();
       expect(fs.existsSync(logPath)).toBe(false);
     } finally {
-      resetServerToolProgressFileLoggerForTests();
       if (originalSessionDir === undefined) {
         delete process.env.ROUTECODEX_SESSION_DIR;
       } else {
@@ -782,14 +769,11 @@ describe('servertool progress logging', () => {
     )) as ProgressFileLoggerModule;
     const append = mod.appendServerToolProgressFileEvent;
     const flush = mod.flushServerToolProgressFileLoggerForTests;
-    const reset = mod.resetServerToolProgressFileLoggerForTests;
     expect(typeof append).toBe('function');
     expect(typeof flush).toBe('function');
-    expect(typeof reset).toBe('function');
 
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG = '1';
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH = path.join(fileAsParent, 'events.jsonl');
-    reset?.();
 
     try {
       append?.({

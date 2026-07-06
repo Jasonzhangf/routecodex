@@ -18,8 +18,6 @@ const truthy = new Set(['1', 'true', 'yes', 'on']);
 const falsy = new Set(['0', 'false', 'no', 'off']);
 const DEFAULT_LOG_PATH = path.join(resolveRccPath(), 'logs', 'servertool-events.jsonl');
 
-let cachedEnabled: boolean | null = null;
-let cachedLogPath: string | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 const ensuredDirs = new Set<string>();
 
@@ -41,9 +39,6 @@ function isDevMode(): boolean {
 }
 
 function resolveEnabled(): boolean {
-  if (cachedEnabled !== null) {
-    return cachedEnabled;
-  }
   const raw = String(
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG ??
       process.env.RCC_SERVERTOOL_FILE_LOG ??
@@ -53,29 +48,22 @@ function resolveEnabled(): boolean {
     .trim()
     .toLowerCase();
   if (truthy.has(raw)) {
-    cachedEnabled = true;
     return true;
   }
   if (falsy.has(raw)) {
-    cachedEnabled = false;
     return false;
   }
-  cachedEnabled = isDevMode();
-  return cachedEnabled;
+  return isDevMode();
 }
 
 function resolveLogPath(): string {
-  if (cachedLogPath) {
-    return cachedLogPath;
-  }
   const raw = String(
     process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH ??
       process.env.RCC_SERVERTOOL_FILE_LOG_PATH ??
       process.env.LLMSWITCH_SERVERTOOL_FILE_LOG_PATH ??
       ''
   ).trim();
-  cachedLogPath = raw || DEFAULT_LOG_PATH;
-  return cachedLogPath;
+  return raw || DEFAULT_LOG_PATH;
 }
 
 async function ensureParentDir(logPath: string): Promise<void> {
@@ -97,13 +85,6 @@ export function appendServerToolProgressFileEvent(event: ServerToolProgressFileE
     await ensureParentDir(logPath);
     await fs.appendFile(logPath, line, 'utf8');
   });
-}
-
-export function resetServerToolProgressFileLoggerForTests(): void {
-  cachedEnabled = null;
-  cachedLogPath = null;
-  ensuredDirs.clear();
-  writeQueue = Promise.resolve();
 }
 
 export async function flushServerToolProgressFileLoggerForTests(): Promise<void> {

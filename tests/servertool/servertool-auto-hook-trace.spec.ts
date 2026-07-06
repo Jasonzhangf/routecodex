@@ -2,10 +2,10 @@ import { beforeAll, beforeEach, describe, expect, jest, test } from '@jest/globa
 import type {
   ServerSideToolEngineOptions,
   ServerToolAutoHookTraceEvent,
+  ServerToolAutoHookDescriptor,
   ServerToolHandlerContext,
 } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
-import type { ServerToolExecutionDescriptor } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const registryHooks: Array<{
@@ -14,7 +14,7 @@ const registryHooks: Array<{
   priority: number;
   order: number;
   registration?: Record<string, unknown>;
-  execution: ServerToolExecutionDescriptor & { __testHandler?: (ctx: ServerToolHandlerContext) => Promise<any> };
+  execution: ServerToolAutoHookDescriptor['execution'] & { __testHandler?: (ctx: ServerToolHandlerContext) => Promise<any> };
 }> = [];
 
 function normalizeMockAutoHookError(error: any): string {

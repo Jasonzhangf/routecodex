@@ -1062,13 +1062,6 @@ export function clearResponsesConversationByRequestId(requestId?: string): void 
   store.clearRequest(requestId);
 }
 
-export function releaseResponsesConversationRequestPayload(requestId?: string): void {
-  if (RESPONSES_DEBUG && requestId) {
-    console.log('[responses-store] release-payload', requestId);
-  }
-  store.releaseRequestPayload(requestId);
-}
-
 export function finalizeResponsesConversationRequestRetention(
   requestId?: string,
   options?: { keepForSubmitToolOutputs?: boolean }

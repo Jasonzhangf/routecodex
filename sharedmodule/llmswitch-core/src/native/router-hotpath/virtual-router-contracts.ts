@@ -51,7 +51,7 @@ export interface RoutePoolTier {
   routeParams?: Record<string, unknown>;
 }
 
-export type RoutingPools = Record<string, RoutePoolTier[]>;
+type RoutingPools = Record<string, RoutePoolTier[]>;
 
 export type StreamingPreference = "auto" | "always" | "never";
 

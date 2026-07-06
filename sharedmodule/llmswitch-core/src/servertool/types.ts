@@ -55,12 +55,10 @@ export interface ServerToolExecution {
 type TriggerMode = 'tool_call' | 'auto';
 type AutoHookPhase = 'pre' | 'default' | 'post';
 
-type ServerToolBuiltinExecutionDescriptor = {
+type ServerToolExecutionDescriptor = {
   kind: 'builtin';
   builtinName: string;
 };
-
-export type ServerToolExecutionDescriptor = ServerToolBuiltinExecutionDescriptor;
 
 export interface ServerToolHandlerEntry {
   name: string;
