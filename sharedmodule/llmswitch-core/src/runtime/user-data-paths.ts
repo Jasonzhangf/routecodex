@@ -26,7 +26,7 @@ function expandHome(value: string, homeDir?: string): string {
 
 function isLegacyUserDirPath(value: string, homeDir?: string): boolean {
   const normalized = path.resolve(expandHome(value, homeDir));
-  const legacy = resolveLegacyRouteCodexUserDir(homeDir);
+  const legacy = path.join(resolveHomeDir(homeDir), LEGACY_DIR_NAME);
   return normalized === legacy;
 }
 
@@ -41,10 +41,6 @@ export function resolveRccUserDir(homeDir?: string): string {
     }
   }
   return path.join(resolveHomeDir(homeDir), PRIMARY_DIR_NAME);
-}
-
-function resolveLegacyRouteCodexUserDir(homeDir?: string): string {
-  return path.join(resolveHomeDir(homeDir), LEGACY_DIR_NAME);
 }
 
 export function resolveRccPath(...segments: string[]): string {
