@@ -613,9 +613,11 @@ describe('servertool skeleton config', () => {
   });
 
   test('auto hook queue shell does not expose a reusable TS queue builder', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile('sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts', 'utf8')
-    );
+    const fs = await import('node:fs/promises');
+    await expect(
+      fs.access('sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts')
+    ).rejects.toThrow();
+    const source = await fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8');
 
     expect(source).not.toContain('buildAutoHookQueuesFromConfig');
     expect(source).not.toContain('planServertoolAutoHookQueuesWithNative');

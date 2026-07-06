@@ -220,14 +220,6 @@
       "forbiddenSemantics": ["servertool execution policy", "followup orchestration", "tool governance"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.servertool_orchestration_policy",
-      "minimumTsRole": "Tiny TS structural helper/type surface for servertool host orchestration.",
-      "cannotShrinkFurtherBecause": "No runtime policy remains here; deleting it requires replacing current TS host imports.",
-      "forbiddenSemantics": ["servertool followup", "hook selection", "response action planning"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/servertool/types.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.servertool_rust_only_closeout",

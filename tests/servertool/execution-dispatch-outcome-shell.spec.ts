@@ -189,18 +189,6 @@ jest.unstable_mockModule(
   })
 );
 
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.js',
-  () => ({
-    replaceJsonObjectInPlace: jest.fn((target: any, next: any) => {
-      for (const key of Object.keys(target)) {
-        delete target[key];
-      }
-      Object.assign(target, next);
-    })
-  })
-);
-
 const {
   runServertoolIoExecutionQueue
 } = await import(

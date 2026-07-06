@@ -23,13 +23,24 @@ import {
   type NativeServertoolExecutedRecord,
   type NativeServertoolExecutionLoopState
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
-import { replaceJsonObjectInPlace } from './orchestration-blocks.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
 export type {
   NativeServertoolExecutedRecord as ServertoolExecutedRecord,
   NativeServertoolExecutionLoopState as ServertoolExecutionLoopState
 };
+
+function replaceJsonObjectInPlace(target: JsonObject, next: JsonObject): void {
+  const newKeys = new Set(Object.keys(next));
+  for (const [key, value] of Object.entries(next)) {
+    target[key] = value;
+  }
+  for (const key of Object.keys(target)) {
+    if (!newKeys.has(key)) {
+      delete target[key];
+    }
+  }
+}
 
 export async function runServertoolIoExecutionQueue(args: {
   dispatchPlan: ReturnType<typeof planServertoolToolCallDispatchWithNative>;

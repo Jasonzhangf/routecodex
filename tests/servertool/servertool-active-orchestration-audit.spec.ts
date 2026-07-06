@@ -105,26 +105,6 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts',
-    forbidden: [
-      'export function appendToolOutput(',
-      "nativeRecord({ op: 'append_tool_output'",
-      'export function buildAssistantToolCallMessage(',
-      'export function buildToolMessagesFromOutputs(',
-      'export function stripToolOutputs(',
-      'export function patchToolCallArgumentsById(',
-      'export function filterOutExecutedToolCalls(',
-      'export function buildAutoHookQueuesFromConfig(',
-      'planServertoolAutoHookQueuesWithNative',
-      'sourceIndex',
-      'function replaceJsonObjectInPlaceInternal(',
-      'function nativeArray(',
-      'function nativeRecord(',
-      '.filter((hook): hook is',
-      '.filter(Boolean)',
-    ],
-  },
-  {
     file: 'sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts',
     forbidden: [
       'export function createServerToolTimeoutError(',
