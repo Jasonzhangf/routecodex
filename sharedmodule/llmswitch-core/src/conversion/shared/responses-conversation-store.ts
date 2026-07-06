@@ -400,28 +400,6 @@ class ResponsesConversationStore {
       entry = this.requestMap.get(responseId);
     }
     if (!entry) {
-      const fallbackTokens = normalizeStoreTokens({
-        entryKind: args.entryKind,
-        continuationOwner: args.continuationOwner
-      });
-      const fallbackScopeKeys = buildRequestedScopeKeys({
-        sessionId: args.sessionId,
-        conversationId: args.conversationId,
-        entryKind: fallbackTokens.entryKind,
-        continuationOwner: fallbackTokens.continuationOwner,
-        matchedPort: args.matchedPort,
-        routingPolicyGroup: args.routingPolicyGroup
-      });
-      const { entriesByScopeKey, candidates } = collectScopeMatchCandidates(this.scopeIndex, fallbackScopeKeys);
-      const fallbackPlan = planRecordScopeEntryMatch({
-        scopeKeys: fallbackScopeKeys,
-        candidates
-      });
-      if (fallbackPlan.action === 'select' && fallbackPlan.scopeKey) {
-        entry = entriesByScopeKey.get(fallbackPlan.scopeKey);
-      }
-    }
-    if (!entry) {
       logResponsesStoreNonBlockingError('record.missing_request_context', new Error('missing_request_context'), {
         code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
         reason: 'missing_request_context',

@@ -22,7 +22,7 @@ import {
   recordResponsesResponse,
   finalizeResponsesConversationRequestRetention,
 } from '../../shared/responses-conversation-store.js';
-import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
+import { planChatProcessSessionUsage } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
 import {
   buildReadableFromSseFrames,
   buildSseFramesFromJsonWithNative,
@@ -296,8 +296,8 @@ function executeProviderResponseNativeRuntimeStateEffect(args: {
     );
   }
   if (plan.usageArgs) {
-    saveChatProcessSessionActualUsage({
-      context: args.context,
+    planChatProcessSessionUsage({
+      context: args.context as unknown as Record<string, unknown>,
       usage: plan.usageArgs.usage as Record<string, unknown> | undefined
     });
   }
