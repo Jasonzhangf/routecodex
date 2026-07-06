@@ -1444,9 +1444,9 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
+      - "Must verify standalone TS chat-process-session-usage shell remains physically deleted and provider-response.ts only invokes native planChatProcessSessionUsage."
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
     integration:

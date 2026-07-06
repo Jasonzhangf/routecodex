@@ -6,7 +6,7 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 import {
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
-import { buildOpenAIChatFromAnthropicMessage } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.js';
+import { buildOpenAIChatFromAnthropicMessage } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.js';
 import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 

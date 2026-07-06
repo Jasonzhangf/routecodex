@@ -2278,7 +2278,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts
     forbidden_paths:
       - src/providers
       - src/server/handlers
@@ -2291,7 +2290,7 @@ owners:
     notes:
       - "All requestId generation must go through plan_chat_process_session_usage_json; TS must never locally compose `req_N_N`."
       - "Global counter file lives at ~/.rcc/state/global-request-counter.json; daily count resets when local date string changes."
-      - "TS `chat-process-session-usage.ts` is a native shell only; it may call `planChatProcessSessionUsage` but must not own scope resolution, token normalization, timestamping, or routing-state writes."
+      - "Standalone TS `chat-process-session-usage.ts` shell is physically deleted; provider-response.ts may only invoke native `planChatProcessSessionUsage` and must not own scope resolution, token normalization, timestamping, or routing-state writes."
 
   - feature_id: tool.apply_patch_freeform_contract
     status: active

@@ -251,12 +251,6 @@
       "topDir": "conversion"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts",
-      "loc": 18,
-      "nativeLinked": false,
-      "topDir": "conversion"
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts",
       "loc": 40,
       "nativeLinked": true,
@@ -272,12 +266,6 @@
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts",
       "loc": 31,
       "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.ts",
-      "loc": 5,
-      "nativeLinked": false,
       "topDir": "conversion"
     },
     {

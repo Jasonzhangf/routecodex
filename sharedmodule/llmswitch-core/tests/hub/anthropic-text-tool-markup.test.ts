@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { buildOpenAIChatFromAnthropicMessage } from '../../src/conversion/hub/response/response-runtime.js';
+import { buildOpenAIChatFromAnthropicMessage } from '../../src/conversion/hub/response/response-runtime-anthropic.js';
 
 describe('anthropic text tool markup extraction', () => {
   test('extracts tool_calls from <tool_call> markup in text blocks', () => {

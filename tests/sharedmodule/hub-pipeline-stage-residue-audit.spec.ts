@@ -4139,22 +4139,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('export interface ProcessedRequest');
   });
 
-  it('chat process session usage bridge must not restore retired token estimate branch', () => {
+  it('chat process session usage TS shell must stay physically deleted', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts');
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  it('provider response may only invoke native session usage plan without restoring TS usage semantics', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'restores retired session token estimator export', pattern: /estimateSessionBoundTokens/ },
       { label: 'restores retired session delta token estimator', pattern: /estimateDeltaTokens|countRequestTokens/ },
       { label: 'restores retired session usage snapshot reader', pattern: /SessionUsageSnapshot|buildSnapshot/ },
-    ]);
-
-    expect(findings).toEqual([]);
-  });
-
-  it('chat process session usage bridge must stay a native shell', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
       { label: 'restores TS session usage scope resolver', pattern: /function\s+resolveSessionUsageScope\b/ },
       { label: 'restores TS usage token normalization', pattern: /function\s+normalizeUsage\b|function\s+readRoundedToken\b/ },
       { label: 'restores TS routing state read/write', pattern: /loadRoutingInstructionStateSync|saveRoutingInstructionStateSync|function\s+loadState\b/ },
@@ -4164,7 +4160,8 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(findings).toEqual([]);
     expect(source).toContain('planChatProcessSessionUsage');
-    expect(source).toContain("from '../../../native/router-hotpath/native-virtual-router-routing-state.js'");
+    expect(source).not.toContain('saveChatProcessSessionActualUsage');
+    expect(source).not.toContain('../process/chat-process-session-usage.js');
   });
 
   it('marker lifecycle shared helper must stay physically deleted', () => {

@@ -92,14 +92,6 @@
       "forbiddenSemantics": ["metadata control truth", "request/response semantic conversion", "route selection"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts",
-      "classification": "diagnostic_io_ok",
-      "ownerFeature": "hub.req_chatprocess_governance",
-      "minimumTsRole": "Usage/session observation helper for TS host diagnostics.",
-      "cannotShrinkFurtherBecause": "Remaining work is JS object observation at the host boundary; Rust owns Chat Process semantics and no semantic branch remains to migrate.",
-      "forbiddenSemantics": ["tool governance", "history repair", "continuation restore"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.pipeline_contract_surface",

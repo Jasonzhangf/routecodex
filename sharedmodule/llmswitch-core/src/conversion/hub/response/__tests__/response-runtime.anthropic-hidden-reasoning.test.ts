@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { buildOpenAIChatFromAnthropicMessage } from '../response-runtime.js';
+import { buildOpenAIChatFromAnthropicMessage } from '../response-runtime-anthropic.js';
 import { buildResponsesPayloadFromChatWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 
 describe('response-runtime anthropic hidden reasoning', () => {
