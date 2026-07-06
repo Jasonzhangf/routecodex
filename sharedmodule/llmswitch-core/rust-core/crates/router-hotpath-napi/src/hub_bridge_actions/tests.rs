@@ -1731,11 +1731,15 @@ fn convert_bridge_input_preserves_custom_tool_call_and_output_pair() {
         .find(|entry| entry.get("tool_calls").and_then(Value::as_array).is_some())
         .unwrap();
     assert_eq!(tool_call["role"].as_str(), Some("assistant"));
-    let expected_arguments = serde_json::to_string(&json!({"patch": patch})).unwrap();
     assert_eq!(
         tool_call["tool_calls"][0]["function"]["arguments"].as_str(),
-        Some(expected_arguments.as_str())
+        Some(patch)
     );
+    assert!(!tool_call["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .unwrap()
+        .trim_start()
+        .starts_with('{'));
     let tool_result = output
         .messages
         .iter()

@@ -6,8 +6,7 @@ use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::{
-    normalize_tool_result_text, normalize_tool_result_value, parse_lenient_string,
-    repair_arguments_to_string,
+    normalize_tool_result_value, parse_lenient_string, repair_arguments_to_string,
 };
 
 use super::history::can_allow_terminal_pending_tool_calls;
@@ -280,11 +279,13 @@ fn repair_bridge_tool_arguments(
 ) -> String {
     if entry_type == "custom_tool_call" {
         let input = entry.get("input").cloned().unwrap_or(Value::Null);
-        let argument_key = match read_trimmed_string(entry.get("name")).as_deref() {
-            Some("apply_patch") => "patch",
-            _ => "input",
-        };
-        return serde_json::to_string(&serde_json::json!({ argument_key: input }))
+        if read_trimmed_string(entry.get("name")).as_deref() == Some("apply_patch") {
+            return input
+                .as_str()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| normalize_tool_result_value(&input));
+        }
+        return serde_json::to_string(&serde_json::json!({ "input": input }))
             .unwrap_or_else(|_| "{}".to_string());
     }
     repair_arguments_to_string(args).trim().to_string()
