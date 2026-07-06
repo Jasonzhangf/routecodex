@@ -63,10 +63,6 @@ export function resolveRccPath(...segments: string[]): string {
   return path.join(resolveRccUserDir(), ...segments);
 }
 
-function resolveLegacyRouteCodexPath(...segments: string[]): string {
-  return path.join(resolveLegacyRouteCodexUserDir(), ...segments);
-}
-
 export function resolveRccSnapshotsDir(homeDir?: string): string {
   return path.join(resolveRccUserDir(homeDir), SNAPSHOT_DIR_NAME);
 }
@@ -83,8 +79,4 @@ export function resolveRccSnapshotsDirFromEnv(homeDir?: string): string {
     }
   }
   return resolveRccSnapshotsDir(homeDir);
-}
-
-function resolveRccPathForRead(...segments: string[]): string {
-  return resolveRccPath(...segments);
 }
