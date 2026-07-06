@@ -105,6 +105,7 @@ function main() {
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
   const errors = [];
   const current = new Set(listCurrentNonNativeProdTsFiles());
+  const explicitNativeLinkedShells = new Set();
   const manifestPaths = new Set();
 
   for (const entry of entries) {
@@ -121,7 +122,11 @@ function main() {
       errors.push(`duplicate manifest path: ${rel}`);
     }
     manifestPaths.add(rel);
-    if (!current.has(rel) && !isCurrentNativeLinkedProdTsFile(rel)) {
+    const isExplicitNativeLinkedShell = isCurrentNativeLinkedProdTsFile(rel);
+    if (isExplicitNativeLinkedShell) {
+      explicitNativeLinkedShells.add(rel);
+    }
+    if (!current.has(rel) && !isExplicitNativeLinkedShell) {
       errors.push(`manifest path is neither current non-native prod TS nor explicit native-linked shell: ${rel}`);
     }
     if (!ALLOWED_CLASSIFICATIONS.has(entry.classification)) {
@@ -156,6 +161,7 @@ function main() {
   console.log('[verify-llmswitch-minimal-ts-surface] ok');
   console.log(`- entries: ${entries.length}`);
   console.log(`- current non-native prod TS files: ${current.size}`);
+  console.log(`- explicit native-linked TS shells: ${explicitNativeLinkedShells.size}`);
 }
 
 main();
