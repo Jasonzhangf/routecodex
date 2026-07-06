@@ -148,14 +148,6 @@
       "forbiddenSemantics": ["bridge action execution", "tool normalization", "message repair"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/types/text-markup-normalizer.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.resp_chatprocess.tool_governance",
-      "minimumTsRole": "Text markup normalizer option/result type declarations.",
-      "cannotShrinkFurtherBecause": "Only TS declaration shape remains; runtime text tool parsing is not owned here.",
-      "forbiddenSemantics": ["text tool harvest", "JSON repair", "tool-call normalization"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.ts",
       "classification": "native_shell_ok",
       "ownerFeature": "error.provider_failure_policy",

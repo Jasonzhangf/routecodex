@@ -2,7 +2,7 @@ export type {
   JsonToolRepairConfig,
   TextMarkupNormalizeOptions,
   ToolCallLite
-} from '../types/text-markup-normalizer.js';
+} from './text-markup-normalizer/normalize.js';
 
 export {
   extractApplyPatchCallsFromTextWithNative as extractApplyPatchCallsFromText,
