@@ -164,14 +164,6 @@
       "forbiddenSemantics": ["bridge action parsing", "policy filtering", "message mutation"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.req_outbound_provider_semantic",
-      "minimumTsRole": "Req outbound native facade type declarations.",
-      "cannotShrinkFurtherBecause": "TS callers need compile-time projection types for native outputs; further shrink needs generated declaration adoption.",
-      "forbiddenSemantics": ["provider semantic build", "wire payload build", "compat normalization"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-types.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.response_responses_client_projection",

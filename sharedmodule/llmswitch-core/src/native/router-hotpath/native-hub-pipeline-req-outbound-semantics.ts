@@ -5,23 +5,56 @@ import {
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
-import type {
-  NativeReqOutboundCompatAdapterContextInput,
-  NativeReqOutboundStandardizedToChatInput,
-  NativeReqOutboundStage3CompatInput,
-  NativeReqOutboundStage3CompatOutput,
-  NativeRespInboundStage3CompatInput,
-  NativeRespInboundStage3CompatOutput
-} from './native-hub-pipeline-req-outbound-semantics-types.js';
 
-export type {
-  NativeReqOutboundCompatAdapterContextInput,
-  NativeReqOutboundStandardizedToChatInput,
-  NativeReqOutboundStage3CompatInput,
-  NativeReqOutboundStage3CompatOutput,
-  NativeRespInboundStage3CompatInput,
-  NativeRespInboundStage3CompatOutput
-} from './native-hub-pipeline-req-outbound-semantics-types.js';
+export interface NativeReqOutboundCompatAdapterContextInput {
+  __rt?: Record<string, unknown>;
+  compatibilityProfile?: string;
+  providerProtocol?: string;
+  providerId?: string;
+  providerKey?: string;
+  runtimeKey?: string;
+  requestId?: string;
+  clientRequestId?: string;
+  groupRequestId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  entryEndpoint?: string;
+  routeId?: string;
+  capturedChatRequest?: JsonObject;
+  deepseek?: Record<string, unknown>;
+  anthropicThinkingConfig?: Record<string, unknown>;
+  anthropicThinking?: string;
+  anthropicThinkingBudgets?: Record<string, unknown>;
+  estimatedInputTokens?: number;
+  modelId?: string;
+  clientModelId?: string;
+  originalModelId?: string;
+}
+
+export interface NativeReqOutboundStandardizedToChatInput {
+  request: JsonObject;
+  adapterContext: NativeReqOutboundCompatAdapterContextInput;
+}
+
+export interface NativeReqOutboundStage3CompatInput {
+  payload: JsonObject;
+  adapterContext: NativeReqOutboundCompatAdapterContextInput;
+  explicitProfile?: string;
+}
+
+export interface NativeReqOutboundStage3CompatOutput {
+  payload: JsonObject;
+  appliedProfile?: string;
+  nativeApplied: boolean;
+}
+
+export interface NativeRespInboundStage3CompatInput {
+  payload: JsonObject;
+  adapterContext: NativeReqOutboundCompatAdapterContextInput;
+  explicitProfile?: string;
+}
+
+export type NativeRespInboundStage3CompatOutput = NativeReqOutboundStage3CompatOutput;
 
 const NON_BLOCKING_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingParseLogState = new Map<string, number>();

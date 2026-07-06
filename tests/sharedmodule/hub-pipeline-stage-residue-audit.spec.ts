@@ -3585,10 +3585,12 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired req outbound context/tool-session public wrappers must stay deleted', () => {
     const repoRoot = process.cwd();
+    const retiredFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts',
+    ];
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs',
@@ -3638,7 +3640,8 @@ describe('hub pipeline stage residue audit', () => {
       'parseToolSessionCompatOutput',
       'parseToolSessionHistoryUpdateOutput',
     ];
-    const findings: string[] = [];
+    const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const findings: string[] = existingRetiredFiles.map((relativePath) => `${relativePath}:file exists`);
 
     for (const relativePath of scannedFiles) {
       const absolutePath = path.join(repoRoot, relativePath);
