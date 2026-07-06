@@ -372,6 +372,8 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(screen.getByText('Login'));
 
     await waitFor(() => expect(screen.getByText('Provider Catalog')).toBeTruthy());
+    expect(screen.getByText('Config File')).toBeTruthy();
+    expect(screen.getByText('catalog / backup / authfile')).toBeTruthy();
     expect(screen.getByText('Refresh View (R)')).toBeTruthy();
   });
 
@@ -385,6 +387,8 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText('Provider Catalog')).toBeTruthy());
     expect(screen.getByText('Local Admin Access')).toBeTruthy();
     expect(screen.getByText('auth bypass (loopback bind)')).toBeTruthy();
+    expect(screen.getByText('Config File')).toBeTruthy();
+    expect(screen.getByText('catalog / backup / authfile')).toBeTruthy();
     expect(screen.queryByText('Admin Login')).toBeNull();
     expect(screen.queryByText('Admin Setup')).toBeNull();
     expect(screen.queryByLabelText('password')).toBeNull();
@@ -415,6 +419,12 @@ describe('webui integration flows (feature coverage)', () => {
 
     // Provider: new/save/test/delete/authfile/model manager
     const providerPoolPanel = panelByTitle('Provider Pool');
+    const providerPoolDetails = providerPoolPanel.closest('details') as HTMLDetailsElement;
+    expect(providerPoolDetails.open).toBe(true);
+    fireEvent.click(providerPoolPanel.querySelector('summary') as HTMLElement);
+    expect(providerPoolDetails.open).toBe(false);
+    fireEvent.click(providerPoolPanel.querySelector('summary') as HTMLElement);
+    expect(providerPoolDetails.open).toBe(true);
     fireEvent.click(within(providerPoolPanel).getByText('New'));
 
     const providerIdInput = screen.getByLabelText('provider id') as HTMLInputElement;
@@ -462,6 +472,8 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(screen.getByText('Routing'));
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
     await waitFor(() => expect(screen.getByText('Port Config Entries')).toBeTruthy());
+    expect(screen.getByText('Config Source + Policy Group')).toBeTruthy();
+    expect(screen.getByText('Route Tree')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('5520')).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText('new port'), { target: { value: '7777' } });
@@ -508,6 +520,8 @@ describe('webui integration flows (feature coverage)', () => {
 
     fireEvent.click(screen.getByText('Forwarders'));
     await waitFor(() => expect(screen.getByText('Forwarder Aggregation')).toBeTruthy());
+    expect(screen.getByText('Forwarder Editor')).toBeTruthy();
+    expect(screen.getByText('Forwarder Tree')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('fwd.gpt-5.5')).toBeTruthy());
     expect(screen.getByText('strategy: priority')).toBeTruthy();
     fireEvent.click(screen.getByText('Edit'));

@@ -331,6 +331,33 @@ export function SectionHeader({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
+function CollapsibleSection({
+  title,
+  sub,
+  accent,
+  defaultOpen = true,
+  children
+}: {
+  title: string;
+  sub?: string;
+  accent: 'config' | 'provider' | 'routing' | 'forwarder' | 'runtime';
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className={`panel tree-section accent-${accent}`} open={defaultOpen}>
+      <summary>
+        <span className="tree-toggle" aria-hidden="true" />
+        <span>
+          <span className="tree-title">{title}</span>
+          {sub ? <span className="tree-sub">{sub}</span> : null}
+        </span>
+      </summary>
+      <div className="tree-section-body">{children}</div>
+    </details>
+  );
+}
+
 function AdminAuthPanel({
   authStatus,
   authHint,
@@ -603,6 +630,13 @@ export function App() {
     return 'Providers / Catalog';
   }, [mainTab]);
 
+  const activeSectionLabel = useMemo(() => {
+    if (mainTab === 'providers') return 'Provider Catalog';
+    if (mainTab === 'routing') return 'Routing Groups';
+    if (mainTab === 'forwarders') return 'fwd.* Aggregation';
+    return 'Provider Catalog';
+  }, [mainTab]);
+
   const refreshCurrentView = () => {
     setViewEpoch((v) => v + 1);
     showToast(`Refreshed: ${activeViewLabel}`, 'ok');
@@ -720,36 +754,10 @@ export function App() {
             </div>
           )}
 
-          <div className="nav panel" style={{ padding: 10 }}>
-            <button className={mainTab === 'providers' ? 'active' : ''} onClick={() => setMainTab('providers')}>
-              Providers
-            </button>
-            <button className={mainTab === 'routing' ? 'active' : ''} onClick={() => setMainTab('routing')}>
-              Routing
-            </button>
-            <button className={mainTab === 'forwarders' ? 'active' : ''} onClick={() => setMainTab('forwarders')}>
-              Forwarders
-            </button>
-            {mainTab === 'providers' ? (
-              <button className="active">
-                Provider Catalog
-              </button>
-            ) : null}
-            {mainTab === 'routing' ? (
-              <button className="active">
-                Routing Groups
-              </button>
-            ) : null}
-            {mainTab === 'forwarders' ? (
-              <button className="active">
-                fwd.* Aggregation
-              </button>
-            ) : null}
-          </div>
-
           <div className="actionbar panel" style={{ padding: 10 }}>
             <div className="row">
               <span className="pill mono">view: {activeViewLabel}</span>
+              <span className="pill mono">{activeSectionLabel}</span>
               <span className="pill mono">density: {densityMode}</span>
             </div>
             <div className="row">
@@ -765,16 +773,50 @@ export function App() {
             </div>
           </div>
 
-          <div style={{ marginTop: 10 }}>
-            {mainTab === 'providers' ? (
-              <ProviderPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} apiKey={apiKey} onToast={showToast} />
-            ) : null}
-            {mainTab === 'routing' ? (
-              <RoutingPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
-            ) : null}
-            {mainTab === 'forwarders' ? (
-              <ForwardersPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
-            ) : null}
+          <div className="config-workspace">
+            <aside className="config-tree panel" aria-label="Config editor tree">
+              <div className="tree-root">
+                <span className="tree-node-marker root" />
+                <div>
+                  <p className="tree-title">Config File</p>
+                  <p className="tree-sub">single config truth</p>
+                </div>
+              </div>
+              <div className="tree-branch">
+                <button className={`tree-node accent-provider ${mainTab === 'providers' ? 'active' : ''}`} onClick={() => setMainTab('providers')}>
+                  <span className="tree-node-marker" />
+                  <span>
+                    <span className="tree-title">Providers</span>
+                    <span className="tree-sub">catalog / backup / authfile</span>
+                  </span>
+                </button>
+                <button className={`tree-node accent-routing ${mainTab === 'routing' ? 'active' : ''}`} onClick={() => setMainTab('routing')}>
+                  <span className="tree-node-marker" />
+                  <span>
+                    <span className="tree-title">Routing</span>
+                    <span className="tree-sub">ports / groups / pools</span>
+                  </span>
+                </button>
+                <button className={`tree-node accent-forwarder ${mainTab === 'forwarders' ? 'active' : ''}`} onClick={() => setMainTab('forwarders')}>
+                  <span className="tree-node-marker" />
+                  <span>
+                    <span className="tree-title">Forwarders</span>
+                    <span className="tree-sub">fwd.* aggregation</span>
+                  </span>
+                </button>
+              </div>
+            </aside>
+            <main className="config-main">
+              {mainTab === 'providers' ? (
+                <ProviderPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} apiKey={apiKey} onToast={showToast} />
+              ) : null}
+              {mainTab === 'routing' ? (
+                <RoutingPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
+              ) : null}
+              {mainTab === 'forwarders' ? (
+                <ForwardersPage authenticated={authStatus.authenticated} authEpoch={effectiveEpoch} onToast={showToast} />
+              ) : null}
+            </main>
           </div>
         </>
       )}
@@ -1250,12 +1292,12 @@ export function ProviderPage({
     .sort((a, b) => textOf(a.id).localeCompare(textOf(b.id)));
 
   return (
-    <div className="grid grid-3">
-      <div className="panel">
-        <SectionHeader
-          title="Provider Pool"
-          sub="Provider directory registry view (v2 first) with runtime mapping and quick actions."
-        />
+    <div className="module-grid provider-layout">
+      <CollapsibleSection
+        accent="provider"
+        title="Provider Pool"
+        sub="Provider directory registry view (v2 first) with runtime mapping and quick actions."
+      >
         <div className="row" style={{ marginBottom: 8 }}>
           <input
             value={filter}
@@ -1281,7 +1323,7 @@ export function ProviderPage({
             const modelPreview = Array.isArray(item.modelsPreview) && item.modelsPreview.length ? item.modelsPreview : item.defaultModels || [];
 
             return (
-              <div key={`${source}.${item.id}`} className="panel" style={{ padding: 10 }}>
+              <div key={`${source}.${item.id}`} className="panel tree-card accent-provider" style={{ padding: 10 }}>
                 <div className="row" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
                   <div className="row">
                     <span className="pill mono">{item.id}</span>
@@ -1329,10 +1371,9 @@ export function ProviderPage({
           })}
           {!shownProviders.length ? <AppNotice>No providers found in registry/config.</AppNotice> : null}
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="panel">
-        <SectionHeader title="Provider Editor" sub="Structured provider form (no raw JSON)." />
+      <CollapsibleSection accent="config" title="Provider Editor" sub="Structured provider form (no raw JSON).">
         <div className="row" style={{ marginBottom: 8 }}>
           <label htmlFor="provider-id">provider id</label>
           <input
@@ -1430,10 +1471,9 @@ export function ProviderPage({
             />
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="panel">
-        <SectionHeader title="Models + Test + Authfile" sub="Model registry + authfile helper (no raw JSON)." />
+      <CollapsibleSection accent="runtime" title="Models + Test + Authfile" sub="Model registry + authfile helper (no raw JSON).">
 
         <div className="row" style={{ marginBottom: 8 }}>
           <input
@@ -1508,7 +1548,7 @@ export function ProviderPage({
         </div>
 
         <LogBox value={log} />
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -2012,12 +2052,17 @@ export function RoutingPage({
   const providerTargetOptions = providerPickerItems.flatMap((item) => item.targets.map((target) => ({ providerId: item.id, target })));
 
   return (
-    <div className="grid grid-wide-left">
-      <div className="panel">
-        <SectionHeader title="Routing Management" sub="Single config file editor for httpserver.ports[], routing groups, and provider targets." />
-
-        <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
-          <SectionHeader title="Port Config Entries" sub="Each item is an httpserver.ports[] entry in the same config file." />
+    <div className="module-grid routing-layout">
+      <CollapsibleSection
+        accent="config"
+        title="Routing Management"
+        sub="Single config file editor for httpserver.ports[], routing groups, and provider targets."
+      >
+        <CollapsibleSection
+          accent="routing"
+          title="Port Config Entries"
+          sub="Each item is an httpserver.ports[] entry in the same config file."
+        >
           <div className="row" style={{ marginBottom: 8 }}>
             {portTabs.map((item) => (
               <button
@@ -2085,76 +2130,77 @@ export function RoutingPage({
               Add Port Config
             </button>
           </div>
-        </div>
+        </CollapsibleSection>
 
-        <div className="row" style={{ marginBottom: 8 }}>
-          <label htmlFor="routing-source">source</label>
-          <select
-            id="routing-source"
-            value={sourcePath}
-            onChange={(e) => setSourcePath(e.target.value)}
-            style={{ minWidth: 380, flex: 1 }}
-          >
-            {sources.map((source) => {
-              const path = textOf(source.path).trim();
-              const label = textOf(source.label || source.path || '—');
-              const meta = `${textOf(source.kind || '')}${source.version ? ` v=${source.version}` : ''}${source.location ? ` (${source.location})` : ''}`;
-              return (
-                <option key={path || label} value={path}>
-                  {label} {meta}
+        <CollapsibleSection accent="config" title="Config Source + Policy Group" sub="Choose source file and edit one routing policy group at a time.">
+          <div className="row" style={{ marginBottom: 8 }}>
+            <label htmlFor="routing-source">source</label>
+            <select
+              id="routing-source"
+              value={sourcePath}
+              onChange={(e) => setSourcePath(e.target.value)}
+              style={{ minWidth: 380, flex: 1 }}
+            >
+              {sources.map((source) => {
+                const path = textOf(source.path).trim();
+                const label = textOf(source.label || source.path || '—');
+                const meta = `${textOf(source.kind || '')}${source.version ? ` v=${source.version}` : ''}${source.location ? ` (${source.location})` : ''}`;
+                return (
+                  <option key={path || label} value={path}>
+                    {label} {meta}
+                  </option>
+                );
+              })}
+            </select>
+            <button onClick={() => void refreshSources()} disabled={!authenticated}>
+              Refresh Sources
+            </button>
+            <button className="primary" onClick={() => void loadGroups()} disabled={!authenticated}>
+              Load
+            </button>
+          </div>
+
+          <div className="row" style={{ marginBottom: 8 }}>
+            <label htmlFor="routing-group">group</label>
+            <select
+              id="routing-group"
+              value={selectedGroupId}
+              onChange={(e) => selectGroup(e.target.value)}
+              style={{ width: 220 }}
+            >
+              {groupIds.map((id) => (
+                <option key={id} value={id}>
+                  {id === activeGroupId ? `${id} (active)` : id}
                 </option>
-              );
-            })}
-          </select>
-          <button onClick={() => void refreshSources()} disabled={!authenticated}>
-            Refresh Sources
-          </button>
-          <button className="primary" onClick={() => void loadGroups()} disabled={!authenticated}>
-            Load
-          </button>
-        </div>
+              ))}
+            </select>
+            <input
+              value={newGroupId}
+              onChange={(e) => setNewGroupId(e.target.value)}
+              placeholder="new group id"
+              style={{ width: 180 }}
+            />
+            <button onClick={() => void createGroup()} disabled={!authenticated}>
+              Create/Copy Group
+            </button>
+            <button className="danger" onClick={() => void deleteGroup()} disabled={!authenticated}>
+              Delete Group
+            </button>
+            <span className="pill mono">active: {activeGroupId || '—'}</span>
+          </div>
 
-        <div className="row" style={{ marginBottom: 8 }}>
-          <label htmlFor="routing-group">group</label>
-          <select
-            id="routing-group"
-            value={selectedGroupId}
-            onChange={(e) => selectGroup(e.target.value)}
-            style={{ width: 220 }}
-          >
-            {groupIds.map((id) => (
-              <option key={id} value={id}>
-                {id === activeGroupId ? `${id} (active)` : id}
-              </option>
-            ))}
-          </select>
-          <input
-            value={newGroupId}
-            onChange={(e) => setNewGroupId(e.target.value)}
-            placeholder="new group id"
-            style={{ width: 180 }}
-          />
-          <button onClick={() => void createGroup()} disabled={!authenticated}>
-            Create/Copy Group
-          </button>
-          <button className="danger" onClick={() => void deleteGroup()} disabled={!authenticated}>
-            Delete Group
-          </button>
-          <span className="pill mono">active: {activeGroupId || '—'}</span>
-        </div>
+          <div className="row">
+            <button className="primary" onClick={() => void saveGroup()} disabled={!authenticated}>
+              Save Group
+            </button>
+            <button className="warn" onClick={() => void activateLocal()} disabled={!authenticated}>
+              Activate Local
+            </button>
+            <span className="pill mono">location: {location}</span>
+          </div>
+        </CollapsibleSection>
 
-        <div className="row" style={{ marginBottom: 8 }}>
-          <button className="primary" onClick={() => void saveGroup()} disabled={!authenticated}>
-            Save Group
-          </button>
-          <button className="warn" onClick={() => void activateLocal()} disabled={!authenticated}>
-            Activate Local
-          </button>
-          <span className="pill mono">location: {location}</span>
-        </div>
-
-        <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
-          <SectionHeader title="Route Builder" sub="Add routes and pools with target list (comma/newline separated)." />
+        <CollapsibleSection accent="routing" title="Route Builder" sub="Add routes and pools with target list (comma/newline separated).">
           <div className="row" style={{ marginBottom: 8 }}>
             <input
               value={newRouteName}
@@ -2198,11 +2244,12 @@ export function RoutingPage({
             />
             <button onClick={addPool}>Add Pool</button>
           </div>
-        </div>
+        </CollapsibleSection>
 
-        <div className="grid">
+        <CollapsibleSection accent="runtime" title="Route Tree" sub="Routes contain ordered pools; pools contain provider targets.">
+          <div className="grid">
           {routeRows.map((route) => (
-            <div key={route.name} className="panel" style={{ padding: 10 }}>
+            <div key={route.name} className="panel tree-card accent-routing" style={{ padding: 10 }}>
               <div className="row" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
                 <div className="row">
                   <span className="pill mono">route: {route.name}</span>
@@ -2256,15 +2303,13 @@ export function RoutingPage({
             </div>
           ))}
           {!routeRows.length ? <AppNotice>No routes configured for selected group.</AppNotice> : null}
-        </div>
-      </div>
+          </div>
+        </CollapsibleSection>
+      </CollapsibleSection>
 
-      <div className="grid">
-        <div className="panel">
-          <SectionHeader title="Routing Log" sub="Operation output and API responses." />
-          <LogBox value={log} />
-        </div>
-      </div>
+      <CollapsibleSection accent="runtime" title="Routing Log" sub="Operation output and API responses.">
+        <LogBox value={log} />
+      </CollapsibleSection>
     </div>
   );
 }
@@ -2403,9 +2448,8 @@ export function ForwardersPage({
   };
 
   return (
-    <div className="grid grid-wide-left">
-      <div className="panel">
-        <SectionHeader title="Forwarder Aggregation" sub="Config-only fwd.* aggregation view; runtime selection stays in Virtual Router." />
+    <div className="module-grid forwarder-layout">
+      <CollapsibleSection accent="forwarder" title="Forwarder Aggregation" sub="Config-only fwd.* aggregation view; runtime selection stays in Virtual Router.">
         <div className="row" style={{ marginBottom: 8 }}>
           <label htmlFor="forwarder-config-path">config</label>
           <input
@@ -2420,8 +2464,7 @@ export function ForwardersPage({
           </button>
         </div>
 
-        <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
-          <SectionHeader title="Forwarder Editor" sub="Edit config shape only; runtime policy remains in Virtual Router." />
+        <CollapsibleSection accent="config" title="Forwarder Editor" sub="Edit config shape only; runtime policy remains in Virtual Router.">
           <div className="row" style={{ marginBottom: 8 }}>
             <input
               aria-label="forwarder id"
@@ -2467,11 +2510,12 @@ export function ForwardersPage({
               Save Forwarder
             </button>
           </div>
-        </div>
+        </CollapsibleSection>
 
-        <div className="grid">
+        <CollapsibleSection accent="forwarder" title="Forwarder Tree" sub="Each fwd.* node groups same-model provider targets.">
+          <div className="grid">
           {forwarders.map((item) => (
-            <div key={item.id} className="panel" style={{ padding: 10 }}>
+            <div key={item.id} className="panel tree-card accent-forwarder" style={{ padding: 10 }}>
               <div className="row" style={{ marginBottom: 8 }}>
                 <span className="pill mono">{item.id}</span>
                 <span className="pill mono">model: {item.model}</span>
@@ -2491,13 +2535,13 @@ export function ForwardersPage({
             </div>
           ))}
           {!forwarders.length ? <AppNotice>No fwd.* forwarders found in current config.</AppNotice> : null}
-        </div>
-      </div>
+          </div>
+        </CollapsibleSection>
+      </CollapsibleSection>
 
-      <div className="panel">
-        <SectionHeader title="Forwarder Log" sub="Config editor output for fwd.* aggregation." />
+      <CollapsibleSection accent="runtime" title="Forwarder Log" sub="Config editor output for fwd.* aggregation.">
         <LogBox value={log} />
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

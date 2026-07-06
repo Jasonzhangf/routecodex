@@ -145,6 +145,170 @@ button.active {
   margin-bottom: 10px;
 }
 
+.config-workspace {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-top: 10px;
+}
+
+.config-tree {
+  position: sticky;
+  top: 12px;
+  padding: 10px;
+}
+
+.tree-root,
+.tree-node {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.tree-root {
+  padding: 8px 8px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.tree-branch {
+  display: grid;
+  gap: 5px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.tree-node {
+  width: 100%;
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px;
+  background: transparent;
+}
+
+.tree-node.active,
+.tree-node:hover {
+  background: color-mix(in srgb, var(--tree-accent, var(--accent)), transparent 88%);
+  border-color: color-mix(in srgb, var(--tree-accent, var(--accent)), transparent 45%);
+}
+
+.tree-node-marker {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--tree-accent, var(--accent));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tree-accent, var(--accent)), transparent 82%);
+}
+
+.tree-node-marker.root {
+  background: var(--accent);
+}
+
+.tree-title,
+.tree-sub {
+  display: block;
+}
+
+.tree-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.tree-sub {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.module-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-layout {
+  grid-template-columns: minmax(340px, 1.2fr) minmax(320px, 0.95fr) minmax(320px, 0.95fr);
+}
+
+.routing-layout,
+.forwarder-layout {
+  grid-template-columns: minmax(0, 1.65fr) minmax(260px, 0.7fr);
+}
+
+.tree-section {
+  --tree-accent: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--tree-accent), transparent 58%);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--tree-accent), transparent 91%), transparent 30%),
+    linear-gradient(180deg, var(--panel), var(--panel-2));
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.tree-section > summary {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 11px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tree-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tree-toggle {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-right: 2px solid var(--tree-accent);
+  border-bottom: 2px solid var(--tree-accent);
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+
+.tree-section[open] > summary .tree-toggle {
+  transform: rotate(45deg);
+}
+
+.tree-section-body {
+  padding: 0 12px 12px 30px;
+}
+
+.tree-card {
+  box-shadow: none;
+  border-left: 3px solid var(--tree-accent, var(--accent));
+  background: color-mix(in srgb, var(--tree-accent, var(--accent)), transparent 94%);
+}
+
+.accent-config {
+  --tree-accent: #5ca8ff;
+}
+
+.accent-provider {
+  --tree-accent: #40d67b;
+}
+
+.accent-routing {
+  --tree-accent: #ffbf47;
+}
+
+.accent-forwarder {
+  --tree-accent: #f07178;
+}
+
+.accent-runtime {
+  --tree-accent: #8bd5ff;
+}
+
 .row {
   display: flex;
   gap: 8px;
@@ -378,6 +542,10 @@ button:disabled {
 }
 
 @media (max-width: 1280px) {
+  .config-workspace,
+  .provider-layout,
+  .routing-layout,
+  .forwarder-layout,
   .grid-3,
   .grid-2,
   .grid-wide-left,
@@ -397,5 +565,13 @@ button:disabled {
 
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .config-tree {
+    position: static;
+  }
+
+  .tree-section-body {
+    padding-left: 12px;
   }
 }
