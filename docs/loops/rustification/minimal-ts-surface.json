@@ -188,14 +188,6 @@
       "forbiddenSemantics": ["provider semantic build", "wire payload build", "compat normalization"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts",
-      "classification": "parser_io_ok",
-      "ownerFeature": "hub.response_responses_client_projection",
-      "minimumTsRole": "Parse native JSON strings and type-project Rust-owned response semantics.",
-      "cannotShrinkFurtherBecause": "NAPI currently crosses as JSON strings; removing this parser requires a binding ABI change, not another Rust semantic migration.",
-      "forbiddenSemantics": ["field-level protocol validation", "SSE descriptor normalization", "tool filtering", "stop-reason normalization"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-types.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.response_responses_client_projection",

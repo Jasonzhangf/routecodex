@@ -1,21 +1,11 @@
 import {
-  parseAnthropicChatCompletionOutcome,
-  parseAnthropicStopReasonResolution,
-  parseJsonObjectCandidate,
-  parseProviderResponseContextHelpers,
-  parseProviderResponseToolCallSummary,
-  parseRecord,
-  parseResponsesClientSseFrameProjection,
-  parseResponsesHostPolicyResult,
-  parseStringOrUndefined
-} from './native-hub-pipeline-resp-semantics-parsers.js';
-import {
   failNative,
   extractNativeErrorMessage,
   isNativeDisabledByEnv,
   readNativeFunction,
   safeStringify
 } from './native-hub-pipeline-resp-semantics-shared.js';
+import { formatUnknownError } from '../../shared/common-utils.js';
 import type {
   AnthropicChatCompletionOutcome,
   AnthropicStopReasonResolution,
@@ -26,6 +16,94 @@ import type {
   ResponsesHostPolicyResult
 } from './native-hub-pipeline-resp-semantics-types.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
+
+const NON_BLOCKING_RESP_OUTBOUND_PARSE_LOG_THROTTLE_MS = 60_000;
+const nonBlockingRespOutboundParseLogState = new Map<string, number>();
+const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-resp-semantics-outbound-tools.parse-failed');
+
+function logNativeRespOutboundParserNonBlocking(stage: string, error: unknown): void {
+  const now = Date.now();
+  const last = nonBlockingRespOutboundParseLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_RESP_OUTBOUND_PARSE_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingRespOutboundParseLogState.set(stage, now);
+  console.warn(
+    `[native-hub-pipeline-resp-semantics-outbound-tools] ${stage} parse failed (non-blocking): ${formatUnknownError(error)}`
+  );
+}
+
+function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    logNativeRespOutboundParserNonBlocking(stage, error);
+    return JSON_PARSE_FAILED;
+  }
+}
+
+function parseRecord(raw: string, stage = 'parseRecord'): Record<string, unknown> | null {
+  const parsed = parseJson(stage, raw);
+  if (parsed === JSON_PARSE_FAILED || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseStringOrUndefined(raw: string): string | undefined | null {
+  const parsed = parseJson('parseStringOrUndefined', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return null;
+  }
+  if (parsed === null) {
+    return undefined;
+  }
+  return typeof parsed === 'string' ? parsed : null;
+}
+
+function parseJsonObjectCandidate(raw: string): Record<string, unknown> | null | undefined {
+  const parsed = parseJson('parseJsonObjectCandidate', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return undefined;
+  }
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseResponsesHostPolicyResult(raw: string): ResponsesHostPolicyResult | null {
+  const row = parseRecord(raw, 'parseResponsesHostPolicyResult');
+  return row as unknown as ResponsesHostPolicyResult | null;
+}
+
+function parseResponsesClientSseFrameProjection(raw: string): ResponsesClientSseFrameProjection | null {
+  const row = parseRecord(raw, 'parseResponsesClientSseFrameProjection');
+  return row as unknown as ResponsesClientSseFrameProjection | null;
+}
+
+function parseAnthropicStopReasonResolution(raw: string): AnthropicStopReasonResolution | null {
+  const row = parseRecord(raw, 'parseAnthropicStopReasonResolution');
+  return row as unknown as AnthropicStopReasonResolution | null;
+}
+
+function parseAnthropicChatCompletionOutcome(raw: string): AnthropicChatCompletionOutcome | null {
+  const row = parseRecord(raw, 'parseAnthropicChatCompletionOutcome');
+  return row as unknown as AnthropicChatCompletionOutcome | null;
+}
+
+function parseProviderResponseToolCallSummary(raw: string): ProviderResponseToolCallSummary | null {
+  const row = parseRecord(raw, 'parseProviderResponseToolCallSummary');
+  return row as ProviderResponseToolCallSummary | null;
+}
+
+function parseProviderResponseContextHelpers(raw: string): ProviderResponseContextHelpersOutput | null {
+  const row = parseRecord(raw, 'parseProviderResponseContextHelpers');
+  return row as unknown as ProviderResponseContextHelpersOutput | null;
+}
 
 function callNativeRequired(capability: string, ...args: unknown[]): unknown {
   if (isNativeDisabledByEnv()) {

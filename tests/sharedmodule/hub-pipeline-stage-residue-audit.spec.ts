@@ -3016,13 +3016,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('resp native parser facade must not own response semantic validation', () => {
+  it('resp native parser facade must stay physically deleted', () => {
     const repoRoot = process.cwd();
+    const parserPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts'
+    );
     const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts'),
+      'utf8'
+    );
+    const outboundSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts'),
       'utf8'
     );
     const forbiddenPatterns = [
+      { label: 'imports deleted parser facade', pattern: /native-hub-pipeline-resp-semantics-parsers/u },
       { label: 'alias map key/value normalization', pattern: /Object\.entries\([\s\S]{0,240}trimmedKey/u },
       { label: 'context diagnostics numeric flooring', pattern: /estimatedPromptTokens[\s\S]{0,240}Math\.floor/u },
       { label: 'SSE descriptor code enum validation', pattern: /code\s*!==\s*['"]SSE_DECODE_ERROR['"]/u },
@@ -3034,9 +3043,10 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'provider context protocol enum validation', pattern: /clientProtocol\s*!==\s*['"]openai-chat['"]/u },
     ];
     const findings = forbiddenPatterns
-      .filter(({ pattern }) => pattern.test(source))
+      .filter(({ pattern }) => pattern.test(source) || pattern.test(outboundSource))
       .map(({ label }) => label);
 
+    expect(fs.existsSync(parserPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

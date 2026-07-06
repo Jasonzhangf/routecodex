@@ -1,7 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import fs from 'node:fs';
 
-import { parseAliasMap } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.js';
 import { parsePendingToolSyncPayload } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.js';
 
 async function importWithNativeParseFailureMock<TModule>(
@@ -34,15 +33,6 @@ async function importWithNativeParseFailureMock<TModule>(
 }
 
 describe('native semantics parser observability', () => {
-  it('logs resp semantics parser JSON failures and still preserves null contract', () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    expect(parseAliasMap('{not-json')).toBeNull();
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseAliasMap parse failed (non-blocking)');
-
-    warnSpy.mockRestore();
-  });
-
   it('logs router hotpath analysis parser JSON failures and still returns null', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -73,6 +63,15 @@ describe('native semantics parser observability', () => {
   it('keeps retired req inbound parser facade deleted', () => {
     const retiredWrapperPath = new URL(
       '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts',
+      import.meta.url
+    );
+
+    expect(() => fs.statSync(retiredWrapperPath)).toThrow();
+  });
+
+  it('keeps retired resp parser facade deleted', () => {
+    const retiredWrapperPath = new URL(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts',
       import.meta.url
     );
 
@@ -184,6 +183,38 @@ describe('native semantics parser observability', () => {
 
     expect(() => mod.mapReqInboundBridgeToolsToChatWithNative([])).toThrow('native-fail:invalid payload');
     expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseArray parse failed (non-blocking)');
+
+    warnSpy.mockRestore();
+  });
+
+  it('logs resp inbound parser JSON failures before fail-fasting native capability', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const mod = await importWithNativeParseFailureMock<{
+      normalizeAliasMapWithNative: (candidate: unknown) => Record<string, string> | undefined;
+    }>(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.js',
+      'normalizeAliasMapJson'
+    );
+
+    expect(() => mod.normalizeAliasMapWithNative({})).toThrow('native-fail:invalid payload');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseAliasMap parse failed (non-blocking)');
+
+    warnSpy.mockRestore();
+  });
+
+  it('logs resp outbound parser JSON failures before fail-fasting native capability', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const mod = await importWithNativeParseFailureMock<{
+      evaluateResponsesHostPolicyWithNative: (context: unknown, targetProtocol?: string) => unknown;
+    }>(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.js',
+      'evaluateResponsesHostPolicyJson'
+    );
+
+    expect(() => mod.evaluateResponsesHostPolicyWithNative({})).toThrow('native-fail:invalid payload');
+    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseResponsesHostPolicyResult parse failed (non-blocking)');
 
     warnSpy.mockRestore();
   });

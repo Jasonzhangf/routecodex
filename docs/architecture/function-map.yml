@@ -5,37 +5,6 @@
 # - bind feature to canonical types/builders/tests
 version: 1
 owners:
-  - feature_id: config.virtual_router_types
-    status: deprecated
-    summary: "deprecated Virtual Router TS config type shim after Rust bootstrap migration"
-    owner_kind: ts_shell
-    owner_scope: "file-scoped backward-compatible type shim only; runtime Virtual Router bootstrap is Rust-owned"
-    owner_module: src/config/virtual-router-types.ts
-    canonical_types:
-      - VirtualRouterInput
-      - VirtualRouterProvidersConfig
-      - VirtualRouterRoutingConfig
-    canonical_builders:
-      - config_virtual_router_types_deprecated_shim_boundary
-    allowed_paths:
-      - src/config/virtual-router-types.ts
-      - docs/architecture/function-map.yml
-      - docs/architecture/verification-map.yml
-    forbidden_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
-      - src/server/runtime/http-server
-      - src/providers
-    required_tests:
-      - docs/architecture/function-map.yml
-      - docs/architecture/verification-map.yml
-    required_gates:
-      - npm run verify:function-map-compile-gate
-    migration_target: rust
-    notes:
-      - "This file is a deprecated compatibility/type shim and must not regain Virtual Router config materialization logic."
-      - "`buildVirtualRouterInputFromUserConfig` is a throwing stale-caller guard; `buildVirtualRouterInputV2` is a transition bridge to Rust bootstrap, not a canonical builder."
-      - "Runtime bootstrap truth belongs to Rust `bootstrapVirtualRouterConfig`; do not add TS fallback or provider/config shaping here."
-
   - feature_id: hub.servertool_followup
     status: active
     summary: "servertool followup orchestration and governed response truth"
@@ -2086,7 +2055,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-types.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.ts
       - src/server/handlers/handler-response-utils.ts
@@ -2806,11 +2774,44 @@ owners:
       - "Missing config is fail-fast; no fallback path result is allowed."
       - "Callers may pass explicit path, but auto-resolution truth stays in shared resolver."
 
+  - feature_id: config.toml_codec
+    status: active
+    summary: "RouteCodex TOML parse/serialize and comment-preserving scalar patch semantics are Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust owns TOML parse/serialize and comment-preserving scalar patch semantics for user and provider config; TS toml-basic/toml-comment-preserving are native shells only"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs
+    canonical_types:
+      - TomlValue
+      - TomlStringScalarPatchInput
+    canonical_builders:
+      - parse_toml_record_json
+      - serialize_toml_record_json
+      - update_toml_string_scalar_in_table_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-config-codec.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/config/toml-basic.ts
+      - src/config/toml-comment-preserving.ts
+    forbidden_paths:
+      - src/providers
+    required_tests:
+      - tests/config/toml-shadow-codec.spec.ts
+      - tests/config/toml-comment-preserving.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:config-toml-codec-rust
+    migration_target: rust
+    notes:
+      - "No caller may parse config with raw JSON.parse/TOML logic or patch TOML scalar text outside codec owner; src/config/toml-basic.ts and src/config/toml-comment-preserving.ts are thin native shells only."
+      - "User/provider config codecs own file IO and format rejection; TOML data semantics stay in Rust."
+
   - feature_id: config.user_config_codec
     status: active
-    summary: "user config decode/parse truth for JSON and TOML lives in shared codec"
-    owner_kind: ts_runtime_owner
-    owner_scope: "user config decode/parse truth for JSON and TOML lives in shared codec"
+    summary: "user config decode/format truth is TOML-only; TOML parse/serialize delegates to Rust"
+    owner_kind: ts_shell
+    owner_scope: "TS detects TOML-only user config path and performs file IO; TOML parse/serialize delegates to config.toml_codec; JSON config is rejected fail-fast"
     owner_module: src/config/user-config-codec.ts
     canonical_types:
       - UserConfigFormat
@@ -2842,15 +2843,17 @@ owners:
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
-    migration_target: ts
+      - npm run verify:config-toml-codec-rust
+    migration_target: rust
     notes:
-      - "No caller may parse user config with raw JSON.parse/TOML logic outside codec owner."
+      - "No caller may parse user config with raw JSON.parse/TOML logic outside codec owner; src/config/toml-basic.ts is a thin native shell only."
+      - "Legacy config.json support is removed; callers must use config.toml."
 
   - feature_id: config.provider_config_codec
     status: active
-    summary: "provider v2 config decode/parse truth for JSON and TOML lives in shared codec"
-    owner_kind: ts_runtime_owner
-    owner_scope: "provider v2 config decode/parse truth for JSON and TOML lives in shared codec"
+    summary: "provider v2 config decode/format truth is TOML-only; TOML parse/serialize and provider v2 coercion delegate to Rust"
+    owner_kind: ts_shell
+    owner_scope: "TS detects provider TOML path and performs file IO only; TOML parse/serialize delegates to config.toml_codec; provider v2 coercion delegates to Rust; provider JSON config is rejected/ignored"
     owner_module: src/config/provider-config-codec.ts
     canonical_types:
       - ProviderConfigFormat
@@ -2863,6 +2866,9 @@ owners:
     allowed_paths:
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-config-codec.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/server/handlers/config-admin-handler.ts
       - src/server/runtime/http-server/daemon-admin/providers-handler.ts
       - src/cli/commands/init/basic.ts
@@ -2876,27 +2882,72 @@ owners:
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
-    migration_target: ts
+      - npm run verify:config-toml-codec-rust
+      - npm run verify:config-provider-codec-rust
+    migration_target: rust
     notes:
       - "Provider config decode truth is shared; maintenance/admin must not raw-parse provider files."
+      - "Legacy config.v1.json/config.v2.json support is removed; provider config path is config.v2.toml."
+      - "Provider config v2 coercion is Rust-owned through coerceRouteCodexProviderConfigV2Json; src/config/provider-config-codec.ts remains file IO/path rejection shell."
+
+  - feature_id: config.provider_config_coercion
+    status: active
+    summary: "provider v2 config coercion and loader identity/file planning are Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust owns provider config v2 coercion from parsed TOML record to ProviderConfigV2 shape, config.v2 TOML file selection, and base/suffixed provider identity validation; TS caller remains file IO/native shell"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
+    canonical_types:
+      - ProviderConfigCoerceInput
+      - ProviderConfigFilePlanInput
+      - ProviderConfigIdResolveInput
+    canonical_builders:
+      - coerce_provider_config_v2_from_parsed_json
+      - plan_provider_config_v2_files_json
+      - resolve_provider_config_v2_identity_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-config-codec.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/config/provider-config-codec.ts
+      - src/config/provider-v2-loader.ts
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers
+    required_tests:
+      - tests/config/provider-v2-loader.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:config-provider-codec-rust
+    migration_target: rust
+    notes:
+      - "Provider config v2 coercion, config.v2 TOML filename filtering/sorting, and base/suffixed provider identity validation must not be reimplemented in TS; provider-config-codec.ts/provider-v2-loader.ts may only call the native bridge around file IO."
 
   - feature_id: config.user_config_materialization
     status: active
-    summary: "runtime user config load, v2 single-source validation, VR materialization, and provider-profile build live in shared config loader chain"
-    owner_kind: ts_runtime_owner
-    owner_scope: "runtime user config load, v2 single-source validation, VR materialization, and provider-profile build live in shared config loader chain"
-    owner_module: src/config/user-config-loader.ts
+    summary: "runtime user config IO stays in TS shell; v2 source validation and runtime manifest materialization are Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "TS loads TOML/provider files and builds provider profiles; Rust owns v2 source validation, primary routingPolicyGroup resolution, deterministic RouteCodex runtime manifest, and VR bootstrap materialization"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
     canonical_types:
       - LoadedRouteCodexConfig
       - MaterializedRouteCodexConfig
+      - RouteCodexRuntimeManifest
     canonical_builders:
-      - materializeRouteCodexConfig
-      - collectV2ConfigSourceErrors
-      - validateV2ConfigSources
+      - collect_v2_config_source_errors_json
+      - normalize_routecodex_v2_runtime_source_json
+      - resolve_primary_routecodex_routing_policy_group_json
+      - extract_routecodex_materialized_provider_configs_json
+      - materialize_routecodex_user_config_from_manifest_json
+      - compile_routecodex_runtime_manifest_json
+      - compile_routecodex_runtime_manifest
     allowed_paths:
       - src/config/routecodex-config-loader.ts
       - src/config/user-config-loader.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-runtime-config.ts
       - src/config/user-config-materializer.ts
+      - src/server/runtime/http-server/runtime-config-manifest-carrier.ts
       - src/server/handlers/config-admin-handler.ts
     forbidden_paths:
       - src/server/runtime/http-server/daemon-admin
@@ -2907,17 +2958,98 @@ owners:
     required_tests:
       - tests/config/routecodex-config-loader.v2-single-source.spec.ts
       - tests/config/provider-v2-loader.spec.ts
+      - tests/config/runtime-config-materialization-rust.spec.ts
+      - tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
-    migration_target: ts
+    migration_target: rust
     notes:
-      - "Runtime/config callers consume materialized config output; they must not rebuild VR/provider-profile semantics locally."
+      - "Runtime/config callers consume Rust-compiled v2 source normalization, validation, routingPolicyGroup selection, materialized provider extraction, manifest-to-userConfig materialization, and materialized config output; they must not rebuild VR/provider-profile semantics locally."
+      - "src/config/user-config-loader.ts is a TS file IO/profile shell; implicit-v2 normalization, collectV2ConfigSourceErrors, primary routingPolicyGroup selection, materialized virtualrouter.providers extraction, and final virtualrouter materialized assignment must delegate to native."
+      - "Server runtime carries the Rust-compiled RouteCodexRuntimeManifest from bootstrap into HubPipeline pipelineRuntimeConfig through a non-enumerable carrier; it must not recompile or consume VR-only bootstrap input."
+      - "TS config loader is IO/profile shell only; no TS fallback materialization path is allowed."
+
+  - feature_id: config.provider_profile_materialization
+    status: active
+    summary: "provider profile projection from materialized runtime config is Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust owns provider profile protocol/auth/transport/compatibility/metadata projection from materialized config; TS provider-profile-loader keeps public type shell and extractApiKeyEntries helper only"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+    canonical_types:
+      - ProviderProfile
+      - ProviderProfileCollection
+    canonical_builders:
+      - build_routecodex_provider_profiles_json
+      - build_provider_profiles
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-runtime-config.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/providers/profile/provider-profile-loader.ts
+      - src/providers/profile/provider-profile.ts
+    forbidden_paths:
+      - src/server/runtime/http-server
+      - src/config
+      - src/providers/core
+    forbidden_mentions_allowlist:
+      - ProviderProfile
+      - ProviderProfileCollection
+      - buildProviderProfiles
+    required_tests:
+      - src/providers/profile/__tests__/provider-profile-loader.spec.ts
+      - tests/providers/profile/provider-profile-loader.entries.unit.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "buildProviderProfiles must delegate to native buildRouteCodexProviderProfilesJson; TS must not reimplement protocol aliases, auth extraction, transport extraction, compatibility rejection, or metadata extraction."
+
+  - feature_id: config.forwarder_profile_materialization
+    status: active
+    summary: "forwarder profile projection from config is Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust owns forwarder profile id/protocol/model/strategy/stickyKey/targets/weights projection and validation; TS provider-profile-loader keeps buildForwarderProfiles as a native shell only"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+    canonical_types:
+      - ProviderForwarderProfile
+      - ProviderForwarderCollection
+    canonical_builders:
+      - build_routecodex_forwarder_profiles_json
+      - build_forwarder_profiles
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-runtime-config.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/providers/profile/provider-profile-loader.ts
+      - src/providers/profile/forwarder-types.ts
+      - src/providers/profile/forwarder-types-adapter.ts
+    forbidden_paths:
+      - src/server/runtime/http-server
+      - src/config
+      - src/providers/core
+    forbidden_mentions_allowlist:
+      - ProviderForwarderProfile
+      - ProviderForwarderCollection
+      - buildForwarderProfiles
+      - validateForwarderId
+      - FORWARDER_ID_PREFIX
+    required_tests:
+      - tests/providers/forwarder-selection.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Forwarder profile projection is native-owned; TS may keep schema types, id-prefix validator, adapter re-export, and a native shell only. Do not reintroduce TS collect/parse/pick helpers for forwarder profiles."
 
   - feature_id: config.user_config_write_surface
     status: active
     summary: "full user config write and scalar patch update live in shared writer; callers must not stringify config directly"
-    owner_kind: ts_runtime_owner
-    owner_scope: "full user config write and scalar patch update live in shared writer; callers must not stringify config directly"
+    owner_kind: ts_shell
+    owner_scope: "TS owns atomic user config file IO and writer entrypoints; comment-preserving TOML scalar patch semantics delegate to config.toml_codec Rust owner"
     owner_module: src/config/user-config-writer.ts
     canonical_types:
       - PersistedUserConfigFile
@@ -2942,6 +3074,7 @@ owners:
     migration_target: ts
     notes:
       - "User config writes must be atomic and must flow through one writer owner."
+      - "Comment-preserving TOML scalar patch logic is Rust-owned through config.toml_codec; src/config/toml-comment-preserving.ts is only a sync native shell."
 
   - feature_id: config.provider_config_write_surface
     status: active
