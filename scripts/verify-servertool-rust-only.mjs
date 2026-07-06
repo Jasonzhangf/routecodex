@@ -3228,42 +3228,11 @@ function checkServertoolExecutionDispatchRustOwner() {
     executionQueueShell,
     'export function applyServertoolExecutionResult('
   );
-  assertMissing(
-    'servertool-orchestration-blocks-no-ts-append-tool-output',
+  assertMissingFile(
+    'servertool-orchestration-blocks-dead-mutation-facades-deleted',
     `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
-    'export function appendToolOutput('
+    'orchestration-blocks.ts must stay physically deleted; mutation helpers are inlined into the remaining thin shells'
   );
-  assertMissing(
-    'servertool-orchestration-blocks-no-ts-append-tool-output',
-    `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
-    "nativeRecord({ op: 'append_tool_output'"
-  );
-  assertMissing(
-    'servertool-orchestration-blocks-native-array-failfast',
-    `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
-    '.filter((entry): entry is JsonObject'
-  );
-  for (const marker of [
-    'export function buildAssistantToolCallMessage(',
-    'export function buildToolMessagesFromOutputs(',
-      'export function stripToolOutputs(',
-      'export function patchToolCallArgumentsById(',
-      'export function filterOutExecutedToolCalls(',
-      'function replaceJsonObjectInPlaceInternal(',
-      'function nativeArray(',
-    'function nativeRecord(',
-    'runServertoolOrchestrationMutationWithNative'
-  ]) {
-    assertMissing(
-      'servertool-orchestration-blocks-dead-mutation-facades-deleted',
-      `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
-      readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`),
-      marker
-    );
-  }
 }
 
 // ── Check 13: followup mainline bridge is Rust-owned ──────────
@@ -6430,24 +6399,11 @@ function checkServertoolAutoHookCallerThinShell() {
     'server-side-tools-impl.ts must stay physically deleted; auto-hook caller must not re-enter a root facade'
   );
   const autoHookCallerShell = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
-  const orchestrationBlocks = readRequired(`${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`);
-  for (const marker of [
-    'buildAutoHookQueuesFromConfig',
-    'planServertoolAutoHookQueuesWithNative',
-    'sourceIndex',
-    'function scheduleAutoHookQueueWithNative',
-    'planServertoolHookScheduleWithNative',
-    "effectKind: `auto_hook:${normalizeServerToolCallName(hook.id)}:${requiredness}`",
-    'function normalizeServerToolCallName(',
-    '.trim().toLowerCase()',
-  ]) {
-    if (orchestrationBlocks.includes(marker)) {
-      fail(
-        'servertool-auto-hook-queue-single-rust-plan',
-        `orchestration-blocks.ts must not reschedule Rust-planned auto-hook queues via TS marker ${marker}`
-      );
-    }
-  }
+  assertMissingFile(
+    'servertool-auto-hook-queue-single-rust-plan',
+    `${SERVERTOOL_TS_DIR}/orchestration-blocks.ts`,
+    'orchestration-blocks.ts must stay physically deleted; auto-hook queue planning must not reappear in TS'
+  );
   for (const marker of [
     'planServertoolAutoHookQueueItemsWithNative({',
     'queueOrder: nativePlan.queueOrder.map(',

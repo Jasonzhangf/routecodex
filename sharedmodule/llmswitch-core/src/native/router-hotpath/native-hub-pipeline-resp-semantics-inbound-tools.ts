@@ -6,12 +6,35 @@ import {
   safeStringify
 } from './native-hub-pipeline-resp-semantics-shared.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
-import type {
-  ContextLengthDiagnosticsOutput,
-  NativeRespInboundReasoningNormalizeInput,
-  ProviderSseStreamReadErrorDescriptor,
-  RespInboundSseErrorDescriptor
-} from './native-hub-pipeline-resp-semantics-types.js';
+
+export interface NativeRespInboundReasoningNormalizeInput {
+  payload: Record<string, unknown>;
+  protocol: string;
+}
+
+export interface ContextLengthDiagnosticsOutput {
+  estimatedPromptTokens?: number;
+  maxContextTokens?: number;
+}
+
+export interface RespInboundSseErrorDescriptor {
+  code: 'SSE_DECODE_ERROR' | 'HTTP_502';
+  protocol: string;
+  providerType?: string;
+  errorMessage: string;
+  details: Record<string, unknown>;
+  stageRecord: Record<string, unknown>;
+  status?: number;
+}
+
+export interface ProviderSseStreamReadErrorDescriptor {
+  message: string;
+  code: 'SSE_DECODE_ERROR';
+  upstreamCode: string;
+  statusCode: number;
+  retryable: boolean;
+  requestExecutorProviderErrorStage: 'provider.sse_decode';
+}
 
 const NON_BLOCKING_RESP_INBOUND_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingRespInboundParseLogState = new Map<string, number>();

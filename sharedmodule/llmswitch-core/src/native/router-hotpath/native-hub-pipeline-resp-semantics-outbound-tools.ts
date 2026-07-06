@@ -6,16 +6,47 @@ import {
   safeStringify
 } from './native-hub-pipeline-resp-semantics-shared.js';
 import { formatUnknownError } from '../../shared/common-utils.js';
-import type {
-  AnthropicChatCompletionOutcome,
-  AnthropicStopReasonResolution,
-  ProviderResponseContextHelpersOutput,
-  ProviderResponseToolCallSummary,
-  ResponsesClientSseFrameProjection,
-  ResponsesClientSseProjectionState,
-  ResponsesHostPolicyResult
-} from './native-hub-pipeline-resp-semantics-types.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
+
+export interface AnthropicStopReasonResolution {
+  normalized: string;
+  finishReason: string;
+  isContextOverflow: boolean;
+}
+
+export interface AnthropicChatCompletionOutcome extends AnthropicStopReasonResolution {
+  shouldFailEmptyContextOverflow: boolean;
+}
+
+export interface ProviderResponseToolCallSummary {
+  toolCallCount?: number;
+  toolNames?: string[];
+}
+
+export interface ProviderResponseContextHelpersOutput {
+  isServerToolFollowup: boolean;
+  toolSurfaceShadowEnabled: boolean;
+  clientProtocol: 'openai-chat' | 'openai-responses' | 'anthropic-messages';
+  displayModel?: string;
+  clientFacingRequestId?: string;
+}
+
+export interface ResponsesHostPolicyResult {
+  shouldStripHostManagedFields: boolean;
+  targetProtocol: string;
+}
+
+export interface ResponsesClientSseProjectionState {
+  pendingApplyPatchArgumentDeltas?: Record<string, string>;
+  applyPatchCallIds?: string[];
+  emittedApplyPatchDoneCallIds?: string[];
+}
+
+export interface ResponsesClientSseFrameProjection {
+  emit: boolean;
+  frame: string;
+  state: ResponsesClientSseProjectionState;
+}
 
 const NON_BLOCKING_RESP_OUTBOUND_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingRespOutboundParseLogState = new Map<string, number>();

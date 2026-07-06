@@ -164,14 +164,6 @@
       "forbiddenSemantics": ["bridge action parsing", "policy filtering", "message mutation"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-types.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.response_responses_client_projection",
-      "minimumTsRole": "Response native facade type declarations.",
-      "cannotShrinkFurtherBecause": "TS host compiles against native response projection shapes; further shrink requires generated NAPI TypeScript declarations.",
-      "forbiddenSemantics": ["response projection", "SSE materialization", "tool harvest"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.ts",
       "classification": "native_shell_ok",
       "ownerFeature": "error.provider_failure_policy",

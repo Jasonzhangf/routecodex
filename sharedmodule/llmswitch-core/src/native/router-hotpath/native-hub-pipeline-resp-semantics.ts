@@ -1,10 +1,13 @@
 export type {
+  NativeRespInboundReasoningNormalizeInput,
+} from './native-hub-pipeline-resp-semantics-inbound-tools.js';
+
+export type {
   AnthropicChatCompletionOutcome,
   AnthropicStopReasonResolution,
-  NativeRespInboundReasoningNormalizeInput,
   ProviderResponseContextHelpersOutput,
   ProviderResponseToolCallSummary
-} from './native-hub-pipeline-resp-semantics-types.js';
+} from './native-hub-pipeline-resp-semantics-outbound-tools.js';
 
 export {
   applyReasoningPayloadToMessageWithNative,
