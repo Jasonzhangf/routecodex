@@ -1,3 +1,9 @@
+# 2026-07-06: rcc start defaults foreground, daemon is explicit
+
+- Correction: `rcc start` / `rcc start --snap` must default to foreground startup logs, not a silent daemon supervisor summary. It still performs managed takeover/restart by default; daemon mode requires explicit `ROUTECODEX_START_DAEMON=1` / `RCC_START_DAEMON=1`.
+- Verified rule: startup readiness polling must not warn-spam transient `daemon_supervisor_health_probe network_error`; those are normal until the child opens `/health`. Surface only final timeout/exit/startupError.
+- Evidence: focused CLI Jest 24/24 and root TypeScript passed; `build:base` and `pack:rcc` passed; global npm-owned `rcc` installed as `0.90.3613`; real `rcc start --snap` printed foreground runtime logs including `RouteCodex version: 0.90.3613`, port registration, active listeners, and no `daemon_supervisor_health_probe network_error`; explicit `ROUTECODEX_START_DAEMON=1 rcc start --snap` restored background service; 4444/5520/5555/10000 `/health.version=0.90.3613`.
+
 # 2026-07-06: rcc start takeover lock must be observable and health-gated
 
 - Verified rule: plain `rcc start` / `rcc start --snap` owns the managed runtime slot and must not look hung when another start is already taking over the same port group. The lock contention path must first attach to live `/health`, then retry acquiring a released/dead-owner start lock when health is not ready, and emit waiting progress before timeout.

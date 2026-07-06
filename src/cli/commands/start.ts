@@ -527,7 +527,10 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           const parsed = Number(raw);
           return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
         })();
-        const probeStartHealth = async (stage: string): Promise<boolean> => {
+        const probeStartHealth = async (
+          stage: string,
+          options: { logFailure?: boolean } = {}
+        ): Promise<boolean> => {
           let lastProbe: Awaited<ReturnType<typeof probeRouteCodexHealth>> | null = null;
           for (const host of buildLocalProbeHostCandidates(serverHost)) {
             const probe = await probeRouteCodexHealth({
@@ -541,7 +544,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               return true;
             }
           }
-          if (lastProbe && !lastProbe.ok) {
+          if (options.logFailure === true && lastProbe && !lastProbe.ok) {
             logStartHealthProbeNonBlocking(ctx, stage, lastProbe, {
               port: resolvedPort,
               kind: lastProbe.kind

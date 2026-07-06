@@ -48,14 +48,11 @@ export function resolveReleaseDaemonEnabled(env: NodeJS.ProcessEnv): boolean {
   const raw = String(
     env.ROUTECODEX_START_DAEMON
       ?? env.RCC_START_DAEMON
-      ?? '1'
+      ?? '0'
   )
     .trim()
     .toLowerCase();
-  if (['0', 'false', 'no', 'off'].includes(raw)) {
-    return false;
-  }
-  return true;
+  return ['1', 'true', 'yes', 'on'].includes(raw);
 }
 
 export function isDaemonSupervisorProcess(env: NodeJS.ProcessEnv): boolean {

@@ -85,8 +85,8 @@ function createExitableFakeChild(pid = 43210, exitDelayMs = 0, code: number | nu
 }
 
 describe('cli start command', () => {
-  it('keeps release start daemonized unless daemon is explicitly disabled', () => {
-    expect(resolveReleaseDaemonEnabled({})).toBe(true);
+  it('keeps release start foreground unless daemon is explicitly enabled', () => {
+    expect(resolveReleaseDaemonEnabled({})).toBe(false);
     expect(resolveReleaseDaemonEnabled({ ROUTECODEX_START_DAEMON: '1' })).toBe(true);
     expect(resolveReleaseDaemonEnabled({ RCC_START_DAEMON: '1' })).toBe(true);
     expect(resolveReleaseDaemonEnabled({ ROUTECODEX_START_DAEMON: '0' })).toBe(false);
@@ -807,7 +807,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(errors.join('\n')).toContain('Please create a RouteCodex user config');
   });
 
-  it('release start runs foreground server when daemon is explicitly disabled', async () => {
+  it('release start runs foreground server by default', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();
 
@@ -818,7 +818,7 @@ routingPolicyGroup = "gateway_coding_10000"
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: { ROUTECODEX_START_DAEMON: '0' },
+      env: {},
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
@@ -1066,7 +1066,7 @@ port = 5520
         nodeBin: 'node',
         createSpinner: async () => createStubSpinner(),
         logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-        env: {},
+        env: { ROUTECODEX_START_DAEMON: '1' },
         fsImpl: fs as any,
         pathImpl: path as any,
         homedir: () => tempHome,
@@ -1380,7 +1380,7 @@ port = 5520
     expect(spawnCalls[0].unrefCalled).toBe(true);
   });
 
-  it('release start runs daemon supervisor by default', async () => {
+  it('release foreground start enables --snap by default', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any; unrefCalled?: boolean }> = [];
     const program = new Command();
 
@@ -1398,7 +1398,8 @@ port = 5520
         readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
-        mkdirSync: () => {}
+        mkdirSync: () => {},
+        createWriteStream: () => ({ write: () => true, end: () => {} } as any)
       } as any,
       pathImpl: {
         join: (...parts: string[]) => parts.join('/'),
@@ -1417,10 +1418,7 @@ port = 5520
       spawn: (command, args, options) => {
         const call = { command, args, options, unrefCalled: false };
         spawnCalls.push(call);
-        return {
-          ...createFakeChild(43210),
-          unref: () => { call.unrefCalled = true; }
-        } as any;
+        return createFakeChild(43210);
       },
       fetch: (async () => ({
         ok: true,
@@ -1434,14 +1432,12 @@ port = 5520
       }
     });
 
-    await expect(program.parseAsync(['node', 'rcc', 'start', '--snap'], { from: 'node' })).rejects.toThrow('exit:0');
+    await program.parseAsync(['node', 'rcc', 'start', '--snap'], { from: 'node' });
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].args).toContain('start');
-    expect(spawnCalls[0].args).toContain('--snap');
-    expect(spawnCalls[0].options?.detached).toBe(true);
-    expect(spawnCalls[0].options?.stdio).toBe('ignore');
-    expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBe('1');
-    expect(spawnCalls[0].unrefCalled).toBe(true);
+    expect(spawnCalls[0].args).toContain('/tmp/index.js');
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_SNAPSHOT).toBe('1');
+    expect(spawnCalls[0].options?.detached).toBeUndefined();
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBeUndefined();
   });
 
   it('release daemon start waits for child health before reporting success', async () => {
@@ -1456,7 +1452,7 @@ port = 5520
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: { ROUTECODEX_START_DAEMON: '1' },
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
@@ -1531,7 +1527,7 @@ port = 5520
           }
         }) as any,
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: { ROUTECODEX_START_DAEMON: '1' },
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),

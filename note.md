@@ -1,3 +1,18 @@
+# 2026-07-06: rcc start restored foreground logs and explicit daemon mode
+
+- Root cause of the bad observed behavior: commit `fe6fea444 fix(cli): daemonize release start by default` made release `rcc start --snap` default to daemon mode, so the command returned with only supervisor information instead of showing runtime startup logs. My previous `7a30349` fixed lock/health waiting but preserved that wrong daemon default.
+- Fix: `resolveReleaseDaemonEnabled({})` is back to `false`; daemon mode is only explicit via `ROUTECODEX_START_DAEMON=1` / `RCC_START_DAEMON=1`. Startup health probes no longer print transient `daemon_supervisor_health_probe network_error` warnings while the child has not opened `/health`.
+- Evidence:
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/cli/start-command.spec.ts tests/cli/start-command.startup-error.spec.ts` PASS 24/24.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:runtime-lifecycle-pid-rebase` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run build:base` PASS.
+  - `npm run pack:rcc` PASS.
+  - `npm install -g artifacts/pack/rcc-0.90.3613.tgz --no-audit --no-fund` PASS.
+  - real `rcc start --snap` printed foreground runtime logs: `RouteCodex version: 0.90.3613`, port registration, active listeners, health URL, and no `daemon_supervisor_health_probe network_error`.
+  - after foreground validation, explicit `ROUTECODEX_START_DAEMON=1 rcc start --snap` restored background service; 4444/5520/5555/10000 `/health.version=0.90.3613`; start-lock directory empty.
+
 # 2026-07-06: rcc start takeover lock no longer looks hung
 
 - Symptom: running `rcc start --snap` again while a prior start was still taking over printed only `another start is already taking over port-group: 4444, 5520, 5555, 10000`, then looked stuck.
