@@ -19,7 +19,7 @@ export interface ConversionContext {
   metadata?: Record<string, unknown>;
 }
 
-export interface ConversionResult {
+interface ConversionResult {
   profile: ConversionProfile;
   payload: any;
 }

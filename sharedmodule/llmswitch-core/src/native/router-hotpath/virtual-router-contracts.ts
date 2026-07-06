@@ -7,9 +7,9 @@ import type { StandardizedRequest } from "../../conversion/hub/types/standardize
 
 export type RoutingInstructionMode = "force" | "none";
 
-export type RoutePoolMode = "round-robin" | "priority";
+type RoutePoolMode = "round-robin" | "priority";
 
-export interface RoutePoolLoadBalancingPolicy {
+interface RoutePoolLoadBalancingPolicy {
   /**
    * Optional pool-level override for provider selection strategy.
    * When omitted, Virtual Router falls back to the global loadBalancing.strategy.
@@ -26,7 +26,7 @@ export interface RoutePoolLoadBalancingPolicy {
   };
 }
 
-export interface RoutePoolTier {
+interface RoutePoolTier {
   id: string;
   targets: string[];
   priority: number;
@@ -62,7 +62,7 @@ export interface ProviderAuthConfig {
   rawType?: string;
 }
 
-export interface DeepSeekCompatRuntimeOptions {
+interface DeepSeekCompatRuntimeOptions {
   strictToolRequired?: boolean;
   toolProtocol?: "native" | "text";
   contextFileEnabled?: boolean;
@@ -80,7 +80,7 @@ export type AnthropicThinkingBudgetMap = Partial<
   Record<AnthropicThinkingEffort, number>
 >;
 
-export type ModelCapability =
+type ModelCapability =
   | "text"
   | "reasoning"
   | "multimodal"
@@ -166,14 +166,14 @@ export interface ProviderRuntimeProfile {
   modelCapabilities?: Record<string, ModelCapability[]>;
 }
 
-export interface VirtualRouterClassifierConfig {
+interface VirtualRouterClassifierConfig {
   longContextThresholdTokens?: number;
   thinkingKeywords?: string[];
   codingKeywords?: string[];
   backgroundKeywords?: string[];
 }
 
-export interface LoadBalancingPolicy {
+interface LoadBalancingPolicy {
   strategy: "round-robin" | "weighted";
   weights?: Record<string, number>;
   /**
@@ -200,7 +200,7 @@ export interface LoadBalancingPolicy {
   contextWeighted?: ContextWeightedLoadBalancingConfig;
 }
 
-export interface HealthWeightedLoadBalancingConfig {
+interface HealthWeightedLoadBalancingConfig {
   /**
    * When false, health-weighted logic is disabled and the engine uses legacy behavior.
    * When true/undefined, the engine uses health-weighted provider selection.
@@ -229,7 +229,7 @@ export interface HealthWeightedLoadBalancingConfig {
   recoverToBestOnRetry?: boolean;
 }
 
-export interface ContextWeightedLoadBalancingConfig {
+interface ContextWeightedLoadBalancingConfig {
   /**
    * When false, context-weighted logic is disabled.
    * When true/undefined, context-weighted logic applies within the same pool bucket,
@@ -251,16 +251,16 @@ export interface ContextWeightedLoadBalancingConfig {
   maxMultiplier?: number;
 }
 
-export interface ProviderHealthConfig {
+interface ProviderHealthConfig {
   failureThreshold: number;
   cooldownMs: number;
   fatalCooldownMs?: number;
 }
 
-export type VirtualRouterWebSearchExecutionMode = "servertool" | "direct";
-export type VirtualRouterWebSearchDirectActivation = "route" | "builtin";
+type VirtualRouterWebSearchExecutionMode = "servertool" | "direct";
+type VirtualRouterWebSearchDirectActivation = "route" | "builtin";
 
-export interface VirtualRouterWebSearchEngineConfig {
+interface VirtualRouterWebSearchEngineConfig {
   id: string;
   providerKey: string;
   description?: string;
@@ -294,7 +294,7 @@ export interface VirtualRouterWebSearchEngineConfig {
   serverToolsDisabled?: boolean;
 }
 
-export interface VirtualRouterWebSearchConfig {
+interface VirtualRouterWebSearchConfig {
   engines: VirtualRouterWebSearchEngineConfig[];
   injectPolicy?: "always" | "selective";
   /**
@@ -304,7 +304,7 @@ export interface VirtualRouterWebSearchConfig {
   force?: boolean;
 }
 
-export interface VirtualRouterExecCommandGuardConfig {
+interface VirtualRouterExecCommandGuardConfig {
   enabled: boolean;
   /**
    * Optional JSON policy file path for additional deny rules.
@@ -317,11 +317,11 @@ export interface VirtualRouterExecCommandGuardConfig {
   policyFile?: string;
 }
 
-export interface VirtualRouterApplyPatchConfig {
+interface VirtualRouterApplyPatchConfig {
   mode: "client" | "servertool";
 }
 
-export interface VirtualRouterClockConfig {
+interface VirtualRouterClockConfig {
   enabled: boolean;
   tickMs?: number;
   includeTimeTag?: boolean;
@@ -350,7 +350,7 @@ export interface VirtualRouterContextRoutingConfig {
   hardLimit?: boolean;
 }
 
-export type VirtualRouterProviderDefinition = Record<string, unknown>;
+type VirtualRouterProviderDefinition = Record<string, unknown>;
 
 export interface VirtualRouterBootstrapInput extends Record<string, unknown> {
   virtualrouter?: Record<string, unknown>;
@@ -369,7 +369,7 @@ export interface VirtualRouterBootstrapInput extends Record<string, unknown> {
   clock?: VirtualRouterClockConfig | Record<string, unknown>;
 }
 
-export type ProviderRuntimeMap = Record<string, ProviderRuntimeProfile>;
+type ProviderRuntimeMap = Record<string, ProviderRuntimeProfile>;
 
 export interface VirtualRouterBootstrapResult {
   config: VirtualRouterConfig;

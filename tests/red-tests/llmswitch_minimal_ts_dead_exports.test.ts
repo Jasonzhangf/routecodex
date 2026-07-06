@@ -60,12 +60,12 @@ function extractDeclaredExports(source: string): string[] {
 }
 
 function hasExternalSourceConsumer(filePath: string, symbol: string): boolean {
+  const symbolPattern = `\\b${symbol}\\b`;
   const result = spawnSync(
     'rg',
     [
       '-n',
-      '--fixed-strings',
-      symbol,
+      symbolPattern,
       ...SEARCH_ROOTS,
       '--glob',
       '!dist/**',

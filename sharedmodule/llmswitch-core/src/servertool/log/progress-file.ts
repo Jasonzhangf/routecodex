@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { resolveRccPath } from '../../runtime/user-data-paths.js';
 
-export type ServerToolProgressFileEvent = {
+type ServerToolProgressFileEvent = {
   requestId: string;
   flowId: string;
   tool: string;

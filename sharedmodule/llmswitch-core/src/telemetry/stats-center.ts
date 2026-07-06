@@ -37,7 +37,7 @@ export interface ProviderUsageEvent {
   totalTokens?: number;
 }
 
-export interface RouterStatsBucket {
+interface RouterStatsBucket {
   requestCount: number;
   poolHitCount: Record<string, number>;
   routeHitCount: Record<string, number>;
@@ -47,12 +47,12 @@ export interface RouterStatsBucket {
   stopMessageActiveCount: number;
 }
 
-export interface RouterStatsSnapshot {
+interface RouterStatsSnapshot {
   global: RouterStatsBucket;
   byEntryEndpoint: Record<string, RouterStatsBucket>;
 }
 
-export interface ProviderStatsBucket {
+interface ProviderStatsBucket {
   requestCount: number;
   successCount: number;
   errorCount: number;
@@ -66,7 +66,7 @@ export interface ProviderStatsBucket {
   };
 }
 
-export interface ProviderStatsSnapshot {
+interface ProviderStatsSnapshot {
   global: ProviderStatsBucket;
   byProviderKey: Record<string, ProviderStatsBucket>;
   byRoute: Record<string, ProviderStatsBucket>;
@@ -78,13 +78,13 @@ export interface StatsSnapshot {
   providers: ProviderStatsSnapshot;
 }
 
-export interface StatsCenterOptions {
+interface StatsCenterOptions {
   enable?: boolean;
   autoPrintOnExit?: boolean;
   persistPath?: string | null;
 }
 
-export interface StatsCenter {
+interface StatsCenter {
   recordVirtualRouterHit(ev: VirtualRouterHitEvent): void;
   recordProviderUsage(ev: ProviderUsageEvent): void;
   getSnapshot(): StatsSnapshot;
@@ -374,7 +374,7 @@ function printStatsToConsole(snapshot: StatsSnapshot): void {
   );
 }
 
-export function initStatsCenter(options?: StatsCenterOptions): StatsCenter {
+function initStatsCenter(options?: StatsCenterOptions): StatsCenter {
   if (instance) {
     return instance;
   }

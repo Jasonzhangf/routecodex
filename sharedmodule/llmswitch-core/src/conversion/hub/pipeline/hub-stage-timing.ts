@@ -63,7 +63,7 @@ export function clearHubStageTiming(requestId: string | undefined | null): void 
   clearHubStageTimingState(requestId);
 }
 
-export function peekHubStageTopSummary(
+function peekHubStageTopSummary(
   requestId: string | undefined | null,
   options?: {
     topN?: number;
