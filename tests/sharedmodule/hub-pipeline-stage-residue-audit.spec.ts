@@ -1310,6 +1310,14 @@ describe('hub pipeline stage residue audit', () => {
         label: 'exports redundant read-path helper',
         pattern: /export\s+function\s+resolveRccPathForRead\b/,
       },
+      {
+        label: 'exports unused snapshot dir helper',
+        pattern: /export\s+function\s+resolveRccSnapshotsDir\b/,
+      },
+      {
+        label: 'exports unused snapshot dir env helper',
+        pattern: /export\s+function\s+resolveRccSnapshotsDirFromEnv\b/,
+      },
     ]);
 
     expect(findings).toEqual([]);
