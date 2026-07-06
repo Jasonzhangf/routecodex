@@ -1749,6 +1749,51 @@ fn convert_bridge_input_preserves_custom_tool_call_and_output_pair() {
 }
 
 #[test]
+fn convert_bridge_input_unwraps_apply_patch_json_wrapper_in_assistant_tool_calls() {
+    let patch = "*** Begin Patch\n*** Add File: apply_patch_test/02-add.txt\n+hello\n*** End Patch";
+    let input = BridgeInputToChatInput {
+        input: vec![
+            json!({
+                "type": "message",
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_patch_2",
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "arguments": serde_json::to_string(&json!({ "patch": patch })).unwrap()
+                    }
+                }]
+            }),
+            json!({
+                "type": "custom_tool_call_output",
+                "call_id": "call_patch_2",
+                "output": "APPLY_PATCH_ERROR: apply_patch did not apply"
+            }),
+        ],
+        tools: None,
+        tool_result_fallback_text: Some(String::new()),
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: Some(false),
+    };
+
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
+    let tool_call = output
+        .messages
+        .iter()
+        .find(|entry| entry.get("tool_calls").and_then(Value::as_array).is_some())
+        .unwrap();
+    let arguments = tool_call["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .unwrap();
+    assert_eq!(arguments, patch);
+    assert!(!arguments.trim_start().starts_with('{'));
+    assert!(!arguments.contains("\"patch\""));
+}
+
+#[test]
 fn build_bridge_history_allows_terminal_pending_tool_call_suffix_when_enabled() {
     let input = BuildBridgeHistoryInput {
         messages: vec![

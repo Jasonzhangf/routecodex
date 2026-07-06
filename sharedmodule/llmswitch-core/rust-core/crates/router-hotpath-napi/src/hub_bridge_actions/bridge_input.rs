@@ -274,9 +274,15 @@ fn serialize_tool_output(entry: &Map<String, Value>) -> Option<String> {
 
 fn repair_bridge_tool_arguments(
     entry_type: &str,
+    tool_name: &str,
     entry: &Map<String, Value>,
     args: &Value,
 ) -> String {
+    if tool_name == "apply_patch" {
+        if let Some(patch) = read_apply_patch_freeform_patch(args) {
+            return patch;
+        }
+    }
     if entry_type == "custom_tool_call" {
         let input = entry.get("input").cloned().unwrap_or(Value::Null);
         if read_trimmed_string(entry.get("name")).as_deref() == Some("apply_patch") {
@@ -289,6 +295,26 @@ fn repair_bridge_tool_arguments(
             .unwrap_or_else(|_| "{}".to_string());
     }
     repair_arguments_to_string(args).trim().to_string()
+}
+
+fn read_apply_patch_freeform_patch(value: &Value) -> Option<String> {
+    match value {
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.starts_with("*** Begin Patch") {
+                return Some(raw.to_string());
+            }
+            let parsed: Value = serde_json::from_str(trimmed).ok()?;
+            read_apply_patch_freeform_patch(&parsed)
+        }
+        Value::Object(row) => row
+            .get("patch")
+            .or_else(|| row.get("input"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .filter(|patch| patch.trim_start().starts_with("*** Begin Patch")),
+        _ => None,
+    }
 }
 
 struct ProcessBlocksResult {
@@ -510,7 +536,8 @@ fn process_message_blocks(
                 call_id_candidate,
                 "missing_tool_call_id: bridge function_call block is missing call_id/id",
             )?;
-            let serialized = repair_bridge_tool_arguments(block_type.as_str(), block_obj, args);
+            let serialized =
+                repair_bridge_tool_arguments(block_type.as_str(), name.as_str(), block_obj, args);
             tool_name_by_id.insert(call_id.clone(), name.clone());
             register_pending_tool_call(pending_tool_call_ids, call_id.as_str());
             let mut fn_row = Map::new();
@@ -694,7 +721,12 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                         continue;
                     };
                     let args_val = func_obj.get("arguments").cloned().unwrap_or(Value::Null);
-                    let serialized = repair_arguments_to_string(&args_val).trim().to_string();
+                    let serialized = repair_bridge_tool_arguments(
+                        "tool_call",
+                        name.as_str(),
+                        entry_obj,
+                        &args_val,
+                    );
                     func_obj.insert("name".to_string(), Value::String(name.clone()));
                     func_obj.insert("arguments".to_string(), Value::String(serialized));
                     let call_id = require_explicit_tool_call_id(
@@ -809,7 +841,8 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 "missing_tool_call_id: bridge function_call item is missing call_id/id",
             )?;
             decrement_call_count(&mut future_tool_call_counts, call_id.as_str());
-            let serialized = repair_bridge_tool_arguments(entry_type.as_str(), entry_obj, args);
+            let serialized =
+                repair_bridge_tool_arguments(entry_type.as_str(), name.as_str(), entry_obj, args);
             tool_name_by_id.insert(call_id.clone(), name.clone());
             let mut fn_row = Map::new();
             fn_row.insert("name".to_string(), Value::String(name));
