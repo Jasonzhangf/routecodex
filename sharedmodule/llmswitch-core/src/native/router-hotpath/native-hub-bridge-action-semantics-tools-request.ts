@@ -11,31 +11,141 @@ import {
   shouldRethrowNativeRawError
 } from './native-hub-bridge-action-semantics-shared.js';
 
-import type {
-  NativeAppendLocalImageBlockOnLatestUserInputInput,
-  NativeAppendLocalImageBlockOnLatestUserInputOutput,
-  NativeApplyBridgeNormalizeToolIdentifiersInput,
-  NativeBridgeHistoryInput,
-  NativeBridgeHistoryOutput,
-  NativeBridgeToolCallIdsInput,
-  NativeBridgeToolCallIdsOutput,
-  NativeFilterBridgeInputForUpstreamInput,
-  NativeFilterBridgeInputForUpstreamOutput,
-  NativeMergeRetainedResponsesRequestParametersInput,
-  NativeNormalizeBridgeHistorySeedOutput,
-  NativePickResponsesRequestParametersInput,
-  NativePickResponsesRequestParametersOutput,
-  NativePrepareResponsesRequestEnvelopeInput,
-  NativePrepareResponsesRequestEnvelopeOutput,
-  NativeResolveResponsesBridgeToolsInput,
-  NativeResolveResponsesBridgeToolsOutput,
-  NativeResolveResponsesRequestBridgeDecisionsInput,
-  NativeResolveResponsesRequestBridgeDecisionsOutput,
-  NativeResponsesValueInput,
-  NativeSanitizeCapturedResponsesInputInput,
-  NativeSanitizeCapturedResponsesInputOutput,
-  NativeStripResponsesToolControlFieldsInput
-} from './native-hub-bridge-action-semantics-types.js';
+export interface NativeBridgeToolCallIdsInput {
+  messages: unknown[];
+  rawRequest?: Record<string, unknown>;
+  capturedToolResults?: Array<Record<string, unknown>>;
+  idPrefix?: string;
+}
+
+export interface NativeBridgeToolCallIdsOutput {
+  messages: unknown[];
+  rawRequest?: Record<string, unknown>;
+  capturedToolResults?: Array<Record<string, unknown>>;
+}
+
+export interface NativeApplyBridgeNormalizeToolIdentifiersInput {
+  stage: 'request_inbound' | 'request_outbound' | 'response_inbound' | 'response_outbound';
+  protocol?: string;
+  moduleType?: string;
+  messages: unknown[];
+  rawRequest?: Record<string, unknown>;
+  capturedToolResults?: Array<Record<string, unknown>>;
+  idPrefix?: string;
+}
+
+export interface NativeBridgeHistoryInput {
+  messages: unknown[];
+  tools?: Array<Record<string, unknown>>;
+  allowPendingTerminalToolCall?: boolean;
+}
+
+export interface NativeBridgeHistoryOutput {
+  input: unknown[];
+  combinedSystemInstruction?: string;
+  latestUserInstruction?: string;
+  originalSystemMessages: string[];
+}
+
+export interface NativeNormalizeBridgeHistorySeedOutput {
+  input: unknown[];
+  combinedSystemInstruction?: string;
+  latestUserInstruction?: string;
+  originalSystemMessages: string[];
+}
+
+export interface NativeResolveResponsesBridgeToolsInput {
+  originalTools?: Array<Record<string, unknown>>;
+  chatTools?: Array<Record<string, unknown>>;
+  allowBuiltinWebSearch?: boolean;
+  hasServerSideWebSearch?: boolean;
+  passthroughKeys?: string[];
+  request?: Record<string, unknown>;
+}
+
+export interface NativeResolveResponsesBridgeToolsOutput {
+  mergedTools?: Array<Record<string, unknown>>;
+  request?: Record<string, unknown>;
+}
+
+export interface NativeResolveResponsesRequestBridgeDecisionsInput {
+  context?: Record<string, unknown>;
+  requestMetadata?: Record<string, unknown>;
+  envelopeMetadata?: Record<string, unknown>;
+  bridgeMetadata?: Record<string, unknown>;
+  extraBridgeHistory?: Record<string, unknown>;
+  requestSemantics?: Record<string, unknown>;
+}
+
+export interface NativeResolveResponsesRequestBridgeDecisionsOutput {
+  forceWebSearch: boolean;
+  allowBuiltinWebSearch: boolean;
+  toolCallIdStyle?: 'fc' | 'preserve';
+  historySeed?: NativeBridgeHistoryOutput;
+  previousResponseId?: string;
+}
+
+export interface NativeFilterBridgeInputForUpstreamInput {
+  input: unknown[];
+  allowToolCallId?: boolean;
+}
+
+export interface NativeFilterBridgeInputForUpstreamOutput {
+  input: Array<Record<string, unknown>>;
+}
+
+export interface NativeSanitizeCapturedResponsesInputInput {
+  input: unknown[];
+}
+
+export interface NativeSanitizeCapturedResponsesInputOutput {
+  input: Array<Record<string, unknown>>;
+}
+
+export interface NativePickResponsesRequestParametersInput {
+  payload?: Record<string, unknown>;
+  streamHint?: boolean;
+}
+
+export interface NativePickResponsesRequestParametersOutput {
+  [key: string]: unknown;
+}
+
+export interface NativeResponsesValueInput {
+  value?: Record<string, unknown>;
+}
+
+export interface NativeStripResponsesToolControlFieldsInput extends NativeResponsesValueInput {
+  nestedExtraFields?: boolean;
+}
+
+export interface NativeMergeRetainedResponsesRequestParametersInput {
+  request?: Record<string, unknown>;
+  retainedParameters?: Record<string, unknown>;
+}
+
+export interface NativePrepareResponsesRequestEnvelopeInput {
+  request: Record<string, unknown>;
+  extraSystemInstruction?: unknown;
+  combinedSystemInstruction?: unknown;
+  reasoningInstructionSegments?: unknown;
+  chatParameters?: unknown;
+  chatStream?: unknown;
+  chatParametersStream?: unknown;
+  stripHostFields?: boolean;
+}
+
+export interface NativePrepareResponsesRequestEnvelopeOutput {
+  request: Record<string, unknown>;
+}
+
+export interface NativeAppendLocalImageBlockOnLatestUserInputInput {
+  messages: unknown[];
+}
+
+export interface NativeAppendLocalImageBlockOnLatestUserInputOutput {
+  messages: Array<Record<string, unknown>>;
+}
 
 export function normalizeBridgeToolCallIdsWithNative(
   input: NativeBridgeToolCallIdsInput

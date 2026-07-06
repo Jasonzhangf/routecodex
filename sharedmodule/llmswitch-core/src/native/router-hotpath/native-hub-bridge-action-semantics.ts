@@ -21,7 +21,10 @@ export type {
   NativePrepareResponsesRequestEnvelopeInput,
   NativePrepareResponsesRequestEnvelopeOutput,
   NativeAppendLocalImageBlockOnLatestUserInputInput,
-  NativeAppendLocalImageBlockOnLatestUserInputOutput,
+  NativeAppendLocalImageBlockOnLatestUserInputOutput
+} from './native-hub-bridge-action-semantics-tools-request.js';
+
+export type {
   NativeApplyBridgeNormalizeHistoryInput,
   NativeApplyBridgeNormalizeHistoryOutput,
   NativeApplyBridgeCaptureToolResultsInput,
@@ -34,7 +37,10 @@ export type {
   NativeSerializeToolArgumentsInput,
   NativeSerializeToolOutputInput,
   NativeEnsureMessagesArrayInput,
-  NativeEnsureMessagesArrayOutput,
+  NativeEnsureMessagesArrayOutput
+} from './native-hub-bridge-action-semantics-tools-core.js';
+
+export type {
   NativeEnsureBridgeOutputFieldsInput,
   NativeEnsureBridgeOutputFieldsOutput,
   NativeApplyBridgeMetadataActionInput,
@@ -52,7 +58,7 @@ export type {
   NativeNormalizeMessageReasoningToolsOutput,
   NativeHarvestToolsInput,
   NativeHarvestToolsOutput
-} from './native-hub-bridge-action-semantics-types.js';
+} from './native-hub-bridge-action-semantics-tools-post.js';
 
 export {
   normalizeBridgeToolCallIdsWithNative,

@@ -156,14 +156,6 @@
       "forbiddenSemantics": ["text tool harvest", "JSON repair", "tool-call normalization"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-types.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.response_responses_chat_projection",
-      "minimumTsRole": "Native bridge action facade type declarations.",
-      "cannotShrinkFurtherBecause": "Native facade callers need TS compile-time shapes; further shrink requires generated NAPI TypeScript declarations.",
-      "forbiddenSemantics": ["bridge action parsing", "policy filtering", "message mutation"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.ts",
       "classification": "native_shell_ok",
       "ownerFeature": "error.provider_failure_policy",

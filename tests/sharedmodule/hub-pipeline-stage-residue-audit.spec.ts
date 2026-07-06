@@ -2058,6 +2058,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_provider_key.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_state_codec.rs',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-types.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-types.ts',
     ];
 
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));

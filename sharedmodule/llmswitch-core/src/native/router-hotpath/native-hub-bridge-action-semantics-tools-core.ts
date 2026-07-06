@@ -11,20 +11,75 @@ import {
   shouldRethrowNativeRawError
 } from './native-hub-bridge-action-semantics-shared.js';
 
-import type {
-  NativeApplyBridgeCaptureToolResultsInput,
-  NativeApplyBridgeCaptureToolResultsOutput,
-  NativeApplyBridgeEnsureToolPlaceholdersInput,
-  NativeApplyBridgeEnsureToolPlaceholdersOutput,
-  NativeApplyBridgeNormalizeHistoryInput,
-  NativeApplyBridgeNormalizeHistoryOutput,
-  NativeBridgeInputToChatInput,
-  NativeBridgeInputToChatOutput,
-  NativeEnsureMessagesArrayInput,
-  NativeEnsureMessagesArrayOutput,
-  NativeSerializeToolArgumentsInput,
-  NativeSerializeToolOutputInput
-} from './native-hub-bridge-action-semantics-types.js';
+export interface NativeApplyBridgeNormalizeHistoryInput {
+  messages: unknown[];
+  tools?: Array<Record<string, unknown>>;
+  allowPendingTerminalToolCall?: boolean;
+}
+
+export interface NativeApplyBridgeNormalizeHistoryOutput {
+  messages: unknown[];
+  bridgeHistory?: Record<string, unknown>;
+}
+
+export interface NativeApplyBridgeCaptureToolResultsInput {
+  stage: 'request_inbound' | 'request_outbound' | 'response_inbound' | 'response_outbound';
+  capturedToolResults?: Array<Record<string, unknown>>;
+  rawRequest?: Record<string, unknown>;
+  rawResponse?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface NativeApplyBridgeCaptureToolResultsOutput {
+  capturedToolResults?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface NativeApplyBridgeEnsureToolPlaceholdersInput {
+  stage: 'request_inbound' | 'request_outbound' | 'response_inbound' | 'response_outbound';
+  messages: unknown[];
+  capturedToolResults?: Array<Record<string, unknown>>;
+  rawRequest?: Record<string, unknown>;
+  rawResponse?: Record<string, unknown>;
+}
+
+export interface NativeApplyBridgeEnsureToolPlaceholdersOutput {
+  messages: unknown[];
+  toolOutputs?: Array<Record<string, unknown>>;
+}
+
+export interface NativeBridgeInputToChatInput {
+  input: unknown[];
+  tools?: Array<Record<string, unknown>>;
+  toolResultFallbackText?: string;
+  normalizeFunctionName?: string;
+  allowPendingTerminalToolCall?: boolean;
+  allowOrphanToolResult?: boolean;
+}
+
+export interface NativeBridgeInputToChatOutput {
+  messages: Array<Record<string, unknown>>;
+}
+
+export interface NativeCoerceBridgeRoleInput {
+  role: unknown;
+}
+
+export interface NativeSerializeToolArgumentsInput {
+  args?: unknown;
+}
+
+export interface NativeSerializeToolOutputInput {
+  output?: unknown;
+}
+
+export interface NativeEnsureMessagesArrayInput {
+  state?: unknown;
+}
+
+export interface NativeEnsureMessagesArrayOutput {
+  messages: Array<Record<string, unknown>>;
+}
 
 export function applyBridgeNormalizeHistoryWithNative(
   input: NativeApplyBridgeNormalizeHistoryInput
