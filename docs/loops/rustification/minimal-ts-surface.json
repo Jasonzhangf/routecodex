@@ -188,14 +188,6 @@
       "forbiddenSemantics": ["req_inbound parsing", "context restoration", "tool result repair"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts",
-      "classification": "parser_io_ok",
-      "ownerFeature": "hub.req_outbound_provider_semantic",
-      "minimumTsRole": "Parse native JSON string and type-project Rust-owned req_outbound result.",
-      "cannotShrinkFurtherBecause": "The current NAPI boundary is JSON-string based; TS must parse the return until the native binding contract changes.",
-      "forbiddenSemantics": ["payload rebuild", "profile trim/validation", "compat policy"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.req_outbound_provider_semantic",

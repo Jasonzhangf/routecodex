@@ -3040,13 +3040,18 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('req outbound native parser facade must not own compat output semantic validation', () => {
+  it('req outbound native parser facade must stay physically deleted', () => {
     const repoRoot = process.cwd();
+    const parserPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts'
+    );
     const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts'),
       'utf8'
     );
     const forbiddenPatterns = [
+      { label: 'imports deleted parser facade', pattern: /native-hub-pipeline-req-outbound-semantics-parsers/u },
       { label: 'payload object validation', pattern: /const payloadRaw = row\.payload/u },
       { label: 'appliedProfile trimming', pattern: /appliedProfileRaw[\s\S]{0,180}\.trim\(\)/u },
       { label: 'nativeApplied boolean validation', pattern: /typeof nativeAppliedRaw !== ['"]boolean['"]/u },
@@ -3057,6 +3062,7 @@ describe('hub pipeline stage residue audit', () => {
       .filter(({ pattern }) => pattern.test(source))
       .map(({ label }) => label);
 
+    expect(fs.existsSync(parserPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 
@@ -3574,7 +3580,6 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs',
