@@ -24,6 +24,88 @@ const ALLOWED_CLASSIFICATIONS = new Set([
   'parser_io_ok',
   'diagnostic_io_ok',
 ]);
+const SEMANTIC_TOKEN_PATTERNS = {
+  'provider response parsing': [
+    /\bprovider\s+response\s+parsing\b/iu,
+    /\brunRespInboundStage2FormatParse\b/u,
+    /\brunRespInboundStage3SemanticMap\b/u,
+    /\bOpenAIChatResponseMapper\b/u,
+    /\bPROVIDER_RESPONSE_REGISTRY\b/u,
+  ],
+  'response governance': [
+    /\bresponse\s+governance\b/iu,
+    /\brunRespProcessStage1ToolGovernance\b/u,
+    /\brunRespProcessStage2Finalize\b/u,
+    /\brunRespProcessStage3ServerToolOrchestration\b/u,
+  ],
+  'client projection': [
+    /\bclient\s+projection\b/iu,
+    /\brunRespOutboundStage1ClientRemap\b/u,
+    /\bbuild[A-Za-z0-9_]*(?:Client|Responses|Chat)[A-Za-z0-9_]*Payload\b/u,
+  ],
+  'effect planning': [
+    /\beffect\s+planning\b/iu,
+    /\binterface\s+ProviderResponsePlan\b/u,
+    /\btype\s+ProviderResponsePlan\b/u,
+    /\bswitch\s*\([^)]*(?:effect|runtimeEffect)[^)]*(?:kind|action)[^)]*\)/u,
+    /(?:effect|runtimeEffect)\.(?:kind|action)\s*===/u,
+  ],
+  fallback: [/\bfallback\b/iu, /\bcompat\b/iu, /best[- ]?effort/iu],
+  'pipeline execution': [/\bexecuteHubPipeline\b/u, /\bexecuteHubPipelineWithNative\b/u],
+  'route selection': [/\bselectProvider\b/u, /\bselectRoute\b/u],
+  'payload mutation': [/\bpayload\s+mutation\b/iu, /\bpayload\s*=/u],
+  'request shaping': [/\brequest\s+shaping\b/iu],
+  'response shaping': [/\bresponse\s+shaping\b/iu],
+  'route policy': [/\broute\s+policy\b/iu],
+  'tool governance': [/\btool\s+governance\b/iu],
+  'continuation policy': [/\bcontinuation\s+policy\b/iu],
+  'runtime routing': [/\bruntime\s+routing\b/iu],
+  'provider selection': [/\bprovider\s+selection\b/iu],
+  'payload policy': [/\bpayload\s+policy\b/iu],
+  'provider policy': [/\bprovider\s+policy\b/iu],
+  'client response projection': [/\bproject[A-Za-z0-9_]*Client[A-Za-z0-9_]*Response\b/u, /\bclientResponse[A-Za-z0-9_]*\s*=/u],
+  'Hub stage policy': [/\bresolveHubStage[A-Za-z0-9_]*Policy\b/u, /\bplanHubStage[A-Za-z0-9_]*Policy\b/u],
+  'VR policy': [/\bresolveVirtualRouter[A-Za-z0-9_]*Policy\b/u, /\bplanVirtualRouter[A-Za-z0-9_]*Policy\b/u],
+  'request repair': [/\brepair[A-Za-z0-9_]*Request\b/u, /\brequestRepair[A-Za-z0-9_]*\b/u],
+  'response repair': [/\brepair[A-Za-z0-9_]*Response\b/u, /\bresponseRepair[A-Za-z0-9_]*\b/u],
+  'routing policy': [/\bresolve[A-Za-z0-9_]*RoutingPolicy\b/u, /\bplan[A-Za-z0-9_]*RoutingPolicy\b/u],
+  'metadata control truth': [/\bmetadata\s+control\s+truth\b/iu],
+  'request/response semantic conversion': [/\brequest\/response\s+semantic\s+conversion\b/iu],
+  'message normalization': [/\bmessage\s+normalization\b/iu],
+  'payload repair': [/\bpayload\s+repair\b/iu],
+  'runtime JSON guards': [/\bfunction\s+isJson[A-Za-z0-9_]*\b/u],
+  'clone helpers': [/\bfunction\s+jsonClone\b/u, /\bstructuredClone\b/u],
+  'protocol validation': [/\bprotocol\s+validation\b/iu],
+  'payload sanitization': [/\bsanitiz(?:e|ation)\b/iu],
+  'standardization execution': [/\bstandardization\s+execution\b/iu],
+  'route decision': [/\broute\s+decision\b/iu],
+  'provider wire build': [/\bprovider\s+wire\s+build\b/iu],
+  'manual continuation owner branches': [/\bcontinuationOwner\s*===/u, /\bconst\s+owners\s*:\s*Array\b/u],
+  'manual scope-key builder': [
+    /entry:\$\{[^`]+owner:\$\{/u,
+    /owner:\$\{[^`]+session:\$\{/u,
+    /owner:\$\{[^`]+conversation:\$\{/u,
+  ],
+  'payload materialization': [/\bpayload\s+materialization\b/iu],
+  'allowContinuation policy': [/\ballowContinuation\s*[:=]\s*(?:true|false)/u],
+  'output-to-input conversion': [/\boutput[-_ ]to[-_ ]input\b/iu],
+  'retry policy': [/\bretry\s+policy\b/iu],
+  'reroute policy': [/\breroute\s+policy\b/iu],
+  'provider error classification': [/\bprovider\s+error\s+classification\b/iu],
+  'load balancing': [/\bload\s+balancing\b/iu],
+  'provider availability': [/\bprovider\s+availability\b/iu],
+  'error classes': [/\berror\s+classes\b/iu],
+  'runtime constants': [/\bruntime\s+constants\b/iu],
+  routing: [/\brouting\b/iu],
+  'Hub payload policy': [/\bHub\s+payload\s+policy\b/u],
+  'servertool execution policy': [/\bservertool\s+execution\s+policy\b/iu],
+  'followup orchestration': [/\bfollowup\s+orchestration\b/iu],
+  'handler selection': [/\bhandler\s+selection\b/iu],
+  'execution dispatch': [/\bexecution\s+dispatch\b/iu],
+  'followup policy': [/\bfollowup\s+policy\b/iu],
+  'hit reason build': [/\bhit\s+reason\s+build\b/iu],
+  'client response policy': [/\bclient\s+response\s+policy\b/iu],
+};
 
 function readGitTrackedFiles() {
   return execFileSync('git', ['ls-files', '-z'], {
@@ -100,6 +182,38 @@ function hasUsefulReason(value) {
   return typeof value === 'string' && value.trim().length >= 40;
 }
 
+function readSource(rel) {
+  return fs.readFileSync(path.join(ROOT, rel), 'utf8');
+}
+
+function withoutManifestCommentLines(source) {
+  const withoutComments = source
+    .replace(/\/\*[\s\S]*?\*\//gu, '')
+    .replace(/(^|[^:])\/\/.*$/gmu, '$1');
+  return withoutComments
+    .split('\n')
+    .filter((line) => !line.includes('forbiddenSemantics') && !line.includes('cannotShrinkFurtherBecause'))
+    .join('\n');
+}
+
+function findForbiddenSemanticHits(source, forbiddenSemantics) {
+  const searchable = withoutManifestCommentLines(source);
+  const hits = [];
+  for (const semantic of forbiddenSemantics) {
+    const patterns = SEMANTIC_TOKEN_PATTERNS[semantic];
+    if (!patterns) {
+      hits.push(`unmapped forbiddenSemantics token: ${semantic}`);
+      continue;
+    }
+    for (const pattern of patterns) {
+      if (pattern.test(searchable)) {
+        hits.push(`${semantic} matched ${String(pattern)}`);
+      }
+    }
+  }
+  return hits;
+}
+
 function main() {
   const manifest = readManifest();
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
@@ -143,6 +257,11 @@ function main() {
     }
     if (!Array.isArray(entry.forbiddenSemantics) || entry.forbiddenSemantics.length === 0) {
       errors.push(`missing forbiddenSemantics for ${rel}`);
+    } else if (isCurrentTrackedProdTsFile(rel)) {
+      const hits = findForbiddenSemanticHits(readSource(rel), entry.forbiddenSemantics);
+      for (const hit of hits) {
+        errors.push(`forbidden semantic residue in ${rel}: ${hit}`);
+      }
     }
   }
 
