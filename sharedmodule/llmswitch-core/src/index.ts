@@ -5,7 +5,8 @@
  * have to depend on the removed LLMSwitch V2 engine.
  */
 
-export * from './conversion/index.js';
+export { convertProviderResponse } from './conversion/hub/response/provider-response.js';
+export { runStandardChatRequestFilters } from './conversion/shared/chat-request-filters.js';
 export * from './native/router-hotpath/native-virtual-router-bootstrap-config.js';
 export * from './native/router-hotpath/native-provider-runtime-ingress.js';
 export * from './native/router-hotpath/native-router-hotpath-policy.js';

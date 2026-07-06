@@ -124,14 +124,6 @@
       "forbiddenSemantics": ["standardization execution", "route decision", "provider wire build"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/index.ts",
-      "classification": "native_shell_ok",
-      "ownerFeature": "hub.pipeline_contract_surface",
-      "minimumTsRole": "Package barrel for current public imports.",
-      "cannotShrinkFurtherBecause": "It has no logic; deleting it is a public API break unless package exports are redesigned.",
-      "forbiddenSemantics": ["conversion logic", "fallback", "provider special case"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.ts",
       "classification": "type_shell_ok",
       "ownerFeature": "hub.response_responses_chat_projection",

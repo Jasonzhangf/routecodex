@@ -311,12 +311,6 @@
       "topDir": "conversion"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/index.ts",
-      "loc": 3,
-      "nativeLinked": false,
-      "topDir": "conversion"
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/mcp-injection.ts",
       "loc": 13,
       "nativeLinked": true,

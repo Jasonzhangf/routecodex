@@ -13,10 +13,6 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./conversion": {
-      "import": "./dist/conversion/index.js",
-      "types": "./dist/conversion/index.d.ts"
-    },
     "./conversion/switch-orchestrator": {
       "import": "./dist/conversion/switch-orchestrator.js",
       "types": "./dist/conversion/switch-orchestrator.d.ts"

@@ -1076,20 +1076,25 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).toContain('export interface CompatApplicationResult');
   });
 
-  it('public conversion barrels must not export legacy mapper or adapter implementations', () => {
+  it('public conversion barrel must stay deleted and root exports only direct live owners', () => {
     const conversionIndexPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/index.ts',
     );
+    const rootIndexPath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/index.ts');
     const formatAdapterIndexPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts',
     );
-    const conversionIndexSource = fs.readFileSync(conversionIndexPath, 'utf8');
+    const rootIndexSource = fs.readFileSync(rootIndexPath, 'utf8');
     const formatAdapterIndexSource = fs.readFileSync(formatAdapterIndexPath, 'utf8');
 
     const findings = [
-      ...collectMatches(conversionIndexSource, [
+      ...collectMatches(rootIndexSource, [
+        {
+          label: 'restores conversion barrel',
+          pattern: /conversion\/index/,
+        },
         {
           label: 'exports legacy ChatSemanticMapper',
           pattern: /ChatSemanticMapper/,
@@ -1219,6 +1224,9 @@ describe('hub pipeline stage residue audit', () => {
       ]),
     ];
 
+    expect(fs.existsSync(conversionIndexPath)).toBe(false);
+    expect(rootIndexSource).toContain("export { convertProviderResponse } from './conversion/hub/response/provider-response.js';");
+    expect(rootIndexSource).toContain("export { runStandardChatRequestFilters } from './conversion/shared/chat-request-filters.js';");
     expect(findings).toEqual([]);
   });
 
@@ -1423,13 +1431,13 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/hub-feature.js',
       'sharedmodule/llmswitch-core/src/conversion/hub/hub-feature.d.ts',
     ].filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
-    const publicBarrel = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/index.ts'),
+    const publicRoot = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/index.ts'),
       'utf8',
     );
 
     expect(deletedFiles).toEqual([]);
-    expect(publicBarrel).not.toContain('hub/hub-feature');
+    expect(publicRoot).not.toContain('hub/hub-feature');
   });
 
   it('legacy Hub enable env flags must not return as runtime gates', () => {
@@ -3782,11 +3790,12 @@ describe('hub pipeline stage residue audit', () => {
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
     const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
-    const conversionIndex = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/index.ts'),
+    const rootIndex = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/index.ts'),
       'utf8'
     );
-    const indexFindings = collectMatches(conversionIndex, [
+    const indexFindings = collectMatches(rootIndex, [
+      { label: 'restores conversion barrel', pattern: /conversion\/index/ },
       { label: 'exports shared tool-governor', pattern: /shared\/tool-governor/ },
       { label: 'exports governTools TS API', pattern: /governTools/ },
     ]);
