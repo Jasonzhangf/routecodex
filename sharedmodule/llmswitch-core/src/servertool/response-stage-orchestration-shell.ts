@@ -1,6 +1,6 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
-import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
+import type { StageRecorder } from '../conversion/hub/pipeline/hub-pipeline-types.js';
 import { recordStage } from '../conversion/hub/pipeline/stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../conversion/hub/pipeline/hub-stage-timing.js';
 import { runServerToolOrchestrationShell } from './engine-orchestration-shell.js';

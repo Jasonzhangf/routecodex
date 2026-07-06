@@ -1082,12 +1082,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/index.ts',
     );
     const rootIndexPath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/index.ts');
-    const formatAdapterIndexPath = path.join(
-      process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts',
-    );
     const rootIndexSource = fs.readFileSync(rootIndexPath, 'utf8');
-    const formatAdapterIndexSource = fs.readFileSync(formatAdapterIndexPath, 'utf8');
 
     const findings = [
       ...collectMatches(rootIndexSource, [
@@ -1204,24 +1199,6 @@ describe('hub pipeline stage residue audit', () => {
           pattern: /responses\/responses-openai-bridge/,
         },
       ]),
-      ...collectMatches(formatAdapterIndexSource, [
-        {
-          label: 'exports legacy ChatFormatAdapter',
-          pattern: /ChatFormatAdapter/,
-        },
-        {
-          label: 'exports legacy AnthropicFormatAdapter',
-          pattern: /AnthropicFormatAdapter/,
-        },
-        {
-          label: 'exports legacy ResponsesFormatAdapter',
-          pattern: /ResponsesFormatAdapter/,
-        },
-        {
-          label: 'exports legacy GeminiFormatAdapter',
-          pattern: /GeminiFormatAdapter/,
-        },
-      ]),
     ];
 
     expect(fs.existsSync(conversionIndexPath)).toBe(false);
@@ -1230,22 +1207,32 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('format-adapters public surface must only expose stage recorder glue', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts'),
+  it('format-adapters public surface must stay deleted after StageRecorder type owner merge', () => {
+    const repoRoot = process.cwd();
+    const retiredPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts');
+    const hubPipelineTypesSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts'),
       'utf8',
     );
 
-    const findings = collectMatches(source, [
-      { label: 'FormatAdapter interface residue', pattern: /interface\s+FormatAdapter\b/ },
-      { label: 'SemanticMapper interface residue', pattern: /interface\s+SemanticMapper\b/ },
-      { label: 'ChatEnvelope import residue', pattern: /ChatEnvelope/ },
-      { label: 'FormatEnvelope import residue', pattern: /FormatEnvelope/ },
-      { label: 'JsonObject import residue', pattern: /JsonObject/ },
-    ]);
+    const liveSourceRoots = [
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src'),
+      path.join(repoRoot, 'tests'),
+      path.join(repoRoot, 'scripts'),
+    ];
+    const staleImports: string[] = [];
+    for (const root of liveSourceRoots) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.mjs'])) {
+        const source = fs.readFileSync(fullPath, 'utf8');
+        if (/from\s+['"][^'"]*(?:conversion\/hub\/format-adapters|format-adapters\/index\.js)['"]/.test(source)) {
+          staleImports.push(path.relative(repoRoot, fullPath));
+        }
+      }
+    }
 
-    expect(findings).toEqual([]);
-    expect(source).toContain('export interface StageRecorder');
+    expect(fs.existsSync(retiredPath)).toBe(false);
+    expect(staleImports).toEqual([]);
+    expect(hubPipelineTypesSource).toContain('export interface StageRecorder');
   });
 
   it('hub json helper public surface must not restore zero-consumer array helpers', () => {

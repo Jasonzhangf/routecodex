@@ -12,14 +12,6 @@
   },
   "entries": [
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.response_provider_sse_materialization",
-      "minimumTsRole": "StageRecorder interface for TS tests and package type surface.",
-      "cannotShrinkFurtherBecause": "Pure type surface has no Rust runtime behavior to migrate; deleting it breaks current TypeScript test/package imports before a separate generated-type replacement exists.",
-      "forbiddenSemantics": ["payload conversion", "stage execution", "provider response parsing"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts",
       "classification": "ts_io_shell_ok",
       "ownerFeature": "hub.response_provider_sse_materialization",

@@ -1,7 +1,6 @@
 import { Readable } from "node:stream";
 import type { StandardizedRequest, ProcessedRequest } from "../types/standardized.js";
 import type { JsonObject } from "../types/json.js";
-import type { StageRecorder } from "../format-adapters/index.js";
 import type {
   VirtualRouterConfig,
   RoutingDecision,
@@ -26,6 +25,10 @@ type HubToolSurfaceMode = "off" | "observe" | "shadow" | "enforce";
 interface HubToolSurfaceConfig {
   mode: HubToolSurfaceMode;
   sampleRate?: number;
+}
+
+export interface StageRecorder {
+  record(stage: string, payload: object): void;
 }
 
 export interface HubPipelineConfig {

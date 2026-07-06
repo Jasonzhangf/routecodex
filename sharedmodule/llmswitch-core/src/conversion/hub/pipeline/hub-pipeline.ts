@@ -25,8 +25,8 @@ import type {
   HubPipelineResult,
   NormalizedRequest,
   ProviderProtocol,
+  StageRecorder,
 } from "./hub-pipeline-types.js";
-import type { StageRecorder } from "../format-adapters/index.js";
 
 // feature_id: hub.runtime_ingress_bridge
 export type {
@@ -36,6 +36,7 @@ export type {
   HubPipelineResult,
   NormalizedRequest,
   ProviderProtocol,
+  StageRecorder,
 } from "./hub-pipeline-types.js";
 
 function registerHubPipelineRuntimeIngressBridge(args: { owner: unknown; routerEngine: VirtualRouterRuntime; }): void {

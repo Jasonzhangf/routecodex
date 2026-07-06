@@ -1,7 +1,7 @@
 import type { Readable } from 'node:stream';
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { JsonObject } from '../types/json.js';
-import type { StageRecorder } from '../format-adapters/index.js';
+import type { StageRecorder } from '../pipeline/hub-pipeline-types.js';
 import { recordStage } from '../pipeline/stages/utils.js';
 import {
   executeHubPipelineWithNative,

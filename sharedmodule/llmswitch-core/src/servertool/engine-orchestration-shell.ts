@@ -2,7 +2,7 @@ import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import type { ServerSideToolEngineOptions } from './types.js';
 import { orchestrateServertoolEngine } from './run-server-side-tool-engine-shell.js';
-import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
+import type { StageRecorder } from '../conversion/hub/pipeline/hub-pipeline-types.js';
 import {
   createServertoolProviderProtocolErrorFromPlan,
   withTimeout

@@ -1,4 +1,4 @@
-import type { StageRecorder } from '../../format-adapters/index.js';
+import type { StageRecorder } from '../hub-pipeline-types.js';
 import { parseLenientJsonishWithNative } from '../../../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 function normalizeRecordPayload(payload: unknown): object {

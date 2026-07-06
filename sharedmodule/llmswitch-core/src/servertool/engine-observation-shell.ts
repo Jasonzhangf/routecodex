@@ -1,5 +1,5 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
-import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
+import type { StageRecorder } from '../conversion/hub/pipeline/hub-pipeline-types.js';
 import type { ServerToolExecution } from './types.js';
 import { appendServertoolMatchSkippedProgressEvent } from './progress-log-block.js';
 import { resolveServertoolEngineMatchHitWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';

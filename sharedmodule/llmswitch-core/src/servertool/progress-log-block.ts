@@ -1,5 +1,5 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
-import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
+import type { StageRecorder } from '../conversion/hub/pipeline/hub-pipeline-types.js';
 import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import {
   buildServertoolAutoHookTraceProgressEventWithNative,

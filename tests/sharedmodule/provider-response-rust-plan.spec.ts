@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { Readable } from 'node:stream';
-import type { StageRecorder } from '../../sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.js';
+import type { StageRecorder } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const recordResponsesResponseMock = jest.fn();
