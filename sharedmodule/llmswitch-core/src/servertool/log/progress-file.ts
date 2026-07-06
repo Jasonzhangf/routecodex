@@ -2,18 +2,6 @@ import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { resolveRccPath } from '../../runtime/user-data-paths.js';
 
-type ServerToolProgressFileEvent = {
-  requestId: string;
-  flowId: string;
-  tool: string;
-  stage: string;
-  result: string;
-  message: string;
-  step: number;
-  entryEndpoint?: string;
-  providerProtocol?: string;
-};
-
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 const falsy = new Set(['0', 'false', 'no', 'off']);
 const DEFAULT_LOG_PATH = path.join(resolveRccPath(), 'logs', 'servertool-events.jsonl');
@@ -75,7 +63,17 @@ async function ensureParentDir(logPath: string): Promise<void> {
   ensuredDirs.add(dir);
 }
 
-export function appendServerToolProgressFileEvent(event: ServerToolProgressFileEvent): void {
+export function appendServerToolProgressFileEvent(event: {
+  requestId: string;
+  flowId: string;
+  tool: string;
+  stage: string;
+  result: string;
+  message: string;
+  step: number;
+  entryEndpoint?: string;
+  providerProtocol?: string;
+}): void {
   if (!resolveEnabled()) {
     return;
   }

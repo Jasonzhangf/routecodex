@@ -1257,6 +1257,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('export interface JsonObject');
   });
 
+  it('servertool progress file shell must not retain zero-consumer event type shell', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/log/progress-file.ts'),
+      'utf8',
+    );
+
+    const findings = collectMatches(source, [
+      {
+        label: 'declares zero-consumer servertool progress event type shell',
+        pattern: /(?:export\s+)?type\s+ServerToolProgressFileEvent\b|(?:export\s+)?interface\s+ServerToolProgressFileEvent\b/,
+      },
+    ]);
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('export function appendServerToolProgressFileEvent(event: {');
+  });
+
   it('snapshot stage recorder must not restore TS hotpath trimming semantics', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts'),
@@ -1335,7 +1352,10 @@ describe('hub pipeline stage residue audit', () => {
       'hub/pipelines/inbound.ts',
       'hub/pipelines/outbound.ts',
     ].filter((relativePath) => fs.existsSync(path.join(sourceRoot, relativePath)));
-    const conversionIndexSource = fs.readFileSync(path.join(sourceRoot, 'index.ts'), 'utf8');
+    const conversionIndexPath = path.join(sourceRoot, 'index.ts');
+    const conversionIndexSource = fs.existsSync(conversionIndexPath)
+      ? fs.readFileSync(conversionIndexPath, 'utf8')
+      : '';
     const exportFindings = collectMatches(conversionIndexSource, [
       {
         label: 'exports legacy node-support',
