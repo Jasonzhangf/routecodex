@@ -26510,3 +26510,202 @@ Complete SSE rustification status (34 TS files):
   - Managed runtime closure is now evidenced for this restart/live probe path.
   - Global npm package `rcc` under `/opt/homebrew/lib/node_modules/rcc` was still `0.90.3591` before the snapshot-first shim rewrite; the stable contract is now "both shims must prefer `~/.rcc/install/current`".
   - MemoryPalace re-mine/search closure is still unclaimed because the mine lock blocker remains unresolved in this segment.
+
+# 2026-07-06: minimal TS surface manifest gate added
+
+- Scope: Hub/VR rustification remaining non-native TS surface classification.
+- Change:
+  - Added `docs/loops/rustification/minimal-ts-surface.json` as the machine-readable manifest for all current non-native production TS files under `sharedmodule/llmswitch-core/src`.
+  - Added `scripts/ci/verify-llmswitch-minimal-ts-surface.mjs` to compare the manifest against the live source/doc-only rustification audit file set.
+  - Added `verify:llmswitch-minimal-ts-surface` and wired it into `verify:architecture-ci-longtail`.
+  - Updated rustification STATE/run-log and rcc-dev lesson L93-69.
+- Contract:
+  - Every remaining non-native TS file must list classification, owner feature, minimum TS role, forbidden semantics, and a hard `cannotShrinkFurtherBecause` reason.
+  - Missing, stale, invalid, or weak classifications are gate failures.
+- Verification:
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries=36, current non-native prod TS files=36.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=160`, `prodTsLocTotal=28969`, `nonNativeFileCount=36`, `nonNativeLocTotal=4747`.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm run verify:architecture-ci-longtail` PASS, including the new minimal TS gate.
+  - `git diff --check -- package.json docs/loops/rustification/minimal-ts-surface.json scripts/ci/verify-llmswitch-minimal-ts-surface.mjs docs/loops/rustification/STATE.md docs/loops/rustification/loop-run-log.md .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md` PASS.
+- Boundary:
+  - This is classification/gate hardening only. It does not migrate additional IO/type shells to Rust and does not claim new live runtime evidence.
+  - Remaining TS is now explicitly classified as type shell, native shell, parser IO, diagnostics IO, or Node host IO. Further reduction needs separate projects such as generated TS declarations, typed NAPI object ABI, Rust-backed store persistence, diagnostics sink rewrite, or Node host IO migration.
+# 2026-07-06: dead response-runtime barrel deleted after reference audit
+
+- Scope: Hub/VR remaining TS surface reference cleanup.
+- Evidence before deletion:
+  - `response-runtime.ts` only re-exported `buildOpenAIChatFromAnthropicMessage` and `buildAnthropicResponseFromChat` from `response-runtime-anthropic.ts`.
+  - Source-only production reference scan found no prod consumer of `response-runtime.ts`.
+  - Remaining active references were tests/scripts and old audit/baseline paths.
+- Change:
+  - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.ts`.
+  - Rewired tests/scripts to import `response-runtime-anthropic.js` directly.
+  - Removed the stale file from `docs/loops/rustification/minimal-ts-surface.json` and `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json`.
+  - Changed root `sharedmodule/llmswitch-core/src/index.ts` VR contracts export from `export *` to `export type *` because `virtual-router-contracts.ts` contains only type/interface declarations and must not be a runtime VR export.
+- Verification:
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries=35, current non-native prod TS files=35.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=159`, `prodTsLocTotal=28964`, `nonNativeFileCount=35`, `nonNativeLocTotal=4742`.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm --prefix sharedmodule/llmswitch-core run build` PASS; emitted `dist/index.js` has no runtime export for `virtual-router-contracts`, while `dist/index.d.ts` keeps `export type *`.
+  - Focused Jest PASS: `tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts` and `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`, 180 tests.
+- Remaining:
+  - Current remaining 35 non-native prod TS files all have production references in the static import graph.
+  - Further TS reduction is not possible by dead-code deletion alone; it needs generated declarations, typed NAPI ABI, Rust-backed IO stores/sinks, or Node host IO migration.
+# 2026-07-06: Config loader rust/materialization and JSON config removal slice
+
+- Scope: config loader rust 收口 + `~/.rcc` old JSON config cleanup.
+- Change:
+  - Rust `runtime_config_materialization.rs` owns deterministic RouteCodex runtime manifest / VR bootstrap materialization via `compileRouteCodexRuntimeManifestJson`.
+  - TS config loader remains file IO/provider-profile shell and calls Rust manifest compiler; no TS fallback materialization path.
+  - User config codec/writer is TOML-only; `config.json` is fail-fast rejected.
+  - Provider config codec/loader/writer is TOML-only; provider loader only accepts `config.v2.toml` and suffixed `config.v2.*.toml`.
+  - Removed legacy JSON migration command/modules/tests and deleted old shadow semantic compare test.
+  - Provider update, bundled provider pack, config admin, daemon provider handler paths now use `config.v2.toml` only.
+  - Deleted `scripts/virtual-router-shadow-v2.mjs` and `scripts/virtual-router-shadow-v2-real.mjs`.
+- Runtime cleanup:
+  - Removed 23 old `~/.rcc` JSON config files: provider `config.v1.json`, provider `config.v2.json`, and one stale provider backup JSON.
+  - Verification command confirmed no remaining `~/.rcc/config.json`, `~/.rcc/provider/*/config.json`, `config.v1.json`, `config.v2.json`, or `config.v2.*.json`.
+- Verification:
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:llmswitch-core-tsc -- --pretty false` PASS.
+  - Focused Jest PASS: provider-update core/maintenance, bundled provider pack, provider-v2 loader, config writer, routecodex config loader v2, TOML codec, unified paths, VR model-alias contract: 55 tests.
+  - `cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS.
+  - `npm run build:native-hotpath` PASS with existing warnings.
+- Residue:
+  - Production `src` and `sharedmodule/llmswitch-core/src` scan has no `config.json`, `config.v1.json`, `config.v2.json`, JSON migration, or VR shadow script refs.
+  - Remaining JSON config strings are in CLI tests still pending broad conversion or in tests that explicitly assert JSON rejection.
+
+# 2026-07-06: VR contracts upper references routed through native facades
+
+- Scope: Virtual Router TS type-surface收口，重点是上一层引用整理，不改 VR runtime semantics。
+- MemoryPalace:
+  - `mempalace search "virtual-router-contracts rustification VR contracts generated types"` returned `virtual-router-no-ts-runtime-plan.md` and L93-30.
+  - L93-30 warning: config materialization cannot be blindly moved into VR runtime; this slice only changes type imports.
+- Change:
+  - `native-virtual-router-runtime.ts` now re-exports the VR contract types needed by Hub/Host callers.
+  - `native-virtual-router-bootstrap-config.ts` now re-exports bootstrap/config/provider profile/metadata types needed by config/bootstrap callers.
+  - `native-provider-runtime-ingress.ts` now re-exports provider error/success event types needed by error-chain callers.
+  - Hub pipeline, host-effects, hit-log, and VR-focused tests now import these types from the adjacent native facade instead of direct `virtual-router-contracts.ts`.
+  - `hub-pipeline-stage-residue-audit.spec.ts` now fails if upper production layers import `virtual-router-contracts.ts` directly; only native/router-hotpath same-layer facades and root `export type *` are allowed.
+- Verification:
+  - `npm --prefix sharedmodule/llmswitch-core run build` PASS.
+  - Focused residue Jest PASS: `virtual router contracts`.
+  - `npm run verify:llmswitch-core-tsc` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: 35 entries/current files.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=159`, `prodTsLocTotal=29001`, `nonNativeFileCount=35`, `nonNativeLocTotal=4742`.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm run verify:vr-no-ts-runtime` PASS: VR production TS files remain 0.
+  - `npm run verify:vr-no-fallback-semantics` PASS.
+- Boundary:
+  - This does not delete `virtual-router-contracts.ts`; it scopes it behind facades.
+  - Physical deletion requires generated Rust schema declarations or public config/API migration.
+  - Broad historical VR Jest files still fail on unrelated fixture/runtime prerequisites: missing `metadataCenterSnapshot`, missing real provider config files, or old auth fixture shape.
+
+# 2026-07-06: Provider-update v1 config builder deleted
+
+- Scope: close remaining production v1 provider config surface after config loader Rust materialization and JSON config removal.
+- Change:
+  - Deleted `src/tools/provider-update/config-builder.ts`; it generated v1 `virtualrouter.providers` JSON configs.
+  - `src/tools/provider-update/index.ts` now reads `config.v2.toml` through `decodeProviderConfigFile()` and writes through `writeProviderConfigFile()`.
+  - `provider update --config` now expects provider `config.v2.toml`; default provider-update root is `~/.rcc/provider/<id>`.
+  - Removed seed-model fallback on upstream fetch failure; only explicit `--use-cache` reads `models-latest.json`, and invalid cache fails explicitly.
+  - `--probe-keys` no longer swallows probe errors.
+  - `tests/grep/config-codec-gate.spec.ts` now blocks production old config filenames, JSON migration/shadow script refs, and v1 `virtualrouter.providers` reads outside Rust materialization output validation.
+- Runtime cleanup verification:
+  - Confirmed no `~/.rcc/config.json`, provider `config.json`, provider `config.v1.json`, provider `config.v2.json`, or provider `config.v2.*.json` remain under checked patterns.
+- Verification:
+  - Focused provider/config Jest PASS: 9 suites / 54 tests.
+  - Provider-update + grep focused Jest PASS: 3 suites / 14 tests.
+  - Root `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:llmswitch-core-tsc -- --pretty false` PASS.
+  - Rust `cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS.
+  - `npm run build:native-hotpath` PASS with existing warnings.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm run verify:vr-no-ts-runtime` PASS with VR production TS files 0.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS with 35 current non-native prod TS files.
+  - `npm run verify:llmswitch-rustification-audit` PASS with `prodTsFileCount=159`, `prodTsLocTotal=29002`, `nonNativeFileCount=35`, `nonNativeLocTotal=4742`.
+  - `npm run verify:architecture-ci-longtail` PASS.
+  - `git diff --check` PASS.
+- Remaining gap:
+  - No global install / managed `routecodex restart --port <port>` / live same-entry replay was run in this slice.
+
+# 2026-07-06: HubPipeline consumes Rust-compiled runtime manifest artifact
+
+- Scope: close config materialization runtime artifact gap after VR bootstrap rustification.
+- Change:
+  - Added `compileRouteCodexRuntimeConfigManifest()` TS shell in `src/config/user-config-loader.ts`; it validates and returns the full Rust `RouteCodexRuntimeManifest`.
+  - `resolveRouterBootstrapConfig()` now compiles all `virtualrouter` runtime configs through Rust manifest materialization, not only `routingPolicyGroups` configs.
+  - Added `src/server/runtime/http-server/runtime-config-manifest-carrier.ts` as a non-enumerable carrier so bootstrap passes the exact Rust manifest to setup without JSON payload pollution.
+  - `setupRuntime()` fail-fast rejects missing manifest and passes `manifest.pipelineRuntimeConfig` into `HubPipelineConfig`.
+  - `buildHubPipelineConfigForRoutingPolicyGroup()` compiles the group-specific Rust manifest and passes group `pipelineRuntimeConfig` to the group HubPipeline.
+  - Added residue gate: server runtime cannot import/use VR-only `compileRouteCodexVirtualRouterBootstrapInput` / `buildVirtualRouterInputV2`.
+- Verification:
+  - `cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS.
+  - `npm run build:native-hotpath` PASS with existing warnings.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:llmswitch-core-tsc -- --pretty false` PASS.
+  - Focused Jest PASS: 8 suites / 49 tests, including config Rust materialization, provider-v2 loader, routing policy group, forwarder multimodal route, grep gate, and runtime setup provider merge.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm run verify:vr-no-ts-runtime` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=159`, `prodTsLocTotal=28837`, `nonNativeFileCount=35`, `nonNativeLocTotal=4743`.
+  - `npm run verify:architecture-ci-longtail` PASS.
+  - `/usr/bin/find ~/.rcc ... old JSON config patterns` returned empty output.
+- Boundary:
+  - Initial offline pass did not include live validation; final pass completed managed restart and same-entry replay.
+- Live validation:
+  - `routecodex --version`, repo `package.json`, and `~/.rcc/install/current/package.json` all report `0.90.3603`.
+  - `routecodex restart --port 5555` PASS.
+  - `/health` on 5555 and 5520 returns `version=0.90.3603`, `ready=true`, `pipelineReady=true`.
+  - Same-entry live probe PASS: `STOPLESS_BASE_URL=http://127.0.0.1:5555 STOPLESS_MODELS=gpt-5.5 STOPLESS_ROUTE_HINT=search STOPLESS_ATTEMPTS=3 STOPLESS_OUTPUT=/tmp/config-materialization-rust-live-5555.json node scripts/tests/stopless-5555-live-probe.mjs`.
+  - Probe evidence: first response required `exec_command` stopless hook, no leaked stop schema, resume chain completed.
+
+# 2026-07-06: Hub Responses payload closeout planning moved to Rust
+
+- Scope: Hub response outbound `/v1/responses` payload closeout, centered on `responses-openai-bridge/response-payload.ts` and Rust `hub_resp_outbound_client_semantics_blocks/responses_payload.rs`.
+- Change:
+  - Added Rust `plan_responses_payload_from_chat_closeout` + NAPI `planResponsesPayloadFromChatCloseoutJson`.
+  - Rust now owns data-node unwrap, snapshot lookup key order/dedup, inline passthrough/snapshot detection, existing Responses payload replay-safe normalization, freeform apply_patch/custom tool projection, retention context projection, and chat/nonstandard kind planning.
+  - TS `response-payload.ts` is reduced to host IO/native facade: evaluates host-strip policy, consumes snapshot/passthrough stores, calls Rust build, and strips internal tooling metadata from returned metadata.
+  - Removed TS response payload local helpers for normalize client output items, data unwrap, snapshot key resolution, inline retention payload reads, response bridge action pipeline use, reasoning pre-normalization, and local malformed-message check.
+  - Residue audit now blocks response payload TS from re-owning bridge action/reasoning normalization semantics.
+- Verification:
+  - `cargo fmt --manifest-path sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml --check` PASS.
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml plan_responses_payload_closeout --lib -- --nocapture` PASS: 4 passed.
+  - `npm run build:native-hotpath` PASS with existing warnings.
+  - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS.
+  - Focused Jest PASS: `tests/responses/responses-openai-bridge.spec.ts`, `tests/sharedmodule/provider-response-rust-plan.spec.ts`, `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` = 210 tests.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=159`, `prodTsLocTotal=28837`, `nonNativeFileCount=35`, `nonNativeLocTotal=4743`.
+- Boundary:
+  - `responses-openai-bridge.ts` still contains request bridge TS orchestration and remains the next rustification target.
+  - `provider-response.ts` still contains Node stream/runtime side-effect IO shell and remains separately reviewable.
+  - No global install / managed live restart / live same-entry replay was run in this slice.
+
+# 2026-07-06: Provider response TS surface classified as IO shell
+
+- Scope: close the open question whether `provider-response.ts` is still Hub Pipeline semantic debt.
+- Evidence:
+  - `provider-response.ts` is 493 LOC and imports Rust/native planners for Hub response execution, metadata snapshot planning, runtime effect normalization, servertool runtime actions, provider protocol resolution, post-servertool projection, Responses record planning, provider SSE materialization/read-error descriptor, metadata write projection, and SSE frame build.
+  - The remaining local TS work is Node host IO/effect execution: requestId assertion, MetadataCenter reads/writes, Node `Readable` stream extraction/read, response store calls, usage save, servertool orchestration shell call, stage recording, and returned SSE stream construction.
+  - Function map / verification map already mark provider response semantics as Rust SSOT; minimal TS surface had not tracked this native-linked IO shell, which left ambiguity.
+- Change:
+  - Added `provider-response.ts` to `docs/loops/rustification/minimal-ts-surface.json` as `ts_io_shell_ok`.
+  - Updated `verify-llmswitch-minimal-ts-surface.mjs` so explicit native-linked shell entries are allowed while non-native files remain mandatory.
+  - Added residue gate `provider response TS shell must be classified as native IO shell only`.
+- Verification:
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries=36, current non-native prod TS files=35.
+  - `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` PASS: 180 tests.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=159`, `prodTsLocTotal=28837`, `nonNativeFileCount=35`, `nonNativeLocTotal=4743`.
+  - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:hub-response-provider-sse-materialization` PASS: 6 Rust tests.
+  - `npm run verify:hub-response-provider-context-helpers` PASS.
+  - `npm run verify:hub-response-post-servertool-client-projection` PASS: 2 Rust tests.
+- Boundary:
+  - This does not add a new provider-response Rust implementation because source evidence shows the provider response semantic owner is already Rust; this slice locks classification and prevents TS semantic resurrection.
+  - No global install / managed live restart / live replay was run for this doc/gate classification slice.

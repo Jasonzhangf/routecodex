@@ -1,0 +1,303 @@
+{
+  "schemaVersion": 1,
+  "scope": "sharedmodule/llmswitch-core/src non-native production TypeScript from llmswitch-rustification-audit",
+  "generatedFrom": "node scripts/ci/llmswitch-rustification-audit.mjs --json",
+  "classificationContract": {
+    "native_shell_ok": "TypeScript is a fail-fast native facade or type projection over Rust truth.",
+    "type_shell_ok": "TypeScript is compile-time/public API shape only and owns no runtime decision.",
+    "ts_io_shell_ok": "TypeScript owns unavoidable Node host IO, timers, filesystem, process, Map storage, or diagnostics emission only.",
+    "parser_io_ok": "TypeScript parses native JSON strings and type-projects Rust-owned output only.",
+    "diagnostic_io_ok": "TypeScript records or emits diagnostic observations only; no request/response/route/tool policy.",
+    "hardStopRule": "Any file not listed here, or any listed file with an empty cannotShrinkFurtherBecause reason, is rustification debt."
+  },
+  "entries": [
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.response_provider_sse_materialization",
+      "minimumTsRole": "StageRecorder interface for TS tests and package type surface.",
+      "cannotShrinkFurtherBecause": "Pure type surface has no Rust runtime behavior to migrate; deleting it breaks current TypeScript test/package imports before a separate generated-type replacement exists.",
+      "forbiddenSemantics": ["payload conversion", "stage execution", "provider response parsing"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts",
+      "classification": "ts_io_shell_ok",
+      "ownerFeature": "hub.response_provider_sse_materialization",
+      "minimumTsRole": "Provider response Node IO shell that reads streams, invokes Rust Hub Pipeline/effect planners, executes host side effects, and writes returned SSE frames.",
+      "cannotShrinkFurtherBecause": "The remaining code touches Node Readable streams, MetadataCenter host objects, response store IO, usage persistence, servertool shell execution, stage recording, and returned SSE stream construction. Provider response parsing, governance, projection, effect planning, and error descriptors are Rust-owned through native calls.",
+      "forbiddenSemantics": ["provider response parsing", "response governance", "client projection", "effect planning", "fallback"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.pipeline_contract_surface",
+      "minimumTsRole": "Type declarations for TS host/Rust bridge boundaries.",
+      "cannotShrinkFurtherBecause": "Current Node package compiles TS callers against these structural types; further removal requires a separate Rust-generated declaration pipeline, not Hub runtime migration.",
+      "forbiddenSemantics": ["pipeline execution", "route selection", "payload mutation"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-blocks.ts",
+      "classification": "diagnostic_io_ok",
+      "ownerFeature": "hub.stage_timing_observation",
+      "minimumTsRole": "In-process timing observation state for Node diagnostics.",
+      "cannotShrinkFurtherBecause": "The state is tied to Node process diagnostic logging and MetadataCenter debug snapshots; migrating it means a separate diagnostics/runtime IO rewrite, not Hub semantic rustification.",
+      "forbiddenSemantics": ["request shaping", "response shaping", "route policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-breakdown-state-blocks.ts",
+      "classification": "diagnostic_io_ok",
+      "ownerFeature": "hub.stage_timing_observation",
+      "minimumTsRole": "Node-local diagnostic timing aggregation state for hub-stage top-summary reporting.",
+      "cannotShrinkFurtherBecause": "Only Node-local diagnostic state remains; there is no Hub/VR runtime semantic decision to migrate without rewriting the diagnostics sink.",
+      "forbiddenSemantics": ["payload mutation", "tool governance", "continuation policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-env-blocks.ts",
+      "classification": "diagnostic_io_ok",
+      "ownerFeature": "hub.stage_timing_observation",
+      "minimumTsRole": "Reads environment flags for diagnostic timing only.",
+      "cannotShrinkFurtherBecause": "Environment access is Node host IO; moving it to Rust would not reduce Hub semantics and needs a separate process-config migration.",
+      "forbiddenSemantics": ["runtime routing", "provider selection", "payload policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-log-blocks.ts",
+      "classification": "diagnostic_io_ok",
+      "ownerFeature": "hub.stage_timing_observation",
+      "minimumTsRole": "Formats and emits diagnostic timing log lines.",
+      "cannotShrinkFurtherBecause": "Console/log emission is Node diagnostics IO; Rust owns Hub semantics already, and further removal needs a diagnostics sink rewrite.",
+      "forbiddenSemantics": ["client response projection", "provider response parsing", "route policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-state-blocks.ts",
+      "classification": "diagnostic_io_ok",
+      "ownerFeature": "hub.stage_timing_observation",
+      "minimumTsRole": "Node-local diagnostic timing state used by console and debug snapshot emission.",
+      "cannotShrinkFurtherBecause": "This is process-local observation state; deleting it removes current diagnostics and migrating it is a separate observability runtime project.",
+      "forbiddenSemantics": ["Hub stage policy", "VR policy", "provider policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-timeline-state-blocks.ts",
+      "classification": "diagnostic_io_ok",
+      "ownerFeature": "hub.stage_timing_observation",
+      "minimumTsRole": "Node-local timing timeline state used only by hub-stage diagnostic observation.",
+      "cannotShrinkFurtherBecause": "Only diagnostic timeline bookkeeping remains; there is no Rust semantic owner gap to close.",
+      "forbiddenSemantics": ["request repair", "response repair", "fallback"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts",
+      "classification": "diagnostic_io_ok",
+      "ownerFeature": "hub.stage_timing_observation",
+      "minimumTsRole": "Attaches timing summaries to MetadataCenter debug snapshots and logs observations.",
+      "cannotShrinkFurtherBecause": "It must touch JS MetadataCenter/debug snapshot objects and console IO in the current Node host; moving it requires replacing the diagnostics host surface.",
+      "forbiddenSemantics": ["metadata control truth", "request/response semantic conversion", "route selection"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts",
+      "classification": "diagnostic_io_ok",
+      "ownerFeature": "hub.req_chatprocess_governance",
+      "minimumTsRole": "Usage/session observation helper for TS host diagnostics.",
+      "cannotShrinkFurtherBecause": "Remaining work is JS object observation at the host boundary; Rust owns Chat Process semantics and no semantic branch remains to migrate.",
+      "forbiddenSemantics": ["tool governance", "history repair", "continuation restore"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.pipeline_contract_surface",
+      "minimumTsRole": "TS structural contract for host/native request and adapter context wiring.",
+      "cannotShrinkFurtherBecause": "Current TS host modules compile against these public shapes; Rust cannot remove compile-time TS declarations without a separate generated bindings system.",
+      "forbiddenSemantics": ["message normalization", "tool governance", "payload repair"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.pipeline_contract_surface",
+      "minimumTsRole": "Shared JSON structural type and clone helper for TS-only IO/tests.",
+      "cannotShrinkFurtherBecause": "It is a TypeScript compile-time/public utility for JS JSON values; Rust migration cannot replace TS type checking without generated declaration adoption.",
+      "forbiddenSemantics": ["protocol validation", "payload sanitization", "fallback"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.pipeline_contract_surface",
+      "minimumTsRole": "Host-side standardized request/response structural declarations.",
+      "cannotShrinkFurtherBecause": "These are TS compiler contracts for the Node host boundary; Rust owns runtime builders, but TS declarations remain until generated bindings replace them.",
+      "forbiddenSemantics": ["standardization execution", "route decision", "provider wire build"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/index.ts",
+      "classification": "native_shell_ok",
+      "ownerFeature": "hub.pipeline_contract_surface",
+      "minimumTsRole": "Package barrel for current public imports.",
+      "cannotShrinkFurtherBecause": "It has no logic; deleting it is a public API break unless package exports are redesigned.",
+      "forbiddenSemantics": ["conversion logic", "fallback", "provider special case"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.response_responses_chat_projection",
+      "minimumTsRole": "Responses bridge TS host type declarations.",
+      "cannotShrinkFurtherBecause": "Only compile-time shape declarations remain; further removal requires generated Rust/NAPI declaration replacement.",
+      "forbiddenSemantics": ["Responses request build", "history repair", "metadata projection"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.chat_process_responses_continuation",
+      "minimumTsRole": "Responses store TS interface declarations consumed by the IO shell and tests.",
+      "cannotShrinkFurtherBecause": "Rust owns continuation decisions, but the current TS IO shell needs compile-time entry/result shapes until the store IO itself moves out of Node.",
+      "forbiddenSemantics": ["scope matching", "owner policy", "payload materialization"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts",
+      "classification": "ts_io_shell_ok",
+      "ownerFeature": "hub.chat_process_responses_continuation",
+      "minimumTsRole": "Node Map/FS/global singleton/timer/error-projection shell executing Rust native plans.",
+      "cannotShrinkFurtherBecause": "The remaining code owns Node-only persistence files, process-global singleton state, timers, Map indexes, and exception projection. Moving it further requires a separate Rust-backed persistent store plus Node host lifecycle replacement; no Hub continuation semantics remain in TS.",
+      "forbiddenSemantics": ["manual continuation owner branches", "manual scope-key builder", "payload materialization", "allowContinuation policy", "output-to-input conversion"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.pipeline_contract_surface",
+      "minimumTsRole": "Legacy conversion package type declarations.",
+      "cannotShrinkFurtherBecause": "This is public TS type/API surface only; deletion needs package API migration, not Rust runtime work.",
+      "forbiddenSemantics": ["conversion execution", "provider runtime", "routing"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/types/bridge-message-types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.pipeline_contract_surface",
+      "minimumTsRole": "Bridge message TS declarations for host compile boundary.",
+      "cannotShrinkFurtherBecause": "Current bridge host code and tests compile against these TS declarations; only generated bindings or full TS bridge removal can eliminate them.",
+      "forbiddenSemantics": ["bridge action execution", "tool normalization", "message repair"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/conversion/types/text-markup-normalizer.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.resp_chatprocess.tool_governance",
+      "minimumTsRole": "Text markup normalizer option/result type declarations.",
+      "cannotShrinkFurtherBecause": "Only TS declaration shape remains; runtime text tool parsing is not owned here.",
+      "forbiddenSemantics": ["text tool harvest", "JSON repair", "tool-call normalization"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.response_responses_chat_projection",
+      "minimumTsRole": "Native bridge action facade type declarations.",
+      "cannotShrinkFurtherBecause": "Native facade callers need TS compile-time shapes; further shrink requires generated NAPI TypeScript declarations.",
+      "forbiddenSemantics": ["bridge action parsing", "policy filtering", "message mutation"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts",
+      "classification": "parser_io_ok",
+      "ownerFeature": "hub.req_inbound_responses_context_capture",
+      "minimumTsRole": "Parse native JSON string and project Rust-owned req_inbound result shape.",
+      "cannotShrinkFurtherBecause": "NAPI currently returns JSON strings to TS; a parser facade is required until the binding API changes to typed JS objects.",
+      "forbiddenSemantics": ["nested snapshot validation", "payload rebuild", "tool output policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.req_inbound_responses_context_capture",
+      "minimumTsRole": "Req inbound native facade type declarations.",
+      "cannotShrinkFurtherBecause": "TS native callers require compile-time shapes until generated bindings replace handwritten declarations.",
+      "forbiddenSemantics": ["req_inbound parsing", "context restoration", "tool result repair"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts",
+      "classification": "parser_io_ok",
+      "ownerFeature": "hub.req_outbound_provider_semantic",
+      "minimumTsRole": "Parse native JSON string and type-project Rust-owned req_outbound result.",
+      "cannotShrinkFurtherBecause": "The current NAPI boundary is JSON-string based; TS must parse the return until the native binding contract changes.",
+      "forbiddenSemantics": ["payload rebuild", "profile trim/validation", "compat policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.req_outbound_provider_semantic",
+      "minimumTsRole": "Req outbound native facade type declarations.",
+      "cannotShrinkFurtherBecause": "TS callers need compile-time projection types for native outputs; further shrink needs generated declaration adoption.",
+      "forbiddenSemantics": ["provider semantic build", "wire payload build", "compat normalization"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts",
+      "classification": "parser_io_ok",
+      "ownerFeature": "hub.response_responses_client_projection",
+      "minimumTsRole": "Parse native JSON strings and type-project Rust-owned response semantics.",
+      "cannotShrinkFurtherBecause": "NAPI currently crosses as JSON strings; removing this parser requires a binding ABI change, not another Rust semantic migration.",
+      "forbiddenSemantics": ["field-level protocol validation", "SSE descriptor normalization", "tool filtering", "stop-reason normalization"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.response_responses_client_projection",
+      "minimumTsRole": "Response native facade type declarations.",
+      "cannotShrinkFurtherBecause": "TS host compiles against native response projection shapes; further shrink requires generated NAPI TypeScript declarations.",
+      "forbiddenSemantics": ["response projection", "SSE materialization", "tool harvest"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.ts",
+      "classification": "native_shell_ok",
+      "ownerFeature": "error.provider_failure_policy",
+      "minimumTsRole": "Fail-fast native policy facade for provider failure decisions.",
+      "cannotShrinkFurtherBecause": "Node executor/provider shells call this facade; removal requires moving those host call sites or replacing them with generated bindings.",
+      "forbiddenSemantics": ["retry policy", "reroute policy", "provider error classification"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "vr.route_selection",
+      "minimumTsRole": "Virtual Router public TS config/contract declaration surface.",
+      "cannotShrinkFurtherBecause": "VR runtime is Rust-only, but Node config/bootstrap/tests compile against these TS contract declarations. Removing them requires generated Rust schema declarations or a full config API migration.",
+      "forbiddenSemantics": ["route selection", "load balancing", "provider availability", "error classes", "runtime constants"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/runtime/user-data-paths.ts",
+      "classification": "ts_io_shell_ok",
+      "ownerFeature": "runtime.lifecycle",
+      "minimumTsRole": "Node filesystem/path environment resolver.",
+      "cannotShrinkFurtherBecause": "It is host OS/path IO; moving it requires a separate runtime lifecycle Rust migration and does not close Hub/VR semantics.",
+      "forbiddenSemantics": ["routing", "provider policy", "Hub payload policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/servertool/log/progress-file.ts",
+      "classification": "ts_io_shell_ok",
+      "ownerFeature": "hub.servertool_flow_presentation",
+      "minimumTsRole": "Servertool progress-file filesystem IO for Node-hosted diagnostic/progress artifacts.",
+      "cannotShrinkFurtherBecause": "Remaining behavior is file IO in the Node host. Rust owns servertool semantics; further shrink needs a separate file-output runtime migration.",
+      "forbiddenSemantics": ["servertool execution policy", "followup orchestration", "tool governance"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/servertool/orchestration-blocks.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.servertool_orchestration_policy",
+      "minimumTsRole": "Tiny TS structural helper/type surface for servertool host orchestration.",
+      "cannotShrinkFurtherBecause": "No runtime policy remains here; deleting it requires replacing current TS host imports.",
+      "forbiddenSemantics": ["servertool followup", "hook selection", "response action planning"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/servertool/types.ts",
+      "classification": "type_shell_ok",
+      "ownerFeature": "hub.servertool_rust_only_closeout",
+      "minimumTsRole": "Servertool TS host interface declarations.",
+      "cannotShrinkFurtherBecause": "Current TS servertool shells/tests compile against these types; Rust owns execution semantics but cannot eliminate TypeScript declarations without generated bindings or full shell removal.",
+      "forbiddenSemantics": ["handler selection", "execution dispatch", "followup policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/shared/common-utils.ts",
+      "classification": "ts_io_shell_ok",
+      "ownerFeature": "hub.pipeline_contract_surface",
+      "minimumTsRole": "Generic JS object/error formatting helpers used by TS IO shells.",
+      "cannotShrinkFurtherBecause": "Helpers operate on JS unknown/object values at the host boundary; moving them only makes sense after the TS IO shells they support are removed.",
+      "forbiddenSemantics": ["protocol validation", "payload repair", "routing policy"]
+    },
+    {
+      "path": "sharedmodule/llmswitch-core/src/telemetry/stats-center.ts",
+      "classification": "ts_io_shell_ok",
+      "ownerFeature": "vr.hit_log_projection",
+      "minimumTsRole": "Node telemetry aggregation sink for Rust-projected events.",
+      "cannotShrinkFurtherBecause": "Rust projects VR hit-log events; this file owns the JS process telemetry sink. Removing it requires a separate telemetry runtime replacement.",
+      "forbiddenSemantics": ["hit reason build", "route selection", "provider policy", "client response policy"]
+    }
+  ]
+}

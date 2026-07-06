@@ -601,6 +601,53 @@ describe('hub pipeline stage residue audit', () => {
     expect(servertoolRuntimeActionFindings).toEqual([]);
   });
 
+  it('provider response TS shell must be classified as native IO shell only', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+    );
+    const manifestPath = path.join(process.cwd(), 'docs/loops/rustification/minimal-ts-surface.json');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+      entries?: Array<{
+        path?: string;
+        classification?: string;
+        ownerFeature?: string;
+        forbiddenSemantics?: string[];
+      }>;
+    };
+    const manifestEntry = manifest.entries?.find((entry) => entry.path === 'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
+    const findings = collectMatches(source, [
+      { label: 'ts-local-provider-response-plan-type-owner', pattern: /interface\s+ProviderResponsePlan\b|type\s+ProviderResponsePlan\b/ },
+      { label: 'ts-local-response-shape-detector', pattern: /function\s+(?:detect|is|has)[A-Za-z0-9_]*ProviderResponse[A-Za-z0-9_]*\s*\(/ },
+      { label: 'ts-local-responses-endpoint-semantic-branch', pattern: /entryEndpoint[\s\S]{0,120}(?:includes|===)\s*\(?['"]\/v1\/responses['"]/ },
+      { label: 'ts-local-provider-protocol-branch', pattern: /providerProtocol\s*===\s*['"][a-z0-9-]+['"]/ },
+      { label: 'ts-local-effect-kind-switch', pattern: /switch\s*\([^)]*(?:effect|runtimeEffect)[^)]*(?:kind|action)[^)]*\)/ },
+      { label: 'ts-local-effect-kind-if-branch', pattern: /(?:effect|runtimeEffect)\.(?:kind|action)\s*===/ },
+      { label: 'ts-local-client-payload-builder', pattern: /function\s+build[A-Za-z0-9_]*(?:Client|Responses|Chat)[A-Za-z0-9_]*Payload\s*\(/ },
+      { label: 'ts-local-fallback-owner', pattern: /\bfallback\b|\bcompat\b|best[- ]?effort/i },
+    ]);
+
+    expect(manifestEntry).toEqual(expect.objectContaining({
+      classification: 'ts_io_shell_ok',
+      ownerFeature: 'hub.response_provider_sse_materialization',
+    }));
+    expect(manifestEntry?.forbiddenSemantics).toEqual(expect.arrayContaining([
+      'provider response parsing',
+      'response governance',
+      'client projection',
+      'effect planning',
+      'fallback',
+    ]));
+    expect(source).toContain('executeHubPipelineWithNative');
+    expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
+    expect(source).toContain('materializeProviderResponseSsePayloadWithNative');
+    expect(source).toContain('publishResponsesRecordPlanWithNative');
+    expect(source).toContain('buildSseFramesFromJsonWithNative');
+    expect(source).toContain('runServertoolResponseStageOrchestrationShell');
+    expect(findings).toEqual([]);
+  });
+
   it('provider response SSE marker materialization must stay Rust-owned', () => {
     const filePath = path.join(
       process.cwd(),
