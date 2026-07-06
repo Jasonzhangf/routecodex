@@ -24,6 +24,8 @@ function createStubSpinner() {
 function createFakeChild(pid = 43210) {
   return {
     pid,
+    exitCode: null,
+    signalCode: null,
     stdout: null,
     stderr: null,
     on: () => createFakeChild(pid),
@@ -33,12 +35,62 @@ function createFakeChild(pid = 43210) {
   } as any;
 }
 
+function createExitableFakeChild(pid = 43210, exitDelayMs = 0, code: number | null = 0, signal: NodeJS.Signals | null = null) {
+  const handlers = new Map<string, Array<(exitCode: number | null, exitSignal: NodeJS.Signals | null) => void>>();
+  const child = {
+    pid,
+    exitCode: exitDelayMs === 0 ? code : null as number | null,
+    signalCode: exitDelayMs === 0 ? signal : null as NodeJS.Signals | null,
+    stdout: null,
+    stderr: null,
+    on: (event: string, handler: (exitCode: number | null, exitSignal: NodeJS.Signals | null) => void) => {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return child;
+    },
+    once: (event: string, handler: (exitCode: number | null, exitSignal: NodeJS.Signals | null) => void) => {
+      const wrapped = (exitCode: number | null, exitSignal: NodeJS.Signals | null) => {
+        const list = handlers.get(event) ?? [];
+        handlers.set(event, list.filter((item) => item !== wrapped));
+        handler(exitCode, exitSignal);
+      };
+      return child.on(event, wrapped);
+    },
+    kill: (nextSignal?: NodeJS.Signals) => {
+      child.exitCode = null;
+      child.signalCode = nextSignal ?? 'SIGTERM';
+      const listeners = [...(handlers.get('exit') ?? [])];
+      for (const listener of listeners) {
+        listener(child.exitCode, child.signalCode);
+      }
+      return true;
+    },
+    unref: () => {}
+  } as any;
+  const emitExit = () => {
+    child.exitCode = code;
+    child.signalCode = signal;
+    const listeners = [...(handlers.get('exit') ?? [])];
+    for (const listener of listeners) {
+      listener(code, signal);
+    }
+  };
+  if (exitDelayMs === 0) {
+    queueMicrotask(emitExit);
+  } else {
+    setTimeout(emitExit, exitDelayMs);
+  }
+  return child;
+}
+
 describe('cli start command', () => {
-  it('keeps release start in foreground unless daemon is explicitly enabled', () => {
-    expect(resolveReleaseDaemonEnabled({})).toBe(false);
+  it('keeps release start daemonized unless daemon is explicitly disabled', () => {
+    expect(resolveReleaseDaemonEnabled({})).toBe(true);
     expect(resolveReleaseDaemonEnabled({ ROUTECODEX_START_DAEMON: '1' })).toBe(true);
     expect(resolveReleaseDaemonEnabled({ RCC_START_DAEMON: '1' })).toBe(true);
     expect(resolveReleaseDaemonEnabled({ ROUTECODEX_START_DAEMON: '0' })).toBe(false);
+    expect(resolveReleaseDaemonEnabled({ RCC_START_DAEMON: 'false' })).toBe(false);
   });
 
   it('starts only the requested port from a multi-port config', async () => {
@@ -524,7 +576,11 @@ routingPolicyGroup = "gateway_coding_10000"
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: () => createFakeChild(1),
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {
@@ -569,7 +625,11 @@ routingPolicyGroup = "gateway_coding_10000"
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: () => createFakeChild(1),
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {
@@ -620,7 +680,11 @@ routingPolicyGroup = "gateway_coding_10000"
         captured.env = options.env as any;
         return createFakeChild(1);
       },
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {
@@ -727,7 +791,11 @@ routingPolicyGroup = "gateway_coding_10000"
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: () => createFakeChild(1),
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {
@@ -739,7 +807,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(errors.join('\n')).toContain('Please create a RouteCodex user config');
   });
 
-  it('release start runs foreground server by default', async () => {
+  it('release start runs foreground server when daemon is explicitly disabled', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();
 
@@ -750,7 +818,7 @@ routingPolicyGroup = "gateway_coding_10000"
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: { ROUTECODEX_START_DAEMON: '0' },
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
@@ -778,7 +846,11 @@ routingPolicyGroup = "gateway_coding_10000"
         spawnCalls.push({ command, args, options });
         return createFakeChild(43210);
       },
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {
@@ -796,7 +868,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(spawnCalls[0].options?.env?.RCC_EXPECT_PARENT_PID).toBeUndefined();
   });
 
-  it('release start restarts by default and preserves explicit --no-restart', async () => {
+  it('release foreground start restarts by default and preserves explicit --no-restart', async () => {
     const restartFlags: Array<boolean | undefined> = [];
     const createContext = () => ({
       isDevPackage: false,
@@ -805,7 +877,7 @@ routingPolicyGroup = "gateway_coding_10000"
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: { ROUTECODEX_START_DAEMON: '0' },
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
@@ -834,7 +906,11 @@ routingPolicyGroup = "gateway_coding_10000"
       resolveCliEntryPath: () => '/tmp/cli.js',
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: () => createFakeChild(43210),
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code: number) => {
@@ -853,7 +929,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(restartFlags).toEqual([true, false]);
   });
 
-  it('writes daemon stop intent before foreground restart takeover', async () => {
+  it('writes daemon stop intent before explicit foreground restart takeover', async () => {
     const previousRccHome = process.env.RCC_HOME;
     const previousRouteCodexUserDir = process.env.ROUTECODEX_USER_DIR;
     const previousRouteCodexHome = process.env.ROUTECODEX_HOME;
@@ -873,7 +949,7 @@ routingPolicyGroup = "gateway_coding_10000"
         nodeBin: 'node',
         createSpinner: async () => createStubSpinner(),
         logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-        env: {},
+        env: { ROUTECODEX_START_DAEMON: '0' },
         fsImpl: {
           existsSync: (target: string) => target === configPath || target === '/tmp/index.js' || target === '/tmp/modules.json',
           statSync: () => ({ isDirectory: () => false } as any),
@@ -914,7 +990,11 @@ port = 5520
         resolveCliEntryPath: () => '/tmp/cli.js',
         resolveServerEntryPath: () => '/tmp/index.js',
         spawn: () => createFakeChild(43210),
-        fetch: (async () => ({ ok: true })) as any,
+        fetch: (async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ server: 'routecodex', status: 'ok' })
+        })) as any,
         setupKeypress: () => () => {},
         waitForever: async () => {},
         exit: (code: number) => {
@@ -1074,7 +1154,11 @@ port = 5520
           unref: () => { call.unrefCalled = true; }
         } as any;
       },
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {
@@ -1087,6 +1171,70 @@ port = 5520
     expect(spawnCalls[0].command).toBe('node');
     expect(spawnCalls[0].args).toContain('/tmp/cli.js');
     expect(spawnCalls[0].args).toContain('start');
+    expect(spawnCalls[0].options?.detached).toBe(true);
+    expect(spawnCalls[0].options?.stdio).toBe('ignore');
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBe('1');
+    expect(spawnCalls[0].unrefCalled).toBe(true);
+  });
+
+  it('release start runs daemon supervisor by default', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any; unrefCalled?: boolean }> = [];
+    const program = new Command();
+
+    createStartCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/')
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensurePortAvailable: async () => {},
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveCliEntryPath: () => '/tmp/cli.js',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: (command, args, options) => {
+        const call = { command, args, options, unrefCalled: false };
+        spawnCalls.push(call);
+        return {
+          ...createFakeChild(43210),
+          unref: () => { call.unrefCalled = true; }
+        } as any;
+      },
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'rcc', 'start', '--snap'], { from: 'node' })).rejects.toThrow('exit:0');
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].args).toContain('start');
+    expect(spawnCalls[0].args).toContain('--snap');
     expect(spawnCalls[0].options?.detached).toBe(true);
     expect(spawnCalls[0].options?.stdio).toBe('ignore');
     expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBe('1');
@@ -1131,7 +1279,11 @@ port = 5520
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: () => createFakeChild(1),
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {
@@ -1182,7 +1334,11 @@ port = 5520
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: () => createFakeChild(1),
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {
@@ -1233,7 +1389,11 @@ port = 5520
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
       spawn: () => createFakeChild(1),
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
       setupKeypress: () => () => {},
       waitForever: async () => {},
       exit: (code) => {

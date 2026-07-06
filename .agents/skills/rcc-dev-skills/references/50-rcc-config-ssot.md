@@ -82,6 +82,9 @@
 - `provider.models.<modelId>` 是 upstream wire model 真名
 - `aliases` 只给客户端展示 / 客户端输入匹配
 - provider 出站 `body.model` 必须回写 `modelId`，不能发 alias
+- 每个 routingPolicyGroup 的 `routing.default` 池必须包含该组其他池出现过的所有模型/forwarder。
+- `default.targets` 排序按业务 priority 排序；同等可用时，支持 `web_search` 和 `multimodal` 的模型/forwarder 靠前。
+- GPT forwarder 分类：`fwd.gpt.*` 表示 free/限免动态池，默认优先于 `fwd.paid.*`；free 池只保留当前免费 provider，paid 池承载付费 provider 聚合。
 
 ## 修改流程
 1. 编辑 `~/.rcc/provider/<id>/config.v2.toml`
@@ -94,6 +97,14 @@
 6. 健康检查：
    - `curl -s http://127.0.0.1:<port>/health`
 7. 再做 live `/v1/responses` 或 `/v1/chat/completions` probe
+
+## 安装面边界
+- 交付级测试默认只认全局 `routecodex` 安装面；repo-local build、手工 snapshot、临时 shim 只能定位问题。
+- 实验验证顺序：安装目标产物 → `routecodex --version` → `curl /health` 核版本 → `routecodex restart --port <port>` → live probe。
+- 未经 Jason 明确要求，不覆盖 `rcc` release 安装或 Homebrew/global shim；不要为了验证 `routecodex` 产物顺手改掉 `rcc` 的 release 面。
+- 若用户要求验证 `rcc` release，全局安装后必须证明 `rcc --version`、`routecodex --version`、`~/.rcc/install/current/package.json`、`/health.version` 一致。
+- 若怀疑某个测试导致 server 停止，先记录 `server-<port>.log` 行数和 `/health`，只运行该测试，再检查新增 lifecycle 行；没有新增 `signal_received` / `self_termination` / `restart_signal_received` 时，不得把停止归因给该测试。Jest/WebUI 单测必须保持无 live server 生命周期副作用。
+- Jason 已手动恢复 live server 后，默认冻结生命周期动作：不要继续执行会 stop/restart/install/start 的命令，也不要用新的 live probe 反证现场。只能做离线 diff/代码检查；需要再动 live server 时必须等 Jason 明确指令。
 
 ## 排障顺序
 1. 先看 `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/` 的真实样本四件套。

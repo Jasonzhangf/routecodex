@@ -65,6 +65,16 @@ description: RouteCodex 调试与架构路由入口
 - 验证后：必须做 architecture review，判断结果是否正确、架构是否正确、是否用了 fallback / 临时绕路 / 补丁式修复、是否存在“结果对了但架构错了”。
 - 验证通过不等于闭环完成；架构 review 不过，仍视为未完成。
 
+## 全局安装 / release 验证硬规则
+
+- 所有交付级 RouteCodex 测试必须使用全局安装版本。单元测试、编译、repo-local build 只能作为前置 gate，不能作为“已修复/已启动/已可用”的最终证据。
+- 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` / `/health.version` 确认版本，再用 `routecodex restart --port <port>` 重启验证。
+- Jason 未明确要求时，不得覆盖或改写 `rcc` 的 release 安装、Homebrew/global shim、或正在工作的 release runtime。需要动 `rcc` release install 时，先确认这是本轮目标。
+- 禁止用 `rcc start`、repo-local `node dist/...`、手工 snapshot、或临时 shim 代替标准 release/global 安装验证；这些只能作为定位证据，不能作为交付闭环。
+- 版本真相必须三点一致：命令入口版本、`~/.rcc/install/current/package.json`、目标端口 `/health.version`。不一致时先修安装/入口，不继续判断业务功能。
+- 区分测试与生命周期动作：`npm run test:webui` 这类 Jest/UI 单测不得启动、停止、重启 live server；若测试前后 server 变化，必须用 `~/.rcc/logs/server-<port>.log` 的 `signal_received` / `self_termination` / `restart_signal_received` 追真正 stop owner，禁止把 install/restart/HTTP shutdown 误归因给 UI 单测。
+- 如果 Jason 说某次执行导致 live server 停止，并且已经手动恢复，立刻接受现场事实；停止争辩和重复复现。后续命令先按 side-effect 分级：禁止再跑 install/restart/start/stop/HTTP shutdown/foreground server/可能退出会话的 browser probe，除非 Jason 明确要求。
+
 ## 路由表
 
 | 主题 | 文件 | 用途 |
