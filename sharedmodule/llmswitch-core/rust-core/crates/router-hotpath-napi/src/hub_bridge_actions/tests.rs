@@ -1565,6 +1565,50 @@ fn convert_bridge_input_rejects_orphan_tool_result() {
 }
 
 #[test]
+fn convert_bridge_input_normalizes_responses_tool_message_id_to_tool_call_id() {
+    let input = BridgeInputToChatInput {
+        input: vec![
+            json!({
+                "type": "function_call",
+                "id": "call_apply_patch",
+                "call_id": "call_apply_patch",
+                "name": "apply_patch",
+                "arguments": "*** Begin Patch\n*** Add File: tmp/example.txt\n+ok\n*** End Patch"
+            }),
+            json!({
+                "role": "tool",
+                "name": "apply_patch",
+                "id": "call_apply_patch",
+                "content": "APPLY_PATCH_ERROR: apply_patch did not apply"
+            }),
+        ],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+        allow_pending_terminal_tool_call: Some(true),
+        allow_orphan_tool_result: None,
+    };
+
+    let output = convert_bridge_input_to_chat_messages(input).unwrap();
+    assert_eq!(output.messages.len(), 2);
+    assert_eq!(output.messages[0]["role"], json!("assistant"));
+    assert_eq!(
+        output.messages[0]["tool_calls"][0]["id"],
+        json!("call_apply_patch")
+    );
+    assert_eq!(output.messages[1]["role"], json!("tool"));
+    assert_eq!(
+        output.messages[1]["tool_call_id"],
+        json!("call_apply_patch")
+    );
+    assert_eq!(output.messages[1]["name"], json!("apply_patch"));
+    assert_eq!(
+        output.messages[1]["content"],
+        json!("APPLY_PATCH_ERROR: apply_patch did not apply")
+    );
+}
+
+#[test]
 fn build_bridge_history_rejects_dangling_tool_call() {
     let input = BuildBridgeHistoryInput {
         messages: vec![json!({

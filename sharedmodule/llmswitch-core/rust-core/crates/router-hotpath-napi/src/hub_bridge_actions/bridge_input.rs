@@ -698,6 +698,75 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             non_system_message_indices.push(entry_index);
         }
 
+        if role_hint == "tool" {
+            let tool_call_id = require_explicit_tool_call_id(
+                read_trimmed_string(entry_obj.get("tool_call_id"))
+                    .or_else(|| read_trimmed_string(entry_obj.get("call_id")))
+                    .or_else(|| read_trimmed_string(entry_obj.get("tool_use_id")))
+                    .or_else(|| read_trimmed_string(entry_obj.get("id"))),
+                "missing_tool_call_id: bridge tool message is missing call_id/tool_call_id",
+            )?;
+            let mut content = serialize_tool_output(entry_obj).unwrap_or_default();
+            if content.trim().is_empty() {
+                if let Some(value) = entry_obj.get("content").and_then(Value::as_str) {
+                    content = value.to_string();
+                }
+            }
+            if content.trim().is_empty() {
+                content = fallback_text.clone();
+            }
+            let mut tool_msg = Map::new();
+            tool_msg.insert("role".to_string(), Value::String("tool".to_string()));
+            tool_msg.insert(
+                "tool_call_id".to_string(),
+                Value::String(tool_call_id.clone()),
+            );
+            tool_msg.insert("id".to_string(), Value::String(tool_call_id.clone()));
+            tool_msg.insert("content".to_string(), Value::String(content));
+            if let Some(name) = read_trimmed_string(entry_obj.get("name")) {
+                tool_msg.insert("name".to_string(), Value::String(name));
+            } else if let Some(name) = tool_name_by_id.get(&tool_call_id) {
+                if !name.trim().is_empty() {
+                    tool_msg.insert("name".to_string(), Value::String(name.clone()));
+                }
+            }
+            if pending_tool_call_ids
+                .iter()
+                .any(|entry| entry == &tool_call_id)
+            {
+                consume_pending_tool_call(
+                    &mut pending_tool_call_ids,
+                    tool_call_id.as_str(),
+                    "bridge tool message references unknown or already-consumed call_id",
+                )?;
+                messages.push(Value::Object(tool_msg));
+                continue;
+            }
+            if future_tool_call_counts
+                .get(&tool_call_id)
+                .copied()
+                .unwrap_or(0)
+                > 0
+            {
+                deferred_tool_results
+                    .entry(tool_call_id.clone())
+                    .or_insert_with(VecDeque::new)
+                    .push_back(DeferredToolResult {
+                        call_id: tool_call_id.clone(),
+                        message: Value::Object(tool_msg),
+                    });
+                continue;
+            }
+            if allow_orphan_tool_result {
+                messages.push(Value::Object(tool_msg));
+                continue;
+            }
+            return Err(format!(
+                "orphan_tool_result: bridge tool message references unknown or already-consumed call_id: {}",
+                tool_call_id
+            ));
+        }
+
         if let Some(Value::String(content)) = entry_obj.get("content") {
             let tool_calls = entry_obj
                 .get("tool_calls")
