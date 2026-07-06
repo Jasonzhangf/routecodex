@@ -140,38 +140,9 @@ function ensureMetaProviderKey(meta: AnyRecord | undefined, entry: ConversationE
   return planContinuationMeta({ meta, entry }).meta;
 }
 
-type ScopeMatchCandidate = {
-  scopeKey: string;
-  requestId?: string;
-  lastResponseId?: string;
-  allowContinuation?: boolean;
-  continuationOwner?: 'direct' | 'relay';
-};
-
-type ResumeEntryMatchCandidate = ScopeMatchCandidate & {
-  source: 'response_index' | 'request_map' | 'scope';
-  portScopeKey?: string;
-  entryKind?: ResponsesContinuationEntryKind;
-};
-
-type CapturePendingCleanupCandidate = {
-  requestId?: string;
-  lastResponseId?: string;
-  scopeKeys?: string[];
-};
-
-type RecordScopeCleanupCandidate = {
-  requestId?: string;
-  lastResponseId?: string;
-  scopeKeys?: string[];
-};
-
-function collectScopeMatchCandidates(scopeIndex: Map<string, ConversationEntry>, scopeKeys: string[]): {
-  entriesByScopeKey: Map<string, ConversationEntry>;
-  candidates: ScopeMatchCandidate[];
-} {
+function collectScopeMatchCandidates(scopeIndex: Map<string, ConversationEntry>, scopeKeys: string[]) {
   const entriesByScopeKey = new Map<string, ConversationEntry>();
-  const candidates: ScopeMatchCandidate[] = [];
+  const candidates: Array<Parameters<typeof planScopeContinuationMatch>[0]['candidates'][number]> = [];
   for (const scopeKey of scopeKeys) {
     const entry = scopeIndex.get(scopeKey);
     if (!entry) continue;
@@ -190,9 +161,9 @@ function collectScopeMatchCandidates(scopeIndex: Map<string, ConversationEntry>,
 
 function projectResumeEntryCandidate(
   entry: ConversationEntry,
-  source: ResumeEntryMatchCandidate['source'],
+  source: 'response_index' | 'request_map' | 'scope',
   scopeKey?: string
-): ResumeEntryMatchCandidate {
+) {
   const tokens = normalizeStoreTokens({
     entryKind: entry.entryKind,
     continuationOwner: entry.continuationOwner
@@ -330,7 +301,7 @@ class ResponsesConversationStore {
       continuationOwner: 'relay'
     });
     const portScopeKey = readPortScopeKey(args);
-    const cleanupCandidates: CapturePendingCleanupCandidate[] = scopeKeys.length
+    const cleanupCandidates = scopeKeys.length
       ? [...this.requestMap.values()].map((candidate) => ({
         requestId: candidate.requestId,
         lastResponseId: candidate.lastResponseId,
@@ -488,7 +459,11 @@ class ResponsesConversationStore {
     entry.lastResponseId = responseId;
     entry.updatedAt = Date.now();
     this.responseIndex.set(responseId, entry);
-    const recordCleanupCandidates = new Map<string, RecordScopeCleanupCandidate>();
+    const recordCleanupCandidates = new Map<string, {
+      requestId?: string;
+      lastResponseId?: string;
+      scopeKeys?: string[];
+    }>();
     for (const scopeKey of entry.scopeKeys) {
       const previous = this.scopeIndex.get(scopeKey);
       if (previous) {
@@ -552,7 +527,7 @@ class ResponsesConversationStore {
     this.prune();
     const requestedPortScopeKey = readPortScopeKey(options);
     const entriesByRequestId = new Map<string, ConversationEntry>();
-    const candidates: ResumeEntryMatchCandidate[] = [];
+    const candidates: ReturnType<typeof projectResumeEntryCandidate>[] = [];
     const indexedEntry = this.responseIndex.get(normalizedResponseId);
     if (indexedEntry) {
       entriesByRequestId.set(indexedEntry.requestId, indexedEntry);

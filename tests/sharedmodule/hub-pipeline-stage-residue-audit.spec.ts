@@ -4634,6 +4634,22 @@ describe('hub pipeline stage residue audit', () => {
         pattern: /function\s+pickPersistedFields\b|pickResponsesPersistedFieldsWithNative/u,
       },
       {
+        label: 'restores zero-consumer scope match type shell',
+        pattern: /(?:export\s+)?type\s+ScopeMatchCandidate\b/u,
+      },
+      {
+        label: 'restores zero-consumer resume match type shell',
+        pattern: /(?:export\s+)?type\s+ResumeEntryMatchCandidate\b/u,
+      },
+      {
+        label: 'restores zero-consumer capture cleanup type shell',
+        pattern: /(?:export\s+)?type\s+CapturePendingCleanupCandidate\b/u,
+      },
+      {
+        label: 'restores zero-consumer record cleanup type shell',
+        pattern: /(?:export\s+)?type\s+RecordScopeCleanupCandidate\b/u,
+      },
+      {
         label: 'manual continuation owner branch',
         pattern: /continuationOwner\s*===|continuationOwner\s*!==/u,
       },
