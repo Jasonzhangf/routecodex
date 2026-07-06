@@ -360,6 +360,18 @@ function AdminAuthPanel({
   changePassword: () => Promise<void>;
   refreshStatus: () => Promise<void>;
 }) {
+  if (!authStatus.authRequired) {
+    return (
+      <div className="panel">
+        <SectionHeader title="Local Admin Access" sub="Loopback request is already authorized." />
+        <div className="row">
+          <span className="pill mono">{authHint}</span>
+          <button onClick={() => void refreshStatus()}>Refresh Status</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="panel">
       <SectionHeader
@@ -688,7 +700,25 @@ export function App() {
                 </div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="auth-grid">
+              <AdminAuthPanel
+                authStatus={authStatus}
+                authHint={authHint}
+                adminPassword={adminPassword}
+                oldPassword={oldPassword}
+                newPassword={newPassword}
+                setAdminPassword={setAdminPassword}
+                setOldPassword={setOldPassword}
+                setNewPassword={setNewPassword}
+                setupPassword={setupPassword}
+                login={login}
+                logout={logout}
+                changePassword={changePassword}
+                refreshStatus={refreshStatus}
+              />
+            </div>
+          )}
 
           <div className="nav panel" style={{ padding: 10 }}>
             <button className={mainTab === 'providers' ? 'active' : ''} onClick={() => setMainTab('providers')}>
@@ -1735,7 +1765,7 @@ export function RoutingPage({
     }
     const nextPorts = [...ports, nextPort];
     try {
-      await savePorts(nextPorts, 'Port tab saved.', makePortKey(nextPort, nextPorts.length - 1));
+      await savePorts(nextPorts, 'Port config saved.', makePortKey(nextPort, nextPorts.length - 1));
       setNewPortNumber('');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -1984,10 +2014,10 @@ export function RoutingPage({
   return (
     <div className="grid grid-wide-left">
       <div className="panel">
-        <SectionHeader title="Routing Management" sub="Readable route registry cards (route -> pool -> targets), no raw JSON." />
+        <SectionHeader title="Routing Management" sub="Single config file editor for httpserver.ports[], routing groups, and provider targets." />
 
         <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
-          <SectionHeader title="Port Routing Tabs" sub="One config tab per httpserver.ports[] entry." />
+          <SectionHeader title="Port Config Entries" sub="Each item is an httpserver.ports[] entry in the same config file." />
           <div className="row" style={{ marginBottom: 8 }}>
             {portTabs.map((item) => (
               <button
@@ -2001,7 +2031,7 @@ export function RoutingPage({
                 {item.label}
               </button>
             ))}
-            {!portTabs.length ? <span className="muted">No httpserver.ports[] entries loaded.</span> : null}
+            {!portTabs.length ? <span className="muted">No httpserver.ports[] entries loaded from this config file.</span> : null}
           </div>
           {selectedPort ? (
             <>
@@ -2013,7 +2043,7 @@ export function RoutingPage({
                 <span className="pill mono">same-protocol: {textOf(selectedPort.port.sameProtocolBehavior || '—')}</span>
               </div>
               <div className="row" style={{ marginTop: 8 }}>
-                <label htmlFor="port-routing-group">port group</label>
+                <label htmlFor="port-routing-group">routing group</label>
                 <select
                   id="port-routing-group"
                   value={textOf(selectedPort.port.routingPolicyGroup || '')}
@@ -2052,7 +2082,7 @@ export function RoutingPage({
               <option value="relay">relay</option>
             </select>
             <button onClick={() => void createPortTab()} disabled={!authenticated}>
-              Add Port Tab
+              Add Port Config
             </button>
           </div>
         </div>

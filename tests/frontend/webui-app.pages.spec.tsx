@@ -233,8 +233,8 @@ describe('webui page-level coverage', () => {
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
     fireEvent.change(screen.getByLabelText('new port'), { target: { value: '7777' } });
     fireEvent.change(screen.getByLabelText('new port provider binding'), { target: { value: 'demo' } });
-    fireEvent.click(screen.getByText('Add Port Tab'));
-    await waitFor(() => expect(hasToast('Port tab saved.')).toBe(true));
+    fireEvent.click(screen.getByText('Add Port Config'));
+    await waitFor(() => expect(hasToast('Port config saved.')).toBe(true));
     fireEvent.change(screen.getByLabelText('provider target picker'), { target: { value: 'demo.default.demo-max' } });
     expect((screen.getByPlaceholderText('targets: provider.alias.model, provider.alias.model') as HTMLInputElement).value).toContain('demo.default.demo-max');
     routingView.unmount();

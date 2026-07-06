@@ -55,6 +55,7 @@ describe('webui integration flows (feature coverage)', () => {
   });
 
   const state = {
+    authRequired: true,
     authenticated: true,
     hasPassword: true,
     activeGroupId: 'default'
@@ -138,6 +139,7 @@ describe('webui integration flows (feature coverage)', () => {
       if (key !== 'default') delete routingGroups[key];
     }
 
+    state.authRequired = true;
     state.authenticated = true;
     state.hasPassword = true;
     state.activeGroupId = 'default';
@@ -176,7 +178,12 @@ describe('webui integration flows (feature coverage)', () => {
       if (path === '/health') return json({ version: 'test-version' });
 
       if (path === '/daemon/auth/status' && method === 'GET') {
-        return json({ ok: true, hasPassword: state.hasPassword, authenticated: state.authenticated });
+        return json({
+          ok: true,
+          authRequired: state.authRequired,
+          hasPassword: state.hasPassword,
+          authenticated: state.authenticated
+        });
       }
       if (path === '/daemon/auth/login' && method === 'POST') {
         state.authenticated = true;
@@ -368,6 +375,23 @@ describe('webui integration flows (feature coverage)', () => {
     expect(screen.getByText('Refresh View (R)')).toBeTruthy();
   });
 
+  it('opens admin pages without password controls when local auth is not required', async () => {
+    state.authRequired = false;
+    state.authenticated = false;
+    state.hasPassword = true;
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('Provider Catalog')).toBeTruthy());
+    expect(screen.getByText('Local Admin Access')).toBeTruthy();
+    expect(screen.getByText('auth bypass (loopback bind)')).toBeTruthy();
+    expect(screen.queryByText('Admin Login')).toBeNull();
+    expect(screen.queryByText('Admin Setup')).toBeNull();
+    expect(screen.queryByLabelText('password')).toBeNull();
+    expect(screen.getByText('Routing')).toBeTruthy();
+    expect(screen.getByText('Refresh View (R)')).toBeTruthy();
+  });
+
   it('covers major user flows across all tabs', async () => {
     const covered = new Set<string>();
     const hit = (feature: (typeof requiredFeatures)[number]) => covered.add(feature);
@@ -437,15 +461,15 @@ describe('webui integration flows (feature coverage)', () => {
     // Routing page
     fireEvent.click(screen.getByText('Routing'));
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
-    await waitFor(() => expect(screen.getByText('Port Routing Tabs')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Port Config Entries')).toBeTruthy());
     await waitFor(() => expect(screen.getByText('5520')).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText('new port'), { target: { value: '7777' } });
     fireEvent.change(screen.getByLabelText('new port routing group'), { target: { value: 'canary' } });
     fireEvent.change(screen.getByLabelText('new port provider binding'), { target: { value: 'picker' } });
     fireEvent.change(screen.getByLabelText('new port same protocol'), { target: { value: 'relay' } });
-    fireEvent.click(screen.getByText('Add Port Tab'));
-    await waitFor(() => expect(screen.getAllByText(/Port tab saved\./).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText('Add Port Config'));
+    await waitFor(() => expect(screen.getAllByText(/Port config saved\./).length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getByText('7777')).toBeTruthy());
     hit('routing.port_tab_save');
 

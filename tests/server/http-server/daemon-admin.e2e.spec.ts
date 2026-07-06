@@ -32,6 +32,19 @@ async function createTempUserConfig(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-daemon-admin-'));
   const filePath = path.join(dir, 'config.json');
   const config = {
+    version: '1.0.0',
+    httpserver: {
+      host: '127.0.0.1',
+      port: 0,
+      ports: [
+        {
+          host: '127.0.0.1',
+          port: 0,
+          mode: 'router',
+          routingPolicyGroup: 'default'
+        }
+      ]
+    },
     virtualrouterMode: 'v1',
     virtualrouter: {
       providers: {
@@ -55,6 +68,14 @@ function createTestConfig(port: number, configPath: string, apikey?: string, hos
     server: {
       host,
       port,
+      ports: [
+        {
+          host,
+          port,
+          mode: 'router',
+          routingPolicyGroup: 'default'
+        }
+      ],
       ...(apikey ? { apikey } : {})
     },
     pipeline: {},
@@ -95,6 +116,7 @@ async function startTestServer(host = '127.0.0.1'): Promise<{
   }
   const tmpConfig = createTestConfig(0, configPath, apikey, host);
   const server = new RouteCodexHttpServer(tmpConfig);
+  server.seedUserConfigForBootstrap(JSON.parse(await fs.readFile(configPath, 'utf8')));
   // 使用私有方法启动监听，以便读取实际端口；这里复用 start() 逻辑。
   await server.start();
   const raw = (server as unknown as { server?: http.Server }).server;

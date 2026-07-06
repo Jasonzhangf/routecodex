@@ -1,4 +1,4 @@
-import type { Application, Request, Response, NextFunction } from 'express';
+import type { Application, Request, Response } from 'express';
 // feature_id: daemon_admin.command_handlers
 // feature_id: daemon_admin.auth_gate_shell
 import { registerDaemonAuthRoutes } from './daemon-admin/auth-handler.js';
@@ -44,9 +44,9 @@ export interface DaemonAdminRouteOptions {
    */
   getServerHost?: () => string;
   /**
-   * Return the primary business port (= config.server.port).
-   * Used to lock /daemon, /admin, /daemon/credentials to this port only.
-   * If absent, isolation is disabled (legacy behavior).
+   * Return the configured business port.
+   * Kept for runtime status/control consumers; daemon-admin config editing is
+   * scoped by authenticated config path, not by the socket port used to open UI.
    */
   getServerPort?: () => number | undefined;
   /**
@@ -140,9 +140,7 @@ function readBoolEnvFlag(keys: string[]): boolean {
 }
 
 export function isDaemonAdminAuthRequired(req: Request): boolean {
-  const localBypassRaw = (req.app?.locals as Record<string, unknown> | undefined)?.[DAEMON_ADMIN_LOCAL_BYPASS_LOCAL_KEY];
-  const localBypassEnabled = typeof localBypassRaw === 'boolean' ? localBypassRaw : false;
-  if (isLocalRequest(req) && localBypassEnabled) {
+  if (isLocalRequest(req)) {
     return false;
   }
   const raw = (req.app?.locals as Record<string, unknown> | undefined)?.[DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY];
@@ -233,7 +231,6 @@ export function rejectNonLocalOrUnauthorizedAdmin(
 export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): void {
   const { app } = options;
   const bindHost = typeof options.getServerHost === 'function' ? options.getServerHost() : '';
-  const primaryPort = typeof options.getServerPort === 'function' ? options.getServerPort() : undefined;
   const localBypassEnabled = readBoolEnvFlag([
     'ROUTECODEX_DAEMON_ADMIN_LOCAL_BYPASS',
     'RCC_DAEMON_ADMIN_LOCAL_BYPASS'
@@ -246,37 +243,6 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
   (app.locals as Record<string, unknown>)[DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY] =
     resolvedApiKey.ok && Boolean(resolvedApiKey.value);
   setDaemonAdminExpectedApiKeyForApp(app, resolvedApiKey.ok ? resolvedApiKey.value : '');
-
-  // Per-port guard: control-plane mutate paths must be reachable only on the
-  // primary business port (== config.server.port). Non-primary ports (10000/5555)
-  // must not be able to mutate the server (add/remove ports, reload config,
-  // reset auth, change routing). Read-only auth/cookie/setup
-  // and per-port diagnostics stay open on every port. This middleware must
-  // be installed BEFORE any route registration below.
-  if (typeof primaryPort === 'number' && primaryPort > 0) {
-    const CONTROL_MUTATE_PATH_REGEX = /^\/(?:admin\/ports(?:\/\d+)?|config\/(?:providers\/v2(?:\/[^/]+)?|routing(?:\/[^/]+)?|settings)|daemon\/control\/mutate|daemon\/auth\/reset-password|daemon\/credentials\/[^/]+\/(?:verify|refresh))(?:$|\/)/;
-    app.use((req: Request, res: Response, next: NextFunction) => {
-      const path = String(req.path || req.url || '').split('?')[0];
-      if (CONTROL_MUTATE_PATH_REGEX.test(path)) {
-        const sockPort =
-          typeof (req.socket as { localPort?: number } | undefined)?.localPort === 'number'
-            ? (req.socket as { localPort: number }).localPort
-            : undefined;
-        if (sockPort !== primaryPort) {
-          res.status(404).json({
-            error: {
-              message: 'Not Found',
-              type: 'not_found',
-              code: 'not_found',
-              port: sockPort ?? '-'
-            }
-          });
-          return;
-        }
-      }
-      next();
-    });
-  }
 
   // Daemon admin password auth (setup/login/logout/status)
   registerDaemonAuthRoutes(app);
