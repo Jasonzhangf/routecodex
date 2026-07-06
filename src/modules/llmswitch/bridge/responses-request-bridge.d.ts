@@ -174,6 +174,7 @@ export declare function recordResponsesResponseForHttp(args: {
     routeHint?: string;
 }): Promise<void>;
 export declare function seedResponsesToolCallResponseForHttp(args: {
+    requestId?: string;
     body: unknown;
     requestContext?: {
         payload?: Record<string, unknown>;
@@ -188,6 +189,7 @@ export declare function seedResponsesToolCallResponseForHttp(args: {
 }): Promise<void>;
 export declare function finalizeResponsesPipelineResultForHttp(args: {
     entryEndpoint?: string;
+    requestId?: string;
     body: unknown;
     resultMetadata: Record<string, unknown> | undefined;
     requestContext: ResponsesRequestContextForHttp;

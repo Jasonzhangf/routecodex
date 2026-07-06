@@ -945,6 +945,7 @@ export async function recordResponsesResponseForHttp(args: {
 }
 
 export async function seedResponsesToolCallResponseForHttp(args: {
+  requestId?: string;
   body: unknown;
   requestContext?: {
     payload?: Record<string, unknown>;
@@ -966,8 +967,14 @@ export async function seedResponsesToolCallResponseForHttp(args: {
   if (!requestContext?.payload || !requestContext?.context) {
     return;
   }
+  const requestId = typeof args.requestId === 'string' && args.requestId.trim()
+    ? args.requestId.trim()
+    : undefined;
+  if (!requestId) {
+    throw new Error('Responses tool-call persistence requires request id');
+  }
   await captureResponsesRequestContextForHttp({
-    requestId: responseId,
+    requestId,
     payload: requestContext.payload,
     context: requestContext.context,
     sessionId: requestContext.sessionId,
@@ -978,7 +985,7 @@ export async function seedResponsesToolCallResponseForHttp(args: {
   });
   if (args.body && typeof args.body === 'object' && !Array.isArray(args.body)) {
     await recordResponsesResponseForHttp({
-      requestId: responseId,
+      requestId,
       response: args.body as Record<string, unknown>,
       providerKey: args.providerKey,
       matchedPort: requestContext.matchedPort,
@@ -992,6 +999,7 @@ export async function seedResponsesToolCallResponseForHttp(args: {
 
 export async function finalizeResponsesPipelineResultForHttp(args: {
   entryEndpoint?: string;
+  requestId?: string;
   body: unknown;
   resultMetadata: Record<string, unknown> | undefined;
   requestContext: ResponsesRequestContextForHttp;
@@ -1007,6 +1015,7 @@ export async function finalizeResponsesPipelineResultForHttp(args: {
     return nextMetadata;
   }
   await seedResponsesToolCallResponseForHttp({
+    requestId: args.requestId,
     body: args.body,
     requestContext: args.requestContext,
     providerKey: args.providerKey,

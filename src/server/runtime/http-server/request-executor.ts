@@ -244,7 +244,10 @@ export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntr
   if (!payload || !context) {
     return null;
   }
-  const requestTruth = readRuntimeRequestTruthIdentifiers(args.metadata);
+  const {
+    requestId: _requestTruthRequestId,
+    ...requestTruthScope
+  } = readRuntimeRequestTruthIdentifiers(args.metadata);
   const matchedPort = readResponsesConversationMatchedPort(args.metadata);
   const routingPolicyGroup =
     readString(args.metadata.routecodexRoutingPolicyGroup)
@@ -253,7 +256,7 @@ export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntr
     requestId: args.input.requestId,
     payload,
     context,
-    ...requestTruth,
+    ...requestTruthScope,
     ...(args.providerKey ? { providerKey: args.providerKey } : {}),
     entryKind: 'responses',
     ...(matchedPort !== undefined ? { matchedPort } : {}),

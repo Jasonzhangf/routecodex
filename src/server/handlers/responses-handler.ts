@@ -412,8 +412,19 @@ export async function handleResponses(
       }
       return undefined;
     })();
+    const finalizeRequestId = (() => {
+      const usageTop = (result as { usageLogInfo?: { inputRequestId?: unknown; providerRequestId?: unknown } }).usageLogInfo;
+      if (typeof usageTop?.inputRequestId === 'string' && usageTop.inputRequestId.trim()) {
+        return usageTop.inputRequestId.trim();
+      }
+      if (typeof usageTop?.providerRequestId === 'string' && usageTop.providerRequestId.trim()) {
+        return usageTop.providerRequestId.trim();
+      }
+      return effectiveRequestId;
+    })();
     result.metadata = await finalizeResponsesPipelineResultForHttp({
       entryEndpoint: pipelineEntryEndpoint,
+      requestId: finalizeRequestId,
       body: result.body,
       resultMetadata: isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined,
       requestContext,

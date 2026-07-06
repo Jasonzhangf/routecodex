@@ -68,7 +68,21 @@ describe('responses conversation store plain continuation restore', () => {
     } catch {}
   });
 
-  it('reports missing response request context as local store error, not malformed upstream response', () => {
+  it('reports missing response request context as local store error without scope fallback', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-resp-store-other-context'),
+      providerKey: 'minimax.key1.MiniMax-M2.7',
+      sessionId: 'sess-missing-context',
+      conversationId: 'conv-missing-context',
+      matchedPort: null,
+      payload: {
+        model: 'gpt-5.5',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'old' }] }]
+      },
+      context: {
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'old' }] }]
+      }
+    });
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       expect(() => recordResponsesResponse({

@@ -43,7 +43,9 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.ts');
   return {
     ...actual,
-    getRouterHotpathJsonBindingSync: jest.fn(() => undefined),
+    getRouterHotpathJsonBindingSync: jest.fn(() => ({
+      hasStoplessDirectiveInRequestPayloadJson: jest.fn(() => JSON.stringify({ result: false }))
+    })),
     resolveProviderResponseRequestSemanticsNative: jest.fn(() => undefined),
     resolveEntryProtocolFromEndpointNative: jest.fn(() => 'openai-responses'),
     hasRequestedToolsInSemanticsNative: jest.fn(() => false),
@@ -69,6 +71,7 @@ const RESPONSES_HANDLER_PATH = path.join(ROOT, 'src/server/handlers/responses-ha
 let MetadataCenter: any;
 let writeProviderProtocolRuntimeControl: any;
 let resolveResponsesConversationRequestCaptureArgsForChatProcessEntry: any;
+let buildRequestMetadata: any;
 let decorateMetadataForAttempt: any;
 let resolveRequestExecutorPipelineAttempt: any;
 let __requestExecutorTestables: any;
@@ -83,7 +86,7 @@ beforeAll(async () => {
     __requestExecutorTestables
   } = await import('../../../../src/server/runtime/http-server/request-executor.ts'));
   ({ resolveRequestExecutorPipelineAttempt } = __requestExecutorTestables);
-  ({ decorateMetadataForAttempt } = await import(
+  ({ buildRequestMetadata, decorateMetadataForAttempt } = await import(
     '../../../../src/server/runtime/http-server/executor-metadata.ts'
   ));
 });
@@ -399,6 +402,54 @@ describe('request-executor metadata center contract', () => {
     });
   });
 
+  it('preserves raw Responses request body in executor metadata before Hub rewrites provider payload', () => {
+    const inputBody = {
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      tools: [{ type: 'function', name: 'exec_command' }]
+    };
+
+    const metadata = decorateMetadataForAttempt(
+      buildRequestMetadata({
+        entryEndpoint: '/v1/responses',
+        requestId: 'openai-responses-router-gpt-5.5-20260706T215738702-469861-1397',
+        body: inputBody,
+        metadata: {
+          routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+          portScope: '5555'
+        }
+      }),
+      1,
+      new Set()
+    );
+
+    const args = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry({
+      input: {
+        entryEndpoint: '/v1/responses',
+        requestId: 'openai-responses-orangeai.key1-glm-5.2-20260706T215738702-469861-1397',
+        body: {
+          data: {
+            model: 'glm-5.2',
+            messages: [{ role: 'user', content: 'hi' }]
+          }
+        }
+      },
+      metadata,
+      providerKey: 'orangeai.key1.glm-5.2'
+    });
+
+    expect(args).toMatchObject({
+      requestId: 'openai-responses-orangeai.key1-glm-5.2-20260706T215738702-469861-1397',
+      payload: inputBody,
+      context: {
+        input: inputBody.input,
+        toolsRaw: inputBody.tools
+      },
+      providerKey: 'orangeai.key1.glm-5.2',
+      entryKind: 'responses'
+    });
+  });
+
   it('captures Responses request context from raw entry payload after Hub rewrites body to provider wire shape', () => {
     const rawInput = [
       { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'continue' }] }
@@ -465,7 +516,7 @@ describe('request-executor metadata center contract', () => {
     });
   });
 
-  it('captures Responses request context with MetadataCenter requestTruth id after provider request id enhancement', () => {
+  it('captures Responses request context with active provider request id after provider request id enhancement', () => {
     const metadata: Record<string, unknown> = {
       routecodexRoutingPolicyGroup: 'gateway_priority_5555',
       portScope: '5555',
@@ -481,7 +532,7 @@ describe('request-executor metadata center contract', () => {
       'openai-responses-router-gpt-5.5-20260703T120957051-453706-103',
       {
         module: 'test',
-        symbol: 'captures Responses request context with MetadataCenter requestTruth id after provider request id enhancement',
+        symbol: 'captures Responses request context with active provider request id after provider request id enhancement',
         stage: 'test'
       },
       'test request id'
@@ -491,7 +542,7 @@ describe('request-executor metadata center contract', () => {
       'sess_provider_enhanced_capture_1',
       {
         module: 'test',
-        symbol: 'captures Responses request context with MetadataCenter requestTruth id after provider request id enhancement',
+        symbol: 'captures Responses request context with active provider request id after provider request id enhancement',
         stage: 'test'
       },
       'test session id'
@@ -513,7 +564,12 @@ describe('request-executor metadata center contract', () => {
     });
 
     expect(args).toMatchObject({
-      requestId: 'openai-responses-router-gpt-5.5-20260703T120957051-453706-103',
+      requestId: 'openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103',
+      payload: expect.objectContaining({ model: 'gpt-5.5' }),
+      context: {
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+        toolsRaw: [{ type: 'function', name: 'exec_command' }]
+      },
       sessionId: 'sess_provider_enhanced_capture_1',
       matchedPort: 5555,
       providerKey: 'orangeai.key1.glm-5.2',
