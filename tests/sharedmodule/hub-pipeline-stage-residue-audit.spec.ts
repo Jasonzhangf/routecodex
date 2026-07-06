@@ -4106,9 +4106,9 @@ describe('hub pipeline stage residue audit', () => {
     const findings: string[] = [];
 
     for (const name of forbidden) {
-      const exportedDeclaration = new RegExp(`export\\s+(?:type|interface)\\s+${name}\\b`);
-      if (exportedDeclaration.test(source)) {
-        findings.push(`exported zero-consumer nested type ${name}`);
+      const declaration = new RegExp(`(?:export\\s+)?(?:type|interface)\\s+${name}\\b`);
+      if (declaration.test(source)) {
+        findings.push(`restored zero-consumer nested type ${name}`);
       }
     }
 
