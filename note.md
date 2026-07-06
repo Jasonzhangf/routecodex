@@ -1,3 +1,16 @@
+# 2026-07-06: rcc start takeover lock no longer looks hung
+
+- Symptom: running `rcc start --snap` again while a prior start was still taking over printed only `another start is already taking over port-group: 4444, 5520, 5555, 10000`, then looked stuck.
+- Fix: `src/cli/commands/start.ts` now makes the start-lock wait path observable, checks live `/health` first, retries acquiring a released/dead-owner lock when health is not ready, and logs remaining wait time instead of silently sleeping.
+- Regression: `tests/cli/start-command.spec.ts` now locks progress output for a held takeover lock.
+- Release/live evidence:
+  - `tests/cli/start-command.spec.ts` PASS 23/23.
+  - root `tsc --noEmit`, `verify:runtime-lifecycle-pid-rebase`, `verify:function-map-compile-gate`, `build:base`, `install-release.sh`, and `pack:rcc` PASS.
+  - release snapshot/global runtime installed as `0.90.3611`; `/Users/fanzhang/.rcc/install/current`, `/Volumes/extension/.rcc/install/current`, and `/opt/homebrew/lib/node_modules/rcc/package.json` all report `0.90.3611`.
+  - real single `rcc start --snap` succeeded and returned after daemon health ready.
+  - real concurrent `rcc start --snap` pair exited 0/0; second command hit takeover lock, then returned `RouteCodex is already running on 127.0.0.1:5520` instead of hanging.
+  - `/health` on 4444/5520/5555/10000 all returned ready `version=0.90.3611`; start-lock directory empty after validation.
+
 # 2026-07-06: compat profile registry TS implementation removed from source-only L1
 
 - Current source state: `sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/*` TS implementation/test files are deleted from the working tree.

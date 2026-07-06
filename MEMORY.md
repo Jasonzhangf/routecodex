@@ -1,3 +1,9 @@
+# 2026-07-06: rcc start takeover lock must be observable and health-gated
+
+- Verified rule: plain `rcc start` / `rcc start --snap` owns the managed runtime slot and must not look hung when another start is already taking over the same port group. The lock contention path must first attach to live `/health`, then retry acquiring a released/dead-owner start lock when health is not ready, and emit waiting progress before timeout.
+- Global install truth: closeout for lifecycle fixes must check `rcc --version`, `routecodex --version`, both release snapshot `install/current` roots, `/opt/homebrew/lib/node_modules/rcc/package.json` when `/opt/homebrew/bin/rcc` exists, and `/health.version` on all configured ports.
+- Evidence: source lifecycle Jest 23/23, root TypeScript, `verify:runtime-lifecycle-pid-rebase`, `verify:function-map-compile-gate`, `build:base`, release install, `pack:rcc`, npm global `rcc@0.90.3611`, real single `rcc start --snap`, real concurrent `rcc start --snap` pair, and 4444/5520/5555/10000 `/health.version=0.90.3611` all passed. The concurrent second start returned successfully after seeing takeover lock instead of hanging.
+
 # 2026-07-05: Responses SSE terminal closeout is transport sentinel, not business event
 
 - Direct `/v1/responses` provider passthrough must append final `data: [DONE]\n\n` after a valid terminal Responses SSE event when upstream omits it. It must not synthesize `response.done`, request id, required_action, continuation, stopless/servertool state, or tool history.

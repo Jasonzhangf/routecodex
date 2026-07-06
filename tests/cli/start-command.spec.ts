@@ -1024,6 +1024,112 @@ port = 5520
     }
   });
 
+  it('release daemon takeover preserves stop intent for old supervisors and marks the new supervisor to ignore it', async () => {
+    const previousRccHome = process.env.RCC_HOME;
+    const previousRouteCodexUserDir = process.env.ROUTECODEX_USER_DIR;
+    const previousRouteCodexHome = process.env.ROUTECODEX_HOME;
+    delete process.env.RCC_HOME;
+    delete process.env.ROUTECODEX_USER_DIR;
+    delete process.env.ROUTECODEX_HOME;
+
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-daemon-takeover-intent-'));
+    const configPath = path.join(tempHome, 'config.toml');
+    const cliPath = path.join(tempHome, 'dist', 'cli.js');
+    const indexPath = path.join(tempHome, 'dist', 'index.js');
+    const modulesPath = path.join(tempHome, 'config', 'modules.json');
+    fs.mkdirSync(path.dirname(cliPath), { recursive: true });
+    fs.mkdirSync(path.dirname(modulesPath), { recursive: true });
+    fs.writeFileSync(cliPath, '', 'utf8');
+    fs.writeFileSync(indexPath, '', 'utf8');
+    fs.writeFileSync(modulesPath, '{}', 'utf8');
+    fs.writeFileSync(configPath, `
+[httpserver]
+port = 5520
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+port = 4444
+
+[[httpserver.ports]]
+port = 5520
+`, 'utf8');
+
+    const checkedPorts: number[] = [];
+    let spawnedEnv: NodeJS.ProcessEnv | null = null;
+    const program = new Command();
+
+    try {
+      createStartCommand(program, {
+        isDevPackage: false,
+        isWindows: false,
+        defaultDevPort: 5520,
+        nodeBin: 'node',
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+        env: {},
+        fsImpl: fs as any,
+        pathImpl: path as any,
+        homedir: () => tempHome,
+        tmpdir: () => os.tmpdir(),
+        sleep: async () => {},
+        ensureLocalTokenPortalEnv: async () => {},
+        ensurePortAvailable: async (port) => {
+          checkedPorts.push(port);
+          const intentPath = resolveDaemonStopIntentPath(port, path.join(tempHome, '.rcc'));
+          expect(fs.existsSync(intentPath)).toBe(true);
+        },
+        findListeningPids: () => [],
+        killPidBestEffort: () => {},
+        getModulesConfigPath: () => modulesPath,
+        resolveCliEntryPath: () => cliPath,
+        resolveServerEntryPath: () => indexPath,
+        spawn: (_command, _args, options) => {
+          spawnedEnv = options.env as NodeJS.ProcessEnv;
+          return createFakeChild(43210);
+        },
+        fetch: (async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true })
+        })) as any,
+        setupKeypress: () => () => {},
+        waitForever: async () => {},
+        exit: (code: number) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath, '--snap'], { from: 'node' })).rejects.toThrow('exit:0');
+      expect(checkedPorts).toEqual([4444, 5520]);
+      expect(spawnedEnv?.ROUTECODEX_DAEMON_SUPERVISOR_IGNORE_STOP_INTENT_PID).toBe(String(process.pid));
+      expect(spawnedEnv?.RCC_DAEMON_SUPERVISOR_IGNORE_STOP_INTENT_PID).toBe(String(process.pid));
+      for (const port of checkedPorts) {
+        const intentPath = resolveDaemonStopIntentPath(port, path.join(tempHome, '.rcc'));
+        expect(fs.existsSync(intentPath)).toBe(true);
+        const parsed = JSON.parse(fs.readFileSync(intentPath, 'utf8')) as { pid?: number; source?: string };
+        expect(parsed.pid).toBe(process.pid);
+        expect(parsed.source).toBe('cli.start.restart_takeover');
+      }
+    } finally {
+      if (previousRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = previousRccHome;
+      }
+      if (previousRouteCodexUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = previousRouteCodexUserDir;
+      }
+      if (previousRouteCodexHome === undefined) {
+        delete process.env.ROUTECODEX_HOME;
+      } else {
+        process.env.ROUTECODEX_HOME = previousRouteCodexHome;
+      }
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it('does not interrupt another start while the same port group is taking over', async () => {
     const previousRccHome = process.env.RCC_HOME;
     const previousRouteCodexUserDir = process.env.ROUTECODEX_USER_DIR;
@@ -1092,6 +1198,103 @@ port = 5520
 
       await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath], { from: 'node' })).rejects.toThrow('exit:0');
       expect(checkedPorts).toEqual([]);
+    } finally {
+      if (previousRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = previousRccHome;
+      }
+      if (previousRouteCodexUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = previousRouteCodexUserDir;
+      }
+      if (previousRouteCodexHome === undefined) {
+        delete process.env.ROUTECODEX_HOME;
+      } else {
+        process.env.ROUTECODEX_HOME = previousRouteCodexHome;
+      }
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('reports progress while waiting for another start takeover lock', async () => {
+    const previousRccHome = process.env.RCC_HOME;
+    const previousRouteCodexUserDir = process.env.ROUTECODEX_USER_DIR;
+    const previousRouteCodexHome = process.env.ROUTECODEX_HOME;
+    delete process.env.RCC_HOME;
+    delete process.env.ROUTECODEX_USER_DIR;
+    delete process.env.ROUTECODEX_HOME;
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-start-lock-progress-'));
+    const configPath = path.join(tempHome, 'config.toml');
+    fs.writeFileSync(configPath, `
+[httpserver]
+port = 5520
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+port = 4444
+
+[[httpserver.ports]]
+port = 5520
+`, 'utf8');
+    const lockDir = path.join(tempHome, '.rcc', 'state', 'runtime-lifecycle', 'start-locks');
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(lockDir, '4444-5520.lock'),
+      JSON.stringify({ pid: process.pid, ports: [4444, 5520], startedAtMs: Date.now() }),
+      'utf8'
+    );
+    const spinnerInfo: string[] = [];
+    const program = new Command();
+
+    try {
+      createStartCommand(program, {
+        isDevPackage: false,
+        isWindows: false,
+        defaultDevPort: 5520,
+        nodeBin: 'node',
+        createSpinner: async () =>
+          ({
+            ...createStubSpinner(),
+            info: (message?: string) => {
+              if (message) {
+                spinnerInfo.push(message);
+              }
+            }
+          }) as any,
+        logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+        env: { ROUTECODEX_START_LOCK_WAIT_MS: '1000' },
+        homedir: () => tempHome,
+        tmpdir: () => '/tmp',
+        sleep: async () => {},
+        ensureLocalTokenPortalEnv: async () => {},
+        ensurePortAvailable: async () => {
+          throw new Error('ensurePortAvailable should not run while takeover lock is held');
+        },
+        findListeningPids: () => [],
+        killPidBestEffort: () => {},
+        getModulesConfigPath: () => '/tmp/modules.json',
+        resolveCliEntryPath: () => '/tmp/cli.js',
+        resolveServerEntryPath: () => '/tmp/index.js',
+        spawn: () => {
+          throw new Error('spawn should not be called');
+        },
+        fetch: (async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ server: 'routecodex', status: 'starting', ready: false, pipelineReady: false })
+        })) as any,
+        setupKeypress: () => () => {},
+        waitForever: async () => {},
+        exit: (code: number) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath], { from: 'node' })).rejects.toThrow('exit:1');
+      expect(spinnerInfo.some((line) => line.includes('another start is already taking over'))).toBe(true);
+      expect(spinnerInfo.some((line) => line.includes('waiting for existing start takeover to finish'))).toBe(true);
     } finally {
       if (previousRccHome === undefined) {
         delete process.env.RCC_HOME;
@@ -1239,6 +1442,139 @@ port = 5520
     expect(spawnCalls[0].options?.stdio).toBe('ignore');
     expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBe('1');
     expect(spawnCalls[0].unrefCalled).toBe(true);
+  });
+
+  it('release daemon start waits for child health before reporting success', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any; unrefAtFetchCall?: number }> = [];
+    const program = new Command();
+    let fetchCalls = 0;
+
+    createStartCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/')
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensurePortAvailable: async () => {},
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveCliEntryPath: () => '/tmp/cli.js',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: (command, args, options) => {
+        const call = { command, args, options, unrefAtFetchCall: undefined as number | undefined };
+        spawnCalls.push(call);
+        return {
+          ...createFakeChild(43210),
+          unref: () => { call.unrefAtFetchCall = fetchCalls; }
+        } as any;
+      },
+      fetch: (async () => {
+        fetchCalls += 1;
+        const ready = fetchCalls >= 3;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ready
+            ? ({ server: 'routecodex', status: 'ok' })
+            : ({ server: 'routecodex', status: 'starting', ready: false, pipelineReady: false })
+        };
+      }) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'rcc', 'start', '--snap'], { from: 'node' })).rejects.toThrow('exit:0');
+    expect(fetchCalls).toBeGreaterThanOrEqual(3);
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].unrefAtFetchCall).toBeGreaterThanOrEqual(3);
+  });
+
+  it('release daemon start exits nonzero and stops supervisor when health never becomes ready', async () => {
+    const program = new Command();
+    const killCalls: Array<{ pid: number; force: boolean }> = [];
+    const failMessages: string[] = [];
+
+    createStartCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () =>
+        ({
+          ...createStubSpinner(),
+          fail: (msg?: string) => {
+            if (msg) {
+              failMessages.push(msg);
+            }
+          }
+        }) as any,
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/')
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensurePortAvailable: async () => {},
+      findListeningPids: () => [],
+      killPidBestEffort: (pid, opts) => {
+        killCalls.push({ pid, force: opts.force });
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveCliEntryPath: () => '/tmp/cli.js',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: () => createExitableFakeChild(43210, 0, 1),
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'starting', ready: false, pipelineReady: false })
+      })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'rcc', 'start', '--snap'], { from: 'node' })).rejects.toThrow('exit:1');
+    expect(failMessages.join('\n')).toContain('daemon supervisor exited before server became ready');
+    expect(killCalls).toEqual([
+      { pid: 43210, force: false },
+      { pid: 43210, force: true }
+    ]);
   });
 
   it('restarts by default', async () => {

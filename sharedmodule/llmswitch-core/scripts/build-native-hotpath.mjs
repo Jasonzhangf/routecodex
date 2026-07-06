@@ -2,15 +2,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const rustRoot = path.join(projectRoot, 'rust-core');
 const cargoManifest = path.join(rustRoot, 'Cargo.toml');
+const requireFromProject = createRequire(path.join(projectRoot, 'package.json'));
 const cargoTargetRoot = resolveCargoTargetRoot();
 const targetRelease = path.join(cargoTargetRoot, 'release');
 const distNativeDir = path.join(projectRoot, 'dist', 'native');
 const distBinDir = path.join(projectRoot, 'dist', 'bin');
 const packagedNodeTarget = path.join(distNativeDir, 'router_hotpath_napi.node');
+const requiredNativeExportsSource = path.join(
+  projectRoot,
+  'src',
+  'native',
+  'router-hotpath',
+  'native-router-hotpath-required-exports.ts'
+);
 const servertoolBinaryName = process.platform === 'win32' ? 'routecodex-servertool.exe' : 'routecodex-servertool';
 const releaseServertoolBinary = path.join(targetRelease, servertoolBinaryName);
 const packagedServertoolBinary = path.join(distBinDir, servertoolBinaryName);
@@ -177,6 +186,49 @@ function syncServertoolBinaryArtifact() {
   );
 }
 
+function readRequiredNativeExports() {
+  if (!fs.existsSync(requiredNativeExportsSource)) {
+    console.error(`[native-build] missing required export contract: ${requiredNativeExportsSource}`);
+    process.exit(1);
+  }
+  const source = fs.readFileSync(requiredNativeExportsSource, 'utf8');
+  const exports = [...new Set([...source.matchAll(/"([^"]+)"/g)].map((match) => match[1]))].filter(Boolean);
+  if (!exports.includes('compileRouteCodexRuntimeManifestJson')) {
+    console.error('[native-build] required export contract missing compileRouteCodexRuntimeManifestJson');
+    process.exit(1);
+  }
+  return exports;
+}
+
+function validatePackagedNativeExports() {
+  const requiredExports = readRequiredNativeExports();
+  let binding;
+  try {
+    const resolved = requireFromProject.resolve(packagedNodeTarget);
+    delete requireFromProject.cache?.[resolved];
+    binding = requireFromProject(packagedNodeTarget);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `native binding failed to load: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+  const missing = requiredExports.filter((key) => typeof binding?.[key] !== 'function');
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      reason: `native binding missing required exports: ${missing.slice(0, 12).join(', ')}`
+    };
+  }
+  return { ok: true, reason: '' };
+}
+
+function removeNativeReleaseArtifacts() {
+  for (const artifact of [...releaseArtifacts, packagedNodeTarget]) {
+    fs.rmSync(artifact, { force: true });
+  }
+}
+
 function ensureCargoReady() {
   const probe = spawnSync(cargoBinary, ['--version'], { stdio: 'pipe', cwd: projectRoot });
   if ((probe.status ?? 1) !== 0) {
@@ -216,8 +268,14 @@ function main() {
   if (latestArtifact > 0 && latestArtifact >= latestSource) {
     syncNodeBridgeArtifact();
     syncServertoolBinaryArtifact();
-    console.log('[native-build] up-to-date, skip cargo build');
-    return;
+    const validation = validatePackagedNativeExports();
+    if (validation.ok) {
+      console.log('[native-build] required native exports ok');
+      console.log('[native-build] up-to-date, skip cargo build');
+      return;
+    }
+    console.error(`[native-build] stale native artifact rejected: ${validation.reason}`);
+    removeNativeReleaseArtifacts();
   }
 
   ensureCargoReady();
@@ -230,6 +288,12 @@ function main() {
 
   syncNodeBridgeArtifact();
   syncServertoolBinaryArtifact();
+  const validation = validatePackagedNativeExports();
+  if (!validation.ok) {
+    console.error(`[native-build] native export validation failed: ${validation.reason}`);
+    process.exit(1);
+  }
+  console.log('[native-build] required native exports ok');
   console.log('[native-build] ready');
 }
 

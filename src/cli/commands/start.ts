@@ -14,7 +14,6 @@ import { buildLocalProbeHostCandidates } from '../../utils/local-connect-host.js
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
-  clearDaemonStopIntent,
   consumeDaemonStopIntent,
   writeDaemonStopIntent
 } from '../../utils/daemon-stop-intent.js';
@@ -92,6 +91,15 @@ function resolveStartShutdownHttpTimeoutMs(env: NodeJS.ProcessEnv): number {
   return 1200;
 }
 
+function resolveStartReadyTimeoutMs(env: NodeJS.ProcessEnv): number {
+  const raw = String(env.ROUTECODEX_START_READY_TIMEOUT_MS ?? env.RCC_START_READY_TIMEOUT_MS ?? '').trim();
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed >= 5000) {
+    return Math.min(Math.floor(parsed), 300_000);
+  }
+  return 60_000;
+}
+
 function sanitizeStartLogSegment(value: string): string {
   const trimmed = String(value || '').trim();
   const withoutJson = trimmed.replace(/\.json$/i, '') || trimmed;
@@ -123,6 +131,22 @@ type StartPortGroupLock = {
   release: () => void;
 };
 
+function isStartLockOwnerAlive(pid: number): boolean {
+  const normalizedPid = Math.floor(Number(pid));
+  if (!Number.isFinite(normalizedPid) || normalizedPid <= 0) {
+    return false;
+  }
+  if (normalizedPid === process.pid) {
+    return true;
+  }
+  try {
+    process.kill(normalizedPid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
 function resolveStartPortGroupLockPath(args: {
   pathImpl: typeof path;
   routeCodexHomeDir: string;
@@ -149,6 +173,7 @@ function acquireStartPortGroupLock(args: {
   routeCodexHomeDir: string;
   ports: number[];
   staleMs?: number;
+  reapDeadOwner?: boolean;
 }): StartPortGroupLock {
   const lockPath = resolveStartPortGroupLockPath(args);
   const staleMs = Number.isFinite(args.staleMs as number) && Number(args.staleMs) > 0
@@ -178,6 +203,18 @@ function acquireStartPortGroupLock(args: {
         const stat = args.fsImpl.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleMs) {
           args.fsImpl.unlinkSync(lockPath);
+        } else if (args.reapDeadOwner === true) {
+          const raw = args.fsImpl.readFileSync(lockPath, 'utf8');
+          const parsed = JSON.parse(String(raw || '{}')) as { pid?: number };
+          const ownerPid = Math.floor(Number(parsed?.pid));
+          if (
+            Number.isFinite(ownerPid)
+            && ownerPid > 0
+            && ownerPid !== process.pid
+            && !isStartLockOwnerAlive(ownerPid)
+          ) {
+            args.fsImpl.unlinkSync(lockPath);
+          }
         }
       } catch {
         // Keep the existing lock if it cannot be inspected safely.
@@ -481,6 +518,111 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         const daemonEnabled = !ctx.isDevPackage && resolveReleaseDaemonEnabled(ctx.env);
         const daemonSupervisor = daemonEnabled && isDaemonSupervisorProcess(ctx.env);
         const daemonRestartDelayMs = resolveDaemonRestartDelayMs(ctx.env);
+        const daemonSupervisorIgnoreStopIntentPid = (() => {
+          const raw = String(
+            ctx.env.ROUTECODEX_DAEMON_SUPERVISOR_IGNORE_STOP_INTENT_PID
+            ?? ctx.env.RCC_DAEMON_SUPERVISOR_IGNORE_STOP_INTENT_PID
+            ?? ''
+          ).trim();
+          const parsed = Number(raw);
+          return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+        })();
+        const probeStartHealth = async (stage: string): Promise<boolean> => {
+          let lastProbe: Awaited<ReturnType<typeof probeRouteCodexHealth>> | null = null;
+          for (const host of buildLocalProbeHostCandidates(serverHost)) {
+            const probe = await probeRouteCodexHealth({
+              fetchImpl: ctx.fetch,
+              host,
+              port: resolvedPort,
+              timeoutMs: 800
+            });
+            lastProbe = probe;
+            if (probe.ok) {
+              return true;
+            }
+          }
+          if (lastProbe && !lastProbe.ok) {
+            logStartHealthProbeNonBlocking(ctx, stage, lastProbe, {
+              port: resolvedPort,
+              kind: lastProbe.kind
+            });
+          }
+          return false;
+        };
+        const waitForDaemonSupervisorReadyOrExit = async (
+          proc: ReturnType<typeof ctx.spawn>,
+          deadlineMs: number
+        ): Promise<{
+          ready: boolean;
+          exitCode?: number | null;
+          signal?: NodeJS.Signals | null;
+          startupExitState?: { kind?: string; message?: string } | null;
+        }> => {
+          let exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+          try {
+            proc.once?.('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+              exitInfo = { code, signal };
+            });
+            proc.once?.('error', () => {
+              exitInfo = { code: 1, signal: null };
+            });
+          } catch (error) {
+            logStartNonBlocking(ctx, 'daemon_supervisor_exit_listener', error, {
+              port: resolvedPort,
+              daemonPid: proc.pid ?? null
+            });
+          }
+          while (Date.now() < deadlineMs) {
+            if (await probeStartHealth('daemon_supervisor_health_probe')) {
+              return { ready: true };
+            }
+            const procRecord = proc as unknown as {
+              exitCode?: number | null;
+              signalCode?: NodeJS.Signals | null;
+            };
+            const observedExitInfo = exitInfo as { code: number | null; signal: NodeJS.Signals | null } | null;
+            const exitCode = observedExitInfo ? observedExitInfo.code : procRecord.exitCode;
+            const signal = observedExitInfo ? observedExitInfo.signal : procRecord.signalCode;
+            const exited = typeof exitCode === 'number' || Boolean(signal);
+            if (exited) {
+              return {
+                ready: false,
+                exitCode,
+                signal,
+                startupExitState: readChildStartupExitState({
+                  port: resolvedPort,
+                  routeCodexHomeDir: routeCodexHome
+                })
+              };
+            }
+            await ctx.sleep(250);
+          }
+          return { ready: false };
+        };
+        const stopSpawnedDaemonSupervisorBestEffort = async (proc: ReturnType<typeof ctx.spawn>): Promise<void> => {
+          const daemonPid = proc.pid;
+          for (const p of effectivePortGroup) {
+            writeDaemonStopIntent(p, {
+              source: 'cli.start.daemon_start_failed',
+              routeCodexHomeDir: routeCodexHome,
+              pid: process.pid
+            });
+          }
+          if (!daemonPid || daemonPid <= 0) {
+            return;
+          }
+          try {
+            ctx.killPidBestEffort(daemonPid, { force: false });
+          } catch (error) {
+            logStartNonBlocking(ctx, 'daemon_supervisor_stop_signal', error, { port: resolvedPort, daemonPid });
+          }
+          await ctx.sleep(1500);
+          try {
+            ctx.killPidBestEffort(daemonPid, { force: true });
+          } catch (error) {
+            logStartNonBlocking(ctx, 'daemon_supervisor_stop_force', error, { port: resolvedPort, daemonPid });
+          }
+        };
         if (shouldRestart && !daemonSupervisor) {
           startPortGroupLock = acquireStartPortGroupLock({
             fsImpl,
@@ -494,6 +636,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             const waitMsParsed = Number(waitMsRaw);
             const waitMs = Number.isFinite(waitMsParsed) && waitMsParsed >= 1000 ? Math.floor(waitMsParsed) : 60_000;
             const deadline = Date.now() + waitMs;
+            let acquiredAfterWait = false;
+            let nextWaitLogAt = Date.now();
             while (Date.now() < deadline) {
               for (const host of buildLocalProbeHostCandidates(serverHost)) {
                 const probe = await probeRouteCodexHealth({
@@ -508,12 +652,33 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                   ctx.exit(0);
                 }
               }
+              const retryLock = acquireStartPortGroupLock({
+                fsImpl,
+                pathImpl,
+                routeCodexHomeDir: routeCodexHome,
+                ports: effectivePortGroup,
+                reapDeadOwner: true
+              });
+              if (retryLock.acquired) {
+                startPortGroupLock = retryLock;
+                acquiredAfterWait = true;
+                spinner.info(`[start] previous takeover lock released; continuing startup on port-group: ${effectivePortGroup.join(', ')}`);
+                break;
+              }
+              const nowMs = Date.now();
+              if (nowMs >= nextWaitLogAt) {
+                const remainingSeconds = Math.max(0, Math.ceil((deadline - nowMs) / 1000));
+                spinner.info(`[start] waiting for existing start takeover to finish (${remainingSeconds}s remaining): ${effectivePortGroup.join(', ')}`);
+                nextWaitLogAt = nowMs + 2_000;
+              }
               await ctx.sleep(250);
             }
-            throw new Error(`Another rcc start is still taking over port-group ${effectivePortGroup.join(', ')}`);
+            if (!acquiredAfterWait) {
+              throw new Error(`Another rcc start is still taking over port-group ${effectivePortGroup.join(', ')}`);
+            }
           }
         }
-        if (shouldRestart && !daemonEnabled && !daemonSupervisor) {
+        if (shouldRestart && !daemonSupervisor) {
           for (const p of effectivePortGroup) {
             writeDaemonStopIntent(p, {
               source: 'cli.start.restart_takeover',
@@ -699,11 +864,12 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             return fallback || serverEntry;
           })();
 
-          clearDaemonStopIntent(resolvedPort, routeCodexHome);
           const daemonEnv = {
             ...env,
             ROUTECODEX_DAEMON_SUPERVISOR: '1',
             RCC_DAEMON_SUPERVISOR: '1',
+            ROUTECODEX_DAEMON_SUPERVISOR_IGNORE_STOP_INTENT_PID: String(process.pid),
+            RCC_DAEMON_SUPERVISOR_IGNORE_STOP_INTENT_PID: String(process.pid),
             ROUTECODEX_PORT: String(resolvedPort),
             RCC_PORT: String(resolvedPort)
           } as NodeJS.ProcessEnv;
@@ -715,6 +881,31 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             cwd: serverRuntimeCwd
           });
           writePidFile(daemonProc.pid);
+          const readyResult = await waitForDaemonSupervisorReadyOrExit(
+            daemonProc,
+            Date.now() + resolveStartReadyTimeoutMs(ctx.env)
+          );
+          if (!readyResult.ready) {
+            await stopSpawnedDaemonSupervisorBestEffort(daemonProc);
+            releaseStartPortGroupLock();
+            const message = readyResult.startupExitState?.kind === 'startupError'
+              ? `RouteCodex startup failed on port ${resolvedPort}: ${readyResult.startupExitState.message || 'startupError'}`
+              : typeof readyResult.exitCode === 'number' || readyResult.signal
+                ? `RouteCodex daemon supervisor exited before server became ready (code=${readyResult.exitCode ?? 'n/a'}, signal=${readyResult.signal ?? 'none'})`
+                : `Timed out waiting for RouteCodex server to become ready on port ${resolvedPort}`;
+            logProcessLifecycleSync({
+              event: 'daemon_supervisor_start_wait',
+              source: 'cli.start',
+              details: {
+                result: 'failed',
+                port: resolvedPort,
+                daemonPid: daemonProc.pid ?? null,
+                message
+              }
+            });
+            spinner.fail(message);
+            ctx.exit(1);
+          }
           try {
             daemonProc.unref?.();
           } catch (error) {
@@ -723,7 +914,16 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               daemonPid: daemonProc.pid ?? null
             });
           }
-          spinner.succeed(`RouteCodex daemon supervisor started on ${serverHost}:${resolvedPort}`);
+          logProcessLifecycleSync({
+            event: 'daemon_supervisor_start_wait',
+            source: 'cli.start',
+            details: {
+              result: 'ready',
+              port: resolvedPort,
+              daemonPid: daemonProc.pid ?? null
+            }
+          });
+          spinner.succeed(`RouteCodex server started on ${serverHost}:${resolvedPort}`);
           ctx.logger.info(`Configuration loaded from: ${configPath}`);
           ctx.logger.info(`Supervisor PID: ${daemonProc.pid ?? 'unknown'}`);
           const configuredStopPassword =
@@ -737,8 +937,12 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           ctx.exit(0);
         }
 
-        const consumeStopIntent = (): { matched: boolean; source?: string; requestedAtMs?: number } =>
-          consumeDaemonStopIntent(resolvedPort, { routeCodexHomeDir: routeCodexHome });
+        const consumeStopIntent = (): { matched: boolean; source?: string; requestedAtMs?: number; pid?: number } =>
+          consumeDaemonStopIntent(resolvedPort, {
+            routeCodexHomeDir: routeCodexHome,
+            ignorePid: daemonSupervisorIgnoreStopIntentPid,
+            preserveMatched: true
+          });
 
         if (daemonSupervisor) {
           spinner.succeed(`RouteCodex daemon supervisor active on ${serverHost}:${resolvedPort}`);
@@ -931,26 +1135,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         };
 
         const isChildHealthy = async (): Promise<boolean> => {
-          let lastProbe: Awaited<ReturnType<typeof probeRouteCodexHealth>> | null = null;
-          for (const host of buildLocalProbeHostCandidates(serverHost)) {
-            const probe = await probeRouteCodexHealth({
-              fetchImpl: ctx.fetch,
-              host,
-              port: resolvedPort,
-              timeoutMs: 800
-            });
-            lastProbe = probe;
-            if (probe.ok) {
-              return true;
-            }
-          }
-          if (lastProbe && !lastProbe.ok) {
-            logStartHealthProbeNonBlocking(ctx, 'child_health_probe', lastProbe, {
-              port: resolvedPort,
-              kind: lastProbe.kind
-            });
-          }
-          return false;
+          return probeStartHealth('child_health_probe');
         };
 
         const waitForServerEntryReady = async (entryPath: string, deadlineMs: number): Promise<boolean> => {
@@ -1176,9 +1361,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               updateRuntimeInstanceStatus({ port: resolvedPort, status: 'healthy', routeCodexHomeDir: routeCodexHome });
             } catch (error) {
               logStartNonBlocking(ctx, 'update_runtime_instance.healthy_initial', error, { port: resolvedPort });
-            }
-            for (const p of effectivePortGroup) {
-              clearDaemonStopIntent(p, routeCodexHome);
             }
           }
           releaseStartPortGroupLock();
