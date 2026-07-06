@@ -55,7 +55,7 @@ export function resolveRccUserDir(homeDir?: string): string {
   return path.join(resolveHomeDir(homeDir), PRIMARY_DIR_NAME);
 }
 
-export function resolveLegacyRouteCodexUserDir(homeDir?: string): string {
+function resolveLegacyRouteCodexUserDir(homeDir?: string): string {
   return path.join(resolveHomeDir(homeDir), LEGACY_DIR_NAME);
 }
 
@@ -63,7 +63,7 @@ export function resolveRccPath(...segments: string[]): string {
   return path.join(resolveRccUserDir(), ...segments);
 }
 
-export function resolveLegacyRouteCodexPath(...segments: string[]): string {
+function resolveLegacyRouteCodexPath(...segments: string[]): string {
   return path.join(resolveLegacyRouteCodexUserDir(), ...segments);
 }
 
@@ -85,6 +85,6 @@ export function resolveRccSnapshotsDirFromEnv(homeDir?: string): string {
   return resolveRccSnapshotsDir(homeDir);
 }
 
-export function resolveRccPathForRead(...segments: string[]): string {
+function resolveRccPathForRead(...segments: string[]): string {
   return resolveRccPath(...segments);
 }

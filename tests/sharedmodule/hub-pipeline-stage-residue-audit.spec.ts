@@ -1291,6 +1291,30 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('runtime user data paths shell must not export legacy read-only helpers', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/runtime/user-data-paths.ts'),
+      'utf8',
+    );
+
+    const findings = collectMatches(source, [
+      {
+        label: 'exports legacy RouteCodex user dir helper',
+        pattern: /export\s+function\s+resolveLegacyRouteCodexUserDir\b/,
+      },
+      {
+        label: 'exports legacy RouteCodex path helper',
+        pattern: /export\s+function\s+resolveLegacyRouteCodexPath\b/,
+      },
+      {
+        label: 'exports redundant read-path helper',
+        pattern: /export\s+function\s+resolveRccPathForRead\b/,
+      },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('snapshot stage recorder must not restore TS hotpath trimming semantics', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts'),
