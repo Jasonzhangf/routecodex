@@ -4120,6 +4120,30 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('export interface ChatEnvelope');
   });
 
+  it('ServerTool type surface must not restore zero-consumer nested execution shells', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/types.ts');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const forbidden = [
+      'TriggerMode',
+      'AutoHookPhase',
+      'ServerToolExecutionDescriptor',
+    ];
+    const findings: string[] = [];
+
+    for (const name of forbidden) {
+      const declaration = new RegExp(`(?:export\\s+)?(?:type|interface)\\s+${name}\\b`);
+      if (declaration.test(source)) {
+        findings.push(`restored zero-consumer servertool type ${name}`);
+      }
+    }
+
+    expect(findings).toEqual([]);
+    expect(source).toContain('export interface ServerToolHandlerEntry');
+    expect(source).toContain('export interface ServerToolAutoHookDescriptor');
+    expect(source).toContain("trigger: 'tool_call' | 'auto'");
+    expect(source).toContain("phase: 'pre' | 'default' | 'post'");
+  });
+
   it('StandardizedRequest type surface must not export zero-consumer nested field shells', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts');
     const source = fs.readFileSync(filePath, 'utf8');

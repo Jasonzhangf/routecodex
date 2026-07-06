@@ -52,22 +52,17 @@ export interface ServerToolExecution {
   };
 }
 
-type TriggerMode = 'tool_call' | 'auto';
-type AutoHookPhase = 'pre' | 'default' | 'post';
-
-type ServerToolExecutionDescriptor = {
-  kind: 'builtin';
-  builtinName: string;
-};
-
 export interface ServerToolHandlerEntry {
   name: string;
-  trigger: TriggerMode;
-  execution: ServerToolExecutionDescriptor;
+  trigger: 'tool_call' | 'auto';
+  execution: {
+    kind: 'builtin';
+    builtinName: string;
+  };
   registration: import('../native/router-hotpath/native-followup-mainline-semantics.js').ServerToolHandlerRegistrationSpec;
   autoHook?: {
     id: string;
-    phase: AutoHookPhase;
+    phase: 'pre' | 'default' | 'post';
     priority: number;
     order: number;
   };
@@ -75,11 +70,14 @@ export interface ServerToolHandlerEntry {
 
 export interface ServerToolAutoHookDescriptor {
   id: string;
-  phase: AutoHookPhase;
+  phase: 'pre' | 'default' | 'post';
   priority: number;
   order: number;
   registration: import('../native/router-hotpath/native-followup-mainline-semantics.js').ServerToolHandlerRegistrationSpec;
-  execution: ServerToolExecutionDescriptor;
+  execution: {
+    kind: 'builtin';
+    builtinName: string;
+  };
 }
 
 /**

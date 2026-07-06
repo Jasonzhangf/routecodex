@@ -15,19 +15,22 @@ Drive the Hub Pipeline / chat process / provider response runtime surface toward
 
 ## Current Audit Snapshot
 
-Observed from source/doc-only audit on 2026-07-07:
+Observed from source/doc-only audit on 2026-07-07 after the latest type-shell closeout slices:
 
-- `minimal-ts-surface.json` has 35 entries.
+- `minimal-ts-surface.json` has 20 entries.
+- Current audit metrics:
+  - `prodTsFileCount`: 143
+  - `prodTsLocTotal`: 28629
+  - `nonNativeFileCount`: 19
+  - `nonNativeLocTotal`: 3620
 - Categories:
-  - `type_shell_ok`: 17
+  - `type_shell_ok`: 5
   - `ts_io_shell_ok`: 6
   - `diagnostic_io_ok`: 7
-  - `native_shell_ok`: 2
-  - `parser_io_ok`: 3
+  - `native_shell_ok`: 1
 - Known high-value active surfaces:
   - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
   - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
-  - native parser facades under `sharedmodule/llmswitch-core/src/native/router-hotpath/*-parsers.ts`
   - diagnostic timing modules under `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing*`
   - type-only shells and contracts that require Rust-generated `.d.ts` or ABI cleanup before deletion.
 
