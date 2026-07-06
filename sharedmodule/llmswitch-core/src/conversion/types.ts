@@ -19,11 +19,6 @@ export interface ConversionContext {
   metadata?: Record<string, unknown>;
 }
 
-interface ConversionResult {
-  profile: ConversionProfile;
-  payload: any;
-}
-
 export interface ConversionCodec {
   readonly id: string;
   initialize(): Promise<void>;
