@@ -28,26 +28,3 @@ export function formatUnknownError(error: unknown): string {
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
-
-/**
- * Type guard: check if a value is a non-null, non-array plain object.
- * Alias for isRecord — use when the codebase context uses "Object" terminology.
- */
-export const isObject = isRecord;
-
-/**
- * Safely get the message text from an unknown error.
- */
-export function getErrorText(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === 'string') {
-    return error;
-  }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
