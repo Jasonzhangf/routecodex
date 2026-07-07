@@ -452,6 +452,30 @@ export function resolveRccPathNativeSync(segments: string[], homeDir?: string): 
   return output;
 }
 
+export function resolveRccSnapshotsDirNativeSync(homeDir?: string): string {
+  const binding = loadNativeBindingForConfigCodec();
+  const fn = binding.resolveRccSnapshotsDirJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveRccSnapshotsDirJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    homeDir,
+    rccSnapshotDir: process.env.RCC_SNAPSHOT_DIR,
+    routecodexSnapshotDir: process.env.ROUTECODEX_SNAPSHOT_DIR,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-bridge] RouteCodex snapshots dir resolver returned invalid payload');
+  }
+  const snapshotsDir = (output as AnyRecord).snapshotsDir;
+  if (typeof snapshotsDir !== 'string' || !snapshotsDir.trim()) {
+    throw new Error('[llmswitch-bridge] RouteCodex snapshots dir resolver returned invalid path');
+  }
+  return snapshotsDir;
+}
+
 export function planAuthFileResolutionNativeSync(input: {
   keyId: string;
   authDir?: string;

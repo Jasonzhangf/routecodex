@@ -2744,6 +2744,7 @@ owners:
       - AuthFileResolvePlanInput
       - RouteCodexConfigLoaderPathPlanInput
       - ProviderConfigRootPlanInput
+      - RccSnapshotsDirResolveInput
     canonical_builders:
       - resolve_rcc_user_dir_for_host_with_env
       - resolve_rcc_path_for_host_with_env
@@ -2751,6 +2752,7 @@ owners:
       - plan_auth_file_resolution_for_host
       - plan_routecodex_config_loader_paths_for_host
       - plan_provider_config_root_for_host
+      - resolve_rcc_snapshots_dir_for_host_with_env
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
@@ -2775,6 +2777,7 @@ owners:
       - src/providers
     required_tests:
       - tests/config/user-data-paths.spec.ts
+      - tests/config/user-data-snapshots-rust.spec.ts
       - tests/config/unified-config-paths.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
@@ -2783,7 +2786,7 @@ owners:
     migration_target: rust
     notes:
       - "Missing config is fail-fast; no fallback path result is allowed."
-      - "Config path candidate precedence, config env handling, TOML-only rejection, directory scan, RCC user dir env precedence, and default ~/.rcc path resolution must not be reimplemented in TS; src/config/unified-config-paths.ts and src/config/user-data-paths.ts are thin native shells plus snapshot-env publisher."
+      - "Config path candidate precedence, config env handling, TOML-only rejection, directory scan, RCC user dir env precedence, RCC snapshot env precedence, retired ~/.routecodex rejection, default ~/.rcc path resolution, and snapshot/subpath joining must not be reimplemented in TS; src/config/unified-config-paths.ts and src/config/user-data-paths.ts are thin native shells."
 
   - feature_id: config.toml_codec
     status: active

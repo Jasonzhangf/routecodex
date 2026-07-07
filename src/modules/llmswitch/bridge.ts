@@ -112,6 +112,7 @@ export {
   planRouteCodexConfigLoaderPathsNativeSync,
   resolveRouteCodexConfigPathNativeSync,
   resolveRccPathNativeSync,
+  resolveRccSnapshotsDirNativeSync,
   resolveRccUserDirNativeSync,
   getHubPipelineCtor,
   getHubPipelineCtorForImpl,

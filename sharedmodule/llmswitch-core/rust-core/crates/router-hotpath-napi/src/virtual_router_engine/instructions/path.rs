@@ -208,6 +208,15 @@ pub(crate) struct ProviderConfigRootPlanInput<'a> {
     pub root_dir: Option<&'a str>,
 }
 
+pub(crate) struct RccSnapshotsDirResolveInput<'a> {
+    pub home_dir: Option<&'a str>,
+    pub rcc_snapshot_dir: Option<&'a str>,
+    pub routecodex_snapshot_dir: Option<&'a str>,
+    pub rcc_home: Option<&'a str>,
+    pub routecodex_user_dir: Option<&'a str>,
+    pub routecodex_home: Option<&'a str>,
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AuthFileResolvePlan {
@@ -234,6 +243,12 @@ pub(crate) struct RouteCodexConfigLoaderPathPlan {
 pub(crate) struct ProviderConfigRootPlan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_dir: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RccSnapshotsDirResolvePlan {
+    pub snapshots_dir: String,
 }
 
 pub(crate) fn plan_auth_file_resolution_for_host(
@@ -314,6 +329,44 @@ pub(crate) fn plan_provider_config_root_for_host(
                 .to_string()
         });
     ProviderConfigRootPlan { root_dir }
+}
+
+pub(crate) fn resolve_rcc_snapshots_dir_for_host_with_env(
+    input: RccSnapshotsDirResolveInput<'_>,
+) -> Result<RccSnapshotsDirResolvePlan, String> {
+    let home_dir = resolve_home_dir(input.home_dir)?;
+    let retired = home_dir.join(".routecodex").join("codex-samples");
+    for (key, value) in [
+        ("RCC_SNAPSHOT_DIR", input.rcc_snapshot_dir),
+        ("ROUTECODEX_SNAPSHOT_DIR", input.routecodex_snapshot_dir),
+    ] {
+        let raw = value.unwrap_or("").trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let candidate = absolutize_path(expand_home(raw, &home_dir));
+        if candidate == retired {
+            return Err(format!(
+                "[config] {} points to retired ~/.routecodex/codex-samples root; use ~/.rcc/codex-samples",
+                key
+            ));
+        }
+        return Ok(RccSnapshotsDirResolvePlan {
+            snapshots_dir: candidate.to_string_lossy().to_string(),
+        });
+    }
+    let snapshots_dir = resolve_rcc_path_for_host_with_env(
+        input.home_dir,
+        &["codex-samples".to_string()],
+        &[
+            ("RCC_HOME", input.rcc_home),
+            ("ROUTECODEX_USER_DIR", input.routecodex_user_dir),
+            ("ROUTECODEX_HOME", input.routecodex_home),
+        ],
+    )?;
+    Ok(RccSnapshotsDirResolvePlan {
+        snapshots_dir: snapshots_dir.to_string_lossy().to_string(),
+    })
 }
 
 const DEFAULT_CONFIG_NAME: &str = "config.toml";
@@ -481,9 +534,10 @@ mod host_path_tests {
     use super::{
         plan_auth_file_resolution_for_host, plan_provider_config_root_for_host,
         plan_routecodex_config_loader_paths_for_host, resolve_rcc_path_for_host,
-        resolve_rcc_user_dir_for_host, resolve_routecodex_config_path_for_host,
-        AuthFileResolvePlanInput, ProviderConfigRootPlanInput, RouteCodexConfigLoaderPathPlanInput,
-        RouteCodexConfigPathResolveInput,
+        resolve_rcc_snapshots_dir_for_host_with_env, resolve_rcc_user_dir_for_host,
+        resolve_routecodex_config_path_for_host, AuthFileResolvePlanInput,
+        ProviderConfigRootPlanInput, RccSnapshotsDirResolveInput,
+        RouteCodexConfigLoaderPathPlanInput, RouteCodexConfigPathResolveInput,
     };
     use std::env;
     use std::fs;
@@ -841,6 +895,61 @@ mod host_path_tests {
                     .unwrap()
             )
         );
+    }
+
+    #[test]
+    fn resolve_rcc_snapshots_dir_matches_env_precedence_and_default() {
+        let root = temp_root("snapshots-env");
+        let plan = resolve_rcc_snapshots_dir_for_host_with_env(RccSnapshotsDirResolveInput {
+            home_dir: Some(root.to_str().unwrap()),
+            rcc_snapshot_dir: Some("  custom-samples  "),
+            routecodex_snapshot_dir: Some("other-samples"),
+            rcc_home: None,
+            routecodex_user_dir: None,
+            routecodex_home: None,
+        })
+        .unwrap();
+        assert_eq!(
+            plan.snapshots_dir,
+            env::current_dir()
+                .unwrap()
+                .join("custom-samples")
+                .to_string_lossy()
+                .to_string()
+        );
+
+        let plan = resolve_rcc_snapshots_dir_for_host_with_env(RccSnapshotsDirResolveInput {
+            home_dir: Some(root.to_str().unwrap()),
+            rcc_snapshot_dir: None,
+            routecodex_snapshot_dir: None,
+            rcc_home: None,
+            routecodex_user_dir: None,
+            routecodex_home: None,
+        })
+        .unwrap();
+        assert_eq!(
+            plan.snapshots_dir,
+            root.join(".rcc")
+                .join("codex-samples")
+                .to_string_lossy()
+                .to_string()
+        );
+    }
+
+    #[test]
+    fn resolve_rcc_snapshots_dir_rejects_retired_routecodex_samples() {
+        let root = temp_root("snapshots-retired");
+        let retired = root.join(".routecodex").join("codex-samples");
+        let error = resolve_rcc_snapshots_dir_for_host_with_env(RccSnapshotsDirResolveInput {
+            home_dir: Some(root.to_str().unwrap()),
+            rcc_snapshot_dir: Some(retired.to_str().unwrap()),
+            routecodex_snapshot_dir: None,
+            rcc_home: None,
+            routecodex_user_dir: None,
+            routecodex_home: None,
+        })
+        .unwrap_err();
+        assert!(error.contains("retired ~/.routecodex/codex-samples"));
     }
 }
 

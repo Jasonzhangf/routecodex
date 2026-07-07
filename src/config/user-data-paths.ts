@@ -1,11 +1,9 @@
-import path from 'node:path';
-import { homedir } from 'node:os';
 import {
   resolveRccPathNativeSync,
+  resolveRccSnapshotsDirNativeSync,
   resolveRccUserDirNativeSync
 } from '../modules/llmswitch/bridge/routing-integrations.js';
 
-const LEGACY_DIR_NAME = '.routecodex';
 const SNAPSHOT_DIR_ENV_KEYS = ['RCC_SNAPSHOT_DIR', 'ROUTECODEX_SNAPSHOT_DIR'] as const;
 export const RCC_SUBDIRS = {
   auth: 'auth',
@@ -27,48 +25,8 @@ export const RCC_SUBDIRS = {
 } as const;
 export type RccSubdirKey = keyof typeof RCC_SUBDIRS;
 
-function resolveHomeDir(homeDir?: string): string {
-  const explicit = String(homeDir || '').trim();
-  if (explicit) {
-    return path.resolve(explicit);
-  }
-  const envHome = String(process.env.HOME || '').trim();
-  if (envHome) {
-    return path.resolve(envHome);
-  }
-  const resolved = homedir();
-  return path.resolve(resolved);
-}
-
-function expandHome(value: string, homeDir?: string): string {
-  if (!value.startsWith('~/')) {
-    return value;
-  }
-  return path.join(resolveHomeDir(homeDir), value.slice(2));
-}
-
-function resolveRetiredSnapshotsDir(homeDir?: string): string {
-  return path.join(resolveRetiredRouteCodexUserDir(homeDir), RCC_SUBDIRS.snapshots);
-}
-
-function isRetiredSnapshotsDirPath(value: string, homeDir?: string): boolean {
-  const normalized = path.resolve(expandHome(value, homeDir));
-  const retired = resolveRetiredSnapshotsDir(homeDir);
-  return normalized === retired;
-}
-
-function assertNotRetiredSnapshotsDirEnv(key: string, raw: string, homeDir?: string): void {
-  if (isRetiredSnapshotsDirPath(raw, homeDir)) {
-    throw new Error(`[config] ${key} points to retired ~/.routecodex/codex-samples root; use ~/.rcc/codex-samples`);
-  }
-}
-
 export function resolveRccUserDir(homeDir?: string): string {
   return resolveRccUserDirNativeSync(homeDir);
-}
-
-function resolveRetiredRouteCodexUserDir(homeDir?: string): string {
-  return path.join(resolveHomeDir(homeDir), LEGACY_DIR_NAME);
 }
 
 export function resolveRccPath(...segments: string[]): string {
@@ -104,15 +62,7 @@ export function resolveRccSnapshotsDir(homeDir?: string): string {
 }
 
 export function resolveRccSnapshotsDirFromEnv(homeDir?: string): string {
-  for (const key of SNAPSHOT_DIR_ENV_KEYS) {
-    const raw = String(process.env[key] || '').trim();
-    if (raw) {
-      const candidate = path.resolve(expandHome(raw, homeDir));
-      assertNotRetiredSnapshotsDirEnv(key, candidate, homeDir);
-      return candidate;
-    }
-  }
-  return resolveRccSnapshotsDir(homeDir);
+  return resolveRccSnapshotsDirNativeSync(homeDir);
 }
 
 export function resolveRccProviderDir(homeDir?: string): string {
@@ -172,9 +122,7 @@ export function ensureRccUserDirEnvironment(homeDir?: string): string {
   }
   for (const key of SNAPSHOT_DIR_ENV_KEYS) {
     const raw = String(process.env[key] || '').trim();
-    if (raw) {
-      assertNotRetiredSnapshotsDirEnv(key, raw, homeDir);
-    } else {
+    if (!raw) {
       process.env[key] = snapshotsDir;
     }
   }
