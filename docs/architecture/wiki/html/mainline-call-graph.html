@@ -135,6 +135,61 @@
           <li><code>partial</code> = edge is bound, but only part of the transition is concretely anchored</li>
           <li><code>binding pending</code> = edge intentionally left unresolved until code audit pins the real bridge</li>
         </ul>
+        <h2>config.user_config_materialization.mainline</h2>
+        <p>RouteCodex runtime config loading flows from the public TS shell into the native Rust loader, then into Rust path/provider/materialization owners before returning LoadedRouteCodexConfig.</p>
+        <p>Entry contract: <code>ConfigLoad01PublicShell</code> via <code>docs/architecture/function-map.yml</code></p>
+        <pre class="mermaid">flowchart LR
+          HubConfig03RuntimeRouteTierArtifacts[&quot;HubConfig03RuntimeRouteTierArtifacts&quot;]
+          HubConfig02RuntimePolicyArtifacts[&quot;HubConfig02RuntimePolicyArtifacts&quot;]
+          HubConfig01PipelineRuntimeArtifact[&quot;HubConfig01PipelineRuntimeArtifact&quot;]
+          VrConfig02NativeBootstrap[&quot;VrConfig02NativeBootstrap&quot;]
+          VrConfig01RustBootstrapArtifact[&quot;VrConfig01RustBootstrapArtifact&quot;]
+          ConfigLoad06LoadedConfigReturned[&quot;ConfigLoad06LoadedConfigReturned&quot;]
+          ConfigLoad05RuntimeManifestCompiled[&quot;ConfigLoad05RuntimeManifestCompiled&quot;]
+          ConfigLoad04UserConfigParsed[&quot;ConfigLoad04UserConfigParsed&quot;]
+          ConfigLoad03RustLoader[&quot;ConfigLoad03RustLoader&quot;]
+          ConfigLoad02NativeBridge[&quot;ConfigLoad02NativeBridge&quot;]
+          ConfigLoad01PublicShell[&quot;ConfigLoad01PublicShell&quot;]
+          ConfigLoad01PublicShell --&gt;|cfg-load-01| ConfigLoad02NativeBridge
+          ConfigLoad02NativeBridge --&gt;|cfg-load-02| ConfigLoad03RustLoader
+          ConfigLoad03RustLoader --&gt;|cfg-load-03| ConfigLoad04UserConfigParsed
+          ConfigLoad04UserConfigParsed --&gt;|cfg-load-04| ConfigLoad05RuntimeManifestCompiled
+          ConfigLoad05RuntimeManifestCompiled --&gt;|cfg-load-05| ConfigLoad06LoadedConfigReturned
+          ConfigLoad05RuntimeManifestCompiled --&gt;|cfg-runtime-vr-01| VrConfig01RustBootstrapArtifact
+          VrConfig01RustBootstrapArtifact --&gt;|cfg-runtime-vr-02| VrConfig02NativeBootstrap
+          ConfigLoad05RuntimeManifestCompiled --&gt;|cfg-runtime-hub-01| HubConfig01PipelineRuntimeArtifact
+          HubConfig01PipelineRuntimeArtifact --&gt;|cfg-runtime-hub-02| HubConfig02RuntimePolicyArtifacts
+          HubConfig01PipelineRuntimeArtifact --&gt;|cfg-runtime-hub-03| HubConfig03RuntimeRouteTierArtifacts
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class ConfigLoad01PublicShell anchored;
+          class ConfigLoad02NativeBridge anchored;
+          class ConfigLoad03RustLoader anchored;
+          class ConfigLoad04UserConfigParsed anchored;
+          class ConfigLoad05RuntimeManifestCompiled anchored;
+          class ConfigLoad06LoadedConfigReturned anchored;
+          class VrConfig01RustBootstrapArtifact anchored;
+          class VrConfig02NativeBootstrap anchored;
+          class HubConfig01PipelineRuntimeArtifact anchored;
+          class HubConfig02RuntimePolicyArtifacts anchored;
+          class HubConfig03RuntimeRouteTierArtifacts anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>cfg-load-01</td><td><code>ConfigLoad01PublicShell -&gt; ConfigLoad02NativeBridge</code></td><td>anchored</td><td><code>loadRouteCodexConfig -&gt; loadRouteCodexConfigNativeSync</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-load-02</td><td><code>ConfigLoad02NativeBridge -&gt; ConfigLoad03RustLoader</code></td><td>anchored</td><td><code>loadRouteCodexConfigNativeSync -&gt; load_route_codex_config_json</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-load-03</td><td><code>ConfigLoad03RustLoader -&gt; ConfigLoad04UserConfigParsed</code></td><td>anchored</td><td><code>load_route_codex_config_json -&gt; load_routecodex_config_json</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-load-04</td><td><code>ConfigLoad04UserConfigParsed -&gt; ConfigLoad05RuntimeManifestCompiled</code></td><td>anchored</td><td><code>load_routecodex_config_json -&gt; compile_routecodex_runtime_manifest_json</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-load-05</td><td><code>ConfigLoad05RuntimeManifestCompiled -&gt; ConfigLoad06LoadedConfigReturned</code></td><td>anchored</td><td><code>load_routecodex_config_json -&gt; materialize_routecodex_user_config_from_manifest_json</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-runtime-vr-01</td><td><code>ConfigLoad05RuntimeManifestCompiled -&gt; VrConfig01RustBootstrapArtifact</code></td><td>anchored</td><td><code>resolveRouterBootstrapConfig -&gt; compileRouteCodexRuntimeConfigManifest</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-runtime-vr-02</td><td><code>VrConfig01RustBootstrapArtifact -&gt; VrConfig02NativeBootstrap</code></td><td>anchored</td><td><code>bootstrapVirtualRouter -&gt; bootstrapVirtualRouterConfig</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-runtime-hub-01</td><td><code>ConfigLoad05RuntimeManifestCompiled -&gt; HubConfig01PipelineRuntimeArtifact</code></td><td>anchored</td><td><code>setupRuntime -&gt; getRuntimeConfigManifestFromBootstrapInput</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-runtime-hub-02</td><td><code>HubConfig01PipelineRuntimeArtifact -&gt; HubConfig02RuntimePolicyArtifacts</code></td><td>anchored</td><td><code>extractProviderKeysFromPipelineRuntimeConfig -&gt; compile_routecodex_runtime_manifest</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        <tr><td>cfg-runtime-hub-03</td><td><code>HubConfig01PipelineRuntimeArtifact -&gt; HubConfig03RuntimeRouteTierArtifacts</code></td><td>anchored</td><td><code>extractRoutingTiersForPipelineRuntimeConfigRoute -&gt; compile_routecodex_runtime_manifest</code></td><td></td><td><code>config.user_config_materialization</code>&lt;br/&gt;runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned</td></tr>
+        </tbody>
+        </table>
         <h2>webui.config_editor_surface.mainline</h2>
         <p>WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics.</p>
         <p>Entry contract: <code>WebuiConfigEditor01UserIntent</code> via <code>docs/loops/runtime-lifecycle/gate-matrix.md</code></p>
@@ -640,7 +695,6 @@
         <p>Entry contract: <code>MetaReq01InboundSeeded</code> via <code>docs/architecture/wiki/metadata-center-mainline-source.md</code></p>
         <pre class="mermaid">flowchart LR
           MetaResp08CloseoutReleased[&quot;MetaResp08CloseoutReleased&quot;]
-          MetaResp07ServertoolContextProjected[&quot;MetaResp07ServertoolContextProjected&quot;]
           MetaResp07BridgeMetadataBound[&quot;MetaResp07BridgeMetadataBound&quot;]
           MetaResp06ResponseObserved[&quot;MetaResp06ResponseObserved&quot;]
           MetaReq05ProviderObservationProjected[&quot;MetaReq05ProviderObservationProjected&quot;]
@@ -655,8 +709,7 @@
           MetaReq04RuntimeControlBound --&gt;|mtc-04| MetaReq05ProviderObservationProjected
           MetaReq05ProviderObservationProjected --&gt;|mtc-05| MetaResp06ResponseObserved
           MetaResp06ResponseObserved --&gt;|mtc-06| MetaResp07BridgeMetadataBound
-          MetaResp07BridgeMetadataBound --&gt;|mtc-07| MetaResp07ServertoolContextProjected
-          MetaResp07ServertoolContextProjected --&gt;|mtc-08| MetaResp08CloseoutReleased
+          MetaResp07BridgeMetadataBound --&gt;|mtc-07| MetaResp08CloseoutReleased
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -667,7 +720,6 @@
           class MetaReq05ProviderObservationProjected anchored;
           class MetaResp06ResponseObserved anchored;
           class MetaResp07BridgeMetadataBound anchored;
-          class MetaResp07ServertoolContextProjected anchored;
           class MetaResp08CloseoutReleased anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
@@ -679,9 +731,8 @@
         <tr><td>mtc-03</td><td><code>MetaReq03ContinuationAttached -&gt; MetaReq04RuntimeControlBound</code></td><td>anchored</td><td><code>finalizeRequestExecutorAttemptMetadata -&gt; finalizeRequestExecutorAttemptMetadata</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         <tr><td>mtc-04</td><td><code>MetaReq04RuntimeControlBound -&gt; MetaReq05ProviderObservationProjected</code></td><td>anchored</td><td><code>resolveRequestExecutorPipelineAttempt -&gt; resolveRequestExecutorPipelineAttempt</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         <tr><td>mtc-05</td><td><code>MetaReq05ProviderObservationProjected -&gt; MetaResp06ResponseObserved</code></td><td>anchored</td><td><code>convertProviderResponse -&gt; readRequestTruthFromBoundMetadataCenter</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
-        <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07BridgeMetadataBound</code></td><td>anchored</td><td><code>buildBridgeAdapterContext -&gt; readRuntimeServerToolProjection</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
-        <tr><td>mtc-07</td><td><code>MetaResp07BridgeMetadataBound -&gt; MetaResp07ServertoolContextProjected</code></td><td>anchored</td><td><code>runServertoolResponseStageOrchestrationShell -&gt; readRuntimeControlFromAnyBoundMetadataCenter</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
-        <tr><td>mtc-08</td><td><code>MetaResp07ServertoolContextProjected -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-06</td><td><code>MetaResp06ResponseObserved -&gt; MetaResp07BridgeMetadataBound</code></td><td>anchored</td><td><code>buildBridgeInvocationMetadata -&gt; MetadataCenter.read</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
+        <tr><td>mtc-07</td><td><code>MetaResp07BridgeMetadataBound -&gt; MetaResp08CloseoutReleased</code></td><td>anchored</td><td><code>releaseMetadataCenterForHttpResponse -&gt; markReleased</code></td><td></td><td><code>hub.metadata_center_mainline</code>&lt;br/&gt;single request-scoped metadata center remains the only carrier across server -&gt; Hub Pipeline -&gt; provider/runtime -&gt; response closeout</td></tr>
         </tbody>
         </table>
         <h2>sse.chat_stream_projection.mainline</h2>

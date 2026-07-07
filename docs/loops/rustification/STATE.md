@@ -14,9 +14,9 @@ last_run_id: 2026-07-06T13:16:52+08:00-config-materialization-rust-closeout
 - Current worktree contains unrelated dirty runtime/WebUI/test/memory files; L1
   may report them as collision context but must not stage, reset, checkout, or
   delete them.
-- Latest source/doc-only L1/config closeout: `npm run verify:llmswitch-rustification-audit`
-  reports `prodTsFileCount=137`, `prodTsLocTotal=28365`,
-  `nonNativeFileCount=12`, `nonNativeLocTotal=3323`; current Hub/VR semantic
+- Latest source/doc-only zero-TS closeout slice: `npm run verify:llmswitch-rustification-audit`
+reports `prodTsFileCount=126`, `prodTsLocTotal=27379`,
+  `nonNativeFileCount=10`, `nonNativeLocTotal=2432`; current Hub/VR semantic
   watchlist has no open `ts_semantic_debt` from that list.
 - MemPalace artifact exclusion gate: `npm run verify:mempalace-scan-artifacts`
   reports `artifactHits=0`; representative generated/local examples under
@@ -40,6 +40,10 @@ last_run_id: 2026-07-06T13:16:52+08:00-config-materialization-rust-closeout
 - Root package export of `virtual-router-contracts.ts` is type-only
   (`export type *`) because that file declares only TS contracts and must not be
   treated as a runtime VR module.
+- Root package no longer publicly exports the provider-response TS IO shell or
+  stats-center TS IO shell. `verify:llmswitch-minimal-ts-surface` gates against
+  reintroducing those public exports and against changing VR contracts back to a
+  runtime `export *`.
 - Upper production layers must not import `virtual-router-contracts.ts`
   directly. Hub/Host/Server code must consume VR contract types through the
   adjacent native facade that owns the call boundary, such as

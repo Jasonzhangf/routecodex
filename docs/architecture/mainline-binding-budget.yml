@@ -4,6 +4,15 @@ description: >
   are explicitly acknowledged per chain, but any growth must fail fast until the
   chain is re-budgeted with review.
 chains:
+  - chain_id: config.user_config_materialization.mainline
+    expected_total_edges: 10
+    min_anchored_edges: 10
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Config materialization is fully anchored: TS public shell calls the native
+      Rust loader, Rust owns TOML/provider/runtime manifest materialization, and
+      server runtime consumes only the Rust-produced VR/Hub runtime artifacts.
   - chain_id: webui.config_editor_surface.mainline
     expected_total_edges: 2
     min_anchored_edges: 2
@@ -78,11 +87,11 @@ chains:
     max_binding_pending_edges: 0
     note: Error mainline is fully anchored through explicit ErrorErr04 router-policy application and ErrorErr05 executor consumption.
   - chain_id: metadata.center.mainline
-    expected_total_edges: 9
+    expected_total_edges: 8
     min_anchored_edges: 8
-    max_partial_edges: 1
+    max_partial_edges: 0
     max_binding_pending_edges: 0
-    note: Metadata center runtime-control family is partially implemented; bridge-bound metadata carrier split is now anchored.
+    note: Metadata center runtime-control family is fully anchored after the obsolete servertool-context projection edge was removed; bridge-bound metadata carrier split stays anchored.
   - chain_id: runtime.lifecycle.mainline
     expected_total_edges: 10
     min_anchored_edges: 10

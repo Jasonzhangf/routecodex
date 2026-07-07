@@ -620,7 +620,6 @@ Entry contract: `MetaReq01InboundSeeded` via `docs/architecture/wiki/metadata-ce
 ```mermaid
 flowchart LR
   MetaResp08CloseoutReleased["MetaResp08CloseoutReleased"]
-  MetaResp07ServertoolContextProjected["MetaResp07ServertoolContextProjected"]
   MetaResp07BridgeMetadataBound["MetaResp07BridgeMetadataBound"]
   MetaResp06ResponseObserved["MetaResp06ResponseObserved"]
   MetaReq05ProviderObservationProjected["MetaReq05ProviderObservationProjected"]
@@ -635,8 +634,7 @@ flowchart LR
   MetaReq04RuntimeControlBound -->|mtc-04| MetaReq05ProviderObservationProjected
   MetaReq05ProviderObservationProjected -->|mtc-05| MetaResp06ResponseObserved
   MetaResp06ResponseObserved -->|mtc-06| MetaResp07BridgeMetadataBound
-  MetaResp07BridgeMetadataBound -->|mtc-07| MetaResp07ServertoolContextProjected
-  MetaResp07ServertoolContextProjected -->|mtc-08| MetaResp08CloseoutReleased
+  MetaResp07BridgeMetadataBound -->|mtc-07| MetaResp08CloseoutReleased
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -647,7 +645,6 @@ flowchart LR
   class MetaReq05ProviderObservationProjected anchored;
   class MetaResp06ResponseObserved anchored;
   class MetaResp07BridgeMetadataBound anchored;
-  class MetaResp07ServertoolContextProjected anchored;
   class MetaResp08CloseoutReleased anchored;
 ```
 
@@ -659,9 +656,8 @@ flowchart LR
 | mtc-03 | `MetaReq03ContinuationAttached -> MetaReq04RuntimeControlBound` | anchored | `finalizeRequestExecutorAttemptMetadata -> finalizeRequestExecutorAttemptMetadata` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-04 | `MetaReq04RuntimeControlBound -> MetaReq05ProviderObservationProjected` | anchored | `resolveRequestExecutorPipelineAttempt -> resolveRequestExecutorPipelineAttempt` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 | mtc-05 | `MetaReq05ProviderObservationProjected -> MetaResp06ResponseObserved` | anchored | `convertProviderResponse -> readRequestTruthFromBoundMetadataCenter` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
-| mtc-06 | `MetaResp06ResponseObserved -> MetaResp07BridgeMetadataBound` | anchored | `buildBridgeAdapterContext -> readRuntimeServerToolProjection` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
-| mtc-07 | `MetaResp07BridgeMetadataBound -> MetaResp07ServertoolContextProjected` | anchored | `runServertoolResponseStageOrchestrationShell -> readRuntimeControlFromAnyBoundMetadataCenter` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
-| mtc-08 | `MetaResp07ServertoolContextProjected -> MetaResp08CloseoutReleased` | anchored | `releaseMetadataCenterForHttpResponse -> markReleased` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-06 | `MetaResp06ResponseObserved -> MetaResp07BridgeMetadataBound` | anchored | `buildBridgeInvocationMetadata -> MetadataCenter.read` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
+| mtc-07 | `MetaResp07BridgeMetadataBound -> MetaResp08CloseoutReleased` | anchored | `releaseMetadataCenterForHttpResponse -> markReleased` |  | `hub.metadata_center_mainline`<br/>single request-scoped metadata center remains the only carrier across server -> Hub Pipeline -> provider/runtime -> response closeout |
 
 ## sse.chat_stream_projection.mainline
 

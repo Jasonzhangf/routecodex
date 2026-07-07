@@ -18,18 +18,19 @@ The current "thin shell" state is an intermediate checkpoint, not the final targ
 
 ## Current Audit Snapshot
 
-Observed from source/doc-only audit on 2026-07-07 after the latest type-shell closeout slices:
+Observed from source/doc-only audit on 2026-07-07 after the latest public-barrel shrink slice:
 
 - `npm run verify:llmswitch-minimal-ts-surface -- --json`: PASS.
-- `minimal-ts-surface.json` has 13 entries:
+- `minimal-ts-surface.json` has 13 entries and now also gates public-barrel shrink rules:
   - 10 current non-native production TS files.
   - 3 explicit native-linked TS shells.
+- `sharedmodule/llmswitch-core/src/index.ts` no longer publicly exports `convertProviderResponse` or `telemetry/stats-center`; the minimal TS surface gate rejects their reintroduction and rejects runtime `export *` of `virtual-router-contracts`.
 - `npm run verify:llmswitch-rustification-audit -- --json`: PASS.
 - Current audit metrics:
-  - `prodTsFileCount`: 133
-  - `prodTsLocTotal`: 27445
+- `prodTsFileCount`: 126
+- `prodTsLocTotal`: 27379
   - `nonNativeFileCount`: 10
-  - `nonNativeLocTotal`: 2437
+  - `nonNativeLocTotal`: 2432
 - Categories:
   - `type_shell_ok`: 6
   - `ts_io_shell_ok`: 4
@@ -49,7 +50,7 @@ Observed from source/doc-only audit on 2026-07-07 after the latest type-shell cl
   - `servertool/types.ts` (`type_shell_ok`)
   - `telemetry/stats-center.ts` (`ts_io_shell_ok`)
 - Current hard reference locks:
-  - `sharedmodule/llmswitch-core/src/index.ts` still publicly exports `convertProviderResponse`, VR contracts, failure policy, and stats center.
+- `sharedmodule/llmswitch-core/src/index.ts` still publicly exports native bootstrap/provider ingress/failure policy and type-only VR contracts; provider-response and stats-center root exports are removed and gated.
   - `src/types/llmswitch-core.d.ts` still declares public modules for `provider-response.js`, `virtual-router-contracts.js`, `native-router-hotpath-policy.js`, and `stats-center.js`.
   - `scripts/lib/build-core-utils.mjs` still requires dist outputs for `conversion/hub/response/provider-response.js` and `conversion/shared/responses-conversation-store.js`.
   - `responses.continuation.mainline` edge `rct-06` is still `convertProviderResponse -> recordResponsesResponse`, so store deletion is blocked until the canonical save edge no longer names TS caller/callee.

@@ -6,6 +6,7 @@ const ROOT = process.cwd();
 const MANIFEST_PATH = path.join(ROOT, 'docs/loops/rustification/minimal-ts-surface.json');
 const FUNCTION_MAP_PATH = path.join(ROOT, 'docs/architecture/function-map.yml');
 const VERIFICATION_MAP_PATH = path.join(ROOT, 'docs/architecture/verification-map.yml');
+const CORE_INDEX_PATH = 'sharedmodule/llmswitch-core/src/index.ts';
 const SRC_PREFIX = 'sharedmodule/llmswitch-core/src/';
 const GENERATED_DIR_NAMES = new Set([
   'dist',
@@ -108,6 +109,23 @@ const SEMANTIC_TOKEN_PATTERNS = {
   'hit reason build': [/\bhit\s+reason\s+build\b/iu],
   'client response policy': [/\bclient\s+response\s+policy\b/iu],
 };
+const PUBLIC_BARREL_FORBIDDEN_EXPORTS = [
+  {
+    path: CORE_INDEX_PATH,
+    pattern: /export\s+\{\s*convertProviderResponse\s*\}\s+from\s+['"]\.\/conversion\/hub\/response\/provider-response\.js['"]/u,
+    message: 'root llmswitch-core index must not publicly export provider-response TS IO shell',
+  },
+  {
+    path: CORE_INDEX_PATH,
+    pattern: /export\s+\*\s+from\s+['"]\.\/telemetry\/stats-center\.js['"]/u,
+    message: 'root llmswitch-core index must not publicly export stats-center TS IO shell',
+  },
+  {
+    path: CORE_INDEX_PATH,
+    pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/virtual-router-contracts\.js['"]/u,
+    message: 'root llmswitch-core index may only export virtual-router-contracts as type-only surface',
+  },
+];
 
 function readGitTrackedFiles() {
   return execFileSync('git', ['ls-files', '-z'], {
@@ -236,6 +254,19 @@ function findForbiddenSemanticHits(source, forbiddenSemantics) {
   return hits;
 }
 
+function checkPublicBarrelShrink(errors) {
+  for (const rule of PUBLIC_BARREL_FORBIDDEN_EXPORTS) {
+    const full = path.join(ROOT, rule.path);
+    if (!fs.existsSync(full)) {
+      errors.push(`missing public barrel shrink source: ${rule.path}`);
+      continue;
+    }
+    if (rule.pattern.test(fs.readFileSync(full, 'utf8'))) {
+      errors.push(rule.message);
+    }
+  }
+}
+
 function main() {
   const manifest = readManifest();
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
@@ -301,6 +332,7 @@ function main() {
       errors.push(`current non-native prod TS file lacks minimal-surface classification: ${rel}`);
     }
   }
+  checkPublicBarrelShrink(errors);
 
   if (errors.length > 0) {
     console.error('[verify-llmswitch-minimal-ts-surface] FAILED');

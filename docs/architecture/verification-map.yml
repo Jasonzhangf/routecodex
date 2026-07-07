@@ -424,11 +424,10 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts
-      - sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
-      - tests/servertool/entry-context-shell.spec.ts
+      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
     integration:
       - tests/servertool/server-side-tools.failfast.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -522,10 +521,8 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs
       - scripts/verify-servertool-rust-only.mjs
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
-      - tests/servertool/response-stage-prepass-shell.spec.ts
       - tests/servertool/execution-queue-shell.spec.ts
       - tests/servertool/execution-stage-shell.spec.ts
-      - tests/servertool/entry-context-shell.spec.ts
       - tests/servertool/run-server-side-tool-engine-shell.spec.ts
     contract:
       - tests/servertool/server-side-tools.auto-hook-config.spec.ts
@@ -587,7 +584,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Minimal change stack must prove fixed 1s/3s/5s cycling, blocking gate serialization, hook events, fixed waiter cap, provider-switch waits before exclude/reroute, provider traffic wait-then-saturate behavior, and server help visibility."
+      - "Minimal change stack must prove fixed 1s/3s/5s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
       - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
 
   - feature_id: vr.route_selection
@@ -1427,8 +1424,10 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
     integration:

@@ -14,7 +14,6 @@ node_ids:
   - MetaReq05ProviderObservationProjected
   - MetaResp06ResponseObserved
   - MetaResp07BridgeMetadataBound
-  - MetaResp07ServertoolContextProjected
   - MetaResp08CloseoutReleased
 step_ids:
   - mtc-01
@@ -25,12 +24,11 @@ step_ids:
   - mtc-05
   - mtc-06
   - mtc-07
-  - mtc-08
 edge_status_counts:
-  anchored: 9
+  anchored: 8
   partial: 0
   binding_pending: 0
-  total: 9
+  total: 8
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

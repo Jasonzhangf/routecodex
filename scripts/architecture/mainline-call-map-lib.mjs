@@ -384,6 +384,7 @@ export function renderMainlineChainMarkdown(root, chainId, options = {}) {
   ];
 
   const CHAIN_PAGE_MAP = new Map([
+    ['config.user_config_materialization.mainline', 'mainline-call-graph'],
     ['request.mainline', 'request-mainline-call-graph'],
     ['response.mainline', 'response-mainline-call-graph'],
     ['error.mainline', 'error-mainline-call-graph'],
@@ -497,6 +498,7 @@ export function renderMainlineCallGraphMarkdown(root) {
 
 // Chain-id -> wiki markdown path mapping (used by wiki-consistency gates)
 export const GENERATED_WIKI_CHAIN_PAGES = [
+  { chainId: 'config.user_config_materialization.mainline', path: 'docs/architecture/wiki/mainline-call-graph.md' },
   { chainId: 'request.mainline', path: 'docs/architecture/wiki/request-mainline-call-graph.md' },
   { chainId: 'response.mainline', path: 'docs/architecture/wiki/response-mainline-call-graph.md' },
   { chainId: 'error.mainline', path: 'docs/architecture/wiki/error-mainline-call-graph.md' },

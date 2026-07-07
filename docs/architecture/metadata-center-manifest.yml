@@ -13,7 +13,6 @@ node_ids:
   - MetaReq05ProviderObservationProjected
   - MetaResp06ResponseObserved
   - MetaResp07BridgeMetadataBound
-  - MetaResp07ServertoolContextProjected
   - MetaResp08CloseoutReleased
 families:
   request_truth:
@@ -155,15 +154,6 @@ stages:
       - provider_observation
       - response_observation
   - node_id: MetaResp07BridgeMetadataBound
-    owner: HubRespChatProcess03Governed
-    read_families:
-      - request_truth
-      - continuation_context
-      - runtime_control
-      - provider_observation
-      - response_observation
-      - debug_snapshot
-  - node_id: MetaResp07ServertoolContextProjected
     owner: HubRespChatProcess03Governed
     read_families:
       - request_truth

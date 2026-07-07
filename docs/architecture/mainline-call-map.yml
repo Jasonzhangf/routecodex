@@ -1151,28 +1151,17 @@ chains:
       - step_id: mtc-06
         from_node: MetaResp06ResponseObserved
         to_node: MetaResp07BridgeMetadataBound
-        caller_symbol: buildBridgeAdapterContext
+        caller_symbol: buildBridgeInvocationMetadata
         caller_file: src/server/runtime/http-server/executor/provider-response-converter.ts
-        callee_symbol: readRuntimeServerToolProjection
-        callee_file: src/server/runtime/http-server/metadata-center/request-truth-readers.ts
+        callee_symbol: MetadataCenter.read
+        callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
         owner_feature_id: hub.metadata_center_mainline
-        semantic_input: "request/continuation/runtime/provider observation families"
-        semantic_output: "servertool adapter context reads request truth from MetadataCenter and projects session/conversation truth without reusing continuation context as request truth"
+        semantic_input: "response conversion metadata plus bound request-scoped MetadataCenter"
+        semantic_output: "bridge invocation metadata is bound to the same MetadataCenter without copying request/context payload or projecting servertool truth in TS"
         status: anchored
-        note: "The provider response converter now performs this read-only projection locally before calling the native bridge; the old standalone servertool-adapter-context owner is physically removed."
+        note: "The provider response converter no longer builds a servertool adapter context and no longer reads entryOriginRequest; semantic stopless/servertool state must already be Rust Chat Process output or MetadataCenter runtime_control."
       - step_id: mtc-07
         from_node: MetaResp07BridgeMetadataBound
-        to_node: MetaResp07ServertoolContextProjected
-        caller_symbol: runServertoolResponseStageOrchestrationShell
-        caller_file: sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts
-        callee_symbol: readRuntimeControlFromAnyBoundMetadataCenter
-        callee_file: sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts
-        owner_feature_id: hub.metadata_center_mainline
-        semantic_input: "bridge-bound metadata center"
-        semantic_output: "servertool context from bridge bound metadata"
-        status: anchored
-      - step_id: mtc-08
-        from_node: MetaResp07ServertoolContextProjected
         to_node: MetaResp08CloseoutReleased
         caller_symbol: releaseMetadataCenterForHttpResponse
         caller_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
