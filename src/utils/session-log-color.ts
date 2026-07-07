@@ -24,17 +24,17 @@ export function resolveSessionLogColorKey(context?: Record<string, unknown> | nu
     return undefined;
   }
   const candidates = [
+    context.sessionId,
+    context.session_id,
+    context.conversationId,
+    context.conversation_id,
+    context.logSessionColorKey,
     context.clientTmuxSessionId,
     context.client_tmux_session_id,
     context.tmuxSessionId,
     context.tmux_session_id,
     context.rccSessionClientTmuxSessionId,
-    context.rcc_session_client_tmux_session_id,
-    context.sessionId,
-    context.session_id,
-    context.conversationId,
-    context.conversation_id,
-    context.logSessionColorKey
+    context.rcc_session_client_tmux_session_id
   ];
   for (const candidate of candidates) {
     const normalized = normalizeToken(candidate);

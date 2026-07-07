@@ -128,6 +128,14 @@ function readNumericMetaField(meta: Record<string, unknown> | undefined, key: st
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function readClientMetadata(payload: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const raw = payload?.client_metadata ?? payload?.clientMetadata;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  return raw as Record<string, unknown>;
+}
+
 function logResponsesHandlerNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
     const detailSuffix = details && Object.keys(details).length
@@ -202,9 +210,11 @@ export async function handleResponses(
       && (req.headers['accept'] as string).includes('text/event-stream');
     const responsesConversationPortScope = buildResponsesConversationPortScopeForHttp(ctx.portContext);
     const rawInputItems = countResponsesInputItems(payload);
+    const clientMetadata = readClientMetadata(payload as Record<string, unknown>);
     const preRuntimeLogMetadata = buildHandlerLogMetadata({
       entryEndpoint,
       headers: req.headers as Record<string, unknown>,
+      clientMetadata,
       clientHeaders,
       portContext: ctx.portContext
     });
@@ -227,6 +237,7 @@ export async function handleResponses(
       entryEndpoint,
       headers: req.headers as Record<string, unknown>,
       requestBodyMetadata,
+      clientMetadata,
       clientHeaders,
       portContext: ctx.portContext,
       metadata: preRuntimeLogMetadata

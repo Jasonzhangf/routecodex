@@ -584,6 +584,12 @@ function resolvePortContext(
 export function buildInboundLogSessionContext(input: InboundLogSessionContextInput): Record<string, unknown> {
   const userMeta = asRecord(input.metadata);
   const bodyMeta = asRecord(input.bodyMetadata);
+  const clientMetadata = asRecord(
+    bodyMeta.client_metadata
+    ?? bodyMeta.clientMetadata
+    ?? userMeta.client_metadata
+    ?? userMeta.clientMetadata
+  );
   const headers = asRecord(input.headers);
   const normalizedClientHeaders =
     cloneClientHeaders((userMeta as { clientHeaders?: unknown }).clientHeaders)
@@ -609,6 +615,7 @@ export function buildInboundLogSessionContext(input: InboundLogSessionContextInp
   const resolvedWorkdir = extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders);
   const resolvedTmuxSessionId = extractSessionScopeId(userMeta, headers, normalizedClientHeaders);
   const requestTruthSource: Record<string, unknown> = {
+    ...clientMetadata,
     ...bodyMeta,
     ...userMeta
   };
@@ -632,7 +639,11 @@ export function buildInboundLogSessionContext(input: InboundLogSessionContextInp
     workdir: resolvedWorkdir,
     clientType: inferredClientType
   });
+  const requestSessionId = logSessionColorKey;
+  const requestConversationId = explicitConversationId || requestSessionId;
   return {
+    ...(requestSessionId ? { sessionId: requestSessionId } : {}),
+    ...(requestConversationId ? { conversationId: requestConversationId } : {}),
     ...(logSessionColorKey ? { logSessionColorKey } : {}),
     ...(resolvedSessionDaemonId
       ? {
@@ -718,7 +729,16 @@ function logSessionScopeMetadata(args: {
 
 export function buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
   const userMeta = asRecord(input.metadata);
-  const bodyMeta = asRecord(asRecord(input.body).metadata);
+  const bodyRecord = asRecord(input.body);
+  const bodyMeta = asRecord(bodyRecord.metadata);
+  const clientMetadata = asRecord(
+    bodyRecord.client_metadata
+    ?? bodyRecord.clientMetadata
+    ?? bodyMeta.client_metadata
+    ?? bodyMeta.clientMetadata
+    ?? userMeta.client_metadata
+    ?? userMeta.clientMetadata
+  );
   const headers = asRecord(input.headers);
   const portContext = resolvePortContext(userMeta, bodyMeta);
   const inboundUserAgent = extractHeaderValue(headers, 'user-agent');
@@ -754,7 +774,10 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const inboundLogSessionContext = buildInboundLogSessionContext({
     entryEndpoint: input.entryEndpoint,
     headers,
-    bodyMetadata: bodyMeta,
+    bodyMetadata: {
+      ...bodyMeta,
+      ...(Object.keys(clientMetadata).length > 0 ? { client_metadata: clientMetadata } : {})
+    },
     metadata: userMeta,
     portContext
   });
@@ -880,6 +903,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     });
   }
   const requestTruthSource: Record<string, unknown> = {
+    ...clientMetadata,
     ...bodyMeta,
     ...metadata
   };
@@ -916,10 +940,11 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       family: 'request_truth',
       key: 'sessionId',
       value: sessionIdentifiers.sessionId,
-      writer: BUILD_REQUEST_METADATA_WRITER
+      writer: BUILD_REQUEST_METADATA_WRITER,
+      reason: 'request entry session identity'
     });
   }
-  if (sessionIdentifiers.sessionId && normalizeToken(userMeta.sessionId)) {
+  if (sessionIdentifiers.sessionId) {
     metadata.sessionId = sessionIdentifiers.sessionId;
   }
   if (sessionIdentifiers.conversationId && !currentRequestTruth.conversationId) {
@@ -928,10 +953,11 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       family: 'request_truth',
       key: 'conversationId',
       value: sessionIdentifiers.conversationId,
-      writer: BUILD_REQUEST_METADATA_WRITER
+      writer: BUILD_REQUEST_METADATA_WRITER,
+      reason: 'request entry conversation identity'
     });
   }
-  if (sessionIdentifiers.conversationId && normalizeToken(userMeta.conversationId)) {
+  if (sessionIdentifiers.conversationId) {
     metadata.conversationId = sessionIdentifiers.conversationId;
   }
   const responsesResumeSource =

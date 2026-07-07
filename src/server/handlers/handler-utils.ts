@@ -1028,6 +1028,7 @@ export function buildHandlerLogMetadata(args: {
   entryEndpoint: string;
   headers: Record<string, unknown>;
   requestBodyMetadata?: Record<string, unknown>;
+  clientMetadata?: Record<string, unknown>;
   clientHeaders?: Record<string, string>;
   portContext?: HandlerContext['portContext'];
   metadata?: Record<string, unknown>;
@@ -1035,9 +1036,13 @@ export function buildHandlerLogMetadata(args: {
   return buildInboundLogSessionContext({
     entryEndpoint: args.entryEndpoint,
     headers: args.headers,
-    bodyMetadata: args.requestBodyMetadata,
+    bodyMetadata: {
+      ...(args.requestBodyMetadata ?? {}),
+      ...(args.clientMetadata ? { client_metadata: args.clientMetadata } : {})
+    },
     metadata: {
       ...(args.requestBodyMetadata ?? {}),
+      ...(args.clientMetadata ? { client_metadata: args.clientMetadata } : {}),
       ...(args.clientHeaders ? { clientHeaders: args.clientHeaders } : {}),
       ...(args.metadata ?? {})
     },

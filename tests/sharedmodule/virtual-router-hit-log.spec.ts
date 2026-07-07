@@ -1,3 +1,5 @@
+import { jest } from '@jest/globals';
+
 import {
   createVirtualRouterHitRecord,
   formatVirtualRouterHit,
@@ -5,6 +7,9 @@ import {
   resolveSessionLogColorKey,
   toVirtualRouterHitEvent
 } from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.js';
+import {
+  createVirtualRouterRouteHostEffects
+} from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.js';
 
 describe('virtual-router hit log', () => {
   it('includes request token estimate when available', () => {
@@ -184,6 +189,42 @@ describe('virtual-router hit log', () => {
 
     expect(resolveSessionColor()).toBeUndefined();
     expect(() => formatVirtualRouterHit(record)).toThrow(/sessionId is required/);
+  });
+
+  it('emits host virtual-router-hit lines with request session color instead of route color', () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const sessionId = 'host-visible-session-color';
+    const sessionColor = resolveSessionColor(sessionId);
+    const routeColor = resolveSessionColor('thinking');
+    const effects = createVirtualRouterRouteHostEffects({
+      request: {},
+      metadata: {
+        requestId: 'req-host-hit-color',
+        sessionId,
+        logSessionColorKey: 'route-color-must-not-win'
+      }
+    });
+
+    effects.finalize({
+      target: {
+        providerKey: 'cc.key1.gpt-5.5',
+        modelId: 'gpt-5.5'
+      },
+      decision: {
+        providerKey: 'cc.key1.gpt-5.5',
+        routeName: 'thinking',
+        poolId: 'gateway-priority-5520-priority-thinking',
+        reasoning: 'thinking:user-input'
+      }
+    }, () => null);
+
+    const line = String(logSpy.mock.calls[0]?.[0] ?? '');
+    expect(sessionColor).toBeDefined();
+    expect(routeColor).toBeDefined();
+    expect(line.startsWith(String(sessionColor))).toBe(true);
+    expect(line.startsWith(String(routeColor))).toBe(false);
+    expect(line).toContain('req=req-host-hit-color');
+    expect(line).toContain(`sid=${sessionId}`);
   });
 
   it('prefers request session id over stable tmux scope for log color key', () => {

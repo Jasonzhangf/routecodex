@@ -124,7 +124,7 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.sessionDaemonId).toBe('sessiond_header_1');
   });
 
-  it('extracts session identifiers from request body metadata when input.metadata is empty', () => {
+  it('projects request body session identifiers into inbound metadata and request truth', () => {
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/messages',
       method: 'POST',
@@ -145,11 +145,40 @@ describe('executor metadata session daemon extraction', () => {
 
     expect(metadata.clientDaemonId).toBe('sessiond_header_2');
     expect(metadata.sessionDaemonId).toBe('sessiond_header_2');
-    expect(metadata.sessionId).toBeUndefined();
-    expect(metadata.conversationId).toBeUndefined();
+    expect(metadata.sessionId).toBe('conv_from_body_meta');
+    expect(metadata.conversationId).toBe('conv_from_body_meta');
     expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
       sessionId: 'conv_from_body_meta',
       conversationId: 'conv_from_body_meta'
+    });
+  });
+
+  it('projects responses client_metadata session id into executor metadata and request truth', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-client-metadata-session',
+      headers: {},
+      query: {},
+      body: {
+        model: 'gpt-5.4',
+        client_metadata: {
+          session_id: '019f34fe-5f32-7c71-8931-9ab3d18422a3',
+          thread_id: '019f34fe-5f32-7c71-8931-9ab3d18422a3',
+          turn_id: '019f3cdf-9e6c-7ab3-bd5e-336ba07236d3'
+        },
+        input: []
+      },
+      metadata: {}
+    } as any);
+
+    expect(metadata.sessionId).toBe('019f34fe-5f32-7c71-8931-9ab3d18422a3');
+    expect(metadata.conversationId).toBe('019f34fe-5f32-7c71-8931-9ab3d18422a3');
+    expect(metadata.logSessionColorKey).toBe('019f34fe-5f32-7c71-8931-9ab3d18422a3');
+    expect(metadata.sessionId).not.toBe('019f3cdf-9e6c-7ab3-bd5e-336ba07236d3');
+    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
+      sessionId: '019f34fe-5f32-7c71-8931-9ab3d18422a3',
+      conversationId: '019f34fe-5f32-7c71-8931-9ab3d18422a3'
     });
   });
 
@@ -175,7 +204,7 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.tmuxSessionId).toBe('tmux_turn_meta_1');
   });
 
-  it('does not synthesize request sessionId from tmux-only metadata', () => {
+  it('synthesizes stable request sessionId from tmux-only metadata', () => {
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/responses',
       method: 'POST',
@@ -189,16 +218,17 @@ describe('executor metadata session daemon extraction', () => {
       }
     } as any);
 
+    const expectedSessionId = 'rcc-session:tmux_only_scope_1';
     expect(metadata.clientTmuxSessionId).toBe('tmux_only_scope_1');
     expect(metadata.tmuxSessionId).toBe('tmux_only_scope_1');
-    expect(metadata.sessionId).toBeUndefined();
-    expect(metadata.conversationId).toBeUndefined();
-    expect(metadata.logSessionColorKey).toBe('rcc-session:tmux_only_scope_1');
-    expect(MetadataCenter.read(metadata)?.readRequestTruth().sessionId).toBeUndefined();
-    expect(MetadataCenter.read(metadata)?.readRequestTruth().conversationId).toBeUndefined();
+    expect(metadata.sessionId).toBe(expectedSessionId);
+    expect(metadata.conversationId).toBe(expectedSessionId);
+    expect(metadata.logSessionColorKey).toBe(expectedSessionId);
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().sessionId).toBe(expectedSessionId);
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().conversationId).toBe(expectedSessionId);
   });
 
-  it('builds a log session color key from inbound codex scope without redefining request truth', () => {
+  it('builds request session identity from inbound codex scope', () => {
     const turnMetadata = JSON.stringify({
       scope: {
         tmux_session: 'tmux_log_scope_1'
@@ -218,12 +248,14 @@ describe('executor metadata session daemon extraction', () => {
       metadata: {}
     } as any);
 
-    expect(metadata.sessionId).toBeUndefined();
-    expect(metadata.conversationId).toBeUndefined();
+    const expectedSessionId = 'rcc-session:codex:tmux_log_scope_1:tmp_routecodex-log-scope';
+    expect(metadata.sessionId).toBe(expectedSessionId);
+    expect(metadata.conversationId).toBe(expectedSessionId);
     expect(metadata.clientTmuxSessionId).toBe('tmux_log_scope_1');
     expect(metadata.workdir).toBe('/tmp/routecodex-log-scope');
-    expect(metadata.logSessionColorKey).toBe('rcc-session:codex:tmux_log_scope_1:tmp_routecodex-log-scope');
-    expect(MetadataCenter.read(metadata)?.readRequestTruth().sessionId).toBeUndefined();
+    expect(metadata.logSessionColorKey).toBe(expectedSessionId);
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().sessionId).toBe(expectedSessionId);
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().conversationId).toBe(expectedSessionId);
   });
 
   it('attaches request-scoped metadata center with request truth provenance', () => {
@@ -514,8 +546,8 @@ describe('executor metadata session daemon extraction', () => {
       metadata: {}
     } as any);
 
-    expect(metadata.sessionId).toBeUndefined();
-    expect(metadata.conversationId).toBeUndefined();
+    expect(metadata.sessionId).toBe('sess-codex-header-truth-1');
+    expect(metadata.conversationId).toBe('conv-codex-header-truth-1');
     const center = MetadataCenter.read(metadata);
     expect(center?.readRequestTruth()).toMatchObject({
       sessionId: 'sess-codex-header-truth-1',

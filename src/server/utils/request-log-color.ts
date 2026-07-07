@@ -168,7 +168,8 @@ export function colorizeRequestLog(
   if (!text || !isConsoleColorEnabled()) {
     return text;
   }
-  const color = options?.isError ? ANSI_ERROR_LOG_COLOR : resolveRequestLogColorToken(requestId, context);
+  const requestColor = resolveRequestLogColorToken(requestId, context);
+  const color = requestColor ?? (options?.isError ? ANSI_ERROR_LOG_COLOR : undefined);
   if (!color) {
     return text;
   }

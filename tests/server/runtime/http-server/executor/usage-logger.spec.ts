@@ -130,7 +130,7 @@ describe('usage logger timing summary', () => {
     expect(resolveLocalDayKey(first)).toBe(resolveLocalDayKey(second));
   });
 
-  it('uses tmux session color for every usage line before request session id', async () => {
+  it('uses request session color for every usage line before tmux scope', async () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
     const { resolveSessionAnsiColor } = await import('../../../../../src/utils/session-log-color.js');
@@ -141,7 +141,7 @@ describe('usage logger timing summary', () => {
     for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === tmuxColor; index += 1) {
       requestSessionId = `usage-per-request-session-${index}`;
     }
-    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+    const expectedColor = resolveSessionAnsiColor(requestSessionId);
 
     logUsageSummary('req_usage_color', {
       providerKey: 'demo.key1',
@@ -162,11 +162,10 @@ describe('usage logger timing summary', () => {
     const renderedLines = rendered.split('\n');
     expect(expectedColor).toBeDefined();
     expect(tmuxColor).toBeDefined();
-    expect(expectedColor).toBe(tmuxColor);
     expect(renderedLines.length).toBeGreaterThan(0);
     for (const line of renderedLines) {
       expect(line.startsWith(String(expectedColor))).toBe(true);
-      expect(line.startsWith(String(resolveSessionAnsiColor(requestSessionId)))).toBe(false);
+      expect(line.startsWith(String(tmuxColor))).toBe(false);
     }
     expect(renderedLines).toHaveLength(1);
     expect(rendered).toContain('finish_reason=\x1b[97mstop');

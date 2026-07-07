@@ -63,7 +63,8 @@ describe('logRequestStart', () => {
 
   it('registers request start color from tmux session metadata', async () => {
     const { resolveSessionAnsiColor } = await import('../../../src/utils/session-log-color.js');
-    const expectedColor = resolveSessionAnsiColor('request-start-tmux');
+    const expectedColor = resolveSessionAnsiColor('request-start-session');
+    const tmuxColor = resolveSessionAnsiColor('request-start-tmux');
 
     logRequestStart('/v1/responses', 'req-start-session-color', {
       sessionId: 'request-start-session',
@@ -73,7 +74,9 @@ describe('logRequestStart', () => {
 
     const rendered = String(warnSpy.mock.calls.at(-1)?.[0] ?? '');
     expect(expectedColor).toBeDefined();
+    expect(tmuxColor).toBeDefined();
     expect(rendered.startsWith(String(expectedColor))).toBe(true);
+    expect(rendered.startsWith(String(tmuxColor))).toBe(false);
   });
 
   it('builds request start color from inbound codex session scope', async () => {
@@ -90,7 +93,8 @@ describe('logRequestStart', () => {
       }
     });
     const expectedSessionId = 'rcc-session:codex:tmux-start-log-scope:tmp_start-log-project';
-    const expectedColor = resolveSessionAnsiColor('tmux-start-log-scope');
+    const expectedColor = resolveSessionAnsiColor(expectedSessionId);
+    const tmuxColor = resolveSessionAnsiColor('tmux-start-log-scope');
 
     logRequestStart('/v1/responses', 'req-start-codex-scope-color', {
       clientRequestId: 'client-start-codex-scope',
@@ -103,6 +107,40 @@ describe('logRequestStart', () => {
     expect(logMetadata.conversationId).toBe(expectedSessionId);
     expect(logMetadata.logSessionColorKey).toBe(expectedSessionId);
     expect(expectedColor).toBeDefined();
+    expect(tmuxColor).toBeDefined();
     expect(rendered.startsWith(String(expectedColor))).toBe(true);
+    expect(rendered.startsWith(String(tmuxColor))).toBe(false);
+  });
+
+  it('builds request start color from responses client_metadata session id', async () => {
+    const { resolveSessionAnsiColor } = await import('../../../src/utils/session-log-color.js');
+    const expectedSessionId = '019f34fe-5f32-7c71-8931-9ab3d18422a3';
+    const expectedColor = resolveSessionAnsiColor(expectedSessionId);
+    const defaultStartColor = '\x1b[36m';
+    const logMetadata = buildHandlerLogMetadata({
+      entryEndpoint: '/v1/responses',
+      headers: {
+        'user-agent': 'codex-cli'
+      },
+      clientMetadata: {
+        session_id: expectedSessionId,
+        thread_id: expectedSessionId,
+        turn_id: '019f3cdf-9e6c-7ab3-bd5e-336ba07236d3'
+      }
+    });
+
+    logRequestStart('/v1/responses', 'req-start-client-metadata-color', {
+      clientRequestId: 'client-start-client-metadata-color',
+      ...logMetadata,
+      inboundStream: true
+    });
+
+    const rendered = String(warnSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(logMetadata.sessionId).toBe(expectedSessionId);
+    expect(logMetadata.conversationId).toBe(expectedSessionId);
+    expect(logMetadata.logSessionColorKey).toBe(expectedSessionId);
+    expect(expectedColor).toBeDefined();
+    expect(rendered.startsWith(String(expectedColor))).toBe(true);
+    expect(rendered.startsWith(defaultStartColor)).toBe(false);
   });
 });

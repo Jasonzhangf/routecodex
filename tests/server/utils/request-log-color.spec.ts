@@ -98,7 +98,7 @@ describe('request log color registry', () => {
     for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === tmuxColor; index += 1) {
       requestSessionId = `session-vr-hit-context-${index}`;
     }
-    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+    const expectedColor = resolveSessionAnsiColor(requestSessionId);
     const requestId = 'req-vr-hit-context';
 
     registerRequestLogContext(requestId, {
@@ -111,7 +111,7 @@ describe('request log color registry', () => {
 
     expect(expectedColor).toBeDefined();
     expect(tmuxColor).toBeDefined();
-    expect(expectedColor).toBe(tmuxColor);
+    expect(expectedColor).toBe(resolveSessionAnsiColor(requestSessionId));
     expect(line.startsWith(String(expectedColor))).toBe(true);
     expect(line).not.toContain('\x1b[38;5;208m[virtual-router-hit]\x1b[0m');
     expect(stripAnsiCodes(line)).toContain(`req=${requestId} tools/pool -> provider.model`);
@@ -146,20 +146,24 @@ describe('request log color registry', () => {
     expect(stripAnsiCodes(routerHitLine)).toContain(`req=${requestId} longcontext/gateway-priority-5555-priority-longcontext`);
   });
 
-  it('keeps one tmux session color across request, virtual-router-hit, and usage routes', () => {
+  it('keeps one request session color across request, virtual-router-hit, and usage routes', () => {
     const tmuxSessionId = 'tmux-one-visible-session';
-    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+    const tmuxColor = resolveSessionAnsiColor(tmuxSessionId);
     const longcontextRouteColor = '\x1b[38;5;141m';
     const thinkingRouteColor = '\x1b[34m';
     const firstRequestId = 'openai-responses-router-gpt-5.4-20260708T000514123-477223-5339';
     const secondRequestId = 'openai-responses-router-gpt-5.4-20260708T001134174-477269-5385';
+    const sessionId = 'same-visible-session-id';
+    const expectedColor = resolveSessionAnsiColor(sessionId);
 
     registerRequestLogContext(firstRequestId, {
       clientTmuxSessionId: tmuxSessionId,
+      sessionId,
       logSessionColorKey: 'synthetic-longcontext-key'
     });
     registerRequestLogContext(secondRequestId, {
       clientTmuxSessionId: tmuxSessionId,
+      sessionId,
       logSessionColorKey: 'synthetic-thinking-key'
     });
 
@@ -175,6 +179,7 @@ describe('request log color registry', () => {
     const secondUsageLine = colorizeRequestLog('[usage] req=269-5385 route=router-direct:thinking', secondRequestId);
 
     expect(expectedColor).toBeDefined();
+    expect(tmuxColor).toBeDefined();
     for (const line of [
       firstStartLine,
       firstHitLine,
@@ -184,6 +189,7 @@ describe('request log color registry', () => {
       secondUsageLine
     ]) {
       expect(line.startsWith(String(expectedColor))).toBe(true);
+      expect(line.startsWith(String(tmuxColor))).toBe(false);
       expect(line.startsWith(longcontextRouteColor)).toBe(false);
       expect(line.startsWith(thinkingRouteColor)).toBe(false);
     }
@@ -198,7 +204,7 @@ describe('request log color registry', () => {
     expect(line).not.toContain('\x1b[90m[virtual-router-hit]\x1b[0m');
   });
 
-  it('uses tmux session color before request session color across different requests', () => {
+  it('uses request session color before tmux scope across different requests', () => {
     const tmuxSessionId = 'tmux-stable-color-1';
     const tmuxColor = resolveSessionAnsiColor(tmuxSessionId);
     const firstSessionColor = resolveSessionAnsiColor('request-session-a');
@@ -216,22 +222,22 @@ describe('request log color registry', () => {
     expect(tmuxColor).toBeDefined();
     expect(firstSessionColor).toBeDefined();
     expect(secondSessionColor).toBeDefined();
-    expect(resolveRequestLogColorToken('req-stable-color-a')).toBe(tmuxColor);
-    expect(resolveRequestLogColorToken('req-stable-color-b')).toBe(tmuxColor);
+    expect(resolveRequestLogColorToken('req-stable-color-a')).toBe(firstSessionColor);
+    expect(resolveRequestLogColorToken('req-stable-color-b')).toBe(secondSessionColor);
     expect(resolveRequestLogColorToken('req-stable-color-c', {
       clientTmuxSessionId: tmuxSessionId,
       sessionId: 'request-session-c'
-    })).toBe(tmuxColor);
+    })).toBe(resolveSessionAnsiColor('request-session-c'));
   });
 
-  it('uses one registered tmux color for request, response, and usage lines', () => {
+  it('uses one registered request session color for request, response, and usage lines', () => {
     const tmuxSessionId = 'tmux-same-color-log-family';
     const tmuxColor = resolveSessionAnsiColor(tmuxSessionId);
     let requestSessionId = 'request-specific-session';
     for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === tmuxColor; index += 1) {
       requestSessionId = `request-specific-session-${index}`;
     }
-    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
+    const expectedColor = resolveSessionAnsiColor(requestSessionId);
 
     registerRequestLogContext('req-same-color', {
       clientTmuxSessionId: tmuxSessionId,
@@ -244,13 +250,13 @@ describe('request log color registry', () => {
 
     expect(expectedColor).toBeDefined();
     expect(tmuxColor).toBeDefined();
-    expect(expectedColor).toBe(tmuxColor);
+    expect(expectedColor).toBe(resolveSessionAnsiColor(requestSessionId));
     expect(requestLine.startsWith(String(expectedColor))).toBe(true);
     expect(responseLine.startsWith(String(expectedColor))).toBe(true);
     expect(usageLine.startsWith(String(expectedColor))).toBe(true);
-    expect(requestLine.startsWith(String(resolveSessionAnsiColor(requestSessionId)))).toBe(false);
-    expect(responseLine.startsWith(String(resolveSessionAnsiColor(requestSessionId)))).toBe(false);
-    expect(usageLine.startsWith(String(resolveSessionAnsiColor(requestSessionId)))).toBe(false);
+    expect(requestLine.startsWith(String(tmuxColor))).toBe(false);
+    expect(responseLine.startsWith(String(tmuxColor))).toBe(false);
+    expect(usageLine.startsWith(String(tmuxColor))).toBe(false);
   });
 
   it('colors virtual-router-hit lines from sid without request context', () => {
@@ -360,12 +366,25 @@ describe('request log color registry', () => {
     expect(line.includes('\x1b[97m')).toBe(false);
   });
 
-  it('colors error request logs red', () => {
+  it('uses the registered session color for failed request logs', () => {
     const sessionId = 'session-error-log';
     const line = colorizeRequestLog(
       '❌ [/v1/responses] 21:05:22 request req-error failed: upstream 503',
       'req-error',
       { sessionId },
+      { isError: true }
+    );
+
+    expect(line.startsWith(String(resolveSessionAnsiColor(sessionId)))).toBe(true);
+    expect(line.startsWith('\x1b[31m')).toBe(false);
+    expect(line).toContain('503');
+  });
+
+  it('keeps red error color only when no request session color exists', () => {
+    const line = colorizeRequestLog(
+      '❌ [/v1/responses] 21:05:22 request req-error-no-session failed: upstream 503',
+      'req-error-no-session',
+      undefined,
       { isError: true }
     );
 
