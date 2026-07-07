@@ -1,7 +1,8 @@
 import type { Readable } from 'node:stream';
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { JsonObject } from '../types/json.js';
-import type { StageRecorder } from '../pipeline/hub-pipeline-types.js';
+// StageRecorder inline: record(stage: string, payload: object): void
+type StageRecorder = { record(stage: string, payload: object): void };
 import { recordStage } from '../pipeline/stages/utils.js';
 import {
   executeHubPipelineWithNative,

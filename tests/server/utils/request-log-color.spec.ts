@@ -91,7 +91,7 @@ describe('request log color registry', () => {
     expect(String(logSpy.mock.calls[0]?.[0] ?? '').startsWith(String(expectedColor))).toBe(true);
   });
 
-  it('colors virtual-router-hit lines from registered request context when sid is absent', () => {
+  it('does not color virtual-router-hit lines from registered request context when sid is absent', () => {
     const tmuxSessionId = 'tmux-vr-hit-context';
     const tmuxColor = resolveSessionAnsiColor(tmuxSessionId);
     let requestSessionId = 'session-vr-hit-context';
@@ -112,8 +112,9 @@ describe('request log color registry', () => {
     expect(expectedColor).toBeDefined();
     expect(tmuxColor).toBeDefined();
     expect(expectedColor).not.toBe(tmuxColor);
-    expect(line.startsWith(String(expectedColor))).toBe(true);
-    expect(line).toContain(`req=${requestId} tools/pool -> provider.model`);
+    expect(line.startsWith(String(expectedColor))).toBe(false);
+    expect(line).toContain('\x1b[38;5;208m[virtual-router-hit]\x1b[0m');
+    expect(stripAnsiCodes(line)).toContain(`req=${requestId} tools/pool -> provider.model`);
     expect(line.includes('\x1b[97m')).toBe(false);
   });
 

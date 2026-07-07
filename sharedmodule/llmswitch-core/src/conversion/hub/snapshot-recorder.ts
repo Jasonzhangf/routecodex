@@ -1,4 +1,5 @@
-import type { StageRecorder } from './pipeline/hub-pipeline-types.js';
+// StageRecorder inline: record(stage: string, payload: object): void
+type StageRecorder = { record(stage: string, payload: object): void };
 import type { AdapterContext } from './types/chat-envelope.js';
 import { buildSnapshotRecorderWriteOptionsWithNative, writeSnapshotViaHooksWithNative, shouldRecordSnapshotsWithNative } from '../../native/router-hotpath/native-snapshot-hooks.js';
 import { normalizeSnapshotStagePayloadWithNative } from '../../native/router-hotpath/native-snapshot-hooks.js';

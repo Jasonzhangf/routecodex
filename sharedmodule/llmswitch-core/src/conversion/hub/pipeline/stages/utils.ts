@@ -1,4 +1,5 @@
-import type { StageRecorder } from '../hub-pipeline-types.js';
+// StageRecorder inline: record(stage: string, payload: object): void
+type StageRecorder = { record(stage: string, payload: object): void };
 import { parseLenientJsonishWithNative } from '../../../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 function normalizeRecordPayload(payload: unknown): object {

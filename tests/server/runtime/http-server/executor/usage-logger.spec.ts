@@ -176,7 +176,7 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('\x1b[97m');
   });
 
-  it('does not inherit virtual-router-hit route color when request has no session key', async () => {
+  it('does not recolor virtual-router-hit or usage lines when request has no session key', async () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const { colorizeVirtualRouterHitLogLine, registerRequestLogContext } = await import('../../../../../src/server/utils/request-log-color.js');
     const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
@@ -188,6 +188,7 @@ describe('usage logger timing summary', () => {
       `${routeColor}[virtual-router-hit]\x1b[0m \x1b[90m16:21:36\x1b[0m req=${requestId} ${routeColor}longcontext/gateway-priority-5555-priority-longcontext -> orangeai[key1].glm-5.2 reason=longcontext:token-threshold\x1b[0m`
     );
     expect(routerHitLine.startsWith(routeColor)).toBe(true);
+    expect(routerHitLine).toContain(`${routeColor}longcontext/gateway-priority-5555-priority-longcontext`);
 
     logUsageSummary(requestId, {
       providerKey: 'orangeai.key1',

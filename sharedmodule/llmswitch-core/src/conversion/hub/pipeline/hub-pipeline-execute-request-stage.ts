@@ -43,13 +43,10 @@ function syncRequestStageRuntimeControlToMetadataCenter(args: {
 }
 
 // feature_id: hub.request_stage_pipeline_bridge
-export async function executeRequestStagePipeline<TContext = Record<string, unknown>>(args: {
-  normalized: NormalizedRequest;
-  routerEngine: VirtualRouterRuntime;
-  config: HubPipelineConfig;
-  entryMode?: "request_stage" | "chat_process";
-}): Promise<HubPipelineResult> {
-  const { normalized, config } = args;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function executeRequestStagePipeline(args: any): Promise<any> {
+  const normalized = args.normalized;
+  const config = args.config;
   const entryMode = args.entryMode ?? "request_stage";
   const requestTruthPayload = readRequestTruthFromBoundMetadataCenter(normalized.metadata);
   const continuationContextPayload = readContinuationContextFromBoundMetadataCenter(normalized.metadata);
