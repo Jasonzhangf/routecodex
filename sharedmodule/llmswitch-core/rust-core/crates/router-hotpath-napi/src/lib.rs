@@ -239,17 +239,6 @@ pub fn update_route_codex_toml_string_scalar_in_table_json(
 }
 
 #[napi]
-pub fn decode_route_codex_user_config_file_json(input_json: String) -> NapiResult<String> {
-    config_file_codec::decode_user_config_file_json(&input_json).map_err(napi::Error::from_reason)
-}
-
-#[napi]
-pub fn decode_route_codex_provider_config_file_json(input_json: String) -> NapiResult<String> {
-    config_file_codec::decode_provider_config_file_json(&input_json)
-        .map_err(napi::Error::from_reason)
-}
-
-#[napi]
 pub fn decode_route_codex_user_config_text_json(input_json: String) -> NapiResult<String> {
     config_file_codec::decode_user_config_text_json(&input_json).map_err(napi::Error::from_reason)
 }

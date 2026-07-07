@@ -36,8 +36,6 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "parseRouteCodexTomlRecordJson",
   "serializeRouteCodexTomlRecordJson",
   "updateRouteCodexTomlStringScalarInTableJson",
-  "decodeRouteCodexUserConfigFileJson",
-  "decodeRouteCodexProviderConfigFileJson",
   "decodeRouteCodexUserConfigTextJson",
   "decodeRouteCodexProviderConfigTextJson",
   "coerceRouteCodexProviderConfigV2Json",

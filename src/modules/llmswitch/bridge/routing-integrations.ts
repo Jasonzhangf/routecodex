@@ -265,36 +265,6 @@ export function updateRouteCodexTomlStringScalarInTableSync(input: {
   })));
 }
 
-export function decodeRouteCodexUserConfigFileSync(configPath: string): {
-  path: string;
-  format: 'toml';
-  raw: string;
-  parsed: AnyRecord;
-} {
-  const binding = loadNativeBindingForConfigCodec();
-  const fn = binding.decodeRouteCodexUserConfigFileJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] decodeRouteCodexUserConfigFileJson not available');
-  }
-  const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') }))) as unknown;
-  return parseDecodedConfigFileOutput(output, 'user');
-}
-
-export function decodeRouteCodexProviderConfigFileSync(configPath: string): {
-  path: string;
-  format: 'toml';
-  raw: string;
-  parsed: AnyRecord;
-} {
-  const binding = loadNativeBindingForConfigCodec();
-  const fn = binding.decodeRouteCodexProviderConfigFileJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] decodeRouteCodexProviderConfigFileJson not available');
-  }
-  const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') }))) as unknown;
-  return parseDecodedConfigFileOutput(output, 'provider');
-}
-
 export function decodeRouteCodexUserConfigTextSync(input: {
   raw: string;
   configPath?: string;
@@ -489,32 +459,6 @@ function safeBridgeCwd(): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function parseDecodedConfigFileOutput(output: unknown, kind: 'user' | 'provider'): {
-  path: string;
-  format: 'toml';
-  raw: string;
-  parsed: AnyRecord;
-} {
-  if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    throw new Error(`[llmswitch-bridge] RouteCodex ${kind} config decoder returned invalid payload`);
-  }
-  const record = output as AnyRecord;
-  if (typeof record.path !== 'string' ||
-      record.format !== 'toml' ||
-      typeof record.raw !== 'string' ||
-      !record.parsed ||
-      typeof record.parsed !== 'object' ||
-      Array.isArray(record.parsed)) {
-    throw new Error(`[llmswitch-bridge] RouteCodex ${kind} config decoder returned invalid shape`);
-  }
-  return {
-    path: record.path,
-    format: 'toml',
-    raw: record.raw,
-    parsed: record.parsed as AnyRecord,
-  };
 }
 
 function parseDecodedConfigTextOutput(output: unknown, kind: 'user' | 'provider'): {

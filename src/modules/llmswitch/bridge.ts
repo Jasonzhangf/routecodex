@@ -100,8 +100,6 @@ export {
   serializeRouteCodexTomlRecordSync,
   updateRouteCodexTomlStringScalarInTable,
   updateRouteCodexTomlStringScalarInTableSync,
-  decodeRouteCodexUserConfigFileSync,
-  decodeRouteCodexProviderConfigFileSync,
   decodeRouteCodexUserConfigTextSync,
   decodeRouteCodexProviderConfigTextSync,
   coerceRouteCodexProviderConfigV2,

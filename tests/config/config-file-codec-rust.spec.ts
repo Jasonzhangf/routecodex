@@ -3,47 +3,28 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  decodeRouteCodexProviderConfigFileSync,
   decodeRouteCodexProviderConfigTextSync,
-  decodeRouteCodexUserConfigFileSync,
   decodeRouteCodexUserConfigTextSync,
 } from '../../src/modules/llmswitch/bridge.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
-
-type DecodedConfigFile = {
-  path: string;
-  format: 'toml';
-  raw: string;
-  parsed: Record<string, unknown>;
-};
 
 async function mkTmp(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-function legacyDecodeUserConfig(raw: string, configPath: string): DecodedConfigFile {
+function legacyDecodeUserConfig(raw: string, configPath: string): Record<string, unknown> {
   const ext = path.extname(configPath).trim().toLowerCase();
   if (ext !== '.toml') {
     throw new Error(`[config] user config JSON support removed; expected TOML file: ${configPath}`);
   }
-  return {
-    path: configPath,
-    format: 'toml',
-    raw,
-    parsed: raw.trim() ? parseTomlRecord(raw) : {},
-  };
+  return raw.trim() ? parseTomlRecord(raw) : {};
 }
 
-function legacyDecodeProviderConfig(raw: string, configPath: string): DecodedConfigFile {
+function legacyDecodeProviderConfig(raw: string, configPath: string): Record<string, unknown> {
   if (!configPath.trim().toLowerCase().endsWith('.toml')) {
     throw new Error(`[config] provider config JSON support removed; expected TOML file: ${configPath}`);
   }
-  return {
-    path: configPath,
-    format: 'toml',
-    raw,
-    parsed: raw.trim() ? parseTomlRecord(raw) : {},
-  };
+  return raw.trim() ? parseTomlRecord(raw) : {};
 }
 
 describe('config file codec rust parity', () => {
@@ -54,7 +35,7 @@ describe('config file codec rust parity', () => {
     await fs.writeFile(configPath, raw, 'utf8');
 
     const legacy = legacyDecodeUserConfig(raw, configPath);
-    const native = decodeRouteCodexUserConfigFileSync(configPath);
+    const native = decodeRouteCodexUserConfigTextSync({ raw, configPath }).parsed;
 
     expect(native).toEqual(legacy);
   });
@@ -74,7 +55,7 @@ describe('config file codec rust parity', () => {
     await fs.writeFile(configPath, raw, 'utf8');
 
     const legacy = legacyDecodeProviderConfig(raw, configPath);
-    const native = decodeRouteCodexProviderConfigFileSync(configPath);
+    const native = decodeRouteCodexProviderConfigTextSync({ raw, configPath }).parsed;
 
     expect(native).toEqual(legacy);
   });
@@ -87,7 +68,7 @@ describe('config file codec rust parity', () => {
     expect(() => legacyDecodeUserConfig('{"version":"2.0.0"}\n', configPath)).toThrow(
       'user config JSON support removed'
     );
-    expect(() => decodeRouteCodexUserConfigFileSync(configPath)).toThrow(
+    expect(() => decodeRouteCodexUserConfigTextSync({ raw: '{"version":"2.0.0"}\n', configPath })).toThrow(
       'user config JSON support removed'
     );
   });
@@ -100,14 +81,14 @@ describe('config file codec rust parity', () => {
     expect(() => legacyDecodeProviderConfig('{"version":"2.0.0"}\n', configPath)).toThrow(
       'provider config JSON support removed'
     );
-    expect(() => decodeRouteCodexProviderConfigFileSync(configPath)).toThrow(
+    expect(() => decodeRouteCodexProviderConfigTextSync({ raw: '{"version":"2.0.0"}\n', configPath })).toThrow(
       'provider config JSON support removed'
     );
   });
 
   it('matches pre-wire user config text decode semantics', () => {
     const raw = ['version = "2.0.0"', 'virtualrouterMode = "v2"', ''].join('\n');
-    const legacy = legacyDecodeUserConfig(raw, 'config.toml').parsed;
+    const legacy = legacyDecodeUserConfig(raw, 'config.toml');
     const native = decodeRouteCodexUserConfigTextSync({ raw, configPath: 'config.toml' }).parsed;
 
     expect(native).toEqual(legacy);
@@ -123,7 +104,7 @@ describe('config file codec rust parity', () => {
       'type = "openai"',
       '',
     ].join('\n');
-    const legacy = legacyDecodeProviderConfig(raw, 'config.v2.toml').parsed;
+    const legacy = legacyDecodeProviderConfig(raw, 'config.v2.toml');
     const native = decodeRouteCodexProviderConfigTextSync({ raw, configPath: 'config.v2.toml' }).parsed;
 
     expect(native).toEqual(legacy);
