@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
-import type { VirtualRouterConfig } from "../../../native/router-hotpath/virtual-router-contracts.js";
 import {
   createVirtualRouterRuntime,
+  type VirtualRouterConfig,
   type VirtualRouterRuntime
 } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
 import { executeRequestStagePipeline } from "./hub-pipeline-execute-request-stage.js";

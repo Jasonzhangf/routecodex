@@ -611,7 +611,7 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
   const candidates: Array<{ kind: RoutingSourceSummary['kind']; label: string; path: string }> = [];
   candidates.push({ kind: 'active', label: 'Active config', path: activePath });
 
-  for (const defaultConfig of [path.join(routecodexHome, 'config.toml'), path.join(routecodexHome, 'config.json')]) {
+  for (const defaultConfig of [path.join(routecodexHome, 'config.toml')]) {
     if (defaultConfig === activePath) {
       continue;
     }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { registerDefaultMiddleware } from '../../../src/server/runtime/http-server/middleware.js';
 import { registerHttpRoutes } from '../../../src/server/runtime/http-server/routes.js';
+import { serializeTomlRecord } from '../../../src/config/toml-basic.js';
 
 // Canonical builder trace for server.models_capability_contract:
 // buildCodexModelMetadata / buildCodexAdvancedModelMetadata / collectConfiguredModelItems
@@ -93,8 +94,8 @@ describe('http routes invalid json handling', () => {
     process.env.RCC_HOME = tmp;
     await fs.mkdir(providerDir, { recursive: true });
     await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      JSON.stringify(
+      path.join(providerDir, 'config.v2.toml'),
+      `${serializeTomlRecord(
         {
           version: '2.0.0',
           providerId: 'demo-web',
@@ -111,10 +112,8 @@ describe('http routes invalid json handling', () => {
               }
             }
           }
-        },
-        null,
-        2
-      ),
+        }
+      )}\n`,
       'utf8'
     );
 
@@ -155,8 +154,8 @@ describe('http routes invalid json handling', () => {
     process.env.RCC_HOME = tmp;
     await fs.mkdir(providerDir, { recursive: true });
     await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      JSON.stringify(
+      path.join(providerDir, 'config.v2.toml'),
+      `${serializeTomlRecord(
         {
           version: '2.0.0',
           providerId: 'minimax',
@@ -176,10 +175,8 @@ describe('http routes invalid json handling', () => {
               }
             }
           }
-        },
-        null,
-        2
-      ),
+        }
+      )}\n`,
       'utf8'
     );
 
@@ -240,8 +237,8 @@ describe('http routes invalid json handling', () => {
     process.env.RCC_HOME = tmp;
     await fs.mkdir(providerDir, { recursive: true });
     await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      JSON.stringify(
+      path.join(providerDir, 'config.v2.toml'),
+      `${serializeTomlRecord(
         {
           version: '2.0.0',
           providerId: 'demo-web',
@@ -256,10 +253,8 @@ describe('http routes invalid json handling', () => {
               'gpt-5.5': { supportsStreaming: true }
             }
           }
-        },
-        null,
-        2
-      ),
+        }
+      )}\n`,
       'utf8'
     );
 

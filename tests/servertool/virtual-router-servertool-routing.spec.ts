@@ -1,9 +1,5 @@
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig, type RouterMetadataInput, type VirtualRouterBootstrapInput } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
-import type {
-  RouterMetadataInput,
-  VirtualRouterBootstrapInput
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 import type {
   StandardizedMessage,
   StandardizedRequest

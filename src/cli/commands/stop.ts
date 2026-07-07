@@ -480,14 +480,97 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
           }
 
           const remain = ctx.findListeningPids(resolvedPort);
-          spinner.fail(`Graceful stop timed out on ${resolvedPort}; direct signal fallback is disabled.`);
+          for (const pid of remain) {
+            try {
+              ctx.killPidBestEffort(pid, { force: false });
+            } catch (error) {
+              logProcessLifecycleSync({
+                event: 'stop_command',
+                source: 'cli.stop',
+                details: {
+                  result: 'sigterm_failed',
+                  port: resolvedPort,
+                  pid,
+                  error: error instanceof Error ? error.message : String(error),
+                  ...callerAudit
+                }
+              });
+            }
+          }
+
+          const signalDeadline = Date.now() + 3000;
+          while (Date.now() < signalDeadline) {
+            if (ctx.findListeningPids(resolvedPort).length === 0) {
+              spinner.succeed(`Stopped server on ${resolvedPort}.`);
+              logProcessLifecycleSync({
+                event: 'stop_command',
+                source: 'cli.stop',
+                details: {
+                  result: 'stopped_via_sigterm',
+                  port: resolvedPort,
+                  ...callerAudit
+                }
+              });
+              await finalizeStop(resolvedPort);
+              stopped = true;
+              break;
+            }
+            await ctx.sleep(100);
+          }
+          if (stopped) {
+            continue;
+          }
+
+          const forceRemain = ctx.findListeningPids(resolvedPort);
+          for (const pid of forceRemain) {
+            try {
+              ctx.killPidBestEffort(pid, { force: true });
+            } catch (error) {
+              logProcessLifecycleSync({
+                event: 'stop_command',
+                source: 'cli.stop',
+                details: {
+                  result: 'sigkill_failed',
+                  port: resolvedPort,
+                  pid,
+                  error: error instanceof Error ? error.message : String(error),
+                  ...callerAudit
+                }
+              });
+            }
+          }
+
+          const forceDeadline = Date.now() + 3000;
+          while (Date.now() < forceDeadline) {
+            if (ctx.findListeningPids(resolvedPort).length === 0) {
+              spinner.succeed(`Stopped server on ${resolvedPort}.`);
+              logProcessLifecycleSync({
+                event: 'stop_command',
+                source: 'cli.stop',
+                details: {
+                  result: 'stopped_via_sigkill',
+                  port: resolvedPort,
+                  ...callerAudit
+                }
+              });
+              await finalizeStop(resolvedPort);
+              stopped = true;
+              break;
+            }
+            await ctx.sleep(100);
+          }
+          if (stopped) {
+            continue;
+          }
+
+          spinner.fail(`Failed to stop managed server on ${resolvedPort}; remaining PID(s): ${ctx.findListeningPids(resolvedPort).join(', ')}`);
           logProcessLifecycleSync({
             event: 'stop_command',
             source: 'cli.stop',
             details: {
-              result: 'graceful_timeout_no_fallback',
+              result: 'managed_signal_fallback_failed',
               port: resolvedPort,
-              remainingPids: remain,
+              remainingPids: ctx.findListeningPids(resolvedPort),
               ...callerAudit
             }
           });

@@ -2,8 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
-import type { ProviderRuntimeProfile } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
+import { bootstrapVirtualRouterConfig, type ProviderRuntimeProfile } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 
 function bootstrapProvider(providerId: string, provider: Record<string, unknown>, modelId: string): ProviderRuntimeProfile {
   const result = bootstrapVirtualRouterConfig({

@@ -261,6 +261,32 @@ pub(super) fn detect_custom_tool_declared(tools: Option<&Value>) -> bool {
     })
 }
 
+pub(super) fn detect_apply_patch_tool_choice(tool_choice: Option<&Value>) -> bool {
+    let Some(tool_choice) = tool_choice else {
+        return false;
+    };
+    if let Some(raw) = tool_choice.as_str() {
+        return raw.trim().eq_ignore_ascii_case("apply_patch");
+    }
+    let Some(obj) = tool_choice.as_object() else {
+        return false;
+    };
+    if obj
+        .get("name")
+        .and_then(Value::as_str)
+        .map(|name| name.trim().eq_ignore_ascii_case("apply_patch"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    obj.get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .map(|name| name.trim().eq_ignore_ascii_case("apply_patch"))
+        .unwrap_or(false)
+}
+
 pub(super) fn extract_meaningful_declared_tool_names(tools: Option<&Value>) -> Vec<String> {
     let tools = match tools.and_then(|v| v.as_array()) {
         Some(list) => list,

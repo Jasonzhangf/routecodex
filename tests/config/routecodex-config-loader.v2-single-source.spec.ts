@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadRouteCodexConfig } from '../../src/config/routecodex-config-loader.js';
+import { serializeTomlRecord } from '../../src/config/toml-basic.js';
 
 async function mkTmp(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -48,7 +49,11 @@ async function writeProviderConfig(root: string): Promise<void> {
       }
     }
   };
-  await fs.writeFile(path.join(providerDir, 'config.v2.json'), `${JSON.stringify(providerPayload, null, 2)}\n`, 'utf8');
+  await fs.writeFile(path.join(providerDir, 'config.v2.toml'), `${serializeTomlRecord(providerPayload)}\n`, 'utf8');
+}
+
+async function writeUserConfig(configPath: string, payload: Record<string, unknown>): Promise<void> {
+  await fs.writeFile(configPath, `${serializeTomlRecord(payload)}\n`, 'utf8');
 }
 
 describe('loadRouteCodexConfig v2 single-source layout', () => {
@@ -69,7 +74,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     process.env.ROUTECODEX_HOME = root;
     await writeProviderConfig(root);
 
-    const configPath = path.join(root, 'config.json');
+    const configPath = path.join(root, 'config.toml');
     const configPayload = {
       version: '2.0.0',
       virtualrouterMode: 'v2',
@@ -100,7 +105,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
         }
       }
     };
-    await fs.writeFile(configPath, `${JSON.stringify(configPayload, null, 2)}\n`, 'utf8');
+    await writeUserConfig(configPath, configPayload);
 
     const before = await fs.readFile(configPath, 'utf8');
     const loaded = await loadRouteCodexConfig(configPath);
@@ -119,7 +124,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     process.env.ROUTECODEX_HOME = root;
     await writeProviderConfig(root);
 
-    const configPath = path.join(root, 'config.json');
+    const configPath = path.join(root, 'config.toml');
     const configPayload = {
       version: '2.0.0',
       virtualrouterMode: 'v2',
@@ -153,7 +158,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
         }
       }
     };
-    await fs.writeFile(configPath, `${JSON.stringify(configPayload, null, 2)}\n`, 'utf8');
+    await writeUserConfig(configPath, configPayload);
 
     await expect(loadRouteCodexConfig(configPath)).rejects.toThrow('v2 config disallows top-level field "providers"');
   });
@@ -165,10 +170,10 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     process.env.ROUTECODEX_HOME = root;
     await writeProviderConfig(root);
 
-    const configPath = path.join(root, 'config.json');
-    await fs.writeFile(
+    const configPath = path.join(root, 'config.toml');
+    await writeUserConfig(
       configPath,
-      `${JSON.stringify({
+      {
         version: '2.0.0',
         virtualrouterMode: 'v2',
         httpserver: {
@@ -194,8 +199,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
             }
           }
         }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
 
     const loaded = await loadRouteCodexConfig(configPath);
@@ -209,7 +213,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     process.env.ROUTECODEX_HOME = root;
     await writeProviderConfig(root);
 
-    const configPath = path.join(root, 'config.json');
+    const configPath = path.join(root, 'config.toml');
     const configPayload = {
       version: '2.0.0',
       httpserver: {
@@ -243,7 +247,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
         }
       }
     };
-    await fs.writeFile(configPath, `${JSON.stringify(configPayload, null, 2)}\n`, 'utf8');
+    await writeUserConfig(configPath, configPayload);
 
     const before = await fs.readFile(configPath, 'utf8');
     const loaded = await loadRouteCodexConfig(configPath);
@@ -261,10 +265,10 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     process.env.ROUTECODEX_HOME = root;
     await writeProviderConfig(root);
 
-    const configPath = path.join(root, 'config.json');
-    await fs.writeFile(
+    const configPath = path.join(root, 'config.toml');
+    await writeUserConfig(
       configPath,
-      `${JSON.stringify({
+      {
         version: '2.0.0',
         virtualrouterMode: 'v2',
         httpserver: {
@@ -288,8 +292,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
             }
           }
         }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
 
     await expect(loadRouteCodexConfig(configPath)).rejects.toThrow(
@@ -304,10 +307,10 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     process.env.ROUTECODEX_HOME = root;
     await writeProviderConfig(root);
 
-    const configPath = path.join(root, 'config.json');
-    await fs.writeFile(
+    const configPath = path.join(root, 'config.toml');
+    await writeUserConfig(
       configPath,
-      `${JSON.stringify({
+      {
         version: '2.0.0',
         virtualrouterMode: 'v2',
         httpserver: {
@@ -331,8 +334,7 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
             }
           }
         }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
 
     await expect(loadRouteCodexConfig(configPath)).rejects.toThrow(

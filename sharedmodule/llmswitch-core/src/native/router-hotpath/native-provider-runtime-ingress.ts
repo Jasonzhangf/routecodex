@@ -5,6 +5,13 @@ import {
 import { failNativeRequired } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 
+export type {
+  ProviderErrorEvent,
+  ProviderErrorRuntimeMetadata,
+  ProviderSuccessEvent,
+  ProviderSuccessRuntimeMetadata
+} from './virtual-router-contracts.js';
+
 export type InternalRouterPolicyErrorSource = {
   code: string;
   message: string;

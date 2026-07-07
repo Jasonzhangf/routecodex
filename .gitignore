@@ -1,5 +1,6 @@
 # Build artifacts
 dist/
+build/
 coverage/
 config/pipeline-config.generated.json
 config/llmswitch/
@@ -14,6 +15,13 @@ artifacts/pack/
 
 # Local debug payloads
 /payloads/
+samples/
+configsamples/
+tests/fixtures/
+tests/**/fixtures/
+sharedmodule/**/test/fixtures/
+sharedmodule/**/tests/fixtures/
+**/fixtures/
 scripts/tools-dev/responses-debug-client/logs/
 logs/
 tmp/
@@ -71,6 +79,9 @@ memory/
 
 # Local development files
 CACHE.md
+MEMORY.md
+DELIVERY.md
+note.md
 botpy.log
 /*.backup
 /*.backup2

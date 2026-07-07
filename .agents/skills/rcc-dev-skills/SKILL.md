@@ -62,6 +62,8 @@ description: RouteCodex 调试与架构路由入口
 ## 修改前 / 验证后 必做
 
 - 修改前：必须同时看 `function map` 和 `mainline source`，确认模块边界、允许路径、禁止路径、主线 caller/callee。
+- 配置/loader/VR/Hub/Pipeline 接线前：必须先完成未接线状态下的模块黑盒与旧配置样本对比，证明新实现能读取/等价处理现有用户配置；黑盒未绿禁止接线、禁止启动/重启 live server。
+- 禁止为绕过代码缺陷去修改 `~/.rcc` 或用户真实配置文件。若现有配置暴露兼容失败，必须回代码唯一 owner 修正；需要清理/迁移用户配置文件时必须先获得 Jason 明确授权。
 - 验证后：必须做 architecture review，判断结果是否正确、架构是否正确、是否用了 fallback / 临时绕路 / 补丁式修复、是否存在“结果对了但架构错了”。
 - 验证通过不等于闭环完成；架构 review 不过，仍视为未完成。
 

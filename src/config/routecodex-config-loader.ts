@@ -4,7 +4,7 @@ import path from 'node:path';
 import { resolveRouteCodexConfigPath } from './config-paths.js';
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
 import type { UnknownRecord } from './user-config-codec.js';
-import { materializeRouteCodexConfig } from './user-config-materializer.js';
+import { materializeRouteCodexConfig } from './user-config-loader.js';
 import { parseUserConfigText } from './user-config-codec.js';
 import { detectUserConfigFormat } from './user-config-codec.js';
 
@@ -32,7 +32,7 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   };
 }
 
-export { collectV2ConfigSourceErrors } from './user-config-materializer.js';
+export { collectV2ConfigSourceErrors } from './user-config-loader.js';
 
 
 function resolveProviderRootDirFromEnv(): string | undefined {

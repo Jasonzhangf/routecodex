@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
-import { decodeProviderConfigFile } from '../../config/provider-config-codec.js';
+import { loadProviderConfigsV2 } from '../../config/provider-v2-loader.js';
 import { resolveRccProviderDir } from '../../config/user-data-paths.js';
 import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../../cli/config/bootstrap-provider-templates.js';
 import { collectV2ConfigSourceErrors, loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
@@ -96,7 +96,7 @@ export async function handleGetUserConfig(req: Request, res: Response): Promise<
  * 列出 Provider 模板与独立 Provider 配置。
  *
  * - 模板（templates）：目前提供少量内置模板，用于快速创建 provider 配置。
- * - 独立 Provider（standalone）：来自 ~/.rcc/provider/*.json，
+ * - 独立 Provider（standalone）：来自 ~/.rcc/provider/<id>/config.v2.toml，
  *   并标记是否已在当前 user config 中被引用（boundToConfig）。
  */
 export async function handleListProviderTemplates(req: Request, res: Response): Promise<void> {
@@ -114,7 +114,7 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       logConfigAdminNonBlockingError('handleListProviderTemplates.readUserConfig', error);
     }
 
-    // 2) 独立 Provider 配置：~/.rcc/provider/*.json
+    // 2) 独立 Provider 配置：~/.rcc/provider/<id>/config.v2.toml
     const providerDir = pickProviderDirectoryPath();
     const standalone: Array<{
       id: string;
@@ -125,50 +125,22 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       boundToConfig: boolean;
     }> = [];
 
-    try {
-      if (fsSync.existsSync(providerDir) && fsSync.statSync(providerDir).isDirectory()) {
-        const entries = await fs.readdir(providerDir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (!entry.isDirectory()) {
-            continue;
-          }
-          const jsonPath = path.join(providerDir, entry.name, 'config.v2.json');
-          const tomlPath = path.join(providerDir, entry.name, 'config.v2.toml');
-          const fullPath = fsSync.existsSync(tomlPath) ? tomlPath : jsonPath;
-          if (!fsSync.existsSync(fullPath)) {
-            continue;
-          }
-          try {
-            const decoded = await decodeProviderConfigFile(fullPath);
-            const parsed = decoded.parsed;
-            if (!isRecord(parsed)) {
-              continue;
-            }
-            const providerNode = isRecord(parsed.provider) ? parsed.provider : parsed;
-            const fallbackId = entry.name;
-            const id = readString(parsed.providerId) ?? readString(providerNode.id) ?? fallbackId;
-            const type = readString(providerNode.type) ?? readString(providerNode.providerType);
-            const baseURL = readString(providerNode.baseURL) ?? readString(providerNode.baseUrl);
-            const authType = isRecord(providerNode.auth) ? readString(providerNode.auth.type) : undefined;
-            const boundToConfig = Boolean(id && configuredProviderIds.has(id));
-            standalone.push({
-              id,
-              source: fullPath,
-              type,
-              baseURL,
-              authType,
-              boundToConfig
-            });
-          } catch (error) {
-            logConfigAdminNonBlockingError('handleListProviderTemplates.readProviderConfig', error, {
-              source: fullPath
-            });
-          }
-        }
-      }
-    } catch (error) {
-      logConfigAdminNonBlockingError('handleListProviderTemplates.readProviderDirectory', error, {
-        providerDir
+    const providerConfigs = await loadProviderConfigsV2(providerDir);
+    for (const cfg of Object.values(providerConfigs)) {
+      const providerNode = isRecord(cfg.provider) ? cfg.provider : {};
+      const id = cfg.providerId;
+      const source = path.join(providerDir, id, 'config.v2.toml');
+      const type = readString(providerNode.type) ?? readString(providerNode.providerType);
+      const baseURL = readString(providerNode.baseURL) ?? readString(providerNode.baseUrl);
+      const authType = isRecord(providerNode.auth) ? readString(providerNode.auth.type) : undefined;
+      const boundToConfig = configuredProviderIds.has(id);
+      standalone.push({
+        id,
+        source,
+        type,
+        baseURL,
+        authType,
+        boundToConfig
       });
     }
 

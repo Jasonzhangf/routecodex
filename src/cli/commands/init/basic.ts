@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { decodeProviderConfigFileSync } from '../../../config/provider-config-codec.js';
 import { decodeUserConfigFileSync } from '../../../config/user-config-codec.js';
 import { writeProviderConfigFileSync } from '../../../config/provider-config-writer.js';
 import { resolveRccProviderDir } from '../../../config/user-data-paths.js';
+import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
+import { serializeTomlRecord } from '../../../config/toml-basic.js';
 
 import type { InitProviderTemplate } from '../../config/init-provider-catalog.js';
 import { buildInitRouting, buildV2ConfigObject, resolveDefaultToolsTarget } from '../../config/init-v2-builder.js';
@@ -49,11 +50,7 @@ export function getProviderRoot(pathImpl: typeof path, homeDir: string): string 
 }
 
 export function getProviderV2Path(pathImpl: typeof path, providerRoot: string, providerId: string): string {
-  const tomlPath = pathImpl.join(providerRoot, providerId, 'config.v2.toml');
-  if (fs.existsSync(tomlPath)) {
-    return tomlPath;
-  }
-  return pathImpl.join(providerRoot, providerId, 'config.v2.json');
+  return pathImpl.join(providerRoot, providerId, 'config.v2.toml');
 }
 
 export function inferDefaultModel(providerNode: UnknownRecord): string {
@@ -185,38 +182,6 @@ export function mergeRecordsPreferExisting(baseFromV1: UnknownRecord, existing: 
   return result;
 }
 
-export function readProviderV2Payload(
-  fsImpl: typeof fs,
-  filePath: string
-): ProviderV2Payload | null {
-  try {
-    if (!fsImpl.existsSync(filePath)) {
-      return null;
-    }
-    const parsed = decodeProviderConfigFileSync(
-      filePath,
-      fsImpl as Pick<typeof fs, 'readFileSync'>
-    ).parsed;
-    if (!isRecord(parsed)) {
-      return null;
-    }
-    const providerIdRaw = parsed.providerId;
-    const providerNode = parsed.provider;
-    if (typeof providerIdRaw !== 'string' || !providerIdRaw.trim() || !isRecord(providerNode)) {
-      return null;
-    }
-    const versionRaw = parsed.version;
-    const version = typeof versionRaw === 'string' && versionRaw.trim() ? versionRaw.trim() : '2.0.0';
-    return {
-      version,
-      providerId: providerIdRaw.trim(),
-      provider: providerNode
-    };
-  } catch {
-    return null;
-  }
-}
-
 export function backupFileBestEffort(fsImpl: typeof fs, filePath: string): string | null {
   try {
     if (!fsImpl.existsSync(filePath)) {
@@ -244,8 +209,8 @@ export function computeBackupPath(fsImpl: typeof fs, filePath: string): string {
   return `${base}.${Date.now()}`;
 }
 
-export function writeJsonFile(fsImpl: typeof fs, filePath: string, payload: unknown): void {
-  fsImpl.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+export function writeTomlConfigFile(fsImpl: typeof fs, filePath: string, payload: UnknownRecord): void {
+  fsImpl.writeFileSync(filePath, `${serializeTomlRecord(payload)}\n`, 'utf8');
 }
 
 export function writeProviderV2(
@@ -267,44 +232,8 @@ export function writeProviderV2(
   return filePath;
 }
 
-export function loadProviderV2Map(fsImpl: typeof fs, pathImpl: typeof path, providerRoot: string): Record<string, ProviderV2Payload> {
-  const result: Record<string, ProviderV2Payload> = {};
-  if (!fsImpl.existsSync(providerRoot)) {
-    return result;
-  }
-
-  const entries = fsImpl.readdirSync(providerRoot, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-    const filePath = getProviderV2Path(pathImpl, providerRoot, entry.name);
-    if (!fsImpl.existsSync(filePath)) {
-      continue;
-    }
-    try {
-      const parsed = decodeProviderConfigFileSync(
-        filePath,
-        fsImpl as Pick<typeof fs, 'readFileSync'>
-      ).parsed;
-      if (!isRecord(parsed)) {
-        continue;
-      }
-      const providerId = typeof parsed.providerId === 'string' ? parsed.providerId.trim() : '';
-      const providerNode = asRecord(parsed.provider);
-      if (!providerId || !Object.keys(providerNode).length) {
-        continue;
-      }
-      result[providerId] = {
-        version: typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : '2.0.0',
-        providerId,
-        provider: providerNode
-      };
-    } catch {
-      // ignore malformed files
-    }
-  }
-  return result;
+export async function loadProviderV2Map(providerRoot: string): Promise<Record<string, ProviderV2Payload>> {
+  return await loadProviderConfigsV2(providerRoot);
 }
 
 export function maskSecretTail3(raw: string): string {

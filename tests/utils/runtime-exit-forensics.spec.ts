@@ -7,8 +7,10 @@ import {
   inferUngracefulPreviousExit,
   resolveRuntimeLifecyclePath,
   safeMarkRuntimeExit,
+  safeMarkRuntimeExitSync,
   safeReadRuntimeLifecycle,
   safeWriteRuntimeLifecycle,
+  safeWriteRuntimeLifecycleSync,
   type RuntimeLifecycleState
 } from '../../src/utils/runtime-exit-forensics.js';
 
@@ -60,11 +62,11 @@ describe('runtime-exit-forensics', () => {
     expect(inference.reason).toBe('previous_exit_recorded');
   });
 
-  it('writes and marks lifecycle exit state', () => {
+  it('writes and marks lifecycle exit state', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-runtime-forensics-'));
     const filePath = resolveRuntimeLifecyclePath(5520, root);
 
-    const wrote = safeWriteRuntimeLifecycle(filePath, {
+    const wrote = await safeWriteRuntimeLifecycle(filePath, {
       runId: 'run_current',
       pid: 12345,
       port: 5520,
@@ -75,7 +77,7 @@ describe('runtime-exit-forensics', () => {
 
     expect(wrote).toBe(true);
 
-    const marked = safeMarkRuntimeExit(filePath, {
+    const marked = await safeMarkRuntimeExit(filePath, {
       kind: 'signal',
       code: 0,
       signal: 'SIGTERM',
@@ -87,5 +89,33 @@ describe('runtime-exit-forensics', () => {
     expect(state).toBeTruthy();
     expect(state?.exit?.kind).toBe('signal');
     expect(state?.exit?.signal).toBe('SIGTERM');
+  });
+
+  it('writes and marks lifecycle exit state synchronously for process exit handlers', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-runtime-forensics-sync-'));
+    const filePath = resolveRuntimeLifecyclePath(5520, root);
+
+    const wrote = safeWriteRuntimeLifecycleSync(filePath, {
+      runId: 'run_current_sync',
+      pid: 23456,
+      port: 5520,
+      startedAt: '2026-02-12T02:00:00.000Z',
+      buildVersion: '0.89.2001',
+      buildMode: 'release'
+    });
+
+    expect(wrote).toBe(true);
+
+    const marked = safeMarkRuntimeExitSync(filePath, {
+      kind: 'startupError',
+      code: 1,
+      message: 'native bootstrapVirtualRouterConfigJson is required but unavailable',
+      recordedAt: '2026-02-12T02:00:02.000Z'
+    });
+
+    expect(marked).toBe(true);
+    const state = safeReadRuntimeLifecycle(filePath);
+    expect(state?.exit?.kind).toBe('startupError');
+    expect(state?.exit?.message).toContain('bootstrapVirtualRouterConfigJson');
   });
 });

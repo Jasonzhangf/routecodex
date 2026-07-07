@@ -82,6 +82,16 @@ export async function safeWriteRuntimeLifecycle(filePath: string, state: Runtime
   }
 }
 
+export function safeWriteRuntimeLifecycleSync(filePath: string, state: RuntimeLifecycleState): boolean {
+  try {
+    ensureParentDir(filePath);
+    fsSync.writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function safeMarkRuntimeExit(filePath: string, marker: RuntimeExitMarker): Promise<boolean> {
   try {
     const existing = safeReadRuntimeLifecycle(filePath);
@@ -93,6 +103,22 @@ export async function safeMarkRuntimeExit(filePath: string, marker: RuntimeExitM
       exit: marker
     };
     return await safeWriteRuntimeLifecycle(filePath, next);
+  } catch {
+    return false;
+  }
+}
+
+export function safeMarkRuntimeExitSync(filePath: string, marker: RuntimeExitMarker): boolean {
+  try {
+    const existing = safeReadRuntimeLifecycle(filePath);
+    if (!existing) {
+      return false;
+    }
+    const next: RuntimeLifecycleState = {
+      ...existing,
+      exit: marker
+    };
+    return safeWriteRuntimeLifecycleSync(filePath, next);
   } catch {
     return false;
   }

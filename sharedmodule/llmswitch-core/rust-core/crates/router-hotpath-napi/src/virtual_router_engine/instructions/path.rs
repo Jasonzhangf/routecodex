@@ -52,7 +52,22 @@ fn expand_home(value: &str, home_dir: &Path) -> PathBuf {
     PathBuf::from(value)
 }
 
-fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
+fn absolutize_path(value: PathBuf) -> PathBuf {
+    if value.is_absolute() {
+        return value;
+    }
+    env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(value)
+}
+
+fn resolve_home_dir(home_dir: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(raw) = home_dir {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Ok(absolutize_path(PathBuf::from(trimmed)));
+        }
+    }
     if let Some(explicit) = read_override_user_dir() {
         return Ok(explicit);
     }
@@ -64,7 +79,14 @@ fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
     if trimmed.is_empty() {
         return Err("precommand: cannot resolve homedir".to_string());
     }
-    let home_dir = PathBuf::from(trimmed);
+    Ok(absolutize_path(PathBuf::from(trimmed)))
+}
+
+pub(crate) fn resolve_rcc_user_dir_for_host(home_dir: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(explicit) = read_override_user_dir() {
+        return Ok(explicit);
+    }
+    let home_dir = resolve_home_dir(home_dir)?;
     let legacy_dir = home_dir.join(".routecodex");
     for key in ["RCC_HOME", "ROUTECODEX_USER_DIR", "ROUTECODEX_HOME"] {
         if let Ok(value) = env::var(key) {
@@ -72,7 +94,7 @@ fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
             if raw.is_empty() {
                 continue;
             }
-            let candidate = expand_home(raw, &home_dir);
+            let candidate = absolutize_path(expand_home(raw, &home_dir));
             if candidate == legacy_dir {
                 continue;
             }
@@ -80,6 +102,111 @@ fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
         }
     }
     Ok(home_dir.join(".rcc"))
+}
+
+fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
+    resolve_rcc_user_dir_for_host(None)
+}
+
+pub(crate) fn resolve_rcc_path_for_host(
+    segments: &[String],
+    home_dir: Option<&str>,
+) -> Result<PathBuf, String> {
+    let mut base = resolve_rcc_user_dir_for_host(home_dir)?;
+    for segment in segments {
+        base.push(segment);
+    }
+    Ok(base)
+}
+
+#[cfg(test)]
+mod host_path_tests {
+    use super::{resolve_rcc_path_for_host, resolve_rcc_user_dir_for_host};
+    use std::env;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, MutexGuard};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let previous = env::var(key).ok();
+            match value {
+                Some(next) => env::set_var(key, next),
+                None => env::remove_var(key),
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.as_deref() {
+                Some(previous) => env::set_var(self.key, previous),
+                None => env::remove_var(self.key),
+            }
+        }
+    }
+
+    fn clear_rcc_env() -> Vec<EnvGuard> {
+        vec![
+            EnvGuard::set("RCC_HOME", None),
+            EnvGuard::set("ROUTECODEX_USER_DIR", None),
+            EnvGuard::set("ROUTECODEX_HOME", None),
+        ]
+    }
+
+    #[test]
+    fn resolve_rcc_user_dir_for_host_uses_primary_home_dir() {
+        let _lock = lock_env();
+        let _env = clear_rcc_env();
+        let home = PathBuf::from("/tmp/rcc-home-probe");
+        assert_eq!(
+            resolve_rcc_user_dir_for_host(Some(home.to_str().unwrap())).unwrap(),
+            home.join(".rcc")
+        );
+    }
+
+    #[test]
+    fn resolve_rcc_user_dir_for_host_ignores_retired_legacy_env_root() {
+        let _lock = lock_env();
+        let _clear = clear_rcc_env();
+        let home = PathBuf::from("/tmp/rcc-legacy-probe");
+        let legacy = home.join(".routecodex");
+        let _rcc_home = EnvGuard::set("RCC_HOME", Some(legacy.to_str().unwrap()));
+        assert_eq!(
+            resolve_rcc_user_dir_for_host(Some(home.to_str().unwrap())).unwrap(),
+            home.join(".rcc")
+        );
+    }
+
+    #[test]
+    fn resolve_rcc_path_for_host_joins_segments_under_user_dir() {
+        let _lock = lock_env();
+        let _env = clear_rcc_env();
+        let home = PathBuf::from("/tmp/rcc-path-probe");
+        assert_eq!(
+            resolve_rcc_path_for_host(
+                &["logs".to_string(), "servertool-events.jsonl".to_string()],
+                Some(home.to_str().unwrap()),
+            )
+            .unwrap(),
+            home.join(".rcc")
+                .join("logs")
+                .join("servertool-events.jsonl")
+        );
+    }
 }
 
 fn resolve_precommand_base_dir() -> Result<PathBuf, String> {
@@ -297,14 +424,18 @@ mod isolation_tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn unique_temp() -> PathBuf {
         let n = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("rcc-user-dir-iso-{n}"))
+        let seq = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("rcc-user-dir-iso-{}-{n}-{seq}", std::process::id()))
     }
 
     // T2a: two different rcc_user_dir overrides must resolve to different base paths

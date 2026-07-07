@@ -1993,6 +1993,7 @@ owners:
       - tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts
       - tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts
       - tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
       - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     required_gates:
@@ -2064,6 +2065,7 @@ owners:
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
       - tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
       - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
       - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -2788,14 +2790,13 @@ owners:
       - update_toml_string_scalar_in_table_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-config-codec.ts
       - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/toml-basic.ts
       - src/config/toml-comment-preserving.ts
     forbidden_paths:
       - src/providers
     required_tests:
-      - tests/config/toml-shadow-codec.spec.ts
+      - tests/config/toml-codec.spec.ts
       - tests/config/toml-comment-preserving.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
@@ -2838,7 +2839,7 @@ owners:
     forbidden_paths:
       - src/providers
     required_tests:
-      - tests/config/toml-shadow-codec.spec.ts
+      - tests/config/toml-codec.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
@@ -2852,7 +2853,7 @@ owners:
     status: active
     summary: "provider v2 config decode/format truth is TOML-only; TOML parse/serialize and provider v2 coercion delegate to Rust"
     owner_kind: ts_shell
-    owner_scope: "TS detects provider TOML path and performs file IO only; TOML parse/serialize delegates to config.toml_codec; provider v2 coercion delegates to Rust; provider JSON config is rejected/ignored"
+    owner_scope: "file-scoped TS provider-config-codec handles single-file TOML text IO/decode shell only for codec/writer tests and explicit codec callers; TOML parse/serialize delegates to config.toml_codec; provider v2 root loading, file planning, duplicate detection, identity validation, and coercion delegate to Rust; provider JSON config is rejected"
     owner_module: src/config/provider-config-codec.ts
     canonical_types:
       - ProviderConfigFormat
@@ -2864,19 +2865,11 @@ owners:
       - coerceProviderConfigV2FromParsed
     allowed_paths:
       - src/config/provider-config-codec.ts
-      - src/config/provider-v2-loader.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-config-codec.ts
-      - src/modules/llmswitch/bridge/routing-integrations.ts
-      - src/server/handlers/config-admin-handler.ts
-      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
-      - src/cli/commands/init/basic.ts
-      - src/commands/provider-update.ts
-      - src/commands/provider-update-maintenance.ts
+      - src/config/provider-config-writer.ts
     forbidden_paths:
       - src/server/runtime/http-server/executor
     required_tests:
-      - tests/config/toml-shadow-codec.spec.ts
+      - tests/config/toml-codec.spec.ts
       - tests/config/provider-v2-loader.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
@@ -2885,30 +2878,41 @@ owners:
       - npm run verify:config-provider-codec-rust
     migration_target: rust
     notes:
-      - "Provider config decode truth is shared; maintenance/admin must not raw-parse provider files."
+      - "Provider config single-file codec is now file-scoped; maintenance/admin/init/provider-update must not call provider-config-codec directly for providerId/root reads."
       - "Legacy config.v1.json/config.v2.json support is removed; provider config path is config.v2.toml."
-      - "Provider config v2 coercion is Rust-owned through coerceRouteCodexProviderConfigV2Json; src/config/provider-config-codec.ts remains file IO/path rejection shell."
+      - "Provider config v2 root loading and coercion are Rust-owned through loadRouteCodexProviderConfigsV2FromRootJson/coerceRouteCodexProviderConfigV2Json; src/config/provider-config-codec.ts remains single-file IO/path rejection shell."
+      - "Provider CLI/tooling/admin/init commands that address configs by providerId must read through loadProviderConfigsV2/root loader instead of decoding config.v2.toml directly; provider-update no longer accepts arbitrary provider config file paths."
 
   - feature_id: config.provider_config_coercion
     status: active
-    summary: "provider v2 config coercion and loader identity/file planning are Rust-owned"
+    summary: "provider v2 config coercion and root loader are Rust-owned"
     owner_kind: rust_ssot
-    owner_scope: "Rust owns provider config v2 coercion from parsed TOML record to ProviderConfigV2 shape, config.v2 TOML file selection, and base/suffixed provider identity validation; TS caller remains file IO/native shell"
+    owner_scope: "Rust owns provider config v2 root directory loading, provider directory scan, config.v2 TOML file selection, file read, TOML parse bridge, coercion to ProviderConfigV2 shape, duplicate provider id detection, and base/suffixed provider identity validation; TS caller remains root path/native bridge shell"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
     canonical_types:
       - ProviderConfigCoerceInput
       - ProviderConfigFilePlanInput
       - ProviderConfigIdResolveInput
+      - ProviderConfigRootLoadInput
     canonical_builders:
       - coerce_provider_config_v2_from_parsed_json
       - plan_provider_config_v2_files_json
       - resolve_provider_config_v2_identity_json
+      - load_provider_configs_v2_from_root_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-config-codec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
+      - src/cli/commands/init/basic.ts
+      - src/cli/commands/init.ts
+      - src/cli/commands/init/workflows.ts
+      - src/server/handlers/config-admin-handler.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
+      - src/commands/provider-update.ts
+      - src/commands/provider-update-maintenance.ts
+      - src/tools/provider-update/index.ts
     forbidden_paths:
       - src/server/runtime/http-server/executor
       - src/providers
@@ -2920,7 +2924,8 @@ owners:
       - npm run verify:config-provider-codec-rust
     migration_target: rust
     notes:
-      - "Provider config v2 coercion, config.v2 TOML filename filtering/sorting, and base/suffixed provider identity validation must not be reimplemented in TS; provider-config-codec.ts/provider-v2-loader.ts may only call the native bridge around file IO."
+      - "Provider config v2 root loading, directory/file IO, duplicate accumulation, config.v2 TOML filename filtering/sorting, coercion, and base/suffixed provider identity validation must not be reimplemented in TS; provider-v2-loader.ts may only resolve the root path and call the native bridge."
+      - "Provider-update CLI/tooling paths, admin provider listing/detail views, and init provider listing/maintenance/merge reads must consume the Rust root loader output by providerId/root; arbitrary provider --config file direct-decode shells are removed and must not return."
 
   - feature_id: config.user_config_materialization
     status: active
@@ -2944,8 +2949,8 @@ owners:
       - src/config/routecodex-config-loader.ts
       - src/config/user-config-loader.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-runtime-config.ts
-      - src/config/user-config-materializer.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/server/runtime/http-server/runtime-config-manifest-carrier.ts
       - src/server/handlers/config-admin-handler.ts
     forbidden_paths:
@@ -2983,7 +2988,7 @@ owners:
       - build_provider_profiles
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-runtime-config.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/providers/profile/provider-profile-loader.ts
       - src/providers/profile/provider-profile.ts
@@ -3019,7 +3024,7 @@ owners:
       - build_forwarder_profiles
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-runtime-config.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/providers/profile/provider-profile-loader.ts
@@ -4286,7 +4291,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
       - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
       - src/cli/config/init-provider-catalog.ts
-      - src/config/toml-commented-template.ts
       - src/provider-sdk/provider-inspect.ts
       - src/provider-sdk/provider-runtime-inference.ts
       - tests/provider-sdk/provider-inspect.spec.ts

@@ -31,6 +31,23 @@ import {
 import { callNativeJson } from './native-router-hotpath.js';
 import { failNativeRequired } from './native-router-hotpath-policy.js';
 
+export type {
+  ClassificationResult,
+  ProviderProfile,
+  RouterMetadataInput,
+  RoutingDecision,
+  RoutingDiagnostics,
+  RoutingFeatures,
+  RoutingInstructionMode,
+  RoutingStatusSnapshot,
+  StopMessageStateSnapshot,
+  TargetMetadata,
+  VirtualRouterConfig,
+  VirtualRouterContextRoutingConfig,
+  VirtualRouterDryRunDiagnostics,
+  VirtualRouterHealthStore
+} from './virtual-router-contracts.js';
+
 type TokenEstimateOutput = {
   tokens?: unknown;
 };

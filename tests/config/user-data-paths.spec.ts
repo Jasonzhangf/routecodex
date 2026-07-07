@@ -4,12 +4,10 @@ import path from 'node:path';
 
 import {
   ensureRccUserDirEnvironment,
-  resolveLegacyRouteCodexUserDir,
   resolveRccProviderDir,
   resolveRccSnapshotsDirFromEnv,
   resolveRccSubdir,
-  resolveRccUserDir,
-  resolveRccUserDirForRead
+  resolveRccUserDir
 } from '../../src/config/user-data-paths.js';
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -59,21 +57,6 @@ describe('user-data-paths', () => {
     delete process.env.ROUTECODEX_HOME;
     const home = await createTempDir('rcc-home-');
     expect(resolveRccUserDir(home)).toBe(path.join(home, '.rcc'));
-    expect(resolveLegacyRouteCodexUserDir(home)).toBe(path.join(home, '.routecodex'));
-  });
-
-  it('keeps read helpers pinned to the primary ~/.rcc root', async () => {
-    delete process.env.RCC_HOME;
-    delete process.env.ROUTECODEX_USER_DIR;
-    delete process.env.ROUTECODEX_HOME;
-
-    const home = await createTempDir('rcc-legacy-read-');
-    const legacyRoot = path.join(home, '.routecodex');
-    const legacyConfig = path.join(legacyRoot, 'config.json');
-    await fs.mkdir(legacyRoot, { recursive: true });
-    await fs.writeFile(legacyConfig, '{}\n', 'utf8');
-
-    expect(resolveRccUserDirForRead(home)).toBe(path.join(home, '.rcc'));
   });
 
   it('publishes the resolved ~/.rcc path into process env for downstream modules', async () => {
@@ -95,17 +78,21 @@ describe('user-data-paths', () => {
     expect(resolveRccSnapshotsDirFromEnv(home)).toBe(path.join(expected, 'codex-samples'));
   });
 
-  it('overrides legacy snapshot env values to the primary ~/.rcc snapshot root', async () => {
+  it('fails fast when snapshot env values point at retired ~/.routecodex samples', async () => {
     const home = await createTempDir('rcc-snapshot-env-');
     process.env.RCC_SNAPSHOT_DIR = path.join(home, '.routecodex', 'codex-samples');
     process.env.ROUTECODEX_SNAPSHOT_DIR = path.join(home, '.routecodex', 'codex-samples');
 
-    ensureRccUserDirEnvironment(home);
+    expect(() => ensureRccUserDirEnvironment(home)).toThrow('retired ~/.routecodex/codex-samples');
+    expect(() => resolveRccSnapshotsDirFromEnv(home)).toThrow('retired ~/.routecodex/codex-samples');
+  });
 
-    const expectedSnapshotsDir = path.join(home, '.rcc', 'codex-samples');
-    expect(process.env.RCC_SNAPSHOT_DIR).toBe(expectedSnapshotsDir);
-    expect(process.env.ROUTECODEX_SNAPSHOT_DIR).toBe(expectedSnapshotsDir);
-    expect(resolveRccSnapshotsDirFromEnv(home)).toBe(expectedSnapshotsDir);
+  it('fails fast when user dir env values point at retired ~/.routecodex root', async () => {
+    const home = await createTempDir('rcc-user-env-');
+    process.env.RCC_HOME = path.join(home, '.routecodex');
+
+    expect(() => resolveRccUserDir(home)).toThrow('retired ~/.routecodex root');
+    expect(() => ensureRccUserDirEnvironment(home)).toThrow('retired ~/.routecodex root');
   });
 
   it('resolves named subdirectories and config/provider helpers from the same layout registry', async () => {

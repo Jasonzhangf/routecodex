@@ -1836,6 +1836,165 @@ fn project_responses_sse_frame_for_client_suppresses_apply_patch_deltas_and_proj
 }
 
 #[test]
+fn project_responses_sse_frame_for_client_normalizes_created_apply_patch_required_action() {
+    let patch =
+        "*** Begin Patch\n*** Add File: tmp/apft/01-created.txt\n+hello from created\n*** End Patch";
+    let raw_args = serde_json::to_string(&json!({ "patch": patch })).unwrap();
+    let frame = format!(
+        "event: response.created\ndata: {}\n\n",
+        serde_json::to_string(&json!({
+            "type": "response.created",
+            "response": {
+                "id": "resp_apply_patch_created",
+                "object": "response",
+                "status": "in_progress",
+                "required_action": {
+                    "type": "submit_tool_outputs",
+                    "submit_tool_outputs": {
+                        "tool_calls": [{
+                            "id": "call_patch_created",
+                            "type": "function",
+                            "name": "apply_patch",
+                            "arguments": raw_args,
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": raw_args
+                            }
+                        }]
+                    }
+                }
+            }
+        }))
+        .unwrap()
+    );
+
+    let output = project_responses_sse_frame_for_client(
+        frame.as_str(),
+        Some("response.created"),
+        &json!({
+            "type": "response.created",
+            "response": {
+                "id": "resp_apply_patch_created",
+                "object": "response",
+                "status": "in_progress",
+                "required_action": {
+                    "type": "submit_tool_outputs",
+                    "submit_tool_outputs": {
+                        "tool_calls": [{
+                            "id": "call_patch_created",
+                            "type": "function",
+                            "name": "apply_patch",
+                            "arguments": raw_args,
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": raw_args
+                            }
+                        }]
+                    }
+                }
+            }
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+        &json!({}),
+    );
+
+    assert_eq!(output["emit"], true);
+    let output_frame = output["frame"].as_str().unwrap();
+    assert!(output_frame.contains("event: response.created"));
+    assert!(output_frame.contains("tmp/apft/01-created.txt"));
+    assert!(!output_frame.contains("{\\\"patch\\\""));
+}
+
+#[test]
+fn project_responses_sse_frame_for_client_terminal_apply_patch_uses_custom_tool_call() {
+    let patch =
+        "*** Begin Patch\n*** Add File: tmp/apft/01-terminal.txt\n+hello from terminal\n*** End Patch";
+    let raw_args = serde_json::to_string(&json!({ "patch": patch })).unwrap();
+    let frame = format!(
+        "event: response.completed\ndata: {}\n\n",
+        serde_json::to_string(&json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_apply_patch_terminal",
+                "object": "response",
+                "status": "requires_action",
+                "output": [{
+                    "id": "fc_patch_terminal",
+                    "type": "function_call",
+                    "call_id": "call_patch_terminal",
+                    "name": "apply_patch",
+                    "arguments": raw_args
+                }],
+                "required_action": {
+                    "type": "submit_tool_outputs",
+                    "submit_tool_outputs": {
+                        "tool_calls": [{
+                            "id": "call_patch_terminal",
+                            "type": "function",
+                            "name": "apply_patch",
+                            "arguments": raw_args,
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": raw_args
+                            }
+                        }]
+                    }
+                }
+            }
+        }))
+        .unwrap()
+    );
+
+    let output = project_responses_sse_frame_for_client(
+        frame.as_str(),
+        Some("response.completed"),
+        &json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_apply_patch_terminal",
+                "object": "response",
+                "status": "requires_action",
+                "output": [{
+                    "id": "fc_patch_terminal",
+                    "type": "function_call",
+                    "call_id": "call_patch_terminal",
+                    "name": "apply_patch",
+                    "arguments": raw_args
+                }],
+                "required_action": {
+                    "type": "submit_tool_outputs",
+                    "submit_tool_outputs": {
+                        "tool_calls": [{
+                            "id": "call_patch_terminal",
+                            "type": "function",
+                            "name": "apply_patch",
+                            "arguments": raw_args,
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": raw_args
+                            }
+                        }]
+                    }
+                }
+            }
+        }),
+        &freeform_apply_patch_tool_fixture(),
+        &json!({}),
+        &json!({}),
+    );
+
+    assert_eq!(output["emit"], true);
+    let output_frame = output["frame"].as_str().unwrap();
+    assert!(output_frame.contains("event: response.completed"));
+    assert!(output_frame.contains("\"type\":\"custom_tool_call\""));
+    assert!(output_frame.contains("\"input\""));
+    assert!(output_frame.contains("tmp/apft/01-terminal.txt"));
+    assert!(!output_frame.contains("required_action"));
+    assert!(!output_frame.contains("{\\\"patch\\\""));
+}
+
+#[test]
 fn project_responses_sse_frame_for_client_uses_pending_apply_patch_delta_when_done_has_empty_arguments(
 ) {
     let patch =

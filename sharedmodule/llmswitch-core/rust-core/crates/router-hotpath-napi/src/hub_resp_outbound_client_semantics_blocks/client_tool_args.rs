@@ -1649,7 +1649,11 @@ fn mark_response_function_call_outputs_completed(response: &mut Map<String, Valu
     }
 }
 
-fn project_responses_terminal_event_payload_for_client(data: &Value) -> Value {
+fn project_responses_terminal_event_payload_for_client(
+    data: &Value,
+    tools_raw: &Value,
+    metadata: &Value,
+) -> Value {
     let Some(record) = data.as_object() else {
         return sanitize_responses_client_payload_for_replay_safety(data);
     };
@@ -1687,7 +1691,7 @@ fn project_responses_terminal_event_payload_for_client(data: &Value) -> Value {
             mark_response_function_call_outputs_completed(next_response);
         }
     }
-    sanitize_responses_client_payload_for_replay_safety(&next)
+    project_responses_sse_client_event_payload(&next, tools_raw, metadata)
 }
 
 fn build_standard_tool_call_sse_frames_from_required_action_payload(
@@ -1968,7 +1972,7 @@ pub(crate) fn project_responses_sse_frame_for_client(
             }
         }
     } else if event_name == "response.completed" || event_name == "response.done" {
-        let normalized = project_responses_terminal_event_payload_for_client(data);
+        let normalized = project_responses_terminal_event_payload_for_client(data, tools_raw, metadata);
         if normalized != *data {
             output_frame = replace_frame_data(frame, &normalized);
         }

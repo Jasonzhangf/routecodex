@@ -16,6 +16,8 @@ describe('server responses SSE business module contract', () => {
 
     expect(handler).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
     expect(bridge).toContain('// feature_id: server.responses_sse_bridge_surface');
+    expect(bridge).toContain('projectResponsesSseFrameForClientNative');
+    expect(bridge).toContain('export function projectResponsesSseFrameForClientForHttp(');
     expect(sseTransport).toContain('export function buildClientSseKeepaliveFrameForHttp(');
     expect(sseTransport).not.toContain('export function shouldDropClientSseFrameForHttp(');
     expect(bridge).not.toContain('shouldDropClientSseFrameForHttp');
@@ -61,7 +63,6 @@ describe('server responses SSE business module contract', () => {
       'normalizeResponsesSseFrameForClientForHttp',
       'summarizeResponsesSseFrameForLogForHttp',
       'resolveResponsesProviderProtocolHintFromSseFrameForHttp',
-      'projectResponsesSseFrameForClientForHttp',
       'assertDirectPassthroughResponsesSseMetadataIsolationForHttp',
       'sanitizeDirectPassthroughResponsesSseFrameForHttp',
       'attachResponsesStreamSemanticsForHttp',

@@ -53,9 +53,9 @@ interface RoutePoolTier {
 
 type RoutingPools = Record<string, RoutePoolTier[]>;
 
-export type StreamingPreference = "auto" | "always" | "never";
+type StreamingPreference = "auto" | "always" | "never";
 
-export interface ProviderAuthConfig {
+interface ProviderAuthConfig {
   type: "apiKey";
   secretRef?: string;
   value?: string;
@@ -68,15 +68,15 @@ interface DeepSeekCompatRuntimeOptions {
   contextFileEnabled?: boolean;
 }
 
-export type AnthropicThinkingEffort = "low" | "medium" | "high" | "max";
+type AnthropicThinkingEffort = "low" | "medium" | "high" | "max";
 
-export interface AnthropicThinkingConfig {
+interface AnthropicThinkingConfig {
   mode?: "disabled" | "enabled" | "adaptive";
   budgetTokens?: number;
   effort?: AnthropicThinkingEffort;
 }
 
-export type AnthropicThinkingBudgetMap = Partial<
+type AnthropicThinkingBudgetMap = Partial<
   Record<AnthropicThinkingEffort, number>
 >;
 
@@ -154,7 +154,7 @@ export interface ProviderRuntimeProfile {
   maxContextTokens?: number;
   deepseek?: DeepSeekCompatRuntimeOptions;
   /**
-   * Provider-level flag propagated from virtualrouter.providers[*].
+   * Provider-level flag propagated from the materialized provider profile.
    * When true, VirtualRouterEngine will skip this runtime for any
    * request that declares serverToolRequired=true in routing metadata.
    */
@@ -524,7 +524,7 @@ export interface TargetMetadata {
   forceVision?: boolean;
 }
 
-export interface ResponsesProviderConfig {
+interface ResponsesProviderConfig {
   toolCallIdStyle?: "fc" | "preserve";
 }
 

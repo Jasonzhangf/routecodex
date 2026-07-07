@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { compareSemanticValue } from '../../src/config/config-semantic-compare.js';
 import { decodeProviderConfigFile } from '../../src/config/provider-config-codec.js';
 import { decodeUserConfigFile } from '../../src/config/user-config-codec.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
@@ -11,8 +10,8 @@ async function mkTmp(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-describe('toml shadow codec', () => {
-  it('parses basic TOML records used by RouteCodex config shadow', () => {
+describe('toml codec', () => {
+  it('parses basic TOML records used by RouteCodex config', () => {
     const parsed = parseTomlRecord(`
       version = "2.0.0"
       virtualrouterMode = "v2"
@@ -61,112 +60,18 @@ describe('toml shadow codec', () => {
     ]);
   });
 
-  it('decodes semantically equivalent user config from JSON and TOML shadow files', async () => {
-    const root = await mkTmp('routecodex-toml-shadow-user-');
+  it('rejects legacy user config JSON files', async () => {
+    const root = await mkTmp('routecodex-json-user-');
     const jsonPath = path.join(root, 'config.json');
-    const tomlPath = path.join(root, 'config.toml');
-
-    const jsonPayload = {
-      version: '2.0.0',
-      virtualrouterMode: 'v2',
-      httpserver: {
-        host: '127.0.0.1',
-        port: 5555
-      },
-      virtualrouter: {
-        activeRoutingPolicyGroup: 'default',
-        routingPolicyGroups: {
-          default: {
-            routing: {
-              default: [
-                {
-                  id: 'default-primary',
-                  targets: ['demo.mock-1']
-                }
-              ]
-            },
-            session: {
-              enabled: true,
-              tickMs: 1500,
-              retentionMs: 1200000
-            }
-          }
-        }
-      }
-    };
-
-    const tomlPayload = `
-version = "2.0.0"
-virtualrouterMode = "v2"
-
-[httpserver]
-host = "127.0.0.1"
-port = 5555
-
-[virtualrouter]
-activeRoutingPolicyGroup = "default"
-
-[virtualrouter.routingPolicyGroups.default.session]
-enabled = true
-tickMs = 1500
-retentionMs = 1200000
-
-[[virtualrouter.routingPolicyGroups.default.routing.default]]
-id = "default-primary"
-targets = ["demo.mock-1"]
-`;
-
-    await fs.writeFile(jsonPath, `${JSON.stringify(jsonPayload, null, 2)}\n`, 'utf8');
-    await fs.writeFile(tomlPath, tomlPayload, 'utf8');
-
-    const decodedJson = await decodeUserConfigFile(jsonPath);
-    const decodedToml = await decodeUserConfigFile(tomlPath);
-    const compared = compareSemanticValue(decodedJson.parsed, decodedToml.parsed);
-
-    expect(compared.equal).toBe(true);
+    await fs.writeFile(jsonPath, '{"version":"2.0.0"}\n', 'utf8');
+    await expect(decodeUserConfigFile(jsonPath)).rejects.toThrow('user config JSON support removed');
   });
 
-  it('decodes semantically equivalent provider config from JSON and TOML shadow files', async () => {
-    const root = await mkTmp('routecodex-toml-shadow-provider-');
+  it('rejects legacy provider config JSON files', async () => {
+    const root = await mkTmp('routecodex-json-provider-');
     const jsonPath = path.join(root, 'config.v2.json');
-    const tomlPath = path.join(root, 'config.v2.toml');
-
-    const jsonPayload = {
-      version: '2.0.0',
-      providerId: 'demo',
-      provider: {
-        id: 'demo',
-        type: 'anthropic',
-        baseURL: 'https://example.test/anthropic',
-        models: {
-          'qwen3.5-plus': { capabilities: ['web_search', 'multimodal'] }
-        }
-      }
-    };
-
-    const tomlPayload = `
-version = "2.0.0"
-providerId = "demo"
-
-[provider]
-id = "demo"
-type = "anthropic"
-baseURL = "https://example.test/anthropic"
-
-[provider.models]
-
-[provider.models."qwen3.5-plus"]
-capabilities = ["web_search", "multimodal"]
-`;
-
-    await fs.writeFile(jsonPath, `${JSON.stringify(jsonPayload, null, 2)}\n`, 'utf8');
-    await fs.writeFile(tomlPath, tomlPayload, 'utf8');
-
-    const decodedJson = await decodeProviderConfigFile(jsonPath);
-    const decodedToml = await decodeProviderConfigFile(tomlPath);
-    const compared = compareSemanticValue(decodedJson.parsed, decodedToml.parsed);
-
-    expect(compared.equal).toBe(true);
+    await fs.writeFile(jsonPath, '{"version":"2.0.0"}\n', 'utf8');
+    await expect(decodeProviderConfigFile(jsonPath)).rejects.toThrow('provider config JSON support removed');
   });
 });
 

@@ -218,6 +218,44 @@ describe('cli stop command', () => {
     expect(shutdownPorts).toEqual([5520]);
   });
 
+  it('falls back to explicit managed PID SIGTERM when HTTP shutdown does not release the port', async () => {
+    const program = new Command();
+    let alive = true;
+    const shutdownPorts: number[] = [];
+    const killCalls: Array<{ pid: number; force: boolean }> = [];
+
+    createStopCommand(program, {
+      isDevPackage: true,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: () => (alive ? [12345] : []),
+      killPidBestEffort: (pid, opts) => {
+        killCalls.push({ pid, force: opts.force });
+        if (!opts.force) {
+          alive = false;
+        }
+      },
+      sleep: async () => {},
+      fetchImpl: (async (url: string | URL | Request) => {
+        const text = String(url);
+        if (text.endsWith('/shutdown')) {
+          shutdownPorts.push(Number(new URL(text).port));
+          return { ok: true, status: 200 };
+        }
+        return { ok: true, status: 200 };
+      }) as any,
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' })).resolves.toBe(program);
+    expect(shutdownPorts).toContain(5520);
+    expect(killCalls).toEqual([{ pid: 12345, force: false }]);
+  });
+
   it('release stop expands a matched config port to the full port group and shuts down healthy no-pid servers', async () => {
     const previousConfig = process.env.ROUTECODEX_CONFIG_PATH;
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stop-command-'));

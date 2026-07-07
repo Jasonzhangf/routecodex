@@ -202,6 +202,17 @@ export async function ensurePortAvailableImpl(args: {
     });
   };
 
+  const waitForPortFree = async (timeoutMs: number, pollIntervalMs: number): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await canBindPort()) {
+        return true;
+      }
+      await args.sleep(pollIntervalMs);
+    }
+    return await canBindPort();
+  };
+
   const attemptConfirmedHttpShutdown = async (): Promise<boolean> => {
     let accepted = false;
     try {
@@ -281,41 +292,38 @@ export async function ensurePortAvailableImpl(args: {
     return;
   }
 
-  const initialPids = args.findListeningPids(port);
+  let initialPids = args.findListeningPids(port);
   if (initialPids.length === 0) {
     const healthyWithoutPid = await args.isServerHealthyQuick(port);
     if (healthyWithoutPid && opts.restart && !buildRestartOnly) {
       const accepted = await attemptConfirmedHttpShutdown();
-      if (!accepted) {
+      const shutdownTimeoutMs = Number(args.env.ROUTECODEX_STOP_TIMEOUT_MS ?? 5000);
+      if (accepted && await waitForPortFree(shutdownTimeoutMs, 150)) {
         logProcessLifecycle({
           event: 'port_check_result',
           source: 'cli.ensurePortAvailable',
-          details: { port, result: 'http_shutdown_unconfirmed_no_pid' }
+          details: { port, result: 'freed_after_http_shutdown_no_pid' }
+        });
+        return;
+      }
+      const lateManagedPids = args.findListeningPids(port);
+      if (lateManagedPids.length > 0) {
+        initialPids = lateManagedPids;
+      } else {
+        const result = accepted ? 'http_shutdown_timeout_no_pid' : 'http_shutdown_unconfirmed_no_pid';
+        logProcessLifecycle({
+          event: 'port_check_result',
+          source: 'cli.ensurePortAvailable',
+          details: { port, result }
         });
         throw new Error(
-          `Port ${port} is occupied by RouteCodex but no managed PID is available; refusing to start until /shutdown is confirmed.`
+          accepted
+            ? `Timed out waiting for RouteCodex /shutdown to free port ${port}; no managed PID is available for signal fallback.`
+            : `Port ${port} is occupied by RouteCodex but no managed PID is available; refusing to start until /shutdown is confirmed.`
         );
       }
-      const shutdownDeadline = Date.now() + Number(args.env.ROUTECODEX_STOP_TIMEOUT_MS ?? 5000);
-      while (Date.now() < shutdownDeadline) {
-        if (await canBindPort()) {
-          logProcessLifecycle({
-            event: 'port_check_result',
-            source: 'cli.ensurePortAvailable',
-            details: { port, result: 'freed_after_http_shutdown_no_pid' }
-          });
-          return;
-        }
-        await args.sleep(150);
-      }
-      logProcessLifecycle({
-        event: 'port_check_result',
-        source: 'cli.ensurePortAvailable',
-        details: { port, result: 'http_shutdown_timeout_no_pid' }
-      });
-      throw new Error(`Timed out waiting for RouteCodex /shutdown to free port ${port}.`);
     }
-    if (healthyWithoutPid && opts.restart && buildRestartOnly) {
+    if (initialPids.length === 0 && healthyWithoutPid && opts.restart && buildRestartOnly) {
       logProcessLifecycle({
         event: 'port_check_result',
         source: 'cli.ensurePortAvailable',
@@ -326,17 +334,20 @@ export async function ensurePortAvailableImpl(args: {
       args.logger.info(`Build restart-only mode: reusing existing server without shutdown.`);
       args.exit(0);
     }
-    if (healthyWithoutPid && !opts.restart) {
+    if (initialPids.length === 0 && healthyWithoutPid && !opts.restart) {
       logProcessLifecycle({
         event: 'port_check_result',
         source: 'cli.ensurePortAvailable',
         details: { port, result: 'already_running_unmanaged' }
       });
-    parentSpinner.stop();
-    args.logger.success(`RouteCodex is already running on port ${port}.`);
-    args.logger.info(`Use 'rcc stop' for graceful shutdown.`);
-    args.exit(0);
+      parentSpinner.stop();
+      args.logger.success(`RouteCodex is already running on port ${port}.`);
+      args.logger.info(`Use 'rcc stop' for graceful shutdown.`);
+      args.exit(0);
+    }
   }
+
+  if (initialPids.length === 0) {
     logProcessLifecycle({
       event: 'port_check_result',
       source: 'cli.ensurePortAvailable',
@@ -424,6 +435,27 @@ export async function ensurePortAvailableImpl(args: {
   const killTimeout = Number(args.env.ROUTECODEX_KILL_TIMEOUT_MS ?? 3000);
   const pollInterval = 150;
 
+  const httpShutdownAccepted = await attemptConfirmedHttpShutdown();
+  if (httpShutdownAccepted) {
+    if (await waitForPortFree(gracefulTimeout, pollInterval)) {
+      logProcessLifecycle({
+        event: 'port_check_result',
+        source: 'cli.ensurePortAvailable',
+        details: { port, result: 'freed_after_http_shutdown' }
+      });
+      stopSpinner.succeed(`Port ${port} freed after RouteCodex /shutdown.`);
+      args.logger.success(`Port ${port} freed after RouteCodex /shutdown.`);
+      parentSpinner.start('Starting RouteCodex server...');
+      return;
+    }
+    logProcessLifecycle({
+      event: 'port_check_result',
+      source: 'cli.ensurePortAvailable',
+      details: { port, result: 'http_shutdown_timeout', pids: args.findListeningPids(port) }
+    });
+  }
+
+  stopSpinner.warn(`Graceful shutdown did not free port ${port}, sending SIGTERM to managed PID(s): ${initialPids.join(', ')}`);
   for (const pid of initialPids) {
     try {
       args.killPidBestEffort(pid, { force: false });
@@ -434,7 +466,7 @@ export async function ensurePortAvailableImpl(args: {
 
   const gracefulDeadline = Date.now() + gracefulTimeout;
   while (Date.now() < gracefulDeadline) {
-    if (args.findListeningPids(port).length === 0) {
+    if (await canBindPort()) {
       logProcessLifecycle({
         event: 'port_check_result',
         source: 'cli.ensurePortAvailable',
@@ -469,7 +501,7 @@ export async function ensurePortAvailableImpl(args: {
 
     const killDeadline = Date.now() + killTimeout;
     while (Date.now() < killDeadline) {
-      if (args.findListeningPids(port).length === 0) {
+      if (await canBindPort()) {
         logProcessLifecycle({
           event: 'port_check_result',
           source: 'cli.ensurePortAvailable',
@@ -485,7 +517,7 @@ export async function ensurePortAvailableImpl(args: {
   }
 
   remaining = args.findListeningPids(port);
-  if (remaining.length) {
+  if (remaining.length || !(await canBindPort())) {
     logProcessLifecycle({
       event: 'port_check_result',
       source: 'cli.ensurePortAvailable',

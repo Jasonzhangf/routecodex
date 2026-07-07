@@ -60,7 +60,10 @@ function createNodeRequire() {
   const metaUrl = getImportMetaUrlUnsafe();
   if (typeof metaUrl === 'string' && metaUrl.length > 0) {
     try {
-      return createRequire(metaUrl);
+      const requireBase = metaUrl.startsWith('file:') || path.isAbsolute(metaUrl) ? metaUrl : null;
+      if (requireBase) {
+        return createRequire(requireBase);
+      }
     } catch {
       // continue to path fallback
     }

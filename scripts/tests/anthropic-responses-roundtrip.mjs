@@ -99,7 +99,7 @@ function loadCodexSample() {
 async function loadConverters() {
   const distRoot = path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist');
   const responsesBridgePath = path.join(distRoot, 'conversion', 'responses', 'responses-openai-bridge.js');
-  const responseRuntimePath = path.join(distRoot, 'conversion', 'hub', 'response', 'response-runtime.js');
+  const responseRuntimePath = path.join(distRoot, 'conversion', 'hub', 'response', 'response-runtime-anthropic.js');
   if (!fs.existsSync(responsesBridgePath) || !fs.existsSync(responseRuntimePath)) {
     throw new Error('llmswitch-core dist missing. 请先在 sharedmodule/llmswitch-core 运行 npm run build');
   }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { buildAnthropicResponseFromChat } from '../../dist/conversion/hub/response/response-runtime.js';
+import { buildAnthropicResponseFromChat } from '../../dist/conversion/hub/response/response-runtime-anthropic.js';
 
 const chatPayload = {
   id: 'chatcmpl_usage_full_preserve',

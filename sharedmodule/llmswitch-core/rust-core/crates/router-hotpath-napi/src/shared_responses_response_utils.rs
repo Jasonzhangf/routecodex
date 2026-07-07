@@ -67,6 +67,31 @@ fn stringify_args(value: &Value) -> String {
     }
 }
 
+fn read_response_tool_call_type(entry: &Map<String, Value>) -> String {
+    entry
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn read_response_tool_call_arguments(entry: &Map<String, Value>) -> Value {
+    let function_row = entry.get("function").and_then(Value::as_object);
+    if read_response_tool_call_type(entry) == "custom_tool_call" {
+        if let Some(input) = entry.get("input") {
+            let mut out = Map::new();
+            out.insert("patch".to_string(), input.clone());
+            return Value::Object(out);
+        }
+    }
+    function_row
+        .and_then(|row| row.get("arguments"))
+        .or_else(|| entry.get("arguments"))
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()))
+}
+
 fn normalize_tool_call(entry: &Map<String, Value>, fallback_prefix: &str) -> Option<Value> {
     let function_row = entry.get("function").and_then(Value::as_object);
     let raw_name = function_row
@@ -77,11 +102,7 @@ fn normalize_tool_call(entry: &Map<String, Value>, fallback_prefix: &str) -> Opt
         other => other.to_string(),
     };
 
-    let args_value = function_row
-        .and_then(|row| row.get("arguments"))
-        .or_else(|| entry.get("arguments"))
-        .cloned()
-        .unwrap_or_else(|| Value::Object(Map::new()));
+    let args_value = read_response_tool_call_arguments(entry);
     let args_str =
         crate::resp_process_stage1_tool_governance_blocks::tool_args::normalize_tool_args_preserving_raw_shape(
             normalized_name.as_str(),
@@ -160,7 +181,7 @@ fn collect_tool_calls_from_responses_impl(response: &Value) -> Vec<Value> {
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        if item_type != "function_call" {
+        if item_type != "function_call" && item_type != "custom_tool_call" {
             continue;
         }
         push_call(normalize_tool_call(item_obj, "output_call"), "output_call");

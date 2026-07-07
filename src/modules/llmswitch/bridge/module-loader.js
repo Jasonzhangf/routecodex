@@ -91,10 +91,10 @@ function shouldPreferSourceInJest(subpath, impl) {
     if (impl !== 'ts' || !isJestRuntime()) {
         return false;
     }
-    const jestDistOnlyPrefixes = [
-        'native/router-hotpath/native-failure-policy',
-        'native/router-hotpath/native-virtual-router-routing-state'
-    ];
+  const jestDistOnlyPrefixes = [
+    'native/router-hotpath/native-failure-policy',
+    'native/router-hotpath/native-virtual-router-routing-state'
+  ];
     if (matchesPrefix(subpath, jestDistOnlyPrefixes)) {
         return false;
     }

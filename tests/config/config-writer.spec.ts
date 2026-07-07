@@ -12,17 +12,25 @@ async function mkTmp(prefix: string): Promise<string> {
 }
 
 describe('config writers', () => {
-  it('writes user config as json and can decode it back', async () => {
+  it('writes user config as toml and can decode it back', async () => {
     const root = await mkTmp('routecodex-user-writer-');
-    const filePath = path.join(root, 'config.json');
+    const filePath = path.join(root, 'config.toml');
     await writeUserConfigFile(filePath, {
       version: '2.0.0',
       virtualrouterMode: 'v2',
     });
 
     const decoded = await decodeUserConfigFile(filePath);
-    expect(decoded.format).toBe('json');
+    expect(decoded.format).toBe('toml');
     expect(decoded.parsed.virtualrouterMode).toBe('v2');
+  });
+
+  it('rejects user config json writes', async () => {
+    const root = await mkTmp('routecodex-user-writer-json-');
+    const filePath = path.join(root, 'config.json');
+    await expect(writeUserConfigFile(filePath, { version: '2.0.0' })).rejects.toThrow(
+      'user config JSON support removed'
+    );
   });
 
   it('patches toml string scalar through shared writer and keeps comments', async () => {

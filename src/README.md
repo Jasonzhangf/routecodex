@@ -40,7 +40,7 @@ npm run build
 npm run install:global
 
 # 4. 启动
-routecodex start --config ~/.rcc/config.json
+routecodex start --config ~/.rcc/config.toml
 ```
 
 ## 调试

@@ -211,7 +211,7 @@ describe('webui page-level coverage', () => {
     const hasToast = (needle: string) => onToast.mock.calls.some(([msg]) => String(msg).includes(needle));
     const providerView = render(<ProviderPage authenticated authEpoch={1} apiKey="" onToast={onToast} />);
     await waitFor(() => expect(screen.getByText('Provider Pool')).toBeTruthy());
-    const providerEditorPanel = screen.getByText('Provider Editor').closest('.panel') as HTMLElement;
+    const providerEditorPanel = screen.getByText('Provider Details').closest('.panel') as HTMLElement;
     const modelPanel = screen.getByText('Models + Test + Authfile').closest('.panel') as HTMLElement;
     const providerIdInput = screen.getByLabelText('provider id') as HTMLInputElement;
     fireEvent.change(providerIdInput, { target: { value: 'demo' } });
@@ -236,7 +236,7 @@ describe('webui page-level coverage', () => {
     fireEvent.click(screen.getByText('Add Port Config'));
     await waitFor(() => expect(hasToast('Port config saved.')).toBe(true));
     fireEvent.change(screen.getByLabelText('provider target picker'), { target: { value: 'demo.default.demo-max' } });
-    expect((screen.getByPlaceholderText('targets: provider.alias.model, provider.alias.model') as HTMLInputElement).value).toContain('demo.default.demo-max');
+    expect((screen.getByLabelText('pool targets') as HTMLTextAreaElement).value).toContain('demo.default.demo-max');
     routingView.unmount();
   });
 });

@@ -95,7 +95,7 @@ describe('cli start command startup error fail-fast', () => {
       fsImpl: {
         existsSync: () => true,
         statSync: () => ({ isDirectory: () => false } as any),
-        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
         writeFileSync: () => {},
         mkdtempSync: () => '/tmp/rc',
         mkdirSync: () => {},

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { isRecord } from '../utils/common-utils.js';
 import { parseTomlRecord } from './toml-basic.js';
 
-export type UserConfigFormat = 'json' | 'toml';
+export type UserConfigFormat = 'toml';
 export type UnknownRecord = Record<string, unknown>;
 
 export interface DecodedUserConfigFile {
@@ -19,10 +19,10 @@ type ReadFileSyncLike = Pick<typeof import('node:fs'), 'readFileSync'>;
 
 export function detectUserConfigFormat(configPath: string): UserConfigFormat {
   const ext = path.extname(configPath).trim().toLowerCase();
-  if (ext === '.toml') {
-    return 'toml';
+  if (ext !== '.toml') {
+    throw new Error(`[config] user config JSON support removed; expected TOML file: ${configPath}`);
   }
-  return 'json';
+  return 'toml';
 }
 
 export function parseUserConfigText(raw: string, format: UserConfigFormat): UnknownRecord {
@@ -33,8 +33,7 @@ export function parseUserConfigText(raw: string, format: UserConfigFormat): Unkn
     const parsed = parseTomlRecord(raw);
     return isRecord(parsed) ? (parsed as UnknownRecord) : {};
   }
-  const parsed = JSON.parse(raw);
-  return isRecord(parsed) ? (parsed as UnknownRecord) : {};
+  throw new Error('[config] user config JSON support removed; parser only accepts TOML');
 }
 
 export async function decodeUserConfigFile(configPath: string): Promise<DecodedUserConfigFile> {

@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import { jest } from '@jest/globals';
 
+import { parseTomlRecord } from '../../src/config/toml-basic.js';
+
 export type TestMocks = {
   updateProviderModels: jest.Mock<any>;
   fetchModelsFromUpstream: jest.Mock<any>;
@@ -49,7 +51,7 @@ export async function loadProviderCommand(): Promise<{
       providerId: 'demo',
       totalRemote: 3,
       filtered: 2,
-      outputPath: '/tmp/provider/demo/config.v2.json',
+      outputPath: '/tmp/provider/demo/config.v2.toml',
       blacklistPath: '/tmp/provider/demo/blacklist.json'
     })),
     fetchModelsFromUpstream: jest.fn(async () => ({
@@ -112,10 +114,35 @@ export async function loadProviderCommand(): Promise<{
       routingHints: { provider: 'demo', route: 'default' }
     })),
     buildRoutingHintsConfigFragment: jest.fn(() => ({ providers: [{ id: 'demo' }] })),
-    loadProviderConfigsV2: jest.fn(async () => ({})),
+    loadProviderConfigsV2: jest.fn(async (root?: string) => {
+      const base = typeof root === 'string' && root.trim() ? root : '/tmp/provider-root-default';
+      const out: Record<string, unknown> = {};
+      let entries: Array<{ name: string; isDirectory: () => boolean }> = [];
+      try {
+        entries = await fs.readdir(base, { withFileTypes: true }) as Array<{ name: string; isDirectory: () => boolean }>;
+      } catch {
+        return out;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const providerId = entry.name;
+        const configPath = path.join(base, providerId, 'config.v2.toml');
+        try {
+          out[providerId] = parseTomlRecord(await fs.readFile(configPath, 'utf8'));
+        } catch (e) {
+          try {
+            await fs.access(configPath);
+          } catch {
+            continue;
+          }
+          throw e;
+        }
+      }
+      return out;
+    }),
     resolveRccProviderDir: jest.fn(() => '/tmp/provider-root-default'),
     loadRouteCodexConfig: jest.fn(async () => ({
-      configPath: '/tmp/provider-root-default/config.json',
+      configPath: '/tmp/provider-root-default/config.toml',
       userConfig: {
         virtualrouter: {
           routing: {
@@ -162,7 +189,9 @@ export async function loadProviderCommand(): Promise<{
     loadProviderConfigsV2: mocks.loadProviderConfigsV2
   }));
   await jest.unstable_mockModule('../../src/config/user-data-paths.js', () => ({
-    resolveRccProviderDir: mocks.resolveRccProviderDir
+    resolveRccProviderDir: mocks.resolveRccProviderDir,
+    resolveRccPath: (...segments: string[]) => path.join('/tmp/provider-root-default', ...segments),
+    resolveRccUserDir: () => '/tmp/provider-root-default'
   }));
   await jest.unstable_mockModule('../../src/config/routecodex-config-loader.js', () => ({
     loadRouteCodexConfig: mocks.loadRouteCodexConfig

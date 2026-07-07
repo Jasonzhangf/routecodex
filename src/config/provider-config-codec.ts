@@ -1,13 +1,13 @@
 // feature_id: config.provider_config_codec
 import fs from 'node:fs/promises';
-import path from 'node:path';
 
+import { coerceRouteCodexProviderConfigV2Sync } from '../modules/llmswitch/bridge.js';
 import { isRecord } from '../utils/common-utils.js';
 import type { ProviderConfigV2 } from './provider-v2-loader.js';
-import type { UnknownRecord } from './virtual-router-types.js';
 import { parseTomlRecord } from './toml-basic.js';
 
-export type ProviderConfigFormat = 'json' | 'toml';
+export type ProviderConfigFormat = 'toml';
+type UnknownRecord = Record<string, unknown>;
 
 export interface DecodedProviderConfigFile {
   path: string;
@@ -19,22 +19,17 @@ export interface DecodedProviderConfigFile {
 type ReadFileSyncLike = Pick<typeof import('node:fs'), 'readFileSync'>;
 
 export function detectProviderConfigFormat(configPath: string): ProviderConfigFormat {
-  const ext = path.extname(configPath).trim().toLowerCase();
-  if (ext === '.toml') {
-    return 'toml';
+  if (!configPath.trim().toLowerCase().endsWith('.toml')) {
+    throw new Error(`[config] provider config JSON support removed; expected TOML file: ${configPath}`);
   }
-  return 'json';
+  return 'toml';
 }
 
 export function parseProviderConfigText(raw: string, format: ProviderConfigFormat): UnknownRecord {
   if (!raw.trim()) {
     return {};
   }
-  if (format === 'toml') {
-    const parsed = parseTomlRecord(raw);
-    return isRecord(parsed) ? (parsed as UnknownRecord) : {};
-  }
-  const parsed = JSON.parse(raw);
+  const parsed = parseTomlRecord(raw);
   return isRecord(parsed) ? (parsed as UnknownRecord) : {};
 }
 
@@ -66,24 +61,5 @@ export function decodeProviderConfigFileSync(
 }
 
 export function coerceProviderConfigV2FromParsed(parsed: UnknownRecord, fallbackProviderId?: string): ProviderConfigV2 | null {
-  const providerNode = (parsed as { provider?: unknown }).provider;
-  if (!isRecord(providerNode)) {
-    return null;
-  }
-  const providerRecord = providerNode as UnknownRecord;
-  const providerIdRaw = typeof parsed.providerId === 'string' ? parsed.providerId.trim() : '';
-  const providerNodeId = typeof providerRecord.id === 'string' ? providerRecord.id.trim() : '';
-  const providerId = providerIdRaw || providerNodeId || String(fallbackProviderId || '').trim();
-  if (!providerId) {
-    return null;
-  }
-  if (!providerNodeId) {
-    providerRecord.id = providerId;
-  }
-  const versionRaw = (parsed as { version?: unknown }).version;
-  return {
-    version: typeof versionRaw === 'string' && versionRaw.trim() ? versionRaw : '2.0.0',
-    providerId,
-    provider: providerRecord
-  };
+  return coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId) as ProviderConfigV2 | null;
 }

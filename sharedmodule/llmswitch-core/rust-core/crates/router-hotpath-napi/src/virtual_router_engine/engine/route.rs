@@ -760,6 +760,11 @@ mod tests {
                     "id": "search-pool",
                     "priority": 100,
                     "targets": ["search.key1.model"]
+                }],
+                "tools": [{
+                    "id": "tools-pool",
+                    "priority": 100,
+                    "targets": ["tools.key1.model"]
                 }]
             },
             "providers": {
@@ -779,6 +784,12 @@ mod tests {
                     "providerKey": "search.key1.model",
                     "providerType": "openai",
                     "modelId": "search-model",
+                    "enabled": true
+                },
+                "tools.key1.model": {
+                    "providerKey": "tools.key1.model",
+                    "providerType": "responses",
+                    "modelId": "tools-model",
                     "enabled": true
                 }
             }
@@ -933,6 +944,50 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("route_hint:search"));
+    }
+
+    #[test]
+    fn apply_patch_tool_choice_selects_tools_pool_on_fresh_responses_turn() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                { "role": "user", "content": [{ "type": "input_text", "text": "edit the file" }] }
+            ],
+            "tools": [{
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Use the apply_patch tool to edit files."
+            }],
+            "tool_choice": { "type": "custom", "name": "apply_patch" }
+        });
+        let metadata = json!({
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/responses",
+                "requestId": "test-apply-patch-tool-choice-route"
+            }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("route should succeed");
+
+        let decision = result.get("decision").expect("should have decision");
+        assert_eq!(decision["routeName"].as_str(), Some("tools"));
+        assert_eq!(decision["providerKey"].as_str(), Some("tools.key1.model"));
+        let reasoning = decision["reasoning"].as_str().unwrap_or_default();
+        assert!(
+            reasoning.contains("tools:apply_patch-tool-choice"),
+            "apply_patch tool_choice must be visible in routing reason, got reasoning={reasoning}"
+        );
+        assert!(
+            !reasoning.contains("thinking:user-input"),
+            "explicit apply_patch tool_choice must not be classified as a plain thinking turn"
+        );
     }
 
     #[test]

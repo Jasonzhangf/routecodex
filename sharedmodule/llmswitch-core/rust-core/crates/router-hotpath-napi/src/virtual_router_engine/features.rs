@@ -6,9 +6,9 @@ use serde_json::{json, Value};
 use crate::virtual_router_engine::message_utils::{extract_message_text, get_latest_message_role};
 use media::analyze_media_attachments;
 use tools::{
-    classify_tool_call_for_report, detect_coding_tool, detect_custom_tool_declared,
-    detect_last_assistant_tool_category, detect_vision_tool, detect_web_search_tool_declared,
-    detect_web_tool, extract_meaningful_declared_tool_names,
+    classify_tool_call_for_report, detect_apply_patch_tool_choice, detect_coding_tool,
+    detect_custom_tool_declared, detect_last_assistant_tool_category, detect_vision_tool,
+    detect_web_search_tool_declared, detect_web_tool, extract_meaningful_declared_tool_names,
 };
 
 fn get_message_role(message: &Value) -> Option<String> {
@@ -340,6 +340,7 @@ pub(crate) struct RoutingFeatures {
     pub has_web_tool: bool,
     pub has_web_search_tool_declared: bool,
     pub has_custom_tool_declared: bool,
+    pub has_apply_patch_tool_choice: bool,
     pub has_coding_tool: bool,
     pub has_thinking_keyword: bool,
     pub estimated_tokens: i64,
@@ -477,6 +478,7 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
         has_web_search_tool_declared: detect_web_search_tool_declared(request.get("tools")),
         has_custom_tool_declared: detect_custom_tool_declared(request.get("tools"))
             || contains_responses_custom_tool_payload(request),
+        has_apply_patch_tool_choice: detect_apply_patch_tool_choice(request.get("tool_choice")),
         has_coding_tool,
         has_thinking_keyword,
         estimated_tokens,

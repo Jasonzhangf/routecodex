@@ -425,6 +425,109 @@ describe('Responses SSE client contract blackbox', () => {
     });
   });
 
+  it('projects relay apply_patch SSE function-call arguments into custom_tool_call input', async () => {
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+    const patch = '*** Begin Patch\n*** Add File: tmp/apft/live-sse.txt\n+hello from handler sse\n*** End Patch';
+    const rawArguments = JSON.stringify({ patch });
+    const app = express();
+    app.get('/responses', (_req, res) => {
+      const upstream = new PassThrough();
+      upstream.on('error', () => {});
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          metadata: { outboundStream: true, stream: true },
+          sseStream: upstream,
+        } as any,
+        'req_relay_apply_patch_sse_projection',
+        {
+          forceSSE: true,
+          entryEndpoint: '/v1/responses',
+          sseTotalTimeoutMs: 1500,
+          responsesRequestContext: {
+            payload: {},
+            context: {
+              toolsRaw: [
+                {
+                  type: 'custom',
+                  name: 'apply_patch',
+                  description: 'Apply a raw patch.',
+                  format: { type: 'grammar', syntax: 'lark', definition: 'start: /(.|\\n)+/' },
+                },
+              ],
+            },
+          },
+        }
+      );
+      upstream.write('event: response.output_item.added\n');
+      upstream.write(`data: ${JSON.stringify({
+        type: 'response.output_item.added',
+        output_index: 0,
+        item: {
+          id: 'fc_apply_patch_projection',
+          type: 'function_call',
+          call_id: 'call_apply_patch_projection',
+          name: 'apply_patch',
+          arguments: '',
+          status: 'in_progress',
+        },
+      })}\n\n`);
+      upstream.write('event: response.function_call_arguments.delta\n');
+      upstream.write(`data: ${JSON.stringify({
+        type: 'response.function_call_arguments.delta',
+        output_index: 0,
+        item_id: 'fc_apply_patch_projection',
+        call_id: 'call_apply_patch_projection',
+        delta: rawArguments,
+      })}\n\n`);
+      upstream.write('event: response.function_call_arguments.done\n');
+      upstream.write(`data: ${JSON.stringify({
+        type: 'response.function_call_arguments.done',
+        output_index: 0,
+        item_id: 'fc_apply_patch_projection',
+        call_id: 'call_apply_patch_projection',
+        name: 'apply_patch',
+        arguments: rawArguments,
+      })}\n\n`);
+      upstream.write('event: response.output_item.done\n');
+      upstream.write(`data: ${JSON.stringify({
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: {
+          id: 'fc_apply_patch_projection',
+          type: 'function_call',
+          call_id: 'call_apply_patch_projection',
+          name: 'apply_patch',
+          arguments: rawArguments,
+          status: 'completed',
+        },
+      })}\n\n`);
+      upstream.end();
+    });
+
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/responses`, {
+        headers: { accept: 'text/event-stream' },
+      });
+      const { rawText } = await collectSseEvents(response, {
+        timeoutMs: 1000,
+      });
+
+      expect(response.status).toBe(200);
+      expect(rawText).toContain('event: response.output_item.done');
+      expect(rawText).toContain('"type":"custom_tool_call"');
+      expect(rawText).toContain('"name":"apply_patch"');
+      expect(rawText).toContain('"input"');
+      expect(rawText).toContain('tmp/apft/live-sse.txt');
+      expect(rawText).not.toContain('event: response.function_call_arguments.delta');
+      expect(rawText).not.toContain('event: response.function_call_arguments.done');
+      expect(rawText).not.toContain('"{\\"patch\\":');
+      expect(rawText).not.toContain('"type":"function_call"');
+      expect(rawText).not.toContain('event: error');
+    });
+  });
+
   it('passes direct passthrough transport keepalive events and preserves terminal Responses events', async () => {
     const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const app = express();

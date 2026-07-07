@@ -3,10 +3,9 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
-import { resolveRccAuthDirForRead } from '../../../../config/user-data-paths.js';
+import { resolveRccAuthDir } from '../../../../config/user-data-paths.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { VirtualRouterArtifacts, ProviderProtocol } from '../types.js';
-import { decodeProviderConfigFile } from '../../../../config/provider-config-codec.js';
 import { writeProviderConfigFile } from '../../../../config/provider-config-writer.js';
 import { loadProviderConfigsV2 } from '../../../../config/provider-v2-loader.js';
 import type { ProviderConfigV2 } from '../../../../config/provider-v2-loader.js';
@@ -181,10 +180,7 @@ async function resolveProviderConfigFilePath(
     throw error;
   }
   const tomlPath = path.join(providerDirReal, 'config.v2.toml');
-  if (fsSync.existsSync(tomlPath)) {
-    return tomlPath;
-  }
-  return path.join(providerDirReal, 'config.v2.json');
+  return tomlPath;
 }
 
 function mapRoutingGroupErrorToStatus(error: unknown): number {
@@ -365,7 +361,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     }
   });
 
-  // Config V2 Provider 视图：基于 ~/.rcc/provider/*/config.v2.json 的声明性配置。
+  // Config V2 Provider 视图：基于 ~/.rcc/provider/*/config.v2.toml 的声明性配置。
   app.get('/config/providers/v2', async (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
     try {
@@ -783,7 +779,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         ok: true,
         path: configPath,
         providerDir: pickProviderRootDir(),
-        authDir: resolveRccAuthDirForRead()
+        authDir: resolveRccAuthDir()
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

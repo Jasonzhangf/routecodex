@@ -1,5 +1,7 @@
 # RouteCodex 配置 TOML Shadow 架构设计
 
+> 2026-07-07 status: this document is historical. JSON/v1/shadow runtime support has been removed. Do not recreate the shadow semantic compare module; `src/config/config-semantic-compare.ts` was deleted as dead code after all callers were gone.
+
 ## 目标
 
 在不立刻切换 JSON 主链的前提下，建立一套可验证、可渐进替换的 TOML 平行实现：
@@ -213,7 +215,7 @@ shadow 的角色仅限于：
 
 ## D. Shadow Compare
 
-建议新建：
+历史建议（已废弃，不再新建）：
 
 - `src/config/config-semantic-compare.ts`
 
@@ -362,4 +364,3 @@ shadow 阶段建议：
 因此唯一正确路线是：
 
 > 先建立 resolver/codec/loader 真源与 TOML shadow compare，再切主链。
-

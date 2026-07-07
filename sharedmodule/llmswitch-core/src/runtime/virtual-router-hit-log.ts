@@ -5,7 +5,7 @@ import type {
   RoutingFeatures,
   RoutingInstructionMode,
   VirtualRouterContextRoutingConfig
-} from '../native/router-hotpath/virtual-router-contracts.js';
+} from '../native/router-hotpath/native-virtual-router-runtime.js';
 import type { RoutingInstructionState } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import type { VirtualRouterHitEvent } from '../telemetry/stats-center.js';
 

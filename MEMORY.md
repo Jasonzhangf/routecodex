@@ -1023,9 +1023,16 @@
 # 2026-07-05: rcc startup must not call deleted Virtual Router builder on materialized config
 
 - Verified root cause: `loadRouteCodexConfig()` materializes v2 provider files into `userConfig.virtualrouter.providers`; server runtime bootstrap then re-read that materialized config and called the deleted `buildVirtualRouterInputFromUserConfig()` guard when `routingPolicyGroups` and `providers` were both present.
-- Current rule: runtime bootstrap must route every `virtualrouter` config through `compileRouteCodexRuntimeConfigManifest()` and carry the same Rust manifest into HubPipeline setup. `buildVirtualRouterInputV2()` is retired from live config loader code and remains only as a throwing stale guard in `virtual-router-types.ts`.
+- Current rule: runtime bootstrap must route every `virtualrouter` config through `compileRouteCodexRuntimeConfigManifest()` and carry the same Rust manifest into HubPipeline setup. `buildVirtualRouterInputV2()` is retired from live config loader code; `src/config/virtual-router-types.ts` was later physically deleted after all callers were gone.
 - Current rule: `compileRouteCodexRuntimeConfigManifest()` accepts already-materialized `virtualrouter.providers` as decoded provider config source; raw single-source v2 configs read provider files through `loadProviderConfigsV2()` before calling Rust.
 - Verified evidence: red focused runtime provider-merge test reproduced the exact stale-guard error; after the fix, focused config/runtime/auth Jest 35/35, function-map gate, mainline call-map gate, `build:base`, `pack:rcc`, and `verify:rcc-release-install` passed. Real global install of synchronized `routecodex/rcc@0.90.3590` passed; live `/health` on 5520/4444/5555/10000 returned ready version `0.90.3590`; `/daemon/auth/status` returned `authRequired:false`, `authenticated:true`, `isRemote:false`; `/daemon/admin` returned HTTP 200.
+
+# 2026-07-07: Config shadow compare and stale VR type guard are deleted
+
+- `src/config/config-semantic-compare.ts` was physically deleted after JSON/v1/shadow runtime support removal; it had no production/test caller and only historical shadow docs referenced it.
+- `src/config/virtual-router-types.ts` was physically deleted after all live callers moved to Rust `compileRouteCodexRuntimeConfigManifest()` and no import remained; do not keep fail-fast guard files without callers.
+- `config.virtual_router_types` was removed from function/verification maps; current config materialization truth is `config.user_config_materialization` in Rust `runtime_config_materialization.rs`.
+- Verification evidence on 2026-07-07: live source/test/architecture import grep had zero matches, root `tsc`, function-map gate, `verify:config-ssot`, minimal TS surface gate, rustification audit, and `git diff --check` passed. No managed live restart/replay was run because this was dead-code/config-surface deletion.
 
 # 2026-07-05: Hub/VR/Chat Process rustification is not complete at the LOC threshold
 
@@ -1226,10 +1233,57 @@
 - Config format truth: root runtime config is `~/.rcc/config.toml`; provider config is `~/.rcc/provider/<providerId>/config.v2.toml`. `config.json`, provider `config.v1.json`, provider `config.v2.json`, and JSON migration commands are removed legacy paths and must fail fast or be ignored, not migrated/fallback-read.
 - Verified cleanup: 23 old `~/.rcc` provider JSON config files were physically deleted on 2026-07-06; cleanup verification confirmed no old JSON config files remained under the checked patterns.
 - Verification used: root TS compile, llmswitch-core TS compile, focused config/provider-update Jest, Rust `runtime_config_materialization` cargo test, and native hotpath build.
-- Provider-update closeout: `src/tools/provider-update/config-builder.ts` is deleted; `provider update --config` reads provider `config.v2.toml` through the shared provider codec and writes through the shared TOML writer. It must not regenerate v1 `virtualrouter.providers` JSON configs or silently seed models on upstream failure. The grep gate now blocks production old config filenames, JSON migration/shadow refs, and v1 `virtualrouter.providers` access outside materialized output validation.
+- Provider-update closeout: `src/tools/provider-update/config-builder.ts` is deleted; `provider update <providerId>` reads provider config through the Rust `loadProviderConfigsV2(root)` root loader and writes canonical `provider/<id>/config.v2.toml` through the shared TOML writer. It must not accept arbitrary provider `--config <file>` paths, regenerate v1 `virtualrouter.providers` JSON configs, or silently seed models on upstream failure. The grep gate now blocks production old config filenames, JSON migration/shadow refs, and v1 `virtualrouter.providers` access outside materialized output validation.
 - Server runtime closeout: HubPipeline must consume `pipelineRuntimeConfig` from the same Rust `RouteCodexRuntimeManifest` produced during router bootstrap. `src/server/runtime/http-server/runtime-config-manifest-carrier.ts` carries the non-enumerable manifest from bootstrap to setup; setup must fail fast if the manifest is missing, and server/config runtime must not import/use VR-only bootstrap wrappers.
 - Verified on 2026-07-06: focused config/runtime Jest 8 suites / 49 tests, grep residue gate, root TS compile, llmswitch-core TS compile, Rust config materialization cargo test, native hotpath build, function-map gate, mainline call-map gate, VR no-TS-runtime gate, minimal TS surface gate, rustification audit, and architecture-ci longtail all passed for this artifact-carry slice.
 - Live closeout verified on 2026-07-06: repo package, global `routecodex --version`, and `~/.rcc/install/current/package.json` all reported `0.90.3603`; managed `routecodex restart --port 5555` passed; `/health` on ports 5555 and 5520 reported `version=0.90.3603`; same-entry stopless live probe `/tmp/config-materialization-rust-live-5555.json` completed with first-turn `exec_command`, no leaked stop schema, and completion after submit_tool_outputs.
+
+# 2026-07-06: Config TOML parse/serialize is Rust-owned
+
+- Rust SSOT: TOML parse/serialize semantics for RouteCodex config are owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs`.
+- TS boundary: `src/config/toml-basic.ts` is a thin native shell only; it must not regain handwritten TOML parsing, splitting, inline-table parsing, serializer ordering, or comment-stripping semantics.
+- User/provider config codecs remain TS shells for file IO, TOML-only path rejection, and provider coercion; they delegate TOML data semantics to `config.toml_codec`.
+- Native exports `parseRouteCodexTomlRecordJson` and `serializeRouteCodexTomlRecordJson` are required hotpath exports.
+- Verified on 2026-07-06: Rust TOML codec cargo test, focused config blackbox Jest, `verify:config-ssot`, root TS compile, llmswitch-core TS compile, native hotpath build, function-map gate, minimal TS surface, rustification audit, and diff check all passed.
+
+# 2026-07-06: Config TOML scalar patch is Rust-owned
+
+- Rust SSOT: comment-preserving TOML string scalar patch semantics are owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs` through `update_toml_string_scalar_in_table_json`.
+- TS boundary: `src/config/toml-comment-preserving.ts` is a thin sync native shell only; it must not regain table scanning, key matching, comment spacing preservation, scalar escaping, table creation, or insertion-order logic.
+- User config writer remains a TS file IO shell for atomic writes and path/format orchestration; it delegates scalar patch semantics to `config.toml_codec`.
+- Native export `updateRouteCodexTomlStringScalarInTableJson` is a required hotpath export.
+- Verified on 2026-07-06: Rust TOML codec tests, native hotpath build, focused TOML writer/config writer/grep Jest, `verify:config-ssot`, root TS compile, llmswitch-core TS compile, function-map gate, minimal TS surface, rustification audit, and diff check all passed.
+
+# 2026-07-06: Provider config v2 coercion is Rust-owned
+
+- Rust SSOT: provider config v2 coercion from parsed TOML record into `ProviderConfigV2` shape is owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs` through `coerce_provider_config_v2_from_parsed_json`.
+- TS boundary: `src/config/provider-config-codec.ts` remains a file IO/path rejection/TOML parse shell only; `coerceProviderConfigV2FromParsed` must call native `coerceRouteCodexProviderConfigV2Json` and must not regain provider id/version/default shape logic.
+- Native export `coerceRouteCodexProviderConfigV2Json` is a required hotpath export.
+- Verified on 2026-07-06: Rust provider codec tests, native hotpath build, focused provider config/TOML/grep Jest, `verify:config-ssot`, root TS compile, llmswitch-core TS compile, function-map gate, minimal TS surface, rustification audit, diff check, and cargo fmt check all passed.
+
+# 2026-07-06: Provider v2 loader planning and identity validation are Rust-owned
+
+- Rust SSOT: provider config v2 file filtering/sorting and provider identity validation are owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs` through `plan_provider_config_v2_files_json` and `resolve_provider_config_v2_identity_json`.
+- TS boundary: `src/config/provider-v2-loader.ts` remains a Node host IO shell for readdir/path join/file decode/native coercion and duplicate accumulation across loaded files. It must not regain handwritten `config.v2*.toml` file matching, sort planning, base config directory-id injection, suffixed file explicit-id enforcement, or provider id mismatch logic.
+- Native exports `planRouteCodexProviderConfigV2FilesJson` and `resolveRouteCodexProviderConfigV2IdentityJson` are required hotpath exports.
+- Verified on 2026-07-06: Rust provider codec tests, native hotpath build, focused provider-loader/config-codec-gate Jest, `verify:config-ssot`, root TS compile, function-map gate, minimal TS surface, rustification audit, diff check, and `cargo fmt -p router-hotpath-napi --check` all passed.
+- Boundary: full workspace `cargo fmt --check` remains blocked by unrelated unmodified formatting drift in `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`; no managed live restart/replay was run for this offline config loader slice.
+
+# 2026-07-06: User config v2 source validation is Rust-owned
+
+- Rust SSOT: v2 user config source-layout validation and primary routingPolicyGroup resolution are owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs` through `collect_v2_config_source_errors_json` and `resolve_primary_routecodex_routing_policy_group_json`.
+- TS boundary: `src/config/user-config-loader.ts` remains a file/provider/profile orchestration shell. `collectV2ConfigSourceErrors` and primary routingPolicyGroup selection must call native and must not regain allowed-field sets, default-route target validation, implicit-v2 detection, router-port precedence, active group fallback, or single-group fallback logic.
+- Native exports `collectRouteCodexV2ConfigSourceErrorsJson` and `resolvePrimaryRouteCodexRoutingPolicyGroupJson` are required hotpath exports.
+- Verified on 2026-07-06: Rust runtime materialization tests, native hotpath build, focused routecodex config/runtime materialization/grep Jest, `verify:config-ssot`, root TS compile, function-map gate, minimal TS surface, rustification audit, diff check, and `cargo fmt -p router-hotpath-napi --check` all passed.
+- Boundary: full workspace `cargo fmt --check` remains blocked by unrelated unmodified formatting drift in `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`; no managed live restart/replay was run for this offline config loader slice.
+
+# 2026-07-06: Materialized provider extraction is Rust-owned
+
+- Rust SSOT: materialized `virtualrouter.providers` extraction into provider config records is owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs` through `extract_routecodex_materialized_provider_configs_json`.
+- TS boundary: `src/config/user-config-loader.ts` remains a file/provider/profile orchestration shell. It may choose Rust-extracted materialized provider configs or load provider v2 files, but must not regain provider id trimming, provider object validation, provider.id mismatch checks, id injection, or `ProviderConfigV2` record construction for `virtualrouter.providers`.
+- Native export `extractRouteCodexMaterializedProviderConfigsJson` is a required hotpath export.
+- Verified on 2026-07-06: Rust runtime materialization tests, native hotpath build, focused routecodex config/runtime materialization/grep Jest, `verify:config-ssot`, root TS compile, function-map gate, minimal TS surface, rustification audit, diff check, and `cargo fmt -p router-hotpath-napi --check` all passed.
+- Boundary: full workspace `cargo fmt --check` remains blocked by unrelated unmodified formatting drift in `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`; no managed live restart/replay was run for this offline config loader slice.
 
 # 2026-07-06: RCC default routing pools must be superset pools
 
@@ -1280,3 +1334,93 @@
 - `scripts/ci/verify-llmswitch-minimal-ts-surface.mjs` now permits explicit native-linked shell entries in addition to mandatory non-native entries, so native-linked IO shells can be tracked and forbidden semantics can be gate-locked.
 - Gate: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` test `provider response TS shell must be classified as native IO shell only` blocks local provider response plan types, local shape detectors, endpoint/providerProtocol semantic branches, effect-kind/action switches, client payload builders, fallback/compat wording, and requires the Rust/native call surface.
 - Verified on 2026-07-06: `verify:llmswitch-minimal-ts-surface` PASS with 36 manifest entries / 35 current non-native files, provider-response residue Jest PASS, `verify:llmswitch-rustification-audit` PASS (`prodTsFileCount=159`, `prodTsLocTotal=28837`, `nonNativeFileCount=35`, `nonNativeLocTotal=4743`), llmswitch-core TS compile PASS, and Rust provider response gates PASS for provider SSE materialization, context helpers, and post-servertool client projection.
+
+# 2026-07-06: Responses response save request id is active-label first
+
+- For `/v1/responses`, response save must use the current active request label passed to `publishResponsesRecordPlanJson` before any `requestTruth.requestId`. After request-executor rebinds router id to provider id, stale router `requestTruth.requestId` must not override `recordArgs.requestId`.
+- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs::publish_responses_record_plan_json`.
+- Gate: `npm run verify:responses-history-protocol-contract` now requires the current-id-first Rust test/anchor and forbids the old requestTruth-first test names. `hub.chat_process_responses_continuation` maps include this gate.
+- Verified focused evidence: Rust current-id test passed, native hotpath build passed, provider-response focused/full Jest passed, Responses store/bridge/stopless focused contracts passed, root `tsc`, function-map gate, and mainline call-map gate passed. Current full cargo gate was blocked only by unrelated dirty `config_provider_codec.rs` compile errors.
+# 2026-07-06: Provider profile projection is Rust-owned
+
+- `config.provider_profile_materialization` owns provider profile projection through Rust `build_routecodex_provider_profiles_json` and NAPI `buildRouteCodexProviderProfilesJson`.
+- `src/providers/profile/provider-profile-loader.ts::buildProviderProfiles()` must remain a native bridge shell. Do not reintroduce TS protocol aliases/resolution, transport extraction, auth extraction/OAuth rejection, compatibility field rejection, metadata extraction, or provider node collection there or in config/server callers.
+- `extractApiKeyEntries()` remains TS because it only normalizes an already-built `ApiKeyAuthConfig` public helper; `buildForwarderProfiles()` remains TS and is a separate forwarder profile surface, not closed by this slice.
+- Verification evidence on 2026-07-06: crate-local router-hotpath fmt, Rust `runtime_config_materialization` tests, native hotpath build, provider-profile focused Jest, config SSOT, root `tsc`, function-map gate, minimal TS surface gate, rustification audit, and `git diff --check` passed. No managed live restart/replay was run for this offline slice.
+
+# 2026-07-06: Runtime manifest to userConfig materialization is Rust-owned
+
+- `config.user_config_materialization` owns final runtime manifest application through Rust `materialize_routecodex_user_config_from_manifest_json` and NAPI `materializeRouteCodexUserConfigFromManifestJson`.
+- `src/config/user-config-loader.ts` must not locally assign/rebuild `userConfig.virtualrouter` from `manifest.virtualRouterBootstrapInput`; it may only orchestrate native normalization, validation, group resolution, provider config IO selection, manifest compilation, native manifest application, and TS provider-profile build.
+- Server bootstrap must use `resolvePrimaryRouteCodexRoutingPolicyGroupSync()` for primary group selection; duplicated TS resolver logic was removed.
+- Verification evidence on 2026-07-06: crate-local router-hotpath fmt, Rust `runtime_config_materialization` tests, native hotpath build, config SSOT Jest, root `tsc`, function-map gate, minimal TS surface gate, rustification audit, and `git diff --check` passed. No managed live restart/replay was run for this offline config loader slice.
+
+# 2026-07-06: Implicit v2 runtime source normalization is Rust-owned
+
+- `config.user_config_materialization` owns implicit v2 runtime source normalization through Rust `normalize_routecodex_v2_runtime_source_json` and NAPI `normalizeRouteCodexV2RuntimeSourceJson`.
+- `src/config/user-config-loader.ts` must call `normalizeRouteCodexV2RuntimeSourceSync(userConfigInput)` before validation/materialization and must not regain TS implicit-v2 detection, `virtualrouterMode` mutation, or local config-source normalization semantics.
+- Verification evidence for this ownership slice: crate-local router-hotpath fmt, Rust `runtime_config_materialization` tests, native hotpath build, focused config/runtime/grep Jest, root `tsc`, `verify:config-ssot`, function-map compile gate, minimal TS surface gate, rustification audit, and `git diff --check` passed on 2026-07-06.
+
+# 2026-07-06: Responses missing-context is a local capture/save mismatch, not invented provider continuation behavior
+
+- For `/v1/responses`, configured-provider behavior must be tested against configured providers such as `cc` / `asxs` with login-shell env keys. Do not use `api.openai.com` as a substitute when RouteCodex is routing through configured providers.
+- Verified provider evidence: `cc` HTTP `/responses` with fake `previous_response_id` returned HTTP 400 `previous_response_id is only supported on Responses WebSocket v2`; `asxs` selected key returned 401 in this pass and was not used as continuation truth.
+- Local store root: request-context capture must preserve the original inbound Responses payload before Hub rewrites the body into provider wire shape. Response save uses the active provider request label; capture must use the same active label and the raw entry payload.
+- Code truth: `src/server/runtime/http-server/executor-metadata.ts::buildRequestMetadata` preserves `__raw_request_body` unless already supplied; `resolveResponsesConversationRequestCaptureArgsForChatProcessEntry` consumes that raw payload for Chat Process request-context capture.
+- Safety lock: `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts::recordResponse` must not scope-fallback to a same-scope entry when explicit request context is missing; missing explicit context remains `RESPONSES_STORE_MISSING_REQUEST_CONTEXT`.
+- Verified on 2026-07-06 with focused request-executor metadata contract Jest, `verify:responses-history-protocol-contract`, function-map compile gate, mainline call-map gate, mainline manifest sync, llmswitch-core TS compile, and root TS compile.
+- Boundary: no global install/restart/live replay was run for this code-level closure.
+# 2026-07-06: Forwarder profile projection is Rust-owned
+
+- `config.forwarder_profile_materialization` owns forwarder profile projection through Rust `build_routecodex_forwarder_profiles_json` and NAPI `buildRouteCodexForwarderProfilesJson`.
+- `src/providers/profile/provider-profile-loader.ts::buildForwarderProfiles()` must remain a native bridge shell. Do not reintroduce TS forwarder id/protocol/model/strategy/stickyKey/targets/weights parsing or validation there or in config/server callers.
+- TS may keep `forwarder-types.ts` schema declarations, `validateForwarderId()` prefix helper, and `forwarder-types-adapter.ts` re-export surface; runtime projection semantics stay in Rust.
+- Verification evidence on 2026-07-06: crate-local router-hotpath fmt, Rust `runtime_config_materialization` tests, native hotpath build, forwarder focused Jest, config SSOT, root `tsc`, function-map gate, minimal TS surface gate, rustification audit, and `git diff --check` passed. No managed live restart/replay was run for this offline slice.
+
+# 2026-07-07: Responses apply_patch custom_tool_call requires full Hub response-path gate
+
+- `verify:hub-response-responses-chat-projection` must not be helper-only. It now runs both Rust filters: `build_chat_response_from_responses` and `response_path_preserves_existing_responses_custom_tool_call`.
+- The full-path fixture lives in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs` and locks provider `custom_tool_call` `apply_patch` through Rust Hub response processing into a non-empty client-visible Responses `custom_tool_call`.
+- `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` list `hub_pipeline_lib/tests.rs` under both `hub.response_responses_chat_projection` and `hub.response_responses_client_projection`; the exact fixture name is locked by the package gate command and verification-map notes.
+- Verified on 2026-07-07 with `npm run verify:hub-response-responses-chat-projection`, `npm run verify:function-map-compile-gate`, and scoped `git diff --check`. This is a gate closure only; live closure still requires native build, global release install, health version match, and live apply_patch replay.
+
+# 2026-07-07: Config TS surface is Node IO/native shell only for path/auth/codec-loader slices
+
+- `src/config/user-data-paths.ts` no longer exposes public `ForRead` helpers, public `.routecodex` helpers, or `llmsShadow`; retired `.routecodex` env roots fail fast instead of being silently redirected to `.rcc`.
+- `src/config/auth-file-resolver.ts` keeps only single-key `resolveKey()` over `authfile-*` Node file IO; removed batch fallback and cache-clear helper surfaces must not be restored.
+- `src/config/unified-config-paths.ts` only resolves deterministic TOML config paths and returns `{ resolvedPath }`; it must not regain arbitrary TOML directory selection, source/type/existence metadata, or config-directory creation helpers.
+- Deleted config dead surfaces: `src/config/toml-commented-template.ts` and `src/config/user-config-materializer.ts`. Do not recreate them for examples or import-cycle convenience.
+- Provider config file planning is Rust-owned in `config_provider_codec.rs`; retired `config.v1.json` / `config.v2.json` in provider directories must fail fast, not be ignored beside TOML.
+- Verified on 2026-07-07 with Rust provider codec tests, native hotpath build, focused provider loader/user path tests, root TS compile, config SSOT, function-map gate, minimal TS surface gate, rustification audit (`prodTsFileCount=143`, `prodTsLocTotal=28598`, `nonNativeFileCount=19`, `nonNativeLocTotal=3594`), and diff check. No managed live restart/replay was run for this offline slice.
+
+# 2026-07-07: Provider v2 root loading is Rust-owned
+
+- `config.provider_config_coercion` owns provider v2 root loading through Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs::load_provider_configs_v2_from_root_json` and NAPI `loadRouteCodexProviderConfigsV2FromRootJson`.
+- `src/config/provider-v2-loader.ts` must remain a root path/native bridge shell only. Do not reintroduce `fs/promises`, `readdir`, `readFile`, local provider config file planning, local TOML decode/coerce, local duplicate provider id accumulation, base-file directory id injection, or suffixed-file explicit-id enforcement there.
+- Provider v2 root loading semantics now include provider directory scan, `config.v2*.toml` selection, file read, TOML parse bridge, coercion, duplicate provider id detection, retired JSON rejection, and base/suffixed provider identity validation in Rust.
+- Gate: `tests/grep/config-codec-gate.spec.ts` test `provider v2 root loading semantics stay out of TypeScript shell` blocks the old TS loader semantics from returning.
+- Verified on 2026-07-07 with root TS compile, native hotpath build, focused provider loader Jest (17 tests), Rust provider codec tests (9 tests), config grep gate (10 tests), config SSOT (6 suites / 48 tests), function-map gate, minimal TS surface gate, rustification audit (`prodTsFileCount=143`, `prodTsLocTotal=28502`, `nonNativeFileCount=19`, `nonNativeLocTotal=3497`), and diff check. No managed live restart/replay was run for this offline config slice.
+
+# 2026-07-07: Provider-update providerId reads use Rust root loader
+
+- Provider CLI commands that operate by provider id must consume `loadProviderConfigsV2(root)` output instead of directly decoding `provider/<id>/config.v2.toml`.
+- Covered providerId paths: `provider sync-models`, `provider probe-context`, `provider inspect`, `provider doctor`, and `provider change`.
+- Provider-update CLI/tooling paths must not use `decodeProviderConfigFile()` directly. They must address providers by providerId/root and consume the Rust provider v2 root loader; arbitrary provider `--config <file>` direct-decode surfaces are removed.
+- Config admin provider views must not use `decodeProviderConfigFile()` directly. They must consume the Rust provider v2 root loader and surface provider summaries from the loaded `ProviderConfigV2` records; per-file admin decode is removed.
+- Init provider reads must not use `decodeProviderConfigFileSync()` or local provider directory scans. `rcc init --list-current-providers`, init maintenance menu, provider merge reads, and missing-target checks consume `loadProviderConfigsV2(root)` through `loadProviderV2Map(providerRoot)`. Init writes main config as TOML and provider config as `config.v2.toml`; old JSON init/migration surfaces are rejected.
+- Gate: `tests/grep/config-codec-gate.spec.ts` test `provider id CLI config reads go through provider v2 root loader` blocks direct decode/coerce/planning helpers from `src/commands/provider-update.ts` and `src/commands/provider-update-maintenance.ts`.
+- Verified on 2026-07-07 with residue grep 0 matches, root TS compile, focused provider-update Jest (10 tests), config grep gate (11 tests), config SSOT (6 suites / 49 tests), function-map gate, minimal TS surface gate (`entries=14`, `non-native prod TS files=12`), rustification audit (`prodTsFileCount=137`, `prodTsLocTotal=28366`, `nonNativeFileCount=12`, `nonNativeLocTotal=3323`), and diff check. No managed live restart/replay was run for this offline CLI/config slice.
+
+# 2026-07-07: Init config path is TOML-only before any init action
+
+- `rcc init --config <path>` must reject non-`.toml` paths immediately through `detectUserConfigFormat(configPath)`, before profile validation, provider-source validation, provider listing, config-state inspection, or any write path.
+- This closes the deleted-JSON loophole where a missing `--config /tmp/config.json` path could receive TOML content. Do not restore that behavior as compatibility or migration support.
+- Normal init tests should use `config.toml`; any `config.json` init test must be an explicit fail-fast rejection test.
+- Verified on 2026-07-07 with root TypeScript, focused init/config/provider-update Jest (6 suites / 43 tests), `verify:config-ssot` (6 suites / 49 tests), function-map compile gate, minimal TS surface gate (`entries=14`, `non-native prod TS files=12`), rustification audit (`prodTsFileCount=137`, `prodTsLocTotal=28366`, `nonNativeFileCount=12`, `nonNativeLocTotal=3323`), residue scans, and `git diff --check`. No managed live restart/replay was run for this offline CLI/config slice.
+
+# 2026-07-07: Config loader rustification must prove existing config compatibility before wiring
+
+- Correction: do not connect a new Rust/config loader path to runtime or start/restart live server until blackbox tests prove the new code reads and preserves behavior for existing `~/.rcc/config.toml` and provider `config.v2.toml` shapes.
+- Forbidden response to compatibility failure: editing Jason's real `~/.rcc` config files, removing fields from real config, or treating config edits as a fix for loader/runtime code defects. Existing real config is a compatibility sample; code must adapt or fail with a verified contract error.
+- Required order for config/VR/pipeline wiring: source owner/map lookup -> module blackbox over fixtures copied from existing config shape -> old/new output comparison -> focused gates -> only then connection/wiring -> only then managed restart/live probe if explicitly in scope.
+- If blackbox is not complete, report "not wired" and the failing/unknown cases. Do not claim closure and do not start the server.

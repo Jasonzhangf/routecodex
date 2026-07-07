@@ -55,7 +55,7 @@ function assertHubAnthropicToolCallShape(chat) {
 async function main() {
   const sample = loadSample();
   const runtimeMod = await import(
-    pathToFileURL(resolveDistPath('dist', 'conversion', 'hub', 'response', 'response-runtime.js')).href
+    pathToFileURL(resolveDistPath('dist', 'conversion', 'hub', 'response', 'response-runtime-anthropic.js')).href
   );
   const { buildOpenAIChatFromAnthropicMessage } = runtimeMod;
   if (typeof buildOpenAIChatFromAnthropicMessage !== 'function') {

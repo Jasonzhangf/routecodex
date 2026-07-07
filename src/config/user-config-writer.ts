@@ -14,10 +14,10 @@ export interface PersistedUserConfigFile {
 }
 
 function stringifyUserConfig(parsed: UnknownRecord, format: UserConfigFormat): string {
-  if (format === 'toml') {
-    return serializeTomlRecord(parsed);
+  if (format !== 'toml') {
+    throw new Error('[config] user config JSON support removed; writer only accepts TOML');
   }
-  return `${JSON.stringify(parsed, null, 2)}\n`;
+  return serializeTomlRecord(parsed);
 }
 
 async function writeRawConfigAtomically(configPath: string, raw: string): Promise<void> {
@@ -50,29 +50,8 @@ export async function updateUserConfigStringScalar(options: {
   value: string;
 }): Promise<PersistedUserConfigFile> {
   const decoded = await decodeUserConfigFile(options.configPath);
-  const raw = decoded.format === 'toml'
-    ? updateTomlStringScalarInTable(decoded.raw, options.tablePath, options.key, options.value)
-    : `${JSON.stringify(applyJsonStringScalarUpdate(decoded.parsed, options.tablePath, options.key, options.value), null, 2)}\n`;
+  const raw = updateTomlStringScalarInTable(decoded.raw, options.tablePath, options.key, options.value);
   await writeRawConfigAtomically(options.configPath, raw);
   const persisted = await decodeUserConfigFile(options.configPath);
   return persisted;
-}
-
-function applyJsonStringScalarUpdate(
-  parsed: UnknownRecord,
-  tablePath: string[],
-  key: string,
-  value: string
-): UnknownRecord {
-  const root: UnknownRecord = structuredClone(parsed);
-  let cursor: UnknownRecord = root;
-  for (const segment of tablePath) {
-    const next = cursor[segment];
-    if (!next || typeof next !== 'object' || Array.isArray(next)) {
-      cursor[segment] = {};
-    }
-    cursor = cursor[segment] as UnknownRecord;
-  }
-  cursor[key] = value;
-  return root;
 }

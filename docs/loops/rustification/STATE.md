@@ -2,7 +2,7 @@
 
 kill_switch: inactive
 mode: L1 report-only
-last_run_id: 2026-07-06T06:35:00+08:00-closeout-runtime-and-gates
+last_run_id: 2026-07-06T13:16:52+08:00-config-materialization-rust-closeout
 
 ## Current Baseline
 
@@ -14,9 +14,9 @@ last_run_id: 2026-07-06T06:35:00+08:00-closeout-runtime-and-gates
 - Current worktree contains unrelated dirty runtime/WebUI/test/memory files; L1
   may report them as collision context but must not stage, reset, checkout, or
   delete them.
-- Latest source/doc-only L1: `node scripts/ci/llmswitch-rustification-audit.mjs --json`
-  reports `prodTsFileCount=160`, `prodTsLocTotal=28969`,
-  `nonNativeFileCount=36`, `nonNativeLocTotal=4747`; current Hub/VR semantic
+- Latest source/doc-only L1/config closeout: `npm run verify:llmswitch-rustification-audit`
+  reports `prodTsFileCount=159`, `prodTsLocTotal=28837`,
+  `nonNativeFileCount=35`, `nonNativeLocTotal=4743`; current Hub/VR semantic
   watchlist has no open `ts_semantic_debt` from that list.
 - MemPalace artifact exclusion gate: `npm run verify:mempalace-scan-artifacts`
   reports `artifactHits=0`; representative generated/local examples under
@@ -28,10 +28,30 @@ last_run_id: 2026-07-06T06:35:00+08:00-closeout-runtime-and-gates
   `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`,
   `verify:responses-history-protocol-contract`, `build:base`, and
   `verify:architecture-ci`.
+- Minimal TS surface is now machine-locked by
+  `docs/loops/rustification/minimal-ts-surface.json` and
+  `npm run verify:llmswitch-minimal-ts-surface`. Every current non-native
+  production TS file must have a classification, owner, minimum TS role,
+  forbidden semantics, and a hard cannot-shrink-further reason.
+- The dead `conversion/hub/response/response-runtime.ts` compatibility barrel
+  has been physically deleted after source-only reference proof. Tests/scripts
+  must import the real native wrapper
+  `conversion/hub/response/response-runtime-anthropic.js` directly.
+- Root package export of `virtual-router-contracts.ts` is type-only
+  (`export type *`) because that file declares only TS contracts and must not be
+  treated as a runtime VR module.
+- Upper production layers must not import `virtual-router-contracts.ts`
+  directly. Hub/Host/Server code must consume VR contract types through the
+  adjacent native facade that owns the call boundary, such as
+  `native-virtual-router-runtime.ts`,
+  `native-virtual-router-bootstrap-config.ts`, or
+  `native-provider-runtime-ingress.ts`. The residue audit locks this boundary.
 - Managed runtime/live proof is current:
-  `routecodex restart --port 5555` followed by `/health` on `5555` and `5520`
-  returns `version=0.90.3596`, and same-entry live replay evidence is recorded
-  in `/tmp/p0-rust-live-5555-after-restart.json`.
+  `routecodex --version`, `~/.rcc/install/current/package.json`, and repo
+  `package.json` all report `0.90.3603`; `routecodex restart --port 5555`
+  followed by `/health` on `5555` and `5520` returns `version=0.90.3603`, and
+  same-entry live replay evidence is recorded in
+  `/tmp/config-materialization-rust-live-5555.json`.
 
 ## Current Classification Terms
 
@@ -74,6 +94,9 @@ Allowed `watchlist_id` values:
 4. Inspect canonical inputs only after the source/doc-only filter is active.
 5. Classify findings as `rust_ssot`, `native_shell_ok`, `ts_io_shell_ok`, or
    `ts_semantic_debt`.
+   Current non-native TS residues must also match
+   `docs/loops/rustification/minimal-ts-surface.json`; unclassified or
+   over-broad residues are gate failures.
 6. Emit report items with owner/gate references where available.
 7. Append one JSON object to `loop-run-log.md`.
 

@@ -5,6 +5,7 @@ use crate::hub_resp_outbound_client_semantics::{
     build_anthropic_response_from_chat_value, build_responses_payload_from_chat_core,
     normalize_openai_chat_reasoning_outbound,
 };
+use crate::hub_resp_outbound_client_semantics_blocks::tool_semantics::resolve_client_tools_raw_from_resp_semantics;
 
 pub(crate) fn build_hub_resp_outbound_04_client_payload_for_protocol(
     finalized_payload: Value,
@@ -38,9 +39,15 @@ pub(crate) fn build_hub_resp_outbound_04_client_payload_for_protocol(
             build_anthropic_response_from_chat_value(&finalized_payload, alias_map)
         }
         "openai-responses" => {
+            let tools_raw = metadata
+                .get("requestSemantics")
+                .and_then(resolve_client_tools_raw_from_resp_semantics)
+                .map(Value::Array)
+                .unwrap_or_else(|| Value::Array(Vec::new()));
             let context = serde_json::json!({
                 "requestId": request_id,
                 "metadata": metadata,
+                "toolsRaw": tools_raw,
                 "model": metadata
                     .get("displayModel")
                     .or_else(|| metadata.get("clientModelId"))

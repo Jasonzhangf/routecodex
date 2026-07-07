@@ -142,7 +142,7 @@ import {
   stopSessionDaemonInjectLoop
 } from './http-server-session-daemon.js';
 import { setupRuntime } from './http-server-runtime-setup.js';
-import { buildRouterBootstrapConfigV2 } from '../../../config/virtual-router-types.js';
+import { compileRouteCodexRuntimeConfigManifest } from '../../../config/user-config-loader.js';
 import {
   initializeProviderRuntimes,
   createProviderHandle,
@@ -200,7 +200,6 @@ import { runHubPipeline } from './executor-pipeline.js';
 import { convertProviderResponseIfNeeded } from './executor/provider-response-converter.js';
 import { extractUsageFromResult } from './executor/usage-aggregator.js';
 import { deriveFinishReason } from '../../utils/finish-reason.js';
-import { mapProviderProtocol } from './provider-utils.js';
 import { mapErrorToPublicLogSummary } from '../../utils/http-error-mapper.js';
 import { emitRequestExecutorProviderRetryTelemetry } from './executor/request-executor-retry-telemetry.js';
 import {
@@ -650,13 +649,15 @@ export class RouteCodexHttpServer {
     routingPolicyGroup: string,
     baseConfig: HubPipelineConfig,
   ): Promise<HubPipelineConfig> {
-    const routerInput = await buildRouterBootstrapConfigV2(this.userConfig as Record<string, unknown>, undefined, {
+    const manifest = await compileRouteCodexRuntimeConfigManifest(this.userConfig as Record<string, unknown>, undefined, {
       routingPolicyGroup,
     });
+    const routerInput = manifest.virtualRouterBootstrapInput;
     const artifacts = await this.bootstrapVirtualRouter(routerInput as UnknownObject);
     return {
       ...baseConfig,
       virtualRouter: artifacts.config,
+      pipelineRuntimeConfig: manifest.pipelineRuntimeConfig,
     };
   }
 
@@ -784,57 +785,6 @@ export class RouteCodexHttpServer {
               handle?.providerProtocol
               ?? (typeof providerRecord.outboundProfile === 'string' ? providerRecord.outboundProfile : undefined),
           });
-        }
-      }
-    }
-    if (items.size === 0 && this.userConfig && typeof this.userConfig === 'object') {
-      const rootRecord = this.userConfig as Record<string, unknown>;
-      const virtualRouterNode =
-        rootRecord.virtualrouter && typeof rootRecord.virtualrouter === 'object'
-          ? (rootRecord.virtualrouter as Record<string, unknown>)
-          : undefined;
-      const providersNode =
-        virtualRouterNode?.providers && typeof virtualRouterNode.providers === 'object'
-          ? (virtualRouterNode.providers as Record<string, unknown>)
-          : undefined;
-      if (providersNode) {
-        for (const [providerId, providerRaw] of Object.entries(providersNode)) {
-          const providerRecord =
-            providerRaw && typeof providerRaw === 'object'
-              ? (providerRaw as Record<string, unknown>)
-              : {};
-          const providerType =
-            typeof providerRecord.type === 'string' && providerRecord.type.trim()
-              ? providerRecord.type.trim()
-              : undefined;
-          const modelsNode =
-            providerRecord.models && typeof providerRecord.models === 'object'
-              ? (providerRecord.models as Record<string, unknown>)
-              : undefined;
-          if (modelsNode && Object.keys(modelsNode).length > 0) {
-            for (const modelId of Object.keys(modelsNode)) {
-              if (!modelId.trim()) {
-                continue;
-              }
-              const providerKey = `${providerId}.${modelId.trim()}`;
-              if (items.has(providerKey)) {
-                continue;
-              }
-              items.set(providerKey, {
-                key: providerKey,
-                family: providerType,
-                protocol: providerType ? mapProviderProtocol(providerType) : undefined,
-              });
-            }
-            continue;
-          }
-          if (!items.has(providerId)) {
-            items.set(providerId, {
-              key: providerId,
-              family: providerType,
-              protocol: providerType ? mapProviderProtocol(providerType) : undefined,
-            });
-          }
         }
       }
     }

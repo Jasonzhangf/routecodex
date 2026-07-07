@@ -1012,6 +1012,7 @@ fn has_output_function_calls(value: Option<&Value>) -> bool {
             .to_ascii_lowercase();
         item_type == "function_call"
             || item_type == "function"
+            || item_type == "custom_tool_call"
             || has_non_empty_tool_calls(row.get("tool_calls"))
     })
 }
@@ -2463,6 +2464,22 @@ mod tests {
         assert!(contains_synthetic_routecodex_control_text_value(
             &payload, None
         ));
+    }
+
+    #[test]
+    fn empty_assistant_contract_accepts_responses_custom_tool_call() {
+        let payload = json!({
+            "id": "resp_custom_tool_call_contract",
+            "object": "response",
+            "status": "completed",
+            "output": [{
+                "type": "custom_tool_call",
+                "call_id": "call_apply_patch_1",
+                "name": "apply_patch",
+                "input": "*** Begin Patch\n*** Add File: tmp/a.txt\n+x\n*** End Patch"
+            }]
+        });
+        assert!(detect_empty_assistant_payload_contract_signal(&payload).is_none());
     }
 
     #[test]

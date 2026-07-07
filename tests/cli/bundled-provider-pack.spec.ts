@@ -4,10 +4,20 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { installBundledProviderPackBestEffort } from '../../src/cli/config/bundled-provider-pack.js';
+import { parseTomlRecord, serializeTomlRecord } from '../../src/config/toml-basic.js';
 
 function writeJson(filePath: string, payload: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+function writeToml(filePath: string, payload: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${serializeTomlRecord(payload)}\n`, 'utf8');
+}
+
+function readToml(filePath: string): Record<string, unknown> {
+  return parseTomlRecord(fs.readFileSync(filePath, 'utf8'));
 }
 
 describe('bundled provider pack installer', () => {
@@ -33,17 +43,17 @@ describe('bundled provider pack installer', () => {
       profile: 'default',
       providers: ['alpha', 'beta']
     });
-    writeJson(path.join(sourceDir, 'alpha', 'config.v2.json'), {
+    writeToml(path.join(sourceDir, 'alpha', 'config.v2.toml'), {
       version: '2.0.0',
       providerId: 'alpha',
       provider: { id: 'alpha', enabled: true, type: 'openai' }
     });
-    writeJson(path.join(sourceDir, 'beta', 'config.v2.json'), {
+    writeToml(path.join(sourceDir, 'beta', 'config.v2.toml'), {
       version: '2.0.0',
       providerId: 'beta',
       provider: { id: 'beta', enabled: true, type: 'openai', marker: 'new' }
     });
-    writeJson(path.join(providerRoot, 'beta', 'config.v2.json'), {
+    writeToml(path.join(providerRoot, 'beta', 'config.v2.toml'), {
       version: '2.0.0',
       providerId: 'beta',
       provider: { id: 'beta', enabled: true, type: 'openai', marker: 'old' }
@@ -60,8 +70,8 @@ describe('bundled provider pack installer', () => {
       expect(first.skippedProviders).toContain('beta');
     }
 
-    const betaFirst = JSON.parse(fs.readFileSync(path.join(providerRoot, 'beta', 'config.v2.json'), 'utf8'));
-    expect(betaFirst.provider.marker).toBe('old');
+    const betaFirst = readToml(path.join(providerRoot, 'beta', 'config.v2.toml'));
+    expect((betaFirst.provider as Record<string, unknown>).marker).toBe('old');
 
     const second = installBundledProviderPackBestEffort({
       sourceDir,
@@ -73,7 +83,7 @@ describe('bundled provider pack installer', () => {
       expect(second.copiedProviders).toContain('beta');
     }
 
-    const betaSecond = JSON.parse(fs.readFileSync(path.join(providerRoot, 'beta', 'config.v2.json'), 'utf8'));
-    expect(betaSecond.provider.marker).toBe('new');
+    const betaSecond = readToml(path.join(providerRoot, 'beta', 'config.v2.toml'));
+    expect((betaSecond.provider as Record<string, unknown>).marker).toBe('new');
   });
 });

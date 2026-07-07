@@ -12,8 +12,7 @@ import { UnifiedConfigPathResolver } from './unified-config-paths.js';
 export function resolveRouteCodexConfigPath(preferredPath?: string): string {
   const result = UnifiedConfigPathResolver.resolveConfigPath({
     preferredPath,
-    allowDirectoryScan: true,
-    strict: true
+    allowDirectoryScan: true
   });
   return result.resolvedPath;
 }

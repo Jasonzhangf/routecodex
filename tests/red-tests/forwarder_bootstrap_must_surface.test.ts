@@ -4,26 +4,30 @@
  * 触发原因：2026-06-01 实环境观察到 10000 端口 listen 起来后所有请求
  * "Empty reply from server"（无 HTTP 响应、无 log 子目录），而 5520/5555 正常。
  *
- * 根因假设：10000 routingPolicyGroup 的 buildVirtualRouterInputV2 内部
+ * 根因假设：10000 routingPolicyGroup 的 Rust runtime manifest materialization 内部
  * 抛错被静默吞掉，导致 hubPipelinesByRoutingPolicyGroup map 没有 10000 entry，
  * 请求进来时 resolveHubPipelineForRoutingPolicyGroup 返回 null，
  * 抛 "Routing policy group pipeline not available" 错误但被框架外层
  * unhandled rejection 路径吞掉，server 进程没死但连接被 close。
  *
  * 硬护栏（fail-fast + no fallback）：
- * - 1) buildVirtualRouterInputV2 对单个 routingPolicyGroup 抛错时，
+ * - 1) Rust runtime manifest materialization 对单个 routingPolicyGroup 抛错时，
  *      启动流程必须在 [server.startup] log 出现 fail-fast 错误，
  *      server 进程必须以非零 exit code 退出，listener 必须不复用。
  * - 2) resolveHubPipelineForRoutingPolicyGroup 返回 null 时，
  *      必须返回 HTTP 500 + JSON error body（不是空连接、不是 unhandled rejection）。
- * - 3) live config.toml 的 10000 group 必须能被 buildVirtualRouterInputV2 成功解析
+ * - 3) live config.toml 的 10000 group 必须能被 Rust runtime manifest 成功解析
  *      （即当前 patch 不应引入 10000 bootstrap 抛错）。
  */
 import { describe, it, expect } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
+import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-config-loader.js';
+
+async function compileVirtualRouterInput(userConfig: Record<string, unknown>, providerRootDir?: string, options?: Parameters<typeof compileRouteCodexRuntimeConfigManifest>[2]) {
+  return (await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, options)).virtualRouterBootstrapInput;
+}
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
 
 const LIVE_CONFIG = '/Users/fanzhang/.rcc/config.toml';
@@ -33,7 +37,7 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
   it('live config.toml 10000 group must bootstrap without throwing', async () => {
     const cfg = parseTomlRecord(readFileSync(LIVE_CONFIG, 'utf8'));
     // If this throws, the test is a RED gate that protects 10000 from silent dead state.
-    const input = await buildVirtualRouterInputV2(
+    const input = await compileVirtualRouterInput(
       cfg as Record<string, unknown>,
       PROVIDER_ROOT,
       { routingPolicyGroup: 'gateway_coding_10000' },
@@ -51,7 +55,7 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
 
   it('live config.toml 5520 group must use free GPT forwarders before paid providers', async () => {
     const cfg = parseTomlRecord(readFileSync(LIVE_CONFIG, 'utf8'));
-    const input = await buildVirtualRouterInputV2(
+    const input = await compileVirtualRouterInput(
       cfg as Record<string, unknown>,
       PROVIDER_ROOT,
       { routingPolicyGroup: 'gateway_priority_5520' },
@@ -72,7 +76,7 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
 
   it('live config.toml 5555 group must use GPT forwarder for GPT routes', async () => {
     const cfg = parseTomlRecord(readFileSync(LIVE_CONFIG, 'utf8'));
-    const input = await buildVirtualRouterInputV2(
+    const input = await compileVirtualRouterInput(
       cfg as Record<string, unknown>,
       PROVIDER_ROOT,
       { routingPolicyGroup: 'gateway_priority_5555' },
@@ -97,7 +101,7 @@ describe('RED: forwarder bootstrap must surface (not silent fail)', () => {
 
   it('drift guard: 10000 routes M3 and M2.7 pools without qwen leakage', async () => {
     const cfg = parseTomlRecord(readFileSync(LIVE_CONFIG, 'utf8'));
-    const input = await buildVirtualRouterInputV2(
+    const input = await compileVirtualRouterInput(
       cfg as Record<string, unknown>,
       PROVIDER_ROOT,
       { routingPolicyGroup: 'gateway_coding_10000' },

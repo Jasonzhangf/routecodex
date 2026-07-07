@@ -240,7 +240,9 @@ describe('cli server port-utils', () => {
         parentSpinner: spinner,
         opts: { restart: true },
         fetchImpl: (async () => ({ ok: false })) as any,
-        sleep: async () => {},
+        sleep: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        },
         env: {},
         logger,
         createSpinner: async () => spinner,
@@ -285,7 +287,9 @@ describe('cli server port-utils', () => {
           fetchCalled = true;
           return { ok: false };
         }) as any,
-        sleep: async () => {},
+        sleep: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        },
         env: {},
         logger,
         createSpinner: async () => spinner,
@@ -343,6 +347,134 @@ describe('cli server port-utils', () => {
     });
 
     expect(fetchCalled).toBe(false);
+  });
+
+  it('ensurePortAvailableImpl frees a managed RouteCodex port via HTTP shutdown before signals', async () => {
+    const probe = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.listen({ host: '0.0.0.0', port: 0 }, () => resolve());
+      probe.once('error', reject);
+    });
+    const address = probe.address();
+    const occupiedPort = typeof address === 'object' && address ? address.port : 0;
+
+    const spinner = {
+      start: () => spinner,
+      succeed: () => {},
+      fail: () => {},
+      warn: () => {},
+      info: () => {},
+      stop: () => {},
+      text: ''
+    };
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+    const calls: string[] = [];
+    let closed = false;
+    const closeProbe = async () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+    };
+
+    try {
+      await ensurePortAvailableImpl({
+        port: occupiedPort,
+        parentSpinner: spinner,
+        opts: { restart: true },
+        fetchImpl: (async (url: string | URL | Request) => {
+          calls.push(`fetch:${String(url)}`);
+          if (String(url).endsWith('/shutdown')) {
+            await closeProbe();
+            return { ok: true, status: 200 };
+          }
+          return { ok: true, status: 200 };
+        }) as any,
+        sleep: async () => {},
+        env: {},
+        logger,
+        createSpinner: async () => spinner,
+        findListeningPids: () => [12345],
+        killPidBestEffort: (pid, opts) => {
+          calls.push(`kill:${pid}:${opts.force ? 'SIGKILL' : 'SIGTERM'}`);
+        },
+        isServerHealthyQuick: async () => true,
+        exit: (() => { throw new Error('exit should not be called'); }) as any
+      });
+
+      expect(calls.some((call) => call.includes('/shutdown'))).toBe(true);
+      expect(calls.some((call) => call.startsWith('kill:'))).toBe(false);
+    } finally {
+      await closeProbe();
+    }
+  });
+
+  it('ensurePortAvailableImpl falls back from HTTP shutdown to explicit managed PID signals', async () => {
+    const probe = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.listen({ host: '0.0.0.0', port: 0 }, () => resolve());
+      probe.once('error', reject);
+    });
+    const address = probe.address();
+    const occupiedPort = typeof address === 'object' && address ? address.port : 0;
+
+    const spinner = {
+      start: () => spinner,
+      succeed: () => {},
+      fail: () => {},
+      warn: () => {},
+      info: () => {},
+      stop: () => {},
+      text: ''
+    };
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+    const calls: string[] = [];
+    let closed = false;
+    let managedPidAlive = true;
+    const closeProbe = async () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      managedPidAlive = false;
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+    };
+
+    try {
+      await ensurePortAvailableImpl({
+        port: occupiedPort,
+        parentSpinner: spinner,
+        opts: { restart: true },
+        fetchImpl: (async (url: string | URL | Request) => {
+          calls.push(`fetch:${String(url)}`);
+          return { ok: String(url).endsWith('/shutdown'), status: String(url).endsWith('/shutdown') ? 200 : 503 };
+        }) as any,
+        sleep: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        },
+        env: { ROUTECODEX_STOP_TIMEOUT_MS: '100' },
+        logger,
+        createSpinner: async () => spinner,
+        findListeningPids: () => (managedPidAlive ? [12345] : []),
+        killPidBestEffort: async (pid, opts) => {
+          calls.push(`kill:${pid}:${opts.force ? 'SIGKILL' : 'SIGTERM'}`);
+          if (!opts.force) {
+            await closeProbe();
+          }
+        },
+        isServerHealthyQuick: async () => true,
+        exit: (() => { throw new Error('exit should not be called'); }) as any
+      });
+
+      const shutdownIndex = calls.findIndex((call) => call.includes('/shutdown'));
+      const sigtermIndex = calls.findIndex((call) => call === 'kill:12345:SIGTERM');
+      expect(shutdownIndex).toBeGreaterThanOrEqual(0);
+      expect(sigtermIndex).toBeGreaterThan(shutdownIndex);
+      expect(calls).not.toContain('kill:12345:SIGKILL');
+    } finally {
+      await closeProbe();
+    }
   });
 
   it('ensurePortAvailableImpl uses in-place restart and exits in build restart-only mode', async () => {

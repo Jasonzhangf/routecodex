@@ -79,7 +79,10 @@ impl RoutingClassifier {
             || (features.has_video_attachment && features.has_remote_video_attachment);
         // Fresh user input starts on thinking. Tool-output continuations keep the
         // current turn on the previous tool category instead of falling into tools.
-        let thinking_from_user = latest_message_from_user || stopless_followup;
+        let explicit_apply_patch_tool_request =
+            latest_message_from_user && features.has_apply_patch_tool_choice;
+        let thinking_from_user =
+            (latest_message_from_user && !explicit_apply_patch_tool_request) || stopless_followup;
         // Continuation routes must be based on current-turn tool-output signal only.
         // If this turn does not contain tool-call response activity, do not inherit
         // historical labels into a new request.
@@ -168,8 +171,12 @@ impl RoutingClassifier {
         ));
         evaluation.push((
             "tools".to_string(),
-            other_tool_continuation || unknown_tool_continuation,
-            if other_tool_continuation {
+            explicit_apply_patch_tool_request
+                || other_tool_continuation
+                || unknown_tool_continuation,
+            if explicit_apply_patch_tool_request {
+                "tools:apply_patch-tool-choice".to_string()
+            } else if other_tool_continuation {
                 "tools:last-tool-other".to_string()
             } else {
                 "tools:tool-request-detected".to_string()
@@ -292,6 +299,22 @@ mod tests {
 
         assert_eq!(result.route_name, "thinking");
         assert!(result.reasoning.contains("thinking:user-input"));
+    }
+
+    #[test]
+    fn apply_patch_tool_choice_on_current_user_turn_routes_to_tools() {
+        let features = RoutingFeatures {
+            latest_message_from_user: true,
+            has_tools: true,
+            has_apply_patch_tool_choice: true,
+            ..Default::default()
+        };
+
+        let result = test_classifier().classify(&features);
+
+        assert_eq!(result.route_name, "tools");
+        assert!(result.reasoning.contains("tools:apply_patch-tool-choice"));
+        assert!(!result.reasoning.contains("thinking:user-input"));
     }
 
     #[test]

@@ -430,7 +430,7 @@ describe('webui integration flows (feature coverage)', () => {
     const providerIdInput = screen.getByLabelText('provider id') as HTMLInputElement;
     fireEvent.change(providerIdInput, { target: { value: 'demo' } });
 
-    const providerEditorPanel = panelByTitle('Provider Editor');
+    const providerEditorPanel = panelByTitle('Provider Details');
     const modelPanel = panelByTitle('Models + Test + Authfile');
     fireEvent.change(within(providerEditorPanel).getByLabelText('baseURL'), { target: { value: 'https://example.com/v1' } });
     fireEvent.change(within(modelPanel).getByPlaceholderText('new model id'), { target: { value: 'demo-model' } });
@@ -473,7 +473,8 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
     await waitFor(() => expect(screen.getByText('Port Config Entries')).toBeTruthy());
     expect(screen.getByText('Config Source + Policy Group')).toBeTruthy();
-    expect(screen.getByText('Route Tree')).toBeTruthy();
+    expect(screen.getByText('Route List')).toBeTruthy();
+    expect(screen.getByText('Route Details')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('5520')).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText('new port'), { target: { value: '7777' } });
@@ -490,9 +491,12 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/Routing group created\./)).toBeTruthy());
     hit('routing.group_create_copy');
 
+    expect(screen.queryByText('Remove Route')).toBeNull();
+    expect(screen.queryByText('Remove Pool')).toBeNull();
     fireEvent.change(screen.getByLabelText('provider target picker'), { target: { value: 'picker.default.picker-model' } });
-    fireEvent.click(screen.getByText('Add Pool'));
-    await waitFor(() => expect(screen.getAllByText('picker.default.picker-model').length).toBeGreaterThan(0));
+    expect((screen.getByLabelText('pool targets') as HTMLTextAreaElement).value).toContain('picker.default.picker-model');
+    fireEvent.click(screen.getByText('Save Pool Draft'));
+    await waitFor(() => expect(screen.getByText(/Pool draft saved\./)).toBeTruthy());
     hit('routing.provider_picker');
 
     fireEvent.click(screen.getByText('Save Group'));

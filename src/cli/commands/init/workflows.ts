@@ -17,10 +17,9 @@ import {
   normalizeHost,
   normalizePort,
   printConfiguredProviders,
-  readProviderV2Payload,
   readProvidersFromV1,
   readRoutingFromConfig,
-  writeJsonFile,
+  writeTomlConfigFile,
   writeProviderV2,
   computeBackupPath,
   mergeRecordsPreferExisting
@@ -106,7 +105,7 @@ export async function migrateV1ToV2(args: {
     } else {
       strategy = 'keep_all';
       logger.info(
-        `Detected existing provider configs (${duplicateProviderIds.join(', ')}); keeping existing config.v2.json in non-interactive mode`
+        `Detected existing provider configs (${duplicateProviderIds.join(', ')}); keeping existing config.v2.toml in non-interactive mode`
       );
     }
 
@@ -136,7 +135,7 @@ export async function migrateV1ToV2(args: {
 
     const v2Path = getProviderV2Path(pathImpl, providerRoot, providerId);
     if (resolution === 'merge') {
-      const existingPayload = readProviderV2Payload(fsImpl, v2Path);
+      const existingPayload = (await loadProviderV2Map(providerRoot))[providerId] ?? null;
       if (existingPayload) {
         backupFileBestEffort(fsImpl, v2Path);
         const mergedProvider = mergeRecordsPreferExisting(providerNode, existingPayload.provider);
@@ -172,7 +171,7 @@ export async function migrateV1ToV2(args: {
     fsImpl.writeFileSync(backupPath, fsImpl.readFileSync(configPath, 'utf8'), 'utf8');
   }
 
-  writeJsonFile(fsImpl, configPath, nextConfig);
+  writeTomlConfigFile(fsImpl, configPath, nextConfig);
   spinner.info(`Migrated providers to: ${providerRoot}`);
   return { convertedProviders, backupPath };
 }
@@ -196,7 +195,7 @@ export async function runV2MaintenanceMenu(args: {
   const catalogById = new Map(catalog.map((provider) => [provider.id, provider]));
 
   while (true) {
-    const providerMap = loadProviderV2Map(fsImpl, pathImpl, providerRoot);
+    const providerMap = await loadProviderV2Map(providerRoot);
     const providerIds = Object.keys(providerMap).sort();
 
     const answer = (await prompt(
@@ -585,14 +584,14 @@ export async function runV2MaintenanceMenu(args: {
     }
 
     if (answer === '6') {
-      const providerIdsSet = new Set(Object.keys(loadProviderV2Map(fsImpl, pathImpl, providerRoot)));
+      const providerIdsSet = new Set(Object.keys(await loadProviderV2Map(providerRoot)));
       const routing = readRoutingFromConfig(currentConfig);
       const missingTargets = ensureTargetProvidersExist(routing, providerIdsSet);
       if (missingTargets.length) {
         spinner.warn(`Routing has targets for missing providers: ${missingTargets.join(', ')}`);
         continue;
       }
-      writeJsonFile(fsImpl, configPath, currentConfig);
+      writeTomlConfigFile(fsImpl, configPath, currentConfig);
       spinner.succeed(`Configuration updated: ${configPath}`);
       return;
     }

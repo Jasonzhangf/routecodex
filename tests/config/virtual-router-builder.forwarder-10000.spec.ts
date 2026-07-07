@@ -1,6 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
 import { readFileSync } from 'node:fs';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
+import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-config-loader.js';
+
+async function compileVirtualRouterInput(userConfig: Record<string, unknown>, providerRootDir?: string, options?: Parameters<typeof compileRouteCodexRuntimeConfigManifest>[2]) {
+  return (await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, options)).virtualRouterBootstrapInput;
+}
 import { extractProviderKeysForRoutingGroup } from '../../src/server/runtime/http-server/http-server-bootstrap.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
 
@@ -21,7 +25,7 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
   const skipUnless = liveConfig ? it : it.skip;
 
   skipUnless('10000 tool/search targets resolve to fwd.minimax.MiniMax-M3', async () => {
-    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+    const input = await compileVirtualRouterInput(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_coding_10000',
     });
     for (const routeName of ['tools', 'search', 'web_search']) {
@@ -30,7 +34,7 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
   });
 
   skipUnless('bootstrap forwarders section contains current live forwarders', async () => {
-    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+    const input = await compileVirtualRouterInput(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_coding_10000',
     });
     const fwds = (input as unknown as { forwarders?: Record<string, unknown> }).forwarders ?? {};
@@ -128,7 +132,7 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
   });
 
   skipUnless('5520 routes use current live priority forwarders', async () => {
-    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+    const input = await compileVirtualRouterInput(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_priority_5520',
     });
     expect(routeTargets(input.routing, 'coding')).toEqual(['fwd.paid.gpt-5.5', 'fwd.paid.gpt-5.5']);
@@ -147,7 +151,7 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
   });
 
   skipUnless('5520 thinking uses the current high priority pool', async () => {
-    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+    const input = await compileVirtualRouterInput(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_priority_5520',
     });
     const thinkingRoute = input.routing.thinking;
@@ -159,7 +163,7 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
   });
 
   skipUnless('5555 route targets match current config truth', async () => {
-    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+    const input = await compileVirtualRouterInput(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_priority_5555',
     });
     expect(routeTargets(input.routing, 'coding')).toEqual([
@@ -216,7 +220,7 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
   });
 
   skipUnless('10000 routing contains current forwarder targets', async () => {
-    const input = await buildVirtualRouterInputV2(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
+    const input = await compileVirtualRouterInput(liveConfig as Record<string, unknown>, '/Users/fanzhang/.rcc/provider', {
       routingPolicyGroup: 'gateway_coding_10000',
     });
     const all = collectTargets(input.routing);

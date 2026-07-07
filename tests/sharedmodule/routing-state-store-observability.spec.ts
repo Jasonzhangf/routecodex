@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
+import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js';
 
 const events: ProviderErrorEvent[] = [];
 

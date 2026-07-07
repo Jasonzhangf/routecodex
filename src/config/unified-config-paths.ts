@@ -20,8 +20,6 @@ export interface ConfigPathOptions {
   preferredPath?: string;
   /** Specific configuration file name to look for */
   configName?: string;
-  /** Whether to use strict mode (fail if no config found) */
-  strict?: boolean;
   /** Whether to allow directory scanning for config files */
   allowDirectoryScan?: boolean;
   /** Base directory for configuration resolution */
@@ -31,20 +29,6 @@ export interface ConfigPathOptions {
 export interface ConfigPathResult {
   /** The resolved configuration path */
   resolvedPath: string;
-  /** Source of the resolution */
-  source: 'explicit' | 'environment' | 'default';
-  /** Type of configuration target */
-  configType: 'file' | 'directory';
-  /** Whether the path exists */
-  exists: boolean;
-  /** Warning messages if any */
-  warnings?: string[];
-  /** Information about resolution process */
-  resolutionInfo?: {
-    candidates: string[];
-    environmentVariables: Record<string, string | undefined>;
-    scannedDirectories?: string[];
-  };
 }
 
 /**
@@ -55,12 +39,7 @@ const ENVIRONMENT_VARIABLES = [
   'ROUTECODEX_CONFIG'        // Alternative format
 ];
 
-/**
- * Default configuration file preferences for directory scanning
- */
-const CONFIG_FILE_PREFERENCES = [
-  'config.toml',
-];
+const DEFAULT_CONFIG_NAME = 'config.toml';
 
 function safeProcessCwd(defaultValue?: string): string {
   try {
@@ -83,15 +62,6 @@ function safeProcessCwd(defaultValue?: string): string {
 }
 
 /**
- * Default configuration directory structure
- */
-// const DEFAULT_CONFIG_DIRECTORIES = [
-//   path.join(homedir(), '.rcc', 'config'),           // Primary config directory
-//   path.join(process.cwd(), 'config'),               // Current directory config
-//   process.cwd(),                                    // Current directory
-// ];
-
-/**
  * Unified configuration path resolver
  */
 export class UnifiedConfigPathResolver {
@@ -102,14 +72,10 @@ export class UnifiedConfigPathResolver {
     const {
       preferredPath,
       configName,
-      strict = false,
       allowDirectoryScan = true,
       baseDir = safeProcessCwd()
     } = options;
 
-    const warnings: string[] = [];
-    const candidates: string[] = [];
-    const scannedDirectories: string[] = [];
     const envVars: Record<string, string | undefined> = {};
 
     // Collect environment variables
@@ -126,128 +92,49 @@ export class UnifiedConfigPathResolver {
       envVars
     });
 
-    candidates.push(...candidateList);
-
     // Try to resolve from candidates
     for (const candidate of candidateList) {
       try {
         const expandedPath = this.expandPath(candidate);
         if (!expandedPath) {continue;}
+        if (path.extname(expandedPath).trim().toLowerCase() === '.json') {
+          throw new Error(`[config] user config JSON support removed; expected TOML file: ${expandedPath}`);
+        }
 
         if (fs.existsSync(expandedPath)) {
           const stat = fs.statSync(expandedPath);
 
           if (stat.isFile()) {
             return {
-              resolvedPath: expandedPath,
-              source: this.determineSource(candidate, preferredPath, envVars),
-              configType: 'file',
-              exists: true,
-              warnings: warnings.length > 0 ? warnings : undefined,
-              resolutionInfo: {
-                candidates,
-                environmentVariables: envVars,
-                scannedDirectories
-              }
+              resolvedPath: expandedPath
             };
           }
 
           if (stat.isDirectory() && allowDirectoryScan) {
             const configFile = this.scanConfigDirectory(expandedPath, configName);
             if (configFile) {
-              scannedDirectories.push(expandedPath);
               return {
-                resolvedPath: configFile,
-                source: this.determineSource(candidate, preferredPath, envVars),
-                configType: 'file',
-                exists: true,
-                warnings: warnings.length > 0 ? warnings : undefined,
-                resolutionInfo: {
-                  candidates,
-                  environmentVariables: envVars,
-                  scannedDirectories
-                }
+                resolvedPath: configFile
               };
             }
           }
         }
       } catch (error) {
-        // Log filesystem access errors but continue
-        if (strict) {
-          throw new Error(`Filesystem error accessing ${candidate}: ${error}`);
-        }
-        warnings.push(`Could not access ${candidate}: ${error}`);
+        throw new Error(`Filesystem error accessing ${candidate}: ${error}`);
       }
     }
 
-    const details = warnings.length
-      ? ` warnings=${warnings.join(' | ')}`
-      : '';
-    if (strict) {
-      throw new Error(`No configuration file found. Searched: ${candidates.join(', ')}.${details}`.trim());
-    }
-    throw new Error(`No configuration file found. Searched: ${candidates.join(', ')}.${details}`.trim());
-  }
-
-  /**
-   * Get the default configuration directory
-   */
-  static getDefaultConfigDirectory(): string {
-    return resolveRccConfigDir();
+    throw new Error(`No configuration file found. Searched: ${candidateList.join(', ')}.`);
   }
 
   /**
    * Scan a directory for configuration files
    */
   static scanConfigDirectory(directory: string, preferredName?: string): string | null {
-    try {
-      const preferredSet = new Set(CONFIG_FILE_PREFERENCES.map(name => name.toLowerCase()));
-      const entries = fs.readdirSync(directory)
-        .filter(file => {
-          const lower = file.toLowerCase();
-          return lower.endsWith('.json') || lower.endsWith('.toml');
-        })
-        .filter(file => {
-          const lower = file.toLowerCase();
-          if (preferredSet.has(lower)) {
-            return true;
-          }
-          return preferredSet.has(lower);
-        })
-        .map(file => ({
-          name: file,
-          mtime: fs.statSync(path.join(directory, file)).mtimeMs,
-          isPreferred: preferredName ? file.toLowerCase() === preferredName.toLowerCase() : false
-        }));
-
-      if (entries.length === 0) {
-        return null;
-      }
-
-      // Prioritize preferred name if specified
-      if (preferredName) {
-        const preferred = entries.find(entry => entry.isPreferred);
-        if (preferred) {
-          return path.join(directory, preferred.name);
-        }
-      }
-
-      // Look for preferred configuration names
-      for (const preferredName of CONFIG_FILE_PREFERENCES) {
-        const found = entries.find(entry => entry.name.toLowerCase() === preferredName.toLowerCase());
-        if (found) {
-          return path.join(directory, found.name);
-        }
-      }
-
-      // Fall back to most recently modified file
-      entries.sort((a, b) => b.mtime - a.mtime);
-      return path.join(directory, entries[0].name);
-
-    } catch (error) {
-      // Directory doesn't exist or isn't accessible
-      return null;
-    }
+    const expectedName = (preferredName || DEFAULT_CONFIG_NAME).toLowerCase();
+    const entries = fs.readdirSync(directory);
+    const found = entries.find(file => file.toLowerCase() === expectedName);
+    return found ? path.join(directory, found) : null;
   }
 
   /**
@@ -280,8 +167,8 @@ export class UnifiedConfigPathResolver {
       candidates.push(path.join(baseDir, configName));
       candidates.push(path.join(baseDir, 'config', configName));
     } else {
-      candidates.push(path.join(baseDir, 'config.toml'));
-      candidates.push(path.join(baseDir, 'config', 'config.toml'));
+      candidates.push(path.join(baseDir, DEFAULT_CONFIG_NAME));
+      candidates.push(path.join(baseDir, 'config', DEFAULT_CONFIG_NAME));
     }
 
     // 4. Home directory configurations
@@ -291,18 +178,18 @@ export class UnifiedConfigPathResolver {
       candidates.push(path.join(primaryHome, 'config', configName));
     } else {
       const primaryHome = resolveRccUserDir();
-      candidates.push(path.join(primaryHome, 'config.toml'));
+      candidates.push(path.join(primaryHome, DEFAULT_CONFIG_NAME));
     }
 
     // 5. Default configuration directory (with scanning)
-    const defaultConfigDir = this.getDefaultConfigDirectory();
+    const defaultConfigDir = resolveRccConfigDir();
     if (allowDirectoryScan) {
       candidates.push(resolveRccUserDir());
       candidates.push(defaultConfigDir);
     } else if (configName) {
       candidates.push(path.join(defaultConfigDir, configName));
     } else {
-      candidates.push(path.join(defaultConfigDir, 'config.toml'));
+      candidates.push(path.join(defaultConfigDir, DEFAULT_CONFIG_NAME));
     }
 
     return candidates;
@@ -319,96 +206,4 @@ export class UnifiedConfigPathResolver {
       : pathString;
   }
 
-  /**
-   * Determine the source of a resolved path
-   */
-  private static determineSource(
-    path: string,
-    preferredPath: string | undefined,
-    envVars: Record<string, string | undefined>
-  ): 'explicit' | 'environment' | 'default' {
-    if (preferredPath && path === preferredPath) {
-      return 'explicit';
-    }
-
-    if (Object.values(envVars).includes(path)) {
-      return 'environment';
-    }
-
-    return 'default';
-  }
-
-  /**
-   * Validate that a configuration path is accessible
-   */
-  static validateConfigPath(configPath: string): { valid: boolean; error?: string } {
-    try {
-      const expandedPath = this.expandPath(configPath);
-      if (!expandedPath) {
-        return { valid: false, error: 'Invalid path format' };
-      }
-
-      if (!fs.existsSync(expandedPath)) {
-        return { valid: false, error: 'Path does not exist' };
-      }
-
-      const stat = fs.statSync(expandedPath);
-      if (!stat.isFile() && !stat.isDirectory()) {
-        return { valid: false, error: 'Path is neither a file nor a directory' };
-      }
-
-      return { valid: true };
-    } catch (error) {
-      return {
-        valid: false,
-        error: `Validation error: ${error instanceof Error ? error.message : String(error)}`
-      };
-    }
-  }
-
-  /**
-   * Get all available configuration files in the standard directories
-   */
-  static getAvailableConfigs(): { directory: string; files: string[] }[] {
-    const results: { directory: string; files: string[] }[] = [];
-    const directories = [
-      this.getDefaultConfigDirectory(),
-      resolveRccUserDir(),
-      path.join(safeProcessCwd(), 'config')
-    ];
-
-    directories.forEach(dir => {
-      try {
-        if (fs.existsSync(dir)) {
-          const files = fs.readdirSync(dir)
-            .filter(file => {
-              const lower = file.toLowerCase();
-              return lower.endsWith('.json') || lower.endsWith('.toml');
-            })
-            .sort();
-          results.push({ directory: dir, files });
-        }
-      } catch {
-        // Ignore inaccessible directories
-      }
-    });
-
-    return results;
-  }
-
-  /**
-   * Ensure the default configuration directory exists
-   */
-  static ensureConfigDirectory(): string {
-    const configDir = this.getDefaultConfigDirectory();
-
-    try {
-      if (!fs.existsSync(configDir)) {
-        fs.mkdirSync(configDir, { recursive: true });
-      }
-      return configDir;
-    } catch (error) {
-      throw new Error(`Failed to create config directory: ${error}`);
-    }
-  }
 }

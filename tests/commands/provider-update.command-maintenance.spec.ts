@@ -2,7 +2,16 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { parseTomlRecord, serializeTomlRecord } from '../../src/config/toml-basic.js';
 import { loadProviderCommand, makeTempDir, mockProcessExit, swallowConsole } from './provider-update.command-test-helpers.js';
+
+async function writeToml(filePath: string, value: Record<string, unknown>): Promise<void> {
+  await fs.writeFile(filePath, `${serializeTomlRecord(value)}\n`, 'utf8');
+}
+
+async function readToml(filePath: string): Promise<Record<string, unknown>> {
+  return parseTomlRecord(await fs.readFile(filePath, 'utf8'));
+}
 
 describe('provider-update command maintenance flows', () => {
   afterEach(() => {
@@ -136,22 +145,22 @@ describe('provider-update command maintenance flows', () => {
       'y'
     );
     await createProviderUpdateCommand().parseAsync(['node', 'provider', 'add', '--root', root, '--id', 'demo'], { from: 'node' });
-    const createdPath = path.join(root, 'demo', 'config.v2.json');
-    const created = JSON.parse(await fs.readFile(createdPath, 'utf8')) as { provider: { defaultModel?: string } };
+    const createdPath = path.join(root, 'demo', 'config.v2.toml');
+    const created = await readToml(createdPath) as { provider: { defaultModel?: string } };
     expect(created.provider.defaultModel).toBe('gpt-5.2-codex');
 
     answers.push(
       'https://api.changed.example/v1',
-      'cookie',
-      '~/.rcc/auth/glm.cookie',
+      'apikey',
+      'CHANGED_API_KEY',
       'gpt-5.2-codex,gpt-4.1-mini',
       'gpt-4.1-mini',
       'y'
     );
     await createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'demo', '--root', root], { from: 'node' });
-    const changed = JSON.parse(await fs.readFile(createdPath, 'utf8')) as { provider: { auth?: Record<string, unknown>; defaultModel?: string } };
-    expect(changed.provider.auth?.type).toBe('cookie');
-    expect(changed.provider.auth?.cookieFile).toBe('~/.rcc/auth/glm.cookie');
+    const changed = await readToml(createdPath) as { provider: { auth?: Record<string, unknown>; defaultModel?: string } };
+    expect(changed.provider.auth?.type).toBe('apikey');
+    expect(changed.provider.auth?.apiKey).toBe('${CHANGED_API_KEY}');
     expect(changed.provider.defaultModel).toBe('gpt-4.1-mini');
 
     answers.push('n');
@@ -166,7 +175,7 @@ describe('provider-update command maintenance flows', () => {
 
     const purgeDir = path.join(root, 'purge-me');
     await fs.mkdir(purgeDir, { recursive: true });
-    await fs.writeFile(path.join(purgeDir, 'config.v2.json'), '{}\n', 'utf8');
+    await fs.writeFile(path.join(purgeDir, 'config.v2.toml'), '{}\n', 'utf8');
     answers.push('y');
     await createProviderUpdateCommand().parseAsync(['node', 'provider', 'delete', 'purge-me', '--root', root, '--purge'], { from: 'node' });
     await expect(fs.stat(purgeDir)).rejects.toThrow();
@@ -180,11 +189,11 @@ describe('provider-update command maintenance flows', () => {
 
     answers.push('');
     await createProviderUpdateCommand().parseAsync(['node', 'provider', 'add', '--root', root], { from: 'node' });
-    await expect(fs.stat(path.join(root, 'glm', 'config.v2.json'))).resolves.toBeTruthy();
+    await expect(fs.stat(path.join(root, 'glm', 'config.v2.toml'))).resolves.toBeTruthy();
 
     const existingDir = path.join(root, 'existing');
     await fs.mkdir(existingDir, { recursive: true });
-    await fs.writeFile(path.join(existingDir, 'config.v2.json'), '{}\n', 'utf8');
+    await fs.writeFile(path.join(existingDir, 'config.v2.toml'), '{}\n', 'utf8');
     answers.push('n');
     await createProviderUpdateCommand().parseAsync(['node', 'provider', 'add', '--root', root, '--id', 'existing'], { from: 'node' });
 
@@ -212,13 +221,15 @@ describe('provider-update command maintenance flows', () => {
       providerTypeHint: 'openai'
     });
     answers.push('openai', 'https://api.example.com/v1', 'apikey', 'DEMO_KEY', '', '', 'y');
-    await createProviderUpdateCommand().parseAsync(['node', 'provider', 'add', '--root', root, '--id', 'missing-models'], { from: 'node' });
+    await expect(
+      createProviderUpdateCommand().parseAsync(['node', 'provider', 'add', '--root', root, '--id', 'missing-models'], { from: 'node' })
+    ).rejects.toThrow('process.exit:1');
 
     const oauthDir = path.join(root, 'oauth-provider');
     await fs.mkdir(oauthDir, { recursive: true });
-    await fs.writeFile(
-      path.join(oauthDir, 'config.v2.json'),
-      `${JSON.stringify({
+    await writeToml(
+      path.join(oauthDir, 'config.v2.toml'),
+      {
         version: '2.0.0',
         providerId: 'oauth-provider',
         provider: {
@@ -228,17 +239,18 @@ describe('provider-update command maintenance flows', () => {
           models: { m1: { supportsStreaming: true } },
           defaultModel: 'm1'
         }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
     answers.push('', 'apikey', '', 'm2', 'm3', 'n');
-    await createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'oauth-provider', '--root', root], { from: 'node' });
+    await expect(
+      createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'oauth-provider', '--root', root], { from: 'node' })
+    ).rejects.toThrow('process.exit:1');
 
     const accountDir = path.join(root, 'account-provider');
     await fs.mkdir(accountDir, { recursive: true });
-    await fs.writeFile(
-      path.join(accountDir, 'config.v2.json'),
-      `${JSON.stringify({
+    await writeToml(
+      path.join(accountDir, 'config.v2.toml'),
+      {
         version: '2.0.0',
         providerId: 'account-provider',
         provider: {
@@ -247,13 +259,16 @@ describe('provider-update command maintenance flows', () => {
           models: { m1: { supportsStreaming: true } },
           defaultModel: 'm1'
         }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
     answers.push('', 'deepseek-account', '~/.rcc/auth/new-account.json', 'm1', 'm1', 'y');
-    await createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'account-provider', '--root', root], { from: 'node' });
+    await expect(
+      createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'account-provider', '--root', root], { from: 'node' })
+    ).rejects.toThrow('process.exit:1');
     answers.push('', 'qwen-oauth', '', 'm1', 'm1', 'y');
-    await createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'account-provider', '--root', root], { from: 'node' });
+    await expect(
+      createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'account-provider', '--root', root], { from: 'node' })
+    ).rejects.toThrow('process.exit:1');
 
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'missing-provider', '--root', root], { from: 'node' })
@@ -261,7 +276,7 @@ describe('provider-update command maintenance flows', () => {
 
     const brokenDir = path.join(root, 'broken-provider');
     await fs.mkdir(brokenDir, { recursive: true });
-    await fs.writeFile(path.join(brokenDir, 'config.v2.json'), '{broken json', 'utf8');
+    await fs.writeFile(path.join(brokenDir, 'config.v2.toml'), '{broken toml', 'utf8');
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'broken-provider', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');

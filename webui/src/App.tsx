@@ -1291,12 +1291,20 @@ export function ProviderPage({
     })
     .sort((a, b) => textOf(a.id).localeCompare(textOf(b.id)));
 
+  const selectedProviderSummary = shownProviders.find((item) => item.id === selectedId);
+  const selectedProviderRuntimeCount = runtimeViews.filter((rt) => {
+    const providerKey = textOf(rt.providerKey).trim();
+    const runtimeKey = textOf(rt.runtimeKey).trim();
+    const id = selectedId.trim();
+    return id && (providerKey === id || providerKey.startsWith(`${id}.`) || runtimeKey === id || runtimeKey.startsWith(`${id}.`));
+  }).length;
+
   return (
     <div className="module-grid provider-layout">
       <CollapsibleSection
         accent="provider"
         title="Provider Pool"
-        sub="Provider directory registry view (v2 first) with runtime mapping and quick actions."
+        sub="Provider list only; click one provider to edit its draft in the detail pane."
       >
         <div className="row" style={{ marginBottom: 8 }}>
           <input
@@ -1311,69 +1319,32 @@ export function ProviderPage({
           <button onClick={resetNewProvider}>New</button>
         </div>
 
-        <div className="grid">
-          {shownProviders.map((item) => {
-            const source = item.source;
-            const runtimes = runtimeViews.filter((rt) => {
-              const providerKey = textOf(rt.providerKey).trim();
-              const runtimeKey = textOf(rt.runtimeKey).trim();
-              const id = textOf(item.id).trim();
-              return providerKey === id || providerKey.startsWith(`${id}.`) || runtimeKey === id || runtimeKey.startsWith(`${id}.`);
-            });
-            const modelPreview = Array.isArray(item.modelsPreview) && item.modelsPreview.length ? item.modelsPreview : item.defaultModels || [];
-
-            return (
-              <div key={`${source}.${item.id}`} className="panel tree-card accent-provider" style={{ padding: 10 }}>
-                <div className="row" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
-                  <div className="row">
-                    <span className="pill mono">{item.id}</span>
-                    <span className="pill">{source.toUpperCase()}</span>
-                    <span className={`pill ${item.enabled === false ? 'err' : 'ok'}`}>{item.enabled === false ? 'disabled' : 'enabled'}</span>
-                    {item.protocol ? <span className="pill mono">{item.protocol}</span> : null}
-                    {item.family ? <span className="pill mono">{item.family}</span> : null}
-                  </div>
-                  <div className="row">
-                    <button onClick={() => void loadProvider(textOf(item.id))}>Edit</button>
-                    <button onClick={() => void backupProvider(textOf(item.id))} disabled={!authenticated}>
-                      Backup
-                    </button>
-                    <button onClick={() => void restoreProvider(textOf(item.id))} disabled={!authenticated || !providerBackups[textOf(item.id)]}>
-                      Restore
-                    </button>
-                    <button onClick={() => void testProvider(textOf(item.id))} disabled={!authenticated}>
-                      Test
-                    </button>
-                    <button className="danger" onClick={() => void deleteProvider(textOf(item.id))} disabled={!authenticated}>
-                      Delete
-                    </button>
-                  </div>
-                </div>
-
-                <div className="row" style={{ marginBottom: 6 }}>
-                  <span className="muted">models:</span>
-                  {modelPreview.length
-                    ? modelPreview.slice(0, 8).map((modelId) => (
-                      <span key={`${item.id}.${modelId}`} className="pill mono">
-                        {modelId}
-                      </span>
-                    ))
-                    : <span className="muted">none</span>}
-                </div>
-
-                <div className="row">
-                  <span className="muted">auth:</span>
-                  <span className="pill mono">{textOf(item.authType || item.credentialsRef || '—')}</span>
-                  <span className="pill mono">models={formatInt(item.modelCount || 0)}</span>
-                  <span className="pill mono">runtimes={formatInt(runtimes.length)}</span>
-                </div>
-              </div>
-            );
-          })}
+        <div className="list-stack">
+          {shownProviders.map((item) => (
+            <button
+              key={`${item.source}.${item.id}`}
+              className={`list-row provider-list-row ${selectedId === item.id ? 'active' : ''}`}
+              onClick={() => void loadProvider(textOf(item.id))}
+            >
+              <span className="mono strong">{item.id}</span>
+              <span className="muted">{item.source.toUpperCase()}</span>
+              <span className={`status-dot ${item.enabled === false ? 'err' : 'ok'}`} aria-label={item.enabled === false ? 'disabled' : 'enabled'} />
+              <span className="muted mono">{item.protocol || item.family || item.type || '—'}</span>
+              <span className="muted mono">models={formatInt(item.modelCount || 0)}</span>
+            </button>
+          ))}
           {!shownProviders.length ? <AppNotice>No providers found in registry/config.</AppNotice> : null}
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection accent="config" title="Provider Editor" sub="Structured provider form (no raw JSON).">
+      <div className="module-grid detail-stack">
+      <CollapsibleSection accent="config" title="Provider Details" sub="Edits stay local until Save; selecting another provider discards the unsaved draft.">
+        <div className="row" style={{ marginBottom: 8 }}>
+          <span className="pill mono">selected: {selectedId || 'new provider'}</span>
+          <span className="pill mono">source: {selectedProviderSummary?.source || providerSourceById[providerIdInput] || 'v2'}</span>
+          <span className="pill mono">runtimes={formatInt(selectedProviderRuntimeCount)}</span>
+        </div>
+
         <div className="row" style={{ marginBottom: 8 }}>
           <label htmlFor="provider-id">provider id</label>
           <input
@@ -1549,6 +1520,7 @@ export function ProviderPage({
 
         <LogBox value={log} />
       </CollapsibleSection>
+      </div>
     </div>
   );
 }
@@ -1586,8 +1558,14 @@ export function RoutingPage({
   const [newPortProvider, setNewPortProvider] = useState('');
   const [newPortSameProtocol, setNewPortSameProtocol] = useState('direct');
   const [newRouteName, setNewRouteName] = useState('');
-  const [poolRoute, setPoolRoute] = useState('');
-  const [poolTargetsText, setPoolTargetsText] = useState('');
+  const [selectedRouteName, setSelectedRouteName] = useState('');
+  const [selectedPoolIndex, setSelectedPoolIndex] = useState<number | null>(null);
+  const [routeNameDraft, setRouteNameDraft] = useState('');
+  const [poolIdDraft, setPoolIdDraft] = useState('');
+  const [poolModeDraft, setPoolModeDraft] = useState('priority');
+  const [poolPriorityDraft, setPoolPriorityDraft] = useState('');
+  const [poolBackupDraft, setPoolBackupDraft] = useState(false);
+  const [poolTargetsDraft, setPoolTargetsDraft] = useState('');
 
   const makePortKey = (port: ConfigPortView, index: number) =>
     `${textOf(port.port || index)}:${textOf(port.routingPolicyGroup || port.providerBinding || port.mode || '')}`;
@@ -1637,6 +1615,49 @@ export function RoutingPage({
     };
   }, [policyDraft]);
 
+  const formatRoutingTargetForEdit = (target: unknown, mode: string, index: number) => {
+    const rec = toRecord(target);
+    const providerId = textOf(rec.providerId || rec.provider || rec.target || target).trim();
+    if (!providerId) return '';
+    const weight = textOf(rec.weight).trim();
+    const priority = textOf(rec.priority).trim();
+    if (mode === 'weighted' && weight) return `${providerId}:${weight}`;
+    if (mode === 'priority' && priority) return `${providerId}:${priority}`;
+    if (priority) return `${providerId}:${priority}`;
+    if (weight) return `${providerId}:${weight}`;
+    return providerId || `target-${index + 1}`;
+  };
+
+  const formatRoutingTargetForList = (target: unknown, mode: string, index: number) => {
+    const rec = toRecord(target);
+    const providerId = textOf(rec.providerId || rec.provider || rec.target || target).trim();
+    if (!providerId) return '';
+    const weight = textOf(rec.weight).trim();
+    const priority = textOf(rec.priority).trim();
+    const suffix = [
+      weight ? `w=${weight}` : '',
+      priority ? `p=${priority}` : ''
+    ].filter(Boolean).join(' ');
+    return suffix ? `${providerId} (${suffix})` : providerId || `target-${index + 1}`;
+  };
+
+  const parseRoutingTargets = (text: string, mode: string) => text
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [providerRaw, metricRaw] = item.split(':').map((part) => part.trim());
+      if (!metricRaw) return providerRaw;
+      const metric = Number(metricRaw);
+      if (mode === 'weighted') {
+        return Number.isFinite(metric) ? { providerId: providerRaw, weight: metric } : { providerId: providerRaw, weight: metricRaw };
+      }
+      if (mode === 'priority') {
+        return Number.isFinite(metric) ? { providerId: providerRaw, priority: metric } : { providerId: providerRaw, priority: metricRaw };
+      }
+      return providerRaw;
+    });
+
   const routeRows = useMemo(() => {
     const rows: Array<{
       name: string;
@@ -1654,18 +1675,18 @@ export function RoutingPage({
       const parsedPools = pools
         .map((poolNode, idx) => {
           const rec = toRecord(poolNode);
+          const mode = textOf(rec.mode || 'priority');
           const targets = Array.isArray(rec.targets)
-            ? rec.targets.map((item) => textOf(item).trim()).filter(Boolean)
+            ? rec.targets.map((item, targetIndex) => formatRoutingTargetForList(item, mode, targetIndex)).filter(Boolean)
             : [];
           return {
             id: textOf(rec.id || `${name}-${idx + 1}`),
-            mode: textOf(rec.mode || '—'),
+            mode,
             priority: textOf(rec.priority || '—'),
             backup: rec.backup === true,
             targets
           };
         })
-        .filter((p) => p.targets.length > 0 || p.mode !== '—' || p.priority !== '—' || p.backup);
       rows.push({ name, pools: parsedPools });
     }
     rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -1674,13 +1695,18 @@ export function RoutingPage({
 
   useEffect(() => {
     if (routeRows.length === 0) {
-      setPoolRoute('');
+      setSelectedRouteName('');
+      setSelectedPoolIndex(null);
+      setRouteNameDraft('');
       return;
     }
-    if (!poolRoute || !routeRows.some((row) => row.name === poolRoute)) {
-      setPoolRoute(routeRows[0].name);
+    if (!selectedRouteName || !routeRows.some((row) => row.name === selectedRouteName)) {
+      const firstRoute = routeRows[0];
+      setSelectedRouteName(firstRoute.name);
+      setSelectedPoolIndex(null);
+      setRouteNameDraft(firstRoute.name);
     }
-  }, [routeRows, poolRoute]);
+  }, [routeRows, selectedRouteName]);
 
   const refreshSources = async () => {
     if (!authenticated) return;
@@ -1758,6 +1784,8 @@ export function RoutingPage({
     setSelectedGroupId(groupId);
     const next = toRecord(groups[groupId]);
     setPolicyDraft(Object.keys(next).length ? next : { routing: {} });
+    setSelectedRouteName('');
+    setSelectedPoolIndex(null);
   };
 
   const savePorts = async (nextPorts: ConfigPortView[], successMessage: string, preferredKey?: string) => {
@@ -1985,7 +2013,9 @@ export function RoutingPage({
       next.routing = routing;
       return next;
     });
-    setPoolRoute(routeName);
+    setSelectedRouteName(routeName);
+    setSelectedPoolIndex(null);
+    setRouteNameDraft(routeName);
     setNewRouteName('');
   };
 
@@ -1997,36 +2027,123 @@ export function RoutingPage({
       next.routing = routing;
       return next;
     });
+    if (selectedRouteName === routeName) {
+      setSelectedRouteName('');
+      setSelectedPoolIndex(null);
+      setRouteNameDraft('');
+    }
   };
 
-  const addPool = () => {
-    const routeName = poolRoute.trim();
-    if (!routeName) {
+  const selectRouteForEdit = (routeName: string) => {
+    setSelectedRouteName(routeName);
+    setSelectedPoolIndex(null);
+    setRouteNameDraft(routeName);
+  };
+
+  const selectPoolForEdit = (routeName: string, index: number) => {
+    const routing = toRecord(normalizedPolicy.routing);
+    const pools = Array.isArray(routing[routeName]) ? routing[routeName] as unknown[] : [];
+    const pool = toRecord(pools[index]);
+    const mode = textOf(pool.mode || 'priority');
+    const targetsText = Array.isArray(pool.targets)
+      ? pool.targets.map((target, targetIndex) => formatRoutingTargetForEdit(target, mode, targetIndex)).filter(Boolean).join('\n')
+      : '';
+    setSelectedRouteName(routeName);
+    setSelectedPoolIndex(index);
+    setRouteNameDraft(routeName);
+    setPoolIdDraft(textOf(pool.id || `${routeName}-${index + 1}`));
+    setPoolModeDraft(mode === 'round-robin' ? 'roundrobin' : mode);
+    setPoolPriorityDraft(textOf(pool.priority || ''));
+    setPoolBackupDraft(pool.backup === true);
+    setPoolTargetsDraft(targetsText);
+  };
+
+  const startNewPoolDraft = (routeName = selectedRouteName) => {
+    const selected = routeName.trim();
+    if (!selected) {
       onToast('select a route first');
       return;
     }
-    const targets = poolTargetsText
-      .split(/[\n,]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (!targets.length) {
-      onToast('at least one target is required');
+    setSelectedRouteName(selected);
+    setSelectedPoolIndex(null);
+    setRouteNameDraft(selected);
+    setPoolIdDraft(`${selected}-${Date.now()}`);
+    setPoolModeDraft('priority');
+    setPoolPriorityDraft('');
+    setPoolBackupDraft(false);
+    setPoolTargetsDraft('');
+  };
+
+  const saveRouteDraft = () => {
+    const fromName = selectedRouteName.trim();
+    const toName = routeNameDraft.trim();
+    if (!fromName || !toName) {
+      onToast('route name is required');
+      return;
+    }
+    const currentRouting = toRecord(normalizedPolicy.routing);
+    if (fromName !== toName && Array.isArray(currentRouting[toName])) {
+      onToast('route name already exists');
       return;
     }
     setPolicyDraft((prev) => {
       const next = structuredClone(prev);
       const routing = toRecord(next.routing);
+      if (fromName !== toName) {
+        routing[toName] = Array.isArray(routing[fromName]) ? routing[fromName] : [];
+        delete routing[fromName];
+      }
+      next.routing = routing;
+      return next;
+    });
+    setSelectedRouteName(toName);
+    onToast('Route draft saved.', 'ok');
+  };
+
+  const savePoolDraft = () => {
+    const routeName = selectedRouteName.trim();
+    if (!routeName) {
+      onToast('select a route first');
+      return;
+    }
+    const targets = parseRoutingTargets(poolTargetsDraft, poolModeDraft);
+    if (!targets.length) {
+      onToast('at least one target is required');
+      return;
+    }
+    const normalizedMode = poolModeDraft === 'roundrobin' ? 'round-robin' : poolModeDraft;
+    const priorityNumber = Number(poolPriorityDraft);
+    const pool: Record<string, unknown> = {
+      id: poolIdDraft.trim() || `${routeName}-${Date.now()}`,
+      mode: normalizedMode,
+      targets
+    };
+    if (poolPriorityDraft.trim()) {
+      pool.priority = Number.isFinite(priorityNumber) ? priorityNumber : poolPriorityDraft.trim();
+    }
+    if (poolBackupDraft) {
+      pool.backup = true;
+    }
+    const currentRouting = toRecord(normalizedPolicy.routing);
+    const currentPools = Array.isArray(currentRouting[routeName]) ? currentRouting[routeName] as unknown[] : [];
+    const nextSelectedPoolIndex = selectedPoolIndex === null || selectedPoolIndex < 0 || selectedPoolIndex >= currentPools.length
+      ? currentPools.length
+      : selectedPoolIndex;
+    setPolicyDraft((prev) => {
+      const next = structuredClone(prev);
+      const routing = toRecord(next.routing);
       const pools = Array.isArray(routing[routeName]) ? [...(routing[routeName] as unknown[])] : [];
-      pools.push({
-        id: `${routeName}-${Date.now()}`,
-        mode: 'round-robin',
-        targets
-      });
+      if (selectedPoolIndex === null || selectedPoolIndex < 0 || selectedPoolIndex >= pools.length) {
+        pools.push(pool);
+      } else {
+        pools[selectedPoolIndex] = pool;
+      }
       routing[routeName] = pools;
       next.routing = routing;
       return next;
     });
-    setPoolTargetsText('');
+    setSelectedPoolIndex(nextSelectedPoolIndex);
+    onToast('Pool draft saved.', 'ok');
   };
 
   const removePool = (routeName: string, index: number) => {
@@ -2039,6 +2156,9 @@ export function RoutingPage({
       next.routing = routing;
       return next;
     });
+    setSelectedPoolIndex(null);
+    setPoolIdDraft('');
+    setPoolTargetsDraft('');
   };
 
   const groupIds = Object.keys(groups || {}).sort((a, b) => a.localeCompare(b));
@@ -2200,7 +2320,7 @@ export function RoutingPage({
           </div>
         </CollapsibleSection>
 
-        <CollapsibleSection accent="routing" title="Route Builder" sub="Add routes and pools with target list (comma/newline separated).">
+        <CollapsibleSection accent="routing" title="Route List" sub="Routes and pools are listed only; select one item to edit details on the right.">
           <div className="row" style={{ marginBottom: 8 }}>
             <input
               value={newRouteName}
@@ -2211,105 +2331,135 @@ export function RoutingPage({
             <button onClick={addRoute}>Add Route</button>
           </div>
 
-          <div className="row">
-            <select value={poolRoute} onChange={(e) => setPoolRoute(e.target.value)} style={{ minWidth: 220 }}>
-              {routeRows.map((row) => (
-                <option key={row.name} value={row.name}>
-                  {row.name}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="provider target picker"
-              value=""
-              onChange={(e) => {
-                const target = e.target.value;
-                if (!target) return;
-                setPoolTargetsText((prev) => prev.trim() ? `${prev.trim()}, ${target}` : target);
-              }}
-              style={{ minWidth: 260 }}
-            >
-              <option value="">choose existing provider target</option>
-              {providerTargetOptions.map((item) => (
-                <option key={item.target} value={item.target}>
-                  {item.target}
-                </option>
-              ))}
-            </select>
-            <input
-              value={poolTargetsText}
-              onChange={(e) => setPoolTargetsText(e.target.value)}
-              placeholder="targets: provider.alias.model, provider.alias.model"
-              style={{ minWidth: 340, flex: 1 }}
-            />
-            <button onClick={addPool}>Add Pool</button>
-          </div>
-        </CollapsibleSection>
-
-        <CollapsibleSection accent="runtime" title="Route Tree" sub="Routes contain ordered pools; pools contain provider targets.">
-          <div className="grid">
-          {routeRows.map((route) => (
-            <div key={route.name} className="panel tree-card accent-routing" style={{ padding: 10 }}>
-              <div className="row" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
-                <div className="row">
-                  <span className="pill mono">route: {route.name}</span>
-                  <span className="pill mono">pools={route.pools.length}</span>
-                </div>
-                <button className="danger" onClick={() => removeRoute(route.name)}>
-                  Remove Route
+          <div className="list-stack">
+            {routeRows.map((route) => (
+              <div key={route.name} className="tree-card accent-routing route-list-group">
+                <button
+                  className={`list-row route-list-row ${selectedRouteName === route.name && selectedPoolIndex === null ? 'active' : ''}`}
+                  onClick={() => selectRouteForEdit(route.name)}
+                >
+                  <span className="mono strong">{route.name}</span>
+                  <span className="muted mono">pools={route.pools.length}</span>
+                  <span className="muted">route</span>
                 </button>
-              </div>
-
-              {route.pools.length ? (
-                <div className="table-wrap short">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>id</th>
-                        <th>mode</th>
-                        <th>priority</th>
-                        <th>targets</th>
-                        <th>action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {route.pools.map((poolItem, idx) => (
-                        <tr key={`${route.name}.${poolItem.id}.${idx}`}>
-                          <td className="mono">{poolItem.id}</td>
-                          <td>{poolItem.mode}</td>
-                          <td className="mono">{poolItem.priority}{poolItem.backup ? ' (backup)' : ''}</td>
-                          <td>
-                            <div className="row">
-                              {poolItem.targets.map((target) => (
-                                <span key={`${route.name}.${poolItem.id}.${target}`} className="pill mono">
-                                  {target}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td>
-                            <button className="danger" onClick={() => removePool(route.name, idx)}>
-                              Remove Pool
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="route-pool-list">
+                  {route.pools.map((poolItem, idx) => (
+                    <button
+                      key={`${route.name}.${poolItem.id}.${idx}`}
+                      className={`list-row route-pool-row ${selectedRouteName === route.name && selectedPoolIndex === idx ? 'active' : ''}`}
+                      onClick={() => selectPoolForEdit(route.name, idx)}
+                    >
+                      <span className="mono">{poolItem.id}</span>
+                      <span className="muted mono">{poolItem.mode}</span>
+                      <span className="muted mono">{poolItem.priority}{poolItem.backup ? ' backup' : ''}</span>
+                      <span className="muted mono">{poolItem.targets.length} targets</span>
+                    </button>
+                  ))}
+                  {!route.pools.length ? (
+                    <button className="list-row route-pool-row muted" onClick={() => startNewPoolDraft(route.name)}>
+                      No pools. Add pool in details.
+                    </button>
+                  ) : null}
                 </div>
-              ) : (
-                <AppNotice>No pools in this route.</AppNotice>
-              )}
-            </div>
-          ))}
-          {!routeRows.length ? <AppNotice>No routes configured for selected group.</AppNotice> : null}
+              </div>
+            ))}
+            {!routeRows.length ? <AppNotice>No routes configured for selected group.</AppNotice> : null}
           </div>
         </CollapsibleSection>
+      </CollapsibleSection>
+
+      <div className="module-grid detail-stack">
+      <CollapsibleSection accent="routing" title="Route Details" sub="Edit selected route or pool; Save Group persists the routing group to config.">
+        {selectedRouteName ? (
+          <div className="grid">
+            <div className="row">
+              <label htmlFor="route-name-draft">route name</label>
+              <input
+                id="route-name-draft"
+                value={routeNameDraft}
+                onChange={(e) => setRouteNameDraft(e.target.value)}
+                style={{ minWidth: 220, flex: 1 }}
+              />
+              <button className="primary" onClick={saveRouteDraft}>Save Route Draft</button>
+              <button onClick={() => startNewPoolDraft(selectedRouteName)}>New Pool</button>
+              <button className="danger" onClick={() => removeRoute(selectedRouteName)}>Delete Route</button>
+            </div>
+
+            <div className="row">
+              <label htmlFor="pool-id-draft">pool id</label>
+              <input
+                id="pool-id-draft"
+                value={poolIdDraft}
+                onChange={(e) => setPoolIdDraft(e.target.value)}
+                placeholder="pool id"
+                style={{ minWidth: 180, flex: 1 }}
+              />
+              <label htmlFor="pool-mode-draft">mode</label>
+              <select id="pool-mode-draft" value={poolModeDraft} onChange={(e) => setPoolModeDraft(e.target.value)} style={{ minWidth: 150 }}>
+                <option value="priority">priority</option>
+                <option value="weighted">weighted</option>
+                <option value="roundrobin">roundrobin</option>
+                <option value="round-robin">round-robin</option>
+              </select>
+              <label htmlFor="pool-priority-draft">priority</label>
+              <input
+                id="pool-priority-draft"
+                value={poolPriorityDraft}
+                onChange={(e) => setPoolPriorityDraft(e.target.value)}
+                placeholder="pool priority"
+                style={{ width: 120 }}
+              />
+              <label>
+                <input type="checkbox" checked={poolBackupDraft} onChange={(e) => setPoolBackupDraft(e.target.checked)} /> backup
+              </label>
+            </div>
+
+            <div className="row">
+              <select
+                aria-label="provider target picker"
+                value=""
+                onChange={(e) => {
+                  const target = e.target.value;
+                  if (!target) return;
+                  setPoolTargetsDraft((prev) => prev.trim() ? `${prev.trim()}\n${target}` : target);
+                }}
+                style={{ minWidth: 280 }}
+              >
+                <option value="">choose existing provider target</option>
+                {providerTargetOptions.map((item) => (
+                  <option key={item.target} value={item.target}>
+                    {item.target}
+                  </option>
+                ))}
+              </select>
+              <button className="primary" onClick={savePoolDraft}>Save Pool Draft</button>
+              <button
+                className="danger"
+                onClick={() => {
+                  if (selectedPoolIndex !== null) removePool(selectedRouteName, selectedPoolIndex);
+                }}
+                disabled={selectedPoolIndex === null}
+              >
+                Delete Pool
+              </button>
+            </div>
+            <textarea
+              aria-label="pool targets"
+              value={poolTargetsDraft}
+              onChange={(e) => setPoolTargetsDraft(e.target.value)}
+              placeholder="targets, one per line. Use provider.target:weight for weighted or provider.target:priority for priority"
+              style={{ minHeight: 150 }}
+            />
+          </div>
+        ) : (
+          <AppNotice>Select a route or create one to edit details.</AppNotice>
+        )}
       </CollapsibleSection>
 
       <CollapsibleSection accent="runtime" title="Routing Log" sub="Operation output and API responses.">
         <LogBox value={log} />
       </CollapsibleSection>
+      </div>
     </div>
   );
 }

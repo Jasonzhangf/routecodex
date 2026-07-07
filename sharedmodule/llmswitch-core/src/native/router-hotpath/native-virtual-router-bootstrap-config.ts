@@ -5,6 +5,15 @@ import {
 import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-policy.js';
 import { callNativeJson } from './native-router-hotpath.js';
 
+export type {
+  ProviderProfile,
+  ProviderRuntimeProfile,
+  RouterMetadataInput,
+  VirtualRouterBootstrapInput,
+  VirtualRouterBootstrapResult,
+  VirtualRouterConfig
+} from './virtual-router-contracts.js';
+
 export function bootstrapVirtualRouterConfig(
   input: VirtualRouterBootstrapInput
 ): VirtualRouterBootstrapResult {

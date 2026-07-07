@@ -2,7 +2,16 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { parseTomlRecord, serializeTomlRecord } from '../../src/config/toml-basic.js';
 import { loadProviderCommand, makeTempDir, mockProcessExit, swallowConsole } from './provider-update.command-test-helpers.js';
+
+async function writeToml(filePath: string, value: Record<string, unknown>): Promise<void> {
+  await fs.writeFile(filePath, `${serializeTomlRecord(value)}\n`, 'utf8');
+}
+
+async function readToml(filePath: string): Promise<Record<string, unknown> > {
+  return parseTomlRecord(await fs.readFile(filePath, 'utf8'));
+}
 
 describe('provider-update command core flows', () => {
   afterEach(() => {
@@ -13,14 +22,13 @@ describe('provider-update command core flows', () => {
     const { log, error } = swallowConsole();
     const { createProviderUpdateCommand, mocks } = await loadProviderCommand();
     const cmd = createProviderUpdateCommand();
-    const configPath = path.join(await makeTempDir('provider-update-'), 'provider-input.json');
-    await fs.writeFile(configPath, '{}\n', 'utf8');
+    const root = await makeTempDir('provider-update-');
 
-    await cmd.parseAsync(['node', 'provider', 'update', '-c', configPath, '--provider', 'demo', '--write'], { from: 'node' });
+    await cmd.parseAsync(['node', 'provider', 'update', 'demo', '--root', root, '--write'], { from: 'node' });
     expect(mocks.updateProviderModels).toHaveBeenCalledWith(
       expect.objectContaining({
         providerId: 'demo',
-        configPath: path.resolve(configPath),
+        rootDir: root,
         write: true
       })
     );
@@ -30,7 +38,7 @@ describe('provider-update command core flows', () => {
     const cmdFail = createProviderUpdateCommand();
     const exit = mockProcessExit();
     await expect(
-      cmdFail.parseAsync(['node', 'provider', 'update', '-c', configPath, '--provider', 'demo'], { from: 'node' })
+      cmdFail.parseAsync(['node', 'provider', 'update', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
     expect(error).toHaveBeenCalledWith('provider update failed:', 'upstream fail');
     expect(exit).toHaveBeenCalledWith(1);
@@ -42,10 +50,10 @@ describe('provider-update command core flows', () => {
     const root = await makeTempDir('provider-sync-');
     const providerDir = path.join(root, 'demo');
     await fs.mkdir(providerDir, { recursive: true });
-    const v2Path = path.join(providerDir, 'config.v2.json');
-    await fs.writeFile(
+    const v2Path = path.join(providerDir, 'config.v2.toml');
+    await writeToml(
       v2Path,
-      `${JSON.stringify({
+      {
         version: '2.0.0',
         providerId: 'demo',
         provider: {
@@ -57,8 +65,7 @@ describe('provider-update command core flows', () => {
             'old-model': { supportsStreaming: true }
           }
         }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
 
     mocks.readBlacklist.mockReturnValue({ models: ['blocked-model'] });
@@ -88,7 +95,7 @@ describe('provider-update command core flows', () => {
       path.join(providerDir, 'blacklist.json'),
       expect.objectContaining({ models: ['extra-block'] })
     );
-    const updated = JSON.parse(await fs.readFile(v2Path, 'utf8')) as { provider: { models: Record<string, unknown> } };
+    const updated = await readToml(v2Path) as { provider: { models: Record<string, unknown> } };
     expect(Object.keys(updated.provider.models)).toEqual(expect.arrayContaining(['model-a', 'model-b']));
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Provider "demo" updated:'));
 
@@ -106,31 +113,30 @@ describe('provider-update command core flows', () => {
     const root = await makeTempDir('provider-sync-errors-');
     const providerDir = path.join(root, 'demo');
     await fs.mkdir(providerDir, { recursive: true });
-    const v2Path = path.join(providerDir, 'config.v2.json');
+    const v2Path = path.join(providerDir, 'config.v2.toml');
 
     const exit = mockProcessExit();
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'sync-models', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('No provider config.v2.toml/config.v2.json found for provider "demo"'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('No provider config.v2.toml found for provider "demo"'));
 
-    await fs.writeFile(v2Path, '{invalid json', 'utf8');
+    await fs.writeFile(v2Path, '{invalid toml', 'utf8');
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'sync-models', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
     expect(error).toHaveBeenCalledWith('Failed to parse existing provider config:', expect.any(String));
 
-    await fs.writeFile(
+    await writeToml(
       v2Path,
-      `${JSON.stringify({
+      {
         version: '2.0.0',
         providerId: 'demo',
         provider: {
           type: 'demo',
           models: { blocked: { supportsStreaming: true } }
         }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
 
     mocks.fetchModelsFromUpstream.mockRejectedValueOnce(new Error('upstream-err'));
@@ -159,10 +165,10 @@ describe('provider-update command core flows', () => {
     const root = await makeTempDir('provider-probe-');
     const providerDir = path.join(root, 'demo');
     await fs.mkdir(providerDir, { recursive: true });
-    const v2Path = path.join(providerDir, 'config.v2.json');
-    await fs.writeFile(
+    const v2Path = path.join(providerDir, 'config.v2.toml');
+    await writeToml(
       v2Path,
-      `${JSON.stringify({
+      {
         version: '2.0.0',
         providerId: 'demo',
         provider: {
@@ -172,8 +178,7 @@ describe('provider-update command core flows', () => {
             'model-b': { supportsStreaming: true }
           }
         }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
 
     mocks.probeContextForModel
@@ -208,7 +213,7 @@ describe('provider-update command core flows', () => {
       { from: 'node' }
     );
 
-    const updated = JSON.parse(await fs.readFile(v2Path, 'utf8')) as {
+    const updated = await readToml(v2Path) as {
       provider: { models: Record<string, { maxContextTokens?: number; maxContext?: number }> };
     };
     expect(updated.provider.models['model-a'].maxContextTokens).toBe(180000);
@@ -230,37 +235,32 @@ describe('provider-update command core flows', () => {
     const root = await makeTempDir('provider-probe-errors-');
     const providerDir = path.join(root, 'demo');
     await fs.mkdir(providerDir, { recursive: true });
-    const v2Path = path.join(providerDir, 'config.v2.json');
+    const v2Path = path.join(providerDir, 'config.v2.toml');
     const exit = mockProcessExit();
 
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'probe-context', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('No provider config.v2.toml/config.v2.json found for provider "demo"'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('No provider config.v2.toml found for provider "demo"'));
 
-    await fs.writeFile(v2Path, '{bad json', 'utf8');
+    await fs.writeFile(v2Path, '{bad toml', 'utf8');
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'probe-context', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
 
-    await fs.writeFile(
-      v2Path,
-      `${JSON.stringify({ version: '2.0.0', providerId: 'demo', provider: { type: 'demo', models: {} } }, null, 2)}\n`,
-      'utf8'
-    );
+    await writeToml(v2Path, { version: '2.0.0', providerId: 'demo', provider: { type: 'demo', models: {} } });
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'probe-context', 'demo', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
     expect(error).toHaveBeenCalledWith('No models found to probe');
 
-    await fs.writeFile(
+    await writeToml(
       v2Path,
-      `${JSON.stringify({
+      {
         version: '2.0.0',
         providerId: 'demo',
         provider: { type: 'demo', models: { m1: { supportsStreaming: true } } }
-      }, null, 2)}\n`,
-      'utf8'
+      }
     );
 
     mocks.probeContextForModel.mockResolvedValue({ maxPassedTokens: 123000 });

@@ -337,6 +337,77 @@ button.active {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr);
 }
 
+.detail-stack {
+  align-content: start;
+}
+
+.list-stack {
+  display: grid;
+  gap: 7px;
+}
+
+.list-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(74px, 0.4fr) minmax(16px, auto) minmax(0, 1fr) minmax(84px, 0.5fr);
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.list-row.active,
+.list-row:hover {
+  border-color: color-mix(in srgb, var(--tree-accent, var(--accent)), transparent 45%);
+  background: color-mix(in srgb, var(--tree-accent, var(--accent)), transparent 88%);
+}
+
+.provider-list-row {
+  --tree-accent: #40d67b;
+}
+
+.route-list-row,
+.route-pool-row {
+  --tree-accent: #ffbf47;
+}
+
+.route-list-group {
+  padding: 7px;
+}
+
+.route-pool-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 6px;
+  padding-left: 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.route-pool-row {
+  grid-template-columns: minmax(0, 1.4fr) minmax(82px, 0.5fr) minmax(82px, 0.5fr) minmax(82px, 0.5fr);
+}
+
+.strong {
+  font-weight: 680;
+  color: var(--text);
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  justify-self: center;
+}
+
+.status-dot.ok {
+  background: var(--ok);
+}
+
+.status-dot.err {
+  background: var(--err);
+}
+
 .card-title {
   margin: 0;
   font-size: 13px;

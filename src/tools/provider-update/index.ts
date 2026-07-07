@@ -1,43 +1,16 @@
 import fs from 'fs';
+import path from 'path';
 import { fetchModelsFromUpstream } from './fetch-models.js';
-import { getBlacklistPath, getModelsCachePath, getProviderConfigOutputPath, getProviderRootDir } from './paths.js';
 import { readBlacklist, writeBlacklist } from './blacklist.js';
-import { buildOrUpdateProviderConfig } from './config-builder.js';
 import { probeFirstWorkingKey } from './key-probe.js';
 import { formatUpdateSummary } from './diff.js';
 import type { ProviderInputConfig, UpdateOptions, UpdateResult } from './types.js';
-
-type LegacyProviderConfigNode = {
-  providerId?: string;
-  id?: string;
-  type?: string;
-  providerType?: string;
-  baseUrl?: string;
-  baseURL?: string;
-  auth?: ProviderInputConfig['auth'];
-  apiKey?: Array<unknown> | string | null;
-  model?: string | null;
-  models?: Array<unknown>;
-};
-
-type OpenAIStandardProviderConfig = {
-  type: 'openai-standard';
-  config: LegacyProviderConfigNode;
-  providerId?: string;
-  id?: string;
-  [key: string]: unknown;
-};
-
-type ProviderConfigFile = LegacyProviderConfigNode | OpenAIStandardProviderConfig;
+import { writeProviderConfigFile } from '../../config/provider-config-writer.js';
+import { loadProviderConfigsV2, type ProviderConfigV2 } from '../../config/provider-v2-loader.js';
+import { resolveRccProviderDir } from '../../config/user-data-paths.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
-
-const isLegacyProviderConfig = (value: unknown): value is LegacyProviderConfigNode =>
-  isRecord(value);
-
-const isOpenAIStandardConfig = (value: unknown): value is OpenAIStandardProviderConfig =>
-  isRecord(value) && value.type === 'openai-standard' && isLegacyProviderConfig(value.config);
 
 const pickFirstString = (...values: Array<unknown>): string | null => {
   for (const value of values) {
@@ -48,8 +21,8 @@ const pickFirstString = (...values: Array<unknown>): string | null => {
   return null;
 };
 
-const normalizeStringArray = (values: unknown): string[] | undefined => {
-  if (!Array.isArray(values)) {return undefined;}
+const normalizeStringArray = (values: unknown): string[] => {
+  if (!Array.isArray(values)) {return [];}
   const result: string[] = [];
   for (const entry of values) {
     const normalized = pickFirstString(entry);
@@ -57,107 +30,93 @@ const normalizeStringArray = (values: unknown): string[] | undefined => {
       result.push(normalized);
     }
   }
-  return result.length ? result : undefined;
+  return result;
 };
 
-const resolveSeedModels = (config: LegacyProviderConfigNode): string[] => {
-  const seeds = new Set<string>();
-  const push = (value: unknown): void => {
-    const normalized = pickFirstString(value);
-    if (normalized) {
-      seeds.add(normalized);
-    }
-  };
-  push(config.model);
-  if (Array.isArray(config.models)) {
-    for (const entry of config.models) {
-      push(entry);
-    }
+function normalizeModelsNode(value: unknown): Record<string, Record<string, unknown>> {
+  if (!isRecord(value)) {
+    return {};
   }
-  return Array.from(seeds);
-};
-
-const ensureLegacyConfig = (config: ProviderConfigFile): LegacyProviderConfigNode =>
-  isOpenAIStandardConfig(config) ? config.config : config;
-
-function readJson<T>(file: string): T | null {
-  try {
-    if (fs.existsSync(file)) {
-      return JSON.parse(fs.readFileSync(file, 'utf-8')) as T;
-    }
-  } catch {
-    /* ignore */
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [modelId, modelConfig] of Object.entries(value)) {
+    out[modelId] = isRecord(modelConfig) ? { ...modelConfig } : {};
   }
-  return null;
+  return out;
 }
 
-function ensureDir(dir: string): void { try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ } }
-
-export async function updateProviderModels(options: UpdateOptions): Promise<UpdateResult> {
-  const input = options.configPath;
-  if (!input) {throw new Error('--config is required');}
-
-  const rawData = readJson<unknown>(input);
-  if (!rawData) {throw new Error('invalid provider config JSON');}
-
-  let raw: ProviderConfigFile;
-  if (isOpenAIStandardConfig(rawData)) {
-    raw = rawData;
-  } else if (isLegacyProviderConfig(rawData)) {
-    raw = rawData;
-  } else {
-    throw new Error('invalid provider config JSON');
+function readModelsCache(file: string): string[] {
+  const cached = JSON.parse(fs.readFileSync(file, 'utf-8')) as { models?: unknown };
+  if (!Array.isArray(cached.models)) {
+    throw new Error(`models cache missing array: ${file}`);
   }
+  return cached.models.map((model) => String(model));
+}
 
-  // Support both legacy flat configs and V2 openai-standard provider configs:
-  // - Legacy: { providerId, type, baseUrl, auth, apiKey:[] }
-  // - V2: { type: 'openai-standard', config: { providerType, baseUrl, auth, apiKey? } }
-  const baseNode = ensureLegacyConfig(raw);
+function ensureDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+}
 
-  const apiKeyList =
-    Array.isArray(baseNode.apiKey)
-      ? normalizeStringArray(baseNode.apiKey)
-      : (() => {
-        const single = pickFirstString(baseNode.apiKey);
-        return single ? [single] : undefined;
-      })();
+function resolveProviderNode(parsed: ProviderConfigV2): Record<string, unknown> {
+  if (!isRecord(parsed.provider)) {
+    throw new Error('invalid provider config TOML: provider table is required');
+  }
+  return parsed.provider;
+}
 
-  const providerId =
-    pickFirstString(
-      options.providerId,
-      raw.providerId,
-      raw.id,
-      baseNode.providerId,
-      baseNode.id
-    ) ?? 'provider';
-
+function buildProviderInput(providerId: string, providerNode: Record<string, unknown>): ProviderInputConfig {
   const providerType =
     pickFirstString(
-      baseNode.providerType,
-      baseNode.type,
-      raw.type
+      providerNode.providerType,
+      providerNode.type
     ) ?? 'openai';
-
-  const baseUrl = pickFirstString(baseNode.baseUrl, baseNode.baseURL) ?? '';
-  const baseURL = pickFirstString(baseNode.baseURL, baseNode.baseUrl) ?? '';
-
-  const provider: ProviderInputConfig = {
+  const baseUrl = pickFirstString(providerNode.baseUrl, providerNode.baseURL) ?? '';
+  const baseURL = pickFirstString(providerNode.baseURL, providerNode.baseUrl) ?? '';
+  const auth = isRecord(providerNode.auth) ? providerNode.auth as ProviderInputConfig['auth'] : undefined;
+  const authApiKey = auth && typeof auth.apiKey === 'string' ? auth.apiKey : null;
+  const apiKey = [
+    ...normalizeStringArray(providerNode.apiKey),
+    ...(authApiKey ? [authApiKey] : [])
+  ];
+  if (!baseUrl && !baseURL) {
+    throw new Error('baseUrl/baseURL missing in provider config.v2.toml');
+  }
+  return {
     providerId,
-    // For openai-standard configs, prefer config.providerType as the logical upstream family (e.g., 'glm')
     type: providerType,
     baseUrl,
     baseURL,
-    auth: baseNode.auth,
-    apiKey: apiKeyList
+    auth,
+    apiKey: Array.from(new Set(apiKey))
   };
-  if (!provider.providerId) {throw new Error('providerId missing');}
-  if (!provider.baseUrl && !provider.baseURL) {throw new Error('baseUrl/baseURL missing');}
+}
 
-  const rootDir = getProviderRootDir(provider.providerId, options.outputDir);
-  const blacklistPath = getBlacklistPath(provider.providerId, options.outputDir, options.blacklistFile);
-  const cachePath = getModelsCachePath(provider.providerId, options.outputDir);
-  const outputPath = getProviderConfigOutputPath(provider.providerId, options.outputDir);
-  ensureDir(rootDir);
+export async function updateProviderModels(options: UpdateOptions): Promise<UpdateResult> {
+  const providerId = pickFirstString(options.providerId);
+  if (!providerId) {
+    throw new Error('providerId is required');
+  }
+  const providerRoot = options.rootDir && options.rootDir.trim()
+    ? path.resolve(options.rootDir.trim())
+    : resolveRccProviderDir();
+  const parsed = (await loadProviderConfigsV2(providerRoot))[providerId];
+  if (!parsed) {
+    throw new Error(`No provider config.v2.toml found for provider "${providerId}" under ${providerRoot}`);
+  }
+  const providerNode = resolveProviderNode(parsed);
+  if (!providerNode.id) {
+    providerNode.id = providerId;
+  }
+  parsed.providerId = providerId;
+
+  const provider = buildProviderInput(providerId, providerNode);
+
+  const providerDir = path.join(providerRoot, provider.providerId);
+  const blacklistPath = options.blacklistFile && options.blacklistFile.trim()
+    ? path.resolve(options.blacklistFile.trim())
+    : path.join(providerDir, 'blacklist.json');
+  const cachePath = path.join(providerDir, 'models-latest.json');
+  const outputPath = path.join(providerDir, 'config.v2.toml');
+  ensureDir(providerDir);
 
   // Load/Update blacklist
   const bl = readBlacklist(blacklistPath);
@@ -178,14 +137,8 @@ export async function updateProviderModels(options: UpdateOptions): Promise<Upda
     modelsRemote = r.models || [];
     fs.writeFileSync(cachePath, JSON.stringify(r, null, 2), 'utf-8');
   } catch (e) {
-    // Fallback: if provider input declares a model or models list, use it as seed
-    const seedModels = resolveSeedModels(baseNode);
-    if (seedModels.length > 0) {
-      modelsRemote = seedModels;
-    } else if (options.useCache) {
-      const cached = readJson<{ models?: string[] }>(cachePath);
-      if (!cached?.models || !Array.isArray(cached.models)) {throw e;}
-      modelsRemote = cached.models;
+    if (options.useCache) {
+      modelsRemote = readModelsCache(cachePath);
     } else {
       throw e;
     }
@@ -207,30 +160,49 @@ export async function updateProviderModels(options: UpdateOptions): Promise<Upda
   const blacklistSet = new Set(bl.models || []);
   const modelsFiltered = modelsRemote.filter((m) => !blacklistSet.has(m));
 
-  // Build/Update config JSON
-  const { config, summary } = buildOrUpdateProviderConfig({ providerId: provider.providerId, provider, modelsFiltered, outputPath });
+  const currentModels = normalizeModelsNode(providerNode.models);
+  const currentSet = new Set(Object.keys(currentModels));
+  const nextSet = new Set(modelsFiltered);
+  const added: string[] = [];
+  const removed: string[] = [];
+  const kept: string[] = [];
+  const nextModels: Record<string, Record<string, unknown>> = {};
+  for (const modelId of modelsFiltered) {
+    if (currentSet.has(modelId)) {
+      kept.push(modelId);
+      nextModels[modelId] = currentModels[modelId] ?? {};
+    } else {
+      added.push(modelId);
+      nextModels[modelId] = {};
+    }
+  }
+  for (const modelId of currentSet) {
+    if (!nextSet.has(modelId)) {
+      removed.push(modelId);
+    }
+  }
+  providerNode.models = nextModels;
+  const summary = { added, removed, kept, completedWithTemplates: [] as string[] };
 
   // Optional: probe apiKey list and set auth.apiKey to first working key
   if (options.probeKeys) {
-    try {
-      const provNode = config.virtualrouter.providers?.[provider.providerId];
-      const keysInput = Array.isArray(provider.apiKey) ? provider.apiKey : [];
-      const keysExisting = provNode && Array.isArray(provNode.apiKey) ? provNode.apiKey : [];
-      const candidates = Array.from(new Set([...(keysInput || []), ...(keysExisting || [])])).filter(Boolean);
-      if (provNode && candidates.length) {
-        const picked = await probeFirstWorkingKey(provider, candidates, !!options.verbose);
-        if (picked) {
-          provNode.auth = provNode.auth || { type: 'apikey' };
-          if (!provNode.auth.type) {provNode.auth.type = 'apikey';}
-          provNode.auth.apiKey = picked;
-        }
+    const keysInput = Array.isArray(provider.apiKey) ? provider.apiKey : [];
+    const keysExisting = normalizeStringArray(providerNode.apiKey);
+    const candidates = Array.from(new Set([...(keysInput || []), ...(keysExisting || [])])).filter(Boolean);
+    if (candidates.length) {
+      const picked = await probeFirstWorkingKey(provider, candidates, !!options.verbose);
+      if (picked) {
+        const auth = isRecord(providerNode.auth) ? providerNode.auth : { type: 'apikey' };
+        if (!auth.type) {auth.type = 'apikey';}
+        auth.apiKey = picked;
+        providerNode.auth = auth;
       }
-    } catch { /* non-blocking */ }
+    }
   }
 
   // Write output
   if (options.write) {
-    fs.writeFileSync(outputPath, JSON.stringify(config, null, 2), 'utf-8');
+    await writeProviderConfigFile(outputPath, parsed as unknown as Record<string, unknown>);
   } else {
     // eslint-disable-next-line no-console
     console.log('[DRY RUN] Preview config would be written to:', outputPath);

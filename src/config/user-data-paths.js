@@ -17,7 +17,6 @@ export const RCC_SUBDIRS = {
     login: 'login',
     statics: 'statics',
     errorsamples: 'errorsamples',
-    llmsShadow: 'llms-shadow',
     docs: 'docs',
     precommand: 'precommand',
     runtimeLifecycle: 'state/runtime-lifecycle',
@@ -41,81 +40,62 @@ function expandHome(value, homeDir) {
     }
     return path.join(resolveHomeDir(homeDir), value.slice(2));
 }
-function isLegacyUserDirPath(value, homeDir) {
+function isRetiredUserDirPath(value, homeDir) {
     const normalized = path.resolve(expandHome(value, homeDir));
-    const legacy = resolveLegacyRouteCodexUserDir(homeDir);
-    return normalized === legacy;
+    const retired = resolveRetiredRouteCodexUserDir(homeDir);
+    return normalized === retired;
 }
-function resolveLegacySnapshotsDir(homeDir) {
-    return path.join(resolveLegacyRouteCodexUserDir(homeDir), RCC_SUBDIRS.snapshots);
+function resolveRetiredSnapshotsDir(homeDir) {
+    return path.join(resolveRetiredRouteCodexUserDir(homeDir), RCC_SUBDIRS.snapshots);
 }
-function isLegacySnapshotsDirPath(value, homeDir) {
+function isRetiredSnapshotsDirPath(value, homeDir) {
     const normalized = path.resolve(expandHome(value, homeDir));
-    const legacy = resolveLegacySnapshotsDir(homeDir);
-    return normalized === legacy;
+    const retired = resolveRetiredSnapshotsDir(homeDir);
+    return normalized === retired;
+}
+function assertNotRetiredUserDirEnv(key, raw, homeDir) {
+    if (isRetiredUserDirPath(raw, homeDir)) {
+        throw new Error(`[config] ${key} points to retired ~/.routecodex root; use ~/.rcc`);
+    }
+}
+function assertNotRetiredSnapshotsDirEnv(key, raw, homeDir) {
+    if (isRetiredSnapshotsDirPath(raw, homeDir)) {
+        throw new Error(`[config] ${key} points to retired ~/.routecodex/codex-samples root; use ~/.rcc/codex-samples`);
+    }
 }
 export function resolveRccUserDir(homeDir) {
     for (const key of USER_DIR_ENV_KEYS) {
         const raw = String(process.env[key] || '').trim();
         if (raw) {
-            if (isLegacyUserDirPath(raw, homeDir)) {
-                continue;
-            }
+            assertNotRetiredUserDirEnv(key, raw, homeDir);
             return path.resolve(expandHome(raw, homeDir));
         }
     }
     return path.join(resolveHomeDir(homeDir), PRIMARY_DIR_NAME);
 }
-export function resolveLegacyRouteCodexUserDir(homeDir) {
+function resolveRetiredRouteCodexUserDir(homeDir) {
     return path.join(resolveHomeDir(homeDir), LEGACY_DIR_NAME);
-}
-export function resolveRccUserDirForRead(homeDir) {
-    return resolveRccUserDir(homeDir);
 }
 export function resolveRccPath(...segments) {
     return path.join(resolveRccUserDir(), ...segments);
 }
-export function resolveLegacyRouteCodexPath(...segments) {
-    return path.join(resolveLegacyRouteCodexUserDir(), ...segments);
-}
-export function resolveRccPathForRead(...segments) {
-    return resolveRccPath(...segments);
-}
 export function resolveRccSubdir(key, homeDir) {
     return path.join(resolveRccUserDir(homeDir), RCC_SUBDIRS[key]);
-}
-export function resolveRccSubdirForRead(key, homeDir) {
-    return resolveRccSubdir(key, homeDir);
 }
 export function resolveRccAuthDir(homeDir) {
     return resolveRccSubdir('auth', homeDir);
 }
-export function resolveRccAuthDirForRead(homeDir) {
-    return resolveRccSubdirForRead('auth', homeDir);
-}
 export function resolveRccTokensDir(homeDir) {
     return resolveRccSubdir('tokens', homeDir);
-}
-export function resolveRccTokensDirForRead(homeDir) {
-    return resolveRccSubdirForRead('tokens', homeDir);
 }
 export function resolveRccStateDir(homeDir) {
     return resolveRccSubdir('state', homeDir);
 }
-export function resolveRccStateDirForRead(homeDir) {
-    return resolveRccSubdirForRead('state', homeDir);
-}
 export function resolveRccLogsDir(homeDir) {
     return resolveRccSubdir('logs', homeDir);
 }
-export function resolveRccLogsDirForRead(homeDir) {
-    return resolveRccSubdirForRead('logs', homeDir);
-}
 export function resolveRccSessionsDir(homeDir) {
     return resolveRccSubdir('sessions', homeDir);
-}
-export function resolveRccSessionsDirForRead(homeDir) {
-    return resolveRccSubdirForRead('sessions', homeDir);
 }
 export function resolveRccSnapshotsDir(homeDir) {
     return resolveRccSubdir('snapshots', homeDir);
@@ -125,28 +105,17 @@ export function resolveRccSnapshotsDirFromEnv(homeDir) {
         const raw = String(process.env[key] || '').trim();
         if (raw) {
             const candidate = path.resolve(expandHome(raw, homeDir));
-            if (isLegacySnapshotsDirPath(candidate, homeDir)) {
-                continue;
-            }
+            assertNotRetiredSnapshotsDirEnv(key, candidate, homeDir);
             return candidate;
         }
     }
     return resolveRccSnapshotsDir(homeDir);
 }
-export function resolveRccSnapshotsDirForRead(homeDir) {
-    return resolveRccSubdirForRead('snapshots', homeDir);
-}
 export function resolveRccProviderDir(homeDir) {
     return resolveRccSubdir('provider', homeDir);
 }
-export function resolveRccProviderDirForRead(homeDir) {
-    return resolveRccSubdirForRead('provider', homeDir);
-}
 export function resolveRccConfigDir(homeDir) {
     return resolveRccSubdir('config', homeDir);
-}
-export function resolveRccConfigDirForRead(homeDir) {
-    return resolveRccSubdirForRead('config', homeDir);
 }
 export function resolveRccGuardianDir(homeDir) {
     return resolveRccSubdir('guardian', homeDir);
@@ -159,9 +128,6 @@ export function resolveRccStaticsDir(homeDir) {
 }
 export function resolveRccErrorsamplesDir(homeDir) {
     return resolveRccSubdir('errorsamples', homeDir);
-}
-export function resolveRccLlmsShadowDir(homeDir) {
-    return resolveRccSubdir('llmsShadow', homeDir);
 }
 export function resolveRccDocsDir(homeDir) {
     return resolveRccSubdir('docs', homeDir);
@@ -179,20 +145,32 @@ export function ensureRccUserDirEnvironment(homeDir) {
     const userDir = resolveRccUserDir(homeDir);
     const snapshotsDir = resolveRccSnapshotsDirFromEnv(homeDir);
     const rccHome = String(process.env.RCC_HOME || '').trim();
-    if (!rccHome || isLegacyUserDirPath(rccHome, homeDir)) {
+    if (rccHome) {
+        assertNotRetiredUserDirEnv('RCC_HOME', rccHome, homeDir);
+    }
+    else {
         process.env.RCC_HOME = userDir;
     }
     const routeUserDir = String(process.env.ROUTECODEX_USER_DIR || '').trim();
-    if (!routeUserDir || isLegacyUserDirPath(routeUserDir, homeDir)) {
+    if (routeUserDir) {
+        assertNotRetiredUserDirEnv('ROUTECODEX_USER_DIR', routeUserDir, homeDir);
+    }
+    else {
         process.env.ROUTECODEX_USER_DIR = userDir;
     }
     const routeHome = String(process.env.ROUTECODEX_HOME || '').trim();
-    if (!routeHome || isLegacyUserDirPath(routeHome, homeDir)) {
+    if (routeHome) {
+        assertNotRetiredUserDirEnv('ROUTECODEX_HOME', routeHome, homeDir);
+    }
+    else {
         process.env.ROUTECODEX_HOME = userDir;
     }
     for (const key of SNAPSHOT_DIR_ENV_KEYS) {
         const raw = String(process.env[key] || '').trim();
-        if (!raw || isLegacySnapshotsDirPath(raw, homeDir)) {
+        if (raw) {
+            assertNotRetiredSnapshotsDirEnv(key, raw, homeDir);
+        }
+        else {
             process.env[key] = snapshotsDir;
         }
     }

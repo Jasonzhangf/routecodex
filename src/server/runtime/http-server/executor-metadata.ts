@@ -410,6 +410,9 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     processMode,
     direction: 'request',
     stage: 'inbound',
+    __raw_request_body: Object.prototype.hasOwnProperty.call(userMeta, '__raw_request_body')
+      ? userMeta.__raw_request_body
+      : input.body,
     stream: userMeta.stream === true,
     ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
     ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {}),

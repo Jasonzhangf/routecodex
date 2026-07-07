@@ -26644,8 +26644,8 @@ Complete SSE rustification status (34 TS files):
 - Scope: close remaining production v1 provider config surface after config loader Rust materialization and JSON config removal.
 - Change:
   - Deleted `src/tools/provider-update/config-builder.ts`; it generated v1 `virtualrouter.providers` JSON configs.
-  - `src/tools/provider-update/index.ts` now reads `config.v2.toml` through `decodeProviderConfigFile()` and writes through `writeProviderConfigFile()`.
-  - `provider update --config` now expects provider `config.v2.toml`; default provider-update root is `~/.rcc/provider/<id>`.
+  - `src/tools/provider-update/index.ts` initially moved from v1 generator to provider v2 TOML codec/writer; 2026-07-07 follow-up superseded this by routing update reads through the Rust provider root loader.
+  - Superseded by 2026-07-07 follow-up: provider update no longer accepts an arbitrary provider config file path and now addresses providers by providerId/root.
   - Removed seed-model fallback on upstream fetch failure; only explicit `--use-cache` reads `models-latest.json`, and invalid cache fails explicitly.
   - `--probe-keys` no longer swallows probe errors.
   - `tests/grep/config-codec-gate.spec.ts` now blocks production old config filenames, JSON migration/shadow script refs, and v1 `virtualrouter.providers` reads outside Rust materialization output validation.
@@ -26743,3 +26743,474 @@ Complete SSE rustification status (34 TS files):
 - Boundary:
   - This does not add a new provider-response Rust implementation because source evidence shows the provider response semantic owner is already Rust; this slice locks classification and prevents TS semantic resurrection.
   - No global install / managed live restart / live replay was run for this doc/gate classification slice.
+
+# 2026-07-06: Responses record save request-id priority gate
+
+- Symptom: live `/v1/responses` on 5555 repeatedly failed with `RESPONSES_STORE_MISSING_REQUEST_CONTEXT` after `router-gpt-5.5` selected `orangeai[key1].glm-5.2`; store stats showed pending request context without response index.
+- Root cause: Rust `publish_responses_record_plan_json` had been changed to prefer `requestTruth.requestId` for `recordArgs.requestId`. After request-executor rebinds `input.requestId` to the provider request label and the store moves the entry, stale router `requestTruth.requestId` records response under the wrong key and misses context.
+- Fix: `publish_responses_record_plan_json` now prefers the current `request_id` argument and only falls back to requestTruth ids when the current id is empty. Tests now assert provider active id is recorded and stale router id is not.
+- Gate lock: `scripts/architecture/verify-responses-history-protocol-contract.mjs` now requires `publish_responses_record_plan_uses_current_request_id_before_stale_request_truth` plus `let current_request_id = request_id.trim();`, and forbids the old requestTruth-first test names. `hub.chat_process_responses_continuation` function/verification maps include `npm run verify:responses-history-protocol-contract`.
+- Verification passed: static request-id gate node snippet PASS; focused Rust test `publish_responses_record_plan_uses_current_request_id_before_stale_request_truth` PASS before unrelated cargo blocker appeared; `npm run build:native-hotpath` PASS; focused Jest `provider-response-rust-plan.spec.ts -t "active response request id"` PASS; focused Jest `provider-response.metadata-center-provider-protocol.spec.ts -t "prefers bound MetadataCenter"` PASS; full `provider-response-rust-plan.spec.ts` PASS 21/21; full `provider-response.metadata-center-provider-protocol.spec.ts` PASS 5/5; `responses-continuation-store.spec.ts` PASS 39/39; `responses-request-bridge.request-context-normalization.spec.ts` PASS 15/15; response-bridge focused PASS 3/3; `stopless-cli-continuation.spec.ts` PASS 23/23; root `tsc` PASS; function-map gate PASS; mainline call-map gate PASS.
+- Current blockers outside this fix: `npm run verify:responses-history-protocol-contract` cargo substep is blocked by unrelated dirty `config_provider_codec.rs` compile errors (`is_provider_config_v2_file_name` / `resolve_provider_config_v2_identity` unresolved). `handler-response-utils.responses-store-integration.spec.ts` now imports after adding the missing bridge mock export, but existing responseIndex/`toolsRaw` assertions still fail; that is a separate handler/SSE store integration problem, not this request-id owner.
+
+# 2026-07-06: Config TOML codec rustified
+
+- Scope: start next config-module rustification slice after runtime materialization closeout.
+- Change:
+  - Added Rust TOML parse/serialize owner `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs`.
+  - Added NAPI exports `parseRouteCodexTomlRecordJson` and `serializeRouteCodexTomlRecordJson`; required native export list now locks both.
+  - Added native TS facade `sharedmodule/llmswitch-core/src/native/router-hotpath/native-routecodex-config-codec.ts`.
+  - Collapsed `src/config/toml-basic.ts` from 416 LOC TS parser/serializer to 21 LOC native shell.
+  - Added `npm run verify:config-toml-codec-rust`.
+  - Function/verification maps now split `config.toml_codec` as Rust SSOT from `config.user_config_codec` / `config.provider_config_codec` TS IO/format shells.
+- Verification:
+  - `cargo test -p router-hotpath-napi config_toml_codec --lib -- --nocapture` PASS: 2 Rust tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 44 tests.
+  - Focused config blackbox PASS: 5 suites / 41 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:llmswitch-core-tsc -- --pretty false` PASS.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: non-native prod TS files now 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `nonNativeFileCount=34`.
+  - `git diff --check` PASS.
+- Boundary:
+  - `user-config-codec.ts` / `provider-config-codec.ts` remain TS shell for file IO, path/format rejection, and provider coercion.
+  - `toml-comment-preserving.ts` still has TS comment-preserving scalar patch logic and is the next config sub-slice candidate.
+
+# 2026-07-06: Config TOML comment-preserving scalar patch rustified
+
+- Scope: continue config-module rustification by moving `toml-comment-preserving.ts` scalar patch semantics into Rust.
+- Change:
+  - Extended Rust `config_toml_codec.rs` with `TomlStringScalarPatchInput` and `update_toml_string_scalar_in_table_json`.
+  - Added NAPI export `updateRouteCodexTomlStringScalarInTableJson` and native required-export coverage.
+  - Wired native facade + llmswitch bridge sync/async exports for TOML scalar patch.
+  - Collapsed `src/config/toml-comment-preserving.ts` from TS parser/patch logic to a 13 LOC sync native shell.
+  - Updated function/verification maps so `config.toml_codec` owns parse/serialize/scalar patch semantics and `config.user_config_write_surface` remains TS atomic file IO shell.
+- Verification:
+  - `npm run verify:config-toml-codec-rust` PASS: 6 Rust tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - Focused Jest PASS: `tests/config/toml-comment-preserving.spec.ts`, `tests/config/config-writer.spec.ts`, `tests/grep/config-codec-gate.spec.ts` = 16 tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 44 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:llmswitch-core-tsc -- --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28766`, `nonNativeFileCount=34`, `nonNativeLocTotal=4668`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run for this offline config writer codec slice.
+  - Remaining config TS is file IO/path/coercion/template/CLI-facing shell; next high-yield target is reviewing whether provider/user config codec coercion can become Rust-owned without duplicating file IO.
+
+# 2026-07-06: Provider config v2 coercion rustified
+
+- Scope: continue config-module rustification after TOML scalar patch; target `coerceProviderConfigV2FromParsed` only, leaving file IO/path rejection in TS.
+- Change:
+  - Added Rust `config_provider_codec.rs` with `ProviderConfigCoerceInput` and `coerce_provider_config_v2_from_parsed_json`.
+  - Added NAPI export `coerceRouteCodexProviderConfigV2Json` and required native export coverage.
+  - Added native facade + llmswitch bridge sync/async exports for provider config coercion.
+  - Collapsed `src/config/provider-config-codec.ts` provider-shape coercion to native sync shell; TS now keeps provider config file IO, TOML-only path rejection, and TOML parse delegation.
+  - Added `npm run verify:config-provider-codec-rust`.
+  - Function/verification maps now split `config.provider_config_coercion` as Rust SSOT from provider config file IO shell.
+- Verification:
+  - `npm run verify:config-provider-codec-rust` PASS: 3 Rust tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - Focused Jest PASS: `tests/config/provider-v2-loader.spec.ts`, `tests/config/toml-shadow-codec.spec.ts`, `tests/grep/config-codec-gate.spec.ts` = 29 tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 44 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:llmswitch-core-tsc -- --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28767`, `nonNativeFileCount=34`, `nonNativeLocTotal=4668`.
+  - `git diff --check` PASS; `cargo fmt --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run for this offline provider config codec slice.
+  - `provider-config-codec.ts` remains TS for file IO/path rejection and TOML parse shell. `user-config-codec.ts` has no equivalent shape coercion; remaining config TS shrink candidates are path/template/loader IO shells and need separate owner review.
+
+# 2026-07-06: Provider v2 loader file planning and identity validation rustified
+
+- Scope: continue config-module rustification by moving `provider-v2-loader.ts` non-IO semantics into the provider config Rust owner.
+- Change:
+  - Extended Rust `config_provider_codec.rs` with `ProviderConfigFilePlanInput`, `ProviderConfigIdResolveInput`, `plan_provider_config_v2_files_json`, and `resolve_provider_config_v2_identity_json`.
+  - Added NAPI exports `planRouteCodexProviderConfigV2FilesJson` and `resolveRouteCodexProviderConfigV2IdentityJson`; required native exports now lock both.
+  - Added native facade + llmswitch bridge sync/async exports for provider config v2 file planning and identity resolution.
+  - Collapsed `src/config/provider-v2-loader.ts` filtering/sorting and base-vs-suffixed provider id validation to native calls. TS now keeps readdir/path join/file decode/coerce and duplicate accumulation across loaded files.
+  - Updated function/verification maps so `config.provider_config_coercion` owns provider config v2 TOML file planning and provider id validation in addition to parsed-record coercion.
+- Verification:
+  - `npm run verify:config-provider-codec-rust` PASS: 6 Rust tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - Focused Jest PASS: `tests/config/provider-v2-loader.spec.ts` and `tests/grep/config-codec-gate.spec.ts` = 23 tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 44 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28769`, `nonNativeFileCount=34`, `nonNativeLocTotal=4668`.
+  - `git diff --check` PASS.
+  - `cargo fmt -p router-hotpath-napi --check` PASS.
+- Boundary:
+  - Full workspace `cargo fmt --check` is still blocked by unrelated unmodified formatting drift in `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`.
+  - No managed live restart/replay was run for this offline config loader slice.
+  - Remaining provider v2 loader TS is Node host IO/path loop plus duplicate map accumulation; next config target should inspect `user-config-loader.ts` / `routecodex-config-loader.ts` for semantic validation still in TS.
+
+# 2026-07-06: User config source validation and primary group selection rustified
+
+- Scope: continue config-module rustification by moving `user-config-loader.ts` v2 source validation and primary routingPolicyGroup selection into Rust runtime materialization.
+- Change:
+  - Extended Rust `runtime_config_materialization.rs` with `collect_v2_config_source_errors_json` and `resolve_primary_routecodex_routing_policy_group_json`.
+  - Added NAPI exports `collectRouteCodexV2ConfigSourceErrorsJson` and `resolvePrimaryRouteCodexRoutingPolicyGroupJson`; required native exports now lock both.
+  - Added native runtime-config facade exports and llmswitch bridge sync wrappers.
+  - Collapsed `src/config/user-config-loader.ts` validation/default-route checks and primary group selection to native calls; TS now keeps clone/normalization orchestration, provider config loading, manifest call, and provider-profile build.
+  - Updated function/verification maps so `config.user_config_materialization` owns v2 source layout validation, primary routingPolicyGroup resolution, runtime manifest compilation, and VR bootstrap materialization in Rust.
+- Verification:
+  - `cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS: 3 Rust tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - Focused Jest PASS: `tests/config/routecodex-config-loader.v2-single-source.spec.ts`, `tests/config/runtime-config-materialization-rust.spec.ts`, `tests/grep/config-codec-gate.spec.ts` = 16 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:config-ssot` PASS: 6 suites / 44 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28771`, `nonNativeFileCount=34`, `nonNativeLocTotal=4668`.
+  - `cargo fmt -p router-hotpath-napi --check` PASS.
+  - `git diff --check` PASS.
+- Boundary:
+  - Full workspace `cargo fmt --check` still has unrelated unmodified formatting drift in `stop-message-core/src/lib.rs`; crate-local router-hotpath fmt is clean.
+  - No managed live restart/replay was run for this offline config loader slice.
+  - Remaining `user-config-loader.ts` TS includes materialized `virtualrouter.providers` extraction and provider-profile build orchestration; next slice should review whether materialized-provider extraction can move into Rust without duplicating profile IO/build concerns.
+
+# 2026-07-06: Materialized provider extraction rustified
+
+- Scope: continue config-module rustification by moving `user-config-loader.ts` materialized `virtualrouter.providers` extraction into Rust runtime materialization.
+- Change:
+  - Extended Rust `runtime_config_materialization.rs` with `extract_routecodex_materialized_provider_configs_json`.
+  - Added NAPI export `extractRouteCodexMaterializedProviderConfigsJson`; required native exports now lock it.
+  - Added native runtime-config facade export and llmswitch bridge sync wrapper.
+  - Removed TS `pickString` / `extractMaterializedProviderConfigsFromUserConfig` logic from `src/config/user-config-loader.ts`; TS now asks Rust for materialized provider configs before falling back to provider v2 file IO.
+  - Updated function/verification maps so `config.user_config_materialization` owns materialized provider extraction in Rust.
+- Verification:
+  - `cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS: 4 Rust tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - Focused Jest PASS: `tests/config/routecodex-config-loader.v2-single-source.spec.ts`, `tests/config/runtime-config-materialization-rust.spec.ts`, `tests/grep/config-codec-gate.spec.ts` = 16 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:config-ssot` PASS: 6 suites / 44 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28772`, `nonNativeFileCount=34`, `nonNativeLocTotal=4668`.
+  - `cargo fmt -p router-hotpath-napi --check` PASS.
+  - `git diff --check` PASS.
+- Boundary:
+  - Full workspace `cargo fmt --check` still has unrelated unmodified formatting drift in `stop-message-core/src/lib.rs`; crate-local router-hotpath fmt is clean.
+  - No managed live restart/replay was run for this offline config loader slice.
+  - Remaining `user-config-loader.ts` TS is clone/normalize/file/provider-profile orchestration plus Rust manifest/result shape checks; next review should decide if `normalizeV2RuntimeSource` can be deleted or moved without reintroducing duplicate implicit-v2 semantics.
+# 2026-07-06: Provider profile projection rustified
+
+- Scope: continue config loader TS shrink by moving `buildProviderProfiles()` projection semantics into Rust. This closes the remaining provider-profile build step that `materializeRouteCodexConfig()` used after Rust config materialization.
+- Change:
+  - Added Rust `build_routecodex_provider_profiles_json` in `runtime_config_materialization.rs`.
+  - Added NAPI export `buildRouteCodexProviderProfilesJson`, required native export lock, native facade, and llmswitch bridge sync wrapper.
+  - Collapsed `src/providers/profile/provider-profile-loader.ts::buildProviderProfiles()` to a native bridge shell.
+  - Removed TS provider profile projection helpers from `provider-profile-loader.ts`: protocol aliases/resolution, transport extraction, auth extraction/OAuth rejection, compatibility field rejection, metadata extraction, and provider node collection.
+  - Kept `extractApiKeyEntries()` as a pure TS public helper for already-built `ApiKeyAuthConfig`, and kept `buildForwarderProfiles()` TS because forwarder profile projection is a separate surface.
+  - Added `config.provider_profile_materialization` to function/verification maps and a grep gate that blocks old provider-profile projection helpers from returning to TS config/profile shells.
+- Verification:
+  - `cargo fmt -p router-hotpath-napi --check` PASS.
+  - `cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS: 8 Rust tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - Focused Jest PASS: `src/providers/profile/__tests__/provider-profile-loader.spec.ts`, `tests/providers/profile/provider-profile-loader.entries.unit.spec.ts`, `tests/config/routecodex-config-loader.v2-single-source.spec.ts`, `tests/grep/config-codec-gate.spec.ts` = 34 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:config-ssot` PASS: 6 suites / 46 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 35, current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28753`, `nonNativeFileCount=34`, `nonNativeLocTotal=4646`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run for this offline provider-profile/config loader slice.
+  - Remaining provider profile TS is public type shell, `extractApiKeyEntries()` helper, and forwarder profile helper. Forwarder profile projection is not yet Rust-owned.
+
+# 2026-07-06: Runtime manifest to userConfig materialization rustified
+
+- Scope: continue config-module TS shrink after implicit v2 normalization by moving final `virtualrouter` materialized assignment out of `user-config-loader.ts`.
+- Change:
+  - Added Rust `materialize_routecodex_user_config_from_manifest_json` in `runtime_config_materialization.rs`.
+  - Added NAPI export `materializeRouteCodexUserConfigFromManifestJson`, required native export lock, native facade, and llmswitch bridge sync wrapper.
+  - `materializeRouteCodexConfig()` now normalizes/validates/selects group through Rust, compiles the Rust runtime manifest, then calls `materializeRouteCodexUserConfigFromManifestSync()`; TS no longer assigns `userConfig.virtualrouter = { providers, routing, forwarders, applyPatch }`.
+  - Deleted dead TS `materializeActiveRoutingPolicyGroup()` no-op and inlined private primary-group wrapper to the native bridge.
+  - Removed unused `pathExists()` from `provider-v2-loader.ts`.
+  - Replaced duplicated server bootstrap primary routingPolicyGroup resolver with `resolvePrimaryRouteCodexRoutingPolicyGroupSync()`.
+  - Added grep gate blocking local materialized `virtualrouter` rebuild in config loader and updated function/verification maps.
+- Verification:
+  - `cargo fmt -p router-hotpath-napi --check` PASS.
+  - `cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS: 6 Rust tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - `npm run verify:config-ssot` PASS: 6 suites / 45 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 35, current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28774`, `nonNativeFileCount=34`, `nonNativeLocTotal=4668`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run for this offline config loader slice.
+  - Remaining `user-config-loader.ts` TS is now native ABI validation, provider config IO selection, and provider-profile build orchestration. `buildProviderProfiles()` remains TS outside the config Rust owner and needs separate owner review before claiming full config-module TS closure.
+
+# 2026-07-06: Implicit v2 source normalization rustified
+
+- Scope: continue config-module rustification by moving implicit v2 runtime source normalization out of `user-config-loader.ts` and into Rust runtime materialization.
+- Change:
+  - Added Rust `normalize_routecodex_v2_runtime_source_json` in `runtime_config_materialization.rs`.
+  - Added NAPI export `normalizeRouteCodexV2RuntimeSourceJson`, required native export lock, native runtime-config facade, and llmswitch bridge sync wrapper.
+  - Collapsed `src/config/user-config-loader.ts` implicit v2 detection and `virtualrouterMode` mutation to `normalizeRouteCodexV2RuntimeSourceSync(userConfigInput)`.
+  - Removed TS `isImplicitV2Config` and `normalizeV2RuntimeSource`; TS no longer decides whether a config is implicit v2 or mutates `virtualrouterMode`.
+  - Updated function/verification maps so `config.user_config_materialization` lists the Rust normalization builder.
+- Verification:
+  - `cargo fmt -p router-hotpath-napi --check` PASS.
+  - `cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS: 5 Rust tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - Focused Jest PASS: `tests/config/routecodex-config-loader.v2-single-source.spec.ts`, `tests/config/runtime-config-materialization-rust.spec.ts`, and `tests/grep/config-codec-gate.spec.ts` = 16 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:config-ssot` PASS: 6 suites / 44 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 35, current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28773`, `nonNativeFileCount=34`, `nonNativeLocTotal=4668`.
+  - `git diff --check` PASS.
+- Boundary:
+  - Full workspace `cargo fmt --check` remains blocked by unrelated unmodified `sharedmodule/llmswitch-core/rust-core/crates/stop-message-core/src/lib.rs`; this slice used crate-local format check.
+  - No managed live restart/replay was run for this offline config loader slice.
+  - Remaining `user-config-loader.ts` TS still includes provider config IO selection, native manifest ABI validation, `virtualrouter` materialized assignment, and provider profile build; next pass should inspect which wrappers are dead versus legitimate TS shell.
+
+# 2026-07-06: Responses missing-context capture fixed without invented provider behavior
+
+- Scope: debug recurring `/v1/responses` `RESPONSES_STORE_MISSING_REQUEST_CONTEXT` and validate real configured-provider behavior for `previous_response_id`.
+- Provider evidence:
+  - `cc` configured provider (`https://api.anyint.ai/openai/v1/responses`) with fake `previous_response_id` returned HTTP 400: `previous_response_id is only supported on Responses WebSocket v2`.
+  - `asxs` configured provider probe could not prove continuation behavior in this pass because the selected configured key returned HTTP 401 `invalid_api_key`.
+  - Therefore no OpenAI.com-derived or invented missing-context client error was used as local behavior truth.
+- Root cause found:
+  - Local response save was already using the active provider request label, but request-context capture could miss the original Responses body after Hub rewrote the live body into provider wire shape.
+  - Without stable original request payload, response store `recordResponse()` could not find the request-map entry and threw `RESPONSES_STORE_MISSING_REQUEST_CONTEXT`.
+- Change:
+  - `buildRequestMetadata()` now preserves the original inbound request body in `__raw_request_body` for all executor attempts unless an upstream caller already supplied one.
+  - `responses-conversation-store.recordResponse()` no longer scope-falls back to an unrelated same-scope entry when the explicit request context is missing.
+  - Added request-executor contract coverage proving raw Responses body is preserved before provider wire rewrite and capture uses the active provider request id.
+- Verification:
+  - Focused Jest PASS: `tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts` = 13 tests.
+  - `npm run verify:responses-history-protocol-contract` PASS: 76 Rust tests and static anchors.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm run verify:architecture-mainline-manifest-sync` PASS.
+  - `npm run verify:llmswitch-core-tsc` PASS.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+- Boundary:
+  - No global install/restart/live replay was run in this pass.
+  - Full `tests/sharedmodule/provider-response-rust-plan.spec.ts` still fails in this local Jest environment because native `buildProviderResponseMetadataSnapshotJson` is unavailable; this predates the patch path and was not used as closure evidence.
+# 2026-07-06: Forwarder profile projection rustified
+
+- Scope: continue config/profile TS shrink after provider profile projection; close the separate `buildForwarderProfiles()` surface.
+- Change:
+  - Added Rust `build_routecodex_forwarder_profiles_json` in `runtime_config_materialization.rs`.
+  - Added NAPI export `buildRouteCodexForwarderProfilesJson`, required native export lock, native facade, and llmswitch bridge sync wrapper.
+  - Collapsed `src/providers/profile/provider-profile-loader.ts::buildForwarderProfiles()` to native shell only.
+  - Removed TS forwarder profile parsing helpers: `pickString`, `pickNumber`, `pickPositiveInt`, `collectForwarderNodes`, `parseForwarderTargets`, `parseForwarderWeights`.
+  - Added `config.forwarder_profile_materialization` to function/verification maps and grep gate blocking TS helper resurrection.
+- Verification:
+  - `cargo fmt --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi -- --check` PASS.
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS: 8 tests.
+  - `npm run build:native-hotpath` PASS and required native exports OK.
+  - Focused Jest PASS: `tests/providers/forwarder-selection.spec.ts`, `tests/grep/config-codec-gate.spec.ts` = 19 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:config-ssot` PASS: 6 suites / 47 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 35, current non-native prod TS files 34.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=158`, `prodTsLocTotal=28754`, `nonNativeFileCount=34`, `nonNativeLocTotal=4646`.
+  - `git diff --check` PASS.
+- Boundary:
+  - Accidentally ran broad `npm test -- tests/providers/forwarder-selection.spec.ts --runInBand`, which first ran unrelated routing-instructions suite and failed on existing unrelated servertool/daemon/legacy-test assumptions. This was not used as closure evidence; focused forwarder/config gates passed afterward.
+  - No managed live restart/replay was run for this offline config/profile slice.
+  - Remaining provider-profile TS is native shells plus `extractApiKeyEntries()` public helper; forwarder projection semantics are now Rust-owned.
+# 2026-07-07: Config shadow compare and stale VR type guard deleted
+
+- Scope: continue config-module TS shrink after provider/forwarder profile rustification by removing zero-caller config TS residue.
+- Evidence before delete:
+  - `rg` found no production/test imports for `src/config/config-semantic-compare.ts`.
+  - `rg` found no production/test imports for `src/config/virtual-router-types.ts`; only function/verification map and historical docs referenced it.
+  - MemoryPalace confirmed `virtual-router-types.ts` had been reduced to stale guard after Rust config manifest migration.
+- Change:
+  - Deleted `src/config/config-semantic-compare.ts`; JSON/TOML shadow semantic compare is obsolete after JSON/v1/shadow runtime support removal.
+  - Deleted `src/config/virtual-router-types.ts`; fail-fast stale guard had no caller and should not be kept as dead compatibility surface.
+  - Removed `config.virtual_router_types` from function/verification maps.
+  - Removed `config-semantic-compare.ts` from config codec grep allowlist.
+  - Updated config materialization closeout plan and historical TOML shadow docs to say these files are deleted / not to recreate.
+- Verification:
+  - Residue grep for live imports/callers of both deleted files: 0 matches in source/tests/architecture/gates.
+  - `npm run verify:function-map-compile-gate` PASS: active features 118, source anchors 115.
+  - `npm run verify:config-ssot` PASS: 6 suites / 47 tests.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 34, current non-native prod TS files 33, explicit native-linked TS shells 1.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=157`, `prodTsLocTotal=28752`, `nonNativeFileCount=33`, `nonNativeLocTotal=4643`.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS before doc-only follow-up.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run; this was dead-code/config-surface deletion only.
+  - Remaining mentions in old plans/audits are historical and not runtime callers.
+
+# 2026-07-07: Responses apply_patch custom_tool_call gate hole closed
+
+- Finding: the existing `verify:hub-response-responses-chat-projection` gate only ran `build_chat_response_from_responses`, so a helper-level pass could miss the real provider Responses `custom_tool_call` collapsing to empty output after the full Rust Hub response path.
+- Fix: wired `response_path_preserves_existing_responses_custom_tool_call` into `npm run verify:hub-response-responses-chat-projection`, and listed `hub_pipeline_lib/tests.rs` in both `hub.response_responses_chat_projection` and `hub.response_responses_client_projection` required tests.
+- Verified:
+  - `npm run verify:hub-response-responses-chat-projection` PASS; it now runs both `build_chat_response_from_responses` and the full response-path `response_path_preserves_existing_responses_custom_tool_call`.
+  - `npm run verify:function-map-compile-gate` PASS after map updates.
+  - `git diff --check` PASS for the scoped files.
+- Boundary: no global install/live replay in this gate-only follow-up; runtime closeout still requires native build, global release install, health version match, and live apply_patch replay.
+
+# 2026-07-07: Config path/auth/template/materializer surface compressed
+
+- Scope: continue config-module TS shrink after deleting shadow compare/VR type guard.
+- Change:
+  - `AuthFileResolver` now exposes only single-key `resolveKey()` and fails fast on authfile read errors; removed batch/fallback/cache-clear/dir helper API.
+  - `UnifiedConfigPathResolver` now returns only `resolvedPath`, scans only explicit/default `config.toml`, and removed strict/source/type/existence/warnings/available-config/ensure-dir helper surface.
+  - `user-data-paths` removed public `ForRead` helpers, public `.routecodex` helpers, and `llmsShadow`; retired `.routecodex` env roots now fail fast instead of silently redirecting to `.rcc`.
+  - Deleted zero-caller `src/config/toml-commented-template.ts` and 2-line `src/config/user-config-materializer.ts`; route config loader imports native-backed materialization directly from `user-config-loader.ts`.
+  - Renamed TOML codec test away from `toml-shadow-codec` to `toml-codec`.
+  - Rust provider config file planner now fails fast when retired `config.v1.json` / `config.v2.json` remains in a provider directory; TS bridge now preserves native error text instead of masking it as `JSON.parse` failure.
+- Verification:
+  - Focused `tests/config/user-data-paths.spec.ts` PASS: 5 tests.
+  - Rust provider codec gate PASS: `npm run verify:config-provider-codec-rust` = 7 tests.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - Focused `tests/config/provider-v2-loader.spec.ts` PASS: 17 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:config-ssot` PASS: 6 suites / 47 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 20, current non-native prod TS files 19, explicit native-linked TS shells 1.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=143`, `prodTsLocTotal=28598`, `nonNativeFileCount=19`, `nonNativeLocTotal=3594`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run; this is offline config/module surface closeout.
+  - A mistakenly broad `npm test -- --runInBand tests/config/user-data-paths.spec.ts` invoked unrelated routing-instructions suites and failed on pre-existing servertool/daemon assumptions; it was not used as closure evidence.
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs` is still untracked in git status because prior Rust config owner files were untracked in this workspace; final commit must include that source with the rest of the Rust config owner files.
+
+# 2026-07-07: Provider v2 root loader rustified
+
+- Scope: continue config-module rustification by moving the remaining `provider-v2-loader.ts` root loading surface into Rust.
+- Change:
+  - Added Rust provider root loader in `config_provider_codec.rs`: provider root creation, provider directory scan, deterministic config file selection, TOML file read/parse bridge, ProviderConfigV2 coercion, duplicate provider id detection, and base/suffixed identity validation.
+  - Added NAPI export `loadRouteCodexProviderConfigsV2FromRootJson`, required-native export lock, TS native facade, and llmswitch bridge exports.
+  - Reduced `src/config/provider-v2-loader.ts` to root path resolution plus native bridge call; removed local `fs/promises`, `readdir`, `readFile`, file planning, identity resolution, decode/coerce calls, and duplicate accumulation from TS.
+  - Added grep gate `provider v2 root loading semantics stay out of TypeScript shell`.
+  - Updated function/verification maps and L93-78 lesson so provider v2 root loading is documented as Rust-owned.
+- Verification:
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - Focused `tests/config/provider-v2-loader.spec.ts` PASS: 17 tests.
+  - `npm run verify:config-provider-codec-rust` PASS: 9 Rust tests.
+  - Focused `tests/grep/config-codec-gate.spec.ts` PASS: 10 tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 48 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 20, current non-native prod TS files 19, explicit native-linked TS shells 1.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=143`, `prodTsLocTotal=28502`, `nonNativeFileCount=19`, `nonNativeLocTotal=3497`.
+  - `git diff --check` PASS before memory append.
+- Architecture review:
+  - No TS fallback or dual path added; missing native export remains fail-fast through required native exports.
+  - Provider loader TS is now root path/native shell only; provider config semantics are in Rust owner.
+  - No provider-specific branch added to Hub Pipeline or VR.
+- Boundary:
+  - No managed live restart/replay was run; this remains offline config/module rustification evidence, not live runtime closure.
+
+# 2026-07-07: Provider-update providerId reads routed through Rust root loader
+
+- Scope: continue config-module TS shrink by removing providerId-based direct provider config decode from `provider-update` CLI paths.
+- Change:
+  - `src/commands/provider-update.ts` no longer imports `decodeProviderConfigFile`; `sync-models` and `probe-context` now load provider configs by providerId through `loadProviderConfigsV2(root)`.
+  - `src/commands/provider-update-maintenance.ts` no longer imports `decodeProviderConfigFile`; `inspect`, `doctor`, and `change` share `loadProviderConfigById()` over the Rust root loader.
+  - ProviderId CLI reads now preserve fail-fast parse errors by catching root-loader errors and surfacing `Failed to parse existing provider config`.
+  - Test helper mock now mirrors root-loader behavior: missing config is skipped, malformed existing TOML throws.
+  - Added grep gate `provider id CLI config reads go through provider v2 root loader`.
+  - Updated function/verification maps and L93-78 lesson to lock providerId CLI reads to the Rust root loader; explicit arbitrary `--config <file>` IO shell remains a separate allowed single-file codec surface.
+- Verification:
+  - Residue grep for direct decode/coerce/planning helpers in `src/commands/provider-update.ts` and `src/commands/provider-update-maintenance.ts`: 0 matches.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - Focused `tests/commands/provider-update.command-core.spec.ts` + `tests/commands/provider-update.command-maintenance.spec.ts` PASS: 10 tests.
+  - Focused `tests/grep/config-codec-gate.spec.ts` PASS: 11 tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 49 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 14, current non-native prod TS files 12, explicit native-linked TS shells 2.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=137`, `prodTsLocTotal=28366`, `nonNativeFileCount=12`, `nonNativeLocTotal=3323`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run; this is offline CLI/config rustification evidence.
+  - Superseded by the next 2026-07-07 slice: arbitrary provider config file shell was removed and `updateProviderModels()` now consumes providerId/root.
+
+# 2026-07-07: Provider-update arbitrary provider --config shell removed
+
+- Scope: continue config-module TS shrink by removing the last provider-update arbitrary provider config file read surface.
+- Change:
+  - `provider update` now accepts `provider update <providerId> [--root <dir>]` instead of `--config <file>` / `--provider` / `--output-dir`.
+  - `UpdateOptions` now carries `providerId` plus optional `rootDir`; removed `ProviderSingleConfig`, `configPath`, `outputDir`, and deleted `src/tools/provider-update/paths.ts`.
+  - `updateProviderModels()` now loads configs through `loadProviderConfigsV2(providerRoot)` and writes only `provider/<id>/config.v2.toml`; blacklist/cache paths remain provider-local non-runtime JSON control files.
+  - Grep gate now scans `src/tools/provider-update/index.ts` and blocks direct provider config decode/coerce/planning helpers from returning to provider-update tooling.
+- Verification:
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - Focused `tests/commands/provider-update.command-core.spec.ts`, `tests/commands/provider-update.command-maintenance.spec.ts`, and `tests/grep/config-codec-gate.spec.ts` PASS: 21 tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 49 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 14, current non-native prod TS files 12, explicit native-linked TS shells 2.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=137`, `prodTsLocTotal=28366`, `nonNativeFileCount=12`, `nonNativeLocTotal=3323`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run; this remains offline CLI/config closeout evidence.
+
+# 2026-07-07: Config admin provider reads routed through Rust root loader
+
+- Scope: continue config-module TS shrink by removing admin/provider view direct provider config decode.
+- Change:
+  - `src/server/handlers/config-admin-handler.ts` now lists standalone provider configs through `loadProviderConfigsV2(providerDir)` instead of scanning provider dirs and calling `decodeProviderConfigFile()` per file.
+  - `src/server/runtime/http-server/daemon-admin/providers-handler.ts` no longer imports `decodeProviderConfigFile`; its provider v2 views already use `loadProviderConfigsV2()`.
+  - Updated function/verification maps and L93-78/MEMORY to lock admin provider views to the Rust root loader.
+- Verification:
+  - Provider codec production direct-read residue now remains only in `src/cli/commands/init/basic.ts` plus codec/writer SSOT files.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - Focused provider-update/config grep Jest PASS: 3 suites / 21 tests.
+- Boundary:
+  - Broader config/function/minimal-TS/rustification gates still pending after this admin-read slice.
+  - `src/cli/commands/init/basic.ts` still has synchronous provider config decode in legacy init/migration helpers; next config slice should either remove the v1 migration path or route init provider reads through a Rust/root-loader compatible contract.
+  - No managed live restart/replay was run; this remains offline config/admin closeout evidence.
+
+# 2026-07-07: Init provider reads and writes are TOML/root-loader only
+
+- Scope: continue config-module TS shrink by removing init-local provider config decode and old JSON init writes.
+- Change:
+  - `src/cli/commands/init/basic.ts` no longer imports `decodeProviderConfigFileSync`; deleted `readProviderV2Payload()`.
+  - `loadProviderV2Map(providerRoot)` now delegates to `loadProviderConfigsV2(providerRoot)` and therefore uses the Rust provider v2 root loader for list-current, maintenance, merge reads, and missing-target checks.
+  - `writeJsonFile()` was replaced by `writeTomlConfigFile()` using the Rust-backed TOML serializer; init main config writes now produce TOML.
+  - Init tests now use `config.toml` / `config.v2.toml`; old JSON migration coverage was changed to assert JSON config rejection.
+  - Grep gate now covers init paths and blocks `decodeProviderConfigFileSync`, `writeJsonFile`, `config.v2.json`, and `provider/*.json` from returning to init/providerId read surfaces.
+- Verification:
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - Focused init Jest PASS: `tests/cli/init-basic.spec.ts`, `tests/cli/init-workflows.spec.ts`, `tests/cli/init-command-coverage.spec.ts` = 22 tests.
+  - Focused config/provider/update/init grep Jest PASS: 6 suites / 43 tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 49 tests.
+  - Residue scan: production `decodeProviderConfigFile*` references remain only in `src/config/provider-config-codec.ts` and `src/config/provider-config-writer.ts`.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 14, current non-native prod TS files 12, explicit native-linked TS shells 2.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=137`, `prodTsLocTotal=28366`, `nonNativeFileCount=12`, `nonNativeLocTotal=3323`.
+  - `git diff --check` PASS.
+- Boundary:
+  - Function-map gate passed after provider codec owner was narrowed to a file-scoped single-file codec/writer shell and providerId/root reads moved under `config.provider_config_coercion`.
+  - No managed live restart/replay was run; this is offline config/init closeout evidence.
+
+# 2026-07-07: Init --config path is TOML-only before any write
+
+- Scope: close the remaining init loophole where `rcc init --config /tmp/config.json` could write TOML content to a `.json` path when the target file was missing.
+- Change:
+  - `src/cli/commands/init.ts` now calls `detectUserConfigFormat(configPath)` immediately after resolving `--config`, before profile validation, provider-source validation, provider listing, config-state inspection, or any write path.
+  - Non-TOML init config paths fail fast with `[config] user config JSON support removed; expected TOML file: <path>`.
+  - Init command tests now use `config.toml` for normal provider-source, missing-config, maintenance, and migration-helper workflow coverage; the remaining JSON init coverage is explicit rejection only.
+- Verification:
+  - Residue scan over `src/cli/commands/init*`, `tests/cli/init*`, and `tests/grep/config-codec-gate.spec.ts` found `config.json`/`config.v2.json`/direct provider decode strings only in the grep gate forbidden-list comments/strings.
+  - Production scan over config/init/provider-update/admin paths found direct provider codec functions only in `src/config/provider-config-codec.ts`, the file-scoped codec shell.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - Focused init/config/provider-update Jest PASS: 6 suites / 43 tests.
+  - `npm run verify:config-ssot` PASS: 6 suites / 49 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 14, current non-native prod TS files 12, explicit native-linked TS shells 2.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=137`, `prodTsLocTotal=28366`, `nonNativeFileCount=12`, `nonNativeLocTotal=3323`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay was run; this remains offline CLI/config closeout evidence.
+  - Remaining direct provider codec functions are not providerId/root runtime reads; they are the file-scoped codec/writer shell and still need explicit owner-gated justification until fully removable.

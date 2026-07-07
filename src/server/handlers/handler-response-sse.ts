@@ -25,6 +25,8 @@ import { buildSseErrorEventFrame } from '../utils/http-error-mapper.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildClientSseKeepaliveFrameForHttp,
+  createResponsesSseClientProjectionStateForHttp,
+  projectResponsesSseFrameForClientForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
 
 type FlushableResponse = Response & {
@@ -93,6 +95,47 @@ function logSseFrameProjection(requestLabel: string, stage: string, frame: strin
     return;
   }
   logPipelineStage(stage, requestLabel, { emit: true });
+}
+
+function parseClientSseProjectionFrame(frame: string): {
+  eventName?: string;
+  data: Record<string, unknown>;
+} | undefined {
+  const lines = frame.split(/\r?\n/);
+  const eventLine = lines.find((line) => line.startsWith('event:'));
+  const dataLines = lines.filter((line) => line.startsWith('data:'));
+  if (dataLines.length === 0) {
+    return undefined;
+  }
+  const dataText = dataLines
+    .map((line) => line.slice('data:'.length).trimStart())
+    .join('\n');
+  if (!dataText || dataText === '[DONE]') {
+    return undefined;
+  }
+  const parsed = JSON.parse(dataText);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined;
+  }
+  return {
+    eventName: eventLine?.slice('event:'.length).trim() || undefined,
+    data: parsed as Record<string, unknown>,
+  };
+}
+
+function shouldProjectClientSseFrame(eventName: string | undefined): boolean {
+  return eventName === 'response.created'
+    || eventName === 'response.in_progress'
+    || eventName === 'response.output_item.added'
+    || eventName === 'response.function_call_arguments.delta'
+    || eventName === 'response.function_call_arguments.done'
+    || eventName === 'response.output_item.done'
+    || eventName === 'response.output_text.delta'
+    || eventName === 'response.output_text.done'
+    || eventName === 'response.reasoning_summary_text.delta'
+    || eventName === 'response.reasoning_summary_text.done'
+    || eventName === 'response.completed'
+    || eventName === 'response.done';
 }
 
 function writeSseDiagnosticSnapshot(
@@ -463,6 +506,11 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ['ROUTECODEX_HTTP_SSE_KEEPALIVE_MS', 'RCC_HTTP_SSE_KEEPALIVE_MS'],
     3_000
   );
+  const toolsRaw = Array.isArray(args.responsesRequestContext?.context?.toolsRaw)
+    ? args.responsesRequestContext.context.toolsRaw
+    : [];
+  let projectionState = createResponsesSseClientProjectionStateForHttp();
+  let pendingSseFrameBuffer = '';
   const detachOutboundStream = () => {
     try {
       outboundStream.unpipe(res);
@@ -628,13 +676,56 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     });
   };
 
+  const writeProjectedClientSseFrame = (frame: string) => {
+    const parsed = parseClientSseProjectionFrame(frame);
+    if (
+      !parsed
+      || !isResponsesSseEndpoint(entryEndpoint)
+      || isDirectPassthrough
+      || !shouldProjectClientSseFrame(parsed.eventName)
+    ) {
+      writeClientSseFrame(frame, 'response.sse.stream.write_frame', { recordSnapshot: false });
+      return;
+    }
+    const projection = projectResponsesSseFrameForClientForHttp({
+      frame,
+      eventName: parsed.eventName,
+      data: parsed.data,
+      toolsRaw,
+      metadata: resultMetadata,
+      state: projectionState,
+    });
+    projectionState = projection.state ?? projectionState;
+    if (!projection.emit) {
+      return;
+    }
+    writeClientSseFrame(projection.frame, 'response.sse.stream.write_projected_frame', { recordSnapshot: false });
+  };
+
+  const flushPendingSseFrames = (final = false) => {
+    const parts = pendingSseFrameBuffer.split(/\r?\n\r?\n/);
+    pendingSseFrameBuffer = final ? '' : (parts.pop() ?? '');
+    const completeParts = final ? parts.filter((part) => part.length > 0) : parts;
+    for (const part of completeParts) {
+      if (!part) {
+        continue;
+      }
+      writeProjectedClientSseFrame(`${part}\n\n`);
+    }
+    if (final && pendingSseFrameBuffer) {
+      writeProjectedClientSseFrame(pendingSseFrameBuffer);
+      pendingSseFrameBuffer = '';
+    }
+  };
+
   outboundStream.on('data', (chunk: unknown) => {
     const text = typeof chunk === 'string' ? chunk
       : Buffer.isBuffer(chunk) ? chunk.toString('utf8')
       : chunk instanceof Uint8Array ? Buffer.from(chunk).toString('utf8')
       : '';
     if (!text) return;
-    writeClientSseFrame(text, 'response.sse.stream.write_frame', { recordSnapshot: false });
+    pendingSseFrameBuffer += text;
+    flushPendingSseFrames();
   });
 
   outboundStream.on('error', (error: Error) => {
@@ -698,6 +789,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
 
   outboundStream.on('end', async () => {
     streamEnded = true;
+    flushPendingSseFrames(true);
     clearTimers();
     recordSseTransportStreamEnd(requestLabel, {
       finishReason: undefined,

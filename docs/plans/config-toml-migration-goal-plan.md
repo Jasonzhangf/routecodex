@@ -1,5 +1,7 @@
 # RouteCodex 配置迁移详细计划：JSON -> TOML
 
+> 2026-07-07 status: this plan is historical for the removed JSON/TOML shadow phase. Do not recreate `src/config/config-semantic-compare.ts`; it was deleted as dead code after JSON/v1/shadow support removal.
+
 ## 目标
 
 把 RouteCodex 的**人工维护配置真源**从 JSON 渐进式迁移到 TOML，并建立**全局唯一**的配置路径解析、配置 codec、语义加载链。
@@ -233,8 +235,7 @@ TOML config shadow ---/
 
 ### C. 共用基础
 
-- `src/config/toml-commented-template.ts`
-  - 默认 TOML 模板 + 注释文本
+- 默认 TOML 模板文件已在 config Rust 收口中删除；不要复活 `src/config/toml-commented-template.ts`。
 - `src/config/toml-ast-update.ts`
   - comment-preserving update 核心逻辑
 - `src/config/config-migration-json-to-toml.ts`
@@ -249,7 +250,7 @@ TOML config shadow ---/
 - `src/config/provider-v2-loader.ts`
   - 最终应成为 `provider-config-loader` 的薄壳，或被新 loader 取代
 
-### E. shadow 对照模块
+### E. shadow 对照模块（已废弃）
 
 - `src/config/config-semantic-compare.ts`
   - JSON/TOML 加载结果语义对比

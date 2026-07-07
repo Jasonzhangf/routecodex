@@ -14,7 +14,6 @@ const CODEC_SSOT_FILES = new Set([
   'src/config/toml-basic.ts',
   'src/config/user-config-codec.ts',
   'src/config/provider-config-codec.ts',
-  'src/config/toml-commented-template.ts',
   'src/config/routecodex-config-loader.ts',
   'src/config/user-config-loader.ts',
   'src/config/provider-v2-loader.ts',
@@ -22,7 +21,6 @@ const CODEC_SSOT_FILES = new Set([
   'src/config/user-data-paths.ts',
   'src/config/config-paths.ts',
   'src/config/config-migration.ts',
-  'src/config/config-semantic-compare.ts',
   'src/config/user-config-writer.ts',
   'src/config/provider-config-writer.ts',
 ]);
@@ -41,6 +39,17 @@ function isSsoTFile(filePath: string): boolean {
     if (filePath.endsWith(allowed)) return true;
   }
   return false;
+}
+
+function runGrep(command: string, cwd: string): string {
+  try {
+    return execSync(command, { cwd, encoding: 'utf8' });
+  } catch (e: any) {
+    if (e.status !== 1) {
+      throw e;
+    }
+    return '';
+  }
 }
 
 describe('Config Codec Gate', () => {
@@ -110,12 +119,123 @@ describe('Config Codec Gate', () => {
         if (!isSsoTFile(filePath) &&
             !filePath.includes('toml-comment-preserving') &&
             !filePath.includes('provider-config-codec') &&
-            !filePath.includes('user-config-codec') &&
-            !filePath.includes('config-builder')) {
+            !filePath.includes('user-config-codec')) {
           writeViolations.push(line);
         }
       }
     }
     expect(writeViolations).toEqual([]);
+  });
+
+  test('legacy JSON config runtime entrypoints stay removed from production source', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' --include='*.js' -E ` +
+      `'config\\.v1\\.json|config\\.v2\\.json|config\\.json|migrate-user-config|config-migration-json-to-toml|user-config-migration|virtual-router-shadow-v2' ` +
+      `src sharedmodule/llmswitch-core/src ` +
+      `| grep -v 'node_modules' ` +
+      `| grep -v 'config JSON support removed' ` +
+      `| grep -v 'provider config JSON support removed'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
+  });
+
+  test('v1 virtualrouter.providers production access is limited to Rust materialization output validation', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' --include='*.js' -E 'virtualrouter\\.providers' src sharedmodule/llmswitch-core/src ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    const violations = output
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .filter((line) => !line.includes('src/config/user-config-loader.ts'));
+    expect(violations).toEqual([]);
+  });
+
+  test('old TypeScript config materialization helpers stay deleted', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' -E ` +
+      `'extractRoutingFromUserConfig|extractPolicyGroupOptionFromUserConfig|resolveReferencedProviderIdsFromRouting|resolveReferencedForwarderIdsFromRouting|resolveProviderIdsFromProviderPorts|extractApplyPatchConfigFromUserConfig|extractForwardersFromUserConfig|normalizeForwardersForNative|resolveForwarderTargetProviderKeys|providerAuthAliases|providerDeclaresModel|withRoutePolicyGroupTag|parseProviderIdFromProviderKeyForConfig|pickNumber' ` +
+      `src/config src/server src/modules sharedmodule/llmswitch-core/src ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
+  });
+
+  test('user config loader does not locally rebuild materialized virtualrouter output', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' -E ` +
+      `'userConfig\\.virtualrouter\\s*=|providers:\\s*v2Input\\.providers|routing:\\s*v2Input\\.routing|forwarders:\\s*v2Input\\.forwarders|applyPatch:\\s*v2Input\\.applyPatch' ` +
+      `src/config/user-config-loader.ts ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
+  });
+
+  test('provider profile projection semantics stay out of TypeScript shell', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' -E ` +
+      `'function resolveProtocol|const protocolAliases|function extractTransport|function extractHeaders|function extractAuth|function normalizeAuthType|function extractCompatProfile|function extractMetadata|function collectProviderNodes' ` +
+      `src/providers/profile/provider-profile-loader.ts src/config ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
+  });
+
+  test('provider v2 root loading semantics stay out of TypeScript shell', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' -E ` +
+      `'fs/promises|readdir|readFile|function listProviderDirs|function listProviderConfigFiles|function loadProviderConfigV2|decodeProviderConfigFile|coerceProviderConfigV2FromParsed|planRouteCodexProviderConfigV2FilesSync|resolveRouteCodexProviderConfigV2IdentitySync|duplicate providerId' ` +
+      `src/config/provider-v2-loader.ts ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
+  });
+
+  test('provider id CLI/admin/init config reads go through provider v2 root loader', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' -E 'decodeProviderConfigFile|decodeProviderConfigFileSync|coerceProviderConfigV2FromParsed|planRouteCodexProviderConfigV2FilesSync|resolveRouteCodexProviderConfigV2IdentitySync|getProviderRootDir|getProviderConfigOutputPath|writeJsonFile|config\\.v2\\.json|provider/\\*\\.json' ` +
+      `src/commands/provider-update.ts src/commands/provider-update-maintenance.ts src/tools/provider-update/index.ts ` +
+      `src/server/handlers/config-admin-handler.ts src/server/runtime/http-server/daemon-admin/providers-handler.ts ` +
+      `src/cli/commands/init.ts src/cli/commands/init/basic.ts src/cli/commands/init/workflows.ts ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
+  });
+
+  test('forwarder profile projection semantics stay out of TypeScript shell', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' -E ` +
+      `'function collectForwarderNodes|function parseForwarderTargets|function parseForwarderWeights|function pickPositiveInt|function pickNumber|function pickString|transportOverride is not supported|has invalid resolutionMode|has invalid stickyKey|references unknown providerId' ` +
+      `src/providers/profile/provider-profile-loader.ts src/config ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
+  });
+
+  test('server runtime consumes full Rust config manifest instead of VR-only bootstrap input', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' -E 'compileRouteCodexVirtualRouterBootstrapInput|buildVirtualRouterInputV2' src/server/runtime/http-server src/config/user-config-loader.ts ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
   });
 });

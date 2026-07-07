@@ -5,14 +5,14 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { resolveRccAuthDirForRead } from './user-data-paths.js';
+import { resolveRccAuthDir } from './user-data-paths.js';
 
 export class AuthFileResolver {
   private authDir: string;
   private keyCache: Map<string, string> = new Map();
 
   constructor(authDir?: string) {
-    this.authDir = authDir || resolveRccAuthDirForRead();
+    this.authDir = authDir || resolveRccAuthDir();
   }
 
   /**
@@ -47,41 +47,4 @@ export class AuthFileResolver {
     }
   }
 
-  /**
-   * 批量解析密钥
-   */
-  async resolveKeys(keyIds: string[]): Promise<Map<string, string>> {
-    const result = new Map<string, string>();
-
-    for (const keyId of keyIds) {
-      try {
-        const actualKey = await this.resolveKey(keyId);
-        result.set(keyId, actualKey);
-      } catch (error) {
-        console.warn(`Failed to resolve key ${keyId}:`, error);
-        result.set(keyId, keyId); // 使用原始keyId作为fallback
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * 清除缓存
-   */
-  clearCache(): void {
-    this.keyCache.clear();
-  }
-
-  /**
-   * 确保Auth目录存在
-   */
-  async ensureAuthDir(): Promise<void> {
-    try {
-      await fs.mkdir(this.authDir, { recursive: true });
-      console.log(`Auth directory created: ${this.authDir}`);
-    } catch (error) {
-      // 目录已存在，忽略错误
-    }
-  }
 }

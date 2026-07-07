@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import type { ProviderConfigFormat } from './provider-config-codec.js';
 import { detectProviderConfigFormat } from './provider-config-codec.js';
 import { serializeTomlRecord } from './toml-basic.js';
-import type { UnknownRecord } from './virtual-router-types.js';
+
+type UnknownRecord = Record<string, unknown>;
 
 export interface PersistedProviderConfigFile {
   path: string;
@@ -14,10 +15,10 @@ export interface PersistedProviderConfigFile {
 }
 
 function stringifyProviderConfig(parsed: UnknownRecord, format: ProviderConfigFormat): string {
-  if (format === 'toml') {
-    return serializeTomlRecord(parsed);
+  if (format !== 'toml') {
+    throw new Error('[config] provider config JSON support removed; writer only accepts TOML');
   }
-  return `${JSON.stringify(parsed, null, 2)}\n`;
+  return serializeTomlRecord(parsed);
 }
 
 async function writeRawProviderConfigAtomically(configPath: string, raw: string): Promise<void> {

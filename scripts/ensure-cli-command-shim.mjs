@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const REPO_ROOT = process.cwd();
 
@@ -9,12 +10,38 @@ function resolveShimDirs() {
   if (process.env.ROUTECODEX_SHIM_DIR) {
     return [path.resolve(process.env.ROUTECODEX_SHIM_DIR)];
   }
-  return [path.join(os.homedir(), '.local', 'bin')];
+  const dirs = [path.join(os.homedir(), '.local', 'bin')];
+  if (shouldPreferReleaseSnapshot()) {
+    const globalBinDir = resolveNpmGlobalBinDir();
+    if (globalBinDir) {
+      dirs.push(globalBinDir);
+    }
+  }
+  return [...new Set(dirs)];
 }
 
 function shouldPreferReleaseSnapshot(_binName) {
   const raw = String(process.env.ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT || '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function resolveNpmGlobalBinDir() {
+  const prefix = String(process.env.npm_config_prefix || '').trim() || readNpmPrefix();
+  if (!prefix) {
+    return null;
+  }
+  return path.join(prefix, 'bin');
+}
+
+function readNpmPrefix() {
+  try {
+    return execFileSync('npm', ['prefix', '-g'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+  } catch {
+    return '';
+  }
 }
 
 function normalizeCliPath(value) {

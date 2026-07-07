@@ -7,8 +7,9 @@ import type { HubPipeline, HubPipelineConfig, HubPipelineCtor, VirtualRouterArti
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
 import { clearUnresolvedResponsesConversationRequests, preloadCriticalBridgeRuntimeModules } from '../../../modules/llmswitch/bridge.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
-import { buildRouterBootstrapConfigV2 } from '../../../config/virtual-router-types.js';
+import { compileRouteCodexRuntimeConfigManifest } from '../../../config/user-config-loader.js';
 import { trafficGovernorIsAtCapacity } from '../../../modules/traffic-governor/index.js';
+import { getRuntimeConfigManifestFromBootstrapInput } from './runtime-config-manifest-carrier.js';
 
 type RoutingProviderScope = {
   providerKeys: string[];
@@ -97,9 +98,10 @@ async function buildAllRouterGroupArtifacts(args: {
   const mergedRouting = isRecord(mergedConfig.routing) ? mergedConfig.routing : {};
   mergedConfig.routing = mergedRouting;
   for (const group of groups) {
-  const routerInput = await buildRouterBootstrapConfigV2(args.server.userConfig as Record<string, unknown>, undefined, {
+    const manifest = await compileRouteCodexRuntimeConfigManifest(args.server.userConfig as Record<string, unknown>, undefined, {
       routingPolicyGroup: group,
     });
+    const routerInput = manifest.virtualRouterBootstrapInput;
     const artifacts = await args.server.bootstrapVirtualRouter(routerInput as UnknownObject);
     Object.assign(runtime, artifacts.runtime ?? {});
     Object.assign(targetRuntime, artifacts.targetRuntime ?? {});
@@ -221,6 +223,10 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   server.userConfig = asRecord(userConfig);
   server.ensureProviderProfilesFromUserConfig();
   const routerInput = await server.resolveRouterBootstrapConfig(server.userConfig);
+  const primaryManifest = getRuntimeConfigManifestFromBootstrapInput(routerInput);
+  if (!primaryManifest) {
+    throw new Error('[http-server-runtime-setup] Rust runtime config manifest missing from router bootstrap input');
+  }
   const bootstrapArtifacts = await server.bootstrapVirtualRouter(routerInput);
   const providerRuntimeArtifacts = await buildAllRouterGroupArtifacts({
     server,
@@ -269,7 +275,8 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   }
   const hubCtor = await server.ensureHubPipelineCtor();
   const hubConfig: HubPipelineConfig = {
-    virtualRouter: bootstrapArtifacts.config
+    virtualRouter: bootstrapArtifacts.config,
+    pipelineRuntimeConfig: primaryManifest.pipelineRuntimeConfig,
   };
 
   const hubPolicyModeRaw = String(process.env.ROUTECODEX_HUB_POLICY_MODE || '').trim().toLowerCase();

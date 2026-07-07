@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 
@@ -19,7 +18,6 @@ export const RCC_SUBDIRS = {
   login: 'login',
   statics: 'statics',
   errorsamples: 'errorsamples',
-  llmsShadow: 'llms-shadow',
   docs: 'docs',
   precommand: 'precommand',
   runtimeLifecycle: 'state/runtime-lifecycle',
@@ -47,101 +45,75 @@ function expandHome(value: string, homeDir?: string): string {
   return path.join(resolveHomeDir(homeDir), value.slice(2));
 }
 
-function isLegacyUserDirPath(value: string, homeDir?: string): boolean {
+function isRetiredUserDirPath(value: string, homeDir?: string): boolean {
   const normalized = path.resolve(expandHome(value, homeDir));
-  const legacy = resolveLegacyRouteCodexUserDir(homeDir);
-  return normalized === legacy;
+  const retired = resolveRetiredRouteCodexUserDir(homeDir);
+  return normalized === retired;
 }
 
-function resolveLegacySnapshotsDir(homeDir?: string): string {
-  return path.join(resolveLegacyRouteCodexUserDir(homeDir), RCC_SUBDIRS.snapshots);
+function resolveRetiredSnapshotsDir(homeDir?: string): string {
+  return path.join(resolveRetiredRouteCodexUserDir(homeDir), RCC_SUBDIRS.snapshots);
 }
 
-function isLegacySnapshotsDirPath(value: string, homeDir?: string): boolean {
+function isRetiredSnapshotsDirPath(value: string, homeDir?: string): boolean {
   const normalized = path.resolve(expandHome(value, homeDir));
-  const legacy = resolveLegacySnapshotsDir(homeDir);
-  return normalized === legacy;
+  const retired = resolveRetiredSnapshotsDir(homeDir);
+  return normalized === retired;
+}
+
+function assertNotRetiredUserDirEnv(key: string, raw: string, homeDir?: string): void {
+  if (isRetiredUserDirPath(raw, homeDir)) {
+    throw new Error(`[config] ${key} points to retired ~/.routecodex root; use ~/.rcc`);
+  }
+}
+
+function assertNotRetiredSnapshotsDirEnv(key: string, raw: string, homeDir?: string): void {
+  if (isRetiredSnapshotsDirPath(raw, homeDir)) {
+    throw new Error(`[config] ${key} points to retired ~/.routecodex/codex-samples root; use ~/.rcc/codex-samples`);
+  }
 }
 
 export function resolveRccUserDir(homeDir?: string): string {
   for (const key of USER_DIR_ENV_KEYS) {
     const raw = String(process.env[key] || '').trim();
     if (raw) {
-      if (isLegacyUserDirPath(raw, homeDir)) {
-        continue;
-      }
+      assertNotRetiredUserDirEnv(key, raw, homeDir);
       return path.resolve(expandHome(raw, homeDir));
     }
   }
   return path.join(resolveHomeDir(homeDir), PRIMARY_DIR_NAME);
 }
 
-export function resolveLegacyRouteCodexUserDir(homeDir?: string): string {
+function resolveRetiredRouteCodexUserDir(homeDir?: string): string {
   return path.join(resolveHomeDir(homeDir), LEGACY_DIR_NAME);
-}
-
-export function resolveRccUserDirForRead(homeDir?: string): string {
-  return resolveRccUserDir(homeDir);
 }
 
 export function resolveRccPath(...segments: string[]): string {
   return path.join(resolveRccUserDir(), ...segments);
 }
 
-export function resolveLegacyRouteCodexPath(...segments: string[]): string {
-  return path.join(resolveLegacyRouteCodexUserDir(), ...segments);
-}
-
-export function resolveRccPathForRead(...segments: string[]): string {
-  return resolveRccPath(...segments);
-}
-
 export function resolveRccSubdir(key: RccSubdirKey, homeDir?: string): string {
   return path.join(resolveRccUserDir(homeDir), RCC_SUBDIRS[key]);
-}
-
-export function resolveRccSubdirForRead(key: RccSubdirKey, homeDir?: string): string {
-  return resolveRccSubdir(key, homeDir);
 }
 
 export function resolveRccAuthDir(homeDir?: string): string {
   return resolveRccSubdir('auth', homeDir);
 }
 
-export function resolveRccAuthDirForRead(homeDir?: string): string {
-  return resolveRccSubdirForRead('auth', homeDir);
-}
-
 export function resolveRccTokensDir(homeDir?: string): string {
   return resolveRccSubdir('tokens', homeDir);
-}
-
-export function resolveRccTokensDirForRead(homeDir?: string): string {
-  return resolveRccSubdirForRead('tokens', homeDir);
 }
 
 export function resolveRccStateDir(homeDir?: string): string {
   return resolveRccSubdir('state', homeDir);
 }
 
-export function resolveRccStateDirForRead(homeDir?: string): string {
-  return resolveRccSubdirForRead('state', homeDir);
-}
-
 export function resolveRccLogsDir(homeDir?: string): string {
   return resolveRccSubdir('logs', homeDir);
 }
 
-export function resolveRccLogsDirForRead(homeDir?: string): string {
-  return resolveRccSubdirForRead('logs', homeDir);
-}
-
 export function resolveRccSessionsDir(homeDir?: string): string {
   return resolveRccSubdir('sessions', homeDir);
-}
-
-export function resolveRccSessionsDirForRead(homeDir?: string): string {
-  return resolveRccSubdirForRead('sessions', homeDir);
 }
 
 export function resolveRccSnapshotsDir(homeDir?: string): string {
@@ -153,33 +125,19 @@ export function resolveRccSnapshotsDirFromEnv(homeDir?: string): string {
     const raw = String(process.env[key] || '').trim();
     if (raw) {
       const candidate = path.resolve(expandHome(raw, homeDir));
-      if (isLegacySnapshotsDirPath(candidate, homeDir)) {
-        continue;
-      }
+      assertNotRetiredSnapshotsDirEnv(key, candidate, homeDir);
       return candidate;
     }
   }
   return resolveRccSnapshotsDir(homeDir);
 }
 
-export function resolveRccSnapshotsDirForRead(homeDir?: string): string {
-  return resolveRccSubdirForRead('snapshots', homeDir);
-}
-
 export function resolveRccProviderDir(homeDir?: string): string {
   return resolveRccSubdir('provider', homeDir);
 }
 
-export function resolveRccProviderDirForRead(homeDir?: string): string {
-  return resolveRccSubdirForRead('provider', homeDir);
-}
-
 export function resolveRccConfigDir(homeDir?: string): string {
   return resolveRccSubdir('config', homeDir);
-}
-
-export function resolveRccConfigDirForRead(homeDir?: string): string {
-  return resolveRccSubdirForRead('config', homeDir);
 }
 
 export function resolveRccGuardianDir(homeDir?: string): string {
@@ -196,10 +154,6 @@ export function resolveRccStaticsDir(homeDir?: string): string {
 
 export function resolveRccErrorsamplesDir(homeDir?: string): string {
   return resolveRccSubdir('errorsamples', homeDir);
-}
-
-export function resolveRccLlmsShadowDir(homeDir?: string): string {
-  return resolveRccSubdir('llmsShadow', homeDir);
 }
 
 export function resolveRccDocsDir(homeDir?: string): string {
@@ -222,20 +176,28 @@ export function ensureRccUserDirEnvironment(homeDir?: string): string {
   const userDir = resolveRccUserDir(homeDir);
   const snapshotsDir = resolveRccSnapshotsDirFromEnv(homeDir);
   const rccHome = String(process.env.RCC_HOME || '').trim();
-  if (!rccHome || isLegacyUserDirPath(rccHome, homeDir)) {
+  if (rccHome) {
+    assertNotRetiredUserDirEnv('RCC_HOME', rccHome, homeDir);
+  } else {
     process.env.RCC_HOME = userDir;
   }
   const routeUserDir = String(process.env.ROUTECODEX_USER_DIR || '').trim();
-  if (!routeUserDir || isLegacyUserDirPath(routeUserDir, homeDir)) {
+  if (routeUserDir) {
+    assertNotRetiredUserDirEnv('ROUTECODEX_USER_DIR', routeUserDir, homeDir);
+  } else {
     process.env.ROUTECODEX_USER_DIR = userDir;
   }
   const routeHome = String(process.env.ROUTECODEX_HOME || '').trim();
-  if (!routeHome || isLegacyUserDirPath(routeHome, homeDir)) {
+  if (routeHome) {
+    assertNotRetiredUserDirEnv('ROUTECODEX_HOME', routeHome, homeDir);
+  } else {
     process.env.ROUTECODEX_HOME = userDir;
   }
   for (const key of SNAPSHOT_DIR_ENV_KEYS) {
     const raw = String(process.env[key] || '').trim();
-    if (!raw || isLegacySnapshotsDirPath(raw, homeDir)) {
+    if (raw) {
+      assertNotRetiredSnapshotsDirEnv(key, raw, homeDir);
+    } else {
       process.env[key] = snapshotsDir;
     }
   }

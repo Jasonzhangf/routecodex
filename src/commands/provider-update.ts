@@ -7,10 +7,9 @@ import { fetchModelsFromUpstream } from '../tools/provider-update/fetch-models.j
 import { readBlacklist, writeBlacklist } from '../tools/provider-update/blacklist.js';
 import { probeContextForModel } from '../tools/provider-update/probe-context.js';
 import type { ProviderInputConfig } from '../tools/provider-update/types.js';
-import { decodeProviderConfigFile } from '../config/provider-config-codec.js';
 import { writeProviderConfigFile } from '../config/provider-config-writer.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
-import type { ProviderConfigV2 } from '../config/provider-v2-loader.js';
+import { loadProviderConfigsV2, type ProviderConfigV2 } from '../config/provider-v2-loader.js';
 import type { UnknownRecord } from '../config/user-config-codec.js';
 import {
   __providerUpdateTestables,
@@ -35,33 +34,48 @@ import {
 export { __providerUpdateTestables };
 
 async function resolveProviderV2Path(dir: string): Promise<string> {
-  const tomlPath = path.join(dir, 'config.v2.toml');
-  if (await fileExists(tomlPath)) {
-    return tomlPath;
-  }
-  return path.join(dir, 'config.v2.json');
+  return path.join(dir, 'config.v2.toml');
+}
+
+async function loadProviderConfigById(
+  providerRoot: string,
+  providerId: string
+): Promise<ProviderConfigV2 | undefined> {
+  const configs = await loadProviderConfigsV2(providerRoot);
+  return configs[providerId];
 }
 
 function createUpdateCommand(): Command {
   return new Command('update')
-    .description('Update a provider\'s model list and generate a minimal single-provider config')
-    .requiredOption('-c, --config <file>', 'Provider input config JSON (contains providerId/type/baseUrl/auth)')
-    .option('-p, --provider <id>', 'Override providerId (else read from --config)')
+    .description('Update a provider model list from provider id under ~/.rcc/provider')
+    .argument('<id>', 'Provider id to update (directory name under ~/.rcc/provider)')
+    .option('--root <dir>', 'Override provider root directory')
     .option('--write', 'Write files instead of dry-run', false)
-    .option('--output-dir <dir>', 'Output directory for provider config and lists (default: ~/.rcc/provider/<id>)')
     .option('--blacklist-add <items>', 'Add comma-separated model ids to blacklist')
     .option('--blacklist-remove <items>', 'Remove comma-separated model ids from blacklist')
-    .option('--blacklist-file <file>', 'Explicit blacklist.json path (overrides output-dir default)')
+    .option('--blacklist-file <file>', 'Explicit blacklist.json path (overrides provider root default)')
     .option('--list-only', 'Only list upstream models and exit', false)
     .option('--use-cache', 'Use cached models list on upstream failure', false)
     .option('--probe-keys', 'Probe apiKey list and set auth.apiKey to first working key', false)
     .option('--verbose', 'Verbose logs', false)
-    .action(async (opts) => {
+    .action(async (
+      id: string,
+      opts: {
+        root?: string;
+        write?: boolean;
+        blacklistAdd?: string;
+        blacklistRemove?: string;
+        blacklistFile?: string;
+        listOnly?: boolean;
+        useCache?: boolean;
+        probeKeys?: boolean;
+        verbose?: boolean;
+      }
+    ) => {
       const args = {
-        providerId: opts.provider as string | undefined,
-        configPath: path.resolve(opts.config as string),
+        providerId: (id || '').trim(),
         write: !!opts.write,
-        outputDir: opts.outputDir as string | undefined,
+        rootDir: opts.root as string | undefined,
         blacklistAdd: splitCsv(opts.blacklistAdd),
         blacklistRemove: splitCsv(opts.blacklistRemove),
         blacklistFile: opts.blacklistFile as string | undefined,
@@ -89,10 +103,10 @@ function createUpdateCommand(): Command {
 
 function createSyncModelsCommand(): Command {
   return new Command('sync-models')
-    .description('Sync upstream model list into an existing provider config.v2.toml/config.v2.json')
+    .description('Sync upstream model list into an existing provider config.v2.toml')
     .argument('<id>', 'Provider id to update (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
-    .option('--write', 'Write updated provider config.v2.toml/config.v2.json (default: dry-run)', false)
+    .option('--write', 'Write updated provider config.v2.toml (default: dry-run)', false)
     .option('--use-cache', 'Use cached models-latest.json on upstream failure', false)
     .option('--blacklist-add <items>', 'Add comma-separated model ids to blacklist')
     .option('--blacklist-remove <items>', 'Remove comma-separated model ids from blacklist')
@@ -121,15 +135,20 @@ function createSyncModelsCommand(): Command {
       const cachePath = path.join(dir, 'models-latest.json');
 
       if (!(await fileExists(v2Path))) {
-        console.error(`No provider config.v2.toml/config.v2.json found for provider "${providerId}" under ${dir}`);
+        console.error(`No provider config.v2.toml found for provider "${providerId}" under ${dir}`);
         process.exit(1);
       }
 
-      let parsed: ProviderConfigV2;
+      let parsed: ProviderConfigV2 | undefined;
       try {
-        parsed = (await decodeProviderConfigFile(v2Path)).parsed as unknown as ProviderConfigV2;
+        parsed = await loadProviderConfigById(root, providerId);
       } catch (e) {
         console.error('Failed to parse existing provider config:', (e as Error)?.message ?? String(e));
+        process.exit(1);
+        return;
+      }
+      if (!parsed) {
+        console.error(`No provider config.v2.toml found for provider "${providerId}" under ${dir}`);
         process.exit(1);
         return;
       }
@@ -223,7 +242,7 @@ function createSyncModelsCommand(): Command {
 
 function createProbeContextCommand(): Command {
   return new Command('probe-context')
-    .description('Probe context limits for each model (via /v1/responses) and optionally write maxContextTokens into provider config.v2.toml/config.v2.json')
+    .description('Probe context limits for each model (via /v1/responses) and optionally write maxContextTokens into provider config.v2.toml')
     .argument('<id>', 'Provider id to probe (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
     .option('--endpoint <url>', 'RouteCodex /v1/responses endpoint (default: $ROUTECODEX_BASE/v1/responses)')
@@ -232,7 +251,7 @@ function createProbeContextCommand(): Command {
     .option('--models <items>', 'Only probe these comma-separated model ids')
     .option('--thresholds <items>', 'Comma-separated token thresholds', '128000,150000,180000,200000,256000,512000,1000000')
     .option('--timeout-ms <ms>', 'Per-request timeout (ms)', '60000')
-    .option('--write', 'Write maxContextTokens/maxContext back into provider config.v2.toml/config.v2.json (default: dry-run)', false)
+    .option('--write', 'Write maxContextTokens/maxContext back into provider config.v2.toml (default: dry-run)', false)
     .option('--verbose', 'Verbose logs', false)
     .action(async (
       id: string,
@@ -300,15 +319,20 @@ function createProbeContextCommand(): Command {
       const v2Path = await resolveProviderV2Path(dir);
 
       if (!(await fileExists(v2Path))) {
-        console.error(`No provider config.v2.toml/config.v2.json found for provider "${providerId}" under ${dir}`);
+        console.error(`No provider config.v2.toml found for provider "${providerId}" under ${dir}`);
         process.exit(1);
       }
 
-      let parsed: ProviderConfigV2;
+      let parsed: ProviderConfigV2 | undefined;
       try {
-        parsed = (await decodeProviderConfigFile(v2Path)).parsed as unknown as ProviderConfigV2;
+        parsed = await loadProviderConfigById(root, providerId);
       } catch (e) {
         console.error('Failed to parse existing provider config:', (e as Error)?.message ?? String(e));
+        process.exit(1);
+        return;
+      }
+      if (!parsed) {
+        console.error(`No provider config.v2.toml found for provider "${providerId}" under ${dir}`);
         process.exit(1);
         return;
       }

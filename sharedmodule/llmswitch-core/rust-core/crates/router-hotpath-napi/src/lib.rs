@@ -21,6 +21,8 @@ mod chat_web_search_tool_schema;
 mod compat_field_mapping;
 mod compat_harvest_tool_calls_from_text;
 mod compat_tool_schema;
+mod config_provider_codec;
+mod config_toml_codec;
 mod direct_decision;
 mod failure_policy;
 mod followup_mainline_blocks;
@@ -215,6 +217,52 @@ pub fn resolve_virtual_router_stop_message_scope_json(metadata_json: String) -> 
 
 fn metadata_center_snapshot_or_self(metadata: &Value) -> &Value {
     metadata.get("metadataCenterSnapshot").unwrap_or(metadata)
+}
+
+#[napi]
+pub fn parse_route_codex_toml_record_json(raw: String) -> NapiResult<String> {
+    config_toml_codec::parse_toml_record_json(&raw).map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn serialize_route_codex_toml_record_json(record_json: String) -> NapiResult<String> {
+    config_toml_codec::serialize_toml_record_json(&record_json).map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn update_route_codex_toml_string_scalar_in_table_json(
+    input_json: String,
+) -> NapiResult<String> {
+    config_toml_codec::update_toml_string_scalar_in_table_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn coerce_route_codex_provider_config_v2_json(input_json: String) -> NapiResult<String> {
+    config_provider_codec::coerce_provider_config_v2_from_parsed_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn plan_route_codex_provider_config_v2_files_json(input_json: String) -> NapiResult<String> {
+    config_provider_codec::plan_provider_config_v2_files_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn resolve_route_codex_provider_config_v2_identity_json(
+    input_json: String,
+) -> NapiResult<String> {
+    config_provider_codec::resolve_provider_config_v2_identity_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn load_route_codex_provider_configs_v2_from_root_json(
+    input_json: String,
+) -> NapiResult<String> {
+    config_provider_codec::load_provider_configs_v2_from_root_json(&input_json)
+        .map_err(napi::Error::from_reason)
 }
 
 fn analyze_pending_tool_sync(
@@ -1257,6 +1305,47 @@ pub fn parse_routing_instruction_kinds_json(
     .map_err(|e| napi::Error::from_reason(e))?;
     let kinds: Vec<String> = parsed.into_iter().map(|entry| entry.kind).collect();
     serde_json::to_string(&kinds).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RccUserDirResolveInput {
+    #[serde(default)]
+    home_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RccPathResolveInput {
+    #[serde(default)]
+    home_dir: Option<String>,
+    #[serde(default)]
+    segments: Vec<String>,
+}
+
+#[napi(js_name = "resolveRccUserDirJson")]
+pub fn resolve_rcc_user_dir_json(input_json: String) -> NapiResult<String> {
+    let input: RccUserDirResolveInput = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let path = virtual_router_engine::instructions::resolve_rcc_user_dir_for_host(
+        input.home_dir.as_deref(),
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&path.to_string_lossy().to_string())
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi(js_name = "resolveRccPathJson")]
+pub fn resolve_rcc_path_json(input_json: String) -> NapiResult<String> {
+    let input: RccPathResolveInput = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let path = virtual_router_engine::instructions::resolve_rcc_path_for_host(
+        &input.segments,
+        input.home_dir.as_deref(),
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&path.to_string_lossy().to_string())
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
 #[napi]
@@ -2852,6 +2941,72 @@ pub fn bootstrap_virtual_router_providers_json_bridge(
 ) -> NapiResult<String> {
     virtual_router_engine::provider_bootstrap::bootstrap_virtual_router_providers_json(
         providers_json,
+    )
+}
+
+#[napi(js_name = "compileRouteCodexRuntimeManifestJson")]
+pub fn compile_routecodex_runtime_manifest_json_bridge(input_json: String) -> NapiResult<String> {
+    virtual_router_engine::runtime_config_materialization::compile_routecodex_runtime_manifest_json(
+        input_json,
+    )
+}
+
+#[napi(js_name = "collectRouteCodexV2ConfigSourceErrorsJson")]
+pub fn collect_routecodex_v2_config_source_errors_json_bridge(
+    input_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::runtime_config_materialization::collect_v2_config_source_errors_json(
+        input_json,
+    )
+}
+
+#[napi(js_name = "normalizeRouteCodexV2RuntimeSourceJson")]
+pub fn normalize_routecodex_v2_runtime_source_json_bridge(
+    input_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::runtime_config_materialization::normalize_routecodex_v2_runtime_source_json(
+        input_json,
+    )
+}
+
+#[napi(js_name = "resolvePrimaryRouteCodexRoutingPolicyGroupJson")]
+pub fn resolve_primary_routecodex_routing_policy_group_json_bridge(
+    input_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::runtime_config_materialization::resolve_primary_routecodex_routing_policy_group_json(
+        input_json,
+    )
+}
+
+#[napi(js_name = "extractRouteCodexMaterializedProviderConfigsJson")]
+pub fn extract_routecodex_materialized_provider_configs_json_bridge(
+    input_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::runtime_config_materialization::extract_routecodex_materialized_provider_configs_json(
+        input_json,
+    )
+}
+
+#[napi(js_name = "materializeRouteCodexUserConfigFromManifestJson")]
+pub fn materialize_routecodex_user_config_from_manifest_json_bridge(
+    input_json: String,
+) -> NapiResult<String> {
+    virtual_router_engine::runtime_config_materialization::materialize_routecodex_user_config_from_manifest_json(
+        input_json,
+    )
+}
+
+#[napi(js_name = "buildRouteCodexProviderProfilesJson")]
+pub fn build_routecodex_provider_profiles_json_bridge(input_json: String) -> NapiResult<String> {
+    virtual_router_engine::runtime_config_materialization::build_routecodex_provider_profiles_json(
+        input_json,
+    )
+}
+
+#[napi(js_name = "buildRouteCodexForwarderProfilesJson")]
+pub fn build_routecodex_forwarder_profiles_json_bridge(input_json: String) -> NapiResult<String> {
+    virtual_router_engine::runtime_config_materialization::build_routecodex_forwarder_profiles_json(
+        input_json,
     )
 }
 

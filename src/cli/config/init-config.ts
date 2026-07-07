@@ -10,6 +10,7 @@ import {
 } from './init-provider-catalog.js';
 import { buildInitRouting, buildV2ConfigObject, resolveDefaultToolsTarget } from './init-v2-builder.js';
 import { resolveRccProviderDir } from '../../config/user-data-paths.js';
+import { serializeTomlRecord } from '../../config/toml-basic.js';
 
 export type InitConfigIo = {
   fsImpl: Pick<typeof fs, 'existsSync' | 'mkdirSync' | 'readFileSync' | 'writeFileSync'>;
@@ -177,15 +178,13 @@ function writeProviderV2Configs(
     if (!fsImpl.existsSync(providerDir)) {
       fsImpl.mkdirSync(providerDir, { recursive: true });
     }
-    const jsonPath = pathImpl.join(providerDir, 'config.v2.json');
     const tomlPath = pathImpl.join(providerDir, 'config.v2.toml');
-    const providerConfigPath = fsImpl.existsSync(tomlPath) ? tomlPath : jsonPath;
     const payload = {
       version: '2.0.0',
       providerId: provider.id,
       provider: provider.provider
     };
-    fsImpl.writeFileSync(providerConfigPath, JSON.stringify(payload, null, 2), 'utf8');
+    fsImpl.writeFileSync(tomlPath, `${serializeTomlRecord(payload)}\n`, 'utf8');
   }
 }
 
@@ -199,6 +198,13 @@ export async function initializeConfigV1(
   const homeDir = io.getHomeDir ? io.getHomeDir() : homedir();
 
   const configPath = pathImpl.resolve(opts.configPath);
+  if (path.extname(configPath).trim().toLowerCase() !== '.toml') {
+    return {
+      ok: false,
+      reason: 'write_failed',
+      message: `[config] user config JSON support removed; expected TOML file: ${configPath}`
+    };
+  }
   const configDir = pathImpl.dirname(configPath);
 
   let backupPath: string | undefined;
@@ -281,7 +287,7 @@ export async function initializeConfigV1(
 
   try {
     writeProviderV2Configs(fsImpl, pathImpl, homeDir, selectedTemplates);
-    fsImpl.writeFileSync(configPath, JSON.stringify(configObject, null, 2), 'utf8');
+    fsImpl.writeFileSync(configPath, `${serializeTomlRecord(configObject)}\n`, 'utf8');
     return {
       ok: true,
       configPath,

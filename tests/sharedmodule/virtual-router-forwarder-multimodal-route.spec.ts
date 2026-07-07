@@ -2,7 +2,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
+import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-config-loader.js';
+
+async function compileVirtualRouterInput(userConfig: Record<string, unknown>, providerRootDir?: string, options?: Parameters<typeof compileRouteCodexRuntimeConfigManifest>[2]) {
+  return (await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, options)).virtualRouterBootstrapInput;
+}
+import { serializeTomlRecord } from '../../src/config/toml-basic.js';
 import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
@@ -30,8 +35,8 @@ describe('VirtualRouter multimodal forwarder routing', () => {
       const providerDir = path.join(root, provider.providerId);
       await fs.mkdir(providerDir, { recursive: true });
       await fs.writeFile(
-        path.join(providerDir, 'config.v2.json'),
-        `${JSON.stringify({
+        path.join(providerDir, 'config.v2.toml'),
+        `${serializeTomlRecord({
           version: '2.0.0',
           providerId: provider.providerId,
           provider: {
@@ -43,12 +48,12 @@ describe('VirtualRouter multimodal forwarder routing', () => {
             },
             models: provider.models
           }
-        }, null, 2)}\n`,
+        })}\n`,
         'utf8'
       );
     }
 
-    const input = await buildVirtualRouterInputV2({
+    const input = await compileVirtualRouterInput({
       virtualrouter: {
         forwarders: {
           'fwd.gpt.gpt-5.4-mini': {

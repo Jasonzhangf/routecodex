@@ -105,11 +105,13 @@ function checkRootLayout() {
     'logs',
     'node_modules',
     'tmp',
+    '.tmp',
     'test-results',
   ]);
   const localStateRoots = new Set([
     '.agent-state',
     '.cache',
+    '.DS_Store',
     '.reasonix',
     '.local-index',
     'CACHE.md',

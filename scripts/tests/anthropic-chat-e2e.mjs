@@ -57,10 +57,10 @@ function shallowHash(value) {
 
 async function loadCoreHelpers() {
   const distRoot = path.resolve('sharedmodule', 'llmswitch-core', 'dist');
-  const runtimePath = path.join(distRoot, 'conversion', 'hub', 'response', 'response-runtime.js');
+  const runtimePath = path.join(distRoot, 'conversion', 'hub', 'response', 'response-runtime-anthropic.js');
   const codecPath = path.join(distRoot, 'conversion', 'codecs', 'anthropic-openai-codec.js');
   if (!fs.existsSync(runtimePath)) {
-    throw new Error('sharedmodule/llmswitch-core/dist/conversion/hub/response/response-runtime.js 不存在，请先运行 npm run build:dev');
+    throw new Error('sharedmodule/llmswitch-core/dist/conversion/hub/response/response-runtime-anthropic.js 不存在，请先运行 npm run build:dev');
   }
   if (!fs.existsSync(codecPath)) {
     throw new Error('sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js 不存在');

@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { InitProviderTemplate } from '../../src/cli/config/init-provider-catalog.js';
 import { getProviderV2Path, writeProviderV2 } from '../../src/cli/commands/init/basic.js';
 import { migrateV1ToV2, runV2MaintenanceMenu } from '../../src/cli/commands/init/workflows.js';
+import { parseTomlRecord } from '../../src/config/toml-basic.js';
 
 function tmpDir(prefix = 'init-workflows-'): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -46,6 +47,10 @@ function createSpinner(logs: string[]) {
   } as any;
 }
 
+function readProviderToml(providerRoot: string, providerId: string): Record<string, any> {
+  return parseTomlRecord(fs.readFileSync(getProviderV2Path(path, providerRoot, providerId), 'utf8')) as Record<string, any>;
+}
+
 function testCatalog(): InitProviderTemplate[] {
   return [
     {
@@ -83,9 +88,9 @@ describe('init workflows', () => {
   it('migrates v1->v2 with per-provider merge strategy and backup', async () => {
     const dir = tmpDir();
     const providerRoot = path.join(dir, 'provider');
-    const configPath = path.join(dir, 'config.json');
+    const configPath = path.join(dir, 'config.toml');
     fs.mkdirSync(providerRoot, { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify({ legacy: true }), 'utf8');
+    fs.writeFileSync(configPath, 'legacy = true\n', 'utf8');
 
     writeProviderV2(fs, path, providerRoot, 'openai', {
       id: 'openai',
@@ -130,16 +135,16 @@ describe('init workflows', () => {
     });
 
     expect(result.convertedProviders.sort()).toEqual(['glm', 'openai']);
-    expect(result.backupPath).toContain('config.json.bak');
+    expect(result.backupPath).toContain('config.toml.bak');
     expect(fs.existsSync(result.backupPath!)).toBe(true);
 
-    const openaiPayload = JSON.parse(fs.readFileSync(getProviderV2Path(path, providerRoot, 'openai'), 'utf8'));
+    const openaiPayload = readProviderToml(providerRoot, 'openai');
     expect(openaiPayload.provider.auth.apiKey).toBe('${OLD_KEY}');
     expect(openaiPayload.provider.models.new).toBeTruthy();
     expect(openaiPayload.provider.models.old).toBeTruthy();
     expect(fs.existsSync(`${getProviderV2Path(path, providerRoot, 'openai')}.bak`)).toBe(true);
 
-    const nextConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const nextConfig = parseTomlRecord(fs.readFileSync(configPath, 'utf8')) as Record<string, any>;
     expect(nextConfig.virtualrouterMode).toBe('v2');
     expect(nextConfig.httpserver.host).toBe('0.0.0.0');
     expect(nextConfig.httpserver.port).toBe(6666);
@@ -148,9 +153,9 @@ describe('init workflows', () => {
   it('keeps duplicate providers in non-interactive mode when prompt is unavailable', async () => {
     const dir = tmpDir();
     const providerRoot = path.join(dir, 'provider');
-    const configPath = path.join(dir, 'config.json');
+    const configPath = path.join(dir, 'config.toml');
     fs.mkdirSync(providerRoot, { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify({}), 'utf8');
+    fs.writeFileSync(configPath, 'legacy = true\n', 'utf8');
 
     writeProviderV2(fs, path, providerRoot, 'openai', {
       id: 'openai',
@@ -185,16 +190,16 @@ describe('init workflows', () => {
     });
 
     expect(result.convertedProviders).toEqual([]);
-    expect(loggerLogs.join('\n')).toContain('keeping existing config.v2.json in non-interactive mode');
+    expect(loggerLogs.join('\n')).toContain('keeping existing config.v2.toml in non-interactive mode');
 
-    const openaiPayload = JSON.parse(fs.readFileSync(getProviderV2Path(path, providerRoot, 'openai'), 'utf8'));
+    const openaiPayload = readProviderToml(providerRoot, 'openai');
     expect(openaiPayload.provider.auth.apiKey).toBe('${KEEP_KEY}');
   });
 
   it('runs v2 maintenance menu for add/modify models+auth/save flow', async () => {
     const dir = tmpDir();
     const providerRoot = path.join(dir, 'provider');
-    const configPath = path.join(dir, 'config.json');
+    const configPath = path.join(dir, 'config.toml');
     fs.mkdirSync(providerRoot, { recursive: true });
     const config = {
       virtualrouterMode: 'v2',
@@ -205,14 +210,14 @@ describe('init workflows', () => {
         }
       }
     };
-    fs.writeFileSync(configPath, JSON.stringify(config), 'utf8');
+    fs.writeFileSync(configPath, 'virtualrouterMode = "v2"\n', 'utf8');
 
     const logs: string[] = [];
     await runV2MaintenanceMenu({
       prompt: queuePrompt([
         '1', // add
         '3', // standard built-in only
-        '1', // pick openai
+        '2', // pick openai
         '3', // modify
         '1', // pick openai
         '5', // edit models/default
@@ -249,7 +254,7 @@ describe('init workflows', () => {
       }
     });
 
-    const payload = JSON.parse(fs.readFileSync(getProviderV2Path(path, providerRoot, 'openai'), 'utf8'));
+    const payload = readProviderToml(providerRoot, 'openai');
     expect(payload.provider.defaultModel).toBe('gpt-5.2-codex');
     expect(Object.keys(payload.provider.models).sort()).toEqual(['gpt-5.2', 'gpt-5.2-codex']);
     expect(payload.provider.auth.type).toBe('cookie-auth');
@@ -261,7 +266,7 @@ describe('init workflows', () => {
   it('covers custom add/delete/list/missing-target warning flow', async () => {
     const dir = tmpDir();
     const providerRoot = path.join(dir, 'provider');
-    const configPath = path.join(dir, 'config.json');
+    const configPath = path.join(dir, 'config.toml');
     fs.mkdirSync(providerRoot, { recursive: true });
 
     const config = {
@@ -327,7 +332,7 @@ describe('init workflows', () => {
   it('covers menu back/invalid branches plus routing edit save path', async () => {
     const dir = tmpDir();
     const providerRoot = path.join(dir, 'provider');
-    const configPath = path.join(dir, 'config.json');
+    const configPath = path.join(dir, 'config.toml');
     fs.mkdirSync(providerRoot, { recursive: true });
 
     writeProviderV2(fs, path, providerRoot, 'glm', {

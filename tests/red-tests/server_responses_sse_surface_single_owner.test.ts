@@ -62,6 +62,8 @@ describe('server responses SSE surface single owner', () => {
     const bridgeSource = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
     const indexSource = readFileSync(join(root, 'src/modules/llmswitch/bridge/index.ts'), 'utf8');
 
+    expect(bridgeSource).toContain('projectResponsesSseFrameForClientNative');
+    expect(bridgeSource).toContain('export function projectResponsesSseFrameForClientForHttp(');
     expect(bridgeSource).not.toContain('responses-sse-semantics');
     expect(bridgeSource).not.toContain('responses-client-projection');
     expect(bridgeSource).not.toContain('buildResponsesSseErrorPayloadForHttp');

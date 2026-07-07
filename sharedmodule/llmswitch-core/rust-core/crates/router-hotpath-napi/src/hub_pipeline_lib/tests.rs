@@ -1611,6 +1611,63 @@ fn response_path_moves_provider_top_level_metadata_out_of_normal_payload() {
 }
 
 #[test]
+fn response_path_preserves_existing_responses_custom_tool_call() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let patch =
+        "*** Begin Patch\n*** Add File: tmp/routecodex-online-apply-patch-smoke.txt\n+hello\n*** End Patch";
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-responses-custom-tool-call".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            payload: json!({
+                "id": "resp_custom_tool_call",
+                "object": "response",
+                "status": "completed",
+                "model": "gpt-5.5-2026-04-23",
+                "output": [{
+                    "id": "ctc_apply_patch_1",
+                    "type": "custom_tool_call",
+                    "call_id": "call_apply_patch_1",
+                    "name": "apply_patch",
+                    "input": patch,
+                    "status": "completed"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "stream": false,
+                "clientModelId": "gpt-5.5",
+                "requestSemantics": {
+                    "tools": {
+                        "clientToolsRaw": [{
+                            "type": "custom",
+                            "name": "apply_patch",
+                            "format": { "type": "grammar" }
+                        }]
+                    }
+                }
+            }),
+            metadata_center_snapshot: json!(null),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["output"][0]["type"], json!("custom_tool_call"));
+    assert_eq!(payload["output"][0]["name"], json!("apply_patch"));
+    assert_eq!(payload["output"][0]["call_id"], json!("call_apply_patch_1"));
+    assert_eq!(payload["output"][0]["input"], json!(patch));
+    assert_ne!(payload["output"], json!([]));
+}
+
+#[test]
 fn response_path_projects_responses_required_action_reasoning_stop_to_exec_command() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine

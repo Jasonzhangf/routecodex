@@ -118,6 +118,10 @@ export interface HubPipeline {
   };
 }
 
-export type HubPipelineConfig = { virtualRouter: unknown; [key: string]: unknown };
+export type HubPipelineConfig = {
+  virtualRouter: unknown;
+  pipelineRuntimeConfig?: Record<string, unknown>;
+  [key: string]: unknown;
+};
 
 export type HubPipelineCtor = new (config: HubPipelineConfig) => HubPipeline;

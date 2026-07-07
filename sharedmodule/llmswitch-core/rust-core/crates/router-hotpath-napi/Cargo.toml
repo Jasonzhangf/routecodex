@@ -17,11 +17,14 @@ traffic-governor-core = { path = "../traffic-governor-core" }
 napi-derive = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
+
+dirs = "6"
 
 [build-dependencies]
 napi-build = "2"

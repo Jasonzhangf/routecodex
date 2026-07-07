@@ -4,7 +4,7 @@ import type {
   RoutingDecision,
   StopMessageStateSnapshot,
   TargetMetadata
-} from '../native/router-hotpath/virtual-router-contracts.js';
+} from '../native/router-hotpath/native-virtual-router-runtime.js';
 import { resolveRccUserDir } from './user-data-paths.js';
 import { parseRoutingInstructionKindsWithNative } from '../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 import { parseResolvedStopMessageInstructionWithNative } from '../native/router-hotpath/native-virtual-router-stop-message-semantics.js';

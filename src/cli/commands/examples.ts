@@ -33,7 +33,7 @@ export function createExamplesCommand(program: Command, ctx: ExamplesCommandCont
       ctx.log('  rcc start');
       ctx.log('');
       ctx.log('  # Start with custom config');
-      ctx.log('  rcc start --config ./config/lmstudio-config.json');
+      ctx.log('  rcc start --config ./config/lmstudio-config.toml');
       ctx.log('');
 
       ctx.log(chalk.yellow('3. Launch Tooling (auto-start server):'));

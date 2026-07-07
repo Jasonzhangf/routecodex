@@ -1,48 +1,35 @@
-import os from 'node:os';
-import path from 'node:path';
+import { failNativeRequired } from '../native/router-hotpath/native-router-hotpath-policy.js';
+import {
+  parseString,
+  readNativeFunction,
+  safeStringify,
+} from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 
-const PRIMARY_DIR_NAME = '.rcc';
-const LEGACY_DIR_NAME = '.routecodex';
-const USER_DIR_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'] as const;
-
-function resolveHomeDir(homeDir?: string): string {
-  const explicit = String(homeDir || '').trim();
-  if (explicit) {
-    return path.resolve(explicit);
+function callNativeString(capability: string, input: Record<string, unknown>): string {
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return failNativeRequired<string>(capability);
   }
-  const envHome = String(process.env.HOME || '').trim();
-  if (envHome) {
-    return path.resolve(envHome);
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return failNativeRequired<string>(capability, 'json stringify failed');
   }
-  return path.resolve(os.homedir());
-}
-
-function expandHome(value: string, homeDir?: string): string {
-  if (!value.startsWith('~/')) {
-    return value;
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return failNativeRequired<string>(capability, 'empty result');
+    }
+    return parseString(raw) ?? failNativeRequired<string>(capability, 'invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<string>(capability, reason);
   }
-  return path.join(resolveHomeDir(homeDir), value.slice(2));
-}
-
-function isLegacyUserDirPath(value: string, homeDir?: string): boolean {
-  const normalized = path.resolve(expandHome(value, homeDir));
-  const legacy = path.join(resolveHomeDir(homeDir), LEGACY_DIR_NAME);
-  return normalized === legacy;
 }
 
 export function resolveRccUserDir(homeDir?: string): string {
-  for (const key of USER_DIR_ENV_KEYS) {
-    const raw = String(process.env[key] || '').trim();
-    if (raw) {
-      if (isLegacyUserDirPath(raw, homeDir)) {
-        continue;
-      }
-      return path.resolve(expandHome(raw, homeDir));
-    }
-  }
-  return path.join(resolveHomeDir(homeDir), PRIMARY_DIR_NAME);
+  return callNativeString('resolveRccUserDirJson', { homeDir });
 }
 
 export function resolveRccPath(...segments: string[]): string {
-  return path.join(resolveRccUserDir(), ...segments);
+  return callNativeString('resolveRccPathJson', { segments });
 }

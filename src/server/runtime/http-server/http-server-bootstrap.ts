@@ -6,17 +6,20 @@ import type { ProviderProfile, ProviderProfileCollection } from '../../../provid
 import { buildProviderProfiles } from '../../../providers/profile/provider-profile-loader.js';
 import { logPipelineStage, shouldEmitStageEvent } from '../../utils/stage-logger.js';
 import { buildInfo } from '../../../build-info.js';
-import { buildRouterBootstrapConfigV2 } from '../../../config/virtual-router-types.js';
+import {
+  compileRouteCodexRuntimeConfigManifest,
+} from '../../../config/user-config-loader.js';
 import {
   bootstrapVirtualRouterConfig,
-  getHubPipelineCtor
+  getHubPipelineCtor,
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync
 } from '../../../modules/llmswitch/bridge.js';
 import type { HubPipeline, HubPipelineCtor, VirtualRouterArtifacts } from './types.js';
 import { resolveProviderIdentity } from './provider-utils.js';
 import { initializeRouteErrorHub as initializeRouteErrorHubImpl } from '../../../error-handling/route-error-hub.js';
 import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
 import { resolveRuntimePathFromModuleUrl } from '../../../utils/runtime-package-root.js';
-
+import { attachRuntimeConfigManifest } from './runtime-config-manifest-carrier.js';
 
 function logBootstrapNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
@@ -30,44 +33,14 @@ function logBootstrapNonBlockingError(stage: string, error: unknown, details?: R
 export async function resolveRouterBootstrapConfig(server: any, userConfig: UnknownObject): Promise<UnknownObject> {
   const root = isRecord(userConfig) ? (userConfig as Record<string, unknown>) : {};
   const vrNode = isRecord(root.virtualrouter) ? (root.virtualrouter as Record<string, unknown>) : null;
-  const hasRoutingPolicyGroups = Boolean(vrNode && isRecord(vrNode.routingPolicyGroups));
-  if (hasRoutingPolicyGroups) {
-    const primaryRoutingPolicyGroup = resolvePrimaryRouterRoutingPolicyGroup(root);
-    return (await buildRouterBootstrapConfigV2(root, undefined, {
-      ...(primaryRoutingPolicyGroup ? { routingPolicyGroup: primaryRoutingPolicyGroup } : {})
-    })) as UnknownObject;
-  }
   if (vrNode) {
-    return vrNode as UnknownObject;
+    const primaryRoutingPolicyGroup = resolvePrimaryRouteCodexRoutingPolicyGroupSync(root);
+    const manifest = await compileRouteCodexRuntimeConfigManifest(root, undefined, {
+      ...(primaryRoutingPolicyGroup ? { routingPolicyGroup: primaryRoutingPolicyGroup } : {})
+    });
+    return attachRuntimeConfigManifest(manifest.virtualRouterBootstrapInput, manifest);
   }
   return userConfig;
-}
-
-function resolvePrimaryRouterRoutingPolicyGroup(root: Record<string, unknown>): string | undefined {
-  const httpserver = isRecord(root.httpserver) ? (root.httpserver as Record<string, unknown>) : null;
-  const ports = Array.isArray(httpserver?.ports) ? (httpserver.ports as unknown[]) : [];
-  for (const port of ports) {
-    if (!isRecord(port)) {
-      continue;
-    }
-    const mode = typeof port.mode === 'string' ? port.mode.trim().toLowerCase() : '';
-    if (mode && mode !== 'router') {
-      continue;
-    }
-    const group = typeof port.routingPolicyGroup === 'string' ? port.routingPolicyGroup.trim() : '';
-    if (group) {
-      return group;
-    }
-  }
-  const groups = isRecord(root.virtualrouter)
-    && isRecord((root.virtualrouter as Record<string, unknown>).routingPolicyGroups)
-    ? ((root.virtualrouter as Record<string, unknown>).routingPolicyGroups as Record<string, unknown>)
-    : null;
-  if (!groups) {
-    return undefined;
-  }
-  const groupIds = Object.keys(groups).filter((groupId) => groupId.trim());
-  return groupIds.length === 1 ? groupIds[0] : undefined;
 }
 
 export function getModuleDependencies(server: any): ModuleDependencies {

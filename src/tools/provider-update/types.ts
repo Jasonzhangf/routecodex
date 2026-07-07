@@ -16,10 +16,9 @@ export type ProviderInputConfig = {
 };
 
 export type UpdateOptions = {
-  providerId?: string;
-  configPath: string;
+  providerId: string;
   write: boolean;
-  outputDir?: string;
+  rootDir?: string;
   blacklistAdd?: string[];
   blacklistRemove?: string[];
   blacklistFile?: string;
@@ -38,8 +37,6 @@ export type BlacklistFile = {
   models: string[];
   updatedAt: number;
 };
-
-export type ProviderSingleConfig = Record<string, unknown>;
 
 export type UpdateResult = {
   providerId: string;

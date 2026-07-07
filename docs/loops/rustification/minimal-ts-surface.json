@@ -28,54 +28,6 @@
       "forbiddenSemantics": ["pipeline execution", "route selection", "payload mutation"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-blocks.ts",
-      "classification": "diagnostic_io_ok",
-      "ownerFeature": "hub.stage_timing_observation",
-      "minimumTsRole": "In-process timing observation state for Node diagnostics.",
-      "cannotShrinkFurtherBecause": "The state is tied to Node process diagnostic logging and MetadataCenter debug snapshots; migrating it means a separate diagnostics/runtime IO rewrite, not Hub semantic rustification.",
-      "forbiddenSemantics": ["request shaping", "response shaping", "route policy"]
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-breakdown-state-blocks.ts",
-      "classification": "diagnostic_io_ok",
-      "ownerFeature": "hub.stage_timing_observation",
-      "minimumTsRole": "Node-local diagnostic timing aggregation state for hub-stage top-summary reporting.",
-      "cannotShrinkFurtherBecause": "Only Node-local diagnostic state remains; there is no Hub/VR runtime semantic decision to migrate without rewriting the diagnostics sink.",
-      "forbiddenSemantics": ["payload mutation", "tool governance", "continuation policy"]
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-env-blocks.ts",
-      "classification": "diagnostic_io_ok",
-      "ownerFeature": "hub.stage_timing_observation",
-      "minimumTsRole": "Reads environment flags for diagnostic timing only.",
-      "cannotShrinkFurtherBecause": "Environment access is Node host IO; moving it to Rust would not reduce Hub semantics and needs a separate process-config migration.",
-      "forbiddenSemantics": ["runtime routing", "provider selection", "payload policy"]
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-log-blocks.ts",
-      "classification": "diagnostic_io_ok",
-      "ownerFeature": "hub.stage_timing_observation",
-      "minimumTsRole": "Formats and emits diagnostic timing log lines.",
-      "cannotShrinkFurtherBecause": "Console/log emission is Node diagnostics IO; Rust owns Hub semantics already, and further removal needs a diagnostics sink rewrite.",
-      "forbiddenSemantics": ["client response projection", "provider response parsing", "route policy"]
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-state-blocks.ts",
-      "classification": "diagnostic_io_ok",
-      "ownerFeature": "hub.stage_timing_observation",
-      "minimumTsRole": "Node-local diagnostic timing state used by console and debug snapshot emission.",
-      "cannotShrinkFurtherBecause": "This is process-local observation state; deleting it removes current diagnostics and migrating it is a separate observability runtime project.",
-      "forbiddenSemantics": ["Hub stage policy", "VR policy", "provider policy"]
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-timeline-state-blocks.ts",
-      "classification": "diagnostic_io_ok",
-      "ownerFeature": "hub.stage_timing_observation",
-      "minimumTsRole": "Node-local timing timeline state used only by hub-stage diagnostic observation.",
-      "cannotShrinkFurtherBecause": "Only diagnostic timeline bookkeeping remains; there is no Rust semantic owner gap to close.",
-      "forbiddenSemantics": ["request repair", "response repair", "fallback"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts",
       "classification": "diagnostic_io_ok",
       "ownerFeature": "hub.stage_timing_observation",

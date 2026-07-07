@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { InitProviderTemplate } from '../../src/cli/config/init-provider-catalog.js';
+import { serializeTomlRecord } from '../../src/config/toml-basic.js';
 import {
   asRecord,
   backupFileBestEffort,
@@ -25,7 +26,6 @@ import {
   normalizePort,
   printConfiguredProviders,
   readPrimaryTargetFromRoute,
-  readProviderV2Payload,
   readProvidersFromV1,
   readRoutingFromConfig,
   resolveSelectedTemplates,
@@ -111,7 +111,7 @@ describe('init basic utilities', () => {
     expect(merged.enabled).toBe(true);
   });
 
-  it('inspects config state and provider payload safely', () => {
+  it('inspects config state safely', () => {
     const dir = tmpDir();
     const missing = inspectConfigState(fs, path.join(dir, 'missing.json'));
     expect(missing.kind).toBe('missing');
@@ -121,23 +121,13 @@ describe('init basic utilities', () => {
     const invalid = inspectConfigState(fs, invalidPath);
     expect(invalid.kind).toBe('invalid');
 
-    const v2Path = path.join(dir, 'v2.json');
-    fs.writeFileSync(v2Path, JSON.stringify({ virtualrouterMode: 'v2' }), 'utf8');
+    const v2Path = path.join(dir, 'config.toml');
+    fs.writeFileSync(v2Path, serializeTomlRecord({ virtualrouterMode: 'v2' }), 'utf8');
     const v2 = inspectConfigState(fs, v2Path);
     expect(v2.kind).toBe('v2');
-
-    const payloadPath = path.join(dir, 'provider.json');
-    fs.writeFileSync(
-      payloadPath,
-      JSON.stringify({ version: '2.0.0', providerId: 'x', provider: { id: 'x', models: { m: {} } } }),
-      'utf8'
-    );
-    expect(readProviderV2Payload(fs, payloadPath)?.providerId).toBe('x');
-    fs.writeFileSync(payloadPath, JSON.stringify({ providerId: '', provider: {} }), 'utf8');
-    expect(readProviderV2Payload(fs, payloadPath)).toBeNull();
   });
 
-  it('writes/loads provider v2 config and computes backup paths', () => {
+  it('writes/loads provider v2 config and computes backup paths', async () => {
     const dir = tmpDir();
     const root = path.join(dir, 'provider');
     const filePath = writeProviderV2(fs, path, root, 'demo', {
@@ -148,7 +138,7 @@ describe('init basic utilities', () => {
     });
     expect(fs.existsSync(filePath)).toBe(true);
 
-    const map = loadProviderV2Map(fs, path, root);
+    const map = await loadProviderV2Map(root);
     expect(Object.keys(map)).toEqual(['demo']);
     expect(getProviderV2Path(path, root, 'demo')).toBe(filePath);
 

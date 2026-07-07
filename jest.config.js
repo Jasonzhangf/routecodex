@@ -45,6 +45,7 @@ const config = {
       statements: 60
     }
   },
+  setupFilesAfterEnv: ['<rootDir>/tests/jest-live-safety.ts'],
   moduleNameMapper: (() => {
     // By default, run tests against the vendored `sharedmodule/llmswitch-core` source in this repo.
     // If CI needs to validate against the npm-installed `@jsonstudio/llms` dist, set:

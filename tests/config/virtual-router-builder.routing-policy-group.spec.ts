@@ -1,5 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
+import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-config-loader.js';
+
+async function compileVirtualRouterInput(userConfig: Record<string, unknown>, providerRootDir?: string, options?: Parameters<typeof compileRouteCodexRuntimeConfigManifest>[2]) {
+  return (await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, options)).virtualRouterBootstrapInput;
+}
 
 describe('virtual-router-builder: routing policy group tagging', () => {
   it('requires an explicit routing policy group when multiple groups exist', async () => {
@@ -26,7 +30,7 @@ describe('virtual-router-builder: routing policy group tagging', () => {
       },
     };
 
-    await expect(buildVirtualRouterInputV2(userConfig as any)).rejects.toThrow(
+    await expect(compileVirtualRouterInput(userConfig as any)).rejects.toThrow(
       'requires an explicit routingPolicyGroup'
     );
   });
@@ -55,7 +59,7 @@ describe('virtual-router-builder: routing policy group tagging', () => {
       },
     };
 
-    const result = await buildVirtualRouterInputV2(userConfig as any, undefined, {
+    const result = await compileVirtualRouterInput(userConfig as any, undefined, {
       includeAllRoutingPolicyGroups: true,
     });
     expect(result.routing.thinking).toEqual(
@@ -100,7 +104,7 @@ describe('virtual-router-builder: routing policy group tagging', () => {
       },
     };
 
-    const result = await buildVirtualRouterInputV2(userConfig as any, undefined, {
+    const result = await compileVirtualRouterInput(userConfig as any, undefined, {
       routingPolicyGroup: 'gateway_priority_5555',
     });
 
@@ -145,7 +149,7 @@ describe('virtual-router-builder: routing policy group tagging', () => {
       },
     };
 
-    const result = await buildVirtualRouterInputV2(userConfig as any, undefined, {
+    const result = await compileVirtualRouterInput(userConfig as any, undefined, {
       routingPolicyGroup: 'gateway_priority_5555',
     });
 

@@ -27,11 +27,12 @@ describe('webui render smoke', () => {
     const provider = renderToString(<ProviderPage {...common} apiKey="" />);
     expect(provider).toContain('Provider Pool');
     expect(provider).toContain('tree-section accent-provider');
-    expect(provider).toContain('Provider Editor');
+    expect(provider).toContain('Provider Details');
     const routing = renderToString(<RoutingPage {...common} />);
     expect(routing).toContain('Routing Management');
     expect(routing).toContain('Port Config Entries');
-    expect(routing).toContain('Route Tree');
+    expect(routing).toContain('Route List');
+    expect(routing).toContain('Route Details');
 
     const forwarders = renderToString(<ForwardersPage {...common} />);
     expect(forwarders).toContain('Forwarder Aggregation');

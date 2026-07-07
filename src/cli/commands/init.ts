@@ -16,6 +16,7 @@ import { resolveRccUserDir } from '../../config/user-data-paths.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 import { installBundledProviderPackBestEffort } from '../config/bundled-provider-pack.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
+import { detectUserConfigFormat } from '../../config/user-config-codec.js';
 import {
   asRecord,
   buildRouting,
@@ -28,7 +29,7 @@ import {
   normalizePort,
   printConfiguredProviders,
   resolveSelectedTemplates,
-  writeJsonFile,
+  writeTomlConfigFile,
   writeProviderV2
 } from './init/basic.js';
 import { buildInteractivePrompt } from './init/prompt-utils.js';
@@ -97,6 +98,13 @@ Examples:
       const configPath = options.config
         ? pathImpl.resolve(options.config)
         : pathImpl.join(resolveRccUserDir(home()), 'config.toml');
+      try {
+        detectUserConfigFormat(configPath);
+      } catch (error) {
+        spinner.fail('Failed to initialize configuration');
+        ctx.logger.error(error instanceof Error ? error.message : String(error));
+        return;
+      }
       const profile = typeof profileArg === 'string' ? profileArg.trim().toLowerCase() : '';
       if (profile && profile !== 'default') {
         spinner.fail('Failed to initialize configuration');
@@ -120,7 +128,7 @@ Examples:
 
       if (options.listCurrentProviders) {
         spinner.stop();
-        const providerMap = loadProviderV2Map(fsImpl, pathImpl, providerRoot);
+        const providerMap = await loadProviderV2Map(providerRoot);
         printConfiguredProviders(ctx.logger, providerMap);
         return;
       }
@@ -191,7 +199,7 @@ Examples:
               port: 5555,
               routing: buildRouting(defaultTarget)
             });
-            writeJsonFile(fsImpl, configPath, configPayload);
+            writeTomlConfigFile(fsImpl, configPath, configPayload);
             if (useBundledProviderProfile) {
               const installedProviders = installBundledProviderPackBestEffort({
                 fsImpl,
@@ -358,7 +366,7 @@ Examples:
             routing: routingWithWebSearch,
             policyOptions: webSearchDefaults ? { webSearch: webSearchDefaults.webSearch } : undefined
           });
-          writeJsonFile(fsImpl, configPath, configPayload);
+          writeTomlConfigFile(fsImpl, configPath, configPayload);
           ensureDefaultPrecommandScript();
 
           spinner.succeed(`Configuration initialized: ${configPath}`);
@@ -375,7 +383,7 @@ Examples:
           if (installed.ok) {
             ctx.logger.info(`Docs installed: ${installed.targetDir}`);
           }
-          ctx.logger.info('Next: edit provider baseURL/model/auth in provider/*.json as needed, then run: rcc start');
+          ctx.logger.info('Next: edit provider baseURL/model/auth in provider/<id>/config.v2.toml as needed, then run: rcc start');
           return;
         }
 

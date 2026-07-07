@@ -3,6 +3,24 @@ import { jest } from '@jest/globals';
 const BRIDGE_MODULE_PATH = '../../../../src/modules/llmswitch/bridge.ts';
 const PROVIDER_V2_LOADER_PATH = '../../../../src/config/provider-v2-loader.ts';
 const BOOTSTRAP_MODULE_PATH = '../../../../src/server/runtime/http-server/http-server-bootstrap.ts';
+const RUNTIME_MANIFEST_SYMBOL = Symbol.for('routecodex.runtimeConfigManifest');
+
+function withRuntimeManifest(routerInput: any, pipelineRuntimeConfig: Record<string, unknown> = {}): any {
+  Object.defineProperty(routerInput, RUNTIME_MANIFEST_SYMBOL, {
+    value: {
+      manifestVersion: 'routecodex.runtime-config.v1',
+      routingPolicyGroup: null,
+      virtualRouterBootstrapInput: routerInput,
+      pipelineRuntimeConfig,
+      providerIds: [],
+      forwarderIds: [],
+    },
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return routerInput;
+}
 
 describe('http server runtime setup provider merge', () => {
   afterEach(() => {
@@ -12,6 +30,7 @@ describe('http server runtime setup provider merge', () => {
 
   it('injects referenced provider-v2 configs into virtual router providers during setup', async () => {
     const capturedInputs: any[] = [];
+    const capturedHubConfigs: any[] = [];
 
     jest.unstable_mockModule(PROVIDER_V2_LOADER_PATH, () => ({
       loadProviderConfigsV2: async () => ({
@@ -31,6 +50,21 @@ describe('http server runtime setup provider merge', () => {
 
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       bootstrapVirtualRouterConfig: (input: any) => input,
+      compileRouteCodexRuntimeManifest: async (input: any) => {
+        const group = input?.options?.routingPolicyGroup ?? 'gateway_priority_5520';
+        const routingPolicyGroup = input?.userConfig?.virtualrouter?.routingPolicyGroups?.[group] ?? {};
+        return {
+          manifestVersion: 'routecodex.runtime-config.v1',
+          routingPolicyGroup: group,
+          virtualRouterBootstrapInput: {
+            providers: input?.providerConfigs,
+            routing: routingPolicyGroup.routing ?? {},
+          },
+          pipelineRuntimeConfig: { applyPatch: { mode: 'client' } },
+          providerIds: Object.keys(input?.providerConfigs ?? {}),
+          forwarderIds: [],
+        };
+      },
       getHubPipelineCtor: async () => class HubPipelineMock { constructor(_config: any) {} updateVirtualRouterConfig(): void {} },
       preloadCriticalBridgeRuntimeModules: async () => ({ loaded: [] }),
       loadRoutingInstructionStateSync: () => null,
@@ -58,6 +92,9 @@ describe('http server runtime setup provider merge', () => {
 
     const server: any = {
       userConfig: {
+        servertool: {
+          apply_patch: { mode: 'freeform', allow: ['apply_patch'] },
+        },
         virtualrouter: {
           routingPolicyGroups: {
             gateway_priority_5520: {
@@ -85,7 +122,9 @@ describe('http server runtime setup provider merge', () => {
       },
       ensureHubPipelineCtor: async () =>
         class HubPipelineMock {
-          constructor(_config: any) {}
+          constructor(config: any) {
+            capturedHubConfigs.push(config);
+          }
           updateVirtualRouterConfig(): void {}
         },
       isQuotaRoutingEnabled: () => false,
@@ -103,6 +142,10 @@ describe('http server runtime setup provider merge', () => {
     expect(capturedInputs[0]?.providers?.inline).toBeUndefined();
     expect(capturedInputs[0]?.providers?.openai).toBeDefined();
     expect(capturedInputs[0]?.providers?.openai?.auth?.type).toBe('apiKey');
+    expect(capturedHubConfigs).toHaveLength(1);
+    expect(capturedHubConfigs[0]?.pipelineRuntimeConfig).toEqual({
+      applyPatch: { mode: 'client', allow: ['apply_patch'] },
+    });
   });
 
   it('does not propagate provider profile autoRetry into runtime', async () => {
@@ -271,7 +314,7 @@ describe('http server runtime setup provider merge', () => {
       routingProviderScope: null,
       hubPolicyMode: 'off',
       ensureProviderProfilesFromUserConfig: () => {},
-      resolveRouterBootstrapConfig: async () => ({ routing: { default: [] } }),
+      resolveRouterBootstrapConfig: async () => withRuntimeManifest({ routing: { default: [] } }, { applyPatch: { mode: 'client' } }),
       bootstrapVirtualRouter: async () => providerRuntimeArtifacts,
       ensureHubPipelineCtor: async () =>
         class HubPipelineMock {
@@ -447,7 +490,7 @@ describe('http server runtime setup provider merge', () => {
           virtualRouter: artifacts.config,
         };
       },
-      resolveRouterBootstrapConfig: async () => ({ routing: { provider: [] } }),
+      resolveRouterBootstrapConfig: async () => withRuntimeManifest({ routing: { provider: [] } }, { hitLog: { enabled: true } }),
       bootstrapVirtualRouter: async (input: any) => {
         const defaultTargets =
           Array.isArray(input?.routing?.default)
@@ -594,7 +637,7 @@ describe('http server runtime setup provider merge', () => {
       routingProviderScope: null,
       hubPolicyMode: 'off',
       ensureProviderProfilesFromUserConfig: () => {},
-      resolveRouterBootstrapConfig: async () => ({ routing: { default: [] } }),
+      resolveRouterBootstrapConfig: async () => withRuntimeManifest({ routing: { default: [] } }, { applyPatch: { mode: 'client' } }),
       bootstrapVirtualRouter: async () => providerRuntimeArtifacts,
       ensureHubPipelineCtor: async () =>
         class HubPipelineMock {

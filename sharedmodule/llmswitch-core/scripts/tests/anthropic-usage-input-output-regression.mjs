@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
-import { buildAnthropicResponseFromChat } from '../../dist/conversion/hub/response/response-runtime.js';
+import { buildAnthropicResponseFromChat } from '../../dist/conversion/hub/response/response-runtime-anthropic.js';
 
 function testInputOutputUsageMapping() {
   const chatPayload = {

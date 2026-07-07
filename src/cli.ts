@@ -206,14 +206,6 @@ try {
   logCliNonBlocking('load_optional_command_validate', error);
 }
 
-// User config migration command - explicitly move config.json/config/provider/auth from legacy ~/.routecodex to ~/.rcc
-try {
-  const { createUserConfigMigrateCommand } = await import('./commands/migrate-user-config.js');
-  program.addCommand(createUserConfigMigrateCommand());
-} catch (error) {
-  logCliNonBlocking('load_optional_command_migrate_user_config', error);
-}
-
 // Deprecated `code` command (guides users to `claude`)
 registerCodeCommand(program, {
   logger,

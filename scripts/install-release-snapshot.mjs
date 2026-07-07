@@ -87,12 +87,33 @@ function replaceSnapshotLlmsSymlink(snapshotRoot) {
   }
   const dereferencedSource = fs.realpathSync(sourceLinkPath);
   removeIfExists(targetLinkPath);
-  fs.cpSync(dereferencedSource, targetLinkPath, {
-    recursive: true,
-    dereference: true,
-    preserveTimestamps: true,
-    force: true
-  });
+  for (const relativePath of [
+    'package.json',
+    'dist',
+    'types',
+    'config',
+    'README.md',
+    'LICENSE'
+  ]) {
+    const sourcePath = path.join(dereferencedSource, relativePath);
+    if (!fs.existsSync(sourcePath)) {
+      continue;
+    }
+    const targetPath = path.join(targetLinkPath, relativePath);
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.cpSync(sourcePath, targetPath, {
+      recursive: true,
+      dereference: true,
+      preserveTimestamps: true,
+      force: true
+    });
+  }
+  if (!fs.existsSync(path.join(targetLinkPath, 'package.json'))) {
+    throw new Error(`rcc-llmswitch-core snapshot package.json missing after copy: ${targetLinkPath}`);
+  }
+  if (!fs.existsSync(path.join(targetLinkPath, 'dist', 'native', 'servertool-wrapper.js'))) {
+    throw new Error(`rcc-llmswitch-core snapshot native wrapper missing after copy: ${targetLinkPath}`);
+  }
 }
 
 function copyOptionalIntoSnapshot(relativePath, targetRoot) {

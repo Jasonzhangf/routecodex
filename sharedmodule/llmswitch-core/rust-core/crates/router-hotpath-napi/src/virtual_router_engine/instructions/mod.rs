@@ -12,7 +12,10 @@ pub(crate) use parse::{
     has_routing_instruction_marker_in_responses_context, parse_routing_instructions_from_messages,
     parse_routing_instructions_from_request, parse_single_instruction,
 };
-pub(crate) use path::{is_precommand_script_path_allowed, with_rcc_user_dir_override};
+pub(crate) use path::{
+    is_precommand_script_path_allowed, resolve_rcc_path_for_host, resolve_rcc_user_dir_for_host,
+    with_rcc_user_dir_override,
+};
 pub(crate) use state::{
     apply_routing_instructions, build_metadata_instructions, ensure_stop_message_mode_max_repeats,
     has_client_inject_fields, pre_command_state_snapshot, stop_message_state_snapshot,

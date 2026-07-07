@@ -2,7 +2,12 @@ import { describe, expect, it } from '@jest/globals';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
+import { serializeTomlRecord } from '../../src/config/toml-basic.js';
+import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-config-loader.js';
+
+async function compileVirtualRouterInput(userConfig: Record<string, unknown>, providerRootDir?: string, options?: Parameters<typeof compileRouteCodexRuntimeConfigManifest>[2]) {
+  return (await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, options)).virtualRouterBootstrapInput;
+}
 
 async function createTempProviderRoot(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vr-builder-alias-contract-'));
@@ -17,8 +22,8 @@ async function writeProvider(
   const dir = path.join(root, id);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(
-    path.join(dir, 'config.v2.json'),
-    JSON.stringify(
+    path.join(dir, 'config.v2.toml'),
+    serializeTomlRecord(
       {
         version: '2.0.0',
         providerId: id,
@@ -34,8 +39,6 @@ async function writeProvider(
           models,
         },
       },
-      null,
-      2,
     ),
   );
 }
@@ -99,7 +102,7 @@ describe('virtual-router-builder: provider model alias contract', () => {
         targets: [{ providerId: 'alias-provider', priority: 1 }],
       };
       await expect(
-        buildVirtualRouterInputV2(
+        compileVirtualRouterInput(
           buildConfig('fwd.alias-contract', forwarder, 'fwd.alias-contract') as unknown as Record<string, unknown>,
           root,
           { routingPolicyGroup: 'group_alias_contract' },
@@ -130,7 +133,7 @@ describe('virtual-router-builder: provider model alias contract', () => {
         targets: [{ providerId: 'alias-provider-array', priority: 1 }],
       };
       await expect(
-        buildVirtualRouterInputV2(
+        compileVirtualRouterInput(
           buildConfig('fwd.alias-contract', forwarder, 'fwd.alias-contract') as unknown as Record<string, unknown>,
           root,
           { routingPolicyGroup: 'group_alias_contract' },
@@ -160,7 +163,7 @@ describe('virtual-router-builder: provider model alias contract', () => {
         stickyKey: 'none',
         targets: [{ providerId: 'canonical-provider', priority: 1 }],
       };
-      const input = await buildVirtualRouterInputV2(
+      const input = await compileVirtualRouterInput(
         buildConfig('fwd.alias-contract', forwarder, 'fwd.alias-contract') as unknown as Record<string, unknown>,
         root,
         { routingPolicyGroup: 'group_alias_contract' },
@@ -189,7 +192,7 @@ describe('virtual-router-builder: provider model alias contract', () => {
         stickyKey: 'none',
         targets: [{ providerId: 'canonical-provider', modelId: 'DeepSeek-V4-Pro', priority: 1 }],
       };
-      const input = await buildVirtualRouterInputV2(
+      const input = await compileVirtualRouterInput(
         buildConfig('fwd.alias-contract', forwarder, 'fwd.alias-contract') as unknown as Record<string, unknown>,
         root,
         { routingPolicyGroup: 'group_alias_contract' },
@@ -219,7 +222,7 @@ describe('virtual-router-builder: provider model alias contract', () => {
         targets: [{ providerId: 'canonical-provider', modelId: 'DeepSeek-V4-Pro-Alt', priority: 1 }],
       };
       await expect(
-        buildVirtualRouterInputV2(
+        compileVirtualRouterInput(
           buildConfig('fwd.alias-contract', forwarder, 'fwd.alias-contract') as unknown as Record<string, unknown>,
           root,
           { routingPolicyGroup: 'group_alias_contract' },

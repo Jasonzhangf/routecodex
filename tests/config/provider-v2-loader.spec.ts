@@ -3,13 +3,27 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadProviderConfigsV2 } from '../../src/config/provider-v2-loader.js';
-import { buildVirtualRouterInputV2 } from '../../src/config/virtual-router-types.js';
-import { materializeRouteCodexConfig } from '../../src/config/user-config-loader.js';
-import type { UnknownRecord } from '../../src/config/virtual-router-types.js';
+import { serializeTomlRecord } from '../../src/config/toml-basic.js';
+import { compileRouteCodexRuntimeConfigManifest, materializeRouteCodexConfig, type UnknownRecord } from '../../src/config/user-config-loader.js';
+
+async function compileVirtualRouterInput(userConfig: UnknownRecord, providerRootDir?: string, options?: Parameters<typeof compileRouteCodexRuntimeConfigManifest>[2]) {
+  return (await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, options)).virtualRouterBootstrapInput;
+}
 
 async function createTempDir(prefix: string): Promise<string> {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   return base;
+}
+
+async function writeProviderToml(
+  root: string,
+  providerId: string,
+  payload: UnknownRecord,
+  fileName = 'config.v2.toml'
+): Promise<void> {
+  const providerDir = path.join(root, providerId);
+  await fs.mkdir(providerDir, { recursive: true });
+  await fs.writeFile(path.join(providerDir, fileName), `${serializeTomlRecord(payload)}\n`, 'utf8');
 }
 
 function routeTargets(routing: Record<string, unknown>, routeName: string): string[] {
@@ -53,7 +67,7 @@ describe('ProviderConfig v2 loader', () => {
     }
   });
 
-  it('skips provider directories without config.v2.json', async () => {
+  it('skips provider directories without config.v2.toml', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'foo');
     await fs.mkdir(providerDir, { recursive: true });
@@ -72,22 +86,20 @@ describe('ProviderConfig v2 loader', () => {
       }
     };
     await fs.writeFile(
-      path.join(providerDir, 'config.v1.json'),
-      `${JSON.stringify(v1Config, null, 2)}\n`,
+      path.join(providerDir, 'config.v1.toml'),
+      `${serializeTomlRecord(v1Config)}\n`,
       'utf8'
     );
 
     const configs = await loadProviderConfigsV2(root);
     expect(Object.keys(configs)).not.toContain('foo');
 
-    const v2Path = path.join(providerDir, 'config.v2.json');
+    const v2Path = path.join(providerDir, 'config.v2.toml');
     await expect(fs.readFile(v2Path, 'utf8')).rejects.toThrow();
   });
 
-  it('prefers existing config.v2.json when present', async () => {
+  it('loads existing config.v2.toml when present', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'bar');
-    await fs.mkdir(providerDir, { recursive: true });
 
     const v2Payload = {
       version: '2.0.0',
@@ -97,11 +109,7 @@ describe('ProviderConfig v2 loader', () => {
         baseURL: 'https://bar.example.com'
       }
     };
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify(v2Payload, null, 2)}\n`,
-      'utf8'
-    );
+    await writeProviderToml(root, 'bar', v2Payload);
 
     const configs = await loadProviderConfigsV2(root);
     expect(Object.keys(configs)).toContain('bar');
@@ -110,12 +118,12 @@ describe('ProviderConfig v2 loader', () => {
     expect(cfg.provider.baseURL).toBe('https://bar.example.com');
   });
 
-  it('treats config.v2.toml/json as one base config and prefers toml when both exist', async () => {
+  it('fails fast when retired config.v2.json remains next to config.v2.toml', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'deepseek-web');
     await fs.mkdir(providerDir, { recursive: true });
 
-    await fs.writeFile(
+    await expect(fs.writeFile(
       path.join(providerDir, 'config.v2.json'),
       `${JSON.stringify(
         {
@@ -131,7 +139,7 @@ describe('ProviderConfig v2 loader', () => {
         2
       )}\n`,
       'utf8'
-    );
+    )).resolves.toBeUndefined();
     await fs.writeFile(
       path.join(providerDir, 'config.v2.toml'),
       [
@@ -147,17 +155,13 @@ describe('ProviderConfig v2 loader', () => {
       'utf8'
     );
 
-    const configs = await loadProviderConfigsV2(root);
-    expect(Object.keys(configs)).toEqual(['deepseek-web']);
-    expect(configs['deepseek-web']?.provider.baseURL).toBe('https://toml.example.com');
+    await expect(loadProviderConfigsV2(root)).rejects.toThrow('provider config JSON support removed');
   });
 });
 
-describe('buildVirtualRouterInputV2', () => {
+describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
   it('combines provider v2 configs with routing from userConfig', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'demo');
-    await fs.mkdir(providerDir, { recursive: true });
 
     const v2Payload = {
       version: '2.0.0',
@@ -167,11 +171,7 @@ describe('buildVirtualRouterInputV2', () => {
         baseURL: 'https://demo.example.com'
       }
     };
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify(v2Payload, null, 2)}\n`,
-      'utf8'
-    );
+    await writeProviderToml(root, 'demo', v2Payload);
 
     const userConfig: UnknownRecord = {
       virtualrouter: {
@@ -190,7 +190,7 @@ describe('buildVirtualRouterInputV2', () => {
       }
     };
 
-    const input = await buildVirtualRouterInputV2(userConfig, root);
+    const input = await compileVirtualRouterInput(userConfig, root);
     expect(Object.keys(input.providers)).toEqual(['demo']);
     expect(input.providers.demo.type).toBe('mock-provider');
     expect(input.routing.default).toHaveLength(1);
@@ -199,12 +199,7 @@ describe('buildVirtualRouterInputV2', () => {
 
   it('keeps provider configs referenced by singular route target', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'mini27');
-    await fs.mkdir(providerDir, { recursive: true });
-
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify({
+    await writeProviderToml(root, 'mini27', {
         version: '2.0.0',
         providerId: 'mini27',
         provider: {
@@ -213,11 +208,9 @@ describe('buildVirtualRouterInputV2', () => {
           baseURL: 'https://mini27.example.test/v1',
           defaultModel: 'MiniMax-M2.7'
         }
-      }, null, 2)}\n`,
-      'utf8'
-    );
+      });
 
-    const input = await buildVirtualRouterInputV2({
+    const input = await compileVirtualRouterInput({
       virtualrouter: {
         routingPolicyGroups: {
           default: {
@@ -236,11 +229,7 @@ describe('buildVirtualRouterInputV2', () => {
   it('materializes virtualrouter.forwarders and keeps their target providers', async () => {
     const root = await createTempDir('provider-v2-');
     for (const providerId of ['minimax', 'mini27']) {
-      const providerDir = path.join(root, providerId);
-      await fs.mkdir(providerDir, { recursive: true });
-      await fs.writeFile(
-        path.join(providerDir, 'config.v2.json'),
-        `${JSON.stringify({
+      await writeProviderToml(root, providerId, {
           version: '2.0.0',
           providerId,
           provider: {
@@ -253,9 +242,7 @@ describe('buildVirtualRouterInputV2', () => {
               'MiniMax-M3': { capabilities: ['tools', 'multimodal'] }
             }
           }
-        }, null, 2)}\n`,
-        'utf8'
-      );
+        });
     }
 
     const userConfig: UnknownRecord = {
@@ -311,11 +298,7 @@ describe('buildVirtualRouterInputV2', () => {
   it('materializes multiple forwarders for the same protocol and model', async () => {
     const root = await createTempDir('provider-v2-');
     for (const providerId of ['paid', 'free']) {
-      const providerDir = path.join(root, providerId);
-      await fs.mkdir(providerDir, { recursive: true });
-      await fs.writeFile(
-        path.join(providerDir, 'config.v2.json'),
-        `${JSON.stringify({
+      await writeProviderToml(root, providerId, {
           version: '2.0.0',
           providerId,
           provider: {
@@ -329,12 +312,10 @@ describe('buildVirtualRouterInputV2', () => {
               'gpt-5.3-codex-spark': { capabilities: ['tools', 'thinking'] }
             }
           }
-        }, null, 2)}\n`,
-        'utf8'
-      );
+        });
     }
 
-    const input = await buildVirtualRouterInputV2({
+    const input = await compileVirtualRouterInput({
       virtualrouter: {
         forwarders: {
           'fwd.paid.gpt-5.3-codex-spark': {
@@ -378,11 +359,7 @@ describe('buildVirtualRouterInputV2', () => {
 
   it('materializes providerId-only multimodal forwarder targets into real provider keys', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'media');
-    await fs.mkdir(providerDir, { recursive: true });
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify({
+    await writeProviderToml(root, 'media', {
         version: '2.0.0',
         providerId: 'media',
         provider: {
@@ -396,11 +373,9 @@ describe('buildVirtualRouterInputV2', () => {
             'gpt-5.4-mini': { capabilities: ['text', 'multimodal'] }
           }
         }
-      }, null, 2)}\n`,
-      'utf8'
-    );
+      });
 
-    const input = await buildVirtualRouterInputV2({
+    const input = await compileVirtualRouterInput({
       virtualrouter: {
         forwarders: {
           'fwd.gpt.gpt-5.4-mini': {
@@ -445,11 +420,7 @@ describe('buildVirtualRouterInputV2', () => {
 
   it('expands one forwarder provider target into all provider auth keys', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'freepool');
-    await fs.mkdir(providerDir, { recursive: true });
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify({
+    await writeProviderToml(root, 'freepool', {
         version: '2.0.0',
         providerId: 'freepool',
         provider: {
@@ -466,11 +437,9 @@ describe('buildVirtualRouterInputV2', () => {
             'gpt-5.5': { capabilities: ['text', 'thinking', 'longcontext'] }
           }
         }
-      }, null, 2)}\n`,
-      'utf8'
-    );
+      });
 
-    const input = await buildVirtualRouterInputV2({
+    const input = await compileVirtualRouterInput({
       virtualrouter: {
         forwarders: {
           'fwd.gpt.gpt-5.5': {
@@ -501,20 +470,13 @@ describe('buildVirtualRouterInputV2', () => {
 
   it('normalizes top-level servertool.apply_patch freeform mode into client virtual router input', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'demo');
-    await fs.mkdir(providerDir, { recursive: true });
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify({
-        version: '2.0.0',
-        providerId: 'demo',
-        provider: { type: 'mock-provider', baseURL: 'https://demo.example.com' }
-      }, null, 2)}
-`,
-      'utf8'
-    );
+    await writeProviderToml(root, 'demo', {
+      version: '2.0.0',
+      providerId: 'demo',
+      provider: { type: 'mock-provider', baseURL: 'https://demo.example.com' }
+    });
 
-    const input = await buildVirtualRouterInputV2({
+    const input = await compileVirtualRouterInput({
       servertool: { apply_patch: { mode: 'freeform' } },
       virtualrouter: {
         routingPolicyGroups: {
@@ -530,18 +492,11 @@ describe('buildVirtualRouterInputV2', () => {
 
   it('materializes servertool.apply_patch freeform mode into client runtime bootstrap config', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'demo');
-    await fs.mkdir(providerDir, { recursive: true });
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify({
-        version: '2.0.0',
-        providerId: 'demo',
-        provider: { type: 'mock-provider', baseURL: 'https://demo.example.com' }
-      }, null, 2)}
-`,
-      'utf8'
-    );
+    await writeProviderToml(root, 'demo', {
+      version: '2.0.0',
+      providerId: 'demo',
+      provider: { type: 'mock-provider', baseURL: 'https://demo.example.com' }
+    });
 
     const materialized = await materializeRouteCodexConfig({
       version: '2.0.0',
@@ -567,17 +522,11 @@ describe('buildVirtualRouterInputV2', () => {
   it('materializes only the primary router port routing policy group', async () => {
     const root = await createTempDir('provider-v2-');
     for (const providerId of ['alpha', 'beta']) {
-      const providerDir = path.join(root, providerId);
-      await fs.mkdir(providerDir, { recursive: true });
-      await fs.writeFile(
-        path.join(providerDir, 'config.v2.json'),
-        `${JSON.stringify({
-          version: '2.0.0',
-          providerId,
-          provider: { type: 'mock-provider', baseURL: `https://${providerId}.example.com` }
-        }, null, 2)}\n`,
-        'utf8'
-      );
+      await writeProviderToml(root, providerId, {
+        version: '2.0.0',
+        providerId,
+        provider: { type: 'mock-provider', baseURL: `https://${providerId}.example.com` }
+      });
     }
 
     const materialized = await materializeRouteCodexConfig({
@@ -606,9 +555,6 @@ describe('buildVirtualRouterInputV2', () => {
 
   it('does not auto-synthesize capability routes when route pools are absent', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'ali-coding-plan');
-    await fs.mkdir(providerDir, { recursive: true });
-
     const v2Payload = {
       version: '2.0.0',
       providerId: 'ali-coding-plan',
@@ -623,11 +569,7 @@ describe('buildVirtualRouterInputV2', () => {
         }
       }
     };
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify(v2Payload, null, 2)}\n`,
-      'utf8'
-    );
+    await writeProviderToml(root, 'ali-coding-plan', v2Payload);
 
     const userConfig: UnknownRecord = {
       virtualrouter: {
@@ -646,16 +588,13 @@ describe('buildVirtualRouterInputV2', () => {
       }
     };
 
-    const input = await buildVirtualRouterInputV2(userConfig, root);
+    const input = await compileVirtualRouterInput(userConfig, root);
     expect(input.routing.multimodal).toBeUndefined();
     expect(input.routing.web_search).toBeUndefined();
   });
 
   it('keeps explicitly configured capability routes without injecting additional ones', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'ali-coding-plan');
-    await fs.mkdir(providerDir, { recursive: true });
-
     const v2Payload = {
       version: '2.0.0',
       providerId: 'ali-coding-plan',
@@ -668,11 +607,7 @@ describe('buildVirtualRouterInputV2', () => {
         }
       }
     };
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify(v2Payload, null, 2)}\n`,
-      'utf8'
-    );
+    await writeProviderToml(root, 'ali-coding-plan', v2Payload);
 
     const userConfig: UnknownRecord = {
       virtualrouter: {
@@ -703,7 +638,7 @@ describe('buildVirtualRouterInputV2', () => {
       }
     };
 
-    const input = await buildVirtualRouterInputV2(userConfig, root);
+    const input = await compileVirtualRouterInput(userConfig, root);
     expect(input.routing.multimodal).toHaveLength(1);
     expect(input.routing.multimodal[0].id).toBe('manual-multimodal');
     expect(input.routing.multimodal[0].targets).toEqual(['ali-coding-plan.manual-vl']);
@@ -712,49 +647,35 @@ describe('buildVirtualRouterInputV2', () => {
 
   it('loads suffixed provider configs as standalone providers with explicit providerId', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'ali-coding-plan');
-    await fs.mkdir(providerDir, { recursive: true });
-
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify(
-        {
-          version: '2.0.0',
-          providerId: 'ali-coding-plan',
-          provider: {
-            id: 'ali-coding-plan',
-            type: 'anthropic',
-            baseURL: 'https://example.test/anthropic',
-            models: {
-              'glm-5': { capabilities: ['web_search'] },
-              'qwen3.5-plus': { capabilities: ['web_search', 'multimodal'] }
-            }
+    await writeProviderToml(root, 'ali-coding-plan', {
+      version: '2.0.0',
+      providerId: 'ali-coding-plan',
+      provider: {
+        id: 'ali-coding-plan',
+        type: 'anthropic',
+        baseURL: 'https://example.test/anthropic',
+        models: {
+          'glm-5': { capabilities: ['web_search'] },
+          'qwen3.5-plus': { capabilities: ['web_search', 'multimodal'] }
+        }
+      }
+    });
+    await writeProviderToml(
+      root,
+      'ali-coding-plan',
+      {
+        version: '2.0.0',
+        providerId: 'duck',
+        provider: {
+          id: 'duck',
+          type: 'openai',
+          baseURL: 'https://example.test/openai',
+          models: {
+            'mimo-v2-omni-free': { capabilities: ['vision'] }
           }
-        },
-        null,
-        2
-      )}\n`,
-      'utf8'
-    );
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.duck.json'),
-      `${JSON.stringify(
-        {
-          version: '2.0.0',
-          providerId: 'duck',
-          provider: {
-            id: 'duck',
-            type: 'openai',
-            baseURL: 'https://example.test/openai',
-            models: {
-              'mimo-v2-omni-free': { capabilities: ['vision'] }
-            }
-          }
-        },
-        null,
-        2
-      )}\n`,
-      'utf8'
+        }
+      },
+      'config.v2.duck.toml'
     );
 
     const configs = await loadProviderConfigsV2(root);
@@ -762,39 +683,26 @@ describe('buildVirtualRouterInputV2', () => {
     expect(configs.duck.provider.id).toBe('duck');
   });
 
-  it('buildVirtualRouterInputV2 keeps provider-mode binding provider even if routing does not reference it', async () => {
+  it('keeps provider-mode binding provider even if routing does not reference it', async () => {
     const root = await createTempDir('provider-v2-');
-    const routingProviderDir = path.join(root, 'demo');
-    const directProviderDir = path.join(root, 'dbittai-gpt');
-    await fs.mkdir(routingProviderDir, { recursive: true });
-    await fs.mkdir(directProviderDir, { recursive: true });
-
-    await fs.writeFile(
-      path.join(routingProviderDir, 'config.v2.json'),
-      `${JSON.stringify({
-        version: '2.0.0',
-        providerId: 'demo',
-        provider: {
-          id: 'demo',
-          type: 'openai',
-          baseURL: 'https://demo.example.com'
-        }
-      }, null, 2)}\n`,
-      'utf8'
-    );
-    await fs.writeFile(
-      path.join(directProviderDir, 'config.v2.json'),
-      `${JSON.stringify({
-        version: '2.0.0',
-        providerId: 'dbittai-gpt',
-        provider: {
-          id: 'dbittai-gpt',
-          type: 'responses',
-          baseURL: 'https://dbittai.com/v1'
-        }
-      }, null, 2)}\n`,
-      'utf8'
-    );
+    await writeProviderToml(root, 'demo', {
+      version: '2.0.0',
+      providerId: 'demo',
+      provider: {
+        id: 'demo',
+        type: 'openai',
+        baseURL: 'https://demo.example.com'
+      }
+    });
+    await writeProviderToml(root, 'dbittai-gpt', {
+      version: '2.0.0',
+      providerId: 'dbittai-gpt',
+      provider: {
+        id: 'dbittai-gpt',
+        type: 'responses',
+        baseURL: 'https://dbittai.com/v1'
+      }
+    });
 
     const userConfig: UnknownRecord = {
       httpserver: {
@@ -813,31 +721,25 @@ describe('buildVirtualRouterInputV2', () => {
       }
     };
 
-    const input = await buildVirtualRouterInputV2(userConfig, root);
+    const input = await compileVirtualRouterInput(userConfig, root);
     expect(Object.keys(input.providers).sort()).toEqual(['dbittai-gpt', 'demo']);
   });
 
   it('rejects duplicate provider ids across suffixed config files', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'openai');
-    await fs.mkdir(providerDir, { recursive: true });
-
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify({
-        version: '2.0.0',
-        providerId: 'openai',
-        provider: {
-          id: 'openai',
-          type: 'openai',
-          baseURL: 'https://example.test/openai'
-        }
-      }, null, 2)}\n`,
-      'utf8'
-    );
-    await fs.writeFile(
-      path.join(providerDir, 'config.v2.wuzu.json'),
-      `${JSON.stringify({
+    await writeProviderToml(root, 'openai', {
+      version: '2.0.0',
+      providerId: 'openai',
+      provider: {
+        id: 'openai',
+        type: 'openai',
+        baseURL: 'https://example.test/openai'
+      }
+    });
+    await writeProviderToml(
+      root,
+      'openai',
+      {
         version: '2.0.0',
         providerId: 'openai',
         provider: {
@@ -845,8 +747,8 @@ describe('buildVirtualRouterInputV2', () => {
           type: 'openai',
           baseURL: 'https://example.test/openai-wuzu'
         }
-      }, null, 2)}\n`,
-      'utf8'
+      },
+      'config.v2.wuzu.toml'
     );
 
     await expect(loadProviderConfigsV2(root)).rejects.toThrow('duplicate providerId "openai"');

@@ -16,6 +16,11 @@ const mockBridgeModule = async () => ({
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
   buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
   buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
+  createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({
+    pendingApplyPatchArgumentDeltas: {},
+    applyPatchCallIds: [],
+    emittedApplyPatchDoneCallIds: [],
+  })),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({
     type: 'error',
     status,
@@ -494,7 +499,7 @@ const mockBridgeModule = async () => ({
     return mod.buildResponsesPayloadFromChat(body, { requestId: requestLabel });
   }),
   normalizeResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => frame),
-  projectResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => ({ emit: true, frame, state: undefined })),
+  projectResponsesSseFrameForClientForHttp: jest.fn(({ frame, state }: { frame: string; state?: unknown }) => ({ emit: true, frame, state })),
   rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn((payload: unknown) => {

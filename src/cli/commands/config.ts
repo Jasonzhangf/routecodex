@@ -14,7 +14,6 @@ import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 import { loadProviderConfigsV2 } from '../../config/provider-v2-loader.js';
 import { decodeUserConfigFileSync } from '../../config/user-config-codec.js';
 import { writeUserConfigFile } from '../../config/user-config-writer.js';
-import { migrateUserConfigJsonToToml, migrateAllProviderConfigs } from '../../config/config-migration-json-to-toml.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -526,30 +525,8 @@ Examples:
             }
             break;
           case 'migrate':
-              {
-                console.log('Migrating config.json → config.toml...');
-                const userResult = migrateUserConfigJsonToToml();
-                console.log(`User config: ${userResult.summary}`);
-                
-                console.log('Migrating provider config.v2.json → config.v2.toml...');
-                const providerResult = migrateAllProviderConfigs();
-                console.log(`Provider configs: ${providerResult.summary}`);
-                
-                if (userResult.errors.length > 0) {
-                  for (const e of userResult.errors) {
-                    console.error(`Error (user config): ${e.path} - ${e.message}`);
-                  }
-                }
-                if (providerResult.errors.length > 0) {
-                  for (const e of providerResult.errors) {
-                    console.error(`Error (provider): ${e.path} - ${e.message}`);
-                  }
-                }
-                
-                console.log('\nMigration complete. TOML files are now available alongside JSON originals.');
-                console.log('JSON files are NOT deleted — verify TOML works before removing JSON.');
-                break;
-              }
+            ctx.logger.error('JSON config migration support has been removed. Use config.toml and provider config.v2.toml only.');
+            break;
             case 'switch-group':
           case 'group-switch':
             {

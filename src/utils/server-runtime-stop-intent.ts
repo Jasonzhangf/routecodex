@@ -73,8 +73,10 @@ export function consumeServerStopIntent(
     routeCodexHomeDir?: string;
     nowMs?: number;
     maxAgeMs?: number;
+    ignorePid?: number;
+    preserveMatched?: boolean;
   } = {}
-): { matched: boolean; source?: string; requestedAtMs?: number } {
+): { matched: boolean; source?: string; requestedAtMs?: number; pid?: number } {
   const normalizedPort = normalizePort(port);
   if (!Number.isFinite(normalizedPort) || normalizedPort <= 0) {
     return { matched: false };
@@ -85,6 +87,9 @@ export function consumeServerStopIntent(
   const maxAgeMs = Number.isFinite(options.maxAgeMs as number) && Number(options.maxAgeMs) > 0
     ? Math.floor(options.maxAgeMs as number)
     : DEFAULT_MAX_AGE_MS;
+  const ignorePid = Number.isFinite(options.ignorePid as number) && Number(options.ignorePid) > 0
+    ? Math.floor(Number(options.ignorePid))
+    : null;
   const filePath = resolveIntentPath(normalizedPort, options.routeCodexHomeDir);
   let record: StopIntentRecord | null = null;
   try {
@@ -105,28 +110,41 @@ export function consumeServerStopIntent(
     record = {
       port: Math.floor(parsed.port),
       requestedAtMs: Math.floor(parsed.requestedAtMs),
-      source: typeof parsed.source === 'string' && parsed.source.trim() ? parsed.source.trim() : 'unknown'
+      source: typeof parsed.source === 'string' && parsed.source.trim() ? parsed.source.trim() : 'unknown',
+      ...(Number.isFinite(parsed.pid as number) && Number(parsed.pid) > 0
+        ? { pid: Math.floor(Number(parsed.pid)) }
+        : {})
     };
   } catch {
     return { matched: false };
-  } finally {
-    try {
-      fs.unlinkSync(filePath);
-    } catch {
-      // ignore
-    }
   }
 
   if (!record) {
     return { matched: false };
   }
   if (nowMs - record.requestedAtMs > maxAgeMs) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // ignore
+    }
     return { matched: false };
+  }
+  if (ignorePid && record.pid === ignorePid) {
+    return { matched: false };
+  }
+  if (options.preserveMatched !== true) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // ignore
+    }
   }
   return {
     matched: true,
     source: record.source,
-    requestedAtMs: record.requestedAtMs
+    requestedAtMs: record.requestedAtMs,
+    ...(record.pid ? { pid: record.pid } : {})
   };
 }
 

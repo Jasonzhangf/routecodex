@@ -62,4 +62,57 @@ describe('daemon stop intent', () => {
     });
     expect(consumed.matched).toBe(false);
   });
+
+  it('can preserve a fresh stop intent as a broadcast for multiple supervisors', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-stop-intent-'));
+    const port = 5522;
+
+    writeDaemonStopIntent(port, {
+      source: 'broadcast',
+      routeCodexHomeDir: tempRoot,
+      requestedAtMs: 1700000000000,
+      pid: 111
+    });
+
+    const markerPath = resolveDaemonStopIntentPath(port, tempRoot);
+    const ignored = consumeDaemonStopIntent(port, {
+      routeCodexHomeDir: tempRoot,
+      nowMs: 1700000000001,
+      maxAgeMs: 60_000,
+      ignorePid: 111,
+      preserveMatched: true
+    });
+    expect(ignored.matched).toBe(false);
+    expect(fs.existsSync(markerPath)).toBe(true);
+
+    const firstSupervisor = consumeDaemonStopIntent(port, {
+      routeCodexHomeDir: tempRoot,
+      nowMs: 1700000000002,
+      maxAgeMs: 60_000,
+      ignorePid: 222,
+      preserveMatched: true
+    });
+    expect(firstSupervisor.matched).toBe(true);
+    expect(firstSupervisor.source).toBe('broadcast');
+    expect(firstSupervisor.pid).toBe(111);
+    expect(fs.existsSync(markerPath)).toBe(true);
+
+    const secondSupervisor = consumeDaemonStopIntent(port, {
+      routeCodexHomeDir: tempRoot,
+      nowMs: 1700000000003,
+      maxAgeMs: 60_000,
+      ignorePid: 333,
+      preserveMatched: true
+    });
+    expect(secondSupervisor.matched).toBe(true);
+    expect(fs.existsSync(markerPath)).toBe(true);
+
+    const cleanup = consumeDaemonStopIntent(port, {
+      routeCodexHomeDir: tempRoot,
+      nowMs: 1700000000004,
+      maxAgeMs: 60_000
+    });
+    expect(cleanup.matched).toBe(true);
+    expect(fs.existsSync(markerPath)).toBe(false);
+  });
 });

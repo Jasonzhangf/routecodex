@@ -24,15 +24,15 @@ import { writeRuntimeInstance, updateRuntimeInstanceStatus } from './utils/runti
 import {
   inferUngracefulPreviousExit,
   resolveRuntimeLifecyclePath,
-  safeMarkRuntimeExit,
+  safeMarkRuntimeExitSync,
   safeReadRuntimeLifecycle,
-  safeWriteRuntimeLifecycle,
+  safeWriteRuntimeLifecycleSync,
   type RuntimeLifecycleState
 } from './utils/runtime-exit-forensics.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import { detectUserConfigFormat, parseUserConfigText } from './config/user-config-codec.js';
-import { ensureRccUserDirEnvironment, resolveRccPath, resolveRccPathForRead } from './config/user-data-paths.js';
+import { ensureRccUserDirEnvironment, resolveRccPath } from './config/user-data-paths.js';
 import type { RouteCodexHttpServer } from './server/runtime/http-server.js';
 
 type NodeGlobalWithRequire = typeof globalThis & { require?: NodeJS.Require };
@@ -524,7 +524,7 @@ process.on('exit', (code) => {
   }
 
   if (currentRuntimeLifecyclePath) {
-    void safeMarkRuntimeExit(currentRuntimeLifecyclePath, {
+    const marked = safeMarkRuntimeExitSync(currentRuntimeLifecyclePath, {
       kind: reason.kind,
       code: typeof code === 'number' ? code : null,
       ...(reason.kind === 'signal' ? { signal: reason.signal } : {}),
@@ -532,14 +532,14 @@ process.on('exit', (code) => {
         ? { message: reason.message }
         : {}),
       recordedAt: new Date().toISOString()
-    }).catch((error) => {
-      const reason = error instanceof Error ? error.message : String(error);
+    });
+    if (!marked) {
       logProcessLifecycle({
         event: 'runtime_lifecycle_mark_exit_failed',
         source: 'index.process.on.exit',
-        details: { reason, lifecyclePath: currentRuntimeLifecyclePath }
+        details: { reason: 'sync_mark_failed', lifecyclePath: currentRuntimeLifecyclePath }
       });
-    });
+    }
   }
 
   logProcessLifecycleSync({
@@ -787,7 +787,7 @@ function getDefaultModulesConfigPath(): string {
     scriptDir ? path.join(scriptDir, '..', 'config', 'modules.json') : null,
     path.join(execDir, 'config', 'modules.json'),
     path.join(safeProcessCwd(execDir), 'config', 'modules.json'),
-    resolveRccPathForRead('config', 'modules.json')
+    resolveRccPath('config', 'modules.json')
   ];
 
   for (const configPath of possiblePaths) {
@@ -823,7 +823,7 @@ class RouteCodexApp {
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
   private _bindPort: number | null = null;
-  private configPath: string = path.join(safeProcessCwd(), 'config', 'config.json');
+  private configPath: string = path.join(safeProcessCwd(), 'config', 'config.toml');
   private readonly baseDir: string;
 
   constructor(modulesConfigPath?: string) {
@@ -1156,18 +1156,16 @@ class RouteCodexApp {
         buildVersion: buildInfo.version,
         buildMode: buildInfo.mode
       };
-      void safeWriteRuntimeLifecycle(lifecyclePath, currentState).then((ok) => {
-        if (ok) {
-          setCurrentRuntimeLifecyclePath(lifecyclePath);
-        }
-      }).catch((error) => {
-        const reason = error instanceof Error ? error.message : String(error);
+      const wrote = safeWriteRuntimeLifecycleSync(lifecyclePath, currentState);
+      if (wrote) {
+        setCurrentRuntimeLifecyclePath(lifecyclePath);
+      } else {
         logProcessLifecycle({
           event: 'runtime_lifecycle_write_failed',
           source: 'index.RouteCodexApp.loadConfig',
-          details: { reason, lifecyclePath }
+          details: { reason: 'sync_write_failed', lifecyclePath }
         });
-      });
+      }
     } catch (error) {
       logNonBlockingError('prepare_runtime_exit_forensics', error);
     }
@@ -1752,7 +1750,7 @@ function resolveRestartEntryScript(argv: string[]): string | null {
 
 function resolveInstalledSnapshotRoot(): string | null {
   const candidates = [
-    resolveRccPathForRead('install', 'current'),
+    resolveRccPath('install', 'current'),
     String(process.env.ROUTECODEX_INSTALL_ROOT || '').trim(),
     String(process.env.RCC_INSTALL_ROOT || '').trim(),
   ].filter(Boolean);

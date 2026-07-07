@@ -7,7 +7,7 @@ import type {
   RoutingDiagnostics,
   TargetMetadata,
   VirtualRouterHealthStore,
-} from "../../../native/router-hotpath/virtual-router-contracts.js";
+} from "../../../native/router-hotpath/native-virtual-router-runtime.js";
 
 type HubPolicyMode = "off" | "observe" | "enforce";
 
@@ -33,6 +33,7 @@ export interface StageRecorder {
 
 export interface HubPipelineConfig {
   virtualRouter: VirtualRouterConfig;
+  pipelineRuntimeConfig?: Record<string, unknown>;
   policy?: HubPolicyConfig;
   toolSurface?: HubToolSurfaceConfig;
   healthStore?: VirtualRouterHealthStore;

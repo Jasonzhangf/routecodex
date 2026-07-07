@@ -5,22 +5,6 @@
 
 version: 1
 verification:
-  - feature_id: config.virtual_router_types
-    change_risk: low
-    unit:
-      - src/config/virtual-router-types.ts
-    contract:
-      - docs/architecture/function-map.yml
-      - docs/architecture/verification-map.yml
-    integration: []
-    smoke:
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run build:base
-    notes:
-      - "Deprecated TS type shim only; runtime Virtual Router bootstrap remains Rust-owned."
-      - "Any future restoration of TS config materialization must fail architecture review unless explicitly remapped and tested."
-
   - feature_id: hub.servertool_followup
     change_risk: high
     unit:
@@ -1154,6 +1138,7 @@ verification:
       - tests/red-tests/hub_pipeline_shared_response_wrappers_deleted.test.ts
       - tests/red-tests/hub_pipeline_responses_response_utils_zero_consumer_wrappers_deleted.test.ts
       - tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
     integration:
       - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
@@ -1164,6 +1149,7 @@ verification:
       - npm run verify:llmswitch-core-tsc
     notes:
       - "Shared Responses-to-Chat response projection must stay Rust-owned; TS wrapper must not restore registry, bridge-action, passthrough, or snapshot semantics."
+      - "The required gate must include the full Rust Hub response path fixture `response_path_preserves_existing_responses_custom_tool_call`, not only `build_chat_response_from_responses`, so real provider `custom_tool_call` output cannot collapse to an empty Responses output after RespChatProcess/RespOutbound."
       - "Zero-consumer TS wrappers for tool-call collection and finish-reason resolution must stay removed from the shared response utility file."
       - "Zero-consumer shared response wrappers for output segment extraction, single content-part normalization, chat response reasoning normalization, single-tool mapping, and Responses tool id style must stay removed from TS/native bridge/Rust NAPI public surfaces."
 
@@ -1198,6 +1184,7 @@ verification:
       - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
       - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
     integration:
       - tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts
     smoke:
@@ -1207,6 +1194,7 @@ verification:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
     notes:
       - "Responses client-visible body/SSE projection for apply_patch freeform custom tools must stay Rust-owned; Chat Process owns interception, normalization, and continuation-save preconditions while TS may only call native and write returned JSON/SSE frames."
+      - "The required gate must include the full Rust Hub response path fixture `response_path_preserves_existing_responses_custom_tool_call`, proving `requestSemantics.tools.clientToolsRaw` reaches client projection and `apply_patch` remains a client-visible `custom_tool_call` with non-empty output."
       - "Responses client-visible model/reasoning restore from metadata must stay Rust-owned in Chat Process; residue gate blocks TS restore helpers and metadata parsing in `handler-response-utils.ts`."
       - "Rust response projection contract must lock that client-visible reasoning items never contain `content`; replay-safe `summary`/`encrypted_content` only."
       - "Direct passthrough metadata must not short-circuit replay-safe response projection; transport directness cannot leak `reasoning.content` or item-level pending `status` into client history."
@@ -1262,7 +1250,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
       - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
       - src/cli/config/init-provider-catalog.ts
-      - src/config/toml-commented-template.ts
       - src/provider-sdk/provider-inspect.ts
       - src/provider-sdk/provider-runtime-inference.ts
     contract:
@@ -1444,7 +1431,6 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
-      - "Must verify standalone TS chat-process-session-usage shell remains physically deleted and provider-response.ts only invokes native planChatProcessSessionUsage."
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts
     contract:
@@ -1461,6 +1447,7 @@ verification:
       - "Must verify requestId format `req_{total}_{daily}` is generated by Rust only; TS must not compose locally."
       - "Must verify daily counter resets when local date string changes; no UTC drift."
       - "Must verify global counter survives restart via ~/.rcc/state/global-request-counter.json."
+      - "Must verify standalone TS chat-process-session-usage shell remains physically deleted and provider-response.ts only invokes native planChatProcessSessionUsage."
 
   - feature_id: hub.chat_process_responses_continuation
     change_risk: high
@@ -1773,7 +1760,7 @@ verification:
     unit:
       - src/config/user-config-codec.ts
     contract:
-      - tests/config/toml-shadow-codec.spec.ts
+      - tests/config/toml-codec.spec.ts
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
@@ -1781,16 +1768,39 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "User config JSON/TOML decode must stay centralized in shared codec."
+      - "User config TOML decode path must call Rust TOML parse/serialize through a thin TS shell; config.json is a fail-fast rejected legacy path."
+
+  - feature_id: config.toml_codec
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/config/toml-basic.ts
+      - src/config/toml-comment-preserving.ts
+    contract:
+      - tests/config/toml-codec.spec.ts
+      - tests/config/toml-comment-preserving.spec.ts
+      - npm run verify:config-toml-codec-rust
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "TOML parse/serialize and comment-preserving scalar patch semantics must stay in Rust; src/config/toml-basic.ts and src/config/toml-comment-preserving.ts are native shells only."
 
   - feature_id: config.provider_config_codec
     change_risk: high
     unit:
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
     contract:
-      - tests/config/toml-shadow-codec.spec.ts
+      - tests/config/toml-codec.spec.ts
       - tests/config/provider-v2-loader.spec.ts
+      - npm run verify:config-provider-codec-rust
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
@@ -1798,30 +1808,91 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Provider config JSON/TOML decode must stay centralized in shared codec."
+      - "Provider config TOML decode path must call Rust TOML parse/serialize through a thin TS shell; provider v2 root loading/coercion must call Rust; config.v1.json/config.v2.json are removed legacy paths."
+      - "Provider-update CLI/tooling/admin/init commands must not directly decode provider config files; update/sync/probe/maintenance/admin/init views must consume loadProviderConfigsV2/root loader output by providerId/root."
+
+  - feature_id: config.provider_config_coercion
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/config/provider-config-codec.ts
+      - src/config/provider-v2-loader.ts
+      - src/cli/commands/init/basic.ts
+      - src/cli/commands/init.ts
+      - src/cli/commands/init/workflows.ts
+      - src/server/handlers/config-admin-handler.ts
+      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
+      - src/commands/provider-update.ts
+      - src/commands/provider-update-maintenance.ts
+      - src/tools/provider-update/index.ts
+    contract:
+      - tests/config/provider-v2-loader.spec.ts
+      - npm run verify:config-provider-codec-rust
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Provider config v2 root loading, directory/file IO, duplicate accumulation, config.v2 TOML filename filtering/sorting, coercion, and base/suffixed identity validation must stay Rust-owned; TS provider-v2-loader is only root path/native bridge shell."
+      - "Config grep gate blocks provider-update/provider-update-maintenance/admin provider views/init helpers from reintroducing direct provider config decode/coerce/planning helpers or arbitrary provider --config file shells."
 
   - feature_id: config.user_config_materialization
     change_risk: high
     unit:
       - src/config/routecodex-config-loader.ts
       - src/config/user-config-loader.ts
+      - src/server/runtime/http-server/runtime-config-manifest-carrier.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
     contract:
+      - tests/config/runtime-config-materialization-rust.spec.ts
       - tests/config/routecodex-config-loader.v2-single-source.spec.ts
       - tests/config/provider-v2-loader.spec.ts
+      - tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+      - cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture
     integration: []
     smoke:
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
     notes:
-      - "Runtime materialization must remain the only place that validates v2 single-source layout and projects VR/provider profiles."
+      - "Rust runtime materialization must remain the only place that normalizes implicit-v2 source, validates/projects v2 source layout, resolves primary routingPolicyGroup, extracts materialized providers, builds VR runtime manifest semantics, and applies manifest output back to userConfig.virtualrouter; TS loader remains file IO/profile shell only."
 
-  - feature_id: config.user_config_write_surface
+  - feature_id: config.provider_profile_materialization
     change_risk: high
     unit:
-      - src/config/user-config-writer.ts
+      - src/providers/profile/provider-profile-loader.ts
+      - src/providers/profile/provider-profile.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
     contract:
-      - tests/config/config-writer.spec.ts
+      - src/providers/profile/__tests__/provider-profile-loader.spec.ts
+      - tests/providers/profile/provider-profile-loader.entries.unit.spec.ts
+      - cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture
+    integration:
+      - tests/config/routecodex-config-loader.v2-single-source.spec.ts
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Provider profile projection from materialized runtime config must remain native-owned; TS provider-profile-loader may only expose the public shell/helper APIs."
+
+  - feature_id: config.forwarder_profile_materialization
+    change_risk: high
+    unit:
+      - src/providers/profile/provider-profile-loader.ts
+      - src/providers/profile/forwarder-types.ts
+      - src/providers/profile/forwarder-types-adapter.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+    contract:
+      - tests/providers/forwarder-selection.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
@@ -1829,7 +1900,25 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "User config write/patch must stay in shared writer owner."
+      - "Forwarder profile projection from config must remain native-owned; TS provider-profile-loader may only call buildRouteCodexForwarderProfilesSync and expose public type/adapter APIs."
+
+  - feature_id: config.user_config_write_surface
+    change_risk: high
+    unit:
+      - src/config/user-config-writer.ts
+      - src/config/toml-comment-preserving.ts
+    contract:
+      - tests/config/config-writer.spec.ts
+      - tests/config/toml-comment-preserving.spec.ts
+      - npm run verify:config-toml-codec-rust
+    integration:
+      - tests/grep/config-codec-gate.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "User config file IO must stay in shared writer owner; TOML scalar patch semantics must delegate to config.toml_codec Rust owner."
 
   - feature_id: config.provider_config_write_surface
     change_risk: high

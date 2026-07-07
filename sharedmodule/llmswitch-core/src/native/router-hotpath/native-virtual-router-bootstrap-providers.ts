@@ -4,6 +4,10 @@ import {
 import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-policy.js';
 import { callNativeJson } from './native-router-hotpath.js';
 
+export type {
+  ProviderRuntimeProfile
+} from './virtual-router-contracts.js';
+
 type ModelIndexEntry = {
   declared: boolean;
   models: string[];

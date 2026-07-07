@@ -10,7 +10,6 @@ const exts = new Set(['.ts']);
 
 const allowedFiles = new Set([
   'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-web-search.ts',
-  'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-session-usage.ts',
   'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
 ]);
 
