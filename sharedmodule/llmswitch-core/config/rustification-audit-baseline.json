@@ -4,8 +4,8 @@
   "metrics": {
     "prodTsFileCount": 187,
     "prodTsLocTotal": 39512,
-    "nonNativeFileCount": 58,
-    "nonNativeLocTotal": 9393
+    "nonNativeFileCount": 51,
+    "nonNativeLocTotal": 8708
   },
   "byTopDir": {
     "native": {
@@ -1040,12 +1040,6 @@
       "path": "sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.ts",
       "loc": 19,
       "nativeLinked": true,
-      "topDir": "servertool"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/servertool/log/progress-file.ts",
-      "loc": 112,
-      "nativeLinked": false,
       "topDir": "servertool"
     },
     {
