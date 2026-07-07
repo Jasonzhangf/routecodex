@@ -34,6 +34,7 @@ mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_pipeline;
 mod hub_pipeline_blocks;
+mod hub_pipeline_engine;
 mod hub_pipeline_contracts;
 mod hub_pipeline_lib;
 mod hub_pipeline_session_identifiers;

@@ -1781,19 +1781,22 @@ owners:
 
   - feature_id: hub.runtime_ingress_bridge
     status: active
-    summary: "HubPipeline TS lifecycle bridge for native Virtual Router runtime ingress and deps wiring"
+    summary: "HubPipeline TS lifecycle bridge for native Hub engine handle, Virtual Router runtime ingress, and deps wiring"
     owner_kind: ts_bridge
-    owner_scope: "HubPipeline TS lifecycle bridge for native Virtual Router runtime ingress and deps wiring"
-    owner_module: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
+    owner_scope: "HubPipeline TS lifecycle bridge for native Hub engine handle, Virtual Router runtime ingress, and deps wiring"
+    owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts
     canonical_types:
       - HubPipeline
     canonical_builders:
-      - registerHubPipelineRuntimeIngressBridge
-      - unregisterHubPipelineRuntimeIngressBridge
-      - updateHubPipelineRuntimeDepsBridge
+      - createHubPipelineEngineJson
+      - hubPipelineExecuteJson
+      - disposeHubPipelineEngineJson
+      - updateHubPipelineVirtualRouterConfigJson
+      - updateHubPipelineEngineDepsJson
     allowed_paths:
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine
       - tests/sharedmodule
     forbidden_paths:
       - src/server/runtime/http-server/executor
@@ -1808,7 +1811,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "TS owns only lifecycle glue that calls native Virtual Router runtime ingress/deps APIs."
+      - "TS owns only lifecycle glue that calls native Hub engine handle and Virtual Router runtime ingress/deps APIs."
       - "Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback."
       - "Route selection, health, cooldown, and dependency semantics remain in Rust/native owners."
       - "HubPipeline nested policy/tool-surface/request-metadata type shells are internal only; public barrel exports only live pipeline bridge types."

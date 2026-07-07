@@ -1,3 +1,5 @@
+import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
+
 export interface NativeHubPipelineOrchestrationInput {
   requestId: string;
   endpoint: string;
@@ -96,3 +98,41 @@ export {
   buildRouterMetadataInputWithNative,
   coerceStandardizedRequestFromPayloadWithNative
 } from './native-hub-pipeline-orchestration-semantics-builders.js';
+
+// ---- HubPipeline engine handle exports ----
+
+type NativeFunction1<A, R> = (arg: A) => R;
+type NativeFunction2<A, B, R> = (arg1: A, arg2: B) => R;
+
+function requireNativeHotpathFn<T extends (...args: unknown[]) => unknown>(capability: string): T {
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`${capability} native export is required`);
+  }
+  return fn as T;
+}
+
+export function createHubPipelineEngineJson(inputJson: string): string {
+  const fn = requireNativeHotpathFn<NativeFunction1<string, string>>('createHubPipelineEngineJson');
+  return fn(inputJson);
+}
+
+export function hubPipelineExecuteJson(handle: string, requestJson: string): string {
+  const fn = requireNativeHotpathFn<NativeFunction2<string, string, string>>('hubPipelineExecuteJson');
+  return fn(handle, requestJson);
+}
+
+export function disposeHubPipelineEngineJson(handle: string): void {
+  const fn = requireNativeHotpathFn<NativeFunction1<string, void>>('disposeHubPipelineEngineJson');
+  fn(handle);
+}
+
+export function updateHubPipelineVirtualRouterConfigJson(handle: string, configJson: string): void {
+  const fn = requireNativeHotpathFn<NativeFunction2<string, string, void>>('updateHubPipelineVirtualRouterConfigJson');
+  fn(handle, configJson);
+}
+
+export function updateHubPipelineEngineDepsJson(handle: string, depsJson: string): void {
+  const fn = requireNativeHotpathFn<NativeFunction2<string, string, void>>('updateHubPipelineEngineDepsJson');
+  fn(handle, depsJson);
+}

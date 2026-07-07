@@ -1234,7 +1234,10 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(fs.existsSync(retiredPath)).toBe(false);
     expect(staleImports).toEqual([]);
-    expect(hubPipelineTypesSource).toContain('export interface StageRecorder');
+    expect(hubPipelineTypesSource).not.toContain('export interface StageRecorder');
+    expect(fs.readFileSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/src/servertool/types.ts'), 'utf8')).toContain(
+      'export interface StageRecorder',
+    );
   });
 
   it('hub json type surface must stay type-only without runtime helper exports', () => {
@@ -1258,8 +1261,14 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool progress file shell must not retain zero-consumer event type shell', () => {
+    const progressFilePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/log/progress-file.ts');
+
+    expect(fs.existsSync(progressFilePath)).toBe(false);
+  });
+
+  it('servertool progress log block must not retain zero-consumer event type shell', () => {
     const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/log/progress-file.ts'),
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts'),
       'utf8',
     );
 
@@ -1271,7 +1280,8 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(findings).toEqual([]);
-    expect(source).toContain('export function appendServerToolProgressFileEvent(event: {');
+    expect(source).toContain('export function createServertoolProgressLogger');
+    expect(source).toContain('export function appendServertoolMatchSkippedProgressEvent');
   });
 
   it('stats center shell must not retain zero-consumer bucket or option type shells', () => {
@@ -4135,10 +4145,10 @@ describe('hub pipeline stage residue audit', () => {
     }
 
     expect(findings).toEqual([]);
-    expect(typesSource).toContain('export interface HubPipelineConfig');
-    expect(typesSource).toContain('export interface HubPipelineRequest');
-    expect(typesSource).toContain('export interface HubPipelineResult');
-    expect(typesSource).toContain('export interface NormalizedRequest');
+    expect(typesSource).not.toContain('export interface HubPipelineConfig');
+    expect(typesSource).not.toContain('export interface HubPipelineRequest');
+    expect(typesSource).not.toContain('export interface HubPipelineResult');
+    expect(typesSource).not.toContain('export interface NormalizedRequest');
     expect(typesSource).toContain('export type ProviderProtocol');
   });
 
@@ -5094,7 +5104,6 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'TS owns processMode materialization', pattern: /processMode:\s*["']chat["']/ },
     ]);
 
-    expect(source).toContain('buildHubPipelineMaterializedRequestPlanWithNative');
     expect(nativeWrapperSource).toContain('buildHubPipelineMaterializedRequestPlanWithNative');
     expect(requiredExportsSource).toContain('buildHubPipelineMaterializedRequestPlanJson');
     expect(findings).toEqual([]);

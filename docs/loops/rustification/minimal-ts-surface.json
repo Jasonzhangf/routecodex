@@ -38,6 +38,21 @@
       ]
     },
     {
+      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts",
+      "classification": "native_shell_ok",
+      "ownerFeature": "hub.runtime_ingress_bridge",
+      "minimumTsRole": "Fail-fast native HubPipeline engine handle facade and host request JSON bridge.",
+      "cannotShrinkFurtherBecause": "The Node host still constructs HubPipeline instances and calls the native engine through the package's TS API surface. Further removal requires replacing the JS host lifecycle/API entry with generated bindings or a Rust-owned server host.",
+      "forbiddenSemantics": [
+        "route selection",
+        "provider selection",
+        "response governance",
+        "tool governance",
+        "fallback",
+        "protocol validation"
+      ]
+    },
+    {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts",
       "classification": "diagnostic_io_ok",
       "ownerFeature": "hub.stage_timing_observation",
