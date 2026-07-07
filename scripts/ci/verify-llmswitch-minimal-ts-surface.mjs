@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequiredCoreOutputs } from '../lib/build-core-utils.mjs';
 
 const ROOT = process.cwd();
 const MANIFEST_PATH = path.join(ROOT, 'docs/loops/rustification/minimal-ts-surface.json');
@@ -125,6 +126,10 @@ const PUBLIC_BARREL_FORBIDDEN_EXPORTS = [
     pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/virtual-router-contracts\.js['"]/u,
     message: 'root llmswitch-core index may only export virtual-router-contracts as type-only surface',
   },
+];
+const REQUIRED_CORE_OUTPUT_FORBIDDEN_SUFFIXES = [
+  'conversion/hub/response/provider-response.js',
+  'conversion/shared/responses-conversation-store.js',
 ];
 
 function readGitTrackedFiles() {
@@ -267,6 +272,16 @@ function checkPublicBarrelShrink(errors) {
   }
 }
 
+function checkRequiredCoreOutputShrink(errors) {
+  const requiredOutputs = createRequiredCoreOutputs('/tmp/routecodex-core-dist')
+    .map((entry) => entry.split(path.sep).join('/'));
+  for (const suffix of REQUIRED_CORE_OUTPUT_FORBIDDEN_SUFFIXES) {
+    if (requiredOutputs.some((entry) => entry.endsWith(`/${suffix}`))) {
+      errors.push(`Hub Pipeline TS shell remains a required core dist output: ${suffix}`);
+    }
+  }
+}
+
 function main() {
   const manifest = readManifest();
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
@@ -333,6 +348,7 @@ function main() {
     }
   }
   checkPublicBarrelShrink(errors);
+  checkRequiredCoreOutputShrink(errors);
 
   if (errors.length > 0) {
     console.error('[verify-llmswitch-minimal-ts-surface] FAILED');

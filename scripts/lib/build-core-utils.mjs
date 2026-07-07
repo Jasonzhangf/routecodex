@@ -3,8 +3,6 @@ import path from 'node:path';
 
 export function createRequiredCoreOutputs(outDir) {
   return [
-    path.join(outDir, 'conversion', 'hub', 'response', 'provider-response.js'),
-    path.join(outDir, 'conversion', 'shared', 'responses-conversation-store.js'),
     path.join(outDir, 'native', 'servertool-wrapper.js'),
     path.join(outDir, 'native', 'servertool-wrapper.d.ts'),
     path.join(outDir, 'native', 'router-hotpath', 'native-virtual-router-runtime.js'),

@@ -16,7 +16,7 @@
       "classification": "ts_io_shell_ok",
       "ownerFeature": "hub.response_provider_sse_materialization",
       "minimumTsRole": "Provider response Node IO shell that reads streams, invokes Rust Hub Pipeline/effect planners, executes host side effects, and writes returned SSE frames.",
-      "cannotShrinkFurtherBecause": "The remaining code touches Node Readable streams, MetadataCenter host objects, response store IO, usage persistence, servertool shell execution, stage recording, and returned SSE stream construction. Provider response parsing, governance, projection, effect planning, and error descriptors are Rust-owned through native calls.",
+      "cannotShrinkFurtherBecause": "The remaining code touches Node Readable streams, MetadataCenter host objects, response store IO, usage persistence, servertool shell execution, stage recording, and returned SSE stream construction. Provider response parsing, governance, projection, effect planning, and error descriptors are Rust-owned through native calls. It is no longer a required core dist-output validity lock; remaining blockers are runtime bridge and host IO call sites.",
       "forbiddenSemantics": [
         "provider response parsing",
         "response governance",
@@ -107,7 +107,7 @@
       "classification": "ts_io_shell_ok",
       "ownerFeature": "hub.chat_process_responses_continuation",
       "minimumTsRole": "Node Map/FS/global singleton/timer/error-projection shell executing Rust native plans.",
-      "cannotShrinkFurtherBecause": "The remaining code owns Node-only persistence files, process-global singleton state, timers, Map indexes, and exception projection. Moving it further requires a separate Rust-backed persistent store plus Node host lifecycle replacement; no Hub continuation semantics remain in TS.",
+      "cannotShrinkFurtherBecause": "The remaining code owns Node-only persistence files, process-global singleton state, timers, Map indexes, and exception projection. Moving it further requires a separate Rust-backed persistent store plus Node host lifecycle replacement; no Hub continuation semantics remain in TS. It is no longer a required core dist-output validity lock; remaining blockers are rct-06 and store host IO call sites.",
       "forbiddenSemantics": [
         "manual continuation owner branches",
         "manual scope-key builder",
