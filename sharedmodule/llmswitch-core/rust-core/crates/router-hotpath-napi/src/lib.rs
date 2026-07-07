@@ -280,6 +280,11 @@ pub fn update_route_codex_user_config_string_scalar_json(
 }
 
 #[napi]
+pub fn load_route_codex_config_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::load_routecodex_config_json(&input_json).map_err(napi::Error::from_reason)
+}
+
+#[napi]
 pub fn coerce_route_codex_provider_config_v2_json(input_json: String) -> NapiResult<String> {
     config_provider_codec::coerce_provider_config_v2_from_parsed_json(&input_json)
         .map_err(napi::Error::from_reason)

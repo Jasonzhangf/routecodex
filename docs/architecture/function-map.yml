@@ -2950,9 +2950,9 @@ owners:
 
   - feature_id: config.user_config_materialization
     status: active
-    summary: "runtime user config IO stays in TS shell; v2 source validation and runtime manifest materialization are Rust-owned"
+    summary: "runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned"
     owner_kind: rust_ssot
-    owner_scope: "TS loads TOML/provider files and builds provider profiles; Rust owns v2 source validation, primary routingPolicyGroup resolution, deterministic RouteCodex runtime manifest, and VR bootstrap materialization"
+    owner_scope: "TS captures host env and calls native; Rust owns config path resolution, TOML user/provider file IO, v2 source validation, primary routingPolicyGroup resolution, deterministic RouteCodex runtime manifest, manifest-to-userConfig materialization, and provider profile projection for the runtime loader"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
     canonical_types:
       - LoadedRouteCodexConfig
@@ -2969,6 +2969,7 @@ owners:
     allowed_paths:
       - src/config/routecodex-config-loader.ts
       - src/config/user-config-loader.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/routing-integrations.ts
@@ -2981,6 +2982,7 @@ owners:
     forbidden_mentions_allowlist:
       - LoadedRouteCodexConfig
     required_tests:
+      - tests/config/routecodex-config-loader-rust.spec.ts
       - tests/config/routecodex-config-loader.v2-single-source.spec.ts
       - tests/config/provider-v2-loader.spec.ts
       - tests/config/runtime-config-materialization-rust.spec.ts
@@ -2990,8 +2992,9 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
+      - "src/config/routecodex-config-loader.ts is a native shell only: it must not read config files, parse TOML, load provider roots, or call materialization helpers directly."
       - "Runtime/config callers consume Rust-compiled v2 source normalization, validation, routingPolicyGroup selection, materialized provider extraction, manifest-to-userConfig materialization, and materialized config output; they must not rebuild VR/provider-profile semantics locally."
-      - "src/config/user-config-loader.ts is a TS file IO/profile shell; implicit-v2 normalization, collectV2ConfigSourceErrors, primary routingPolicyGroup selection, materialized virtualrouter.providers extraction, and final virtualrouter materialized assignment must delegate to native."
+      - "src/config/user-config-loader.ts remains a lower-level TS helper shell for direct materialization callers; implicit-v2 normalization, collectV2ConfigSourceErrors, primary routingPolicyGroup selection, materialized virtualrouter.providers extraction, and final virtualrouter materialized assignment must delegate to native."
       - "Server runtime carries the Rust-compiled RouteCodexRuntimeManifest from bootstrap into HubPipeline pipelineRuntimeConfig through a non-enumerable carrier; it must not recompile or consume VR-only bootstrap input."
       - "TS config loader is IO/profile shell only; no TS fallback materialization path is allowed."
 

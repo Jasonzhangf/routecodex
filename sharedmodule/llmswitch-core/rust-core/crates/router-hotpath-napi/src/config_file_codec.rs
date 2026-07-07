@@ -1,10 +1,23 @@
 // feature_id: config.user_config_codec
 // feature_id: config.provider_config_codec
+// feature_id: config.user_config_materialization
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::virtual_router_engine::instructions::{
+    plan_routecodex_config_loader_paths_for_host, resolve_rcc_path_for_host_with_env,
+    resolve_routecodex_config_path_for_host, RouteCodexConfigLoaderPathPlanInput,
+    RouteCodexConfigPathResolveInput,
+};
+use crate::virtual_router_engine::runtime_config_materialization::{
+    build_routecodex_provider_profiles_json, compile_routecodex_runtime_manifest_json,
+    extract_routecodex_materialized_provider_configs_json,
+    materialize_routecodex_user_config_from_manifest_json,
+    normalize_routecodex_v2_runtime_source_json, resolve_primary_routecodex_routing_policy_group_json,
+};
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +49,33 @@ struct UserConfigStringScalarUpdateInput {
     table_path: Vec<String>,
     key: String,
     value: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RouteCodexConfigLoadInput {
+    #[serde(default)]
+    explicit_path: Option<String>,
+    #[serde(default)]
+    routecodex_provider_dir: Option<String>,
+    #[serde(default)]
+    rcc_provider_dir: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    home_dir: Option<String>,
+    #[serde(default)]
+    exec_path: Option<String>,
+    #[serde(default)]
+    routecodex_config_path: Option<String>,
+    #[serde(default)]
+    routecodex_config: Option<String>,
+    #[serde(default)]
+    rcc_home: Option<String>,
+    #[serde(default)]
+    routecodex_user_dir: Option<String>,
+    #[serde(default)]
+    routecodex_home: Option<String>,
 }
 
 pub fn decode_user_config_text_json(input_json: &str) -> Result<String, String> {
@@ -79,6 +119,109 @@ pub fn update_user_config_string_scalar_json(input_json: &str) -> Result<String,
     )?;
     write_raw_config_atomically(&input.config_path, &updated)?;
     decode_persisted_config_output(&input.config_path, &updated, ConfigFileKind::User)
+}
+
+pub fn load_routecodex_config_json(input_json: &str) -> Result<String, String> {
+    let input: RouteCodexConfigLoadInput = serde_json::from_str(input_json)
+        .map_err(|err| format!("[config] invalid routecodex config load input: {err}"))?;
+    let path_plan = plan_routecodex_config_loader_paths_for_host(RouteCodexConfigLoaderPathPlanInput {
+        explicit_path: input.explicit_path.as_deref(),
+        routecodex_provider_dir: input.routecodex_provider_dir.as_deref(),
+        rcc_provider_dir: input.rcc_provider_dir.as_deref(),
+    });
+    let config_path = match path_plan.explicit_path.as_deref() {
+        Some(path) => Path::new(path).to_path_buf(),
+        None => resolve_routecodex_config_path_for_host(RouteCodexConfigPathResolveInput {
+            preferred_path: None,
+            config_name: None,
+            allow_directory_scan: true,
+            base_dir: None,
+            cwd: input.cwd.as_deref(),
+            home_dir: input.home_dir.as_deref(),
+            exec_path: input.exec_path.as_deref(),
+            routecodex_config_path: input.routecodex_config_path.as_deref(),
+            routecodex_config: input.routecodex_config.as_deref(),
+            rcc_home: input.rcc_home.as_deref(),
+            routecodex_user_dir: input.routecodex_user_dir.as_deref(),
+            routecodex_home: input.routecodex_home.as_deref(),
+        })?,
+    };
+    let config_path_text = config_path.to_string_lossy().to_string();
+    let raw = fs::read_to_string(&config_path)
+        .map_err(|err| format!("Failed to read config file {}: {err}", config_path.display()))?;
+    let decoded_json = decode_config_text_json(
+        &json!({
+            "configPath": config_path_text,
+            "raw": raw,
+        })
+        .to_string(),
+        ConfigFileKind::User,
+    )?;
+    let decoded: Value = serde_json::from_str(&decoded_json)
+        .map_err(|err| format!("[config] failed to decode user config load output: {err}"))?;
+    let parsed = decoded
+        .get("parsed")
+        .cloned()
+        .ok_or_else(|| "[config] routecodex config load output missing parsed user config".to_string())?;
+    let normalized = extract_user_config_object(
+        &normalize_routecodex_v2_runtime_source_json(json!({ "userConfig": parsed }).to_string())
+            .map_err(|err| err.to_string())?,
+    )?;
+    let errors = collect_source_errors(&normalized)?;
+    if !errors.is_empty() {
+        let mut message = "[config] v2 config must use single-source layout:".to_string();
+        for error in errors {
+            message.push_str("\n- ");
+            message.push_str(&error);
+        }
+        return Err(message);
+    }
+    let provider_configs = match extract_provider_configs(&normalized)? {
+        Some(configs) => configs,
+        None => load_provider_configs_for_loader(&input, path_plan.provider_root_dir.as_deref())?,
+    };
+    let routing_policy_group = resolve_primary_routecodex_routing_policy_group_json(
+        json!({ "userConfig": normalized }).to_string(),
+    )
+    .map_err(|err| err.to_string())?;
+    let routing_policy_group_value: Value = serde_json::from_str(&routing_policy_group)
+        .map_err(|err| format!("[config] failed to decode routing policy group: {err}"))?;
+    let mut options = serde_json::Map::new();
+    if let Some(group) = routing_policy_group_value
+        .get("routingPolicyGroup")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        options.insert("routingPolicyGroup".to_string(), Value::String(group.to_string()));
+    }
+    let manifest_json = compile_routecodex_runtime_manifest_json(
+        json!({
+            "userConfig": normalized,
+            "providerConfigs": provider_configs,
+            "options": Value::Object(options),
+        })
+        .to_string(),
+    )
+    .map_err(|err| err.to_string())?;
+    let manifest: Value = serde_json::from_str(&manifest_json)
+        .map_err(|err| format!("[config] failed to decode runtime manifest: {err}"))?;
+    let materialized = extract_user_config_object(
+        &materialize_routecodex_user_config_from_manifest_json(
+            json!({
+                "userConfig": normalized,
+                "manifest": manifest,
+            })
+            .to_string(),
+        )
+        .map_err(|err| err.to_string())?,
+    )?;
+    let provider_profiles = extract_provider_profiles(&materialized)?;
+    serde_json::to_string(&json!({
+        "configPath": config_path_text,
+        "userConfig": materialized,
+        "providerProfiles": provider_profiles,
+    }))
+    .map_err(|err| format!("[config] failed to encode routecodex config load output: {err}"))
 }
 
 #[derive(Clone, Copy)]
@@ -205,6 +348,99 @@ fn write_raw_config_atomically(config_path: &str, raw: &str) -> Result<(), Strin
     fs::write(&tmp_path, raw).map_err(|err| format!("Failed to write config file {tmp_path}: {err}"))?;
     fs::rename(&tmp_path, config_path)
         .map_err(|err| format!("Failed to move config file {tmp_path} to {config_path}: {err}"))
+}
+
+fn extract_user_config_object(raw_json: &str) -> Result<Value, String> {
+    let value: Value = serde_json::from_str(raw_json)
+        .map_err(|err| format!("[config] failed to decode user config object: {err}"))?;
+    let user_config = value
+        .get("userConfig")
+        .cloned()
+        .ok_or_else(|| "[config] native loader missing userConfig".to_string())?;
+    if !user_config.is_object() {
+        return Err("[config] native loader returned non-object userConfig".to_string());
+    }
+    Ok(user_config)
+}
+
+fn collect_source_errors(user_config: &Value) -> Result<Vec<String>, String> {
+    let raw = crate::virtual_router_engine::runtime_config_materialization::collect_v2_config_source_errors_json(
+        json!({ "userConfig": user_config }).to_string(),
+    )
+    .map_err(|err| err.to_string())?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|err| format!("[config] failed to decode source errors: {err}"))?;
+    let errors = value
+        .get("errors")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "[config] native loader source validator returned invalid errors".to_string())?;
+    Ok(errors
+        .iter()
+        .filter_map(Value::as_str)
+        .map(ToString::to_string)
+        .collect())
+}
+
+fn extract_provider_configs(user_config: &Value) -> Result<Option<Value>, String> {
+    let raw = extract_routecodex_materialized_provider_configs_json(
+        json!({ "userConfig": user_config }).to_string(),
+    )
+    .map_err(|err| err.to_string())?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|err| format!("[config] failed to decode materialized provider configs: {err}"))?;
+    match value.get("providerConfigs") {
+        Some(Value::Null) | None => Ok(None),
+        Some(configs) if configs.is_object() => Ok(Some(configs.clone())),
+        _ => Err("[config] native loader provider extractor returned invalid providerConfigs".to_string()),
+    }
+}
+
+fn load_provider_configs_for_loader(
+    input: &RouteCodexConfigLoadInput,
+    provider_root_dir: Option<&str>,
+) -> Result<Value, String> {
+    let root_dir = match provider_root_dir {
+        Some(value) if !value.trim().is_empty() => value.trim().to_string(),
+        _ => resolve_rcc_path_for_host_with_env(
+            input.home_dir.as_deref(),
+            &["provider".to_string()],
+            &[
+                ("RCC_HOME", input.rcc_home.as_deref()),
+                ("ROUTECODEX_USER_DIR", input.routecodex_user_dir.as_deref()),
+                ("ROUTECODEX_HOME", input.routecodex_home.as_deref()),
+            ],
+        )?
+        .to_string_lossy()
+        .to_string(),
+    };
+    let raw = crate::config_provider_codec::load_provider_configs_v2_from_root_json(
+        &json!({ "rootDir": root_dir }).to_string(),
+    )?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|err| format!("[config] failed to decode provider configs: {err}"))?;
+    let configs = value
+        .get("configs")
+        .cloned()
+        .ok_or_else(|| "[config] native provider root loader missing configs".to_string())?;
+    if !configs.is_object() {
+        return Err("[config] native provider root loader returned invalid configs".to_string());
+    }
+    Ok(configs)
+}
+
+fn extract_provider_profiles(user_config: &Value) -> Result<Value, String> {
+    let raw = build_routecodex_provider_profiles_json(json!({ "userConfig": user_config }).to_string())
+        .map_err(|err| err.to_string())?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|err| format!("[config] failed to decode provider profiles: {err}"))?;
+    let profiles = value
+        .get("providerProfiles")
+        .cloned()
+        .ok_or_else(|| "[config] native provider profile builder missing providerProfiles".to_string())?;
+    if !profiles.is_object() {
+        return Err("[config] native provider profile builder returned invalid providerProfiles".to_string());
+    }
+    Ok(profiles)
 }
 
 fn ensure_toml_path(config_path: &str, kind: &ConfigFileKind) -> Result<(), String> {

@@ -43,6 +43,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "writeRouteCodexUserConfigFileJson",
   "writeRouteCodexProviderConfigFileJson",
   "updateRouteCodexUserConfigStringScalarJson",
+  "loadRouteCodexConfigJson",
   "coerceRouteCodexProviderConfigV2Json",
   "planRouteCodexProviderConfigV2FilesJson",
   "resolveRouteCodexProviderConfigV2IdentityJson",

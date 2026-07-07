@@ -7,6 +7,68 @@ version: 1
 status: seed
 
 chains:
+  - chain_id: config.user_config_materialization.mainline
+    summary: "RouteCodex runtime config loading flows from the public TS shell into the native Rust loader, then into Rust path/provider/materialization owners before returning LoadedRouteCodexConfig."
+    entry_contract:
+      node: ConfigLoad01PublicShell
+      owner_doc: docs/architecture/function-map.yml
+    edges:
+      - step_id: cfg-load-01
+        from_node: ConfigLoad01PublicShell
+        to_node: ConfigLoad02NativeBridge
+        caller_symbol: loadRouteCodexConfig
+        caller_file: src/config/routecodex-config-loader.ts
+        callee_symbol: loadRouteCodexConfigNativeSync
+        callee_file: src/modules/llmswitch/bridge/routing-integrations.ts
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "optional explicit config path plus current host env provider/root overrides"
+        semantic_output: "native loader input with cwd/home/exec and RouteCodex/RCC env snapshot"
+        status: anchored
+      - step_id: cfg-load-02
+        from_node: ConfigLoad02NativeBridge
+        to_node: ConfigLoad03RustLoader
+        caller_symbol: loadRouteCodexConfigNativeSync
+        caller_file: src/modules/llmswitch/bridge/routing-integrations.ts
+        callee_symbol: load_route_codex_config_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "JSON native loader input"
+        semantic_output: "NAPI call into Rust config loader with fail-fast error projection"
+        status: anchored
+      - step_id: cfg-load-03
+        from_node: ConfigLoad03RustLoader
+        to_node: ConfigLoad04UserConfigParsed
+        caller_symbol: load_route_codex_config_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+        callee_symbol: load_routecodex_config_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "host env snapshot and optional explicit path"
+        semantic_output: "resolved TOML config path and parsed userConfig object"
+        status: anchored
+      - step_id: cfg-load-04
+        from_node: ConfigLoad04UserConfigParsed
+        to_node: ConfigLoad05RuntimeManifestCompiled
+        caller_symbol: load_routecodex_config_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+        callee_symbol: compile_routecodex_runtime_manifest_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "normalized v2 userConfig plus materialized or root-loaded providerConfigs"
+        semantic_output: "deterministic RouteCodex runtime manifest and selected routingPolicyGroup"
+        status: anchored
+      - step_id: cfg-load-05
+        from_node: ConfigLoad05RuntimeManifestCompiled
+        to_node: ConfigLoad06LoadedConfigReturned
+        caller_symbol: load_routecodex_config_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+        callee_symbol: materialize_routecodex_user_config_from_manifest_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "normalized userConfig and compiled runtime manifest"
+        semantic_output: "LoadedRouteCodexConfig with configPath, materialized userConfig, and providerProfiles"
+        status: anchored
+
   - chain_id: webui.config_editor_surface.mainline
     summary: "WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics."
     entry_contract:

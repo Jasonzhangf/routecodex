@@ -419,6 +419,55 @@ export function updateRouteCodexUserConfigStringScalarNativeSync(input: {
   }))), 'User config scalar update');
 }
 
+export function loadRouteCodexConfigNativeSync(input: {
+  explicitPath?: string;
+  routecodexProviderDir?: string;
+  rccProviderDir?: string;
+} = {}): {
+  configPath: string;
+  userConfig: AnyRecord;
+  providerProfiles: AnyRecord;
+} {
+  const binding = loadNativeBindingForConfigCodec();
+  const fn = binding.loadRouteCodexConfigJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] loadRouteCodexConfigJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    explicitPath: input.explicitPath,
+    routecodexProviderDir: input.routecodexProviderDir ?? process.env.ROUTECODEX_PROVIDER_DIR,
+    rccProviderDir: input.rccProviderDir ?? process.env.RCC_PROVIDER_DIR,
+    cwd: safeBridgeCwd(),
+    homeDir: process.env.HOME,
+    execPath: process.execPath,
+    routecodexConfigPath: process.env.ROUTECODEX_CONFIG_PATH,
+    routecodexConfig: process.env.ROUTECODEX_CONFIG,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-bridge] RouteCodex config loader returned invalid payload');
+  }
+  const loaded = output as AnyRecord;
+  if (
+    typeof loaded.configPath !== 'string' ||
+    !loaded.userConfig ||
+    typeof loaded.userConfig !== 'object' ||
+    Array.isArray(loaded.userConfig) ||
+    !loaded.providerProfiles ||
+    typeof loaded.providerProfiles !== 'object' ||
+    Array.isArray(loaded.providerProfiles)
+  ) {
+    throw new Error('[llmswitch-bridge] RouteCodex config loader returned invalid shape');
+  }
+  return loaded as {
+    configPath: string;
+    userConfig: AnyRecord;
+    providerProfiles: AnyRecord;
+  };
+}
+
 export async function coerceRouteCodexProviderConfigV2(
   parsed: AnyRecord,
   fallbackProviderId?: string

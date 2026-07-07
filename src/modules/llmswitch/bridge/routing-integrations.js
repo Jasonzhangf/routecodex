@@ -321,6 +321,39 @@ export function updateRouteCodexUserConfigStringScalarNativeSync(input) {
         value: input.value
     }))), 'User config scalar update');
 }
+export function loadRouteCodexConfigNativeSync(input = {}) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.loadRouteCodexConfigJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] loadRouteCodexConfigJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({
+        explicitPath: input.explicitPath,
+        routecodexProviderDir: input.routecodexProviderDir ?? process.env.ROUTECODEX_PROVIDER_DIR,
+        rccProviderDir: input.rccProviderDir ?? process.env.RCC_PROVIDER_DIR,
+        cwd: safeBridgeCwd(),
+        homeDir: process.env.HOME,
+        execPath: process.execPath,
+        routecodexConfigPath: process.env.ROUTECODEX_CONFIG_PATH,
+        routecodexConfig: process.env.ROUTECODEX_CONFIG,
+        rccHome: process.env.RCC_HOME,
+        routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+        routecodexHome: process.env.ROUTECODEX_HOME
+    })));
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error('[llmswitch-bridge] RouteCodex config loader returned invalid payload');
+    }
+    if (typeof output.configPath !== 'string' ||
+        !output.userConfig ||
+        typeof output.userConfig !== 'object' ||
+        Array.isArray(output.userConfig) ||
+        !output.providerProfiles ||
+        typeof output.providerProfiles !== 'object' ||
+        Array.isArray(output.providerProfiles)) {
+        throw new Error('[llmswitch-bridge] RouteCodex config loader returned invalid shape');
+    }
+    return output;
+}
 export async function coerceRouteCodexProviderConfigV2(parsed, fallbackProviderId) {
     return coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId);
 }

@@ -27390,3 +27390,41 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - Commit: `6aded42 refactor(config): native format detection`.
   - No config files or provider configs were edited, and no live server was started/restarted.
   - Remaining config TS is Node file IO / atomic rename / injected fs shell / env publishing / route loader orchestration / authfile content read-cache. Further shrink requires moving Node host IO boundaries into Rust, not just semantic Rustification.
+
+# 2026-07-07: RouteCodex config loader is native-owned
+
+- Scope: continue config-module Rust closeout by moving `src/config/routecodex-config-loader.ts` from TS orchestration to a native Rust loader shell; no live startup/restart and no `~/.rcc` config edits.
+- Change:
+  - Added Rust `load_routecodex_config_json` in `config_file_codec.rs` and NAPI/bridge export `loadRouteCodexConfigJson` / `loadRouteCodexConfigNativeSync`.
+  - Rust loader now resolves the config path, reads TOML, decodes user config, normalizes/validates v2 source, loads provider configs from materialized config or provider root, compiles runtime manifest, applies manifest back to `userConfig`, and builds provider profiles.
+  - Critical fix during pre-wire blackbox: default provider root must be resolved from the JS env snapshot (`RCC_HOME` / `ROUTECODEX_USER_DIR` / `ROUTECODEX_HOME`) to `<rcc_user_dir>/provider`; using `plan_provider_config_root_for_host(None).unwrap_or_default()` was invalid and could read the wrong relative root.
+  - Added `tests/config/routecodex-config-loader-rust.spec.ts` for pre-wire TS/native parity over explicit TOML, env provider root, auto path no-sticky-cache, v1 rejection, and retired JSON rejection.
+  - Wired `src/config/routecodex-config-loader.ts` only after parity passed; TS loader is now a native host-env shell and no longer imports `fs/promises`, config path resolver, config codec parser, or materialization helpers.
+  - Updated function map, verification map, and mainline call map for the native loader call chain.
+- Verification:
+  - Pre-wire parity Jest PASS: `routecodex-config-loader-rust` + `routecodex-config-loader.v2-single-source` = 2 suites / 14 tests.
+  - Post-wire focused Jest PASS with `--forceExit`: 6 suites / 51 tests (`routecodex-config-loader-rust`, `routecodex-config-loader.v2-single-source`, `provider-v2-loader`, `runtime-config-materialization-rust`, `http-server-runtime-setup.provider-merge`, `config-codec-gate`).
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture` PASS: 5 tests.
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS: 8 tests.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:config-path-resolution-rust` PASS: `resolve_rcc` 6 + config path 3 tests.
+  - `npm run verify:config-toml-codec-rust` PASS: 7 tests.
+  - `npm run verify:config-provider-codec-rust` PASS: 9 tests.
+  - `npm run verify:llmswitch-minimal-ts-surface -- --json` PASS: entries 12, non-native prod TS files 10, explicit native-linked shells 2.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=135`, `prodTsLocTotal=27648`, `nonNativeFileCount=10`, `nonNativeLocTotal=2533`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay and no real `~/.rcc` config/provider file edits.
+  - Architecture review: no fallback or duplicate TS loader semantics remain in `routecodex-config-loader.ts`; lower-level `user-config-loader.ts` remains for direct materialization callers and already delegates semantic owners to Rust.
+
+# 2026-07-07: Hub Pipeline zero-TS audit snapshot
+
+- Unique marker: `hub-zero-ts-audit-20260707-current-surface`.
+- Scope: audit-only; no runtime code change. Current worktree already dirty, so evidence reflects local current state.
+- Current verified state: Hub semantic mainlines are anchored in Rust for `request.mainline`, `response.mainline`, `servertool.hook_skeleton.mainline`, and `responses.continuation.mainline`; prior closeout memory says Hub rustification live closeout was verified on `0.90.3570`, but this audit did not rerun live install/replay.
+- Remaining TS surface is not ordinary Hub semantic owner debt: `verify:llmswitch-minimal-ts-surface` reports 12 allowed entries, 10 current non-native prod TS files, and 2 explicit native-linked TS shells. `llmswitch-rustification-audit` reports `prodTsFileCount=135`, `prodTsLocTotal=27648`, `nonNativeFileCount=10`, `nonNativeLocTotal=2533`.
+- Hub-adjacent non-native files to keep classified/gated: `provider-response.ts` as Node stream/side-effect shell, `responses-conversation-store.ts` as Map/FS/timer persistence shell, Hub type-only files, `hub-stage-timing.ts` diagnostic IO, servertool/types TS type shell, plus non-Hub VR/error/runtime telemetry shells.
+- Active blockers to literal "zero .ts files" are host architecture boundaries, not Hub business logic: Node stream/SSE IO, MetadataCenter host object writes, response store persistence/Map/timers, public TS type declarations, and native binding wrappers. Achieving literal zero TS needs a generated bindings/declaration surface and Rust-backed host IO/store/lifecycle replacement, not just moving another Hub helper.
+- Gates run in this audit: `verify:llmswitch-minimal-ts-surface -- --json` PASS; `verify:llmswitch-rustification-audit -- --json` PASS; `verify:architecture-thin-wrapper-only` PASS; `verify:function-map-compile-gate` PASS; `verify:servertool-rust-only` PASS.

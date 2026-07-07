@@ -1859,13 +1859,16 @@ verification:
       - src/config/routecodex-config-loader.ts
       - src/config/user-config-loader.ts
       - src/server/runtime/http-server/runtime-config-manifest-carrier.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
     contract:
+      - tests/config/routecodex-config-loader-rust.spec.ts
       - tests/config/runtime-config-materialization-rust.spec.ts
       - tests/config/routecodex-config-loader.v2-single-source.spec.ts
       - tests/config/provider-v2-loader.spec.ts
       - tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts
       - tests/grep/config-codec-gate.spec.ts
+      - cargo test -p router-hotpath-napi config_file_codec --lib -- --nocapture
       - cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture
     integration: []
     smoke:
@@ -1873,7 +1876,8 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Rust runtime materialization must remain the only place that normalizes implicit-v2 source, validates/projects v2 source layout, resolves primary routingPolicyGroup, extracts materialized providers, builds VR runtime manifest semantics, and applies manifest output back to userConfig.virtualrouter; TS loader remains file IO/profile shell only."
+      - "Rust runtime loader must match legacy TS loader blackbox semantics before wiring; after wiring, routecodex-config-loader.ts remains a native host-env shell only."
+      - "Rust runtime materialization must remain the only place that normalizes implicit-v2 source, validates/projects v2 source layout, resolves primary routingPolicyGroup, extracts materialized providers, builds VR runtime manifest semantics, and applies manifest output back to userConfig.virtualrouter."
 
   - feature_id: config.provider_profile_materialization
     change_risk: high

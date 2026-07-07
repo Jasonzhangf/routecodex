@@ -107,6 +107,7 @@ export {
   writeRouteCodexUserConfigFileNativeSync,
   writeRouteCodexProviderConfigFileNativeSync,
   updateRouteCodexUserConfigStringScalarNativeSync,
+  loadRouteCodexConfigNativeSync,
   coerceRouteCodexProviderConfigV2,
   coerceRouteCodexProviderConfigV2Sync,
   planRouteCodexProviderConfigV2FilesSync,
