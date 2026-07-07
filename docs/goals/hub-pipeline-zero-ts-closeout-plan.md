@@ -2,12 +2,15 @@
 
 ## Goal
 
-Drive the Hub Pipeline / chat process / provider response runtime surface toward zero TypeScript runtime semantics, with any remaining TypeScript limited to temporary, audited, machine-gated shells that have explicit deletion paths.
+Drive the Hub Pipeline / chat process / provider response runtime surface to literal zero hand-written TypeScript under the Hub Pipeline watchlist by shrinking public references, build outputs, host IO call sites, and type imports until the remaining TS files can be physically deleted.
+
+The current "thin shell" state is an intermediate checkpoint, not the final target. Pure Rust closeout means Hub Pipeline consumers call Rust/NAPI-owned contracts directly or consume generated declarations; no importable TS IO/type facade remains as the Hub owner.
 
 ## Acceptance Criteria
 
 - No `ts_semantic_debt` remains in the source/doc-only rustification audit.
-- Every remaining production TypeScript file under the Hub Pipeline watchlist is either removed or classified in `docs/loops/rustification/minimal-ts-surface.json` with a concrete deletion blocker.
+- Every remaining production TypeScript file under the Hub Pipeline watchlist is either removed or classified in `docs/loops/rustification/minimal-ts-surface.json` with a concrete deletion blocker and an active reference-shrink wave.
+- Public package barrels, ambient declarations, required dist outputs, tests, and runtime bridges no longer import or require deleted Hub Pipeline TS files.
 - Dead or unreferenced TypeScript files are physically deleted after dependency proof.
 - Active semantic work is moved to Rust owners under `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/`.
 - Function map, mainline call map, verification map, rustification state, and lessons are updated in the same change set.
@@ -17,22 +20,41 @@ Drive the Hub Pipeline / chat process / provider response runtime surface toward
 
 Observed from source/doc-only audit on 2026-07-07 after the latest type-shell closeout slices:
 
-- `minimal-ts-surface.json` has 20 entries.
+- `npm run verify:llmswitch-minimal-ts-surface -- --json`: PASS.
+- `minimal-ts-surface.json` has 13 entries:
+  - 10 current non-native production TS files.
+  - 3 explicit native-linked TS shells.
+- `npm run verify:llmswitch-rustification-audit -- --json`: PASS.
 - Current audit metrics:
-  - `prodTsFileCount`: 143
-  - `prodTsLocTotal`: 28629
-  - `nonNativeFileCount`: 19
-  - `nonNativeLocTotal`: 3620
+  - `prodTsFileCount`: 133
+  - `prodTsLocTotal`: 27445
+  - `nonNativeFileCount`: 10
+  - `nonNativeLocTotal`: 2437
 - Categories:
-  - `type_shell_ok`: 5
-  - `ts_io_shell_ok`: 6
-  - `diagnostic_io_ok`: 7
+  - `type_shell_ok`: 6
+  - `ts_io_shell_ok`: 4
+  - `diagnostic_io_ok`: 1
   - `native_shell_ok`: 1
-- Known high-value active surfaces:
-  - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
-  - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
-  - diagnostic timing modules under `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing*`
-  - type-only shells and contracts that require Rust-generated `.d.ts` or ABI cleanup before deletion.
+- Current manifest entries:
+  - `conversion/hub/response/provider-response.ts` (`ts_io_shell_ok`, native-linked)
+  - `conversion/shared/responses-conversation-store.ts` (`ts_io_shell_ok`)
+  - `conversion/hub/pipeline/hub-pipeline-types.ts` (`type_shell_ok`)
+  - `conversion/hub/pipeline/hub-stage-timing.ts` (`diagnostic_io_ok`)
+  - `conversion/hub/types/chat-envelope.ts` (`type_shell_ok`)
+  - `conversion/hub/types/json.ts` (`type_shell_ok`)
+  - `conversion/hub/types/standardized.ts` (`type_shell_ok`)
+  - `native/router-hotpath/native-router-hotpath-policy.ts` (`native_shell_ok`)
+  - `native/router-hotpath/virtual-router-contracts.ts` (`type_shell_ok`)
+  - `runtime/user-data-paths.ts` (`ts_io_shell_ok`, native-linked; non-Hub runtime lifecycle wave)
+  - `servertool/types.ts` (`type_shell_ok`)
+  - `telemetry/stats-center.ts` (`ts_io_shell_ok`)
+- Current hard reference locks:
+  - `sharedmodule/llmswitch-core/src/index.ts` still publicly exports `convertProviderResponse`, VR contracts, failure policy, and stats center.
+  - `src/types/llmswitch-core.d.ts` still declares public modules for `provider-response.js`, `virtual-router-contracts.js`, `native-router-hotpath-policy.js`, and `stats-center.js`.
+  - `scripts/lib/build-core-utils.mjs` still requires dist outputs for `conversion/hub/response/provider-response.js` and `conversion/shared/responses-conversation-store.js`.
+  - `responses.continuation.mainline` edge `rct-06` is still `convertProviderResponse -> recordResponsesResponse`, so store deletion is blocked until the canonical save edge no longer names TS caller/callee.
+  - `src/modules/llmswitch/bridge/response-converter.ts` loads `conversion/hub/response/provider-response` as the host response conversion bridge.
+  - `src/modules/llmswitch/bridge/state-integrations.ts` loads `telemetry/stats-center` for hit-log/stats consumers.
 
 ## Scope
 
@@ -74,31 +96,68 @@ Out of scope:
    - For each non-deleted file, record owner, reason allowed, deletion blocker, and required gate.
    - Treat broad files such as `provider-response.ts` as suspect until source inspection proves they are only IO orchestration around Rust planners.
 
-3. Delete dead or unreferenced files:
+3. Shrink reference owners before deleting implementation files:
+   - Remove public barrel exports from `sharedmodule/llmswitch-core/src/index.ts` once no external runtime consumer needs the TS module.
+   - Remove ambient declarations from `src/types/llmswitch-core.d.ts` only after consumers use native/generated declarations or local boundary types.
+   - Update `scripts/lib/build-core-utils.mjs` so deleted TS modules are not required core dist outputs.
+   - Move tests from TS module imports to native contract fixtures, server boundary tests, or generated declaration tests.
+   - Add an import-graph gate that fails on new imports of the current deletion candidates outside their approved shrink wave.
+
+4. Delete dead or unreferenced files:
    - For each candidate, prove no source import or runtime loader reference.
    - Remove from manifests, baselines, exports, tests, and docs in the same commit.
    - Do not leave commented code or unused exports.
 
-4. Rustify remaining semantic slices:
+5. Rustify remaining semantic slices:
    - Move semantic decisions into `router-hotpath-napi`.
    - Add or extend NAPI exports only for Rust-owned plans, not TS fallback behavior.
    - Collapse TS callers to thin invocation shells or delete them when no longer needed.
 
-5. Gate the boundary:
+6. Gate the boundary:
    - Update rustification audit baseline and `minimal-ts-surface.json`.
    - Add static checks for banned TS semantic files, deleted exports, and stale facade imports.
    - Ensure function map and mainline call map point to Rust owners for semantic nodes.
 
-6. Verify and install:
+7. Verify and install:
    - Run focused unit/regression tests for touched slices.
    - Run `npm run verify:llmswitch-rustification-audit`.
    - Run `npm run verify:function-map-compile-gate`.
    - Run `npm run build:base` or stronger build gate required by the touched surface.
    - For runtime-impacting changes, run release/global install and live verification according to project rules.
 
-7. Record and commit:
+8. Record and commit:
    - Update `docs/loops/rustification/STATE.md`, loop run log, `MEMORY.md` when a durable fact is proven, and local lessons only for reusable process changes.
    - Commit only relevant files with a concise message.
+
+## Reference-Shrink Waves
+
+| Wave | Target | Current reference lock | Delete route | Required gates |
+| ---: | --- | --- | --- | --- |
+| 1 | Public API and dist surface | `src/index.ts`, `src/types/llmswitch-core.d.ts`, `scripts/lib/build-core-utils.mjs` still publish or require TS files. | Remove exports/declarations/required outputs after consumers move to native/generated contracts. This is the first blocker because public references keep TS files alive even after semantics are Rust-owned. | `npm run verify:llmswitch-minimal-ts-surface`; red import-graph gate for banned public exports; `npm run verify:llmswitch-core-tsc`; `npm run verify:function-map-compile-gate`. |
+| 2 | Provider response IO facade | `src/modules/llmswitch/bridge/response-converter.ts` imports `conversion/hub/response/provider-response`; server executor calls the bridge. | Replace the TS facade with a Rust/NAPI response entry plus host-effect executor contract. Server code may own HTTP stream write/read, but Hub response parse/govern/project/save entry must not be a TS module export. | `npm run verify:hub-response-provider-sse-materialization`; provider response converter tests; JSON/SSE parity tests; `npm run verify:architecture-ci`. |
+| 3 | Responses continuation store | `provider-response.ts` calls `responses-conversation-store.ts`; tests import the store directly; `rct-06` names TS caller/callee. | Move persistence API behind Rust-backed continuation store or server-owned persistence host effect. Update `rct-06` to Rust/native caller/callee, then delete direct store imports and dist requirement. | `npm run verify:responses-history-protocol-contract`; `npm run verify:architecture-mainline-call-map`; store integration tests converted to native/server boundary tests. |
+| 4 | Type shells | Servertool, VR, Hub, and tests import `JsonObject`, `AdapterContext`, `Standardized*`, `ServerTool*`, and `VirtualRouter*` TS files. | Generate `.d.ts` from Rust contracts or localize minimal host boundary types outside Hub Pipeline. Delete shared TS type files only when no runtime/test import references them. | `npm run verify:llmswitch-core-tsc`; `npm run verify:servertool-rust-only`; `npm run verify:vr-no-ts-runtime`; import-graph gate banning old type shell imports. |
+| 5 | Diagnostics and stats | `hub-stage-timing.ts` is imported by servertool response orchestration; `stats-center.ts` is exported publicly and loaded by `state-integrations.ts`. | Move stage timing and hit-log/stats emission to Rust event records or a server-owned diagnostic sink. Remove public stats export and state bridge require. | `npm run verify:architecture-custom-payload-carrier-owner-queryability`; `npm run verify:function-map-compile-gate`; focused hit-log/stage-timing tests. |
+| 6 | Non-Hub runtime lifecycle | `runtime/user-data-paths.ts` is native-linked TS but feeds CLI/config/server lifecycle and is outside the first Hub closeout unit. | Split into a separate runtime lifecycle pure-Rust plan; do not count it as Hub Pipeline pure-Rust closed until its feature map owner and gates move to runtime lifecycle. | runtime lifecycle gates from `verification-map.yml`; `npm run verify:runtime-lifecycle-loop-gate-matrix`. |
+
+## Current Consumer Map
+
+Source/test/script import audit on 2026-07-07:
+
+| TS file | Active import locks found | Closeout implication |
+| --- | ---: | --- |
+| `provider-response.ts` | 10 direct import/export locks plus bridge dynamic load | Cannot delete until `response-converter.ts` and public barrel stop loading it. |
+| `responses-conversation-store.ts` | 7 direct import locks plus required dist output | Cannot delete until `rct-06` no longer calls the TS store and tests move to native/server boundary. |
+| `hub-pipeline-types.ts` | 6 direct import locks, mostly servertool shells | Servertool shell types must move to generated/native or local host boundary types. |
+| `hub-stage-timing.ts` | 4 direct import locks | Diagnostic owner must move before stage timing can disappear. |
+| `chat-envelope.ts` | 24 direct import locks | Broad servertool/test type dependency; delete only after generated declarations or local test fixtures replace it. |
+| `json.ts` | 36 direct import locks | Base type dependency; needs generated/common boundary replacement first. |
+| `standardized.ts` | 13 direct import locks | VR/runtime/test type dependency; migrate with VR and request boundary types. |
+| `native-router-hotpath-policy.ts` | 13 direct import locks | Failure policy facade must be replaced by generated/native declaration and host direct native call. |
+| `virtual-router-contracts.ts` | 1 direct import lock in public barrel, plus internal type imports from native wrappers | Public export can be removed early; internal native wrapper types need generated declarations. |
+| `user-data-paths.ts` | 4 direct import locks | Treat as runtime lifecycle wave, not Hub Pipeline first wave. |
+| `servertool/types.ts` | 3 test import locks | Delete after tests consume Rust/generated servertool contracts. |
+| `stats-center.ts` | 2 direct import locks | Delete after state integration no longer requires TS stats facade. |
 
 ## Verification Matrix
 

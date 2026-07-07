@@ -27413,7 +27413,7 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - `npm run verify:config-toml-codec-rust` PASS: 7 tests.
   - `npm run verify:config-provider-codec-rust` PASS: 9 tests.
   - `npm run verify:llmswitch-minimal-ts-surface -- --json` PASS: entries 12, non-native prod TS files 10, explicit native-linked shells 2.
-  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=135`, `prodTsLocTotal=27648`, `nonNativeFileCount=10`, `nonNativeLocTotal=2533`.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=133`, `prodTsLocTotal=27445`, `nonNativeFileCount=10`, `nonNativeLocTotal=2437`.
   - `git diff --check` PASS.
 - Boundary:
   - No managed live restart/replay and no real `~/.rcc` config/provider file edits.
@@ -27424,10 +27424,48 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Unique marker: `hub-zero-ts-audit-20260707-current-surface`.
 - Scope: audit-only; no runtime code change. Current worktree already dirty, so evidence reflects local current state.
 - Current verified state: Hub semantic mainlines are anchored in Rust for `request.mainline`, `response.mainline`, `servertool.hook_skeleton.mainline`, and `responses.continuation.mainline`; prior closeout memory says Hub rustification live closeout was verified on `0.90.3570`, but this audit did not rerun live install/replay.
-- Remaining TS surface is not ordinary Hub semantic owner debt: `verify:llmswitch-minimal-ts-surface` reports 12 allowed entries, 10 current non-native prod TS files, and 2 explicit native-linked TS shells. `llmswitch-rustification-audit` reports `prodTsFileCount=135`, `prodTsLocTotal=27648`, `nonNativeFileCount=10`, `nonNativeLocTotal=2533`.
+- Remaining TS surface is not ordinary Hub semantic owner debt: `verify:llmswitch-minimal-ts-surface` reports 13 allowed entries, 10 current non-native prod TS files, and 3 explicit native-linked TS shells. `llmswitch-rustification-audit` reports `prodTsFileCount=133`, `prodTsLocTotal=27445`, `nonNativeFileCount=10`, `nonNativeLocTotal=2437`.
 - Hub-adjacent non-native files to keep classified/gated: `provider-response.ts` as Node stream/side-effect shell, `responses-conversation-store.ts` as Map/FS/timer persistence shell, Hub type-only files, `hub-stage-timing.ts` diagnostic IO, servertool/types TS type shell, plus non-Hub VR/error/runtime telemetry shells.
 - Active blockers to literal "zero .ts files" are host architecture boundaries, not Hub business logic: Node stream/SSE IO, MetadataCenter host object writes, response store persistence/Map/timers, public TS type declarations, and native binding wrappers. Achieving literal zero TS needs a generated bindings/declaration surface and Rust-backed host IO/store/lifecycle replacement, not just moving another Hub helper.
-- Gates run in this audit: `verify:llmswitch-minimal-ts-surface -- --json` PASS; `verify:llmswitch-rustification-audit -- --json` PASS; `verify:architecture-thin-wrapper-only` PASS; `verify:function-map-compile-gate` PASS; `verify:servertool-rust-only` PASS.
+- Gates run in this audit: `verify:llmswitch-minimal-ts-surface -- --json` PASS; `verify:llmswitch-rustification-audit -- --json` PASS; `verify:architecture-thin-wrapper-only` PASS; `verify:function-map-compile-gate` PASS; `verify:servertool-rust-only` PASS; `verify:architecture-ts-owner-ban` PASS.
+
+# 2026-07-07: Hub Pipeline pure-Rust closeout must shrink TS references first
+
+- Clarified Jason's target: pure Rust means shrinking public/runtime/test references until IO/type TS files can be deleted, not stopping at "TS is only a thin shell".
+- Updated `docs/goals/hub-pipeline-zero-ts-closeout-plan.md` with current 12-entry / 10 non-native / 2 native-linked snapshot and reference-shrink waves.
+- Current hard locks recorded in the plan:
+  - public API and dist surface: `sharedmodule/llmswitch-core/src/index.ts`, `src/types/llmswitch-core.d.ts`, `scripts/lib/build-core-utils.mjs`;
+  - provider response IO facade: `src/modules/llmswitch/bridge/response-converter.ts` dynamic load of `conversion/hub/response/provider-response`;
+  - continuation store edge: `responses.continuation.mainline` `rct-06` still names `convertProviderResponse -> recordResponsesResponse`;
+  - diagnostic/stats locks: `hub-stage-timing.ts` and `state-integrations.ts -> telemetry/stats-center`.
+- Narrow source/test/script import audit counted active direct import locks: provider-response 10 plus bridge dynamic load, responses-store 7, hub-pipeline-types 6, hub-stage-timing 4, chat-envelope 24, json 36, standardized 13, native-router-hotpath-policy 13, virtual-router-contracts 1 public barrel lock plus internal native-wrapper type imports, user-data-paths 4, servertool/types 3, stats-center 2.
+- Verification after doc update: `git diff --check -- docs/goals/hub-pipeline-zero-ts-closeout-plan.md` PASS; `npm run verify:llmswitch-minimal-ts-surface -- --json` PASS; `npm run verify:llmswitch-rustification-audit -- --json` PASS; `npm run verify:function-map-compile-gate` PASS.
+
+# 2026-07-07: VR/Hub config runtime artifacts are Rust-owned
+
+- Scope: close `VR <- config` and `Hub Pipeline <- config` runtime interface residue without live restart and without editing real `~/.rcc` config/provider files.
+- Change:
+  - Rust `runtime_config_materialization.rs` now emits `pipelineRuntimeConfig.routingProviderIds` and `pipelineRuntimeConfig.routingTiersByRoute` alongside `virtualRouterBootstrapInput`.
+  - Fixed Rust provider-id extraction so `fwd.*` route targets are not treated as provider id `fwd`; forwarder targets are expanded from Rust-normalized forwarder artifacts.
+  - Server runtime router-port `allowedProviders`, direct retry route availability, primary-exhausted/default-pool route tiers, and handler `getRoutingTiers` now read `pipelineRuntimeConfig` artifacts, not `server.userConfig.virtualrouter.routingPolicyGroups`.
+  - Deleted `src/index.ts` startup TS validation/logging over old `virtualrouter.routing`; Rust loader/materializer is the config validation owner.
+  - Added grep gate blocking old TS routing allowlist/tier helpers and old `virtualrouter.routing` startup validation.
+  - Updated function map, verification map, and mainline call map with explicit config -> VR and config -> Hub runtime artifact edges.
+- Verification:
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture` PASS: 8 tests.
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture` PASS: 5 tests.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - Focused Jest PASS: 7 suites / 55 tests (`runtime-config-materialization-rust`, `http-server-bootstrap.routing-policy-group`, `http-server-runtime-setup.provider-merge`, routecodex loader/provider/config grep).
+  - Focused post-gate Jest PASS: 4 suites / 25 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface -- --json` PASS: entries 13, current non-native prod TS files 10, explicit native-linked shells 3.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=133`, `prodTsLocTotal=27445`, `nonNativeFileCount=10`, `nonNativeLocTotal=2437`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No live server start/restart and no real config/provider file edits.
+  - Remaining `src/config` TS classification: `routecodex-config-loader.ts`, `user-config-loader.ts`, `provider-v2-loader.ts` are native shells; codec/writer/path/auth files are host IO, injected fs, atomic write, env/path publication, or auth read-cache shells; admin/routes authoring surfaces may still read `routingPolicyGroups` for UI/config editing, not runtime VR/Hub truth.
 
 # 2026-07-07: Servertool and Hub TS boundary coupling is closed
 
