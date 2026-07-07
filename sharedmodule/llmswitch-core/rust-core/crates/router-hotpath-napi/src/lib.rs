@@ -1335,6 +1335,39 @@ struct RccPathResolveInput {
     routecodex_home: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RouteCodexConfigPathResolveInputJson {
+    #[serde(default)]
+    preferred_path: Option<String>,
+    #[serde(default)]
+    config_name: Option<String>,
+    #[serde(default = "default_true")]
+    allow_directory_scan: bool,
+    #[serde(default)]
+    base_dir: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    home_dir: Option<String>,
+    #[serde(default)]
+    exec_path: Option<String>,
+    #[serde(default)]
+    routecodex_config_path: Option<String>,
+    #[serde(default)]
+    routecodex_config: Option<String>,
+    #[serde(default)]
+    rcc_home: Option<String>,
+    #[serde(default)]
+    routecodex_user_dir: Option<String>,
+    #[serde(default)]
+    routecodex_home: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[napi(js_name = "resolveRccUserDirJson")]
 pub fn resolve_rcc_user_dir_json(input_json: String) -> NapiResult<String> {
     let input: RccUserDirResolveInput = serde_json::from_str(&input_json)
@@ -1364,6 +1397,31 @@ pub fn resolve_rcc_path_json(input_json: String) -> NapiResult<String> {
             ("ROUTECODEX_USER_DIR", input.routecodex_user_dir.as_deref()),
             ("ROUTECODEX_HOME", input.routecodex_home.as_deref()),
         ],
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&path.to_string_lossy().to_string())
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi(js_name = "resolveRouteCodexConfigPathJson")]
+pub fn resolve_routecodex_config_path_json(input_json: String) -> NapiResult<String> {
+    let input: RouteCodexConfigPathResolveInputJson = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let path = virtual_router_engine::instructions::resolve_routecodex_config_path_for_host(
+        virtual_router_engine::instructions::RouteCodexConfigPathResolveInput {
+            preferred_path: input.preferred_path.as_deref(),
+            config_name: input.config_name.as_deref(),
+            allow_directory_scan: input.allow_directory_scan,
+            base_dir: input.base_dir.as_deref(),
+            cwd: input.cwd.as_deref(),
+            home_dir: input.home_dir.as_deref(),
+            exec_path: input.exec_path.as_deref(),
+            routecodex_config_path: input.routecodex_config_path.as_deref(),
+            routecodex_config: input.routecodex_config.as_deref(),
+            rcc_home: input.rcc_home.as_deref(),
+            routecodex_user_dir: input.routecodex_user_dir.as_deref(),
+            routecodex_home: input.routecodex_home.as_deref(),
+        },
     )
     .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&path.to_string_lossy().to_string())

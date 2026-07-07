@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { resolveRouteCodexConfigPath } from '../../src/config/config-paths.js';
 import { resolveRccConfigDir, resolveRccUserDir } from '../../src/config/user-data-paths.js';
+import { resolveRouteCodexConfigPathNativeSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 
 async function mkTmp(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -43,6 +44,7 @@ describe('UnifiedConfigPathResolver', () => {
     process.chdir(root);
     try {
       expect(resolveRouteCodexConfigPath()).toBe(configPath);
+      expect(resolveRouteCodexConfigPathNativeSync()).toBe(configPath);
     } finally {
       process.chdir(previousCwd);
     }
@@ -63,6 +65,7 @@ describe('UnifiedConfigPathResolver', () => {
     process.chdir(root);
     try {
       expect(() => resolveRouteCodexConfigPath()).toThrow('No configuration file found');
+      expect(() => resolveRouteCodexConfigPathNativeSync()).toThrow('No configuration file found');
     } finally {
       process.chdir(previousCwd);
     }
@@ -83,6 +86,27 @@ describe('UnifiedConfigPathResolver', () => {
     process.chdir(root);
     try {
       expect(() => resolveRouteCodexConfigPath()).toThrow('No configuration file found');
+      expect(() => resolveRouteCodexConfigPathNativeSync()).toThrow('No configuration file found');
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('matches native config path resolution for explicit env config paths', async () => {
+    const root = await mkTmp('routecodex-config-paths-env-');
+    process.env.RCC_HOME = path.join(root, '.rcc-home');
+    process.env.ROUTECODEX_HOME = process.env.RCC_HOME;
+    process.env.ROUTECODEX_USER_DIR = process.env.RCC_HOME;
+    const envConfigPath = path.join(root, 'explicit.toml');
+    await fs.writeFile(envConfigPath, 'version = "2.0.0"\n', 'utf8');
+    process.env.ROUTECODEX_CONFIG_PATH = envConfigPath;
+    delete process.env.ROUTECODEX_CONFIG;
+
+    const previousCwd = process.cwd();
+    process.chdir(root);
+    try {
+      expect(resolveRouteCodexConfigPath()).toBe(envConfigPath);
+      expect(resolveRouteCodexConfigPathNativeSync()).toBe(envConfigPath);
     } finally {
       process.chdir(previousCwd);
     }

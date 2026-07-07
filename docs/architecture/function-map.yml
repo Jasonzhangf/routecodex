@@ -2733,16 +2733,18 @@ owners:
 
   - feature_id: config.path_resolution_surface
     status: active
-    summary: "RouteCodex user dir and RCC subpath resolution are Rust-owned; TS path callers stay native shells"
+    summary: "RouteCodex config path, user dir, and RCC subpath resolution are Rust-owned; TS path callers stay native shells"
     owner_kind: rust_ssot
-    owner_scope: "Rust owns RCC user dir env precedence, retired ~/.routecodex rejection, default ~/.rcc resolution, and RCC subpath joining; TS user-data-paths only publishes process env and keeps snapshot-env shell semantics"
+    owner_scope: "Rust owns config.toml path precedence, config env handling, TOML-only rejection, directory scan, RCC user dir env precedence, retired ~/.routecodex rejection, default ~/.rcc resolution, and RCC subpath joining; TS path files are native shells plus snapshot-env publishing"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
     canonical_types:
       - RccUserDirResolveInput
       - RccPathResolveInput
+      - RouteCodexConfigPathResolveInput
     canonical_builders:
       - resolve_rcc_user_dir_for_host_with_env
       - resolve_rcc_path_for_host_with_env
+      - resolve_routecodex_config_path_for_host
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
@@ -2773,7 +2775,7 @@ owners:
     migration_target: rust
     notes:
       - "Missing config is fail-fast; no fallback path result is allowed."
-      - "RCC user dir env precedence and default ~/.rcc path resolution must not be reimplemented in TS; src/config/user-data-paths.ts is a thin native shell plus snapshot-env publisher."
+      - "Config path candidate precedence, config env handling, TOML-only rejection, directory scan, RCC user dir env precedence, and default ~/.rcc path resolution must not be reimplemented in TS; src/config/unified-config-paths.ts and src/config/user-data-paths.ts are thin native shells plus snapshot-env publisher."
 
   - feature_id: config.toml_codec
     status: active

@@ -174,12 +174,192 @@ fn join_segments_like_node_path_join(mut base: PathBuf, segments: &[String]) -> 
     base
 }
 
+pub(crate) struct RouteCodexConfigPathResolveInput<'a> {
+    pub preferred_path: Option<&'a str>,
+    pub config_name: Option<&'a str>,
+    pub allow_directory_scan: bool,
+    pub base_dir: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+    pub home_dir: Option<&'a str>,
+    pub exec_path: Option<&'a str>,
+    pub routecodex_config_path: Option<&'a str>,
+    pub routecodex_config: Option<&'a str>,
+    pub rcc_home: Option<&'a str>,
+    pub routecodex_user_dir: Option<&'a str>,
+    pub routecodex_home: Option<&'a str>,
+}
+
+const DEFAULT_CONFIG_NAME: &str = "config.toml";
+
+pub(crate) fn resolve_routecodex_config_path_for_host(
+    input: RouteCodexConfigPathResolveInput<'_>,
+) -> Result<PathBuf, String> {
+    let base_dir =
+        resolve_config_base_dir(input.base_dir, input.cwd, input.home_dir, input.exec_path);
+    let rcc_env = [
+        ("RCC_HOME", input.rcc_home),
+        ("ROUTECODEX_USER_DIR", input.routecodex_user_dir),
+        ("ROUTECODEX_HOME", input.routecodex_home),
+    ];
+    let config_name = input
+        .config_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mut candidates: Vec<String> = Vec::new();
+    push_present(&mut candidates, input.preferred_path);
+    push_present(&mut candidates, input.routecodex_config_path);
+    push_present(&mut candidates, input.routecodex_config);
+
+    let name = config_name.unwrap_or(DEFAULT_CONFIG_NAME);
+    candidates.push(base_dir.join(name).to_string_lossy().to_string());
+    candidates.push(
+        base_dir
+            .join("config")
+            .join(name)
+            .to_string_lossy()
+            .to_string(),
+    );
+
+    let primary_home = resolve_rcc_user_dir_for_host_with_env(input.home_dir, &rcc_env)?;
+    if config_name.is_some() {
+        candidates.push(primary_home.join(name).to_string_lossy().to_string());
+        candidates.push(
+            primary_home
+                .join("config")
+                .join(name)
+                .to_string_lossy()
+                .to_string(),
+        );
+    } else {
+        candidates.push(
+            primary_home
+                .join(DEFAULT_CONFIG_NAME)
+                .to_string_lossy()
+                .to_string(),
+        );
+    }
+
+    let default_config_dir =
+        join_segments_like_node_path_join(primary_home.clone(), &["config".to_string()]);
+    if input.allow_directory_scan {
+        candidates.push(primary_home.to_string_lossy().to_string());
+        candidates.push(default_config_dir.to_string_lossy().to_string());
+    } else {
+        candidates.push(default_config_dir.join(name).to_string_lossy().to_string());
+    }
+
+    for candidate in &candidates {
+        let expanded_path = expand_config_path(candidate, input.home_dir);
+        if expanded_path.as_os_str().is_empty() {
+            continue;
+        }
+        if expanded_path
+            .extension()
+            .map(|value| value.to_string_lossy().trim().eq_ignore_ascii_case("json"))
+            .unwrap_or(false)
+        {
+            return Err(format!(
+                "Filesystem error accessing {candidate}: [config] user config JSON support removed; expected TOML file: {}",
+                expanded_path.display()
+            ));
+        }
+        match fs::metadata(&expanded_path) {
+            Ok(metadata) if metadata.is_file() => return Ok(expanded_path),
+            Ok(metadata) if metadata.is_dir() && input.allow_directory_scan => {
+                if let Some(config_file) = scan_config_directory(&expanded_path, name)? {
+                    return Ok(config_file);
+                }
+            }
+            Ok(_) | Err(_) => {}
+        }
+    }
+
+    Err(format!(
+        "No configuration file found. Searched: {}.",
+        candidates.join(", ")
+    ))
+}
+
+fn push_present(candidates: &mut Vec<String>, value: Option<&str>) {
+    if let Some(raw) = value {
+        if !raw.trim().is_empty() {
+            candidates.push(raw.to_string());
+        }
+    }
+}
+
+fn resolve_config_base_dir(
+    base_dir: Option<&str>,
+    cwd: Option<&str>,
+    home_dir: Option<&str>,
+    exec_path: Option<&str>,
+) -> PathBuf {
+    if let Some(raw) = base_dir {
+        if !raw.trim().is_empty() {
+            return absolutize_path(PathBuf::from(raw.trim()));
+        }
+    }
+    if let Some(raw) = cwd {
+        if !raw.trim().is_empty() {
+            return absolutize_path(PathBuf::from(raw.trim()));
+        }
+    }
+    if let Some(raw) = home_dir {
+        if !raw.trim().is_empty() {
+            return absolutize_path(PathBuf::from(raw.trim()));
+        }
+    }
+    if let Some(raw) = exec_path {
+        if !raw.trim().is_empty() {
+            return PathBuf::from(raw.trim())
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."));
+        }
+    }
+    PathBuf::from(".")
+}
+
+fn expand_config_path(path_string: &str, home_dir: Option<&str>) -> PathBuf {
+    if path_string.is_empty() {
+        return PathBuf::new();
+    }
+    if let Some(rest) = path_string.strip_prefix('~') {
+        let home = resolve_home_dir(home_dir).unwrap_or_else(|_| PathBuf::from("."));
+        return PathBuf::from(format!("{}{}", home.to_string_lossy(), rest));
+    }
+    PathBuf::from(path_string)
+}
+
+fn scan_config_directory(
+    directory: &Path,
+    preferred_name: &str,
+) -> Result<Option<PathBuf>, String> {
+    let expected = preferred_name.to_lowercase();
+    let entries = fs::read_dir(directory)
+        .map_err(|err| format!("Filesystem error accessing {}: {err}", directory.display()))?;
+    for entry_result in entries {
+        let entry = entry_result
+            .map_err(|err| format!("Filesystem error accessing {}: {err}", directory.display()))?;
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if file_name.to_lowercase() == expected {
+            return Ok(Some(directory.join(file_name)));
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod host_path_tests {
-    use super::{resolve_rcc_path_for_host, resolve_rcc_user_dir_for_host};
+    use super::{
+        resolve_rcc_path_for_host, resolve_rcc_user_dir_for_host,
+        resolve_routecodex_config_path_for_host, RouteCodexConfigPathResolveInput,
+    };
     use std::env;
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -220,6 +400,16 @@ mod host_path_tests {
             EnvGuard::set("ROUTECODEX_USER_DIR", None),
             EnvGuard::set("ROUTECODEX_HOME", None),
         ]
+    }
+
+    fn temp_root(label: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("routecodex-{label}-{stamp}"));
+        fs::create_dir_all(&root).unwrap();
+        root
     }
 
     #[test]
@@ -279,6 +469,79 @@ mod host_path_tests {
             .unwrap(),
             home.join(".rcc").join("provider")
         );
+    }
+
+    #[test]
+    fn resolve_routecodex_config_path_prefers_explicit_env_path() {
+        let root = temp_root("config-env");
+        let rcc_home = root.join(".rcc");
+        let env_config = root.join("from-env.toml");
+        fs::create_dir_all(&rcc_home).unwrap();
+        fs::write(&env_config, "version = \"2.0.0\"\n").unwrap();
+        let resolved = resolve_routecodex_config_path_for_host(RouteCodexConfigPathResolveInput {
+            preferred_path: None,
+            config_name: None,
+            allow_directory_scan: true,
+            base_dir: Some(root.to_str().unwrap()),
+            cwd: Some(root.to_str().unwrap()),
+            home_dir: Some(root.to_str().unwrap()),
+            exec_path: None,
+            routecodex_config_path: Some(env_config.to_str().unwrap()),
+            routecodex_config: None,
+            rcc_home: Some(rcc_home.to_str().unwrap()),
+            routecodex_user_dir: Some(rcc_home.to_str().unwrap()),
+            routecodex_home: Some(rcc_home.to_str().unwrap()),
+        })
+        .unwrap();
+        assert_eq!(resolved, env_config);
+    }
+
+    #[test]
+    fn resolve_routecodex_config_path_scans_rcc_user_dir() {
+        let root = temp_root("config-scan");
+        let rcc_home = root.join(".rcc");
+        let config_path = rcc_home.join("config.toml");
+        fs::create_dir_all(&rcc_home).unwrap();
+        fs::write(&config_path, "version = \"2.0.0\"\n").unwrap();
+        let resolved = resolve_routecodex_config_path_for_host(RouteCodexConfigPathResolveInput {
+            preferred_path: None,
+            config_name: None,
+            allow_directory_scan: true,
+            base_dir: Some(root.to_str().unwrap()),
+            cwd: Some(root.to_str().unwrap()),
+            home_dir: Some(root.to_str().unwrap()),
+            exec_path: None,
+            routecodex_config_path: None,
+            routecodex_config: None,
+            rcc_home: Some(rcc_home.to_str().unwrap()),
+            routecodex_user_dir: Some(rcc_home.to_str().unwrap()),
+            routecodex_home: Some(rcc_home.to_str().unwrap()),
+        })
+        .unwrap();
+        assert_eq!(resolved, config_path);
+    }
+
+    #[test]
+    fn resolve_routecodex_config_path_rejects_json_candidate() {
+        let root = temp_root("config-json");
+        let config_path = root.join("config.json");
+        fs::write(&config_path, "{\"version\":\"1\"}\n").unwrap();
+        let error = resolve_routecodex_config_path_for_host(RouteCodexConfigPathResolveInput {
+            preferred_path: Some(config_path.to_str().unwrap()),
+            config_name: None,
+            allow_directory_scan: true,
+            base_dir: Some(root.to_str().unwrap()),
+            cwd: Some(root.to_str().unwrap()),
+            home_dir: Some(root.to_str().unwrap()),
+            exec_path: None,
+            routecodex_config_path: None,
+            routecodex_config: None,
+            rcc_home: None,
+            routecodex_user_dir: None,
+            routecodex_home: None,
+        })
+        .expect_err("json config candidate must fail fast");
+        assert!(error.contains("user config JSON support removed"));
     }
 }
 

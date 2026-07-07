@@ -1433,6 +1433,13 @@
 - Rust path joining must preserve old Node `path.join()` lexical behavior for `..` and absolute-looking segment strings; `PathBuf::push` alone is not equivalent.
 - Verified on 2026-07-07 with Rust `resolve_rcc` tests (4), native hotpath build, focused config blackbox Jest (6 suites / 49 tests), broader config matrix PASS output (13 suites / 99 tests, open handle interrupted after PASS), root TS compile, TOML/provider Rust codec gates, function-map gate, and diff check. No managed live restart/replay or `~/.rcc` edits were performed.
 
+# 2026-07-07: Config file path resolution is Rust-owned
+
+- `config.path_resolution_surface` also owns `config.toml` file path resolution through Rust `resolve_routecodex_config_path_for_host` and NAPI `resolveRouteCodexConfigPathJson`.
+- `src/config/unified-config-paths.ts` must remain a native shell only. Do not reintroduce TS candidate-list precedence, `ROUTECODEX_CONFIG_PATH` / `ROUTECODEX_CONFIG` handling, TOML-only rejection, directory scanning, cwd/base/user-dir candidate construction, or home expansion.
+- Required gate `npm run verify:config-path-resolution-rust` runs both `resolve_rcc` and `resolve_routecodex_config_path` Rust tests.
+- Verified on 2026-07-07 by pre-wire TS/native blackbox comparison, post-wire focused config blackbox, native hotpath build, root TS compile, function-map gate, minimal TS surface, rustification audit, and diff check. No managed live restart/replay or `~/.rcc` edits were performed.
+
 # 2026-07-07: Single-source config loader blackbox must separate legal input from runtime-materialized shapes
 
 - `loadRouteCodexConfig()` single-source input contract still rejects `virtualrouter.providers`; do not treat that shape as a legal pre-wire compatibility target for this loader entrypoint.

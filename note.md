@@ -27268,3 +27268,26 @@ Complete SSE rustification status (34 TS files):
 - Boundary:
   - No runtime wiring, no managed restart, no live server startup, and no `~/.rcc` config edits were performed.
   - Architecture review: no fallback or duplicate TS path resolver remains for RCC user dir/subpaths; TS snapshot-env shell remains because it is a separate snapshot config surface.
+
+# 2026-07-07: Config file path resolution is Rust-owned
+
+- Scope: continue config path surface rustification after RCC user dir/subpath native closeout.
+- Change:
+  - Added Rust `resolve_routecodex_config_path_for_host` and NAPI `resolveRouteCodexConfigPathJson` for config path precedence, `ROUTECODEX_CONFIG_PATH` / `ROUTECODEX_CONFIG`, TOML-only rejection, cwd/base/user-dir candidates, and directory scan.
+  - Added bridge `resolveRouteCodexConfigPathNativeSync()`.
+  - First added TS/native blackbox comparison in `tests/config/unified-config-paths.spec.ts`, then connected `src/config/unified-config-paths.ts` to native and deleted TS candidate-list / fs scan / `safeProcessCwd` / `expandPath` logic.
+  - Updated `config.path_resolution_surface` function/verification maps and expanded `npm run verify:config-path-resolution-rust` to include `resolve_routecodex_config_path`.
+- Verification:
+  - Pre-wire comparison blackbox PASS: `tests/config/unified-config-paths.spec.ts` + `tests/config/user-data-paths.spec.ts` = 2 suites / 10 tests.
+  - Post-wire focused config blackbox PASS: 5 suites / 33 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - `npm run verify:config-path-resolution-rust` PASS: `resolve_rcc` 4 tests + `resolve_routecodex_config_path` 3 tests.
+  - Broader config matrix printed PASS: 13 suites / 100 tests; Jest left the known open handle and was interrupted after PASS output.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 14, current non-native prod TS files 12, explicit native-linked TS shells 2.
+  - `npm run verify:llmswitch-rustification-audit` PASS: `prodTsFileCount=137`, `prodTsLocTotal=28365`, `nonNativeFileCount=12`, `nonNativeLocTotal=3323`.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay and no `~/.rcc` config edits.
+  - Architecture review: no fallback or dual TS config-path resolver remains; TS file is now a native shell only.

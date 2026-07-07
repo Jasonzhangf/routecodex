@@ -15,7 +15,8 @@ pub(crate) use parse::{
 pub(crate) use path::{
     is_precommand_script_path_allowed, resolve_rcc_path_for_host,
     resolve_rcc_path_for_host_with_env, resolve_rcc_user_dir_for_host,
-    resolve_rcc_user_dir_for_host_with_env, with_rcc_user_dir_override,
+    resolve_rcc_user_dir_for_host_with_env, resolve_routecodex_config_path_for_host,
+    with_rcc_user_dir_override, RouteCodexConfigPathResolveInput,
 };
 pub(crate) use state::{
     apply_routing_instructions, build_metadata_instructions, ensure_stop_message_mode_max_repeats,
