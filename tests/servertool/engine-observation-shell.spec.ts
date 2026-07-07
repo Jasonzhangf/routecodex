@@ -34,20 +34,20 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('planServertoolEngineRuntimeActionWithNative');
   });
 
-  test('engine-observation-shell owns match logging fan-in without progress facade', async () => {
+  test('engine orchestration owns match logging fan-in without observation facade', async () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
     const orchestrationSource = fs.readFileSync(
       'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
+    expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts')).toBe(false);
 
     expect(source).not.toContain('export function logServertoolNonBlocking(');
     expect(source).not.toContain('[servertool][non-blocking]');
     expect(source).not.toContain('export function createServertoolObservation(');
-    expect(source).not.toContain('createServertoolProgressLogger({');
     expect(source).toContain('resolveServertoolEngineMatchHitWithNative({');
     expect(source).not.toContain('const flowId = args.execution.flowId');
     expect(source).not.toContain('flowId.trim()');
@@ -68,7 +68,7 @@ describe('engine-observation-shell', () => {
   });
 
   test('match stage recorder failures are fail-fast', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
     const adapterContext: Record<string, unknown> = {};
     bindProviderProtocol(adapterContext, 'openai-chat');
     const stageRecorder = {
@@ -110,9 +110,9 @@ describe('engine-observation-shell', () => {
   });
 
   test('match skipped consumes native skipReason instead of deriving it from engine mode', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
     const orchestrationSource = fs.readFileSync(
@@ -139,7 +139,7 @@ describe('engine-observation-shell', () => {
   });
 
   test('match hit requires execution flowId instead of falling back to unknown', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.js');
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
 
     expect(() =>
       mod.recordServertoolEngineMatchHit({
@@ -237,7 +237,8 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain("engineResult.metadataWritePlan && typeof engineResult.metadataWritePlan === 'object'");
     expect(source).not.toContain('projectNativeMetadataWritePlanToRuntimeControl(');
     expect(source).not.toContain('Object.keys(runtimeControl).length');
-    expect(source).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan(engineResult.metadataWritePlan)');
+    expect(source).toContain('projectMetadataWritePlanToRuntimeControlWritePlanWithNative({');
+    expect(source).toContain('plan: engineResult.metadataWritePlan');
     expect(source).toContain('if (writePlan.runtimeControl)');
     expect(source).toContain("engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'");
     expect(source).toContain('const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot;');

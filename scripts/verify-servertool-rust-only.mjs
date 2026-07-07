@@ -111,7 +111,6 @@ const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-she
 const TS_DISPATCH_PREPARATION_SHELL = `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`;
 const TS_ENGINE_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/engine-preflight-shell.ts`;
 const TS_ENGINE_ORCHESTRATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`;
-const TS_ENGINE_OBSERVATION_SHELL = `${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`;
 const TS_ENTRY_PREFLIGHT_SHELL = `${SERVERTOOL_TS_DIR}/entry-preflight-shell.ts`;
 const TS_ENTRY_CONTEXT_SHELL = `${SERVERTOOL_TS_DIR}/entry-context-shell.ts`;
 const TS_SERVERTOOL_TYPES = `${SERVERTOOL_TS_DIR}/types.ts`;
@@ -5662,17 +5661,21 @@ function checkServertoolRustOutcomeCloseout() {
       'ServerToolHandlerContext must not carry providerProtocol as a duplicated protocol truth'
     );
   }
-  const engineObservationShell = readRequired(TS_ENGINE_OBSERVATION_SHELL);
+  assertMissingFile(
+    'servertool-engine-observation-shell-owner',
+    `${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`,
+    'engine-observation-shell.ts must stay physically deleted; engine-orchestration-shell.ts owns match observation'
+  );
   for (const marker of [
     'export function logServertoolNonBlocking(',
     '[servertool][non-blocking]',
     'readProviderProtocolFromAnyBoundMetadataCenter',
     "throw new Error('Servertool observation requires metadata center runtime_control.providerProtocol')",
   ]) {
-    if (engineObservationShell.includes(marker)) {
+    if (engineOrchestrationShell.includes(marker)) {
       fail(
         'servertool-engine-observation-no-nonblocking-shell',
-        `engine-observation-shell.ts must not retain non-blocking log shell marker ${marker}`
+        `engine-orchestration-shell.ts must not retain non-blocking log shell marker ${marker}`
       );
     }
   }
@@ -5680,25 +5683,24 @@ function checkServertoolRustOutcomeCloseout() {
     "args.stageRecorder?.record('servertool.match'",
     'appendServertoolMatchSkippedProgressEvent({',
   ]) {
-    if (!engineObservationShell.includes(marker)) {
+    if (!engineOrchestrationShell.includes(marker)) {
       fail(
         'servertool-engine-observation-shell-owner',
-        `engine-observation-shell.ts must keep engine observation owner marker ${marker}`
+        `engine-orchestration-shell.ts must keep engine observation owner marker ${marker}`
       );
     }
   }
   for (const marker of [
     'export function createServertoolObservation(',
-    'createServertoolProgressLogger({',
   ]) {
-    if (engineObservationShell.includes(marker)) {
+    if (engineOrchestrationShell.includes(marker)) {
       fail(
         'servertool-engine-observation-no-progress-facade',
-        `engine-observation-shell.ts must not restore public progress observation facade marker ${marker}`
+        `engine-orchestration-shell.ts must not restore public progress observation facade marker ${marker}`
       );
     }
   }
-  if (/recordServertoolEngineMatchSkipped\(args:\s*\{[\s\S]{0,220}providerProtocol:\s*string;/.test(engineObservationShell)) {
+  if (/recordServertoolEngineMatchSkipped\(args:\s*\{[\s\S]{0,220}providerProtocol:\s*string;/.test(engineOrchestrationShell)) {
     fail(
       'servertool-engine-observation-metadata-center-only',
       'recordServertoolEngineMatchSkipped must not accept providerProtocol as a second protocol truth'
@@ -6700,7 +6702,6 @@ function checkServertoolEngineStoplessSessionThinShell() {
   );
   for (const marker of [
     'function logServerToolNonBlocking(',
-    "args.stageRecorder?.record('servertool.match'",
     'appendServerToolProgressFileEvent({',
   ]) {
     if (engineSource.includes(marker)) {
@@ -7161,10 +7162,15 @@ function checkServertoolMatchLoggingFailFast() {
   if (existsSync(matchLogFile)) {
     fail(
       'servertool-match-log-fail-fast',
-      'match-log-block.ts must stay physically deleted; match logging belongs to engine-observation-shell.ts'
+      'match-log-block.ts must stay physically deleted; match logging belongs to engine-orchestration-shell.ts'
     );
   }
-  const observationShellSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`);
+  assertMissingFile(
+    'servertool-match-log-fail-fast',
+    `${SERVERTOOL_TS_DIR}/engine-observation-shell.ts`,
+    'engine-observation-shell.ts must stay physically deleted; match logging belongs to engine-orchestration-shell.ts'
+  );
+  const observationShellSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`);
   const observationSpec = readRequired(`${ROOT}/tests/servertool/engine-observation-shell.spec.ts`);
   for (const keyword of [
     'record_servertool_match_skipped',
@@ -7173,20 +7179,20 @@ function checkServertoolMatchLoggingFailFast() {
     if (observationShellSource.includes(keyword)) {
       fail(
         'servertool-match-log-fail-fast',
-        `engine-observation-shell.ts must not convert stageRecorder failure into non-blocking marker "${keyword}"`
+        `engine-orchestration-shell.ts must not convert stageRecorder failure into non-blocking marker "${keyword}"`
       );
     }
   }
   if (/stageRecorder\?\.record[\s\S]{0,180}catch\s*\(/.test(observationShellSource)) {
     fail(
       'servertool-match-log-fail-fast',
-      'engine-observation-shell.ts must not catch stageRecorder failures'
+      'engine-orchestration-shell.ts must not catch stageRecorder failures'
     );
   }
   if (observationShellSource.includes("flowId ?? 'unknown'")) {
     fail(
       'servertool-match-log-fail-fast',
-      'engine-observation-shell.ts must not fallback missing execution.flowId to unknown'
+      'engine-orchestration-shell.ts must not fallback missing execution.flowId to unknown'
     );
   }
   if (
@@ -7195,25 +7201,25 @@ function checkServertoolMatchLoggingFailFast() {
   ) {
     fail(
       'servertool-match-log-fail-fast',
-      'engine-observation-shell.ts must delegate match-hit flowId validation to native'
+      'engine-orchestration-shell.ts must delegate match-hit flowId validation to native'
     );
   }
   if (!observationShellSource.includes('resolveServertoolEngineMatchHitWithNative({')) {
     fail(
       'servertool-match-log-fail-fast',
-      'engine-observation-shell.ts must call native match-hit flowId resolver'
+      'engine-orchestration-shell.ts must call native match-hit flowId resolver'
     );
   }
   if (observationShellSource.includes("args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution'")) {
     fail(
       'servertool-match-log-fail-fast',
-      'engine-observation-shell.ts must consume native skipReason instead of deriving it from engineMode'
+      'engine-orchestration-shell.ts must consume native skipReason instead of deriving it from engineMode'
     );
   }
   if (observationShellSource.includes('args.skipReason.trim()')) {
     fail(
       'servertool-match-log-fail-fast',
-      'engine-observation-shell.ts must not normalize native skipReason in TS'
+      'engine-orchestration-shell.ts must not normalize native skipReason in TS'
     );
   }
   const engineOrchestrationSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`);

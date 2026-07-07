@@ -23,6 +23,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine.ts',
   'tests/servertool/cli-projection-runtime-shell.spec.ts',
   'tests/servertool/execution-handler-materialization-shell.spec.ts',

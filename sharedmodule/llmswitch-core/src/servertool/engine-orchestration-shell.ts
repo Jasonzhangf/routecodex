@@ -1,4 +1,4 @@
-import type { AdapterContext, JsonObject, ServerSideToolEngineOptions, StageRecorder } from './types.js';
+import type { AdapterContext, JsonObject, ServerSideToolEngineOptions, StageRecorder, ServerToolExecution } from './types.js';
 import { orchestrateServertoolEngine } from './run-server-side-tool-engine-shell.js';
 import {
   createServertoolProviderProtocolErrorFromPlan,
@@ -11,10 +11,9 @@ import {
   runServertoolEnginePostflight
 } from './engine-postflight-shell.js';
 import {
-  recordServertoolEngineMatchHit,
-  recordServertoolEngineMatchSkipped
-} from './engine-observation-shell.js';
-import { createServertoolProgressLogger } from './progress-log-block.js';
+  appendServertoolMatchSkippedProgressEvent,
+  createServertoolProgressLogger
+} from './progress-log-block.js';
 import { runEnginePreflight } from './engine-preflight-shell.js';
 import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter,
@@ -23,6 +22,7 @@ import {
 import {
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEngineTriggerObservationWithNative,
+  resolveServertoolEngineMatchHitWithNative,
   resolveServertoolEngineSkipDecisionWithNative,
   resolveServertoolEngineOrchestrationPreflightDecisionWithNative,
   resolveServertoolTimeoutMsFromEnvCandidatesWithNative,
@@ -36,6 +36,43 @@ export interface ServerToolOrchestrationOptions {
   requestId: string;
   entryEndpoint: string;
   stageRecorder?: StageRecorder;
+}
+
+export function recordServertoolEngineMatchSkipped(args: {
+  requestId: string;
+  entryEndpoint: string;
+  engineMode: 'passthrough' | 'tool_flow';
+  skipReason: string;
+  stageRecorder?: StageRecorder;
+  adapterContext?: AdapterContext;
+}): void {
+  args.stageRecorder?.record('servertool.match', {
+    matched: false,
+    mode: args.engineMode,
+    reason: args.skipReason
+  });
+  appendServertoolMatchSkippedProgressEvent({
+    requestId: args.requestId,
+    entryEndpoint: args.entryEndpoint,
+    adapterContext: args.adapterContext,
+    skipReason: args.skipReason
+  });
+}
+
+export function recordServertoolEngineMatchHit(args: {
+  requestId: string;
+  execution: ServerToolExecution;
+  stageRecorder?: StageRecorder;
+}): string {
+  const { flowId } = resolveServertoolEngineMatchHitWithNative({
+    execution: args.execution
+  });
+  args.stageRecorder?.record('servertool.match', {
+    matched: true,
+    flowId,
+    hasFollowup: false
+  });
+  return flowId;
 }
 
 export interface ServerToolOrchestrationResult {
