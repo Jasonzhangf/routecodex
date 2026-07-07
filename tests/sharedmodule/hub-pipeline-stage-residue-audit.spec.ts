@@ -1204,8 +1204,11 @@ describe('hub pipeline stage residue audit', () => {
     ];
 
     expect(fs.existsSync(conversionIndexPath)).toBe(false);
-    expect(rootIndexSource).toContain("export { convertProviderResponse } from './conversion/hub/response/provider-response.js';");
+    expect(rootIndexSource).not.toContain("export { convertProviderResponse } from './conversion/hub/response/provider-response.js';");
+    expect(rootIndexSource).not.toContain("export * from './telemetry/stats-center.js';");
+    expect(rootIndexSource).not.toContain("export * from './native/router-hotpath/virtual-router-contracts.js';");
     expect(rootIndexSource).toContain("export { runStandardChatRequestFilters } from './conversion/shared/chat-request-filters.js';");
+    expect(rootIndexSource).toContain("export type * from './native/router-hotpath/virtual-router-contracts.js';");
     expect(findings).toEqual([]);
   });
 

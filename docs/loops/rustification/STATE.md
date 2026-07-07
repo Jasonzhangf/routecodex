@@ -2,7 +2,7 @@
 
 kill_switch: inactive
 mode: L1 report-only
-last_run_id: 2026-07-06T13:16:52+08:00-config-materialization-rust-closeout
+last_run_id: 2026-07-07T23:44:48+08:00-public-barrel-residue-red-gate
 
 ## Current Baseline
 
@@ -44,6 +44,10 @@ reports `prodTsFileCount=126`, `prodTsLocTotal=27379`,
   stats-center TS IO shell. `verify:llmswitch-minimal-ts-surface` gates against
   reintroducing those public exports and against changing VR contracts back to a
   runtime `export *`.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` also locks the
+  same public-barrel shrink at the residue-audit layer: provider-response and
+  stats-center root exports must stay absent, and VR contracts must stay
+  type-only.
 - Upper production layers must not import `virtual-router-contracts.ts`
   directly. Hub/Host/Server code must consume VR contract types through the
   adjacent native facade that owns the call boundary, such as

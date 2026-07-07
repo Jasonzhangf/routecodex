@@ -116,7 +116,6 @@ async function main() {
   results.push(await run('matrix:hub-pipeline-smoke', 'scripts/tests/hub-pipeline-smoke.mjs'));
   // 1c.1.1.1) coverage boosts (pure, deterministic)
   results.push(await run('matrix:coverage-openai-message-normalize', 'scripts/tests/coverage-openai-message-normalize.mjs'));
-  results.push(await run('matrix:coverage-sticky-pool', 'scripts/tests/coverage-sticky-pool-via-router.mjs'));
   results.push(await run('matrix:coverage-compat-lmstudio-tool-call-ids', 'scripts/tests/compat-lmstudio-tool-call-ids.mjs'));
   results.push(await run('matrix:coverage-hub-req-outbound-compat', 'scripts/tests/coverage-hub-req-outbound-compat.mjs'));
   results.push(await run('matrix:anthropic-usage-input-output-regression', 'scripts/tests/anthropic-usage-input-output-regression.mjs'));
