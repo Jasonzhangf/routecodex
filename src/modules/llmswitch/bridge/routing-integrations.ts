@@ -452,6 +452,51 @@ export function resolveRccPathNativeSync(segments: string[], homeDir?: string): 
   return output;
 }
 
+export function planAuthFileResolutionNativeSync(input: {
+  keyId: string;
+  authDir?: string;
+  homeDir?: string;
+}): {
+  kind: 'literal' | 'authFile';
+  value?: string;
+  filePath?: string;
+  cacheKey?: string;
+} {
+  const binding = loadNativeBindingForConfigCodec();
+  const fn = binding.planAuthFileResolutionJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] planAuthFileResolutionJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    keyId: String(input.keyId ?? ''),
+    authDir: input.authDir,
+    homeDir: input.homeDir,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid payload');
+  }
+  const plan = output as AnyRecord;
+  if (plan.kind !== 'literal' && plan.kind !== 'authFile') {
+    throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid kind');
+  }
+  if (plan.kind === 'literal' && typeof plan.value !== 'string') {
+    throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid literal value');
+  }
+  if (plan.kind === 'authFile' &&
+      (typeof plan.filePath !== 'string' || typeof plan.cacheKey !== 'string')) {
+    throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid authFile plan');
+  }
+  return plan as {
+    kind: 'literal' | 'authFile';
+    value?: string;
+    filePath?: string;
+    cacheKey?: string;
+  };
+}
+
 function safeBridgeCwd(): string | undefined {
   try {
     const cwd = process.cwd();

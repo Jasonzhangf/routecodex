@@ -189,6 +189,64 @@ pub(crate) struct RouteCodexConfigPathResolveInput<'a> {
     pub routecodex_home: Option<&'a str>,
 }
 
+pub(crate) struct AuthFileResolvePlanInput<'a> {
+    pub key_id: &'a str,
+    pub auth_dir: Option<&'a str>,
+    pub home_dir: Option<&'a str>,
+    pub rcc_home: Option<&'a str>,
+    pub routecodex_user_dir: Option<&'a str>,
+    pub routecodex_home: Option<&'a str>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AuthFileResolvePlan {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_key: Option<String>,
+}
+
+pub(crate) fn plan_auth_file_resolution_for_host(
+    input: AuthFileResolvePlanInput<'_>,
+) -> Result<AuthFileResolvePlan, String> {
+    if !input.key_id.starts_with("authfile-") {
+        return Ok(AuthFileResolvePlan {
+            kind: "literal".to_string(),
+            value: Some(input.key_id.to_string()),
+            file_path: None,
+            cache_key: None,
+        });
+    }
+    let file_name = input.key_id.strip_prefix("authfile-").unwrap_or_default();
+    let auth_dir = match input
+        .auth_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(auth_dir) => PathBuf::from(auth_dir),
+        None => resolve_rcc_path_for_host_with_env(
+            input.home_dir,
+            &["auth".to_string()],
+            &[
+                ("RCC_HOME", input.rcc_home),
+                ("ROUTECODEX_USER_DIR", input.routecodex_user_dir),
+                ("ROUTECODEX_HOME", input.routecodex_home),
+            ],
+        )?,
+    };
+    let file_path = join_segments_like_node_path_join(auth_dir, &[file_name.to_string()]);
+    Ok(AuthFileResolvePlan {
+        kind: "authFile".to_string(),
+        value: None,
+        file_path: Some(file_path.to_string_lossy().to_string()),
+        cache_key: Some(input.key_id.to_string()),
+    })
+}
+
 const DEFAULT_CONFIG_NAME: &str = "config.toml";
 
 pub(crate) fn resolve_routecodex_config_path_for_host(
@@ -352,8 +410,9 @@ fn scan_config_directory(
 #[cfg(test)]
 mod host_path_tests {
     use super::{
-        resolve_rcc_path_for_host, resolve_rcc_user_dir_for_host,
-        resolve_routecodex_config_path_for_host, RouteCodexConfigPathResolveInput,
+        plan_auth_file_resolution_for_host, resolve_rcc_path_for_host,
+        resolve_rcc_user_dir_for_host, resolve_routecodex_config_path_for_host,
+        AuthFileResolvePlanInput, RouteCodexConfigPathResolveInput,
     };
     use std::env;
     use std::fs;
@@ -542,6 +601,88 @@ mod host_path_tests {
         })
         .expect_err("json config candidate must fail fast");
         assert!(error.contains("user config JSON support removed"));
+    }
+
+    #[test]
+    fn plan_auth_file_resolution_returns_literal_for_non_authfile_key() {
+        let root = temp_root("auth-literal");
+        let plan = plan_auth_file_resolution_for_host(AuthFileResolvePlanInput {
+            key_id: " sk-test-authfile-demo ",
+            auth_dir: Some(root.to_str().unwrap()),
+            home_dir: Some(root.to_str().unwrap()),
+            rcc_home: None,
+            routecodex_user_dir: None,
+            routecodex_home: None,
+        })
+        .unwrap();
+        assert_eq!(plan.kind, "literal");
+        assert_eq!(plan.value.as_deref(), Some(" sk-test-authfile-demo "));
+        assert_eq!(plan.file_path, None);
+        assert_eq!(plan.cache_key, None);
+    }
+
+    #[test]
+    fn plan_auth_file_resolution_joins_filename_under_auth_dir() {
+        let root = temp_root("auth-plan");
+        let auth_dir = root.join("auth");
+        let plan = plan_auth_file_resolution_for_host(AuthFileResolvePlanInput {
+            key_id: "authfile-demo-default",
+            auth_dir: Some(auth_dir.to_str().unwrap()),
+            home_dir: Some(root.to_str().unwrap()),
+            rcc_home: None,
+            routecodex_user_dir: None,
+            routecodex_home: None,
+        })
+        .unwrap();
+        assert_eq!(plan.kind, "authFile");
+        assert_eq!(plan.value, None);
+        assert_eq!(
+            plan.file_path.as_deref(),
+            Some(auth_dir.join("demo-default").to_str().unwrap())
+        );
+        assert_eq!(plan.cache_key.as_deref(), Some("authfile-demo-default"));
+    }
+
+    #[test]
+    fn plan_auth_file_resolution_preserves_empty_suffix_path_join() {
+        let root = temp_root("auth-empty");
+        let auth_dir = root.join("auth");
+        let plan = plan_auth_file_resolution_for_host(AuthFileResolvePlanInput {
+            key_id: "authfile-",
+            auth_dir: Some(auth_dir.to_str().unwrap()),
+            home_dir: Some(root.to_str().unwrap()),
+            rcc_home: None,
+            routecodex_user_dir: None,
+            routecodex_home: None,
+        })
+        .unwrap();
+        assert_eq!(plan.kind, "authFile");
+        assert_eq!(plan.file_path.as_deref(), Some(auth_dir.to_str().unwrap()));
+        assert_eq!(plan.cache_key.as_deref(), Some("authfile-"));
+    }
+
+    #[test]
+    fn plan_auth_file_resolution_uses_default_rcc_auth_dir() {
+        let root = temp_root("auth-default");
+        let plan = plan_auth_file_resolution_for_host(AuthFileResolvePlanInput {
+            key_id: "authfile-secret",
+            auth_dir: None,
+            home_dir: Some(root.to_str().unwrap()),
+            rcc_home: None,
+            routecodex_user_dir: None,
+            routecodex_home: None,
+        })
+        .unwrap();
+        assert_eq!(
+            plan.file_path.as_deref(),
+            Some(
+                root.join(".rcc")
+                    .join("auth")
+                    .join("secret")
+                    .to_str()
+                    .unwrap()
+            )
+        );
     }
 }
 

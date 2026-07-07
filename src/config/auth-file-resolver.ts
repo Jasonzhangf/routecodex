@@ -4,7 +4,7 @@
  */
 
 import fs from 'fs/promises';
-import path from 'path';
+import { planAuthFileResolutionNativeSync } from '../modules/llmswitch/bridge.js';
 import { resolveRccAuthDir } from './user-data-paths.js';
 
 export class AuthFileResolver {
@@ -24,14 +24,21 @@ export class AuthFileResolver {
       return this.keyCache.get(keyId)!;
     }
 
+    const plan = planAuthFileResolutionNativeSync({
+      keyId,
+      authDir: this.authDir,
+    });
+
     // 如果不是AuthFile，直接返回
-    if (!keyId.startsWith('authfile-')) {
-      return keyId;
+    if (plan.kind === 'literal') {
+      return plan.value ?? keyId;
     }
 
-    // 解析AuthFile
-    const filename = keyId.replace('authfile-', '');
-    const filePath = path.join(this.authDir, filename);
+    const filePath = plan.filePath;
+    const cacheKey = plan.cacheKey ?? keyId;
+    if (!filePath) {
+      throw new Error('[config] AuthFile native resolver returned empty file path');
+    }
 
     try {
       // 读取密钥文件
@@ -39,7 +46,7 @@ export class AuthFileResolver {
       const actualKey = keyContent.trim();
 
       // 缓存密钥
-      this.keyCache.set(keyId, actualKey);
+      this.keyCache.set(cacheKey, actualKey);
 
       return actualKey;
     } catch (error) {

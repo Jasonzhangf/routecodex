@@ -376,6 +376,35 @@ export function resolveRccPathNativeSync(segments, homeDir) {
     }
     return output;
 }
+export function planAuthFileResolutionNativeSync(input) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.planAuthFileResolutionJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] planAuthFileResolutionJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({
+        keyId: String(input.keyId ?? ''),
+        authDir: input.authDir,
+        homeDir: input.homeDir,
+        rccHome: process.env.RCC_HOME,
+        routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+        routecodexHome: process.env.ROUTECODEX_HOME
+    })));
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid payload');
+    }
+    if (output.kind !== 'literal' && output.kind !== 'authFile') {
+        throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid kind');
+    }
+    if (output.kind === 'literal' && typeof output.value !== 'string') {
+        throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid literal value');
+    }
+    if (output.kind === 'authFile' &&
+        (typeof output.filePath !== 'string' || typeof output.cacheKey !== 'string')) {
+        throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid authFile plan');
+    }
+    return output;
+}
 function safeBridgeCwd() {
     try {
         const cwd = process.cwd();

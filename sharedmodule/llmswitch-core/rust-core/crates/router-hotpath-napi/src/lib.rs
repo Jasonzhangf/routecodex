@@ -1349,6 +1349,22 @@ struct RccPathResolveInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct AuthFileResolvePlanInputJson {
+    key_id: String,
+    #[serde(default)]
+    auth_dir: Option<String>,
+    #[serde(default)]
+    home_dir: Option<String>,
+    #[serde(default)]
+    rcc_home: Option<String>,
+    #[serde(default)]
+    routecodex_user_dir: Option<String>,
+    #[serde(default)]
+    routecodex_home: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RouteCodexConfigPathResolveInputJson {
     #[serde(default)]
     preferred_path: Option<String>,
@@ -1413,6 +1429,24 @@ pub fn resolve_rcc_path_json(input_json: String) -> NapiResult<String> {
     .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&path.to_string_lossy().to_string())
         .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi(js_name = "planAuthFileResolutionJson")]
+pub fn plan_auth_file_resolution_json(input_json: String) -> NapiResult<String> {
+    let input: AuthFileResolvePlanInputJson = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let plan = virtual_router_engine::instructions::plan_auth_file_resolution_for_host(
+        virtual_router_engine::instructions::AuthFileResolvePlanInput {
+            key_id: &input.key_id,
+            auth_dir: input.auth_dir.as_deref(),
+            home_dir: input.home_dir.as_deref(),
+            rcc_home: input.rcc_home.as_deref(),
+            routecodex_user_dir: input.routecodex_user_dir.as_deref(),
+            routecodex_home: input.routecodex_home.as_deref(),
+        },
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&plan).map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
 #[napi(js_name = "resolveRouteCodexConfigPathJson")]

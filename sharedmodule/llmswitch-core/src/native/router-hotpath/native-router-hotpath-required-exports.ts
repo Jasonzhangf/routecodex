@@ -42,6 +42,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planRouteCodexProviderConfigV2FilesJson",
   "resolveRouteCodexProviderConfigV2IdentityJson",
   "loadRouteCodexProviderConfigsV2FromRootJson",
+  "planAuthFileResolutionJson",
   "estimateVirtualRouterRequestTokensJson",
   "evaluateSingletonRoutePoolExhaustionJson",
   "resolveErrorErr05RouteAvailabilityDecisionJson",
