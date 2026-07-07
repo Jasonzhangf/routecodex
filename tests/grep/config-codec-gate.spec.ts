@@ -6,6 +6,7 @@
  * without going through the codec functions (parseUserConfigText, parseProviderConfigText).
  */
 import { execSync } from 'node:child_process';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -249,5 +250,40 @@ describe('Config Codec Gate', () => {
       rootDir
     );
     expect(output.trim()).toBe('');
+  });
+
+  test('remaining src/config TypeScript files are explicitly classified', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const tracked = runGrep(
+      `git ls-files 'src/config/*.ts' 'src/config/*.d.ts'`,
+      rootDir
+    )
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .sort();
+    const manifestPath = path.join(rootDir, 'docs/loops/rustification/config-ts-surface.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+      entries?: Array<{
+        path?: string;
+        classification?: string;
+        ownerFeature?: string;
+        removableNow?: boolean;
+        cannotShrinkFurtherBecause?: string;
+      }>;
+    };
+    const entries = new Map((manifest.entries ?? []).map((entry) => [entry.path, entry]));
+    const missing = tracked.filter((filePath) => !entries.has(filePath));
+    const stale = [...entries.keys()]
+      .filter((filePath): filePath is string => typeof filePath === 'string' && !tracked.includes(filePath))
+      .sort();
+    const weak = [...entries.values()].filter((entry) => {
+      return !entry.classification
+        || !entry.ownerFeature
+        || entry.removableNow !== false
+        || typeof entry.cannotShrinkFurtherBecause !== 'string'
+        || entry.cannotShrinkFurtherBecause.trim().length < 40;
+    });
+    expect({ missing, stale, weak }).toEqual({ missing: [], stale: [], weak: [] });
   });
 });
