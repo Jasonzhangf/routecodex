@@ -27224,3 +27224,11 @@ Complete SSE rustification status (34 TS files):
 - Live replay output: `ok=true`, `eventCount=11`, `customInputCount=3`, `functionArgumentPatchLeakCount=0`, `deltaStreamCount=0`; client-visible `custom_tool_call.input` preserved the exact raw patch text.
 - Live log evidence: request `openai-responses-router-gpt-5.5-20260707T124719881-472008-124` routed to `tools/gateway-priority-5555-priority-tools -> minimax[key1].MiniMax-M2.7` with reason `tools:apply_patch-tool-choice`.
 - Follow-up gates passed after replay: focused Rust SSE projection gate (`project_responses_sse_frame_for_client`, 16 tests), `verify:repo-sanity`, `verify:function-map-compile-gate`, `verify:vr-no-ts-runtime`, `verify:llmswitch-rustification-audit`, `verify:config-provider-codec-rust`, and `verify:config-toml-codec-rust`.
+
+# 2026-07-07: fixed stale hub.stage_timing_observation allowed_paths
+- Trigger: verify:architecture-ci-longtail failing with 6 missing-on-disk errors for hub.stage_timing_observation.
+- Fix: removed 6 stale hub-stage-timing-blocks/state-blocks/log-blocks/env-blocks/breakdown-state-blocks/timeline-state-blocks.ts from function-map.yml allowed_paths; removed 4 matching unit entries from verification-map.yml.
+- Verification: all 10 architecture-ci-longtail sub-gates PASS; llmswitch-rustification-audit PASS (nonNativeFileCount=12); function-map/mainline/binding/responses gates PASS.
+- Architecture review: map hygiene only, no semantic change, no ts_semantic_debt added.
+- D1 clarification: prior model session described user-data-paths rustification plan but did not commit it. Current state: src/config/user-data-paths.ts (full logic, 20+ callers in src/) + llmswitch-core/src/runtime/user-data-paths.ts (35 LOC native facade). minimal-ts-surface.json correctly classifies it as ts_io_shell_ok. Rust migration remains future L2 item.
+- Boundary: mode is L1 report-only. Action was limited to gate-blocking map hygiene fix. No managed live restart/replay.

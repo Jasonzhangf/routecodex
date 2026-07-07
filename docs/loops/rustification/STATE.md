@@ -15,8 +15,8 @@ last_run_id: 2026-07-06T13:16:52+08:00-config-materialization-rust-closeout
   may report them as collision context but must not stage, reset, checkout, or
   delete them.
 - Latest source/doc-only L1/config closeout: `npm run verify:llmswitch-rustification-audit`
-  reports `prodTsFileCount=159`, `prodTsLocTotal=28837`,
-  `nonNativeFileCount=35`, `nonNativeLocTotal=4743`; current Hub/VR semantic
+  reports `prodTsFileCount=137`, `prodTsLocTotal=28365`,
+  `nonNativeFileCount=12`, `nonNativeLocTotal=3323`; current Hub/VR semantic
   watchlist has no open `ts_semantic_debt` from that list.
 - MemPalace artifact exclusion gate: `npm run verify:mempalace-scan-artifacts`
   reports `artifactHits=0`; representative generated/local examples under
