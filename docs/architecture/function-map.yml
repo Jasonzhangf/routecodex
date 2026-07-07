@@ -1457,9 +1457,9 @@ owners:
 
   - feature_id: vr.provider_forwarder_runtime
     status: active
-    summary: "ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router"
+    summary: "ProviderForwarder config load, capability filtering, internal target selection, in-process health/cooldown truth, and runtime diagnostics stay in Rust Virtual Router"
     owner_kind: rust_ssot
-    owner_scope: "ProviderForwarder config load, capability filtering, internal target selection, startup cooldown truth, and runtime diagnostics stay in Rust Virtual Router"
+    owner_scope: "ProviderForwarder config load, capability filtering, internal target selection, in-process health/cooldown truth, and runtime diagnostics stay in Rust Virtual Router"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
     canonical_types:
       - ForwarderRegistry
@@ -1490,7 +1490,7 @@ owners:
     migration_target: rust
     notes:
       - "Config routes may name `fwd.*`, but host/executor must receive only resolved real provider keys."
-      - "Forwarder availability must inspect real targets, including startup cooldown truth, without consuming unselected targets."
+      - "Forwarder availability must inspect real targets using process-local health truth only; stale disk cooldown state must not be consumed after restart."
       - "HTTP diagnostics may expose Rust VR forwarder status only; diagnostics must not implement selection or health policy."
 
   - feature_id: vr.online_diagnostics
@@ -2811,19 +2811,19 @@ owners:
 
   - feature_id: config.user_config_codec
     status: active
-    summary: "user config decode/format truth is TOML-only; TOML parse/serialize delegates to Rust"
-    owner_kind: ts_shell
-    owner_scope: "TS detects TOML-only user config path and performs file IO; TOML parse/serialize delegates to config.toml_codec; JSON config is rejected fail-fast"
-    owner_module: src/config/user-config-codec.ts
+    summary: "user config decode/format truth is TOML-only; config text decode delegates to Rust"
+    owner_kind: rust_ssot
+    owner_scope: "TS detects TOML-only user config path and performs file IO; Rust decodes TOML config text and rejects JSON fail-fast"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
     canonical_types:
       - UserConfigFormat
       - DecodedUserConfigFile
     canonical_builders:
-      - detectUserConfigFormat
-      - parseUserConfigText
-      - decodeUserConfigFile
-      - decodeUserConfigFileSync
+     - decode_user_config_text_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/user-config-codec.ts
       - src/config/routecodex-config-loader.ts
       - src/server/handlers/config-admin-handler.ts
@@ -2841,6 +2841,7 @@ owners:
     forbidden_paths:
       - src/providers
     required_tests:
+      - tests/config/config-file-codec-rust.spec.ts
       - tests/config/toml-codec.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
@@ -2848,29 +2849,30 @@ owners:
       - npm run verify:config-toml-codec-rust
     migration_target: rust
     notes:
-      - "No caller may parse user config with raw JSON.parse/TOML logic outside codec owner; src/config/toml-basic.ts is a thin native shell only."
+      - "No caller may parse user config with raw JSON.parse/TOML logic outside codec owner; src/config/user-config-codec.ts must call native decodeRouteCodexUserConfigTextSync for TOML text semantics."
       - "Legacy config.json support is removed; callers must use config.toml."
 
   - feature_id: config.provider_config_codec
     status: active
-    summary: "provider v2 config decode/format truth is TOML-only; TOML parse/serialize and provider v2 coercion delegate to Rust"
-    owner_kind: ts_shell
-    owner_scope: "file-scoped TS provider-config-codec handles single-file TOML text IO/decode shell only for codec/writer tests and explicit codec callers; TOML parse/serialize delegates to config.toml_codec; provider v2 root loading, file planning, duplicate detection, identity validation, and coercion delegate to Rust; provider JSON config is rejected"
-    owner_module: src/config/provider-config-codec.ts
+    summary: "provider v2 config decode/format truth is TOML-only; config text decode and provider v2 coercion delegate to Rust"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped TS provider-config-codec handles single-file TOML file IO/path shell only for codec/writer tests and explicit codec callers; Rust decodes TOML config text; provider v2 root loading, file planning, duplicate detection, identity validation, and coercion delegate to Rust; provider JSON config is rejected"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
     canonical_types:
       - ProviderConfigFormat
       - DecodedProviderConfigFile
     canonical_builders:
-      - detectProviderConfigFormat
-      - parseProviderConfigText
-      - decodeProviderConfigFile
-      - coerceProviderConfigV2FromParsed
+     - decode_provider_config_text_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/provider-config-codec.ts
       - src/config/provider-config-writer.ts
     forbidden_paths:
       - src/server/runtime/http-server/executor
     required_tests:
+      - tests/config/config-file-codec-rust.spec.ts
       - tests/config/toml-codec.spec.ts
       - tests/config/provider-v2-loader.spec.ts
       - tests/grep/config-codec-gate.spec.ts
@@ -2882,7 +2884,7 @@ owners:
     notes:
       - "Provider config single-file codec is now file-scoped; maintenance/admin/init/provider-update must not call provider-config-codec directly for providerId/root reads."
       - "Legacy config.v1.json/config.v2.json support is removed; provider config path is config.v2.toml."
-      - "Provider config v2 root loading and coercion are Rust-owned through loadRouteCodexProviderConfigsV2FromRootJson/coerceRouteCodexProviderConfigV2Json; src/config/provider-config-codec.ts remains single-file IO/path rejection shell."
+      - "Provider config v2 single-file text decode, root loading, and coercion are Rust-owned through decodeRouteCodexProviderConfigTextJson/loadRouteCodexProviderConfigsV2FromRootJson/coerceRouteCodexProviderConfigV2Json; src/config/provider-config-codec.ts remains single-file IO/path rejection shell."
       - "Provider CLI/tooling/admin/init commands that address configs by providerId must read through loadProviderConfigsV2/root loader instead of decoding config.v2.toml directly; provider-update no longer accepts arbitrary provider config file paths."
 
   - feature_id: config.provider_config_coercion
@@ -3161,9 +3163,9 @@ owners:
 
   - feature_id: manager.routing_control_surface
     status: active
-    summary: "routing instruction / provider health state store managed through Rust VR state store; TS modules/routing is bridge only"
+    summary: "routing instruction state store managed through Rust VR state store; TS modules/routing is bridge only"
     owner_kind: ts_runtime_owner
-    owner_scope: "routing instruction / provider health state store managed through Rust VR state store; TS modules/routing is bridge only"
+    owner_scope: "routing instruction state store managed through Rust VR state store; TS modules/routing is bridge only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
     canonical_types:
       - RoutingInstructionState
@@ -3171,8 +3173,6 @@ owners:
     canonical_builders:
       - load_routing_instruction_state
       - persist_routing_instruction_state
-      - load_provider_health_state
-      - persist_provider_health_state
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
       - src/manager/modules/routing
@@ -3193,17 +3193,15 @@ owners:
       - "Must not duplicate vr.route_selection / vr.route_availability_floor semantics; selection floor stays in Rust."
   - feature_id: manager.health_runtime
     status: active
-    summary: "virtual-router health snapshot persistence bridge; Rust VR health owns runtime cooldown truth"
+    summary: "virtual-router provider-error diagnostics bridge; Rust VR owns process-local runtime cooldown truth"
     owner_kind: ts_runtime_owner
-    owner_scope: "file-scoped virtual-router health snapshot persistence bridge; TS modules/health is the unique owner of persistence and snapshot access"
+    owner_scope: "file-scoped provider-error diagnostics bridge; TS modules/health may record diagnostic events but must not persist provider health or cooldown snapshots"
     owner_module: src/manager/modules/health
     canonical_types:
       - HealthManagerModule
       - VirtualRouterHealthStore
-      - VirtualRouterHealthSnapshot
     canonical_builders:
       - getHealthStore
-      - getCurrentSnapshot
       - resolveStateDir
     allowed_paths:
       - src/manager/modules/health
@@ -3221,8 +3219,8 @@ owners:
       - npm run verify:architecture-ci
     migration_target: rust
     notes:
-      - "Cross-restart cooldown persistence is disabled; TS HealthManagerModule is jsonl persistence bridge only and must not redefine cooldown/runtime semantics."
-      - "Runtime cooldown ladder truth stays in Rust health.rs; this TS owner only manages local snapshot persistence and accessors."
+      - "Cross-restart cooldown persistence is forbidden; TS HealthManagerModule must not load or persist provider health/cooldown snapshots."
+      - "Runtime cooldown ladder truth stays process-local in Rust health.rs; TS may only append provider-error diagnostic events."
   - feature_id: daemon_admin.command_handlers
     status: active
     summary: "daemon-admin HTTP surface (auth/credentials/ports/providers/restart/stats/status) is projection shell over manager/llmswitch-core truth"
