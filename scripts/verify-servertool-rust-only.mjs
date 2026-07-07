@@ -7133,19 +7133,25 @@ function checkDeletedAiFollowupAbsent() {
 }
 
 function checkServertoolProgressFileLoggingFailFast() {
-  const progressFile = `${SERVERTOOL_TS_DIR}/log/progress-file.ts`;
-  const progressFileSource = readRequired(progressFile);
+  // progress-log-block.ts is the canonical location; the old log/progress-file.ts was deleted.
+  const progressBlockFile = `${SERVERTOOL_TS_DIR}/progress-log-block.ts`;
+  if (!existsSync(progressBlockFile)) {
+    fail('servertool-progress-file-fail-fast', `Missing required file: ${progressBlockFile}`);
+    return;
+  }
+  const progressBlockSource = readRequired(progressBlockFile);
   const progressLoggingSpec = readRequired(`${ROOT}/tests/servertool/servertool-progress-logging.spec.ts`);
   for (const keyword of [
     '// best-effort file logging',
     'best-effort file logging',
     '.catch(() => {',
   ]) {
-    if (progressFileSource.includes(keyword)) {
+    if (progressBlockSource.includes(keyword)) {
       fail(
         'servertool-progress-file-fail-fast',
-        `progress-file.ts must not swallow enabled JSONL file logging failures with "${keyword}"`
+        `progress-log-block.ts must not swallow enabled JSONL file logging failures with "${keyword}"`
       );
+      return;
     }
   }
   assertContains(
