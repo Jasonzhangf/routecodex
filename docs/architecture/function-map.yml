@@ -1900,12 +1900,6 @@ owners:
       - attachHubStageTopSummary
     allowed_paths:
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-blocks.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-state-blocks.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-log-blocks.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-env-blocks.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-breakdown-state-blocks.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing-timeline-state-blocks.ts
       - tests/sharedmodule
     forbidden_paths:
       - src/providers/core/runtime
