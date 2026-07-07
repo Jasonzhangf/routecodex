@@ -3258,6 +3258,9 @@ describe('hub pipeline stage residue audit', () => {
 
     const forbiddenPatterns = [
       { label: 'local stop-message summary', pattern: /function summarizeStopMessageRuntime/u },
+      { label: 'local hit-log routing-state flattener', pattern: /function flattenRoutingState/u },
+      { label: 'local hit-log stopMessageText field spread', pattern: /stopMessageText:\s*state\.stopMessageText/u },
+      { label: 'local hit-log stopMessageMaxRepeats field spread', pattern: /stopMessageMaxRepeats:\s*state\.stopMessageMaxRepeats/u },
       { label: 'local hit-log omit normalization', pattern: /function normalizeHitLogOmit/u },
       { label: 'local provider key parser', pattern: /providerKey\.trim\(\)|\.split\('\\.'\)/u },
       { label: 'local target provider descriptor', pattern: /const aliasLabel|parsed\.keyAlias|parsed\.modelId/u },

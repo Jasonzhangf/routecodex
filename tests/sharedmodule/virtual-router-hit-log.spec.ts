@@ -95,6 +95,23 @@ describe('virtual-router hit log', () => {
     expect(event.requestTokens).toBe(777);
   });
 
+  it('accepts nested routing state without TS flattening stopMessage fields', () => {
+    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
+      routeName: 'thinking',
+      poolId: 'thinking-primary',
+      providerKey: 'glm.key1.kimi-k2.5',
+      modelId: 'kimi-k2.5',
+      routingState: {
+        stopMessageText: 'continue until done',
+        stopMessageMaxRepeats: 3,
+        stopMessageUsed: 1,
+        stopMessageStageMode: 'auto'
+      }
+    }));
+
+    expect(line).toContain('[stopMessage:"continue until done" mode=auto round=1/3 active=yes left=2]');
+  });
+
   it('includes session id in hit log and uses session-derived coloring', () => {
     const lineA = formatVirtualRouterHit(createVirtualRouterHitRecord({
       routeName: 'thinking',

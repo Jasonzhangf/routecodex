@@ -110,21 +110,6 @@ function callNativeString(exportName: string, args: unknown[]): string {
   return raw;
 }
 
-function flattenRoutingState(input: {
-  routingState?: StopMessageRoutingStateView;
-}): Record<string, unknown> {
-  const state = input.routingState;
-  if (!state) return {};
-  return {
-    stopMessageText: state.stopMessageText,
-    stopMessageMaxRepeats: state.stopMessageMaxRepeats,
-    stopMessageUsed: state.stopMessageUsed,
-    stopMessageUpdatedAt: state.stopMessageUpdatedAt,
-    stopMessageLastUsedAt: state.stopMessageLastUsedAt,
-    stopMessageStageMode: state.stopMessageStageMode
-  };
-}
-
 export function createVirtualRouterHitRecord(input: {
   requestId?: string;
   sessionId?: string;
@@ -140,11 +125,7 @@ export function createVirtualRouterHitRecord(input: {
   timestampMs?: number;
 }): VirtualRouterHitRecord {
   return callNativeJson<VirtualRouterHitRecord>('createVirtualRouterHitRecordJson', [
-    JSON.stringify({
-      ...input,
-      ...flattenRoutingState(input),
-      routingState: undefined
-    })
+    JSON.stringify(input)
   ]);
 }
 

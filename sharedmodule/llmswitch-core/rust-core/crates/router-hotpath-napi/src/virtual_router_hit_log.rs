@@ -102,11 +102,30 @@ pub struct VirtualRouterHitRecordInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_message_stage_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub routing_state: Option<StopMessageRoutingStateInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub request_tokens: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection_penalty: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StopMessageRoutingStateInput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_message_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_message_max_repeats: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_message_used: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_message_updated_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_message_last_used_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_message_stage_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,12 +189,25 @@ fn current_epoch_ms() -> i64 {
 fn summarize_stop_message_runtime(
     input: &VirtualRouterHitRecordInput,
 ) -> StopMessageRuntimeSummary {
-    let text = input.stop_message_text.as_deref().unwrap_or("").trim();
+    let routing_state = input.routing_state.as_ref();
+    let text = input
+        .stop_message_text
+        .as_deref()
+        .or_else(|| routing_state.and_then(|state| state.stop_message_text.as_deref()))
+        .unwrap_or("")
+        .trim();
     let has_goal_text = !text.is_empty();
     let safe_text = to_safe_text(text);
-    let mode = to_stop_mode(input.stop_message_stage_mode.as_deref().unwrap_or(""));
+    let mode = to_stop_mode(
+        input
+            .stop_message_stage_mode
+            .as_deref()
+            .or_else(|| routing_state.and_then(|state| state.stop_message_stage_mode.as_deref()))
+            .unwrap_or(""),
+    );
     let parsed_max = input
         .stop_message_max_repeats
+        .or_else(|| routing_state.and_then(|state| state.stop_message_max_repeats))
         .map(|v| to_finite_i64(v))
         .filter(|&v| v > 0)
         .unwrap_or(0);
@@ -188,6 +220,7 @@ fn summarize_stop_message_runtime(
     };
     let used = input
         .stop_message_used
+        .or_else(|| routing_state.and_then(|state| state.stop_message_used))
         .map(|v| to_finite_i64(v).max(0))
         .unwrap_or(0);
     let remaining = if max_repeats > 0 {
@@ -207,10 +240,12 @@ fn summarize_stop_message_runtime(
         active,
         updated_at: input
             .stop_message_updated_at
+            .or_else(|| routing_state.and_then(|state| state.stop_message_updated_at))
             .map(|v| to_finite_i64(v))
             .filter(|&v| v > 0),
         last_used_at: input
             .stop_message_last_used_at
+            .or_else(|| routing_state.and_then(|state| state.stop_message_last_used_at))
             .map(|v| to_finite_i64(v))
             .filter(|&v| v > 0),
     }
