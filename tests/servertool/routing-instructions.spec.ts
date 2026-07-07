@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState,
+  persistRoutingInstructionState,
   saveRoutingInstructionStateSync,
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
@@ -448,6 +449,28 @@ describe('Routing instruction parsing and application', () => {
     } finally {
       fs.rmSync(temp, { recursive: true, force: true });
     }
+  });
+
+  test('persistent state sync decision is owned by native store semantics', () => {
+    const syncCalls: string[] = [];
+    const asyncCalls: string[] = [];
+    const store = {
+      saveSync: (key: string) => {
+        syncCalls.push(key);
+      },
+      saveAsync: (key: string) => {
+        asyncCalls.push(key);
+      }
+    };
+    const activeState = createState({ stopMessageText: '继续', stopMessageMaxRepeats: 2 });
+
+    persistRoutingInstructionState('session:native-sync-check', activeState, store);
+    persistRoutingInstructionState('tmux:native-sync-check', activeState, store);
+    persistRoutingInstructionState('conversation:native-async-check', activeState, store);
+    persistRoutingInstructionState('request:not-persistent', activeState, store);
+
+    expect(syncCalls).toEqual(['session:native-sync-check', 'tmux:native-sync-check']);
+    expect(asyncCalls).toEqual(['conversation:native-async-check']);
   });
 
   testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)(

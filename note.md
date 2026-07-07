@@ -27452,3 +27452,28 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - `npm run verify:llmswitch-rustification-audit -- --json` PASS: `prodTsFileCount=135`, `prodTsLocTotal=27784`, `nonNativeFileCount=10`, `nonNativeLocTotal=2542`.
   - `git diff --check` PASS.
 - Boundary: `provider-response.ts -> servertool/response-stage-orchestration-shell.ts` remains the single allowed Rust-planned servertool IO entrypoint; no MetadataCenter/type/timing TS coupling remains between servertool and Hub.
+
+# 2026-07-07: Servertool routing instruction state bridge is native-owned
+
+- Scope: continue servertool-priority TS shrink by removing routing-instruction state persistence-key, empty-state, and sync-save decisions from `native-virtual-router-routing-state.ts`.
+- Change:
+  - Rust `routing_state_store.rs` now owns `should_save_sync` alongside persistent-key and empty-state semantics.
+  - NAPI exports `shouldSaveRoutingInstructionStateSyncJson`; TS bridge calls native for sync/async save selection instead of checking `session:` / `tmux:` prefixes.
+  - `verify:servertool-rust-only` now has `servertool-routing-instruction-state-native-only`, blocking TS reimplementation of routing-state markers and state emptiness checks.
+  - Rust routing-instruction stopMessage parse/apply now preserves `stopMessageAiMode`; `resolveRccUserDir` passes JS env snapshots to Rust so Jest env overrides reach native path resolution.
+- Verification:
+  - `cargo test -p router-hotpath-napi routing_state_store --lib -- --nocapture` PASS: 2 tests.
+  - `cargo test -p router-hotpath-napi virtual_router_stop_message_instruction --lib -- --nocapture` PASS: 3 tests.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/routing-instructions.spec.ts` PASS: 38 passed, 9 skipped.
+  - `cargo test -p servertool-core -- --nocapture` PASS: 373 tests.
+  - `cargo test -p router-hotpath-napi servertool --lib -- --nocapture` PASS: 168 passed.
+  - `npm run verify:servertool-rust-only` PASS.
+  - `npm run verify:llmswitch-core-tsc` PASS.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface -- --json` PASS: entries 13, current non-native prod TS files 10, explicit native-linked TS shells 3.
+  - `npm run verify:llmswitch-rustification-audit -- --json` PASS: `prodTsFileCount=135`, `prodTsLocTotal=27535`, `nonNativeFileCount=10`, `nonNativeLocTotal=2437`.
+  - `git diff --check` PASS.
+- Boundary: no live restart/replay and no real `~/.rcc` edits. This slice changes native bridge/state semantics and test gates, not managed runtime behavior.

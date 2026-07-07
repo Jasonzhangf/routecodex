@@ -197,6 +197,12 @@ function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
   return parseJson(raw) === true;
 }
 
+function shouldSaveRoutingStateSync(key: string | undefined): boolean {
+  const capability = 'shouldSaveRoutingInstructionStateSyncJson';
+  const raw = invokeNativeString(capability, [key ?? null]);
+  return parseJson(raw) === true;
+}
+
 export function serializeRoutingInstructionState(state: RoutingInstructionState): Record<string, unknown> {
   const capability = 'serializeRoutingInstructionStateJson';
   const raw = invokeNativeString(capability, [stringifyForNative(capability, plainState(state))]);
@@ -315,7 +321,7 @@ export function persistRoutingInstructionState(
     routingStateStore.saveSync?.(key, null) ?? routingStateStore.saveAsync(key, null);
     return;
   }
-  if (typeof routingStateStore.saveSync === 'function' && (key.startsWith('session:') || key.startsWith('tmux:'))) {
+  if (typeof routingStateStore.saveSync === 'function' && shouldSaveRoutingStateSync(key)) {
     routingStateStore.saveSync(key, state);
     return;
   }

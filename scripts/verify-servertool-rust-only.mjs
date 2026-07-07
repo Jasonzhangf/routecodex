@@ -42,6 +42,8 @@ const RUST_SERVERTOOL_CLI_BLACKBOX = `${ROOT}/sharedmodule/llmswitch-core/rust-c
 const RUST_FOLLOWUP_CORE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/followup-core/src/lib.rs`;
 const RUST_ROUTER_HOTPATH_NAPI_LIB = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`;
 const RUST_ROUTER_HOTPATH_NAPI_PROXY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs`;
+const RUST_ROUTING_STATE_STORE = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs`;
+const TS_NATIVE_VIRTUAL_ROUTER_ROUTING_STATE = `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts`;
 const RUST_SERVERTOOL_CORE_LOOKUP = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`;
 const RUST_SERVERTOOL_CORE_BLOCKS = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`;
 const RUST_SERVERTOOL_STOP_GATEWAY = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stop_gateway_context.rs`;
@@ -6469,6 +6471,70 @@ function checkServertoolHubBoundaryRustOwned() {
   );
 }
 
+function checkRoutingInstructionStateNativeOnly() {
+  const tsRoutingState = readRequired(TS_NATIVE_VIRTUAL_ROUTER_ROUTING_STATE);
+  const rustRoutingStateStore = readRequired(RUST_ROUTING_STATE_STORE);
+  const rustLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
+
+  for (const marker of [
+    'pub(crate) fn is_persistent_key',
+    'pub(crate) fn should_save_sync',
+    'pub(crate) fn is_state_empty',
+  ]) {
+    if (!rustRoutingStateStore.includes(marker)) {
+      fail(
+        'servertool-routing-instruction-state-native-only',
+        `routing_state_store.rs must own routing-state semantic marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    'is_routing_instruction_state_persistent_key_json',
+    'is_routing_instruction_state_empty_json',
+    'should_save_routing_instruction_state_sync_json',
+  ]) {
+    if (!rustLib.includes(marker)) {
+      fail(
+        'servertool-routing-instruction-state-native-only',
+        `router-hotpath lib.rs must export native routing-state marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    "const capability = 'isRoutingInstructionStatePersistentKeyJson'",
+    "const capability = 'isRoutingInstructionStateEmptyJson'",
+    "const capability = 'shouldSaveRoutingInstructionStateSyncJson'",
+  ]) {
+    if (!tsRoutingState.includes(marker)) {
+      fail(
+        'servertool-routing-instruction-state-native-only',
+        `native-virtual-router-routing-state.ts must call Rust routing-state capability marker ${marker}`
+      );
+    }
+  }
+  for (const marker of [
+    "key.startsWith('session:') || key.startsWith('conversation:') || key.startsWith('tmux:')",
+    "key.startsWith('session:') || key.startsWith('tmux:')",
+    'state.allowedProviders.size === 0',
+    'state.disabledProviders.size === 0',
+    'state.disabledKeys.size === 0',
+    'state.disabledModels.size === 0',
+    'typeof state.stopMessageText ===',
+    'typeof state.preCommandScriptPath ===',
+  ]) {
+    if (tsRoutingState.includes(marker)) {
+      fail(
+        'servertool-routing-instruction-state-native-only',
+        `native-virtual-router-routing-state.ts must not reimplement Rust routing-state semantics via marker ${marker}`
+      );
+    }
+  }
+  pass(
+    'servertool-routing-instruction-state-native-only',
+    'routing instruction persistence key, sync save decision, and empty-state semantics are native-owned'
+  );
+}
+
 function checkServertoolAutoHookCallerThinShell() {
   assertMissingFile(
     'servertool-auto-hook-caller-thin-shell',
@@ -7512,6 +7578,7 @@ checkStoplessNoTsRuntimeControlSpecialization();
 checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
 checkServertoolHubBoundaryRustOwned();
+checkRoutingInstructionStateNativeOnly();
 checkServertoolAutoHookCallerThinShell();
 checkServertoolResponseStageGateThinShell();
 checkServertoolEngineStoplessSessionThinShell();

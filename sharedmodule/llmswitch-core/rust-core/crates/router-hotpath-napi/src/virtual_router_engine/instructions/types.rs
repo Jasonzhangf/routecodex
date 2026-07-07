@@ -64,6 +64,7 @@ pub(crate) struct StopMessageInstruction {
     pub text: Option<String>,
     pub max_repeats: Option<i64>,
     pub stage_mode: Option<String>,
+    pub ai_mode: Option<String>,
     pub source: Option<String>,
     pub from_historical: bool,
 }
@@ -86,6 +87,7 @@ pub(crate) struct StopMessageInstructionParseOutput {
     pub text: Option<String>,
     pub max_repeats: Option<i64>,
     pub stage_mode: Option<String>,
+    pub ai_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -27,7 +27,12 @@ function callNativeString(capability: string, input: Record<string, unknown>): s
 }
 
 export function resolveRccUserDir(homeDir?: string): string {
-  return callNativeString('resolveRccUserDirJson', { homeDir });
+  return callNativeString('resolveRccUserDirJson', {
+    homeDir,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  });
 }
 
 export function resolveRccPath(...segments: string[]): string {

@@ -61,6 +61,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "deserializeRoutingInstructionStateJson",
   "isRoutingInstructionStateEmptyJson",
   "isRoutingInstructionStatePersistentKeyJson",
+  "shouldSaveRoutingInstructionStateSyncJson",
   "isPreCommandScriptPathAllowedJson",
   "loadRoutingInstructionStateJson",
   "mergeStopMessageFromPersistedJson",

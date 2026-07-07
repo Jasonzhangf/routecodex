@@ -381,6 +381,10 @@ pub(crate) fn is_persistent_key(key: &str) -> bool {
     key.starts_with("session:") || key.starts_with("conversation:") || key.starts_with("tmux:")
 }
 
+pub(crate) fn should_save_sync(key: &str) -> bool {
+    key.starts_with("session:") || key.starts_with("tmux:")
+}
+
 fn expand_home(value: &str, home_dir: &Path) -> PathBuf {
     if let Some(stripped) = value.strip_prefix("~/") {
         return home_dir.join(stripped);

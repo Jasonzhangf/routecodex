@@ -1071,6 +1071,12 @@ fn serialize_routing_instruction_for_napi(
                 Value::String(value.clone()),
             );
         }
+        if let Some(value) = &stop.ai_mode {
+            out.insert(
+                "stopMessageAiMode".to_string(),
+                Value::String(value.clone()),
+            );
+        }
         if let Some(value) = &stop.source {
             out.insert(
                 "stopMessageSource".to_string(),
@@ -1144,6 +1150,10 @@ fn deserialize_routing_instruction_for_napi(
                 max_repeats: obj.get("stopMessageMaxRepeats").and_then(|v| v.as_i64()),
                 stage_mode: obj
                     .get("stopMessageStageMode")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                ai_mode: obj
+                    .get("stopMessageAiMode")
                     .and_then(|v| v.as_str())
                     .map(|v| v.to_string()),
                 source: obj
@@ -1277,6 +1287,17 @@ pub fn is_routing_instruction_state_empty_json(state_json: String) -> NapiResult
     .unwrap_or_default();
     let empty = virtual_router_engine::routing_state_store::is_state_empty(&state);
     serde_json::to_string(&empty).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn should_save_routing_instruction_state_sync_json(
+    key: Option<String>,
+) -> NapiResult<String> {
+    let should_sync = key
+        .as_deref()
+        .map(virtual_router_engine::routing_state_store::should_save_sync)
+        .unwrap_or(false);
+    serde_json::to_string(&should_sync).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi]
