@@ -810,7 +810,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
 
 Forbidden paths:

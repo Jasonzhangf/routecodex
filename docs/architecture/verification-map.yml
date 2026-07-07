@@ -404,7 +404,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
     contract:
       - tests/servertool/response-stage-orchestration-shell.spec.ts
       - tests/servertool/server-side-tools.failfast.spec.ts

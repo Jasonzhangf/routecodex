@@ -6610,7 +6610,12 @@ function checkServertoolResponseStageGateThinShell() {
     `${ROOT}/tests/servertool/response-stage-prepass-shell.spec.ts`,
     'response-stage-prepass-shell.spec.ts must stay physically deleted; run-server-side-tool-engine-shell.spec.ts owns the prepass branch assertions'
   );
-  const responseStageAutoHookShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`);
+  assertMissingFile(
+    'servertool-response-stage-auto-hook-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    'response-stage-auto-hook-shell.ts must stay physically deleted; execution-stage-shell.ts owns the native response auto-hook pass'
+  );
+  const responseStageAutoHookShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`);
   for (const marker of [
     'responseHookRequired: args.responseStageGatePlan.responseHookRequired === true',
     "responseHookName: String(args.responseStageGatePlan.responseHookName ?? 'unknown')",
@@ -6644,55 +6649,55 @@ function checkServertoolResponseStageGateThinShell() {
     if (responseStageAutoHookShell.includes(marker)) {
       fail(
       'servertool-response-stage-auto-hook-shell-owner',
-        `response-stage-auto-hook-shell.ts must not derive Rust-owned required hook fields via TS marker ${marker}`
+        `execution-stage-shell.ts must not derive Rust-owned required hook fields via TS marker ${marker}`
       );
     }
   }
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`,
     responseStageAutoHookShell,
     'resolveServertoolResponseStageAutoHookPreDecisionWithNative'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`,
     responseStageAutoHookShell,
     'resolveServertoolResponseStageAutoHookPostDecisionWithNative'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`,
     responseStageAutoHookShell,
     'resolveServertoolResponseStageAutoHookPreApplicationWithNative'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`,
     responseStageAutoHookShell,
     'resolveServertoolResponseStageAutoHookPostApplicationWithNative'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`,
     responseStageAutoHookShell,
     'createServertoolProviderProtocolErrorFromPlan(postAutoHookApplication.errorPlan)'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`,
     responseStageAutoHookShell,
     'autoHookResult'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`,
     responseStageAutoHookShell,
     'return preAutoHookApplication.result'
   );
   assertContains(
     'servertool-response-stage-auto-hook-shell-owner',
-    `${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`,
+    `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`,
     responseStageAutoHookShell,
     'return postAutoHookApplication.result'
   );

@@ -2,6 +2,13 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const planServertoolResponseStageRuntimeActionWithNative = jest.fn();
 const planServertoolRequiredResponseHookEmptyErrorWithNative = jest.fn();
+const buildServertoolDispatchPlanInputWithNative = jest.fn((input: any) => input);
+const buildServertoolCliProjectionRuntimeBranchWithNative = jest.fn();
+const finalizeServertoolResponseStageWithNative = jest.fn();
+const materializeNativeToolCallExecutionOutcomeWithNative = jest.fn();
+const planServertoolToolCallDispatchWithNative = jest.fn();
+const resolveServertoolPostExecutionBranchDecisionWithNative = jest.fn();
+const resolveServertoolPreExecutionBranchDecisionWithNative = jest.fn();
 const resolveServertoolResponseStageAutoHookPreApplicationWithNative = jest.fn((input: any) => {
   const decision = input.decision;
   if (decision?.action === 'return_pass_result') {
@@ -95,12 +102,33 @@ const createServertoolProviderProtocolErrorFromPlan = jest.fn();
 jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
+    buildServertoolDispatchPlanInputWithNative,
+    buildServertoolCliProjectionRuntimeBranchWithNative,
+    finalizeServertoolResponseStageWithNative,
+    materializeNativeToolCallExecutionOutcomeWithNative,
     planServertoolResponseStageRuntimeActionWithNative,
     planServertoolRequiredResponseHookEmptyErrorWithNative,
+    planServertoolToolCallDispatchWithNative,
+    resolveServertoolPostExecutionBranchDecisionWithNative,
+    resolveServertoolPreExecutionBranchDecisionWithNative,
     resolveServertoolResponseStageAutoHookPreApplicationWithNative,
     resolveServertoolResponseStageAutoHookPostApplicationWithNative,
     resolveServertoolResponseStageAutoHookPreDecisionWithNative,
     resolveServertoolResponseStageAutoHookPostDecisionWithNative
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js',
+  () => ({
+    runServertoolIoExecutionQueue: jest.fn()
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
+  () => ({
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter: jest.fn(() => null)
   })
 );
 
@@ -119,7 +147,7 @@ jest.unstable_mockModule(
 );
 
 const { runServertoolResponseStageAutoHookPass } = await import(
-  '../../sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.js'
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.js'
 );
 
 describe('response-stage-auto-hook-shell', () => {
@@ -210,9 +238,12 @@ describe('response-stage-auto-hook-shell', () => {
   test('keeps missing auto-hook result contract errors out of the TS shell', async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(
-      'sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts',
+      'sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts',
       'utf8'
     );
+    await expect(
+      fs.access('sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts')
+    ).rejects.toThrow();
 
     expect(source).not.toContain('[servertool] native response-stage requested auto-hook result but result was empty');
     expect(source).not.toContain('if (!autoHookResult)');

@@ -5,7 +5,10 @@ import type {
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
-import { runServertoolExecutionStage } from './execution-stage-shell.js';
+import {
+  runServertoolExecutionStage,
+  runServertoolResponseStageAutoHookPass
+} from './execution-stage-shell.js';
 import {
   createServertoolProviderProtocolErrorFromPlan
 } from './timeout-error-block.js';
@@ -30,7 +33,6 @@ import {
   runServertoolResponseStageWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import type { NativeServertoolResponseStageGate } from 'rcc-llmswitch-core/native/servertool-wrapper';
-import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 
 type NativeResponseStageExtraction = {
   normalizedPayload?: unknown;

@@ -6,13 +6,16 @@ import type {
   ToolCall
 } from './types.js';
 import { runServertoolIoExecutionQueue } from './execution-queue-shell.js';
-import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import {
   buildServertoolDispatchPlanInputWithNative,
   buildServertoolCliProjectionRuntimeBranchWithNative,
   finalizeServertoolResponseStageWithNative,
   materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome,
   planServertoolToolCallDispatchWithNative,
+  resolveServertoolResponseStageAutoHookPostApplicationWithNative,
+  resolveServertoolResponseStageAutoHookPostDecisionWithNative,
+  resolveServertoolResponseStageAutoHookPreApplicationWithNative,
+  resolveServertoolResponseStageAutoHookPreDecisionWithNative,
   resolveServertoolPostExecutionBranchDecisionWithNative,
   resolveServertoolPreExecutionBranchDecisionWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
@@ -20,6 +23,59 @@ import type { NativeServertoolResponseStageGate } from 'rcc-llmswitch-core/nativ
 import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
+import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
+import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
+
+export type ServertoolResponseStageAutoHookPassResult =
+  | { action: 'return_passthrough_bypass'; result?: never }
+  | { action: 'continue_without_result'; result?: never }
+  | { action: 'return_auto_hook_result'; result: ServerSideToolEngineResult };
+
+export async function runServertoolResponseStageAutoHookPass(args: {
+  options: ServerSideToolEngineOptions;
+  contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
+  includeAutoHookIds: Set<string> | null;
+  excludeAutoHookIds: Set<string> | null;
+  responseStageGatePlan: NativeServertoolResponseStageGate;
+  baseObject: JsonObject;
+}): Promise<ServertoolResponseStageAutoHookPassResult> {
+  const preAutoHookDecision = resolveServertoolResponseStageAutoHookPreDecisionWithNative({
+    responseStageGatePlan: args.responseStageGatePlan,
+    baseObject: args.baseObject
+  });
+  const preAutoHookApplication = resolveServertoolResponseStageAutoHookPreApplicationWithNative({
+    decision: preAutoHookDecision
+  });
+  if (preAutoHookApplication.returnPassResult) {
+    return preAutoHookApplication.result;
+  }
+  if (!preAutoHookApplication.runAutoHooks) {
+    throw new Error('[servertool] invalid response-stage pre auto-hook application');
+  }
+
+  const autoHookResult = await runServertoolAutoHookCaller({
+    options: args.options,
+    contextBase: args.contextBase,
+    includeAutoHookIds: args.includeAutoHookIds,
+    excludeAutoHookIds: args.excludeAutoHookIds
+  });
+  const postAutoHookDecision = resolveServertoolResponseStageAutoHookPostDecisionWithNative({
+    requestId: args.options.requestId,
+    responseStageGatePlan: args.responseStageGatePlan,
+    baseObject: args.baseObject,
+    autoHookResult
+  });
+  const postAutoHookApplication = resolveServertoolResponseStageAutoHookPostApplicationWithNative({
+    decision: postAutoHookDecision
+  });
+  if (postAutoHookApplication.throwRequiredResponseHookEmpty) {
+    throw createServertoolProviderProtocolErrorFromPlan(postAutoHookApplication.errorPlan);
+  }
+  if (!postAutoHookApplication.returnPassResult) {
+    throw new Error('[servertool] invalid response-stage post auto-hook application');
+  }
+  return postAutoHookApplication.result;
+}
 
 async function applyServertoolResponseStageFinalize(args: {
   options: ServerSideToolEngineOptions;

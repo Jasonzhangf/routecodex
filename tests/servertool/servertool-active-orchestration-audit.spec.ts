@@ -25,6 +25,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine.ts',
@@ -231,7 +232,7 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.ts',
+    file: 'sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts',
     forbidden: [
       "if (preAutoHookRuntimeAction.action === 'return_passthrough_bypass')",
       "if (postAutoHookRuntimeAction.action === 'return_required_response_hook_empty')",

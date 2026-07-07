@@ -24,6 +24,10 @@ const planServertoolToolCallDispatchWithNative = jest.fn((input: any) => ({
 }));
 const resolveServertoolPreExecutionBranchDecisionWithNative = jest.fn();
 const resolveServertoolPostExecutionBranchDecisionWithNative = jest.fn();
+const resolveServertoolResponseStageAutoHookPreDecisionWithNative = jest.fn();
+const resolveServertoolResponseStageAutoHookPreApplicationWithNative = jest.fn();
+const resolveServertoolResponseStageAutoHookPostDecisionWithNative = jest.fn();
+const resolveServertoolResponseStageAutoHookPostApplicationWithNative = jest.fn();
 const buildServertoolCliProjectionRuntimeBranchWithNative = jest.fn();
 const planServertoolBuiltinAutoHandlerEntriesWithNative = jest.fn(() => ({
   entries: [],
@@ -34,9 +38,6 @@ const runServertoolAutoHookCaller = jest.fn(async () => ({
   requiredHookResult: null,
   optionalHookResult: null,
   hookEvents: []
-}));
-const runServertoolResponseStageAutoHookPass = jest.fn(async () => ({
-  action: 'continue_without_result'
 }));
 const createServertoolProviderProtocolErrorFromPlan = jest.fn((plan: any) => {
   const message = plan?.message ?? 'mock provider protocol error';
@@ -59,6 +60,10 @@ jest.unstable_mockModule(
     planServertoolBuiltinAutoHandlerEntriesWithNative,
     planServertoolToolCallDispatchWithNative,
     resolveServertoolPostExecutionBranchDecisionWithNative,
+    resolveServertoolResponseStageAutoHookPostApplicationWithNative,
+    resolveServertoolResponseStageAutoHookPostDecisionWithNative,
+    resolveServertoolResponseStageAutoHookPreApplicationWithNative,
+    resolveServertoolResponseStageAutoHookPreDecisionWithNative,
     resolveServertoolPreExecutionBranchDecisionWithNative
   })
 );
@@ -74,13 +79,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js',
   () => ({
     runServertoolAutoHookCaller
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.js',
-  () => ({
-    runServertoolResponseStageAutoHookPass
   })
 );
 
@@ -123,6 +121,31 @@ describe('execution-stage-shell', () => {
     finalizeServertoolResponseStageWithNative.mockReturnValue({
       mode: 'passthrough',
       finalChatResponse: { ok: true }
+    });
+    runServertoolAutoHookCaller.mockResolvedValue({
+      requiredHookResult: null,
+      optionalHookResult: null,
+      hookEvents: []
+    });
+    resolveServertoolResponseStageAutoHookPreDecisionWithNative.mockReturnValue({
+      action: 'run_auto_hooks'
+    });
+    resolveServertoolResponseStageAutoHookPreApplicationWithNative.mockReturnValue({
+      returnPassResult: false,
+      runAutoHooks: true
+    });
+    resolveServertoolResponseStageAutoHookPostDecisionWithNative.mockReturnValue({
+      action: 'return_pass_result',
+      result: {
+        action: 'continue_without_result'
+      }
+    });
+    resolveServertoolResponseStageAutoHookPostApplicationWithNative.mockReturnValue({
+      throwRequiredResponseHookEmpty: false,
+      returnPassResult: true,
+      result: {
+        action: 'continue_without_result'
+      }
     });
     buildServertoolCliProjectionRuntimeBranchWithNative.mockReturnValue({
       resultMode: 'tool_flow',
@@ -309,7 +332,7 @@ describe('execution-stage-shell', () => {
 
     expect(runServertoolIoExecutionQueue).not.toHaveBeenCalled();
     expect(materializeNativeToolCallExecutionOutcome).not.toHaveBeenCalled();
-    expect(runServertoolResponseStageAutoHookPass).not.toHaveBeenCalled();
+    expect(runServertoolAutoHookCaller).not.toHaveBeenCalled();
     expect(finalizeServertoolResponseStageWithNative).not.toHaveBeenCalled();
   });
 
@@ -373,7 +396,7 @@ describe('execution-stage-shell', () => {
         executedToolCalls: [{ toolCall: { id: 'call_1' } }]
       }
     });
-    expect(runServertoolResponseStageAutoHookPass).not.toHaveBeenCalled();
+    expect(runServertoolAutoHookCaller).not.toHaveBeenCalled();
     expect(finalizeServertoolResponseStageWithNative).not.toHaveBeenCalled();
   });
 
@@ -410,13 +433,25 @@ describe('execution-stage-shell', () => {
     });
 
     expect(materializeNativeToolCallExecutionOutcome).not.toHaveBeenCalled();
-    expect(runServertoolResponseStageAutoHookPass).toHaveBeenCalledWith({
+    expect(runServertoolAutoHookCaller).toHaveBeenCalledWith({
       options: { requestId: 'req-continue' },
-      baseObject: { ok: true },
       contextBase: {},
       includeAutoHookIds: null,
-      excludeAutoHookIds: null,
-      responseStageGatePlan: { responseHookMatched: false }
+      excludeAutoHookIds: null
+    });
+    expect(resolveServertoolResponseStageAutoHookPreDecisionWithNative).toHaveBeenCalledWith({
+      responseStageGatePlan: { responseHookMatched: false },
+      baseObject: { ok: true }
+    });
+    expect(resolveServertoolResponseStageAutoHookPostDecisionWithNative).toHaveBeenCalledWith({
+      requestId: 'req-continue',
+      responseStageGatePlan: { responseHookMatched: false },
+      baseObject: { ok: true },
+      autoHookResult: {
+        requiredHookResult: null,
+        optionalHookResult: null,
+        hookEvents: []
+      }
     });
     expect(finalizeServertoolResponseStageWithNative).toHaveBeenCalledWith({
       baseObject: { ok: true },
@@ -441,12 +476,32 @@ describe('execution-stage-shell', () => {
     runServertoolIoExecutionQueue.mockResolvedValueOnce({
       executedToolCalls: []
     });
-    runServertoolResponseStageAutoHookPass.mockResolvedValueOnce({
-      action: 'return_auto_hook_result',
+    runServertoolAutoHookCaller.mockResolvedValueOnce({
+      mode: 'tool_flow',
+      finalChatResponse: { done: true },
+      execution: { flowId: 'flow_1' }
+    });
+    resolveServertoolResponseStageAutoHookPostDecisionWithNative.mockReturnValueOnce({
+      action: 'return_pass_result',
       result: {
-        mode: 'tool_flow',
-        finalChatResponse: { done: true },
-        execution: { flowId: 'flow_1' }
+        action: 'return_auto_hook_result',
+        result: {
+          mode: 'tool_flow',
+          finalChatResponse: { done: true },
+          execution: { flowId: 'flow_1' }
+        }
+      }
+    });
+    resolveServertoolResponseStageAutoHookPostApplicationWithNative.mockReturnValueOnce({
+      throwRequiredResponseHookEmpty: false,
+      returnPassResult: true,
+      result: {
+        action: 'return_auto_hook_result',
+        result: {
+          mode: 'tool_flow',
+          finalChatResponse: { done: true },
+          execution: { flowId: 'flow_1' }
+        }
       }
     });
     finalizeServertoolResponseStageWithNative.mockReturnValueOnce({
@@ -517,7 +572,7 @@ describe('execution-stage-shell', () => {
     ).rejects.toThrow('[servertool] invalid post-execution branch action');
 
     expect(materializeNativeToolCallExecutionOutcome).not.toHaveBeenCalled();
-    expect(runServertoolResponseStageAutoHookPass).not.toHaveBeenCalled();
+    expect(runServertoolAutoHookCaller).not.toHaveBeenCalled();
     expect(finalizeServertoolResponseStageWithNative).not.toHaveBeenCalled();
   });
 });

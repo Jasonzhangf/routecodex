@@ -79,7 +79,8 @@ const resolveServertoolRunEnginePrepassApplicationWithNative = jest.fn((input: a
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.js',
   () => ({
-    runServertoolExecutionStage
+    runServertoolExecutionStage,
+    runServertoolResponseStageAutoHookPass
   })
 );
 
@@ -108,13 +109,6 @@ jest.unstable_mockModule(
   () => ({
     readRuntimeControlFromAnyBoundMetadataCenter,
     readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/response-stage-auto-hook-shell.js',
-  () => ({
-    runServertoolResponseStageAutoHookPass
   })
 );
 
