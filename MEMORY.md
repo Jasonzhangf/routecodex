@@ -1425,6 +1425,13 @@
 - Required order for config/VR/pipeline wiring: source owner/map lookup -> module blackbox over fixtures copied from existing config shape -> old/new output comparison -> focused gates -> only then connection/wiring -> only then managed restart/live probe if explicitly in scope.
 - If blackbox is not complete, report "not wired" and the failing/unknown cases. Do not claim closure and do not start the server.
 
+# 2026-07-07: Single-source config loader blackbox must separate legal input from runtime-materialized shapes
+
+- `loadRouteCodexConfig()` single-source input contract still rejects `virtualrouter.providers`; do not treat that shape as a legal pre-wire compatibility target for this loader entrypoint.
+- Valid pre-wire compatibility targets for the single-source loader include real `config.toml` routing/group/httpserver shapes plus explicit external provider-root resolution through `ROUTECODEX_PROVIDER_DIR` / `RCC_PROVIDER_DIR`.
+- If a blackbox fixture only passes by injecting `virtualrouter.providers` into loader input, that is the wrong contract for this entrypoint. Move that check to the runtime/bootstrap/materialized-config owner instead of weakening the loader.
+- Verified on 2026-07-07 by adding a `ROUTECODEX_PROVIDER_DIR` blackbox to `tests/config/routecodex-config-loader.v2-single-source.spec.ts` and a materialized-provider precedence blackbox to `tests/config/runtime-config-materialization-rust.spec.ts`; together with runtime bootstrap/provider loader specs, 4 suites / 35 tests passed without wiring or live restart.
+
 # 2026-07-07: apply_patch live replay closure requires route and SSE projection evidence
 
 - Unique marker: `routecodex-apply-patch-live-replay-20260707-124719881`.

@@ -27215,6 +27215,18 @@ Complete SSE rustification status (34 TS files):
   - No managed live restart/replay was run; this remains offline CLI/config closeout evidence.
   - Remaining direct provider codec functions are not providerId/root runtime reads; they are the file-scoped codec/writer shell and still need explicit owner-gated justification until fully removable.
 
+# 2026-07-07: Config loader pre-wire blackbox now locks explicit provider-root env
+
+- Scope: continue config rustification under the corrected rule "blackbox before wiring, no config edits, no live startup".
+- Change:
+  - Added a `loadRouteCodexConfig()` blackbox proving explicit `ROUTECODEX_PROVIDER_DIR` provider-root override is honored without mutating `config.toml`.
+  - During blackbox design, confirmed the current single-source loader contract still rejects `virtualrouter.providers`; that shape is not legal input for `loadRouteCodexConfig()` and must not be assumed as a pre-wire compatibility target for this entrypoint.
+- Verification:
+  - `tests/config/routecodex-config-loader.v2-single-source.spec.ts` + `tests/config/runtime-config-materialization-rust.spec.ts` + `tests/config/provider-v2-loader.spec.ts` + `tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts` PASS: 4 suites / 35 tests.
+- Boundary:
+  - No wiring/runtime bootstrap/live restart was attempted.
+  - `virtualrouter.providers` is now locked at runtime materialization/bootstrap owner: `compileRouteCodexRuntimeConfigManifest()` consumes already materialized providers before provider-root loading, while `loadRouteCodexConfig()` still rejects that shape as authoring input.
+
 # 2026-07-07: apply_patch live replay closed on global release
 
 - Unique marker: `routecodex-apply-patch-live-replay-20260707-124719881`.

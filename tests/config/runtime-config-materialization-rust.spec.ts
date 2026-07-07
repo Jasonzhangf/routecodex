@@ -1,4 +1,5 @@
 import { compileRouteCodexRuntimeManifestSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-config-loader.js';
 
 describe('Rust runtime config materialization', () => {
   function providerConfig(providerId: string, provider: Record<string, unknown>): Record<string, unknown> {
@@ -144,5 +145,59 @@ describe('Rust runtime config materialization', () => {
         })
       }
     })).toThrow("[forwarder-config] fwd.gpt.gpt-5.5 target 'freepool' does not declare model 'gpt-5.5'");
+  });
+
+  it('uses materialized virtualrouter.providers before provider root loading', async () => {
+    const userConfig = {
+      version: '2.0.0',
+      virtualrouterMode: 'v2',
+      virtualrouter: {
+        providers: {
+          mock: {
+            id: 'mock',
+            type: 'openai',
+            baseURL: 'https://materialized-provider.example.test/v1',
+            auth: {
+              type: 'apikey',
+              entries: [{ alias: 'default', value: 'mock-key' }]
+            },
+            models: {
+              'gpt-5.1': { supportsStreaming: true }
+            }
+          }
+        },
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              default: [
+                { id: 'mock-default', targets: ['mock.default.gpt-5.1'] }
+              ]
+            }
+          }
+        }
+      }
+    };
+
+    const manifest = await compileRouteCodexRuntimeConfigManifest(
+      userConfig,
+      '/routecodex-test-provider-root-must-not-be-read'
+    );
+
+    expect(manifest.providerIds).toEqual(['mock']);
+    expect(manifest.virtualRouterBootstrapInput).toMatchObject({
+      providers: {
+        mock: {
+          id: 'mock',
+          baseURL: 'https://materialized-provider.example.test/v1'
+        }
+      },
+      routing: {
+        default: [
+          expect.objectContaining({
+            targets: ['mock.default.gpt-5.1']
+          })
+        ]
+      }
+    });
   });
 });

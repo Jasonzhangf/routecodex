@@ -10,7 +10,7 @@ async function mkTmp(prefix: string): Promise<string> {
 }
 
 type EnvSnapshot = Record<
-  'RCC_HOME' | 'ROUTECODEX_USER_DIR' | 'ROUTECODEX_HOME',
+  'RCC_HOME' | 'ROUTECODEX_USER_DIR' | 'ROUTECODEX_HOME' | 'ROUTECODEX_PROVIDER_DIR' | 'RCC_PROVIDER_DIR',
   string | undefined
 >;
 
@@ -18,7 +18,9 @@ function takeEnv(): EnvSnapshot {
   return {
     RCC_HOME: process.env.RCC_HOME,
     ROUTECODEX_USER_DIR: process.env.ROUTECODEX_USER_DIR,
-    ROUTECODEX_HOME: process.env.ROUTECODEX_HOME
+    ROUTECODEX_HOME: process.env.ROUTECODEX_HOME,
+    ROUTECODEX_PROVIDER_DIR: process.env.ROUTECODEX_PROVIDER_DIR,
+    RCC_PROVIDER_DIR: process.env.RCC_PROVIDER_DIR
   };
 }
 
@@ -256,6 +258,71 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
     expect(after).toBe(before);
     expect(loaded.userConfig.virtualrouterMode).toBe('v2');
     expect((loaded.userConfig.virtualrouter as any).routing.default[0].id).toBe('canary-primary');
+  });
+
+  it('reads provider configs from explicit ROUTECODEX_PROVIDER_DIR without mutating config.toml', async () => {
+    const root = await mkTmp('routecodex-v2-provider-dir-env-');
+    const externalProviderRoot = path.join(root, 'external-provider-root');
+    process.env.RCC_HOME = root;
+    process.env.ROUTECODEX_USER_DIR = root;
+    process.env.ROUTECODEX_HOME = root;
+    process.env.ROUTECODEX_PROVIDER_DIR = externalProviderRoot;
+    delete process.env.RCC_PROVIDER_DIR;
+
+    await fs.mkdir(path.join(externalProviderRoot, 'ali-coding-plan'), { recursive: true });
+    await fs.writeFile(
+      path.join(externalProviderRoot, 'ali-coding-plan', 'config.v2.toml'),
+      `${serializeTomlRecord({
+        version: '2.0.0',
+        providerId: 'ali-coding-plan',
+        provider: {
+          id: 'ali-coding-plan',
+          type: 'anthropic',
+          baseURL: 'https://external-provider-root.example.test/anthropic',
+          auth: { type: 'apikey', apiKey: '${ALI_CODINGPLAN_KEY}' },
+          models: {
+            'glm-5': { supportsStreaming: true }
+          }
+        }
+      })}\n`,
+      'utf8'
+    );
+
+    const configPath = path.join(root, 'config.toml');
+    await writeUserConfig(configPath, {
+      version: '2.0.0',
+      virtualrouterMode: 'v2',
+      httpserver: {
+        host: '127.0.0.1',
+        port: 5555,
+        ports: [
+          {
+            port: 5555,
+            host: '127.0.0.1',
+            mode: 'router',
+            routingPolicyGroup: 'default'
+          }
+        ]
+      },
+      virtualrouter: {
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              default: [{ id: 'default-primary', targets: ['ali-coding-plan.glm-5'] }]
+            }
+          }
+        }
+      }
+    });
+
+    const before = await fs.readFile(configPath, 'utf8');
+    const loaded = await loadRouteCodexConfig(configPath);
+    const after = await fs.readFile(configPath, 'utf8');
+
+    expect(after).toBe(before);
+    expect((loaded.userConfig.virtualrouter as any).providers['ali-coding-plan'].baseURL).toBe(
+      'https://external-provider-root.example.test/anthropic'
+    );
   });
 
   it('rejects routingPolicyGroup without explicit non-empty default route skeleton', async () => {
