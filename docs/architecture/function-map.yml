@@ -620,7 +620,8 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
       - tests/servertool/registry-orchestration-shell.spec.ts
       - tests/servertool/server-side-tools.auto-hook-config.spec.ts
     forbidden_paths:

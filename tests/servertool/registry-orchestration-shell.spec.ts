@@ -25,6 +25,25 @@ jest.unstable_mockModule(
     planServertoolRegistryLookupFromSkeletonWithNative: planServertoolRegistryLookupFromSkeletonWithNativeMock,
     resolveServertoolBuiltinHandlerEntryWithNative: getBuiltinHandlerEntryMock,
     resolveServertoolRegistryHandlerWithNative: resolveServertoolRegistryHandlerWithNativeMock,
+    materializeServertoolPlannedResultWithNative: jest.fn(),
+    createServertoolProviderProtocolErrorFromPlanWithNative: jest.fn(),
+    planServertoolTimeoutWatcherWithNative: jest.fn(() => ({ armed: false, timeoutMs: 0 })),
+    planServertoolNoopOutcomeWithNative: jest.fn(),
+    buildServertoolHandlerErrorToolOutputPayloadWithNative: jest.fn(),
+    planServertoolToolCallDispatchWithNative: jest.fn(),
+    planServertoolExecutionDispatchErrorWithNative: jest.fn(),
+    appendServertoolExecutedRecordWithNative: jest.fn(),
+    createServertoolExecutionLoopStateWithNative: jest.fn(),
+    planServertoolHandlerErrorExecutionLoopEffectWithNative: jest.fn(),
+    planServertoolNoopExecutionLoopEffectWithNative: jest.fn(),
+    resolveServertoolExecutionLoopInitialDecisionWithNative: jest.fn(),
+    resolveServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
+    applyServertoolExecutionLoopInitialDecisionWithNative: jest.fn(),
+    applyServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
+    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(),
+    resolveAutoHookCallerFinalizationDecisionWithNative: jest.fn(),
+    resolveAutoHookRuntimeAttemptDecisionWithNative: jest.fn(),
+    planServertoolAutoHookQueueItemsWithNative: jest.fn(),
     planServertoolRegistryBuiltinAutoHookEntriesWithNative:
       planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock,
   })
@@ -32,9 +51,13 @@ jest.unstable_mockModule(
 
 const {
   getServerToolHandler,
+} = await import(
+  '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js'
+);
+const {
   listAutoServerToolHooks,
 } = await import(
-  '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js'
+  '../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js'
 );
 
 describe('registry-orchestration-shell', () => {
@@ -129,9 +152,13 @@ describe('registry-orchestration-shell', () => {
   });
 
   test('registry orchestration shell owns builtin lookup but not name normalization', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts', 'utf8')
-    );
+    const fs = await import('node:fs/promises');
+    const lookupSource = await fs.readFile('sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts', 'utf8');
+    const hookSource = await fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8');
+    const source = `${lookupSource}\n${hookSource}`;
+    await expect(
+      fs.access('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts')
+    ).rejects.toThrow();
 
     expect(source).not.toContain('function resolveBuiltinEntry(');
     expect(source).not.toContain('.trim().toLowerCase()');
@@ -147,8 +174,8 @@ describe('registry-orchestration-shell', () => {
   });
 
   test('keeps native builtin lookup contract errors out of the TS shell', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts', 'utf8')
+    const source = await import('node:fs/promises').then(async (fs) =>
+      `${await fs.readFile('sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts', 'utf8')}\n${await fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8')}`
     );
 
     expect(source).not.toContain('native registry lookup returned builtin without canonicalName');
@@ -158,8 +185,8 @@ describe('registry-orchestration-shell', () => {
   });
 
   test('does not keep a registered-name wrapper around skeleton config', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts', 'utf8')
+    const source = await import('node:fs/promises').then(async (fs) =>
+      `${await fs.readFile('sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts', 'utf8')}\n${await fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8')}`
     );
 
     expect(source).not.toContain('export function isRegisteredServerToolName(');
@@ -170,7 +197,7 @@ describe('registry-orchestration-shell', () => {
 
   test('does not rematch native auto-hook descriptors by sourceIndex in TS', async () => {
     const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts', 'utf8')
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8')
     );
 
     expect(source).not.toContain('descriptor.sourceIndex');

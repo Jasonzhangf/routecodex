@@ -5,10 +5,11 @@ import type {
   ServerToolHandlerContext,
   ServerToolHandlerResult
 } from './types.js';
-import { listAutoServerToolHooks } from './registry-orchestration-shell.js';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
 import {
   materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult,
+  planServertoolBuiltinAutoHandlerEntriesWithNative,
+  planServertoolRegistryBuiltinAutoHookEntriesWithNative,
   resolveAutoHookCallerFinalizationDecisionWithNative,
   resolveAutoHookRuntimeAttemptDecisionWithNative,
   runStoplessBuiltinHandlerForRuntimeWithNative
@@ -44,6 +45,36 @@ function readNativeAutoHookQueueEntries(entries: unknown[]): ServerToolAutoHookD
     return entry;
   });
 }
+
+export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
+  const entries = planServertoolBuiltinAutoHandlerEntriesWithNative().entries as unknown as Array<{
+    name: string;
+    autoHook?: {
+      phase?: string;
+      priority?: number;
+      order?: number;
+    };
+    registration: unknown;
+    execution: unknown;
+  }>;
+  return planServertoolRegistryBuiltinAutoHookEntriesWithNative({
+    hooks: entries.map((entry) => ({
+      id: entry.name,
+      phase: entry.autoHook?.phase,
+      priority: entry.autoHook?.priority,
+      order: entry.autoHook?.order,
+      registration: entry.registration,
+      execution: entry.execution
+    }))
+  }).map((entry) => ({
+    id: entry.id,
+    phase: entry.phase,
+    priority: entry.priority,
+    order: entry.order,
+    registration: entry.registration as unknown as ServerToolAutoHookDescriptor['registration'],
+    execution: entry.execution as ServerToolAutoHookDescriptor['execution']
+  }));
+};
 
 function buildAutoHookQueuesFromNativePlan(args: {
   hooks: ServerToolAutoHookDescriptor[];

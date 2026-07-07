@@ -460,6 +460,9 @@ jest.unstable_mockModule(
     visionExtractOriginalUserPromptWithNative: jest.fn(() => ''),
     planServertoolAutoHookQueuesWithNative,
     planServertoolAutoHookQueueItemsWithNative,
+    materializeServertoolPlannedResultWithNative: jest.fn(),
+    resolveAutoHookCallerFinalizationDecisionWithNative: jest.fn(),
+    resolveAutoHookRuntimeAttemptDecisionWithNative: jest.fn(),
     runServertoolOrchestrationMutationWithNative
   })
 );
@@ -498,8 +501,8 @@ beforeAll(async () => {
   buildServertoolPendingInjectionConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().pendingInjectionConfig;
   normalizeServerToolRegistrationSpec = (name: string, options: Record<string, unknown>) =>
     nativeServertoolOrchestration.normalizeServertoolRegistrationSpecWithNative({ name, options });
-  const registry = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
-  listAutoServerToolHooks = registry.listAutoServerToolHooks;
+  const autoHookCaller = await import('../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js');
+  listAutoServerToolHooks = autoHookCaller.listAutoServerToolHooks;
 
 });
 
@@ -584,13 +587,18 @@ describe('servertool skeleton config', () => {
     });
   });
 
-  test('registry shell does not expose test-only registered-name or record listing APIs', async () => {
+  test('deleted registry shell does not expose test-only registered-name or record listing APIs', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile(
-        'sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts',
+        'sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts',
         'utf8'
       )
     );
+    await expect(
+      import('node:fs/promises').then((fs) =>
+        fs.access('sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts')
+      )
+    ).rejects.toThrow();
 
     expect(source).not.toContain('export function listRegisteredServerToolHandlerNames(');
     expect(source).not.toContain('export function listRegisteredServerToolHandlerRecords(');

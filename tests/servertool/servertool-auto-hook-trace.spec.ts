@@ -107,6 +107,20 @@ const resolveAutoHookCallerFinalizationDecisionWithNativeMock = jest.fn((input: 
 jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
+    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({
+      entries: registryHooks.map((hook) => ({
+        name: hook.id,
+        trigger: 'auto',
+        autoHook: {
+          phase: hook.phase,
+          priority: hook.priority,
+          order: hook.order
+        },
+        registration: hook.registration ?? { name: hook.id, trigger: 'auto', executionMode: 'auto_hook' },
+        execution: hook.execution
+      }))
+    })),
+    planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn((input: any) => input?.hooks ?? []),
     materializeServertoolPlannedResultWithNative: jest.fn(async (planned: any) => {
       if (!planned) {
         return null;
@@ -169,13 +183,6 @@ jest.unstable_mockModule(
         ]
       };
     })
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js',
-  () => ({
-    listAutoServerToolHooks: jest.fn(() => registryHooks)
   })
 );
 

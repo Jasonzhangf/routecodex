@@ -117,13 +117,6 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js',
-  () => ({
-    getServerToolHandler
-  })
-);
-
-jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     materializeServertoolPlannedResultWithNative: materializeServertoolPlannedResult,
@@ -142,6 +135,7 @@ jest.unstable_mockModule(
     createServertoolExecutionLoopStateWithNative,
     appendServertoolExecutedRecordWithNative,
     runStoplessBuiltinHandlerForRuntimeWithNative,
+    resolveServertoolRegistryHandlerWithNative: getServerToolHandler,
     isAdapterClientDisconnectedWithNative: jest.fn(() => false),
     planClientDisconnectWatcherWithNative: jest.fn(() => ({ intervalMs: 50 })),
     planServertoolClientDisconnectedErrorWithNative: jest.fn((input: any) => ({

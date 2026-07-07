@@ -82,13 +82,6 @@ const createServertoolProviderProtocolErrorFromPlanWithNative = jest.fn((plan: a
 });
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js',
-  () => ({
-    getServerToolHandler
-  })
-);
-
-jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     materializeServertoolPlannedResultWithNative: materializeServertoolPlannedResult,
@@ -105,6 +98,7 @@ jest.unstable_mockModule(
     createServertoolExecutionLoopStateWithNative,
     appendServertoolExecutedRecordWithNative,
     runStoplessBuiltinHandlerForRuntimeWithNative,
+    resolveServertoolRegistryHandlerWithNative: getServerToolHandler,
     planServertoolNoopOutcomeWithNative: jest.fn(),
     buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
     planServertoolToolCallDispatchWithNative: jest.fn(),

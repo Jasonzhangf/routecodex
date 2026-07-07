@@ -2,10 +2,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 import type { JsonObject, JsonValue, ServerSideToolEngineOptions } from './types.js';
-import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {
   planServertoolNoopOutcomeWithNative,
-  buildServertoolHandlerErrorToolOutputPayloadWithNative
+  buildServertoolHandlerErrorToolOutputPayloadWithNative,
+  resolveServertoolRegistryHandlerWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import {
   planServertoolToolCallDispatchWithNative
@@ -26,6 +26,7 @@ import {
   type NativeServertoolExecutionLoopState
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
+import type { ServerToolHandlerEntry } from './types.js';
 
 export type {
   NativeServertoolExecutedRecord as ServertoolExecutedRecord,
@@ -43,6 +44,15 @@ function replaceJsonObjectInPlace(target: JsonObject, next: JsonObject): void {
     }
   }
 }
+
+export const getServerToolHandler = (
+  name: string
+): ServerToolHandlerEntry | undefined => {
+  const entry = resolveServertoolRegistryHandlerWithNative({
+    name: typeof name === 'string' ? name : '',
+  });
+  return entry ? entry as unknown as ServerToolHandlerEntry : undefined;
+};
 
 export async function runServertoolIoExecutionQueue(args: {
   dispatchPlan: ReturnType<typeof planServertoolToolCallDispatchWithNative>;

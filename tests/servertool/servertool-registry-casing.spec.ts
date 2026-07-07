@@ -25,6 +25,22 @@ jest.unstable_mockModule(
     planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({ entries: [] })),
     planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({ entries: [] })),
     planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn(() => []),
+    materializeServertoolPlannedResultWithNative: jest.fn(),
+    createServertoolProviderProtocolErrorFromPlanWithNative: jest.fn(),
+    planServertoolTimeoutWatcherWithNative: jest.fn(() => ({ armed: false, timeoutMs: 0 })),
+    planServertoolNoopOutcomeWithNative: jest.fn(),
+    buildServertoolHandlerErrorToolOutputPayloadWithNative: jest.fn(),
+    planServertoolToolCallDispatchWithNative: jest.fn(),
+    planServertoolExecutionDispatchErrorWithNative: jest.fn(),
+    appendServertoolExecutedRecordWithNative: jest.fn(),
+    createServertoolExecutionLoopStateWithNative: jest.fn(),
+    planServertoolHandlerErrorExecutionLoopEffectWithNative: jest.fn(),
+    planServertoolNoopExecutionLoopEffectWithNative: jest.fn(),
+    resolveServertoolExecutionLoopInitialDecisionWithNative: jest.fn(),
+    resolveServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
+    applyServertoolExecutionLoopInitialDecisionWithNative: jest.fn(),
+    applyServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
+    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(),
     planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(() => ({
       action: 'return_builtin',
       canonicalName: 'reasoningStop'
@@ -34,7 +50,7 @@ jest.unstable_mockModule(
 
 const {
   getServerToolHandler
-} = await import('../../sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.js');
+} = await import('../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js');
 
 describe('servertool registry casing', () => {
   test('camelCase builtin reasoningStop resolves to a concrete tool_call handler', () => {

@@ -383,7 +383,8 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
       - tests/servertool/registry-orchestration-shell.spec.ts
     contract:
       - tests/servertool/registry-orchestration-shell.spec.ts

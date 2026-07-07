@@ -209,6 +209,7 @@ const DELETED_SERVERTOOL_REGISTRY_FACADE_FILES = [
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/adhoc-handler-test-support.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-registration-shell.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-projection-shell.ts`,
+  `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-orchestration-shell.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/registry-types.ts`,
   `${ROOT}/sharedmodule/llmswitch-core/src/servertool/builtin-handler-catalog.ts`,
 ];
@@ -3764,11 +3765,13 @@ function checkServertoolRegistryRustOwner() {
     assertMissingFile(
       'servertool-registry-facades-deleted',
       file,
-      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import types/registry-orchestration-shell.ts directly`
+      `${file.replace(`${ROOT}/`, '')} must stay physically deleted; runtime must import concrete registry call sites directly`
     );
   }
   const servertoolTypes = readRequired(TS_SERVERTOOL_TYPES);
-  const registryOrchestrationShell = readRequired(TS_REGISTRY_ORCHESTRATION_SHELL);
+  const registryLookupOwner = readRequired(TS_EXECUTION_QUEUE_SHELL);
+  const registryAutoHookOwner = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
+  const registryOrchestrationShell = `${registryLookupOwner}\n${registryAutoHookOwner}`;
 
   for (const needle of [
     'feature_id: hub.servertool_registry_contract',
@@ -3912,7 +3915,10 @@ function checkServertoolRegistryRustOwner() {
     'resolveServertoolRegistryHandlerWithNative({',
     'planServertoolRegistryBuiltinAutoHookEntriesWithNative({',
   ]) {
-    assertContains('servertool-registry-orchestration-shell', TS_REGISTRY_ORCHESTRATION_SHELL, registryOrchestrationShell, needle);
+    const ownerFile = needle.includes('RegistryHandler')
+      ? TS_EXECUTION_QUEUE_SHELL
+      : `${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`;
+    assertContains('servertool-registry-orchestration-shell', ownerFile, registryOrchestrationShell, needle);
   }
   for (const marker of [
     '[...listBuiltinHandlerNames(), ...listAdHocHandlerNames()]',
@@ -3990,7 +3996,7 @@ function checkServertoolRegistryRustOwner() {
   );
   assertContains(
     'servertool-registry-no-ts-owner',
-    TS_REGISTRY_ORCHESTRATION_SHELL,
+    TS_EXECUTION_QUEUE_SHELL,
     registryOrchestrationShell,
     'resolveServertoolRegistryHandlerWithNative({'
   );
@@ -6716,9 +6722,14 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'engine-postflight-shell.ts must stay physically deleted; engine-orchestration-shell.ts owns postflight IO around native postflight decisions'
   );
   const postflightSource = engineSource;
-  const registryOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`);
+  assertMissingFile(
+    'servertool-registry-orchestration-shell-deleted',
+    `${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`,
+    'registry-orchestration-shell.ts must stay physically deleted; execution queue and auto-hook caller own direct native registry call sites'
+  );
   const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
   const executionQueueShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`);
+  const registryOrchestrationShell = `${autoHookCaller}\n${executionQueueShell}`;
   const nativeServertoolCoreSemantics = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const rustProjectionContextSource = readRequired(
     `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs`
