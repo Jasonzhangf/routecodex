@@ -1,3 +1,4 @@
+use napi::Env;
 use serde_json::Value;
 use std::sync::{Arc, OnceLock, RwLock, Weak};
 
@@ -5,6 +6,8 @@ use super::engine::VirtualRouterEngineCore;
 
 static RUNTIME_REGISTRY: OnceLock<RwLock<Vec<Weak<RwLock<VirtualRouterEngineCore>>>>> =
     OnceLock::new();
+#[cfg(test)]
+static TEST_REGISTRY_LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
 
 fn registry() -> &'static RwLock<Vec<Weak<RwLock<VirtualRouterEngineCore>>>> {
     RUNTIME_REGISTRY.get_or_init(|| RwLock::new(Vec::new()))
@@ -41,6 +44,14 @@ pub(crate) fn reset_for_tests() {
         .clear();
 }
 
+#[cfg(test)]
+pub(crate) fn test_registry_guard() -> std::sync::MutexGuard<'static, ()> {
+    TEST_REGISTRY_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("provider runtime ingress test lock")
+}
+
 pub(crate) fn report_provider_error(event: &Value) -> Value {
     let normalized = normalize_provider_error_event(event);
     dispatch_to_registered_runtimes(&normalized, RuntimeEventKind::Error);
@@ -51,6 +62,42 @@ pub(crate) fn report_provider_success(event: &Value) -> Value {
     let normalized = normalize_provider_success_event(event);
     dispatch_to_registered_runtimes(&normalized, RuntimeEventKind::Success);
     normalized
+}
+
+pub(crate) fn route_with_registered_runtime(
+    env: Env,
+    request: &Value,
+    metadata: &Value,
+    expected_routing_policy_group: Option<&str>,
+) -> Result<Value, String> {
+    let core = resolve_registered_runtime(
+        metadata,
+        expected_routing_policy_group,
+        "route selection",
+    )?;
+    let mut guard = core
+        .write()
+        .map_err(|_| "registered virtual router runtime lock poisoned".to_string())?;
+    guard.route(env, request, metadata)
+}
+
+pub(crate) fn is_provider_available_with_registered_runtime(
+    provider_key: &str,
+    metadata: &Value,
+    expected_routing_policy_group: Option<&str>,
+) -> Result<bool, String> {
+    let core = resolve_registered_runtime(
+        metadata,
+        expected_routing_policy_group,
+        "preselected route availability",
+    )?;
+    let mut guard = core
+        .write()
+        .map_err(|_| "registered virtual router runtime lock poisoned".to_string())?;
+    Ok(guard.is_provider_available(
+        unsafe { Env::from_raw(std::ptr::null_mut()) },
+        provider_key,
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -115,6 +162,97 @@ fn dispatch_to_registered_runtimes(event: &Value, kind: RuntimeEventKind) {
             dispatch_runtime_event(&mut guard, event, kind);
         }
     }
+}
+
+fn registered_runtime_cores() -> Vec<Arc<RwLock<VirtualRouterEngineCore>>> {
+    let mut entries = registry().write().expect("runtime registry write lock");
+    let mut cores = Vec::new();
+    entries.retain(|entry| {
+        if let Some(core) = entry.upgrade() {
+            cores.push(core);
+            true
+        } else {
+            false
+        }
+    });
+    cores
+}
+
+fn resolve_registered_runtime(
+    metadata: &Value,
+    expected_routing_policy_group: Option<&str>,
+    operation: &str,
+) -> Result<Arc<RwLock<VirtualRouterEngineCore>>, String> {
+    let cores = registered_runtime_cores();
+    if cores.is_empty() {
+        return Err(format!(
+            "registered virtual router runtime is required for {operation} but no runtime is registered"
+        ));
+    }
+    let routing_policy_group = expected_routing_policy_group
+        .and_then(|value| normalize_nonempty_string(Some(value)))
+        .or_else(|| resolve_route_routing_policy_group(metadata));
+    if let Some(group) = routing_policy_group.as_deref() {
+        let mut matched = Vec::new();
+        for core in cores {
+            let owns_group = core
+                .read()
+                .map_err(|_| "registered virtual router runtime lock poisoned".to_string())?
+                .routing_policy_group
+                .as_deref()
+                .and_then(|value| normalize_nonempty_string(Some(value)))
+                .as_deref()
+                == Some(group);
+            if owns_group {
+                matched.push(core);
+            }
+        }
+        return matched.into_iter().next().ok_or_else(|| {
+            format!(
+                "registered virtual router runtime is required for {operation} but routingPolicyGroup {group} is not registered"
+            )
+        });
+    }
+    if cores.len() == 1 {
+        return Ok(cores.into_iter().next().expect("single registered runtime"));
+    }
+    Err(format!(
+        "registered virtual router runtime is required for {operation} but routingPolicyGroup is missing and {} runtimes are registered",
+        cores.len()
+    ))
+}
+
+fn resolve_route_routing_policy_group(metadata: &Value) -> Option<String> {
+    metadata
+        .get("routecodexRoutingPolicyGroup")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            metadata
+                .get("runtimeControl")
+                .and_then(|runtime| runtime.get("routecodexRoutingPolicyGroup"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| {
+            metadata
+                .get("runtime_control")
+                .and_then(|runtime| runtime.get("routecodexRoutingPolicyGroup"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| {
+            metadata
+                .get("metadataCenterSnapshot")
+                .and_then(|snapshot| snapshot.get("runtimeControl"))
+                .and_then(|runtime| runtime.get("routecodexRoutingPolicyGroup"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| {
+            metadata
+                .get("metadataCenterSnapshot")
+                .and_then(|snapshot| snapshot.get("requestTruth"))
+                .and_then(|truth| truth.get("routingPolicyGroup"))
+                .and_then(Value::as_str)
+        })
+        .and_then(|value| normalize_nonempty_string(Some(value)))
 }
 
 fn dispatch_runtime_event(
@@ -317,22 +455,11 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex, OnceLock, RwLock};
+    use std::sync::{Arc, RwLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::virtual_router_engine::routing::parse_routing;
-    use crate::virtual_router_engine::routing_state_store::{
-        load_provider_health_state, with_session_dir_override,
-    };
-
-    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-        TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("provider runtime ingress test lock")
-    }
+    use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
 
     fn unique_temp() -> PathBuf {
         let unique = SystemTime::now()
@@ -415,7 +542,7 @@ mod tests {
 
     #[test]
     fn normalizes_error_event_defaults() {
-        let _guard = test_guard();
+        let _guard = test_registry_guard();
         reset_for_tests();
         let out = report_provider_error(&json!({ "code": "HTTP_429", "runtime": null }));
         assert_eq!(out["code"], "HTTP_429");
@@ -427,7 +554,7 @@ mod tests {
 
     #[test]
     fn normalizes_success_event_defaults() {
-        let _guard = test_guard();
+        let _guard = test_registry_guard();
         reset_for_tests();
         let out = report_provider_success(&json!({ "metadata": { "source": "unit" } }));
         assert!(out["runtime"].as_object().unwrap().is_empty());
@@ -437,13 +564,13 @@ mod tests {
 
     #[test]
     fn provider_error_records_once_when_multiple_runtimes_are_registered() {
-        let _guard = test_guard();
+        let _guard = test_registry_guard();
         reset_for_tests();
         let session_dir = unique_temp();
         fs::create_dir_all(&session_dir).unwrap();
         let provider_key = "primary.key1.gpt-test";
-        let _first = build_registered_core(provider_key);
-        let _second = build_registered_core(provider_key);
+        let first = build_registered_core(provider_key);
+        let second = build_registered_core(provider_key);
 
         with_session_dir_override(session_dir.to_str(), || {
             report_provider_error(&json!({
@@ -458,20 +585,22 @@ mod tests {
                     "sessionDir": session_dir
                 }
             }));
-            let persisted = load_provider_health_state().expect("provider-health persisted");
-            let entries = persisted
-                .get("providerCooldowns")
-                .and_then(|value| value.as_array())
-                .expect("providerCooldowns array");
-            assert_eq!(entries.len(), 1);
-            assert_eq!(
-                entries[0]
-                    .get("failureCount")
-                    .and_then(|value| value.as_i64()),
-                Some(1),
-                "one logical provider error must record exactly one strike"
-            );
         });
+
+        for core in [first, second] {
+            let state = core
+                .read()
+                .expect("runtime read lock")
+                .health_manager
+                .snapshot()
+                .into_iter()
+                .find(|entry| entry.provider_key == "primary.1.gpt-test")
+                .expect("runtime health state");
+            assert_eq!(
+                state.failure_count, 1,
+                "one logical provider error must record exactly one in-memory strike"
+            );
+        }
 
         reset_for_tests();
         let _ = fs::remove_dir_all(session_dir);
@@ -479,7 +608,7 @@ mod tests {
 
     #[test]
     fn provider_error_dispatches_to_matching_routing_policy_group_runtime() {
-        let _guard = test_guard();
+        let _guard = test_registry_guard();
         reset_for_tests();
         let session_dir = unique_temp();
         fs::create_dir_all(&session_dir).unwrap();
@@ -528,7 +657,7 @@ mod tests {
 
     #[test]
     fn group_scoped_provider_error_records_once_when_duplicate_group_runtimes_are_registered() {
-        let _guard = test_guard();
+        let _guard = test_registry_guard();
         reset_for_tests();
         let session_dir = unique_temp();
         fs::create_dir_all(&session_dir).unwrap();
@@ -551,19 +680,6 @@ mod tests {
                     "sessionDir": session_dir
                 }
             }));
-            let persisted = load_provider_health_state().expect("provider-health persisted");
-            let entries = persisted
-                .get("providerCooldowns")
-                .and_then(|value| value.as_array())
-                .expect("providerCooldowns array");
-            assert_eq!(entries.len(), 1);
-            assert_eq!(
-                entries[0]
-                    .get("failureCount")
-                    .and_then(|value| value.as_i64()),
-                Some(1),
-                "one group-scoped provider error must record exactly one strike"
-            );
         });
 
         for core in [first, second] {
@@ -587,7 +703,7 @@ mod tests {
 
     #[test]
     fn group_scoped_provider_error_does_not_stop_at_global_runtime() {
-        let _guard = test_guard();
+        let _guard = test_registry_guard();
         reset_for_tests();
         let session_dir = unique_temp();
         fs::create_dir_all(&session_dir).unwrap();
@@ -638,7 +754,7 @@ mod tests {
 
     #[test]
     fn runtime_identity_prevents_group_event_from_hitting_merged_runtime() {
-        let _guard = test_guard();
+        let _guard = test_registry_guard();
         reset_for_tests();
         let session_dir = unique_temp();
         fs::create_dir_all(&session_dir).unwrap();
@@ -687,7 +803,7 @@ mod tests {
 
     #[test]
     fn route_params_do_not_replace_runtime_identity_for_group_events() {
-        let _guard = test_guard();
+        let _guard = test_registry_guard();
         reset_for_tests();
         let session_dir = unique_temp();
         fs::create_dir_all(&session_dir).unwrap();

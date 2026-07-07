@@ -73,42 +73,6 @@ function buildResponsesOkBody(text) {
   };
 }
 
-function sanitizeSessionSegment(value) {
-  return String(value || '')
-    .trim()
-    .replace(/[^a-zA-Z0-9_.-]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
-}
-
-function canonicalizeServerId(host, port) {
-  const rawHost = String(host || '').trim();
-  const normalizedHost = (() => {
-    if (!rawHost) return '127.0.0.1';
-    const lowered = rawHost.toLowerCase();
-    if (lowered === '0.0.0.0' || lowered === '::' || lowered === '::0') {
-      return '127.0.0.1';
-    }
-    return rawHost;
-  })();
-  const normalizedPort = Number.isFinite(port) ? Math.floor(port) : port;
-  return `${normalizedHost}:${normalizedPort}`;
-}
-
-function resolveProviderHealthPathForPortScope(ctx, userConfig, port) {
-  const portConfig = userConfig?.httpserver?.ports?.find((entry) => Number(entry?.port) === port);
-  assert.ok(portConfig, `blackbox missing port config for ${port}`);
-  const serverId = canonicalizeServerId(portConfig.host ?? userConfig?.httpserver?.host, port);
-  const serverSegment = sanitizeSessionSegment(serverId);
-  const rawScope = typeof portConfig.routingPolicyGroup === 'string' && portConfig.routingPolicyGroup.trim()
-    ? portConfig.routingPolicyGroup.trim()
-    : String(port);
-  const scopeSegment = sanitizeSessionSegment(rawScope);
-  assert.ok(serverSegment, 'blackbox failed to resolve server session segment');
-  assert.ok(scopeSegment, 'blackbox failed to resolve port session segment');
-  return path.join(ctx.rccHome, 'sessions', serverSegment, 'ports', scopeSegment, 'provider-health.json');
-}
-
 function readRoutingGroupHealth(routeCodex, routingPolicyGroup) {
   const groupPipelines = routeCodex?.hubPipelinesByRoutingPolicyGroup;
   const pipeline = groupPipelines instanceof Map ? groupPipelines.get(routingPolicyGroup) : undefined;
@@ -253,6 +217,54 @@ function buildPortIsolationUserConfig(upstreams) {
   };
 }
 
+function quoteTomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function tomlScalar(value) {
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return quoteTomlString(value);
+}
+
+function buildProviderToml(providerId, provider) {
+  const lines = [
+    'version = "2.0.0"',
+    `providerId = ${quoteTomlString(providerId)}`,
+    '',
+    '[provider]'
+  ];
+  for (const [key, value] of Object.entries(provider)) {
+    if (key === 'auth' || key === 'models' || value === undefined || value === null || typeof value === 'object') {
+      continue;
+    }
+    lines.push(`${key} = ${tomlScalar(value)}`);
+  }
+  const auth = provider.auth && typeof provider.auth === 'object' && !Array.isArray(provider.auth)
+    ? provider.auth
+    : undefined;
+  if (auth) {
+    lines.push('', '[provider.auth]');
+    for (const [key, value] of Object.entries(auth)) {
+      if (value === undefined || value === null || typeof value === 'object') continue;
+      lines.push(`${key} = ${tomlScalar(value)}`);
+    }
+  }
+  const models = provider.models && typeof provider.models === 'object' && !Array.isArray(provider.models)
+    ? provider.models
+    : {};
+  for (const [modelId, modelConfig] of Object.entries(models)) {
+    lines.push('', `[provider.models.${quoteTomlString(modelId)}]`);
+    if (modelConfig && typeof modelConfig === 'object' && !Array.isArray(modelConfig)) {
+      for (const [key, value] of Object.entries(modelConfig)) {
+        if (value === undefined || value === null || typeof value === 'object') continue;
+        lines.push(`${key} = ${tomlScalar(value)}`);
+      }
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 async function writeProviderConfigs(userConfig) {
   const providers = userConfig?.virtualrouter?.providers;
   if (!providers || typeof providers !== 'object' || Array.isArray(providers)) {
@@ -265,9 +277,8 @@ async function writeProviderConfigs(userConfig) {
     const providerDir = path.join(providerRoot, providerId);
     await fs.mkdir(providerDir, { recursive: true });
     await fs.writeFile(
-      path.join(providerDir, 'config.v2.json'),
-      `${JSON.stringify({ version: '2.0.0', providerId, provider }, null, 2)}
-`,
+      path.join(providerDir, 'config.v2.toml'),
+      buildProviderToml(providerId, provider),
       'utf8'
     );
   }
@@ -353,18 +364,6 @@ async function postResponses(baseUrl, options = {}) {
   };
 }
 
-function summarizeHealthFile(parsed) {
-  return {
-    providerCooldowns: Array.isArray(parsed?.providerCooldowns)
-      ? parsed.providerCooldowns.map((entry) => ({
-          providerKey: entry?.providerKey,
-          reason: entry?.reason,
-          cooldownExpiresAt: entry?.cooldownExpiresAt
-        }))
-      : []
-  };
-}
-
 async function findProviderHealthFiles(rootDir) {
   const files = [];
   async function walk(dir) {
@@ -388,17 +387,6 @@ async function findProviderHealthFiles(rootDir) {
   }
   await walk(rootDir);
   return files.sort();
-}
-
-async function readOptionalProviderHealthSummary(providerHealthPath) {
-  try {
-    return summarizeHealthFile(JSON.parse(await fs.readFile(providerHealthPath, 'utf8')));
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return summarizeHealthFile(undefined);
-    }
-    throw error;
-  }
 }
 
 function findHealthEntry(entries, prefix) {
@@ -478,6 +466,9 @@ async function withScenarioRuntime(options, fn) {
       if (server?.routeCodex?.disposeProviders) {
         await server.routeCodex.disposeProviders().catch(() => {});
       }
+      if (server?.routeCodex?.disposeHubPipelines) {
+        await Promise.resolve(server.routeCodex.disposeHubPipelines()).catch(() => {});
+      }
       if (server?.server) {
         await closeServer(server.server);
       }
@@ -544,27 +535,16 @@ async function run503Scenario() {
     assert.ok(primaryRuntimeHealthAfter503, '503 scenario should mark primary in runtime health after third strike');
     assert.equal(readHealthState(primaryRuntimeHealthAfter503), 'tripped');
 
-    const providerHealthPath = resolveProviderHealthPathForPortScope(ctx, userConfig, 5555);
     const providerHealthFiles = await findProviderHealthFiles(ctx.tmpDir);
     assert.deepEqual(
-      providerHealthFiles.filter((filePath) => filePath !== providerHealthPath),
+      providerHealthFiles,
       [],
-      'provider health must only persist under the port-scoped runtime truth path'
-    );
-    const healthSummary = await readOptionalProviderHealthSummary(providerHealthPath);
-    assert.equal(
-      healthSummary.providerCooldowns.length,
-      1,
-      '503 recoverable cooldown must persist under the port-scoped runtime truth path'
-    );
-    await assert.rejects(
-      () => fs.stat(path.join(ctx.sessionDir, 'provider-health.json')),
-      (error) => error?.code === 'ENOENT',
-      'provider health must not leak into legacy ROUTECODEX_SESSION_DIR root'
+      'provider cooldown must not persist to provider-health.json anywhere'
     );
 
     await closeServer(firstServer.httpHarness.server);
     await firstServer.routeCodex.disposeProviders();
+    firstServer.routeCodex.disposeHubPipelines?.();
     ctx.__requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     firstServer = undefined;
 
@@ -582,9 +562,9 @@ async function run503Scenario() {
     const third = await postResponses(secondServer.httpHarness.baseUrl);
     assert.equal(third.status, 200);
     assert.match(third.body, /ok-from-backup-503/);
-    assert.equal(primaryHits - beforeRestartPrimaryHits, 0);
+    assert.equal(primaryHits - beforeRestartPrimaryHits, 1);
     assert.equal(backupHits - beforeRestartBackupHits, 1);
-    assert.equal(primaryHits, 3, 'restart should preserve port-scoped runtime cooldown and bypass primary');
+    assert.equal(primaryHits, 4, 'restart must drop in-memory cooldown and retry primary');
 
     return {
       firstRequest: { primaryHits: 1, backupHits: 1 },
@@ -595,7 +575,7 @@ async function run503Scenario() {
         backupHitsDelta: backupHits - beforeRestartBackupHits
       },
       primaryErrorAttempts: primaryHits,
-      providerHealth: healthSummary
+      providerHealthFiles
     };
   });
 }

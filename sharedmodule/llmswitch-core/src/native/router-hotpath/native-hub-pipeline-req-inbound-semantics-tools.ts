@@ -4,7 +4,7 @@ import {
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { collectToolOutputsWithNative } from './native-hub-pipeline-inbound-outbound-semantics.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
+import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 
 const NON_BLOCKING_REQ_INBOUND_TOOLS_PARSE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingReqInboundToolsParseLogState = new Map<string, number>();

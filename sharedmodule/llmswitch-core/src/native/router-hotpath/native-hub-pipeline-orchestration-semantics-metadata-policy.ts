@@ -1,6 +1,6 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
+import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 
 type StopMessageRouterMetadataOutput = {
   stopMessageClientInjectSessionScope?: string;

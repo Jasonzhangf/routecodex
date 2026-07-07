@@ -1,5 +1,5 @@
-import { formatUnknownError } from '../../shared/common-utils.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
+import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 
 export type PendingToolSyncPayload = {
   ready: boolean;

@@ -247,7 +247,7 @@ describe('direct passthrough route-level', () => {
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
   }, 15000);
 
-  it('router same-protocol direct does not enter HubPipeline and keeps ingress payload transparent', async () => {
+  it('router same-protocol direct does not enter HubPipeline and only normalizes provider model', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
     const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
@@ -333,7 +333,7 @@ describe('direct passthrough route-level', () => {
 
     expect(directResult.used).toBe(true);
     expect(sentPayload).toEqual({
-      model: 'mutated-model',
+      model: 'gpt-5.3-codex',
       instructions: 'mutated-system-prompt',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
     });
@@ -341,6 +341,131 @@ describe('direct passthrough route-level', () => {
     expect(routerRoute).toHaveBeenCalledTimes(1);
     expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
+  });
+
+  it('router same-protocol direct sends route-safe metadata for cyclic image requests before VR', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    let sentPayload: Record<string, unknown> | undefined;
+    let routeMetadata: Record<string, unknown> | undefined;
+    const providerHandle = {
+      runtimeKey: 'cc.key1.gpt-5.5',
+      providerId: 'cc',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-responses',
+      runtime: { modelId: 'gpt-5.5', modelCapabilities: { 'gpt-5.5': ['text', 'multimodal'] } },
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, body: { ok: true } };
+        },
+        processIncomingDirect: async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, body: { ok: true, direct: true } };
+        },
+      },
+    };
+
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      routeMetadata = metadata;
+      expect(() => JSON.stringify(metadata)).not.toThrow();
+      return {
+        target: {
+          providerKey: 'cc.key1.gpt-5.5',
+          providerType: 'openai',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerHandle.runtimeKey,
+          modelId: 'gpt-5.5',
+        },
+        decision: { routeName: 'longcontext', pool: ['cc.key1.gpt-5.5'] },
+        diagnostics: {},
+      };
+    });
+
+    (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
+    (server as any).hubPipeline = {
+      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
+      getVirtualRouter: jest.fn(() => ({ route })),
+    };
+    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5520', (server as any).hubPipeline],
+    ]);
+
+    const requestBody = {
+      model: 'gpt-5.5',
+      stream: true,
+      input: [{
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'describe this image' },
+          { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
+        ],
+      }],
+    };
+    const metadata: Record<string, unknown> = {
+      requestId: 'req_router_direct_cyclic_image',
+      clientRequestId: 'client-router-direct-cyclic-image',
+      routecodexRoutingPolicyGroup: 'gateway_priority_5520',
+      __raw_request_body: requestBody,
+      entryOriginRequest: requestBody,
+      requestSemantics: { input: requestBody.input },
+      metadataCenterSnapshot: {
+        requestTruth: { requestId: 'req_router_direct_cyclic_image', sessionId: 'sess-image' },
+        runtimeControl: { routecodexRoutingPolicyGroup: 'gateway_priority_5520' },
+      },
+    };
+    metadata.self = metadata;
+
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5520,
+        host: '0.0.0.0',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_priority_5520',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_cyclic_image',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: requestBody,
+        metadata,
+      },
+    );
+
+    expect(outcome.used).toBe(true);
+    expect(route).toHaveBeenCalledTimes(1);
+    expect(routeMetadata).toEqual(expect.objectContaining({
+      requestId: 'req_router_direct_cyclic_image',
+      clientRequestId: 'client-router-direct-cyclic-image',
+      routecodexRoutingPolicyGroup: 'gateway_priority_5520',
+      metadataCenterSnapshot: expect.objectContaining({
+        requestId: 'req_router_direct_cyclic_image',
+        runtimeControl: expect.objectContaining({ routecodexRoutingPolicyGroup: 'gateway_priority_5520' }),
+      }),
+    }));
+    expect(routeMetadata).not.toHaveProperty('__raw_request_body');
+    expect(routeMetadata).not.toHaveProperty('entryOriginRequest');
+    expect(routeMetadata).not.toHaveProperty('requestSemantics');
+    expect(routeMetadata).not.toHaveProperty('self');
+    expect(JSON.stringify(routeMetadata)).not.toContain('data:image/png;base64,AAAA');
+    expect(sentPayload?.input).toBe(requestBody.input);
+    expect(JSON.stringify(sentPayload)).toContain('data:image/png;base64,AAAA');
   });
 
   it('router same-protocol direct does not preflight Responses tool-output wire shape', async () => {
@@ -703,8 +828,9 @@ describe('direct passthrough route-level', () => {
     });
 
     expect(directSpy).toHaveBeenCalledTimes(1);
-    expect(directSpy.mock.calls[0]?.[1]?.metadata).toEqual(expect.objectContaining({
-      routeHint: 'search',
+    const directMetadata = directSpy.mock.calls[0]?.[1]?.metadata as Record<string, unknown>;
+    expect(readRuntimeControlProjection(directMetadata).routeHint).toBe('search');
+    expect(directMetadata).toEqual(expect.objectContaining({
       routecodexRoutingPolicyGroup: 'gateway_priority_5555',
       __rt: expect.objectContaining({
         sessionDir: expect.stringContaining('ports/gateway_priority_5555'),

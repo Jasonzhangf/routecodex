@@ -164,7 +164,6 @@
         <ul>
           <li>generic routing/runtime state snapshots (<code>session:*</code>, <code>conversation:*</code>, <code>tmux:*</code>)</li>
           <li><code>session-bindings.json</code></li>
-          <li><code>provider-health.json</code></li>
         </ul>
         <p>This means <code>sessionId</code> / <code>tmuxSessionId</code> / <code>conversationId</code> are not the same key, but the directory itself is already a shared runtime workdir. When reading or writing stopless/session data, prefer explicit metadata scope + explicit owner path. Do not infer ownership from the directory name alone.</p>
         <p>Stopless-specific clarification:</p>
@@ -204,7 +203,7 @@
         <tr><td>retired servertool pending injection</td><td>retired</td><td>none</td><td>no</td><td><code>pending-session</code> / <code>pending-injection</code> / <code>servertool-pending/*</code> 已物理退役；stopless 只保留 request truth session identity</td></tr>
         <tr><td>tmux / client bindings</td><td><code>SessionClientRegistry</code></td><td>client/tmux attachment lifecycle</td><td>yes, but separate namespace</td><td>这是 client binding，不是 request session 或 continuation</td></tr>
         <tr><td>runtime lifecycle pid/stop-intent/instance registry</td><td>runtime lifecycle owners</td><td>cross-process runtime control</td><td>yes</td><td>这是 runtime control plane，不是业务 continuation</td></tr>
-        <tr><td>provider health / cooldown</td><td>provider runtime health owners</td><td>cross-request runtime heuristics</td><td>yes, if policy requires restart survival</td><td>属于 runtime policy，不是 session 身份</td></tr>
+        <tr><td>provider health / cooldown</td><td>Rust provider runtime health owners</td><td>current process only</td><td>no</td><td>冷却不得跨重启持久化；重启后必须重新尝试真实 provider</td></tr>
         </tbody>
         </table>
         <p>As of 2026-06-30, the implementation contracts are now explicit:</p>

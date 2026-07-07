@@ -7,9 +7,6 @@ use super::super::instructions::RoutingInstructionState;
 use super::super::load_balancer::{LoadBalancingPolicy, RouteLoadBalancer};
 use super::super::provider_registry::ProviderRegistry;
 use super::super::routing::{parse_routing, RoutingPools};
-use super::super::routing_state_store::{
-    load_provider_health_state, persist_provider_health_state,
-};
 use super::super::time_utils::now_ms;
 
 /// Default TTL for concurrency busy entries (60 seconds).
@@ -126,22 +123,6 @@ impl VirtualRouterEngineCore {
         Ok(())
     }
 
-    pub(crate) fn refresh_provider_health_from_store(&mut self) {
-        if let Some(raw) = load_provider_health_state() {
-            let now = now_ms();
-            let pruned_expired = self.health_manager.import_persistable_state(&raw, now);
-            if pruned_expired {
-                let cleaned = self.health_manager.export_persistable_state(now);
-                persist_provider_health_state(&cleaned);
-            }
-        }
-    }
-
-    pub(crate) fn persist_provider_health(&self) {
-        let raw = self.health_manager.export_persistable_state(now_ms());
-        persist_provider_health_state(&raw);
-    }
-
     pub(crate) fn mark_concurrency_scope_busy(&mut self, scope_key: &str) {
         let expires_at = now_ms() + CONCURRENCY_BUSY_TTL_MS;
         self.concurrency_busy_keys
@@ -197,62 +178,5 @@ impl VirtualRouterEngineCore {
             (None, Some(right)) => Some(right),
             (None, None) => None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::virtual_router_engine::routing_state_store::{
-        load_provider_health_state, persist_provider_health_state, with_session_dir_override,
-    };
-    use serde_json::json;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn unique_temp() -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("rcc-provider-health-refresh-{unique}"))
-    }
-
-    #[test]
-    fn refresh_provider_health_from_store_persists_pruned_expired_cooldown() {
-        let session_dir = unique_temp();
-        fs::create_dir_all(&session_dir).unwrap();
-
-        with_session_dir_override(session_dir.to_str(), || {
-            persist_provider_health_state(&json!({
-                "version": 1,
-                "providerCooldowns": [{
-                    "providerKey": "test-provider",
-                    "state": "tripped",
-                    "failureCount": 3,
-                    "cooldownExpiresAt": 1i64,
-                    "lastFailureAt": 1i64,
-                    "reason": "expired"
-                }]
-            }));
-
-            let mut core = VirtualRouterEngineCore::new();
-            core.health_manager
-                .register_providers(&["test-provider".to_string()]);
-            core.refresh_provider_health_from_store();
-
-            let persisted = load_provider_health_state().expect("provider health persisted");
-            assert_eq!(
-                persisted,
-                json!({
-                    "version": 1,
-                    "providerCooldowns": []
-                })
-            );
-            assert!(core.health_manager.is_available("test-provider", 2));
-        });
-
-        let _ = fs::remove_dir_all(session_dir);
     }
 }

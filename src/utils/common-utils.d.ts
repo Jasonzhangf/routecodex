@@ -3,8 +3,8 @@
  * and type guards for the app/root workspace. Lives under src/ so it's
  * accessible from all files within the main project rootDir.
  *
- * Keep API shape aligned with `sharedmodule/llmswitch-core/src/shared/common-utils.ts`
- * to avoid semantic drift across the two build roots.
+ * Sharedmodule TS shells keep their own minimal host-boundary helpers so the
+ * llmswitch-core source surface can continue shrinking independently.
  */
 export declare function formatUnknownError(error: unknown): string;
 export declare function isRecord(value: unknown): value is Record<string, unknown>;

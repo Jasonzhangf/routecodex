@@ -471,11 +471,6 @@ fn resolve_session_filepath(key: &str) -> Option<PathBuf> {
     Some(dir.join(Path::new(&filename)))
 }
 
-fn resolve_provider_health_filepath() -> Option<PathBuf> {
-    let dir = resolve_session_dir()?;
-    Some(dir.join(Path::new("provider-health.json")))
-}
-
 fn resolve_global_request_counter_filepath() -> Option<PathBuf> {
     if let SessionDirOverride::Path(explicit) = read_override_session_dir() {
         return Some(explicit.join(Path::new(GLOBAL_REQUEST_COUNTER_FILENAME)));
@@ -540,31 +535,6 @@ pub(crate) fn persist_global_request_counter(counter: &GlobalRequestCounter) -> 
             filepath, e
         )
     })
-}
-
-pub(crate) fn load_provider_health_state() -> Option<Value> {
-    let filepath = resolve_provider_health_filepath()?;
-    let raw = fs::read_to_string(&filepath).ok()?;
-    if raw.trim().is_empty() {
-        return None;
-    }
-    serde_json::from_str(&raw).ok()
-}
-
-pub(crate) fn persist_provider_health_state(state: &Value) {
-    let filepath = match resolve_provider_health_filepath() {
-        Some(path) => path,
-        None => return,
-    };
-    if let Some(dir) = filepath.parent() {
-        if fs::create_dir_all(dir).is_err() {
-            return;
-        }
-    }
-    let Ok(text) = serde_json::to_string(state) else {
-        return;
-    };
-    let _ = fs::write(&filepath, text);
 }
 
 fn atomic_write_file(filepath: &Path, content: &str) -> std::io::Result<()> {
@@ -1175,34 +1145,4 @@ mod isolation_tests {
         }
     }
 
-    // T3: provider health state also respects session_dir override
-    #[test]
-    fn provider_health_respects_session_dir_override() {
-        let dir_a = unique_temp();
-        let dir_b = unique_temp();
-        fs::create_dir_all(&dir_a).unwrap();
-        fs::create_dir_all(&dir_b).unwrap();
-
-        with_session_dir_override(dir_a.to_str(), || {
-            let health_state = json!({
-                "providerCooldowns": [
-                    {"provider": "test-p", "expires": 9999999999i64}
-                ]
-            });
-            persist_provider_health_state(&health_state);
-            let path_a = resolve_provider_health_filepath().unwrap();
-            assert!(path_a.starts_with(&dir_a));
-
-            with_session_dir_override(dir_b.to_str(), || {
-                let loaded = load_provider_health_state();
-                assert!(
-                    loaded.is_none(),
-                    "dir_b must not see dir_a's provider health"
-                );
-            });
-        });
-
-        let _ = fs::remove_dir_all(dir_a);
-        let _ = fs::remove_dir_all(dir_b);
-    }
 }

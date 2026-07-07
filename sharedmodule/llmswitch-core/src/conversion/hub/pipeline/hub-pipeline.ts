@@ -1,3 +1,6 @@
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
 import { Readable } from "node:stream";
 import {
   createVirtualRouterRuntime,
@@ -17,7 +20,7 @@ import {
   collectSseBodyText,
 } from "../../../native/router-hotpath/native-sse-runtime.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
-import { isRecord } from "../../../shared/common-utils.js";
+
 import { readRuntimeControlFromAnyBoundMetadataCenter } from "../../../servertool/metadata-center-carrier.js";
 import type {
   HubPipelineConfig,

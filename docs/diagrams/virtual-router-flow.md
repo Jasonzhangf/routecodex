@@ -2,8 +2,7 @@
 
 ```mermaid
 flowchart TB
-    START(["route() 入口"]) --> PRE1["刷新 health 状态<br/>(refresh_provider_health_from_store)"]
-    PRE1 --> PRE2["清理异常路由指令标记<br/>(clean_malformed_routing_instruction_markers)"]
+    START(["route() 入口"]) --> PRE2["清理异常路由指令标记<br/>(clean_malformed_routing_instruction_markers)"]
     PRE2 --> PRE3["确定 routing_state_key<br/>(continuation→session, 否则 request scope)"]
     PRE3 --> PRE4["加载路由指令状态<br/>(load_routing_state_for_scope)"]
     PRE4 --> PRE5["解析 metadata 指令<br/>(allowedProviders, force/prefer)"]

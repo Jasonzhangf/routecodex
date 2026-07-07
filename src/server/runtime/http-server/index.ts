@@ -66,7 +66,10 @@ import {
 import {
   requireDirectPassthroughPayloadObject,
 } from './direct-passthrough-payload.js';
-import { buildDirectProviderRuntimeMetadata } from './direct-runtime-metadata.js';
+import {
+  buildDirectProviderRuntimeMetadata,
+  buildRouterDirectRouteMetadata,
+} from './direct-runtime-metadata.js';
 import { normalizeProviderResponse } from './executor/provider-response-utils.js';
 import { extractStatusCodeFromError } from './executor/utils.js';
 import { processProviderResolveFailure } from './executor/request-executor-provider-resolve-failure.js';
@@ -151,6 +154,7 @@ import {
   resolveRuntimeAuth,
   resolveApiKeyValue,
   isLocalBaseUrl,
+  disposeHubPipelines,
   disposeProviders
 } from './http-server-runtime-providers.js';
 
@@ -941,6 +945,10 @@ export class RouteCodexHttpServer {
     await disposeProviders(this);
   }
 
+  private disposeHubPipelines(): void {
+    disposeHubPipelines(this);
+  }
+
   private async executePipeline(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
     return await this.requestExecutor.execute(input);
   }
@@ -1438,6 +1446,12 @@ export class RouteCodexHttpServer {
     }
     const metadataCenterSnapshot = buildMetadataCenterSnapshot(metadataForHub);
     metadataForHub.metadataCenterSnapshot = metadataCenterSnapshot;
+    const routerDirectRouteMetadata = buildRouterDirectRouteMetadata({
+      metadata: metadataForHub,
+      metadataCenterSnapshot,
+      requestId: input.requestId,
+      entryEndpoint: input.entryEndpoint,
+    });
 
     const rawDirectPayload = requireDirectPassthroughPayloadObject(input.body);
     const inboundProtocol = resolveInboundProtocolFromEntryPath(input.entryEndpoint);
@@ -1454,7 +1468,7 @@ export class RouteCodexHttpServer {
       diagnostics?: Record<string, unknown>;
     };
     try {
-      routeResult = routerEngine.route(rawDirectPayload as never, metadataForHub as never) as typeof routeResult;
+      routeResult = routerEngine.route(rawDirectPayload as never, routerDirectRouteMetadata as never) as typeof routeResult;
     } catch (error) {
       if (isPoolExhaustedPipelineError(error)) {
         this.logStage('router-direct.pool_exhausted', input.requestId, {

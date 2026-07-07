@@ -716,32 +716,10 @@ export interface FeatureBuilder {
   ): RoutingFeatures;
 }
 
-export interface ProviderCooldownState {
-  providerKey: string;
-  cooldownExpiresAt: number;
-  reason?: string;
-}
-
-export interface VirtualRouterHealthSnapshot {
-  providers: ProviderHealthState[];
-  cooldowns: ProviderCooldownState[];
-}
-
 export interface VirtualRouterHealthStore {
   /**
-   * 在 VirtualRouterEngine 初始化时提供上一次持久化的健康快照。
-   * 调用方应仅返回仍在有效期内的 cooldown/熔断信息，或返回 null 表示无可恢复状态。
-   */
-  loadInitialSnapshot(): VirtualRouterHealthSnapshot | null;
-
-  /**
-   * 当 VirtualRouterEngine 更新 provider 健康状态或 cooldown 时，可选地持久化最新快照。
-   * 实现应保证内部吞掉 I/O 错误，不影响路由主流程。
-   */
-  persistSnapshot?(snapshot: VirtualRouterHealthSnapshot): void;
-
-  /**
    * 可选：记录原始 ProviderErrorEvent，便于后续离线统计与诊断。
+   * This must never persist cooldown/availability state across restart.
    */
   recordProviderError?(event: ProviderErrorEvent): void;
 }

@@ -1,15 +1,211 @@
+use napi::Env;
 use serde_json::json;
 use std::fs;
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{execute_hub_pipeline_json, HubPipelineConfig, HubPipelineEngine, HubPipelineRequest};
+use crate::virtual_router_engine::provider_runtime_ingress::{
+    register_runtime, report_provider_error, reset_for_tests, test_registry_guard,
+};
 use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
+use crate::virtual_router_engine::VirtualRouterEngineCore;
 
 fn test_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64
+}
+
+fn build_runtime_route_config(routing_policy_group: &str) -> serde_json::Value {
+    json!({
+        "routingPolicyGroup": routing_policy_group,
+        "providers": {
+            "primary.key1.gpt-5.5": {
+                "providerKey": "primary.key1.gpt-5.5",
+                "providerType": "responses",
+                "providerProtocol": "openai-responses",
+                "runtimeKey": "primary.key1",
+                "modelId": "gpt-5.5",
+                "enabled": true,
+                "outboundProfile": "openai-responses",
+                "endpoint": "mock://primary",
+                "auth": { "type": "apikey", "apiKey": "primary-key" }
+            },
+            "backup.key1.gpt-5.5": {
+                "providerKey": "backup.key1.gpt-5.5",
+                "providerType": "responses",
+                "providerProtocol": "openai-responses",
+                "runtimeKey": "backup.key1",
+                "modelId": "gpt-5.5",
+                "enabled": true,
+                "outboundProfile": "openai-responses",
+                "endpoint": "mock://backup",
+                "auth": { "type": "apikey", "apiKey": "backup-key" }
+            }
+        },
+        "routing": {
+            "thinking": [{
+                "id": "thinking-priority",
+                "priority": 100,
+                "mode": "priority",
+                "routeParams": { "routePolicyGroup": routing_policy_group },
+                "targets": ["primary.key1.gpt-5.5", "backup.key1.gpt-5.5"]
+            }],
+            "default": [{
+                "id": "default-priority",
+                "priority": 100,
+                "mode": "priority",
+                "routeParams": { "routePolicyGroup": routing_policy_group },
+                "targets": ["primary.key1.gpt-5.5", "backup.key1.gpt-5.5"]
+            }]
+        }
+    })
+}
+
+fn build_runtime_route_request(
+    request_id: &str,
+    routing_policy_group: &str,
+) -> serde_json::Value {
+    json!({
+        "requestId": request_id,
+        "endpoint": "/v1/responses",
+        "entryEndpoint": "/v1/responses",
+        "providerProtocol": "openai-responses",
+        "payload": {
+            "model": "gpt-5.5",
+            "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "ping" }] }]
+        },
+        "metadata": {
+            "routeHint": "thinking",
+            "routecodexRoutingPolicyGroup": routing_policy_group
+        },
+        "metadataCenterSnapshot": {
+            "requestTruth": {
+                "requestId": request_id,
+                "routingPolicyGroup": routing_policy_group
+            },
+            "runtimeControl": {
+                "routeHint": "thinking",
+                "routecodexRoutingPolicyGroup": routing_policy_group
+            }
+        },
+        "processMode": "chat",
+        "direction": "request",
+        "stage": "inbound"
+    })
+}
+
+#[test]
+fn execute_hub_pipeline_json_uses_registered_runtime_health_for_route_selection() {
+    let _guard = test_registry_guard();
+    reset_for_tests();
+    let routing_policy_group = "gateway_priority_5555";
+    let virtual_router = build_runtime_route_config(routing_policy_group);
+    let mut core = VirtualRouterEngineCore::new();
+    core.initialize(&virtual_router).expect("runtime router init");
+    let core = Arc::new(RwLock::new(core));
+    register_runtime(&core);
+
+    for index in 1..=3 {
+        report_provider_error(&json!({
+            "code": "HTTP_503",
+            "message": format!("primary unavailable #{index}"),
+            "stage": "provider.send",
+            "status": 503,
+            "affectsHealth": true,
+            "runtime": {
+                "requestId": format!("req-runtime-health-{index}"),
+                "providerKey": "primary.key1.gpt-5.5",
+                "routecodexRoutingPolicyGroup": routing_policy_group
+            }
+        }));
+    }
+
+    let direct_route = core
+        .write()
+        .expect("runtime route lock")
+        .route(
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+            &json!({
+                "model": "gpt-5.5",
+                "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "ping" }] }]
+            }),
+            &json!({
+                "metadataCenterSnapshot": {
+                    "runtimeControl": {
+                        "routeHint": "thinking",
+                        "routecodexRoutingPolicyGroup": routing_policy_group
+                    }
+                }
+            }),
+        )
+        .expect("direct registered runtime route");
+    assert_eq!(
+        direct_route
+            .pointer("/target/providerKey")
+            .and_then(|value| value.as_str()),
+        Some("backup.key1.gpt-5.5"),
+        "registered runtime should skip the tripped primary before Hub consumes it: {}",
+        direct_route
+    );
+
+    let input = json!({
+        "config": {
+            "runtimeRouterRequired": true,
+            "virtualRouter": virtual_router
+        },
+        "request": build_runtime_route_request("req-runtime-health-route", routing_policy_group)
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+    assert_eq!(
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(true),
+        "unexpected runtime route output: {}",
+        output
+    );
+    assert_eq!(
+        output
+            .pointer("/metadata/target/providerKey")
+            .and_then(|value| value.as_str()),
+        Some("backup.key1.gpt-5.5"),
+        "live Hub route selection must use process-local runtime health instead of a fresh stateless router: {}",
+        output
+    );
+
+    reset_for_tests();
+}
+
+#[test]
+fn execute_hub_pipeline_json_fails_fast_when_runtime_router_required_without_registered_runtime() {
+    let _guard = test_registry_guard();
+    reset_for_tests();
+    let routing_policy_group = "gateway_priority_5555";
+    let input = json!({
+        "config": {
+            "runtimeRouterRequired": true,
+            "virtualRouter": build_runtime_route_config(routing_policy_group)
+        },
+        "request": build_runtime_route_request("req-runtime-router-missing", routing_policy_group)
+    });
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+    assert_eq!(
+        output.get("success").and_then(|value| value.as_bool()),
+        Some(false),
+        "runtime-required route must not fall back to a stateless router: {}",
+        output
+    );
+    assert_eq!(
+        output
+            .pointer("/error/code")
+            .and_then(|value| value.as_str()),
+        Some("hub_pipeline_virtual_router_runtime_unavailable")
+    );
+
+    reset_for_tests();
 }
 
 #[test]
@@ -305,7 +501,7 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
 }
 
 #[test]
-fn execute_hub_pipeline_json_reselects_when_preselected_route_target_is_health_cooled() {
+fn execute_hub_pipeline_json_ignores_persisted_health_cooldown_for_preselected_route() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -378,7 +574,7 @@ fn execute_hub_pipeline_json_reselects_when_preselected_route_target_is_health_c
                 }
             },
             "request": {
-                "requestId": "req-preselected-health-cooled-reselect",
+                "requestId": "req-preselected-persisted-health-ignored",
                 "endpoint": "/v1/responses",
                 "entryEndpoint": "/v1/responses",
                 "providerProtocol": "openai-responses",
@@ -389,7 +585,7 @@ fn execute_hub_pipeline_json_reselects_when_preselected_route_target_is_health_c
                 "metadata": {},
                 "metadataCenterSnapshot": {
                     "requestTruth": {
-                        "requestId": "req-preselected-health-cooled-reselect"
+                        "requestId": "req-preselected-persisted-health-ignored"
                     },
                     "runtimeControl": {
                         "sessionDir": session_dir,
@@ -420,15 +616,15 @@ fn execute_hub_pipeline_json_reselects_when_preselected_route_target_is_health_c
         assert_eq!(
             output.get("success").and_then(|value| value.as_bool()),
             Some(true),
-            "unexpected health-cooled preselected output: {}",
+            "unexpected persisted-health preselected output: {}",
             output
         );
         assert_eq!(
             output
                 .pointer("/metadata/target/providerKey")
                 .and_then(|value| value.as_str()),
-            Some("openai.key2.gpt-5.5"),
-            "health-cooled preselected provider must not bypass VR availability: {}",
+            Some("openai.key1.gpt-5.5"),
+            "persisted provider cooldown must not survive restart into preselected route availability: {}",
             output
         );
     });

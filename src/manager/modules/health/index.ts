@@ -7,11 +7,7 @@ import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 import { JsonlFileStore } from '../../storage/file-store.js';
 import { resolveRccPath } from '../../../config/user-data-paths.js';
 
-type VirtualRouterHealthSnapshot = unknown;
-
 interface VirtualRouterHealthStore {
-  loadInitialSnapshot(): VirtualRouterHealthSnapshot | null;
-  persistSnapshot?(snapshot: VirtualRouterHealthSnapshot): void;
   recordProviderError?(event: ProviderErrorEvent): void;
 }
 
@@ -20,40 +16,22 @@ export class HealthManagerModule implements ManagerModule {
 
   private serverId: string | null = null;
   private healthStore: VirtualRouterHealthStore | null = null;
-  private snapshotStore: JsonlFileStore<VirtualRouterHealthSnapshot, ProviderErrorEvent> | null = null;
-  private initialSnapshot: VirtualRouterHealthSnapshot | null = null;
+  private eventStore: JsonlFileStore<null, ProviderErrorEvent> | null = null;
 
   async init(context: ManagerContext): Promise<void> {
     this.serverId = context.serverId;
     const baseDir = this.resolveStateDir();
     const filePath = path.join(baseDir, 'health.jsonl');
-    // 默认保留最近 7 天的 ProviderError 事件，最多 1000 条，防止无限膨胀。
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-    this.snapshotStore = new JsonlFileStore<VirtualRouterHealthSnapshot, ProviderErrorEvent>({
+    this.eventStore = new JsonlFileStore<null, ProviderErrorEvent>({
       filePath,
       maxAgeMs: sevenDaysMs,
       maxEvents: 1000
     });
-    try {
-      this.initialSnapshot = await this.snapshotStore.load();
-    } catch {
-      this.initialSnapshot = null;
-    }
 
     this.healthStore = {
-      loadInitialSnapshot: () => this.initialSnapshot,
-      persistSnapshot: (snapshot: VirtualRouterHealthSnapshot) => {
-        this.initialSnapshot = snapshot;
-        const store = this.snapshotStore;
-        if (!store) {
-          return;
-        }
-        void store.save(snapshot).catch(() => {
-          // 持久化失败不影响主流程
-        });
-      },
       recordProviderError: (event: ProviderErrorEvent) => {
-        const store = this.snapshotStore;
+        const store = this.eventStore;
         if (!store) {
           return;
         }
@@ -65,16 +43,15 @@ export class HealthManagerModule implements ManagerModule {
   }
 
   async start(): Promise<void> {
-    // 当前 HealthManager 仅提供 VirtualRouterHealthStore，不需要单独的后台任务。
+    // 当前 HealthManager 仅记录 ProviderError 诊断事件，不恢复或持久化 cooldown。
   }
 
   async stop(): Promise<void> {
-    // Server 停止时做一次 best-effort 压缩，清理过期事件记录。
-    if (this.snapshotStore) {
+    if (this.eventStore) {
       try {
-        await this.snapshotStore.compact();
+        await this.eventStore.compact();
       } catch {
-        // 压缩失败不影响关机流程
+        // 压缩失败不影响关机流程。
       }
     }
   }
@@ -83,8 +60,8 @@ export class HealthManagerModule implements ManagerModule {
     return this.healthStore;
   }
 
-  getCurrentSnapshot(): VirtualRouterHealthSnapshot | null {
-    return this.initialSnapshot;
+  getCurrentSnapshot(): null {
+    return null;
   }
 
   private resolveStateDir(): string {

@@ -233,6 +233,11 @@ export async function stopHttpServer(server: any): Promise<void> {
     logShutdownNonBlocking('dispose_providers', error);
   }
   try {
+    server.disposeHubPipelines?.();
+  } catch (error) {
+    logShutdownNonBlocking('dispose_hub_pipelines', error);
+  }
+  try {
     if (server.managerDaemon) {
       await server.managerDaemon.stop();
       server.managerDaemon = null;

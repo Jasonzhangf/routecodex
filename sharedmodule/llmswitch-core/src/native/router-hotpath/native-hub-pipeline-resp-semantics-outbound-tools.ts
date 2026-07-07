@@ -1,11 +1,11 @@
 import {
   failNative,
   extractNativeErrorMessage,
+  formatUnknownError,
   isNativeDisabledByEnv,
   readNativeFunction,
   safeStringify
 } from './native-hub-pipeline-resp-semantics-shared.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 
 export interface AnthropicStopReasonResolution {

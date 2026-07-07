@@ -1,7 +1,7 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
 import { stringifyNativePayloadForError } from './native-hub-bridge-action-semantics-shared.js';
+import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 import type { ProviderProtocolErrorCode } from '../../conversion/provider-protocol-error.js';
 
 type HubPipelineInput = {

@@ -183,6 +183,20 @@ impl HubPipelineEngine {
             }
         }
         self.with_virtual_router_session_dir(metadata_center_snapshot, || {
+            if self.config.runtime_router_required {
+                return crate::virtual_router_engine::provider_runtime_ingress::route_with_registered_runtime(
+                    unsafe { Env::from_raw(std::ptr::null_mut()) },
+                    request,
+                    &metadata_for_router,
+                    self.expected_routing_policy_group(),
+                )
+                .map_err(|message| {
+                    HubPipelineError::new(
+                        "hub_pipeline_virtual_router_runtime_unavailable",
+                        format!("Rust HubPipeline virtual router runtime route failed: {}", message),
+                    )
+                });
+            }
             let mut router = VirtualRouterEngineCore::new();
             router
                 .initialize(&self.config.virtual_router)
@@ -227,6 +241,24 @@ impl HubPipelineEngine {
                 )
             })?;
         self.with_virtual_router_session_dir(metadata_center_snapshot, || {
+            if self.config.runtime_router_required {
+                return crate::virtual_router_engine::provider_runtime_ingress::is_provider_available_with_registered_runtime(
+                    provider_key,
+                    &serde_json::json!({
+                        "metadataCenterSnapshot": metadata_center_snapshot,
+                    }),
+                    self.expected_routing_policy_group(),
+                )
+                .map_err(|message| {
+                    HubPipelineError::new(
+                        "hub_pipeline_virtual_router_runtime_unavailable",
+                        format!(
+                            "Rust HubPipeline preselected route runtime availability failed: {}",
+                            message
+                        ),
+                    )
+                });
+            }
             let mut router = VirtualRouterEngineCore::new();
             router
                 .initialize(&self.config.virtual_router)
@@ -239,12 +271,20 @@ impl HubPipelineEngine {
                         ),
                     )
                 })?;
-            router.refresh_provider_health_from_store();
             Ok(router.is_provider_available(
                 unsafe { Env::from_raw(std::ptr::null_mut()) },
                 provider_key,
             ))
         })
+    }
+
+    fn expected_routing_policy_group(&self) -> Option<&str> {
+        self.config
+            .virtual_router
+            .get("routingPolicyGroup")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
     }
 
     fn with_virtual_router_session_dir<T>(

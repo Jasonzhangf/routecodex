@@ -186,7 +186,7 @@ client-visible error
 
 ## 当日事实更新（2026-05-27）
 1. 5555 主备问题当前已证实：Rust Virtual Router 的 priority 选路语义正常；“主 provider 未命中”优先排查 health/quota/runtime init 状态，不先改 selection。
-2. provider health 的 `__http_503_daily_cooldown__` 为 persisted 状态（canonical key 生效，`key1 -> 1`）；启动后应先重新校验可恢复性，若首个真实请求仍不可恢复（如 503）则再次冷却。
+2. provider health/cooldown 持久化已废弃：`__http_503_daily_cooldown__`、`provider-health.json`、`providerCooldowns` 不得作为启动或路由真相；重启必须无条件清空 provider cooldown，真实请求失败后只写进程内健康状态。
 3. 启动排障必须区分：`checkHealth=false`、`VR success hook 不可用`、`success 后再次失败重写冷却` 三个分支；不得混为“路由器错误”。
 4. 本项目该类问题调试先看 `.agents/skills/rcc-dev-skills/references/91-lessons-2026-05.md` 的 `L91-01` 与 `L91-06`，再执行改动。
 5. 错误处理主链真相：provider/local error 先归一到 `src/providers/core/runtime/provider-error-catalog.ts`，再进入 `provider-failure-policy-impl.ts` 分类；`request-retry-helpers` / `request-executor-retry-decision` / `request-executor-session-storm-backoff` / `retry-engine` 只消费统一码与分类结果，禁止新增 message-only 分叉。

@@ -1,7 +1,17 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { resolveRccPath } from '../runtime/user-data-paths.js';
-import { formatUnknownError } from '../shared/common-utils.js';
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
 
 export interface VirtualRouterHitEvent {
   requestId: string;

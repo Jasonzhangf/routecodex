@@ -20,6 +20,13 @@ export function safeStringify(value: unknown): string | undefined {
   }
 }
 
+export function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  return safeStringify(error) ?? String(error);
+}
+
 export function failNative<T>(capability: string, reason?: string): T {
   return failNativeRequired<T>(capability, reason);
 }

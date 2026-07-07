@@ -4,6 +4,14 @@
 - Removed dead exports only: `isNativeRequiredByEnv`, `NativeReqInboundSemanticLiftApplyInput`, `NativeReqInboundReasoningNormalizeInput`, `ConversionConfigFile`, `BridgeNativeEnvelope`, `BridgeContentPart`, and `JsonToolArgumentAliasMap`. `BridgeContentPart` / `JsonToolArgumentAliasMap` remain as same-file local types because exported shapes still need them.
 - Verification: deleted symbols scan has 0 matches; llmswitch-core tsc PASS; focused native/parser + residue Jest PASS 190/190; `verify:llmswitch-minimal-ts-surface` PASS; `verify:llmswitch-rustification-audit` PASS with nonNative `34 / 4698`; root TypeScript PASS; touched-file `git diff --check` PASS.
 
+# 2026-07-07: provider cooldown no-persistence live closeout
+
+- Requirement: provider cooldown must be process-local only; restart must clear all cooldown; no `provider-health.json` / `providerCooldowns` persistence or import path.
+- Code/gate path: live Hub request-stage now requires registered runtime router for route selection/availability instead of stateless fresh VR health; lifecycle shutdown disposes HubPipelines separately from provider handles; provider-failure blackbox now asserts no provider-health files and that restart retries primary.
+- Verification: `verify:provider-failure-ban-blackbox` PASS with `providerHealthFiles: []` and `restartRequest.primaryHitsDelta=1`; TS PASS; Rust `execute_hub_pipeline_json_` PASS 13; Rust `provider_runtime_ingress` PASS 8; `verify:architecture-ts-owner-ban` PASS; `build:native-hotpath` PASS; `build:base` PASS; `install:release` PASS and restarted 5520.
+- Live evidence: `routecodex/rcc --version=0.90.3649`; `/health` on 4444/5520/5555/10000 all `0.90.3649`; `find ~/.rcc -name provider-health.json` returned no files; `routecodex port status 5520 --json` shows `55ai.1.gpt-5.5` healthy with `healthCooldownRemainingMs:null`.
+- Routing evidence: 5520 thinking/coding/longcontext routes first select `fwd.free.gpt-5.5 -> cc.key1.gpt-5.5`; paid forwarder order is `asxs.crsa -> asxs.crsb -> 55ai -> 1token`, so 55AI is not selected while CC/free is available and ASXS paid targets precede it.
+
 # 2026-07-06: rcc start restored foreground logs and explicit daemon mode
 
 - Root cause of the bad observed behavior: commit `fe6fea444 fix(cli): daemonize release start by default` made release `rcc start --snap` default to daemon mode, so the command returned with only supervisor information instead of showing runtime startup logs. My previous `7a30349` fixed lock/health waiting but preserved that wrong daemon default.
@@ -25241,6 +25249,8 @@ Complete SSE rustification status (34 TS files):
 
 # 2026-07-04: VR provider forwarder startup persisted cooldown rustification fix
 
+Superseded on 2026-07-07: provider cooldown persistence/import/prune is forbidden. This section is historical failed direction only; do not reuse its `provider-health.json`, imported-persisted, cleanup, or compatibility design.
+
 - MemPalace-first correction applied: `.agents/skills/rcc-dev-skills/SKILL.md` now requires project memory search before RouteCodex implementation/debug edits, and snippets must be opened at source before judgment.
 - Root cause: `vr.provider_forwarder_runtime` red case `forwarder_ignores_unselected_persisted_reprobe_target_under_simple_model` showed imported persisted provider cooldown survived startup refresh and became Virtual Router selection truth. This contradicted the existing 2026-06-27 note that persisted provider cooldown must not own route truth.
 - Fix owner: Rust SSOT only. `ProviderHealthManager` now marks imported persisted state with `imported_persisted`, clears that marker on real runtime failure/success/expiry/reset, and `VirtualRouterEngineCore::refresh_provider_health_from_store()` clears imported persisted cooldown state immediately after import and persists the cleaned health file when anything was pruned/cleared.
@@ -25315,7 +25325,9 @@ Complete SSE rustification status (34 TS files):
 
 # 2026-07-05: persisted provider cooldown startup clearing correction
 
-- Correction to the 2026-07-04 VR provider forwarder note: persisted provider cooldown is runtime truth and must not be cleared merely because it was imported at startup. This aligns with current AGENTS error-handling contract: a provider/local error remains reroutable, but persisted cooldown still gates provider availability until expiry or a real success clears it.
+Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Provider cooldown is process-local only; startup must not import, preserve, prune, or clean persisted cooldown.
+
+- Historical incorrect correction to the 2026-07-04 VR provider forwarder note: this section tried to keep disk-backed provider cooldown as live availability truth. That direction is wrong after the 2026-07-07 no-persistence decision.
 - Root cause found by full Rust lib test: `VirtualRouterEngineCore::refresh_provider_health_from_store()` imported `provider-health.json` and immediately called `clear_imported_persisted_state()`, which erased active cooldown truth. That allowed a health-cooled `runtimeControl.preselectedRoute` target to bypass VR availability and stay selected.
 - Fix owner: Rust SSOT only. Removed imported-persisted clearing state from `ProviderHealthManager` and stopped clearing imported cooldowns during `refresh_provider_health_from_store()`. Updated the forwarder test to assert unselected persisted cooldown remains truth while selection still chooses the healthy target.
 - Servertool side fix in same focused slice: `plan_servertool_noop_outcome_json` now emits Rust-owned `followup.metadata.clientInjectText` and `visibleSummary`; previously `resolve_continue_execution_visible_summary()` parsed the summary but discarded it.
@@ -27291,3 +27303,42 @@ Complete SSE rustification status (34 TS files):
 - Boundary:
   - No managed live restart/replay and no `~/.rcc` config edits.
   - Architecture review: no fallback or dual TS config-path resolver remains; TS file is now a native shell only.
+
+# 2026-07-07: remove all provider cooldown persistence
+
+- User requirement: all cooldown persistence code must be removed unconditionally; restart must clear provider cooldown.
+- Scope locked to VR/provider health owner: Rust `ProviderHealthManager` remains process-local; `routing_state_store` no longer owns provider-health files; TS `HealthManagerModule` must not load/persist VirtualRouter health snapshots.
+- Red/green shape: stale `provider-health.json` fixtures are allowed only inside tests proving they are ignored; production code must not contain provider-health persistence symbols.
+- Added/updated gate target: `verify:architecture-ts-owner-ban` scans production TS/Rust source for provider-health/cooldown persistence residues.
+
+# 2026-07-07: Config single-file text decode is Rust-owned
+
+- Scope: close user/provider single-file config codec text decoding after pre-wire parity; no live startup and no `~/.rcc` edits.
+- Change:
+  - Added Rust `config_file_codec.rs` with user/provider config file decode and TOML text decode surfaces.
+  - Added NAPI/bridge exports `decodeRouteCodexUserConfigFileJson`, `decodeRouteCodexProviderConfigFileJson`, `decodeRouteCodexUserConfigTextJson`, and `decodeRouteCodexProviderConfigTextJson`.
+  - Added pre-wire TS/native parity blackbox `tests/config/config-file-codec-rust.spec.ts`, then wired `src/config/user-config-codec.ts` and `src/config/provider-config-codec.ts` to native text decode. TS now keeps only TOML path rejection, Node file IO, injected fsImpl support, types, and return shape.
+  - Updated function/verification maps for `config.user_config_codec` and `config.provider_config_codec`.
+- Verification:
+  - Pre-wire focused Jest PASS: 3 suites / 16 tests.
+  - Post-wire focused Jest PASS: 6 suites / 53 tests.
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture` PASS: 5 tests.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - Broader config matrix printed PASS: 14 suites / 106 tests; known Jest open handle remained and the explicit Jest PTY was interrupted after PASS output.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface` PASS: entries 13, current non-native prod TS files 11, explicit native-linked TS shells 2.
+  - `git diff --check` PASS.
+- Boundary:
+  - No managed live restart/replay and no `~/.rcc` config edits.
+  - Architecture review: no TS TOML parse/isRecord fallback remains in user/provider config codec; TS file IO shell remains because async/injected Node fs is the IO boundary.
+
+# 2026-07-07: live provider cooldown restart and 55AI routing check
+
+- Trigger: Jason reported provider cooldown still persisted and 55AI still not hit after prior fix.
+- Live version truth: routecodex/rcc active shim and /health on 5520/5555/4444/10000 all report 0.90.3649.
+- Evidence before restart: 5520 status had process-local health cooldown for cc/asxs; /usr/bin/find ~/.rcc -maxdepth 8 -name provider-health.json returned no files. Earlier bare find output was shell/rtk wrapper noise, not filesystem truth.
+- Managed restart evidence: routecodex restart --port 5520 completed; after restart, 5520 status showed cc/asxs/55ai/1token gpt-5.5 healthy with cooldown=null.
+- Routing evidence: dry-run thinking request on 5520 selected cc.key1.gpt-5.5 because fwd.free.gpt-5.5 is first and available. Candidate order is cc -> asxs.crsa -> asxs.crsb -> 55ai -> 1token. Therefore 55AI is not expected to hit while free CC is healthy, and also not before ASXS in paid.
+- Gates: verify:architecture-ts-owner-ban PASS; verify:provider-failure-ban-blackbox PASS with scenario503.providerHealthFiles=[] and restartRequest.primaryHitsDelta=1.
+- Boundary: no code change in this check. If Jason wants 55AI earlier than ASXS or CC, change live config priority; current code behavior matches current config order.

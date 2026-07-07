@@ -108,14 +108,6 @@
       "forbiddenSemantics": ["handler selection", "execution dispatch", "followup policy"]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/shared/common-utils.ts",
-      "classification": "ts_io_shell_ok",
-      "ownerFeature": "hub.pipeline_contract_surface",
-      "minimumTsRole": "Generic JS object/error formatting helpers used by TS IO shells.",
-      "cannotShrinkFurtherBecause": "Helpers operate on JS unknown/object values at the host boundary; moving them only makes sense after the TS IO shells they support are removed.",
-      "forbiddenSemantics": ["protocol validation", "payload repair", "routing policy"]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/telemetry/stats-center.ts",
       "classification": "ts_io_shell_ok",
       "ownerFeature": "vr.hit_log_projection",

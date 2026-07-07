@@ -3,7 +3,7 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
+import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 
 export type NativeContextToolOutput = { tool_call_id: string; call_id: string; output?: string; name?: string };
 

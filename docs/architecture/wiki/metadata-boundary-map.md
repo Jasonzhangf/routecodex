@@ -45,7 +45,6 @@ Canonical sources:
 
 - generic routing/runtime state snapshots (`session:*`, `conversation:*`, `tmux:*`)
 - `session-bindings.json`
-- `provider-health.json`
 
 This means `sessionId` / `tmuxSessionId` / `conversationId` are not the same key, but the directory itself is already a shared runtime workdir. When reading or writing stopless/session data, prefer explicit metadata scope + explicit owner path. Do not infer ownership from the directory name alone.
 
@@ -85,7 +84,7 @@ Stop-message / stopless control clarification:
 | retired servertool pending injection | retired | none | no | `pending-session` / `pending-injection` / `servertool-pending/*` 已物理退役；stopless 只保留 request truth session identity |
 | tmux / client bindings | `SessionClientRegistry` | client/tmux attachment lifecycle | yes, but separate namespace | 这是 client binding，不是 request session 或 continuation |
 | runtime lifecycle pid/stop-intent/instance registry | runtime lifecycle owners | cross-process runtime control | yes | 这是 runtime control plane，不是业务 continuation |
-| provider health / cooldown | provider runtime health owners | cross-request runtime heuristics | yes, if policy requires restart survival | 属于 runtime policy，不是 session 身份 |
+| provider health / cooldown | Rust provider runtime health owners | current process only | no | 冷却不得跨重启持久化；重启后必须重新尝试真实 provider |
 
 As of 2026-06-30, the implementation contracts are now explicit:
 

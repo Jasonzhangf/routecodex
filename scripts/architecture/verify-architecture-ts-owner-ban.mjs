@@ -50,8 +50,27 @@ const TS_OWNER_WHITELIST = new Set([
   'hub.metadata_center_dualwrite_api', // transitional dual-write API shell during Rust migration
   'debug.unified_surface', // debug authoring/diag surface is TS governance shell pending Rust migration
   'debug.internal_error_numbering', // debug-only internal error registry surface, not runtime/provider payload truth
-  'manager.health_runtime', // TS health snapshot persistence bridge; Rust VR owns cooldown semantics
+  'manager.health_runtime', // TS provider-error diagnostics bridge only; cooldown persistence is forbidden
 ]);
+
+const COOLDOWN_PERSISTENCE_FORBIDDEN = [
+  'provider-health.json',
+  'providerCooldowns',
+  'load_provider_health_state',
+  'persist_provider_health_state',
+  'resolve_provider_health_filepath',
+  'export_persistable_state',
+  'import_persistable_state',
+  'loadInitialSnapshot',
+  'VirtualRouterHealthSnapshot',
+  'ProviderCooldownState',
+];
+
+const COOLDOWN_PERSISTENCE_SCAN_ROOTS = [
+  'src',
+  'sharedmodule/llmswitch-core/src',
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+];
 
 function parseOwners(text) {
   const lines = text.split('\n');
@@ -79,10 +98,55 @@ function parseOwners(text) {
 const owners = parseOwners(mapText);
 const failures = [];
 
+function shouldScanSourceFile(filePath) {
+  if (!/\.(ts|tsx|js|mjs|rs)$/.test(filePath)) return false;
+  const normalized = filePath.split(path.sep).join('/');
+  if (normalized.includes('/tests/') || normalized.includes('/__tests__/')) return false;
+  if (normalized.endsWith('/tests.rs')) return false;
+  if (normalized.endsWith('.d.ts')) return false;
+  return true;
+}
+
+function listSourceFiles(dir) {
+  const files = [];
+  if (!fs.existsSync(dir)) return files;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const filepath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (['node_modules', 'dist', 'target', 'coverage'].includes(entry.name)) continue;
+      files.push(...listSourceFiles(filepath));
+      continue;
+    }
+    if (entry.isFile() && shouldScanSourceFile(filepath)) {
+      files.push(filepath);
+    }
+  }
+  return files;
+}
+
+function stripRustTestModule(filepath, text) {
+  if (!filepath.endsWith('.rs')) return text;
+  const markerIndex = text.indexOf('#[cfg(test)]');
+  if (markerIndex < 0) return text;
+  return text.slice(0, markerIndex);
+}
+
 for (const owner of owners) {
   if (!owner.ownerModule.startsWith('src/')) continue;
   if (TS_OWNER_WHITELIST.has(owner.featureId)) continue;
   failures.push(`${owner.featureId}: owner_module '${owner.ownerModule}' lives in TypeScript; only whitelisted TS shells are allowed.`);
+}
+
+for (const scanRoot of COOLDOWN_PERSISTENCE_SCAN_ROOTS) {
+  for (const filepath of listSourceFiles(path.join(root, scanRoot))) {
+    const relative = path.relative(root, filepath);
+    const text = stripRustTestModule(filepath, fs.readFileSync(filepath, 'utf8'));
+    for (const forbidden of COOLDOWN_PERSISTENCE_FORBIDDEN) {
+      if (text.includes(forbidden)) {
+        failures.push(`${relative}: cooldown persistence residue '${forbidden}' is forbidden in production source.`);
+      }
+    }
+  }
 }
 
 if (failures.length > 0) {
@@ -93,3 +157,4 @@ if (failures.length > 0) {
 
 console.log('[verify:architecture-ts-owner-ban] ok');
 console.log(`- checked ${owners.length} features; ${TS_OWNER_WHITELIST.size} TS owners explicitly whitelisted`);
+console.log(`- cooldown persistence production source scan roots: ${COOLDOWN_PERSISTENCE_SCAN_ROOTS.join(', ')}`);

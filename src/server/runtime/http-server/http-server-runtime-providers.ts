@@ -329,6 +329,31 @@ export function isLocalBaseUrl(_server: any, value: string): boolean {
   }
 }
 
+export function disposeHubPipelines(server: any): void {
+  const hubPipelines = new Set<any>();
+  if (server.hubPipeline) {
+    hubPipelines.add(server.hubPipeline);
+  }
+  if (server.hubPipelinesByRoutingPolicyGroup instanceof Map) {
+    for (const pipeline of server.hubPipelinesByRoutingPolicyGroup.values()) {
+      if (pipeline) {
+        hubPipelines.add(pipeline);
+      }
+    }
+  }
+  for (const pipeline of hubPipelines) {
+    try {
+      pipeline.dispose?.();
+    } catch (error) {
+      logRuntimeProvidersNonBlockingError('dispose.hub_pipeline_runtime_ingress', error);
+    }
+  }
+  server.hubPipeline = null;
+  if (server.hubPipelinesByRoutingPolicyGroup instanceof Map) {
+    server.hubPipelinesByRoutingPolicyGroup.clear();
+  }
+}
+
 export async function disposeProviders(server: any): Promise<void> {
   const handles = Array.from(server.providerHandles.values()) as ProviderHandle[];
   await Promise.all(

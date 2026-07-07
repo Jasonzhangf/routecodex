@@ -10,7 +10,6 @@ use crate::virtual_router_engine::time_utils::now_ms;
 
 impl VirtualRouterEngineCore {
     pub(crate) fn get_status(&mut self) -> Value {
-        self.refresh_provider_health_from_store();
         let mut routes = serde_json::Map::new();
         for (route, pools) in &self.routing.pools {
             let expanded_pools = pools

@@ -845,7 +845,7 @@ verification:
       - npm run build:base
     notes:
       - "ProviderForwarder load/select/status truth stays in Rust Virtual Router; TS may only bridge config/native diagnostics."
-      - "Startup cooldown truth must give each real target one selected hit and must not be consumed by availability scans."
+      - "Runtime cooldown truth is process-local only; stale disk cooldown state must not survive restart into selection or availability scans."
 
   - feature_id: vr.online_diagnostics
     change_risk: high
@@ -1741,9 +1741,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
       - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/user-data-paths.ts
+      - src/config/auth-file-resolver.ts
       - src/config/unified-config-paths.ts
       - src/config/config-paths.ts
     contract:
+      - tests/config/auth-file-resolver-rust.spec.ts
       - tests/config/user-data-paths.spec.ts
       - tests/config/unified-config-paths.spec.ts
       - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi resolve_rcc --lib -- --nocapture
@@ -1760,9 +1762,13 @@ verification:
   - feature_id: config.user_config_codec
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/user-config-codec.ts
     contract:
+      - tests/config/config-file-codec-rust.spec.ts
       - tests/config/toml-codec.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
@@ -1770,7 +1776,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "User config TOML decode path must call Rust TOML parse/serialize through a thin TS shell; config.json is a fail-fast rejected legacy path."
+      - "User config TOML text decode path must call Rust config_file_codec through a thin TS file-IO shell; config.json is a fail-fast rejected legacy path."
 
   - feature_id: config.toml_codec
     change_risk: high
@@ -1795,14 +1801,17 @@ verification:
   - feature_id: config.provider_config_codec
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
       - src/modules/llmswitch/bridge/routing-integrations.ts
     contract:
+      - tests/config/config-file-codec-rust.spec.ts
       - tests/config/toml-codec.spec.ts
       - tests/config/provider-v2-loader.spec.ts
       - npm run verify:config-provider-codec-rust
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
@@ -1810,7 +1819,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Provider config TOML decode path must call Rust TOML parse/serialize through a thin TS shell; provider v2 root loading/coercion must call Rust; config.v1.json/config.v2.json are removed legacy paths."
+      - "Provider config TOML text decode path must call Rust config_file_codec through a thin TS file-IO shell; provider v2 root loading/coercion must call Rust; config.v1.json/config.v2.json are removed legacy paths."
       - "Provider-update CLI/tooling/admin/init commands must not directly decode provider config files; update/sync/probe/maintenance/admin/init views must consume loadProviderConfigsV2/root loader output by providerId/root."
 
   - feature_id: config.provider_config_coercion
@@ -1993,7 +2002,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Provider health / cooldown / runtime 503 family must stay in Rust; TS is persistence bridge."
+      - "Provider health / cooldown / runtime 503 family must stay process-local in Rust; TS may record diagnostics but must not persist cooldown snapshots."
 
   - feature_id: daemon_admin.command_handlers
     change_risk: high

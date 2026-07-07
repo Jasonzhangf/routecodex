@@ -3,7 +3,7 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
+import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';
 
 export interface NativeReqOutboundCompatAdapterContextInput {

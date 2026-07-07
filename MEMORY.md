@@ -624,7 +624,7 @@
 # 2026-07-04: 5555 SSE and cooldown restart facts
 
 - `/v1/responses` SSE dispatch from TS to Rust must accept snake_case `request_id` and `body_text`; installed-release replay is required because source can already contain the alias while the live/global package is stale.
-- Provider health restart recovery must clean expired persisted cooldowns during `refresh_provider_health_from_store()`, not wait for a later health write. Verified live on 5555 with `orangeai.1.glm-5.2` `cooldownExpiresAt=null`, `state=healthy`, `available=true`.
+- Superseded on 2026-07-07: provider cooldown persistence/import/prune is forbidden. Do not clean expired persisted cooldown during startup; ignore/delete that design and use the later "Provider cooldown persistence is forbidden" entry.
 - 5555 is served by serverId 5520 in the current config; live runtime used global `rcc`, so release validation must install and check both `routecodex` and `rcc` before restart/smoke.
 
 - Verified root cause: advertising `tool_mode: "code_mode_only"` from `/v1/models` for `gpt-5.5` changed Codex tool planning. Codex hides direct nested tools under `ToolMode::CodeModeOnly`, so upstream models can emit tool-call transcripts as ordinary text instead of structured tool calls.
@@ -733,7 +733,7 @@
 - Live gap: 5555 `/health` still reported `0.90.3542`; `routecodex restart --port 5555`, `routecodex restart --port 5520`, and `routecodex restart --port 5520 --host 127.0.0.1` could not discover the managed server even though `routecodex port status 5555 --json` mapped 5555 to `serverId=127.0.0.1:5520`. Do not claim live stopless `simple_question` closure until managed restart discovery is fixed and a same-entry `/v1/responses` probe runs on `0.90.3549`.
 
 # 2026-07-04: VR imported persisted cooldown must not own startup route truth
-- Verified rule: imported persisted provider cooldown may be read for cleanup/compatibility, but it must be cleared during `VirtualRouterEngineCore::refresh_provider_health_from_store()` before Virtual Router startup selection/availability treats it as live health truth. Fresh runtime failures still own health/cooldown truth and clear the imported marker before persistence.
+- Superseded on 2026-07-07: imported persisted provider cooldown must not be read for cleanup/compatibility. Provider cooldown is process-local only; `provider-health.json` / `providerCooldowns` are red-test fixtures only and must not affect startup route truth.
 - Owner: Rust Virtual Router only, under `vr.provider_forwarder_runtime` / `vr.route_availability_floor` in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`.
 - Evidence: red/green `forwarder_ignores_unselected_persisted_reprobe_target_under_simple_model`, new health unit `clear_imported_persisted_state_removes_startup_cooldown_truth`, `verify:vr-forwarder-runtime`, `verify:vr-no-ts-runtime`, `verify:vr-route-availability-default-floor`, `verify:llmswitch-rustification-audit`, function-map and mainline-call-map gates passed. Build/live closure was not claimed because unrelated dirty servertool wrapper/export TS errors blocked `build:min`.
 
@@ -1454,3 +1454,26 @@
 - Live apply_patch replay against `http://127.0.0.1:5555/v1/responses` passed with `eventCount=11`, `customInputCount=3`, `functionArgumentPatchLeakCount=0`, `deltaStreamCount=0`, and preserved raw patch text in client-visible `custom_tool_call.input`.
 - Live log evidence for request `openai-responses-router-gpt-5.5-20260707T124719881-472008-124`: `[virtual-router-hit] ... tools/gateway-priority-5555-priority-tools -> minimax[key1].MiniMax-M2.7 reason=tools:apply_patch-tool-choice`.
 - Guard rule: explicit `/v1/responses` `tool_choice:{type:"custom",name:"apply_patch"}` is a Rust Virtual Router `tools` route signal, and Responses SSE projection must normalize `response.created`, `response.in_progress`, terminal `response.completed`, and `response.done`; helper-only projection tests are insufficient.
+
+# 2026-07-07: Provider cooldown persistence is forbidden
+
+- Supersedes earlier 2026-07-04 guidance about importing, pruning, or cleaning persisted provider cooldown. Provider cooldown / availability truth must be process-local only in Rust `ProviderHealthManager`.
+- Restart must clear all provider cooldown by construction. Code must not read, write, import, export, prune, or preserve `provider-health.json`, `providerCooldowns`, `VirtualRouterHealthSnapshot`, `loadInitialSnapshot`, or `persistSnapshot` for provider health.
+- TS `HealthManagerModule` may append provider-error diagnostic events, but must not persist or restore provider health/cooldown snapshots. Old provider-health files may exist only as red-test fixtures proving stale disk state is ignored.
+- Required verification: Rust selection/preselected-route tests ignore stale persisted cooldown, provider-error tests prove in-memory cooldown still works without files, blackbox scans find no `provider-health.json`, and architecture gate forbids cooldown persistence symbols in production source.
+- Verified live on 2026-07-07 with release/global `routecodex/rcc 0.90.3649`: `verify:provider-failure-ban-blackbox` passed with `providerHealthFiles: []` and restart primary retry; `/health` on 4444/5520/5555/10000 all reported `0.90.3649`; `find ~/.rcc -name provider-health.json` returned no files; 5520 status showed `55ai.1.gpt-5.5` healthy with no cooldown.
+- 5520 route truth after this fix: thinking/coding/longcontext first select `fwd.free.gpt-5.5 -> cc.key1.gpt-5.5`; paid order is `asxs.crsa -> asxs.crsb -> 55ai -> 1token`, so 55AI is only reached after free CC and preceding paid ASXS targets are unavailable/failed for the current request.
+
+# 2026-07-07: Config single-file text decode is Rust-owned
+
+- `config.user_config_codec` and `config.provider_config_codec` decode TOML text through Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs`.
+- TS `src/config/user-config-codec.ts` and `src/config/provider-config-codec.ts` may keep TOML path rejection, Node file IO, injected `fsImpl` sync support, types, and return shape only; they must call `decodeRouteCodexUserConfigTextSync` / `decodeRouteCodexProviderConfigTextSync` for parse semantics.
+- Do not reintroduce TS `parseTomlRecord` + `isRecord` fallback into user/provider config codecs; blackbox parity must be established before wiring new config codec Rust surfaces.
+- Verified on 2026-07-07 with Rust `config_file_codec` tests (5), native hotpath build, pre-wire and post-wire config codec Jest, broader config matrix PASS output (14 suites / 106 tests, open handle interrupted after PASS), root TS compile, function-map gate, minimal TS surface gate, and diff check. No managed live restart/replay or `~/.rcc` edits were performed.
+
+# 2026-07-07: AuthFile resolution planning is Rust-owned
+
+- `config.path_resolution_surface` owns `authfile-*` literal-vs-file planning through Rust `plan_auth_file_resolution_for_host` and NAPI `planAuthFileResolutionJson`.
+- TS `src/config/auth-file-resolver.ts` may keep only host file IO (`fs.readFile`), returned secret trimming, and in-process cache execution. It must not reimplement `authfile-` detection, suffix extraction, authDir/default RCC auth path planning, or cache key planning.
+- AuthFile Rust parity must preserve old TS `startsWith('authfile-')` semantics exactly: leading/trailing whitespace means literal, not authfile; `authfile-` with empty suffix resolves to `path.join(authDir, '')`.
+- Verified on 2026-07-07 with Rust authfile plan tests (4), native hotpath build with required export check, pre-wire Jest parity, post-wire AuthFile read/cache blackbox (2 suites / 11 tests), root TypeScript, targeted rustfmt checks for touched Rust files, function-map gate, minimal TS surface gate, and diff check. No managed live restart/replay or `~/.rcc` edits were performed.

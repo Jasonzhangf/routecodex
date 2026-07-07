@@ -33,6 +33,7 @@ export interface StageRecorder {
 
 export interface HubPipelineConfig {
   virtualRouter: VirtualRouterConfig;
+  runtimeRouterRequired?: boolean;
   pipelineRuntimeConfig?: Record<string, unknown>;
   policy?: HubPolicyConfig;
   toolSurface?: HubToolSurfaceConfig;

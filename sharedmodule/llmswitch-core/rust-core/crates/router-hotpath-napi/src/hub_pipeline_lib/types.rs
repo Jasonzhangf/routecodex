@@ -14,6 +14,8 @@ pub struct HubPipelineConfig {
     pub policy: Value,
     #[serde(default)]
     pub tool_surface: Value,
+    #[serde(default)]
+    pub runtime_router_required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

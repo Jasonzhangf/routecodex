@@ -1,8 +1,10 @@
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
 import { ProviderProtocolError } from '../provider-protocol-error.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isRecord } from '../../shared/common-utils.js';
 import {
   assertResponsesConversationStoreNativeAvailable,
   buildConversationScopePlan,

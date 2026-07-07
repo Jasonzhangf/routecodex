@@ -473,7 +473,6 @@ impl VirtualRouterEngineCore {
         bound_alias_prefix: Option<&str>,
         env: Env,
     ) -> Result<SelectionResult, String> {
-        self.refresh_provider_health_from_store();
         let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
             .into_iter()
             .collect();
@@ -4243,7 +4242,7 @@ mod tests {
     }
 
     #[test]
-    fn forwarder_preserves_unselected_persisted_cooldown_under_simple_model() {
+    fn forwarder_ignores_persisted_cooldown_file_after_restart() {
         use crate::virtual_router_engine::routing_state_store::with_session_dir_override;
         use std::fs;
         use std::path::PathBuf;
@@ -4282,8 +4281,8 @@ mod tests {
                         "resolutionMode": "model-first",
                         "strategy": "priority",
                         "targets": [
-                            { "providerKey": "healthy.key1.gpt-test", "priority": 1, "disabled": false },
-                            { "providerKey": "cooldown.key1.gpt-test", "priority": 10, "disabled": false }
+                            { "providerKey": "cooldown.key1.gpt-test", "priority": 1, "disabled": false },
+                            { "providerKey": "healthy.key1.gpt-test", "priority": 10, "disabled": false }
                         ],
                         "stickyKey": "none"
                     }
@@ -4331,12 +4330,15 @@ mod tests {
                     unsafe { Env::from_raw(std::ptr::null_mut()) },
                 )
                 .expect("selection should succeed");
-            assert_eq!(selected.provider_key, "healthy.key1.gpt-test");
+            assert_eq!(
+                selected.provider_key, "cooldown.key1.gpt-test",
+                "persisted provider cooldown must not survive restart into VR selection truth"
+            );
             assert!(
                 core.health_manager
                     .cooldown_remaining_ms("cooldown.key1.gpt-test", now_ms())
-                    .is_some(),
-                "unselected persisted cooldown must remain truth until expiry or success"
+                    .is_none(),
+                "persisted provider cooldown must not be imported into process memory"
             );
         });
 

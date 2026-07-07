@@ -1,11 +1,11 @@
 import {
   failNative,
   extractNativeErrorMessage,
+  formatUnknownError,
   isNativeDisabledByEnv,
   readNativeFunction,
   safeStringify
 } from './native-hub-pipeline-resp-semantics-shared.js';
-import { formatUnknownError } from '../../shared/common-utils.js';
 
 export interface NativeRespInboundReasoningNormalizeInput {
   payload: Record<string, unknown>;

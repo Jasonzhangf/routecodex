@@ -427,20 +427,6 @@ export async function ensureHubPipelineEngineShadow(server: any): Promise<HubPip
     };
   }
 
-  const healthStore = baseConfig.healthStore as
-    | {
-        loadInitialSnapshot?: () => unknown | null;
-        persistSnapshot?: (snapshot: unknown) => void;
-        recordProviderError?: (event: unknown) => void;
-      }
-    | undefined;
-  if (healthStore && typeof healthStore.loadInitialSnapshot === 'function') {
-    shadowConfig.healthStore = {
-      loadInitialSnapshot: healthStore.loadInitialSnapshot.bind(healthStore)
-    };
-  }
-
-
   const bridge = (await import('../../../modules/llmswitch/bridge.js')) as {
     getHubPipelineCtorForImpl?: (impl: 'engine') => Promise<unknown>;
   };

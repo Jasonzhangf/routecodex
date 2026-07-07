@@ -66,6 +66,7 @@ export async function executeRequestStagePipeline<TContext = Record<string, unkn
   const nativePlan = runHubPipelineLibWithNative({
     config: {
       virtualRouter: config.virtualRouter as unknown as Record<string, unknown>,
+      runtimeRouterRequired: true,
       ...(config.policy ? { policy: config.policy as unknown as Record<string, unknown> } : {}),
       ...(config.toolSurface ? { toolSurface: config.toolSurface as unknown as Record<string, unknown> } : {}),
     },

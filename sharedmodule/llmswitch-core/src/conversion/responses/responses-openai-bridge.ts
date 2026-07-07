@@ -1,3 +1,6 @@
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
 import { ensureBridgeInstructions } from '../bridge-instructions.js';
 import { evaluateResponsesHostPolicy } from './responses-host-policy.js';
 import type { ChatToolDefinition } from '../hub/types/chat-envelope.js';
@@ -15,7 +18,6 @@ import {
 } from '../shared/responses-tool-utils.js';
 import { mapChatToolsToBridge, type BridgeToolDefinition } from '../shared/tool-mapping.js';
 import { ProviderProtocolError } from '../provider-protocol-error.js';
-import { isRecord } from '../../shared/common-utils.js';
 import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,

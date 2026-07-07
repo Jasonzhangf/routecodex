@@ -18,14 +18,6 @@ jest.unstable_mockModule(
   })
 );
 
-// Mock common utils
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/shared/common-utils.js',
-  () => ({
-    formatUnknownError: (e: unknown) => String(e),
-  })
-);
-
 const {
   executeHubPipelineWithNative,
   runHubPipelineOrchestrationWithNative,

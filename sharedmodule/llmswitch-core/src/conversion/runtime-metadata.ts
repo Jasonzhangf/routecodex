@@ -1,5 +1,7 @@
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
 import type { JsonObject, JsonValue } from './hub/types/json.js';
-import { isRecord } from '../shared/common-utils.js';
 import {
   cloneRuntimeMetadataWithNative,
   ensureRuntimeMetadataCarrierWithNative,
