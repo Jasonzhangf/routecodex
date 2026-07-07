@@ -1,30 +1,36 @@
 import type {
   JsonObject,
-  ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
+  ServerSideToolEngineOptions,
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
-import { runServertoolResponseStagePrePass } from './response-stage-prepass-shell.js';
 import { runServertoolExecutionStage } from './execution-stage-shell.js';
 import {
   createServertoolProviderProtocolErrorFromPlan
 } from './timeout-error-block.js';
 import {
+  readRuntimeControlFromAnyBoundMetadataCenter,
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
 import {
   isAdapterClientDisconnectedWithNative,
   planServertoolEntryContextWithNative,
+  planServertoolResponseStageGateWithNative,
   readServertoolEntryBaseObjectWithNative,
   resolveServertoolEntryPreflightApplicationWithNative,
   resolveServertoolEntryPreflightWithNative,
+  resolveServertoolResponseStagePrepassAfterAutoHookWithNative,
+  resolveServertoolResponseStagePrepassInitialApplicationWithNative,
+  resolveServertoolResponseStagePrepassInitialDecisionWithNative,
   resolveServertoolRunEngineEntryPreflightApplicationWithNative,
   resolveServertoolRunEngineEntryPreflightDecisionWithNative,
   resolveServertoolRunEnginePrepassApplicationWithNative,
   resolveServertoolRunEnginePrepassDecisionWithNative,
   runServertoolResponseStageWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
+import type { NativeServertoolResponseStageGate } from 'rcc-llmswitch-core/native/servertool-wrapper';
+import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 
 type NativeResponseStageExtraction = {
   normalizedPayload?: unknown;
@@ -143,6 +149,55 @@ function applyServertoolEntryContext(args: {
   };
 }
 
+async function applyServertoolResponseStagePrePass(args: {
+  options: ServerSideToolEngineOptions;
+  baseObject: JsonObject;
+  contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
+  includeAutoHookIds: Set<string> | null;
+  excludeAutoHookIds: Set<string> | null;
+}): Promise<
+  | { action: 'continue_to_execution'; responseStageGatePlan: NativeServertoolResponseStageGate }
+  | {
+      action: 'return_result';
+      responseStageGatePlan: NativeServertoolResponseStageGate;
+      result: ServerSideToolEngineResult;
+    }
+> {
+  const responseStageGatePlan = planServertoolResponseStageGateWithNative({
+    payload: args.baseObject,
+    adapterContext: args.options.adapterContext,
+    runtimeControl: readRuntimeControlFromAnyBoundMetadataCenter(
+      args.options.adapterContext
+    ),
+    allowFollowup: false
+  });
+
+  const prepassDecision = resolveServertoolResponseStagePrepassInitialDecisionWithNative({
+    responseStageGatePlan,
+    baseObject: args.baseObject
+  });
+  const initialApplication = resolveServertoolResponseStagePrepassInitialApplicationWithNative({
+    decision: prepassDecision
+  });
+  if (initialApplication.runAutoHook === false) {
+    return initialApplication.result;
+  }
+
+  const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
+    options: args.options,
+    contextBase: args.contextBase,
+    includeAutoHookIds: args.includeAutoHookIds,
+    excludeAutoHookIds: args.excludeAutoHookIds,
+    responseStageGatePlan,
+    baseObject: args.baseObject
+  });
+  return resolveServertoolResponseStagePrepassAfterAutoHookWithNative({
+    responseStageGatePlan,
+    baseObject: args.baseObject,
+    responseStageAutoHookResult: responseStageAutoHook
+  }).result;
+}
+
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
@@ -165,7 +220,7 @@ export async function orchestrateServertoolEngine(
     toolCalls,
     base: entryPreflightApplication.baseObject
   });
-  const responseStagePrePass = await runServertoolResponseStagePrePass({
+  const responseStagePrePass = await applyServertoolResponseStagePrePass({
     options,
     baseObject: entryContext.baseObject,
     contextBase: entryContext.contextBase,

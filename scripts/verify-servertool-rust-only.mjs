@@ -105,7 +105,6 @@ const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
 const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch-runtime-shell.ts`;
-const TS_RESPONSE_STAGE_PREPASS_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-prepass-shell.ts`;
 const TS_EXECUTION_QUEUE_SHELL = `${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`;
 const TS_EXECUTION_STAGE_SHELL = `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`;
 const TS_EXTRACT_TOOL_CALLS_SHELL = `${SERVERTOOL_TS_DIR}/extract-tool-calls-shell.ts`;
@@ -5782,7 +5781,13 @@ function checkServertoolRustOutcomeCloseout() {
     'planServertoolEntryContextWithNative',
     'return tokens != null ? new Set(tokens) : null;',
     'runtimeMetadata: runtimeMetadataSnapshot',
-    'runServertoolResponseStagePrePass',
+    'applyServertoolResponseStagePrePass',
+    'planServertoolResponseStageGateWithNative',
+    'resolveServertoolResponseStagePrepassInitialDecisionWithNative',
+    'resolveServertoolResponseStagePrepassInitialApplicationWithNative',
+    'resolveServertoolResponseStagePrepassAfterAutoHookWithNative',
+    'runServertoolResponseStageAutoHookPass',
+    'readRuntimeControlFromAnyBoundMetadataCenter',
     'runServertoolExecutionStage',
     'resolveServertoolRunEngineEntryPreflightDecisionWithNative',
     'resolveServertoolRunEnginePrepassDecisionWithNative',
@@ -5799,6 +5804,8 @@ function checkServertoolRustOutcomeCloseout() {
     "from './extract-tool-calls-shell.js'",
     'extractToolCallsFromResponseStage',
     "from './entry-context-shell.js'",
+    "from './response-stage-prepass-shell.js'",
+    'runServertoolResponseStagePrePass',
     'resolveServertoolEntryContext',
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
     "import type { JsonObject } from '../conversion/hub/types/json.js';",
@@ -5813,6 +5820,22 @@ function checkServertoolRustOutcomeCloseout() {
     'invalid entry context action',
     "if (responseStagePrePass.action === 'return_result')",
     'switch (responseStagePrePass.action)',
+    'responseHookMatched !== true',
+    'responseStageGatePlan.responseHookMatched !== true',
+    "prepassRuntimeAction.action !== 'run_auto_hooks'",
+    "if (responseStageAutoHook.action === 'return_auto_hook_result')",
+    'autoHookResult as ServerSideToolEngineResult',
+    'prepassRuntimeAction as { action: string }',
+    'responseStageAutoHook as { action: string }',
+    'args.options.adapterContext as Record<string, unknown>',
+    'responseStageGatePlan: Record<string, unknown>',
+    "action: 'continue_to_execution' as const",
+    'planServertoolResponseStageRuntimeActionWithNative',
+    'switch (prepassRuntimeAction.action)',
+    'switch (responseStageAutoHook.action)',
+    'postAutoHookRuntimeAction.prepassResult',
+    'invalid response-stage prepass action',
+    'invalid response-stage prepass auto-hook action',
     'const entryPreflightAction = entryPreflight.action',
     'const entryContextAction = entryContext.action',
     'const responseStagePrePassAction = responseStagePrePass.action',
@@ -6559,63 +6582,16 @@ function checkServertoolResponseStageGateThinShell() {
     'response-stage-finalize-shell.spec.ts must stay physically deleted; execution-stage-shell.spec.ts owns the finalize branch assertions'
   );
 
-  const responseStagePrePassShell = readRequired(TS_RESPONSE_STAGE_PREPASS_SHELL);
-  assertContains(
+  assertMissingFile(
     'servertool-response-stage-prepass-shell-owner',
-    TS_RESPONSE_STAGE_PREPASS_SHELL,
-    responseStagePrePassShell,
-    'planServertoolResponseStageGateWithNative'
+    `${SERVERTOOL_TS_DIR}/response-stage-prepass-shell.ts`,
+    'response-stage-prepass-shell.ts must stay physically deleted; run-server-side-tool-engine-shell.ts owns the native response prepass call'
   );
-  assertContains(
+  assertMissingFile(
     'servertool-response-stage-prepass-shell-owner',
-    TS_RESPONSE_STAGE_PREPASS_SHELL,
-    responseStagePrePassShell,
-    'NativeServertoolResponseStageGate'
+    `${ROOT}/tests/servertool/response-stage-prepass-shell.spec.ts`,
+    'response-stage-prepass-shell.spec.ts must stay physically deleted; run-server-side-tool-engine-shell.spec.ts owns the prepass branch assertions'
   );
-  assertContains(
-    'servertool-response-stage-prepass-shell-owner',
-    TS_RESPONSE_STAGE_PREPASS_SHELL,
-    responseStagePrePassShell,
-    'resolveServertoolResponseStagePrepassInitialDecisionWithNative'
-  );
-  assertContains(
-    'servertool-response-stage-prepass-shell-owner',
-    TS_RESPONSE_STAGE_PREPASS_SHELL,
-    responseStagePrePassShell,
-    'resolveServertoolResponseStagePrepassAfterAutoHookWithNative'
-  );
-  assertContains(
-    'servertool-response-stage-prepass-shell-owner',
-    TS_RESPONSE_STAGE_PREPASS_SHELL,
-    responseStagePrePassShell,
-    'runServertoolResponseStageAutoHookPass'
-  );
-  for (const marker of [
-    'responseHookMatched !== true',
-    'responseStageGatePlan.responseHookMatched !== true',
-    "prepassRuntimeAction.action !== 'run_auto_hooks'",
-    "if (responseStageAutoHook.action === 'return_auto_hook_result')",
-    'autoHookResult as ServerSideToolEngineResult',
-    'prepassRuntimeAction as { action: string }',
-    'responseStageAutoHook as { action: string }',
-    '}) as Record<string, unknown>',
-    'args.options.adapterContext as Record<string, unknown>',
-    'responseStageGatePlan: Record<string, unknown>',
-    "action: 'continue_to_execution' as const",
-    'planServertoolResponseStageRuntimeActionWithNative',
-    'switch (prepassRuntimeAction.action)',
-    'switch (responseStageAutoHook.action)',
-    'postAutoHookRuntimeAction.prepassResult',
-    'invalid response-stage prepass action',
-    'invalid response-stage prepass auto-hook action',
-  ]) {
-    if (responseStagePrePassShell.includes(marker)) {
-      fail(
-        'servertool-response-stage-prepass-shell-owner',
-        `response-stage-prepass-shell.ts must not branch on Rust-owned hook match marker ${marker}`
-      );
-    }
-  }
   const responseStageAutoHookShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-auto-hook-shell.ts`);
   for (const marker of [
     'responseHookRequired: args.responseStageGatePlan.responseHookRequired === true',
