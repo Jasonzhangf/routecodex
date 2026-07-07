@@ -5868,7 +5868,12 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
-  const responseStageOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-orchestration-shell.ts`);
+  assertMissingFile(
+    'servertool-response-stage-orchestration-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-orchestration-shell.ts`,
+    'response-stage-orchestration-shell.ts must stay physically deleted; engine-orchestration-shell.ts owns response-stage IO around native gate decisions'
+  );
+  const responseStageOrchestrationShell = engineOrchestrationShell;
   for (const marker of [
     'export async function runServertoolExecutionStage(',
     'resolveServertoolPreExecutionBranchDecisionWithNative',
@@ -5948,7 +5953,7 @@ function checkServertoolRustOutcomeCloseout() {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
         'servertool-response-stage-orchestration-no-dead-stage',
-        `response-stage-orchestration-shell.ts must not retain unused response stage marker ${marker}`
+        `engine-orchestration-shell.ts must not retain unused response stage marker ${marker}`
       );
     }
   }
@@ -5967,7 +5972,7 @@ function checkServertoolRustOutcomeCloseout() {
     if (!responseStageOrchestrationShell.includes(marker)) {
       fail(
         'servertool-response-stage-orchestration-thin-shell',
-        `response-stage-orchestration-shell.ts must keep thin orchestration marker ${marker}`
+        `engine-orchestration-shell.ts must keep thin orchestration marker ${marker}`
       );
     }
   }
@@ -5982,7 +5987,7 @@ function checkServertoolRustOutcomeCloseout() {
     if (responseStageOrchestrationShell.includes(marker)) {
       fail(
         'servertool-response-stage-orchestration-no-local-carrier',
-        `response-stage-orchestration-shell.ts must not restore local carrier marker ${marker}`
+        `engine-orchestration-shell.ts must not restore local carrier marker ${marker}`
       );
     }
   }
@@ -5995,7 +6000,7 @@ function checkServertoolRustOutcomeCloseout() {
     if (responseStageOrchestrationShell.includes(keyword)) {
       fail(
         'servertool-response-stage-orchestration-thin-shell',
-        `response-stage-orchestration-shell.ts must not retain retired input marker ${keyword}`
+        `engine-orchestration-shell.ts must not retain retired input marker ${keyword}`
       );
     }
   }
@@ -6331,20 +6336,24 @@ function checkServertoolRustOutcomeCloseout() {
 }
 
 function checkResponseStageMetadataCenterOnly() {
-  const responseStageShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-orchestration-shell.ts`);
+  assertMissingFile(
+    'servertool-response-stage-orchestration-shell-owner',
+    `${SERVERTOOL_TS_DIR}/response-stage-orchestration-shell.ts`,
+    'response-stage-orchestration-shell.ts must stay physically deleted; engine-orchestration-shell.ts owns response-stage IO around native gate decisions'
+  );
+  const responseStageShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
   for (const marker of [
     'function markServertoolResponseOrchestration(',
     'function projectRuntimeControlSideChannel(',
     'record.runtime_control = {',
     'projectRuntimeControlSideChannel(options.adapterContext, runtimeControl);',
     'projectRuntimeControlSideChannel(',
-    'writeRuntimeControlToBoundMetadataCenter(',
     'servertoolResponseOrchestration',
   ]) {
     if (responseStageShell.includes(marker)) {
       fail(
         'servertool-response-stage-runtime-control-mirror',
-        `response-stage-orchestration-shell.ts must not mirror MetadataCenter runtime_control via TS marker ${marker}`
+        `engine-orchestration-shell.ts must not mirror MetadataCenter runtime_control via TS marker ${marker}`
       );
     }
   }
@@ -6354,7 +6363,7 @@ function checkResponseStageMetadataCenterOnly() {
     if (!responseStageShell.includes(marker)) {
       fail(
         'servertool-response-stage-metadata-center-owner',
-        `response-stage-orchestration-shell.ts must keep MetadataCenter owner marker ${marker}`
+        `engine-orchestration-shell.ts must keep MetadataCenter owner marker ${marker}`
       );
     }
   }
@@ -6425,10 +6434,10 @@ function checkServertoolHubBoundaryRustOwned() {
     }
     const servertoolImportMatches = [...source.matchAll(/from\s+['"]([^'"]*servertool\/[^'"]+)['"]/g)];
     for (const match of servertoolImportMatches) {
-      if (!match[1].endsWith('servertool/response-stage-orchestration-shell.js')) {
+      if (!match[1].endsWith('servertool/engine-orchestration-shell.js')) {
         fail(
           'servertool-hub-boundary-rust-owned',
-          `${file.replace(`${ROOT}/`, '')} has forbidden Hub->servertool import ${match[1]}; only the Rust-planned response-stage IO shell entrypoint is allowed`
+          `${file.replace(`${ROOT}/`, '')} has forbidden Hub->servertool import ${match[1]}; only the Rust-planned engine orchestration IO entrypoint is allowed`
         );
       }
     }

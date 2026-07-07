@@ -6,35 +6,136 @@ const materializeServertoolResponseStageOrchestrationOutputWithNative = jest.fn(
 const extractServertoolResponseStageOrchestrationShellResultWithNative = jest.fn((output: any) => output.shellResult);
 const detectProviderResponseShapeWithNative = jest.fn(() => 'chat_completion');
 const readRuntimeControlFromAnyBoundMetadataCenter = jest.fn(() => ({}));
+const inspectStopGatewaySignal = jest.fn(() => ({
+  observed: true,
+  reason: 'stop',
+  source: 'chat',
+  eligible: true
+}));
 const runServerToolOrchestrationShell = jest.fn();
+const runPrimaryServerToolEngineSelection = jest.fn(async () => {
+  const result = await runServerToolOrchestrationShell();
+  return {
+    mode: result.executed ? 'tool_flow' : 'passthrough',
+    finalChatResponse: result.chat,
+    execution: result.executed
+      ? {
+          flowId: result.flowId ?? 'flow_response_stage'
+        }
+      : null,
+    metadataWritePlan: null
+  };
+});
 
 jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
+    buildServertoolPostflightObservationSummaryWithNative: jest.fn(),
+    containsSyntheticRouteCodexControlTextWithNative: jest.fn(),
     planServertoolResponseStageGateWithNative,
     detectProviderResponseShapeWithNative,
     materializeServertoolResponseStageOrchestrationOutputWithNative,
     extractServertoolResponseStageOrchestrationShellResultWithNative,
-    resolveServertoolResponseStageOrchestrationGateApplicationWithNative
+    resolveServertoolResponseStageOrchestrationGateApplicationWithNative,
+    planServertoolEngineRuntimeActionWithNative: jest.fn((input: any) => ({
+      action: 'return_servertool_cli_projection_final',
+      executed: true,
+      flowIdSource: 'engine_execution',
+      progressStatus: 'completed',
+      finalPayloadSource: 'engine_result',
+      projectedFlowId: input.currentFlowId
+    })),
+    planServertoolEnginePreflightWithNative: jest.fn(),
+    planServertoolEngineTriggerObservationWithNative: jest.fn(() => ({
+      logStopEntry: null,
+      logStopCompare: null
+    })),
+    resolveServertoolEngineMatchHitWithNative: jest.fn((input: any) => ({
+      flowId: input.execution.flowId
+    })),
+    resolveServertoolEnginePreflightDecisionWithNative: jest.fn(() => ({
+      result: {
+        kind: 'continue',
+        stopSignal: { observed: true, reason: 'stop', source: 'chat', eligible: true }
+      },
+      shouldRunSideEffects: false
+    })),
+    resolveServertoolEnginePostflightPayloadWithNative: jest.fn((input: any) => input.engineResult.finalChatResponse),
+    resolveServertoolEngineSkipDecisionWithNative: jest.fn((input: any) => input.hasExecution
+      ? { returnSkipped: false }
+      : {
+          returnSkipped: true,
+          triggerResult: 'skipped_passthrough',
+          skipReason: 'passthrough',
+          shellResult: {
+            chat: input.finalChatResponse,
+            executed: false
+          }
+        }),
+    resolveServertoolEngineOrchestrationPreflightDecisionWithNative: jest.fn(() => ({
+      returnPreflightChat: false,
+      stopSignal: { observed: true, reason: 'stop', source: 'chat', eligible: true }
+    })),
+    resolveServertoolTimeoutMsFromEnvCandidatesWithNative: jest.fn(),
+    planServertoolTimeoutErrorWithNative: jest.fn(),
+    planStoplessExecutionWithNative: jest.fn((input: any) => ({
+      execution: input.execution,
+      orchestrationPlan: {
+        isStopMessageFlow: false,
+        action: 'return_servertool_cli_projection_final'
+      }
+    }))
   })
 );
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
   () => ({
-    readRuntimeControlFromAnyBoundMetadataCenter
+    attachStopGatewayContext: jest.fn(),
+    inspectStopGatewaySignal,
+    readRuntimeControlFromAnyBoundMetadataCenter,
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter: jest.fn(() => null),
+    writeRuntimeControlToBoundMetadataCenter: jest.fn()
   })
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js',
+  '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js',
   () => ({
-    runServerToolOrchestrationShell
+    createServertoolProviderProtocolErrorFromPlan: jest.fn((plan: any) => plan),
+    withTimeout: jest.fn((promise: Promise<unknown>) => promise)
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/engine-selection-block.js',
+  () => ({
+    runPrimaryServerToolEngineSelection
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js',
+  () => ({
+    appendServertoolMatchSkippedProgressEvent: jest.fn(),
+    createServertoolProgressLogger: jest.fn(() => ({
+      logStopEntry: jest.fn(),
+      logProgress: jest.fn(),
+      logAutoHookTrace: jest.fn(),
+      logStopCompare: jest.fn()
+    }))
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js',
+  () => ({
+    orchestrateServertoolEngine: runServerToolOrchestrationShell
   })
 );
 
 const { runServertoolResponseStageOrchestrationShell } = await import(
-  '../../sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.js'
+  '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js'
 );
 
 describe('response-stage-orchestration-shell', () => {
@@ -105,9 +206,10 @@ describe('response-stage-orchestration-shell', () => {
   test('keeps bypass skipReason validation out of the orchestration shell', async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(
-      'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
+    expect(await import('node:fs').then((fs) => fs.existsSync('sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts'))).toBe(false);
 
     expect(source).not.toContain("throw new Error('[servertool] native response-stage gate bypass missing skipReason')");
     expect(source).not.toContain('typeof gatePlan.skipReason');

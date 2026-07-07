@@ -24,6 +24,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine.ts',
@@ -502,13 +503,12 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+    file: 'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
     forbidden: [
       "from './server-side-tools-impl.js'",
       'runServertoolResponseStageWithNative',
       'const responseStage =',
       'readFollowupClientInjectSourceWithNative',
-      'writeRuntimeControlToBoundMetadataCenter(',
       'servertoolResponseOrchestration',
       'providerProtocol: ProviderProtocol;',
       'const providerProtocol =',
@@ -727,7 +727,7 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.ts',
+    file: 'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
     forbidden: [
       'providerInvoker?:',
       'reenterPipeline?:',

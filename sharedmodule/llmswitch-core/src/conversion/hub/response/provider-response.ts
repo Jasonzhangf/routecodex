@@ -33,7 +33,7 @@ import {
   resolveProviderResponseContextSignals,
   type ProviderProtocol
 } from './provider-response-helpers.js';
-import { runServertoolResponseStageOrchestrationShell } from '../../../servertool/response-stage-orchestration-shell.js';
+import { runServertoolResponseStageOrchestrationShell } from '../../../servertool/engine-orchestration-shell.js';
 import {
   buildProviderSseStreamReadErrorDescriptorWithNative,
   materializeProviderResponseSsePayloadWithNative,
