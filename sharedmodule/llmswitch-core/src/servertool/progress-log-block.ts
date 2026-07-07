@@ -1,6 +1,49 @@
 import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
 import type { StageRecorder } from '../conversion/hub/pipeline/hub-pipeline-types.js';
-import { appendServerToolProgressFileEvent } from './log/progress-file.js';
+import * as ___ppath from "node:path";
+import { promises as ___ppfs } from "node:fs";
+import { resolveRccPath as ___resolveRccPath } from "../runtime/user-data-paths.js";
+
+var ___truthy = new Set(["1", "true", "yes", "on"]);
+var ___falsy = new Set(["0", "false", "no", "off"]);
+var ___DEFAULT_LOG_PATH = ___ppath.join(___resolveRccPath(), "logs", "servertool-events.jsonl");
+var ___writeQueue = Promise.resolve();
+var ___ensuredDirs = new Set();
+function ___isDevMode() {
+  var nodeEnv = String(process.env.NODE_ENV || "").trim().toLowerCase();
+  if (nodeEnv === "development") return true;
+  var buildMode = String(process.env.ROUTECODEX_BUILD_MODE || process.env.RCC_BUILD_MODE || process.env.BUILD_MODE || process.env.LLMSWITCH_BUILD_MODE || "").trim().toLowerCase();
+  return buildMode === "dev" || buildMode === "development";
+}
+function ___resolveEnabled() {
+  var raw = String(process.env.ROUTECODEX_SERVERTOOL_FILE_LOG || process.env.RCC_SERVERTOOL_FILE_LOG || process.env.LLMSWITCH_SERVERTOOL_FILE_LOG || "").trim().toLowerCase();
+  if (___truthy.has(raw)) return true;
+  if (___falsy.has(raw)) return false;
+  return ___isDevMode();
+}
+function ___resolveLogPath() {
+  var raw = String(process.env.ROUTECODEX_SERVERTOOL_FILE_LOG_PATH || process.env.RCC_SERVERTOOL_FILE_LOG_PATH || process.env.LLMSWITCH_SERVERTOOL_FILE_LOG_PATH || "").trim();
+  return raw || ___DEFAULT_LOG_PATH;
+}
+async function ___ensureParentDir(logPath) {
+  var dir = ___ppath.dirname(logPath);
+  if (___ensuredDirs.has(dir)) return;
+  await ___ppfs.mkdir(dir, { recursive: true });
+  ___ensuredDirs.add(dir);
+}
+function ___appendServerToolProgressFileEvent(event) {
+  if (!___resolveEnabled()) return;
+  var logPath = ___resolveLogPath();
+  var line = JSON.stringify(Object.assign({}, event, { ts: new Date().toISOString() })) + String.fromCharCode(10);
+  ___writeQueue = ___writeQueue.then(async function() {
+    await ___ensureParentDir(logPath);
+    await ___ppfs.appendFile(logPath, line, "utf8");
+  });
+}
+export async function flushServerToolProgressFileLoggerForTests() {
+  await ___writeQueue;
+}
+
 import {
   buildServertoolAutoHookTraceProgressEventWithNative,
   buildServertoolMatchSkippedProgressEventWithNative,
@@ -91,7 +134,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       stage,
       result
     });
-    appendServerToolProgressFileEvent({
+    ___appendServerToolProgressFileEvent({
       requestId: args.requestId,
       flowId: progressEvent.flowId,
       tool: progressEvent.tool,
@@ -119,7 +162,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
         field('result', result, color, args.reset)
       ].join(' ')}${args.reset}`);
     }
-    appendServerToolProgressFileEvent({
+    ___appendServerToolProgressFileEvent({
       requestId: args.requestId,
       flowId: flowId || 'none',
       tool,
@@ -144,7 +187,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
     flowId?: string;
   }): void => {
     const progressEvent = buildServertoolAutoHookTraceProgressEventWithNative(event);
-    appendServerToolProgressFileEvent({
+    ___appendServerToolProgressFileEvent({
       requestId: args.requestId,
       flowId: progressEvent.flowId,
       tool: progressEvent.tool,
@@ -178,7 +221,7 @@ export function createServertoolProgressLogger(args: CommonArgs) {
       summary,
       compare: compareContext
     });
-    appendServerToolProgressFileEvent({
+    ___appendServerToolProgressFileEvent({
       requestId: args.requestId,
       flowId: progressEvent.flowId,
       tool: progressEvent.tool,
@@ -244,7 +287,7 @@ export function appendServertoolMatchSkippedProgressEvent(args: {
   const event = buildServertoolMatchSkippedProgressEventWithNative({
     skipReason: args.skipReason
   });
-  appendServerToolProgressFileEvent({
+  ___appendServerToolProgressFileEvent({
     requestId: args.requestId,
     flowId: event.flowId,
     tool: event.tool,
