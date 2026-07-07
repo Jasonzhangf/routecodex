@@ -27365,3 +27365,28 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - Commit: `76dc83c refactor(config): native snapshots dir plan`.
   - `cargo fmt --check` at crate scope is blocked by unrelated existing Rust formatting drift across files outside this slice; not used as slice evidence.
   - Remaining config TS is file IO / atomic write / injected fs shell / env publishing / authfile content read-cache / loader orchestration. These cannot shrink further without moving Node IO and test-injected fs boundaries into Rust; semantic parsing/path decisions are now native-owned.
+
+# 2026-07-07: Config file format detection is Rust-owned
+
+- Scope: close user/provider config file format detection after pre-wire TS/native parity; no live startup and no `~/.rcc` edits.
+- Change:
+  - Added Rust `detect_user_config_format_json` / `detect_provider_config_format_json` in `config_file_codec.rs`.
+  - Added NAPI/bridge exports `detectRouteCodexUserConfigFormatJson`, `detectRouteCodexProviderConfigFormatJson`, `detectRouteCodexUserConfigFormatSync`, and `detectRouteCodexProviderConfigFormatSync`.
+  - Added `tests/config/config-format-detect-rust.spec.ts` to compare pre-wire TS semantics for `.toml`, uppercase `.TOML`, whitespace, empty path, JSON path, and non-TOML suffix rejection.
+  - Wired `src/config/user-config-codec.ts` and `src/config/provider-config-codec.ts` to native format detection; removed TS `path.extname` / `.endsWith(".toml")` file-format logic.
+  - Updated function/verification map so user/provider format detection is part of Rust `config_file_codec`.
+- Verification:
+  - Pre-wire Jest PASS: `config-format-detect-rust`, `config-file-codec-rust`, `config-writer` = 3 suites / 22 tests.
+  - Post-wire Jest PASS: format detect + file codec + writer + routecodex loader + provider loader = 5 suites / 48 tests.
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture` PASS: 5 tests.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - `npm run verify:config-toml-codec-rust` PASS: 7 tests.
+  - `npm run verify:config-provider-codec-rust` PASS: 9 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface -- --json` PASS: entries 12, current non-native prod TS files 10, explicit native-linked TS shells 2.
+  - `git diff --cached --check` PASS before commit.
+- Boundary:
+  - Commit: `6aded42 refactor(config): native format detection`.
+  - No config files or provider configs were edited, and no live server was started/restarted.
+  - Remaining config TS is Node file IO / atomic rename / injected fs shell / env publishing / route loader orchestration / authfile content read-cache. Further shrink requires moving Node host IO boundaries into Rust, not just semantic Rustification.
