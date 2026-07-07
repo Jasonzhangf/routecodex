@@ -5155,6 +5155,26 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('virtual router stop-message status label must stay Rust-owned', () => {
+    const hostEffectsPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts',
+    );
+    const source = fs.readFileSync(hostEffectsPath, 'utf8');
+    const statusLabelSource = source.slice(
+      source.indexOf('export function formatStopMessageStatusLabel'),
+      source.indexOf('export function createVirtualRouterRouteHostEffects'),
+    );
+    const findings = collectMatches(statusLabelSource, [
+      { label: 'TS stop status cleared label revived', pattern: /\[stopMessage:scope=\$\{[^}]+}\s+active=no\s+state=cleared\]/ },
+      { label: 'TS stop status active label revived', pattern: /\[stopMessage:scope=\$\{[^}]+}\s+text="/ },
+      { label: 'TS stop status repeat math revived', pattern: /Math\.(?:max|floor)\(/ },
+      { label: 'TS stop status text truncation revived', pattern: /slice\(0,\s*21\)/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('compat profile registry TS parallel implementation must stay deleted', () => {
     const deletedFiles = [
       'sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/header-policies.ts',

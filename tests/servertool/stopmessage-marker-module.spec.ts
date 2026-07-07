@@ -1,6 +1,7 @@
 import {
   buildStopMessageMarkerParseLog,
   cleanStopMessageMarkersInPlace,
+  formatStopMessageStatusLabel,
   parseStopMessageInstruction
 } from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.js';
 
@@ -45,5 +46,19 @@ describe('stopmessage marker module', () => {
 
     cleanStopMessageMarkersInPlace(request);
     expect(JSON.stringify(request)).not.toContain('<**');
+  });
+
+  test('formatStopMessageStatusLabel delegates status formatting to native', () => {
+    expect(formatStopMessageStatusLabel(null, 'session:abc', true)).toBe(
+      '[stopMessage:scope=session:abc active=no state=cleared]'
+    );
+    expect(formatStopMessageStatusLabel({
+      stopMessageText: 'continue until done',
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 1,
+      stopMessageStageMode: 'auto'
+    } as any, 'session:abc', false)).toBe(
+      '[stopMessage:scope=session:abc text="continue until done" mode=auto round=1/3 left=2 active=yes]'
+    );
   });
 });

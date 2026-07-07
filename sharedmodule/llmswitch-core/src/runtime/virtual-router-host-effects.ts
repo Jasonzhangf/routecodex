@@ -154,20 +154,23 @@ export function formatStopMessageStatusLabel(
   scope: string | undefined,
   forceShow: boolean
 ): string {
-  const scopeLabel = scope && scope.trim() ? scope.trim() : 'none';
-  if (!snapshot) return forceShow ? `[stopMessage:scope=${scopeLabel} active=no state=cleared]` : '';
-  const text = typeof snapshot.stopMessageText === 'string' ? snapshot.stopMessageText.trim() : '';
-  const safeText = text ? (text.length > 24 ? `${text.slice(0, 21)}...` : text) : '(mode-only)';
-  const mode = (snapshot.stopMessageStageMode || 'unset').toString().toLowerCase();
-  const maxRepeats = typeof snapshot.stopMessageMaxRepeats === 'number' && Number.isFinite(snapshot.stopMessageMaxRepeats)
-    ? Math.max(0, Math.floor(snapshot.stopMessageMaxRepeats))
-    : 0;
-  const used = typeof snapshot.stopMessageUsed === 'number' && Number.isFinite(snapshot.stopMessageUsed)
-    ? Math.max(0, Math.floor(snapshot.stopMessageUsed))
-    : 0;
-  const remaining = maxRepeats > 0 ? Math.max(0, maxRepeats - used) : -1;
-  const active = mode !== 'off' && Boolean(text) && maxRepeats > 0;
-  return `[stopMessage:scope=${scopeLabel} text="${safeText}" mode=${mode} round=${maxRepeats > 0 ? `${used}/${maxRepeats}` : `${used}/-`} left=${remaining >= 0 ? String(remaining) : 'n/a'} active=${active ? 'yes' : 'no'}]`;
+  const capability = 'formatStopMessageStatusLabelJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) return failNativeRequired<string>(capability);
+  const snapshotJson = snapshot ? safeStringify(snapshot) : undefined;
+  if (snapshot && !snapshotJson) {
+    return failNativeRequired<string>(capability, 'json stringify failed');
+  }
+  try {
+    const raw = fn(snapshotJson, scope, forceShow);
+    if (typeof raw !== 'string') {
+      return failNativeRequired<string>(capability, 'invalid payload');
+    }
+    return raw;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<string>(capability, reason);
+  }
 }
 
 export function createVirtualRouterRouteHostEffects(args: {
