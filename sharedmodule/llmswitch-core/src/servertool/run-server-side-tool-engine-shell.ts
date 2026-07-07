@@ -4,11 +4,17 @@ import type {
   ServerSideToolEngineResult,
   ToolCall
 } from './types.js';
-import { runServertoolEntryPreflight } from './entry-preflight-shell.js';
 import { runServertoolResponseStagePrePass } from './response-stage-prepass-shell.js';
 import { runServertoolExecutionStage } from './execution-stage-shell.js';
 import { resolveServertoolEntryContext } from './entry-context-shell.js';
 import {
+  createServertoolProviderProtocolErrorFromPlan
+} from './timeout-error-block.js';
+import {
+  isAdapterClientDisconnectedWithNative,
+  readServertoolEntryBaseObjectWithNative,
+  resolveServertoolEntryPreflightApplicationWithNative,
+  resolveServertoolEntryPreflightWithNative,
   resolveServertoolRunEngineEntryPreflightApplicationWithNative,
   resolveServertoolRunEngineEntryPreflightDecisionWithNative,
   resolveServertoolRunEnginePrepassApplicationWithNative,
@@ -56,10 +62,37 @@ function applyServertoolResponseStageExtraction(chatResponse: JsonObject, reques
   }));
 }
 
+function applyServertoolEntryPreflight(options: ServerSideToolEngineOptions):
+  | { action: 'continue'; baseObject: JsonObject }
+  | { action: 'return_result'; result: ServerSideToolEngineResult } {
+  const entryPreflightDecision = resolveServertoolEntryPreflightWithNative({
+    requestId: options.requestId,
+    baseObject: readServertoolEntryBaseObjectWithNative(options.chatResponse),
+    adapterClientDisconnected: isAdapterClientDisconnectedWithNative(options.adapterContext),
+    chatResponse: options.chatResponse
+  });
+  const entryPreflightApplication = resolveServertoolEntryPreflightApplicationWithNative({
+    entryPreflight: entryPreflightDecision
+  });
+  if (entryPreflightApplication.throwError === true) {
+    throw createServertoolProviderProtocolErrorFromPlan(entryPreflightApplication.errorPlan);
+  }
+  if (entryPreflightApplication.returnResult === true) {
+    return {
+      action: 'return_result',
+      result: entryPreflightApplication.result
+    };
+  }
+  return {
+    action: 'continue',
+    baseObject: entryPreflightApplication.baseObject
+  };
+}
+
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
-  const entryPreflight = runServertoolEntryPreflight({ options });
+  const entryPreflight = applyServertoolEntryPreflight(options);
   const entryPreflightDecision = resolveServertoolRunEngineEntryPreflightDecisionWithNative({
     entryPreflight
   });

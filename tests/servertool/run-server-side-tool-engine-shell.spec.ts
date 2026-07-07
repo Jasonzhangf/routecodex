@@ -1,10 +1,28 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
-const runServertoolEntryPreflight = jest.fn();
 const resolveServertoolEntryContext = jest.fn();
 const runServertoolResponseStagePrePass = jest.fn();
 const runServertoolExecutionStage = jest.fn();
 const runServertoolResponseStageWithNative = jest.fn();
+const isAdapterClientDisconnectedWithNative = jest.fn(() => false);
+const readServertoolEntryBaseObjectWithNative = jest.fn((chatResponse: unknown) =>
+  chatResponse != null && typeof chatResponse === 'object' && !Array.isArray(chatResponse)
+    ? chatResponse
+    : null
+);
+const resolveServertoolEntryPreflightWithNative = jest.fn((input: any) => ({
+  action: 'continue',
+  baseObject: input.baseObject
+}));
+const resolveServertoolEntryPreflightApplicationWithNative = jest.fn((input: any) => {
+  if (input.entryPreflight.action === 'throw_error') {
+    return { throwError: true, errorPlan: input.entryPreflight.errorPlan };
+  }
+  if (input.entryPreflight.action === 'return_result') {
+    return { throwError: false, returnResult: true, result: input.entryPreflight.result };
+  }
+  return { throwError: false, returnResult: false, baseObject: input.entryPreflight.baseObject };
+});
 const resolveServertoolRunEngineEntryPreflightDecisionWithNative = jest.fn((input: any) => input.entryPreflight);
 const resolveServertoolRunEngineEntryPreflightApplicationWithNative = jest.fn((input: any) =>
   input.entryPreflight.action === 'return_result'
@@ -16,13 +34,6 @@ const resolveServertoolRunEnginePrepassApplicationWithNative = jest.fn((input: a
   input.decision.action === 'return_result'
     ? { returnResult: true, result: input.decision.result }
     : { returnResult: false }
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.js',
-  () => ({
-    runServertoolEntryPreflight
-  })
 );
 
 jest.unstable_mockModule(
@@ -49,11 +60,28 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
+    isAdapterClientDisconnectedWithNative,
+    readServertoolEntryBaseObjectWithNative,
+    resolveServertoolEntryPreflightApplicationWithNative,
+    resolveServertoolEntryPreflightWithNative,
     resolveServertoolRunEngineEntryPreflightDecisionWithNative,
     resolveServertoolRunEngineEntryPreflightApplicationWithNative,
     resolveServertoolRunEnginePrepassApplicationWithNative,
     resolveServertoolRunEnginePrepassDecisionWithNative,
     runServertoolResponseStageWithNative
+  })
+);
+
+const createServertoolProviderProtocolErrorFromPlan = jest.fn((plan: any) => {
+  const err = new Error(String(plan?.message ?? 'servertool error'));
+  (err as Error & { code?: string }).code = String(plan?.code ?? 'SERVERTOOL_ENTRY_PREFLIGHT_ERROR');
+  return err;
+});
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js',
+  () => ({
+    createServertoolProviderProtocolErrorFromPlan
   })
 );
 
@@ -64,6 +92,25 @@ const { orchestrateServertoolEngine } = await import(
 describe('run-server-side-tool-engine-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    isAdapterClientDisconnectedWithNative.mockReturnValue(false);
+    readServertoolEntryBaseObjectWithNative.mockImplementation((chatResponse: unknown) =>
+      chatResponse != null && typeof chatResponse === 'object' && !Array.isArray(chatResponse)
+        ? chatResponse
+        : null
+    );
+    resolveServertoolEntryPreflightWithNative.mockImplementation((input: any) => ({
+      action: 'continue',
+      baseObject: input.baseObject
+    }));
+    resolveServertoolEntryPreflightApplicationWithNative.mockImplementation((input: any) => {
+      if (input.entryPreflight.action === 'throw_error') {
+        return { throwError: true, errorPlan: input.entryPreflight.errorPlan };
+      }
+      if (input.entryPreflight.action === 'return_result') {
+        return { throwError: false, returnResult: true, result: input.entryPreflight.result };
+      }
+      return { throwError: false, returnResult: false, baseObject: input.entryPreflight.baseObject };
+    });
     resolveServertoolRunEngineEntryPreflightDecisionWithNative.mockImplementation((input: any) => input.entryPreflight);
     resolveServertoolRunEngineEntryPreflightApplicationWithNative.mockImplementation((input: any) =>
       input.entryPreflight.action === 'return_result'
@@ -92,7 +139,15 @@ describe('run-server-side-tool-engine-shell', () => {
       )
     );
 
-    expect(source).toContain('runServertoolEntryPreflight');
+    expect(source).not.toContain("from './entry-preflight-shell.js'");
+    expect(source).not.toContain('runServertoolEntryPreflight');
+    expect(source).toContain('resolveServertoolEntryPreflightWithNative');
+    expect(source).toContain('resolveServertoolEntryPreflightApplicationWithNative');
+    expect(source).toContain('readServertoolEntryBaseObjectWithNative(options.chatResponse)');
+    expect(source).toContain('isAdapterClientDisconnectedWithNative(options.adapterContext)');
+    expect(source).toContain('createServertoolProviderProtocolErrorFromPlan');
+    expect(source).toContain('chatResponse: options.chatResponse');
+    expect(source).toContain('entryPreflightApplication.errorPlan');
     expect(source).toContain('runServertoolResponseStageWithNative');
     expect(source).toContain('applyServertoolResponseStageExtraction');
     expect(source).not.toContain('extractToolCallsFromResponseStage');
@@ -130,9 +185,6 @@ describe('run-server-side-tool-engine-shell', () => {
   });
 
   test('fails fast when native entry preflight decision rejects action', async () => {
-    runServertoolEntryPreflight.mockReturnValue({
-      action: 'unknown_entry_preflight_action'
-    });
     resolveServertoolRunEngineEntryPreflightDecisionWithNative.mockImplementation(() => {
       throw new Error('[servertool] invalid entry preflight result action');
     });
@@ -153,11 +205,34 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(runServertoolExecutionStage).not.toHaveBeenCalled();
   });
 
-  test('fails fast when native engine prepass decision rejects action', async () => {
-    runServertoolEntryPreflight.mockReturnValue({
-      action: 'continue',
-      baseObject: { ok: true }
+  test('throws native entry preflight error through provider protocol projector', async () => {
+    resolveServertoolEntryPreflightApplicationWithNative.mockReturnValue({
+      throwError: true,
+      errorPlan: {
+        message: '[servertool] client disconnected: req-entry-error',
+        code: 'SERVERTOOL_CLIENT_DISCONNECTED'
+      }
     });
+
+    await expect(
+      orchestrateServertoolEngine({
+        chatResponse: { ok: true },
+        adapterContext: {},
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-entry-error',
+        providerProtocol: 'openai-responses'
+      } as any)
+    ).rejects.toThrow('[servertool] client disconnected: req-entry-error');
+
+    expect(createServertoolProviderProtocolErrorFromPlan).toHaveBeenCalledWith({
+      message: '[servertool] client disconnected: req-entry-error',
+      code: 'SERVERTOOL_CLIENT_DISCONNECTED'
+    });
+    expect(runServertoolResponseStageWithNative).not.toHaveBeenCalled();
+    expect(runServertoolExecutionStage).not.toHaveBeenCalled();
+  });
+
+  test('fails fast when native engine prepass decision rejects action', async () => {
     runServertoolResponseStageWithNative.mockReturnValue({
       normalizedPayload: { ok: true },
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
@@ -193,8 +268,9 @@ describe('run-server-side-tool-engine-shell', () => {
   });
 
   test('returns preflight early result when preflight short-circuits', async () => {
-    runServertoolEntryPreflight.mockReturnValue({
-      action: 'return_result',
+    resolveServertoolEntryPreflightApplicationWithNative.mockReturnValue({
+      throwError: false,
+      returnResult: true,
       result: { mode: 'passthrough', finalChatResponse: { ok: 'short' } }
     });
 
@@ -211,10 +287,6 @@ describe('run-server-side-tool-engine-shell', () => {
   });
 
   test('forwards pre-pass early result without entering execution stage', async () => {
-    runServertoolEntryPreflight.mockReturnValue({
-      action: 'continue',
-      baseObject: { ok: true }
-    });
     runServertoolResponseStageWithNative.mockReturnValue({
       normalizedPayload: { ok: true },
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
@@ -260,10 +332,6 @@ describe('run-server-side-tool-engine-shell', () => {
   });
 
   test('uses Rust engine prepass action before entering execution stage', async () => {
-    runServertoolEntryPreflight.mockReturnValue({
-      action: 'continue',
-      baseObject: { ok: true }
-    });
     runServertoolResponseStageWithNative.mockReturnValue({
       normalizedPayload: { ok: true },
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]

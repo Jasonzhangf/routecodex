@@ -14,14 +14,14 @@ describe('servertool timeout/error block native shell', () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile('sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts', 'utf8')
     );
-    const entryPreflightSource = await import('node:fs/promises').then((fs) =>
-      fs.readFile('sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts', 'utf8')
+    const runEngineSource = await import('node:fs/promises').then((fs) =>
+      fs.readFile('sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts', 'utf8')
     );
 
     expect(source).not.toContain('export function isAdapterClientDisconnected(');
     expect(source).not.toContain('isAdapterClientDisconnectedWithNative(adapterContext)');
     expect(source).toContain('planServertoolTimeoutWatcherWithNative({ timeoutMs })');
-    expect(entryPreflightSource).toContain('isAdapterClientDisconnectedWithNative(args.options.adapterContext)');
+    expect(runEngineSource).toContain('isAdapterClientDisconnectedWithNative(options.adapterContext)');
   });
 
   test('uses Rust timeout watcher plan before arming timer', async () => {

@@ -2782,9 +2782,9 @@ function checkOrchestrationPolicyRustOwner() {
   }
   assertContains(
     'server-side-tools-client-disconnect-native-shell',
-    TS_ENTRY_PREFLIGHT_SHELL,
-    readRequired(TS_ENTRY_PREFLIGHT_SHELL),
-    'isAdapterClientDisconnectedWithNative(args.options.adapterContext)'
+    TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL,
+    readRequired(TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL),
+    'isAdapterClientDisconnectedWithNative(options.adapterContext)'
   );
   pass('servertool-timeout-error-ts-thin-shell', 'timeout-error-block.ts consumes Rust timeout/disconnect/error plans only');
   pass('servertool-orchestration-policy-rust-owner', 'servertool-core owns orchestration policy parsing and compaction');
@@ -4003,6 +4003,7 @@ function checkServertoolEntryPreflightRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const runServerSideToolEngineShell = readRequired(TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL);
 
   for (const needle of [
     'feature_id: hub.servertool_server_side_tool_entry_contract',
@@ -4120,26 +4121,36 @@ function checkServertoolEntryPreflightRustOwner() {
     nativeWrapper,
     'planServertoolEnginePrepassActionWithNative'
   );
-  assertContains(
-    'servertool-entry-preflight-ts-thin-shell',
+  assertMissingFile(
+    'servertool-entry-preflight-ts-deleted',
     TS_ENTRY_PREFLIGHT_SHELL,
-    readRequired(TS_ENTRY_PREFLIGHT_SHELL),
-    'isAdapterClientDisconnectedWithNative(args.options.adapterContext)'
+    'entry-preflight-shell.ts must stay physically deleted; run-server-side-tool-engine-shell.ts owns the single native entry preflight call'
   );
   assertContains(
-    'servertool-entry-preflight-ts-thin-shell',
-    TS_ENTRY_PREFLIGHT_SHELL,
-    readRequired(TS_ENTRY_PREFLIGHT_SHELL),
-    'readServertoolEntryBaseObjectWithNative(args.options.chatResponse)'
+    'servertool-entry-preflight-run-engine-native-owner',
+    TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL,
+    runServerSideToolEngineShell,
+    'isAdapterClientDisconnectedWithNative(options.adapterContext)'
   );
   assertContains(
-    'servertool-entry-preflight-ts-thin-shell',
-    TS_ENTRY_PREFLIGHT_SHELL,
-    readRequired(TS_ENTRY_PREFLIGHT_SHELL),
+    'servertool-entry-preflight-run-engine-native-owner',
+    TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL,
+    runServerSideToolEngineShell,
+    'readServertoolEntryBaseObjectWithNative(options.chatResponse)'
+  );
+  assertContains(
+    'servertool-entry-preflight-run-engine-native-owner',
+    TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL,
+    runServerSideToolEngineShell,
     'resolveServertoolEntryPreflightWithNative'
   );
   for (const marker of [
+    "from './entry-preflight-shell.js'",
+    'runServertoolEntryPreflight',
     'Boolean(base)',
+    "options.chatResponse && typeof options.chatResponse === 'object'",
+    "options.chatResponse != null && typeof options.chatResponse === 'object'",
+    'options.chatResponse as JsonObject',
     "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
     "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'",
     'args.options.chatResponse as JsonObject',
@@ -4150,12 +4161,12 @@ function checkServertoolEntryPreflightRustOwner() {
     'switch (entryPreflightPlan.action)',
     'result: entryPreflightPlan.passthroughResult as ServerSideToolEngineResult',
   ]) {
-    if (!readRequired(TS_ENTRY_PREFLIGHT_SHELL).includes(marker)) {
+    if (!runServerSideToolEngineShell.includes(marker)) {
       continue;
     }
     fail(
-      'servertool-entry-preflight-ts-thin-shell',
-      `entry-preflight-shell.ts must not use TS truthiness marker ${marker} for native presence facts`
+      'servertool-entry-preflight-run-engine-native-owner',
+      `run-server-side-tool-engine-shell.ts must not restore entry-preflight TS marker ${marker}`
     );
   }
   pass('servertool-entry-preflight-no-ts-owner', 'entry preflight TS semantics stay out of deleted server-side-tools facade');
@@ -5746,43 +5757,11 @@ function checkServertoolRustOutcomeCloseout() {
       'engine-orchestration-shell.ts must consume native trigger observation plans instead of branching on stopSignal.observed'
     );
   }
-  const entryPreflightShell = readRequired(TS_ENTRY_PREFLIGHT_SHELL);
-  for (const marker of [
-    'export function runServertoolEntryPreflight(',
-    'resolveServertoolEntryPreflightWithNative',
-    'createServertoolProviderProtocolErrorFromPlan',
-    'readServertoolEntryBaseObjectWithNative(args.options.chatResponse)',
-    'chatResponse: args.options.chatResponse',
-    'resolveServertoolEntryPreflightApplicationWithNative',
-    'entryPreflightApplication.errorPlan'
-  ]) {
-    if (!entryPreflightShell.includes(marker)) {
-      fail(
-        'servertool-entry-preflight-shell-owner',
-        `entry-preflight-shell.ts must keep entry preflight owner marker ${marker}`
-      );
-    }
-  }
-  for (const marker of [
-    'Boolean(base)',
-    "args.options.chatResponse && typeof args.options.chatResponse === 'object'",
-    "args.options.chatResponse != null && typeof args.options.chatResponse === 'object'",
-    'args.options.chatResponse as JsonObject',
-    'base as JsonObject',
-    "if (entryPreflightPlan.action === 'return_passthrough_non_object_chat')",
-    "if (entryPreflightPlan.action === 'throw_client_disconnected')",
-    'result: { mode: entryPreflightPlan.resultMode, finalChatResponse: args.options.chatResponse }',
-    'entryPreflightPlan.resultMode',
-    'entryPreflightPlan as { action: unknown }',
-    "result: { mode: 'passthrough', finalChatResponse: args.options.chatResponse }",
-  ]) {
-    if (entryPreflightShell.includes(marker)) {
-      fail(
-        'servertool-entry-preflight-shell-owner',
-        `entry-preflight-shell.ts must not retain TS action-if dispatch marker ${marker}`
-      );
-    }
-  }
+  assertMissingFile(
+    'servertool-entry-preflight-shell-deleted',
+    TS_ENTRY_PREFLIGHT_SHELL,
+    'entry-preflight-shell.ts must stay physically deleted; run-server-side-tool-engine-shell.ts owns the native entry preflight call'
+  );
   const entryContextShell = readRequired(TS_ENTRY_CONTEXT_SHELL);
   for (const marker of [
     'export function resolveServertoolEntryContext(',
@@ -5837,7 +5816,13 @@ function checkServertoolRustOutcomeCloseout() {
   const runServerSideToolEngineShell = readRequired(TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL);
   for (const marker of [
     'export async function orchestrateServertoolEngine(',
-    'runServertoolEntryPreflight',
+    'resolveServertoolEntryPreflightWithNative',
+    'resolveServertoolEntryPreflightApplicationWithNative',
+    'readServertoolEntryBaseObjectWithNative(options.chatResponse)',
+    'isAdapterClientDisconnectedWithNative(options.adapterContext)',
+    'createServertoolProviderProtocolErrorFromPlan',
+    'chatResponse: options.chatResponse',
+    'entryPreflightApplication.errorPlan',
     'runServertoolResponseStageWithNative',
     'applyServertoolResponseStageExtraction',
     'resolveServertoolEntryContext',
