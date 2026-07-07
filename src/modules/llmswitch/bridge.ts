@@ -110,6 +110,7 @@ export {
   resolveRouteCodexProviderConfigV2IdentitySync,
   loadRouteCodexProviderConfigsV2FromRootSync,
   planAuthFileResolutionNativeSync,
+  resolveAuthFileKeyNativeSync,
   planProviderConfigRootNativeSync,
   planRouteCodexConfigLoaderPathsNativeSync,
   resolveRouteCodexConfigPathNativeSync,

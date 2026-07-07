@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { planAuthFileResolutionNativeSync } from '../../src/modules/llmswitch/bridge.js';
+import { planAuthFileResolutionNativeSync, resolveAuthFileKeyNativeSync } from '../../src/modules/llmswitch/bridge.js';
 import { AuthFileResolver } from '../../src/config/auth-file-resolver.js';
 
 async function mkTmp(prefix: string): Promise<string> {
@@ -23,6 +23,23 @@ function legacyPlan(keyId: string, authDir: string): {
     kind: 'authFile',
     filePath: path.join(authDir, filename),
     cacheKey: keyId,
+  };
+}
+
+async function legacyResolve(keyId: string, authDir: string): Promise<{
+  kind: 'literal' | 'authFile';
+  value: string;
+  cacheKey?: string;
+}> {
+  const plan = legacyPlan(keyId, authDir);
+  if (plan.kind === 'literal') {
+    return { kind: 'literal', value: plan.value ?? keyId };
+  }
+  const raw = await fs.readFile(plan.filePath!, 'utf8');
+  return {
+    kind: 'authFile',
+    value: raw.trim(),
+    cacheKey: plan.cacheKey,
   };
 }
 
@@ -59,6 +76,25 @@ describe('auth-file resolver rust parity', () => {
 
     const resolver = new AuthFileResolver(authDir);
     await expect(resolver.resolveKey('authfile-demo')).resolves.toBe('sk-demo-value');
+  });
+
+  it('matches pre-wire authfile read and trim semantics', async () => {
+    const root = await mkTmp('routecodex-auth-native-read-');
+    const authDir = path.join(root, 'auth');
+    await fs.mkdir(authDir, { recursive: true });
+    await fs.writeFile(path.join(authDir, 'demo'), '  sk-native-value  \n', 'utf8');
+
+    expect(resolveAuthFileKeyNativeSync({ keyId: 'authfile-demo', authDir })).toEqual(
+      await legacyResolve('authfile-demo', authDir)
+    );
+  });
+
+  it('matches pre-wire literal key read semantics', async () => {
+    const root = await mkTmp('routecodex-auth-native-literal-');
+    const authDir = path.join(root, 'auth');
+    expect(resolveAuthFileKeyNativeSync({ keyId: 'literal-key', authDir })).toEqual(
+      await legacyResolve('literal-key', authDir)
+    );
   });
 
   it('caches authfile content by native cache key after the first read', async () => {

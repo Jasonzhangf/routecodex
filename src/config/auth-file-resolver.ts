@@ -3,8 +3,7 @@
  * 处理AuthFile机制的密钥解析
  */
 
-import fs from 'fs/promises';
-import { planAuthFileResolutionNativeSync } from '../modules/llmswitch/bridge.js';
+import { resolveAuthFileKeyNativeSync } from '../modules/llmswitch/bridge.js';
 import { resolveRccAuthDir } from './user-data-paths.js';
 
 export class AuthFileResolver {
@@ -24,34 +23,22 @@ export class AuthFileResolver {
       return this.keyCache.get(keyId)!;
     }
 
-    const plan = planAuthFileResolutionNativeSync({
+    const resolved = resolveAuthFileKeyNativeSync({
       keyId,
       authDir: this.authDir,
     });
 
     // 如果不是AuthFile，直接返回
-    if (plan.kind === 'literal') {
-      return plan.value ?? keyId;
+    if (resolved.kind === 'literal') {
+      return resolved.value;
     }
 
-    const filePath = plan.filePath;
-    const cacheKey = plan.cacheKey ?? keyId;
-    if (!filePath) {
-      throw new Error('[config] AuthFile native resolver returned empty file path');
-    }
+    const cacheKey = resolved.cacheKey ?? keyId;
 
-    try {
-      // 读取密钥文件
-      const keyContent = await fs.readFile(filePath, 'utf-8');
-      const actualKey = keyContent.trim();
+    // 缓存密钥
+    this.keyCache.set(cacheKey, resolved.value);
 
-      // 缓存密钥
-      this.keyCache.set(cacheKey, actualKey);
-
-      return actualKey;
-    } catch (error) {
-      throw new Error(`Failed to read auth file ${filePath}: ${error}`);
-    }
+    return resolved.value;
   }
 
 }

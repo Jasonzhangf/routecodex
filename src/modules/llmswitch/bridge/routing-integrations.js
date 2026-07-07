@@ -446,6 +446,31 @@ export function planAuthFileResolutionNativeSync(input) {
     }
     return output;
 }
+export function resolveAuthFileKeyNativeSync(input) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.resolveAuthFileKeyJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] resolveAuthFileKeyJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({
+        keyId: String(input.keyId ?? ''),
+        authDir: input.authDir,
+        homeDir: input.homeDir,
+        rccHome: process.env.RCC_HOME,
+        routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+        routecodexHome: process.env.ROUTECODEX_HOME
+    })));
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid payload');
+    }
+    if ((output.kind !== 'literal' && output.kind !== 'authFile') || typeof output.value !== 'string') {
+        throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid shape');
+    }
+    if (typeof output.cacheKey !== 'undefined' && typeof output.cacheKey !== 'string') {
+        throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid cache key');
+    }
+    return output;
+}
 export function planRouteCodexConfigLoaderPathsNativeSync(input) {
     const binding = loadNativeBindingForConfigCodec();
     const fn = binding.planRouteCodexConfigLoaderPathsJson;

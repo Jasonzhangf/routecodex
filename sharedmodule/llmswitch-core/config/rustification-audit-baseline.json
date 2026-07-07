@@ -2,10 +2,10 @@
   "generatedAt": "2026-07-03T15:49:47.046Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
-    "prodTsFileCount": 187,
-    "prodTsLocTotal": 39512,
+    "prodTsFileCount": 180,
+    "prodTsLocTotal": 38468,
     "nonNativeFileCount": 51,
-    "nonNativeLocTotal": 8708
+    "nonNativeLocTotal": 8349
   },
   "byTopDir": {
     "native": {
@@ -1122,7 +1122,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/telemetry/stats-center.ts",
-      "loc": 430,
+      "loc": 71,
       "nativeLinked": false,
       "topDir": "telemetry"
     },

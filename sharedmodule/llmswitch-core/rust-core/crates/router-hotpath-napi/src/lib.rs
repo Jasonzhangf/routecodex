@@ -1513,6 +1513,24 @@ pub fn plan_auth_file_resolution_json(input_json: String) -> NapiResult<String> 
     serde_json::to_string(&plan).map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 
+#[napi(js_name = "resolveAuthFileKeyJson")]
+pub fn resolve_auth_file_key_json(input_json: String) -> NapiResult<String> {
+    let input: AuthFileResolvePlanInputJson = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let output = virtual_router_engine::instructions::resolve_auth_file_key_for_host(
+        virtual_router_engine::instructions::AuthFileResolvePlanInput {
+            key_id: &input.key_id,
+            auth_dir: input.auth_dir.as_deref(),
+            home_dir: input.home_dir.as_deref(),
+            rcc_home: input.rcc_home.as_deref(),
+            routecodex_user_dir: input.routecodex_user_dir.as_deref(),
+            routecodex_home: input.routecodex_home.as_deref(),
+        },
+    )
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
 #[napi(js_name = "planRouteCodexConfigLoaderPathsJson")]
 pub fn plan_routecodex_config_loader_paths_json(input_json: String) -> NapiResult<String> {
     let input: RouteCodexConfigLoaderPathPlanInputJson = serde_json::from_str(&input_json)

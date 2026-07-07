@@ -231,6 +231,15 @@ pub(crate) struct AuthFileResolvePlan {
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct AuthFileKeyResolveOutput {
+    pub kind: String,
+    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_key: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RouteCodexConfigLoaderPathPlan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explicit_path: Option<String>,
@@ -285,6 +294,30 @@ pub(crate) fn plan_auth_file_resolution_for_host(
         value: None,
         file_path: Some(file_path.to_string_lossy().to_string()),
         cache_key: Some(input.key_id.to_string()),
+    })
+}
+
+pub(crate) fn resolve_auth_file_key_for_host(
+    input: AuthFileResolvePlanInput<'_>,
+) -> Result<AuthFileKeyResolveOutput, String> {
+    let plan = plan_auth_file_resolution_for_host(input)?;
+    if plan.kind == "literal" {
+        return Ok(AuthFileKeyResolveOutput {
+            kind: plan.kind,
+            value: plan.value.unwrap_or_default(),
+            cache_key: None,
+        });
+    }
+    let file_path = plan
+        .file_path
+        .as_deref()
+        .ok_or_else(|| "[config] AuthFile native resolver returned empty file path".to_string())?;
+    let raw = fs::read_to_string(file_path)
+        .map_err(|error| format!("Failed to read auth file {file_path}: {error}"))?;
+    Ok(AuthFileKeyResolveOutput {
+        kind: plan.kind,
+        value: raw.trim().to_string(),
+        cache_key: plan.cache_key,
     })
 }
 

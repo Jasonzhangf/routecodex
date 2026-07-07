@@ -155,12 +155,12 @@
       "path": "sharedmodule/llmswitch-core/src/telemetry/stats-center.ts",
       "classification": "ts_io_shell_ok",
       "ownerFeature": "vr.hit_log_projection",
-      "minimumTsRole": "Node telemetry aggregation sink for Rust-projected events.",
-      "cannotShrinkFurtherBecause": "Rust projects VR hit-log events; this file owns the JS process telemetry sink. Removing it requires a separate telemetry runtime replacement.",
+      "minimumTsRole": "Minimal NoopStatsCenter facade for TS bridge consumers (state-integrations.ts getStatsCenter)",
+      "cannotShrinkFurtherBecause": "Bridge consumers require requireCoreDist(\"telemetry/stats-center\").getStatsCenter() to return a StatsCenter-compatible object. Rust cannot replace this without cross-package bridge migration.",
       "forbiddenSemantics": [
-        "hit reason build",
-        "route selection",
+        "routing",
         "provider policy",
+        "Hub payload policy",
         "client response policy"
       ]
     }

@@ -2742,6 +2742,7 @@ owners:
       - RccPathResolveInput
       - RouteCodexConfigPathResolveInput
       - AuthFileResolvePlanInput
+      - AuthFileKeyResolveOutput
       - RouteCodexConfigLoaderPathPlanInput
       - ProviderConfigRootPlanInput
       - RccSnapshotsDirResolveInput
@@ -2750,6 +2751,7 @@ owners:
       - resolve_rcc_path_for_host_with_env
       - resolve_routecodex_config_path_for_host
       - plan_auth_file_resolution_for_host
+      - resolve_auth_file_key_for_host
       - plan_routecodex_config_loader_paths_for_host
       - plan_provider_config_root_for_host
       - resolve_rcc_snapshots_dir_for_host_with_env

@@ -18,8 +18,8 @@ pub(crate) use path::{
     resolve_rcc_path_for_host, resolve_rcc_path_for_host_with_env,
     resolve_rcc_snapshots_dir_for_host_with_env, resolve_rcc_user_dir_for_host,
     resolve_rcc_user_dir_for_host_with_env, resolve_routecodex_config_path_for_host,
-    with_rcc_user_dir_override, AuthFileResolvePlanInput, ProviderConfigRootPlanInput,
-    RccSnapshotsDirResolveInput, RouteCodexConfigLoaderPathPlanInput,
+    resolve_auth_file_key_for_host, with_rcc_user_dir_override, AuthFileResolvePlanInput,
+    ProviderConfigRootPlanInput, RccSnapshotsDirResolveInput, RouteCodexConfigLoaderPathPlanInput,
     RouteCodexConfigPathResolveInput,
 };
 pub(crate) use state::{

@@ -541,6 +541,45 @@ export function planAuthFileResolutionNativeSync(input: {
   };
 }
 
+export function resolveAuthFileKeyNativeSync(input: {
+  keyId: string;
+  authDir?: string;
+  homeDir?: string;
+}): {
+  kind: 'literal' | 'authFile';
+  value: string;
+  cacheKey?: string;
+} {
+  const binding = loadNativeBindingForConfigCodec();
+  const fn = binding.resolveAuthFileKeyJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveAuthFileKeyJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    keyId: String(input.keyId ?? ''),
+    authDir: input.authDir,
+    homeDir: input.homeDir,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid payload');
+  }
+  const resolved = output as AnyRecord;
+  if ((resolved.kind !== 'literal' && resolved.kind !== 'authFile') || typeof resolved.value !== 'string') {
+    throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid shape');
+  }
+  if (typeof resolved.cacheKey !== 'undefined' && typeof resolved.cacheKey !== 'string') {
+    throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid cache key');
+  }
+  return resolved as {
+    kind: 'literal' | 'authFile';
+    value: string;
+    cacheKey?: string;
+  };
+}
+
 export function planRouteCodexConfigLoaderPathsNativeSync(input: {
   explicitPath?: string;
   routecodexProviderDir?: string;
