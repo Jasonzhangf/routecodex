@@ -270,6 +270,57 @@ export function detectRouteCodexProviderConfigFormatSync(configPath) {
     const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') })));
     return parseDetectedConfigFormatOutput(output, 'provider');
 }
+function validatePersistedConfigFileOutput(output, label) {
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error(`[llmswitch-bridge] ${label} writer returned invalid payload`);
+    }
+    if (typeof output.path !== 'string' ||
+        output.format !== 'toml' ||
+        typeof output.raw !== 'string' ||
+        !output.parsed ||
+        typeof output.parsed !== 'object' ||
+        Array.isArray(output.parsed)) {
+        throw new Error(`[llmswitch-bridge] ${label} writer returned invalid shape`);
+    }
+    return output;
+}
+export function writeRouteCodexUserConfigFileNativeSync(input) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.writeRouteCodexUserConfigFileJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] writeRouteCodexUserConfigFileJson not available');
+    }
+    return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+        configPath: input.configPath,
+        parsed: input.parsed ?? {},
+        format: input.format
+    }))), 'User config');
+}
+export function writeRouteCodexProviderConfigFileNativeSync(input) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.writeRouteCodexProviderConfigFileJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] writeRouteCodexProviderConfigFileJson not available');
+    }
+    return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+        configPath: input.configPath,
+        parsed: input.parsed ?? {},
+        format: input.format
+    }))), 'Provider config');
+}
+export function updateRouteCodexUserConfigStringScalarNativeSync(input) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.updateRouteCodexUserConfigStringScalarJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] updateRouteCodexUserConfigStringScalarJson not available');
+    }
+    return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+        configPath: input.configPath,
+        tablePath: input.tablePath,
+        key: input.key,
+        value: input.value
+    }))), 'User config scalar update');
+}
 export async function coerceRouteCodexProviderConfigV2(parsed, fallbackProviderId) {
     return coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId);
 }

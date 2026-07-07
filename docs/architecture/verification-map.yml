@@ -1919,11 +1919,15 @@ verification:
   - feature_id: config.user_config_write_surface
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/user-config-writer.ts
       - src/config/toml-comment-preserving.ts
     contract:
+      - tests/config/config-writer-rust.spec.ts
       - tests/config/config-writer.spec.ts
       - tests/config/toml-comment-preserving.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture
       - npm run verify:config-toml-codec-rust
     integration:
       - tests/grep/config-codec-gate.spec.ts
@@ -1932,14 +1936,18 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "User config file IO must stay in shared writer owner; TOML scalar patch semantics must delegate to config.toml_codec Rust owner."
+      - "User config async file write and scalar patch write must stay Rust-owned through config_file_codec; TS writer is only the async native shell."
 
   - feature_id: config.provider_config_write_surface
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/provider-config-writer.ts
     contract:
+      - tests/config/config-writer-rust.spec.ts
       - tests/config/config-writer.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
@@ -1947,7 +1955,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Provider config writes must stay in shared writer owner."
+      - "Provider async writes must stay Rust-owned through config_file_codec; writeProviderConfigFileSync(fsImpl) remains a TS injected-fs host boundary until init fs injection is removed."
 
   - feature_id: webui.config_editor_surface
     change_risk: high

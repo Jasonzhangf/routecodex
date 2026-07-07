@@ -1,9 +1,8 @@
 // feature_id: config.provider_config_write_surface
-import fs from 'node:fs/promises';
-
 import type { ProviderConfigFormat } from './provider-config-codec.js';
 import { detectProviderConfigFormat } from './provider-config-codec.js';
 import { serializeTomlRecord } from './toml-basic.js';
+import { writeRouteCodexProviderConfigFileNativeSync } from '../modules/llmswitch/bridge.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -19,13 +18,6 @@ function stringifyProviderConfig(parsed: UnknownRecord, format: ProviderConfigFo
     throw new Error('[config] provider config JSON support removed; writer only accepts TOML');
   }
   return serializeTomlRecord(parsed);
-}
-
-async function writeRawProviderConfigAtomically(configPath: string, raw: string): Promise<void> {
-  const wroteAtMs = Date.now();
-  const tmpPath = `${configPath}.tmp.${process.pid}.${wroteAtMs}`;
-  await fs.writeFile(tmpPath, raw, 'utf8');
-  await fs.rename(tmpPath, configPath);
 }
 
 type WriteFileSyncLike = Pick<typeof import('node:fs'), 'writeFileSync' | 'renameSync'>;
@@ -47,14 +39,7 @@ export async function writeProviderConfigFile(
   format?: ProviderConfigFormat
 ): Promise<PersistedProviderConfigFile> {
   const nextFormat = format ?? detectProviderConfigFormat(configPath);
-  const raw = stringifyProviderConfig(parsed, nextFormat);
-  await writeRawProviderConfigAtomically(configPath, raw);
-  return {
-    path: configPath,
-    format: nextFormat,
-    raw,
-    parsed,
-  };
+  return writeRouteCodexProviderConfigFileNativeSync({ configPath, parsed, format: nextFormat });
 }
 
 export function writeProviderConfigFileSync(

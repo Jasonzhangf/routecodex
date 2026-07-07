@@ -3072,16 +3072,19 @@ owners:
 
   - feature_id: config.user_config_write_surface
     status: active
-    summary: "full user config write and scalar patch update live in shared writer; callers must not stringify config directly"
-    owner_kind: ts_shell
-    owner_scope: "TS owns atomic user config file IO and writer entrypoints; comment-preserving TOML scalar patch semantics delegate to config.toml_codec Rust owner"
-    owner_module: src/config/user-config-writer.ts
+    summary: "full user config async write and scalar patch update are Rust-owned; TS writer is a native shell"
+    owner_kind: rust_ssot
+    owner_scope: "Rust owns TOML-only user config write, serialization, atomic file replace, and scalar patch read/write; TS user writer only exposes async entrypoints and return types"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
     canonical_types:
       - PersistedUserConfigFile
     canonical_builders:
-      - writeUserConfigFile
-      - updateUserConfigStringScalar
+      - write_user_config_file_json
+      - update_user_config_string_scalar_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/user-config-writer.ts
       - src/config/toml-comment-preserving.ts
       - src/server/handlers/config-admin-handler.ts
@@ -3093,25 +3096,30 @@ owners:
       - src/providers
     required_tests:
       - tests/config/config-writer.spec.ts
+      - tests/config/config-writer-rust.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
-    migration_target: ts
+      - npm run verify:config-toml-codec-rust
+    migration_target: rust
     notes:
-      - "User config writes must be atomic and must flow through one writer owner."
-      - "Comment-preserving TOML scalar patch logic is Rust-owned through config.toml_codec; src/config/toml-comment-preserving.ts is only a sync native shell."
+      - "User config async writes and scalar patch updates must call Rust native writer; callers must not stringify config directly."
+      - "src/config/toml-comment-preserving.ts remains only a sync native shell for direct TOML patch callers."
 
   - feature_id: config.provider_config_write_surface
     status: active
-    summary: "provider v2 config write truth lives in shared writer; admin/maintenance must not stringify provider config directly"
-    owner_kind: ts_runtime_owner
-    owner_scope: "provider v2 config write truth lives in shared writer; admin/maintenance must not stringify provider config directly"
-    owner_module: src/config/provider-config-writer.ts
+    summary: "provider v2 async config write is Rust-owned; sync injected-fs init writer remains a TS host boundary"
+    owner_kind: rust_ssot
+    owner_scope: "Rust owns provider v2 async TOML-only write, serialization, and atomic file replace; TS provider writer keeps only return types and the sync fsImpl-injected init/test boundary"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
     canonical_types:
       - PersistedProviderConfigFile
     canonical_builders:
-      - writeProviderConfigFile
+      - write_provider_config_file_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/provider-config-writer.ts
       - src/server/runtime/http-server/daemon-admin/providers-handler.ts
       - src/cli/commands/init/basic.ts
@@ -3122,12 +3130,15 @@ owners:
       - src/server/runtime/http-server/executor
     required_tests:
       - tests/config/config-writer.spec.ts
+      - tests/config/config-writer-rust.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
-    migration_target: ts
+      - npm run verify:config-toml-codec-rust
+    migration_target: rust
     notes:
-      - "Provider config writes must go through one writer owner regardless of JSON/TOML extension."
+      - "Provider async writes must call Rust native writer; admin/maintenance must not stringify provider config directly."
+      - "writeProviderConfigFileSync(fsImpl) is the remaining TS host boundary because init tests and CLI authoring pass an injected synchronous filesystem; do not replace it with Rust until that injection boundary is removed."
 
   - feature_id: webui.config_editor_surface
     status: planned

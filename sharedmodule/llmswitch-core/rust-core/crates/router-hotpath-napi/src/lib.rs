@@ -261,6 +261,25 @@ pub fn detect_route_codex_provider_config_format_json(input_json: String) -> Nap
 }
 
 #[napi]
+pub fn write_route_codex_user_config_file_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::write_user_config_file_json(&input_json).map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn write_route_codex_provider_config_file_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::write_provider_config_file_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn update_route_codex_user_config_string_scalar_json(
+    input_json: String,
+) -> NapiResult<String> {
+    config_file_codec::update_user_config_string_scalar_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
 pub fn coerce_route_codex_provider_config_v2_json(input_json: String) -> NapiResult<String> {
     config_provider_codec::coerce_provider_config_v2_from_parsed_json(&input_json)
         .map_err(napi::Error::from_reason)
