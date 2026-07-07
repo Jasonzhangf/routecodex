@@ -130,7 +130,7 @@ describe('usage logger timing summary', () => {
     expect(resolveLocalDayKey(first)).toBe(resolveLocalDayKey(second));
   });
 
-  it('uses request session color for every usage line before tmux id', async () => {
+  it('uses tmux session color for every usage line before request session id', async () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
     const { resolveSessionAnsiColor } = await import('../../../../../src/utils/session-log-color.js');
@@ -141,7 +141,7 @@ describe('usage logger timing summary', () => {
     for (let index = 0; index < 64 && resolveSessionAnsiColor(requestSessionId) === tmuxColor; index += 1) {
       requestSessionId = `usage-per-request-session-${index}`;
     }
-    const expectedColor = resolveSessionAnsiColor(requestSessionId);
+    const expectedColor = resolveSessionAnsiColor(tmuxSessionId);
 
     logUsageSummary('req_usage_color', {
       providerKey: 'demo.key1',
@@ -162,11 +162,11 @@ describe('usage logger timing summary', () => {
     const renderedLines = rendered.split('\n');
     expect(expectedColor).toBeDefined();
     expect(tmuxColor).toBeDefined();
-    expect(expectedColor).not.toBe(tmuxColor);
+    expect(expectedColor).toBe(tmuxColor);
     expect(renderedLines.length).toBeGreaterThan(0);
     for (const line of renderedLines) {
       expect(line.startsWith(String(expectedColor))).toBe(true);
-      expect(line.startsWith(String(tmuxColor))).toBe(false);
+      expect(line.startsWith(String(resolveSessionAnsiColor(requestSessionId)))).toBe(false);
     }
     expect(renderedLines).toHaveLength(1);
     expect(rendered).toContain('finish_reason=\x1b[97mstop');
@@ -340,10 +340,10 @@ describe('usage logger timing summary', () => {
     const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
 
     logUsageSummary('req_cache_metrics', {
-      providerKey: 'deepseek-web.2',
-      model: 'deepseek-v4-pro',
+      providerKey: 'provider-a.2',
+      model: 'model-a',
       routeName: 'thinking',
-      poolId: 'thinking-deepseek-web-primary',
+      poolId: 'thinking-provider-a-primary',
       finishReason: 'stop',
       latencyMs: 5000,
       externalLatencyMs: 2000,
@@ -776,8 +776,8 @@ describe('usage logger timing summary', () => {
     const { flushLogRollup } = await import('../../../../../src/server/runtime/http-server/executor/log-rollup.js');
 
     logUsageSummary('req_rollup_1', {
-      providerKey: 'qwen.1',
-      model: 'qwen3.6-plus',
+      providerKey: 'provider-a.1',
+      model: 'model-a',
       routeName: 'default',
       poolId: 'tools-primary',
       finishReason: 'length',
@@ -786,8 +786,8 @@ describe('usage logger timing summary', () => {
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
     });
     logUsageSummary('req_rollup_2', {
-      providerKey: 'qwen.1',
-      model: 'qwen3.6-plus',
+      providerKey: 'provider-a.1',
+      model: 'model-a',
       routeName: 'default',
       poolId: 'tools-primary',
       finishReason: 'length',
@@ -803,7 +803,7 @@ describe('usage logger timing summary', () => {
     expect(lines.some((line) => line.includes('req=req_rollup_2'))).toBe(true);
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(true);
     expect(lines.some((line) => line.includes('default/tools-primary'))).toBe(true);
-    expect(lines.some((line) => line.includes('provider=qwen.1.qwen3.6-plus'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider=provider-a.1.model-a'))).toBe(true);
     expect(lines.some((line) => line.includes('calls=2'))).toBe(true);
     expect(lines.some((line) => line.includes('avg.total=1100ms'))).toBe(true);
     expect(lines.some((line) => line.includes('avg.internal=450ms'))).toBe(true);

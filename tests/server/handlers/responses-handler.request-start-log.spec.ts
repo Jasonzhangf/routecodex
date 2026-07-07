@@ -165,14 +165,15 @@ describe('responses-handler request start logging', () => {
       portContext: { matchedPort: 5555, localPort: 5555 }
     } as any);
 
-    const expectedKey = 'rcc-session:codex:tmux-responses-log-scope:tmp_responses-log-project';
-    const expectedColor = resolveSessionAnsiColor(expectedKey);
+    const expectedSessionId = 'rcc-session:codex:tmux-responses-log-scope:tmp_responses-log-project';
+    const expectedColor = resolveSessionAnsiColor('tmux-responses-log-scope');
     const rendered = String(warnSpy.mock.calls.find((call) => String(call[0] ?? '').includes('▶ [/v1/responses]'))?.[0] ?? '');
     const metadata = (executePipeline.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> } | undefined)?.metadata;
 
     expect(expectedColor).toBeDefined();
     expect(rendered.startsWith(String(expectedColor))).toBe(true);
-    expect(metadata?.logSessionColorKey).toBe(expectedKey);
-    expect(metadata?.sessionId).toBeUndefined();
+    expect(metadata?.logSessionColorKey).toBe(expectedSessionId);
+    expect(metadata?.sessionId).toBe(expectedSessionId);
+    expect(metadata?.conversationId).toBe(expectedSessionId);
   });
 });

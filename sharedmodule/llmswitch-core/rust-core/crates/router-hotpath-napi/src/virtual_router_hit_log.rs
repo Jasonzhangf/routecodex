@@ -622,17 +622,17 @@ pub fn resolve_session_log_color_key_json(input_json: String) -> napi::Result<St
         .map_err(|e| napi::Error::from_reason(format!("invalid input: {}", e)))?;
     let result: Option<String> = if let serde_json::Value::Object(m) = &input {
         let candidates = [
-            "logSessionColorKey",
-            "sessionId",
-            "session_id",
-            "conversationId",
-            "conversation_id",
             "clientTmuxSessionId",
             "client_tmux_session_id",
             "tmuxSessionId",
             "tmux_session_id",
             "rccSessionClientTmuxSessionId",
             "rcc_session_client_tmux_session_id",
+            "sessionId",
+            "session_id",
+            "conversationId",
+            "conversation_id",
+            "logSessionColorKey",
         ];
         for key in &candidates {
             if let Some(val) = m.get(*key) {

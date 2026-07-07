@@ -23,5 +23,24 @@ export function resolveSessionLogColorKey(context?: Record<string, unknown> | nu
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     return undefined;
   }
-  return resolveNativeSessionLogColorKey(context);
+  const candidates = [
+    context.clientTmuxSessionId,
+    context.client_tmux_session_id,
+    context.tmuxSessionId,
+    context.tmux_session_id,
+    context.rccSessionClientTmuxSessionId,
+    context.rcc_session_client_tmux_session_id,
+    context.sessionId,
+    context.session_id,
+    context.conversationId,
+    context.conversation_id,
+    context.logSessionColorKey
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeToken(candidate);
+    if (normalized) {
+      return resolveNativeSessionLogColorKey({ logSessionColorKey: normalized });
+    }
+  }
+  return undefined;
 }

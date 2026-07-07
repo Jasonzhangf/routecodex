@@ -61,9 +61,9 @@ describe('logRequestStart', () => {
     expect(rendered).not.toContain('estimatedTextChars');
   });
 
-  it('registers request start color from session id metadata', async () => {
+  it('registers request start color from tmux session metadata', async () => {
     const { resolveSessionAnsiColor } = await import('../../../src/utils/session-log-color.js');
-    const expectedColor = resolveSessionAnsiColor('request-start-session');
+    const expectedColor = resolveSessionAnsiColor('request-start-tmux');
 
     logRequestStart('/v1/responses', 'req-start-session-color', {
       sessionId: 'request-start-session',
@@ -89,7 +89,8 @@ describe('logRequestStart', () => {
         'x-codex-turn-metadata': encodeURIComponent(turnMetadata)
       }
     });
-    const expectedColor = resolveSessionAnsiColor(String(logMetadata.logSessionColorKey));
+    const expectedSessionId = 'rcc-session:codex:tmux-start-log-scope:tmp_start-log-project';
+    const expectedColor = resolveSessionAnsiColor('tmux-start-log-scope');
 
     logRequestStart('/v1/responses', 'req-start-codex-scope-color', {
       clientRequestId: 'client-start-codex-scope',
@@ -98,7 +99,9 @@ describe('logRequestStart', () => {
     });
 
     const rendered = String(warnSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(logMetadata.logSessionColorKey).toBe('rcc-session:codex:tmux-start-log-scope:tmp_start-log-project');
+    expect(logMetadata.sessionId).toBe(expectedSessionId);
+    expect(logMetadata.conversationId).toBe(expectedSessionId);
+    expect(logMetadata.logSessionColorKey).toBe(expectedSessionId);
     expect(expectedColor).toBeDefined();
     expect(rendered.startsWith(String(expectedColor))).toBe(true);
   });
