@@ -252,10 +252,10 @@ function invokeTokenEstimator(request: StandardizedRequest | ProcessedRequest | 
       invalidReason: 'invalid result'
     }
   );
-  if (typeof parsed.tokens !== 'number' || !Number.isFinite(parsed.tokens)) {
+  if (typeof parsed.tokens !== 'number' || !Number.isSafeInteger(parsed.tokens) || parsed.tokens < 0) {
     throw failNativeRequired<number>('estimateVirtualRouterRequestTokensJson', 'invalid token count');
   }
-  return Math.max(0, Math.round(parsed.tokens));
+  return parsed.tokens;
 }
 
 export function countRequestTokens(request: StandardizedRequest | ProcessedRequest | Record<string, unknown>): number {

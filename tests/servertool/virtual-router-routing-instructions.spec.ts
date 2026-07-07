@@ -193,7 +193,7 @@ function buildRequest(userContent: string): StandardizedRequest {
 function buildMetadata(
   overrides?: Partial<RouterMetadataInput>
 ): RouterMetadataInput {
-  return {
+  const metadata = {
     requestId: `req-${Math.random().toString(36).slice(2)}`,
     entryEndpoint: '/v1/chat/completions',
     processMode: 'chat',
@@ -204,6 +204,28 @@ function buildMetadata(
     routeHint: 'default',
     ...(overrides ?? {})
   };
+  return {
+    ...metadata,
+    metadataCenterSnapshot: {
+      requestId: metadata.requestId,
+      entryEndpoint: metadata.entryEndpoint,
+      ...(typeof (metadata as Record<string, unknown>).sessionId === 'string'
+        ? { sessionId: (metadata as Record<string, unknown>).sessionId }
+        : {}),
+      requestTruth: {
+        requestId: metadata.requestId,
+        entryEndpoint: metadata.entryEndpoint,
+        ...(typeof (metadata as Record<string, unknown>).sessionId === 'string'
+          ? { sessionId: (metadata as Record<string, unknown>).sessionId }
+          : {})
+      },
+      runtimeControl: {
+        providerProtocol: metadata.providerProtocol,
+        routeHint: metadata.routeHint
+      },
+      continuationContext: {}
+    }
+  } as RouterMetadataInput;
 }
 
 function listProviderKeys(providers: Record<string, ProviderProfile>, providerId: string): string[] {

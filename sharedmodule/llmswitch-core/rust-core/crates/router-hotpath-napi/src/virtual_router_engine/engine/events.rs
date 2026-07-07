@@ -75,6 +75,21 @@ impl VirtualRouterEngineCore {
         self.handle_provider_failure(event);
     }
 
+    pub(crate) fn mark_provider_cooldown(&mut self, provider_key: &str, cooldown_ms: Option<i64>) {
+        if provider_key.trim().is_empty() {
+            return;
+        }
+        self.health_manager
+            .mark_cooldown(provider_key, cooldown_ms, now_ms());
+    }
+
+    pub(crate) fn clear_provider_cooldown(&mut self, provider_key: &str) {
+        if provider_key.trim().is_empty() {
+            return;
+        }
+        self.health_manager.record_success(provider_key);
+    }
+
     pub(crate) fn mirror_provider_error_in_memory(&mut self, event: &Value) {
         if !event_affects_health(event) {
             return;
@@ -88,7 +103,6 @@ impl VirtualRouterEngineCore {
         self.health_manager
             .record_failure(&provider_key, reason, now);
     }
-
 }
 
 fn event_affects_health(event: &Value) -> bool {
@@ -316,8 +330,7 @@ mod tests {
         fs::create_dir_all(&scoped_dir).unwrap();
 
         let mut core = build_test_core(provider_key, "gpt-test");
-        let event =
-            build_error_event_with_session_dir(provider_key, "unrecoverable", &scoped_dir);
+        let event = build_error_event_with_session_dir(provider_key, "unrecoverable", &scoped_dir);
 
         core.handle_provider_error(&event);
 

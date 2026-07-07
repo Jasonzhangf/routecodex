@@ -1,6 +1,34 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import { computeRequestTokens } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
+function withMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
+  const requestId = typeof metadata.requestId === 'string' ? metadata.requestId : undefined;
+  const entryEndpoint = typeof metadata.entryEndpoint === 'string' ? metadata.entryEndpoint : undefined;
+  const providerProtocol = typeof metadata.providerProtocol === 'string' ? metadata.providerProtocol : undefined;
+  const routeHint = typeof metadata.routeHint === 'string' ? metadata.routeHint : undefined;
+  const excludedProviderKeys = Array.isArray(metadata.excludedProviderKeys)
+    ? metadata.excludedProviderKeys
+    : undefined;
+  return {
+    ...metadata,
+    metadataCenterSnapshot: {
+      ...(requestId ? { requestId } : {}),
+      ...(entryEndpoint ? { entryEndpoint } : {}),
+      ...(metadata.serverToolRequired === true ? { serverToolRequired: true } : {}),
+      ...(excludedProviderKeys ? { excludedProviderKeys } : {}),
+      requestTruth: {
+        ...(requestId ? { requestId } : {}),
+        ...(entryEndpoint ? { entryEndpoint } : {})
+      },
+      runtimeControl: {
+        ...(providerProtocol ? { providerProtocol } : {}),
+        ...(routeHint ? { routeHint } : {})
+      },
+      continuationContext: {}
+    }
+  };
+}
+
 describe('virtual-router context routing fallback', () => {
   it('falls back to risky providers when safe providers are unavailable (e.g. 429 cooldown)', () => {
     const providerBig = 'mock.big.gpt-5.2';
@@ -66,13 +94,13 @@ describe('virtual-router context routing fallback', () => {
       routeHint: 'default'
     };
 
-    const first = engine.route(request, metadata);
+    const first = engine.route(request, withMetadataCenterSnapshot(metadata));
     expect(first.target.providerKey).toBe(providerBig);
 
     // Simulate an already-applied provider cooldown: the risky provider remains routable.
     engine.markProviderCooldown(providerBig, 5_000);
 
-    const second = engine.route(request, metadata);
+    const second = engine.route(request, withMetadataCenterSnapshot(metadata));
     expect(second.target.providerKey).toBe(providerSmall);
   });
 
@@ -139,7 +167,7 @@ describe('virtual-router context routing fallback', () => {
       routeHint: 'default'
     };
 
-    const picked = engine.route(request, metadata).target.providerKey;
+    const picked = engine.route(request, withMetadataCenterSnapshot(metadata)).target.providerKey;
     expect([providerA, providerB]).toContain(picked);
   });
 
@@ -188,7 +216,7 @@ describe('virtual-router context routing fallback', () => {
       excludedProviderKeys: [soleProvider]
     };
 
-    expect(() => engine.route(request, metadata)).toThrow(
+    expect(() => engine.route(request, withMetadataCenterSnapshot(metadata))).toThrow(
       'No available providers after applying routing instructions'
     );
   });

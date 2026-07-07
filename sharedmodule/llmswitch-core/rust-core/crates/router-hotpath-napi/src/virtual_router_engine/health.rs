@@ -144,6 +144,22 @@ impl ProviderHealthManager {
         state.reason = None;
     }
 
+    pub(crate) fn mark_cooldown(
+        &mut self,
+        provider_key: &str,
+        cooldown_ms: Option<i64>,
+        now_ms: i64,
+    ) {
+        let cooldown_ms = cooldown_ms.unwrap_or(self.config.cooldown_ms).max(0);
+        let failure_threshold = self.config.failure_threshold;
+        let state = self.get_state_mut(provider_key);
+        state.failure_count = failure_threshold;
+        state.state = "tripped".to_string();
+        state.cooldown_expires_at = Some(now_ms + cooldown_ms);
+        state.last_failure_at = Some(now_ms);
+        state.reason = Some("manual_cooldown".to_string());
+    }
+
     pub(crate) fn is_available(&mut self, provider_key: &str, now_ms: i64) -> bool {
         let state = self.get_state_mut(provider_key);
         match state.cooldown_expires_at {
@@ -320,5 +336,4 @@ mod tests {
         assert!(!manager.is_available("test-provider", 3_000 + DEFAULT_COOLDOWN_MS - 1));
         assert!(manager.is_available("test-provider", 3_000 + DEFAULT_COOLDOWN_MS + 1));
     }
-
 }

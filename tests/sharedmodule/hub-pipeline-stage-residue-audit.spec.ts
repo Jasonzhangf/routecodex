@@ -5179,6 +5179,25 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('virtual router token estimate normalization must stay Rust-owned', () => {
+    const runtimePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
+    );
+    const source = fs.readFileSync(runtimePath, 'utf8');
+    const estimatorSource = source.slice(
+      source.indexOf('function invokeTokenEstimator'),
+      source.indexOf('export function countRequestTokens'),
+    );
+    const findings = collectMatches(estimatorSource, [
+      { label: 'TS token estimate rounding revived', pattern: /Math\.round/ },
+      { label: 'TS token estimate clamp revived', pattern: /Math\.max/ },
+      { label: 'TS token estimate fallback revived', pattern: /fallbackText|fallback/i },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('virtual router stop-message status label must stay Rust-owned', () => {
     const hostEffectsPath = path.join(
       process.cwd(),

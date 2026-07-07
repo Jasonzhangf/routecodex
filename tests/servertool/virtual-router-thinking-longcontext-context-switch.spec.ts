@@ -1,6 +1,33 @@
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import { computeRequestTokens } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
+function withMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
+  const requestId = typeof metadata.requestId === 'string' ? metadata.requestId : undefined;
+  const entryEndpoint = typeof metadata.entryEndpoint === 'string' ? metadata.entryEndpoint : undefined;
+  const providerProtocol = typeof metadata.providerProtocol === 'string' ? metadata.providerProtocol : undefined;
+  const routeHint = typeof metadata.routeHint === 'string' ? metadata.routeHint : undefined;
+  const estimatedInputTokens = typeof metadata.estimatedInputTokens === 'number'
+    ? metadata.estimatedInputTokens
+    : undefined;
+  return {
+    ...metadata,
+    metadataCenterSnapshot: {
+      ...(requestId ? { requestId } : {}),
+      ...(entryEndpoint ? { entryEndpoint } : {}),
+      ...(estimatedInputTokens !== undefined ? { estimatedInputTokens } : {}),
+      requestTruth: {
+        ...(requestId ? { requestId } : {}),
+        ...(entryEndpoint ? { entryEndpoint } : {})
+      },
+      runtimeControl: {
+        ...(providerProtocol ? { providerProtocol } : {}),
+        ...(routeHint ? { routeHint } : {})
+      },
+      continuationContext: {}
+    }
+  };
+}
+
 describe('virtual-router thinking overflow routes to longcontext', () => {
   it('routes fresh user input to longcontext when thinking pool overflows context', () => {
     const providerThinking = 'mock.thinking.gpt-5.2';
@@ -76,7 +103,7 @@ describe('virtual-router thinking overflow routes to longcontext', () => {
       estimatedInputTokens: estimated
     };
 
-    const decision = engine.route(request, metadata);
+    const decision = engine.route(request, withMetadataCenterSnapshot(metadata));
     expect(decision.decision.routeName).toBe('longcontext');
     expect(decision.target.providerKey).toBe(providerLong);
   });
@@ -154,7 +181,7 @@ describe('virtual-router thinking overflow routes to longcontext', () => {
       estimatedInputTokens: estimated
     };
 
-    const decision = engine.route(request, metadata);
+    const decision = engine.route(request, withMetadataCenterSnapshot(metadata));
     expect(decision.decision.routeName).toBe('default');
     expect(decision.target.providerKey).toBe(providerDefault);
   });
@@ -233,7 +260,7 @@ describe('virtual-router thinking overflow routes to longcontext', () => {
       estimatedInputTokens: estimated
     };
 
-    const decision = engine.route(request, metadata);
+    const decision = engine.route(request, withMetadataCenterSnapshot(metadata));
     expect(decision.decision.routeName).toBe('longcontext');
     expect(decision.target.providerKey).toBe(providerLong);
     expect(decision.decision.reasoning).toContain('longcontext:token-threshold');
@@ -314,7 +341,7 @@ describe('virtual-router thinking overflow routes to longcontext', () => {
       estimatedInputTokens: estimated
     };
 
-    const decision = engine.route(request, metadata);
+    const decision = engine.route(request, withMetadataCenterSnapshot(metadata));
     expect(decision.decision.routeName).toBe('thinking');
     expect(decision.target.providerKey).toBe(providerThinking);
     expect(decision.decision.reasoning).toContain('longcontext:token-threshold');

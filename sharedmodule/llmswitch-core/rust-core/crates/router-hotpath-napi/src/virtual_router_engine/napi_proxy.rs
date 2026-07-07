@@ -143,6 +143,25 @@ impl VirtualRouterEngineProxy {
     }
 
     #[napi]
+    pub fn mark_provider_cooldown(
+        &self,
+        _env: Env,
+        provider_key: String,
+        cooldown_ms: Option<i64>,
+    ) -> NapiResult<()> {
+        let mut core = self.core.write().expect("core write lock");
+        core.mark_provider_cooldown(&provider_key, cooldown_ms);
+        Ok(())
+    }
+
+    #[napi]
+    pub fn clear_provider_cooldown(&self, _env: Env, provider_key: String) -> NapiResult<()> {
+        let mut core = self.core.write().expect("core write lock");
+        core.clear_provider_cooldown(&provider_key);
+        Ok(())
+    }
+
+    #[napi]
     pub fn handle_provider_success(&self, _env: Env, event_json: String) -> NapiResult<()> {
         let event_value: Value = serde_json::from_str(&event_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
