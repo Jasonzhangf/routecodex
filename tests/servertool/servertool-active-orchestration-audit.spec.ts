@@ -328,21 +328,6 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.ts',
-    forbidden: [
-      'function asObject(',
-      "stage.normalizedPayload && typeof stage.normalizedPayload === 'object'",
-      'stage.normalizedPayload as JsonObject',
-    ],
-    required: [
-      'runServertoolResponseStageWithNative',
-      'replaceJsonObjectInPlace',
-      "stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object'",
-      '? stage.normalizedPayload',
-      'stage.toolCalls.map(',
-    ],
-  },
-  {
     file: 'sharedmodule/llmswitch-core/src/servertool/dispatch-preparation-shell.ts',
     forbidden: [
       "from '../conversion/runtime-metadata.js'",
@@ -498,6 +483,8 @@ const TARGETS = [
       'entryPreflight as { action: unknown }',
       'enginePrepassAction as { action: unknown }',
       'planServertoolEnginePrepassActionWithNative',
+      "from './extract-tool-calls-shell.js'",
+      'extractToolCallsFromResponseStage',
       'switch (entryPreflight.action)',
       'switch (enginePrepassAction.action)',
       'contextBase: entryContext.contextBase as ServerToolHandlerContext',
@@ -505,7 +492,8 @@ const TARGETS = [
     required: [
       'orchestrateServertoolEngine',
       'runServertoolEntryPreflight',
-      'extractToolCallsFromResponseStage',
+      'runServertoolResponseStageWithNative',
+      'applyServertoolResponseStageExtraction',
       'resolveServertoolEntryContext',
       'runServertoolResponseStagePrePass',
       'runServertoolExecutionStage',

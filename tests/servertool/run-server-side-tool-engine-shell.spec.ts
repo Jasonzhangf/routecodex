@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const runServertoolEntryPreflight = jest.fn();
-const extractToolCallsFromResponseStage = jest.fn();
 const resolveServertoolEntryContext = jest.fn();
 const runServertoolResponseStagePrePass = jest.fn();
 const runServertoolExecutionStage = jest.fn();
+const runServertoolResponseStageWithNative = jest.fn();
 const resolveServertoolRunEngineEntryPreflightDecisionWithNative = jest.fn((input: any) => input.entryPreflight);
 const resolveServertoolRunEngineEntryPreflightApplicationWithNative = jest.fn((input: any) =>
   input.entryPreflight.action === 'return_result'
@@ -22,13 +22,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.js',
   () => ({
     runServertoolEntryPreflight
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.js',
-  () => ({
-    extractToolCallsFromResponseStage
   })
 );
 
@@ -59,7 +52,8 @@ jest.unstable_mockModule(
     resolveServertoolRunEngineEntryPreflightDecisionWithNative,
     resolveServertoolRunEngineEntryPreflightApplicationWithNative,
     resolveServertoolRunEnginePrepassApplicationWithNative,
-    resolveServertoolRunEnginePrepassDecisionWithNative
+    resolveServertoolRunEnginePrepassDecisionWithNative,
+    runServertoolResponseStageWithNative
   })
 );
 
@@ -84,6 +78,10 @@ describe('run-server-side-tool-engine-shell', () => {
         ? { returnResult: true, result: input.decision.result }
         : { returnResult: false }
     );
+    runServertoolResponseStageWithNative.mockReturnValue({
+      normalizedPayload: { ok: true },
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
+    });
   });
 
   test('owns the full engine orchestration chain as a dedicated shell', async () => {
@@ -95,7 +93,9 @@ describe('run-server-side-tool-engine-shell', () => {
     );
 
     expect(source).toContain('runServertoolEntryPreflight');
-    expect(source).toContain('extractToolCallsFromResponseStage');
+    expect(source).toContain('runServertoolResponseStageWithNative');
+    expect(source).toContain('applyServertoolResponseStageExtraction');
+    expect(source).not.toContain('extractToolCallsFromResponseStage');
     expect(source).toContain('resolveServertoolEntryContext');
     expect(source).toContain('runServertoolResponseStagePrePass');
     expect(source).toContain('runServertoolExecutionStage');
@@ -147,7 +147,7 @@ describe('run-server-side-tool-engine-shell', () => {
       } as any)
     ).rejects.toThrow('[servertool] invalid entry preflight result action');
 
-    expect(extractToolCallsFromResponseStage).not.toHaveBeenCalled();
+    expect(runServertoolResponseStageWithNative).not.toHaveBeenCalled();
     expect(resolveServertoolEntryContext).not.toHaveBeenCalled();
     expect(runServertoolResponseStagePrePass).not.toHaveBeenCalled();
     expect(runServertoolExecutionStage).not.toHaveBeenCalled();
@@ -158,7 +158,10 @@ describe('run-server-side-tool-engine-shell', () => {
       action: 'continue',
       baseObject: { ok: true }
     });
-    extractToolCallsFromResponseStage.mockReturnValue([{ id: 'call_1', name: 'web_search' }]);
+    runServertoolResponseStageWithNative.mockReturnValue({
+      normalizedPayload: { ok: true },
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
+    });
     resolveServertoolEntryContext.mockReturnValue({
       action: 'continue',
       baseObject: { ok: true },
@@ -204,7 +207,7 @@ describe('run-server-side-tool-engine-shell', () => {
         providerProtocol: 'openai-responses'
       } as any)
     ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { ok: 'short' } });
-    expect(extractToolCallsFromResponseStage).not.toHaveBeenCalled();
+    expect(runServertoolResponseStageWithNative).not.toHaveBeenCalled();
   });
 
   test('forwards pre-pass early result without entering execution stage', async () => {
@@ -212,7 +215,10 @@ describe('run-server-side-tool-engine-shell', () => {
       action: 'continue',
       baseObject: { ok: true }
     });
-    extractToolCallsFromResponseStage.mockReturnValue([{ id: 'call_1', name: 'web_search' }]);
+    runServertoolResponseStageWithNative.mockReturnValue({
+      normalizedPayload: { ok: true },
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
+    });
     resolveServertoolEntryContext.mockReturnValue({
       action: 'continue',
       baseObject: { ok: true },
@@ -258,7 +264,10 @@ describe('run-server-side-tool-engine-shell', () => {
       action: 'continue',
       baseObject: { ok: true }
     });
-    extractToolCallsFromResponseStage.mockReturnValue([{ id: 'call_1', name: 'web_search' }]);
+    runServertoolResponseStageWithNative.mockReturnValue({
+      normalizedPayload: { ok: true },
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
+    });
     resolveServertoolEntryContext.mockReturnValue({
       action: 'continue',
       baseObject: { ok: true },

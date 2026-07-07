@@ -5530,33 +5530,11 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
-  const extractToolCallsShell = readRequired(TS_EXTRACT_TOOL_CALLS_SHELL);
-  for (const marker of [
-    'export const extractToolCallsFromResponseStage =',
-    'runServertoolResponseStageWithNative',
-    "stage.normalizedPayload != null && typeof stage.normalizedPayload === 'object'",
-    '? stage.normalizedPayload',
-    'replaceJsonObjectInPlace'
-  ]) {
-    if (!extractToolCallsShell.includes(marker)) {
-      fail(
-        'servertool-extract-tool-calls-shell-owner',
-        `extract-tool-calls-shell.ts must keep extraction owner marker ${marker}`
-      );
-    }
-  }
-  for (const marker of [
-    'function asObject(',
-    "stage.normalizedPayload && typeof stage.normalizedPayload === 'object'",
-    'stage.normalizedPayload as JsonObject',
-  ]) {
-    if (extractToolCallsShell.includes(marker)) {
-      fail(
-        'servertool-extract-tool-calls-shell-owner',
-        `extract-tool-calls-shell.ts must not restore local carrier/truthiness marker ${marker}`
-      );
-    }
-  }
+  assertMissingFile(
+    'servertool-extract-tool-calls-shell-deleted',
+    TS_EXTRACT_TOOL_CALLS_SHELL,
+    'extract-tool-calls-shell.ts must stay physically deleted; run-server-side-tool-engine-shell.ts owns the single native response-stage extraction call'
+  );
   const dispatchPreparationShell = readRequired(TS_DISPATCH_PREPARATION_SHELL);
   for (const marker of [
     "from '../conversion/runtime-metadata.js'",
@@ -5857,7 +5835,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     'export async function orchestrateServertoolEngine(',
     'runServertoolEntryPreflight',
-    'extractToolCallsFromResponseStage',
+    'runServertoolResponseStageWithNative',
+    'applyServertoolResponseStageExtraction',
     'resolveServertoolEntryContext',
     'runServertoolResponseStagePrePass',
     'runServertoolExecutionStage',
@@ -5873,6 +5852,8 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
+    "from './extract-tool-calls-shell.js'",
+    'extractToolCallsFromResponseStage',
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
     "import type { JsonObject } from '../conversion/hub/types/json.js';",
     'const base =',

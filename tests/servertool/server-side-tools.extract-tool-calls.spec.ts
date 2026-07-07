@@ -1,6 +1,16 @@
 import { describe, expect, test } from '@jest/globals';
-import { extractToolCallsFromResponseStage } from '../../sharedmodule/llmswitch-core/src/servertool/extract-tool-calls-shell.js';
+import { runServertoolResponseStageWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { mapNativeProviderResponseToChat } from '../sharedmodule/native-response-mapper-test-helper.js';
+
+function runResponseStage(chat: unknown, requestId = ''): {
+  normalizedPayload?: any;
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+} {
+  return runServertoolResponseStageWithNative(chat, requestId) as {
+    normalizedPayload?: any;
+    toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  };
+}
 
 describe('server-side-tools: extractToolCalls', () => {
   test('skips transcript-like malformed exec_command arguments', () => {
@@ -33,14 +43,14 @@ describe('server-side-tools: extractToolCalls', () => {
       ]
     } as any;
 
-    const calls = extractToolCallsFromResponseStage(chat);
+    const calls = runResponseStage(chat).toolCalls;
     expect(calls).toHaveLength(1);
     expect(calls[0]?.id).toBe('good_exec_call');
     expect(calls[0]?.name).toBe('exec_command');
   });
 
   test('fails fast when assistant tool_call id is missing', () => {
-    expect(() => extractToolCallsFromResponseStage({
+    expect(() => runResponseStage({
       choices: [
         {
           message: {
@@ -61,7 +71,7 @@ describe('server-side-tools: extractToolCalls', () => {
   });
 
   test('assigns canonical ids for allowed internal servertools at extraction source', () => {
-    const calls = extractToolCallsFromResponseStage({
+    const calls = runResponseStage({
       choices: [
         {
           message: {
@@ -78,7 +88,7 @@ describe('server-side-tools: extractToolCalls', () => {
           }
         }
       ]
-    } as any, 'req-continue-source-id');
+    } as any, 'req-continue-source-id').toolCalls;
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.name).toBe('continue_execution');
@@ -104,10 +114,11 @@ describe('server-side-tools: extractToolCalls', () => {
         } as any
     ) as any;
 
-    const calls = extractToolCallsFromResponseStage(chat, 'req-anthropic-tool-use-id');
+    const stage = runResponseStage(chat, 'req-anthropic-tool-use-id');
+    const calls = stage.toolCalls;
     expect(calls).toHaveLength(1);
     expect(calls[0]?.name).toBe('exec_command');
     expect(calls[0]?.id).toBe('call_97cb11e6620746fc9a33d1a1');
-    expect(chat?.choices?.[0]?.message?.tool_calls?.[0]?.id).toBe('call_97cb11e6620746fc9a33d1a1');
+    expect(stage.normalizedPayload?.choices?.[0]?.message?.tool_calls?.[0]?.id).toBe('call_97cb11e6620746fc9a33d1a1');
   });
 });

@@ -1455,8 +1455,32 @@ export function runServertoolResponseStageWithNative(payload: unknown, requestId
     throw new Error('[llmswitch-bridge] runServertoolResponseStageJson not available');
   }
   const payloadJson = JSON.stringify(payload);
-  const raw = fn(payloadJson, requestId);
-  return JSON.parse(raw);
+  let raw: unknown;
+  try {
+    raw = fn(payloadJson, requestId);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(`[llmswitch-bridge] runServertoolResponseStageJson native error: ${detail}`);
+  }
+  if (raw instanceof Error) {
+    throw new Error(`[llmswitch-bridge] runServertoolResponseStageJson native error: ${raw.message || 'unknown error'}`);
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { message?: unknown }).message === 'string') {
+    throw new Error(`[llmswitch-bridge] runServertoolResponseStageJson native error: ${String((raw as { message: unknown }).message)}`);
+  }
+  if (typeof raw !== 'string') {
+    throw new Error('[llmswitch-bridge] runServertoolResponseStageJson returned non-string result');
+  }
+  const rawText = raw.trimStart();
+  if (rawText.startsWith('Error:')) {
+    throw new Error(rawText);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(`[llmswitch-bridge] runServertoolResponseStageJson JSON parse failed: ${detail}; raw=${raw}`);
+  }
 }
 
 export function planServertoolResponseStageGateWithNative(input: unknown): unknown {
