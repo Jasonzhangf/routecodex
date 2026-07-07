@@ -405,6 +405,28 @@ export function planAuthFileResolutionNativeSync(input) {
     }
     return output;
 }
+export function planRouteCodexConfigLoaderPathsNativeSync(input) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.planRouteCodexConfigLoaderPathsJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] planRouteCodexConfigLoaderPathsJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({
+        explicitPath: input.explicitPath,
+        routecodexProviderDir: input.routecodexProviderDir,
+        rccProviderDir: input.rccProviderDir
+    })));
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid payload');
+    }
+    if (typeof output.explicitPath !== 'undefined' && typeof output.explicitPath !== 'string') {
+        throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid explicitPath');
+    }
+    if (typeof output.providerRootDir !== 'undefined' && typeof output.providerRootDir !== 'string') {
+        throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid providerRootDir');
+    }
+    return output;
+}
 function safeBridgeCwd() {
     try {
         const cwd = process.cwd();

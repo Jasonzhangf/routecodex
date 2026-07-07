@@ -497,6 +497,40 @@ export function planAuthFileResolutionNativeSync(input: {
   };
 }
 
+export function planRouteCodexConfigLoaderPathsNativeSync(input: {
+  explicitPath?: string;
+  routecodexProviderDir?: string;
+  rccProviderDir?: string;
+}): {
+  explicitPath?: string;
+  providerRootDir?: string;
+} {
+  const binding = loadNativeBindingForConfigCodec();
+  const fn = binding.planRouteCodexConfigLoaderPathsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] planRouteCodexConfigLoaderPathsJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    explicitPath: input.explicitPath,
+    routecodexProviderDir: input.routecodexProviderDir,
+    rccProviderDir: input.rccProviderDir
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid payload');
+  }
+  const plan = output as AnyRecord;
+  if (typeof plan.explicitPath !== 'undefined' && typeof plan.explicitPath !== 'string') {
+    throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid explicitPath');
+  }
+  if (typeof plan.providerRootDir !== 'undefined' && typeof plan.providerRootDir !== 'string') {
+    throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid providerRootDir');
+  }
+  return plan as {
+    explicitPath?: string;
+    providerRootDir?: string;
+  };
+}
+
 function safeBridgeCwd(): string | undefined {
   try {
     const cwd = process.cwd();

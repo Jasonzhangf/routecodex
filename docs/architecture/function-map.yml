@@ -2742,11 +2742,13 @@ owners:
       - RccPathResolveInput
       - RouteCodexConfigPathResolveInput
       - AuthFileResolvePlanInput
+      - RouteCodexConfigLoaderPathPlanInput
     canonical_builders:
       - resolve_rcc_user_dir_for_host_with_env
       - resolve_rcc_path_for_host_with_env
       - resolve_routecodex_config_path_for_host
       - plan_auth_file_resolution_for_host
+      - plan_routecodex_config_loader_paths_for_host
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
@@ -2755,6 +2757,7 @@ owners:
       - src/config/config-paths.ts
       - src/config/user-data-paths.ts
       - src/config/auth-file-resolver.ts
+      - src/config/routecodex-config-loader.ts
       - src/server/handlers/config-admin-handler.ts
       - src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts
       - src/commands/validate.ts

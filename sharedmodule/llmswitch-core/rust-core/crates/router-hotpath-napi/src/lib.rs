@@ -1365,6 +1365,17 @@ struct AuthFileResolvePlanInputJson {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct RouteCodexConfigLoaderPathPlanInputJson {
+    #[serde(default)]
+    explicit_path: Option<String>,
+    #[serde(default)]
+    routecodex_provider_dir: Option<String>,
+    #[serde(default)]
+    rcc_provider_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RouteCodexConfigPathResolveInputJson {
     #[serde(default)]
     preferred_path: Option<String>,
@@ -1446,6 +1457,20 @@ pub fn plan_auth_file_resolution_json(input_json: String) -> NapiResult<String> 
         },
     )
     .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&plan).map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi(js_name = "planRouteCodexConfigLoaderPathsJson")]
+pub fn plan_routecodex_config_loader_paths_json(input_json: String) -> NapiResult<String> {
+    let input: RouteCodexConfigLoaderPathPlanInputJson = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let plan = virtual_router_engine::instructions::plan_routecodex_config_loader_paths_for_host(
+        virtual_router_engine::instructions::RouteCodexConfigLoaderPathPlanInput {
+            explicit_path: input.explicit_path.as_deref(),
+            routecodex_provider_dir: input.routecodex_provider_dir.as_deref(),
+            rcc_provider_dir: input.rcc_provider_dir.as_deref(),
+        },
+    );
     serde_json::to_string(&plan).map_err(|error| napi::Error::from_reason(error.to_string()))
 }
 

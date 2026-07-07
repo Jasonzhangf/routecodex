@@ -1,12 +1,12 @@
 // feature_id: config.user_config_materialization
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { resolveRouteCodexConfigPath } from './config-paths.js';
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
 import type { UnknownRecord } from './user-config-codec.js';
 import { materializeRouteCodexConfig } from './user-config-loader.js';
 import { parseUserConfigText } from './user-config-codec.js';
 import { detectUserConfigFormat } from './user-config-codec.js';
+import { planRouteCodexConfigLoaderPathsNativeSync } from '../modules/llmswitch/bridge.js';
 
 export interface LoadedRouteCodexConfig {
   configPath: string;
@@ -15,14 +15,18 @@ export interface LoadedRouteCodexConfig {
 }
 
 export async function loadRouteCodexConfig(explicitPath?: string): Promise<LoadedRouteCodexConfig> {
-  const configPath = await resolveConfigPath(explicitPath);
+  const plan = planRouteCodexConfigLoaderPathsNativeSync({
+    explicitPath,
+    routecodexProviderDir: process.env.ROUTECODEX_PROVIDER_DIR,
+    rccProviderDir: process.env.RCC_PROVIDER_DIR,
+  });
+  const configPath = plan.explicitPath ?? await resolveConfigPath();
   const raw = await fs.readFile(configPath, 'utf-8');
   const format = detectUserConfigFormat(configPath);
   const userConfig = parseUserConfigText(raw, format);
-  const providerRootDir = resolveProviderRootDirFromEnv();
   const { userConfig: materializedUserConfig, providerProfiles } = await materializeRouteCodexConfig(
     userConfig,
-    providerRootDir
+    plan.providerRootDir
   );
 
   return {
@@ -34,23 +38,6 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
 
 export { collectV2ConfigSourceErrors } from './user-config-loader.js';
 
-
-function resolveProviderRootDirFromEnv(): string | undefined {
-  const candidates = [
-    process.env.ROUTECODEX_PROVIDER_DIR,
-    process.env.RCC_PROVIDER_DIR
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return path.resolve(candidate.trim());
-    }
-  }
-  return undefined;
-}
-
-async function resolveConfigPath(explicit?: string): Promise<string> {
-  if (explicit && explicit.trim()) {
-    return path.resolve(explicit.trim());
-  }
+async function resolveConfigPath(): Promise<string> {
   return resolveRouteCodexConfigPath();
 }

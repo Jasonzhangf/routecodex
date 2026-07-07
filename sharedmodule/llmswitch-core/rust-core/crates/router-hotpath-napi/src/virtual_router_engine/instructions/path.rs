@@ -198,6 +198,12 @@ pub(crate) struct AuthFileResolvePlanInput<'a> {
     pub routecodex_home: Option<&'a str>,
 }
 
+pub(crate) struct RouteCodexConfigLoaderPathPlanInput<'a> {
+    pub explicit_path: Option<&'a str>,
+    pub routecodex_provider_dir: Option<&'a str>,
+    pub rcc_provider_dir: Option<&'a str>,
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AuthFileResolvePlan {
@@ -208,6 +214,15 @@ pub(crate) struct AuthFileResolvePlan {
     pub file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_key: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RouteCodexConfigLoaderPathPlan {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explicit_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_root_dir: Option<String>,
 }
 
 pub(crate) fn plan_auth_file_resolution_for_host(
@@ -245,6 +260,34 @@ pub(crate) fn plan_auth_file_resolution_for_host(
         file_path: Some(file_path.to_string_lossy().to_string()),
         cache_key: Some(input.key_id.to_string()),
     })
+}
+
+pub(crate) fn plan_routecodex_config_loader_paths_for_host(
+    input: RouteCodexConfigLoaderPathPlanInput<'_>,
+) -> RouteCodexConfigLoaderPathPlan {
+    let explicit_path = input
+        .explicit_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            absolutize_path(PathBuf::from(value))
+                .to_string_lossy()
+                .to_string()
+        });
+    let provider_root_dir = [input.routecodex_provider_dir, input.rcc_provider_dir]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(|value| {
+            absolutize_path(PathBuf::from(value))
+                .to_string_lossy()
+                .to_string()
+        });
+    RouteCodexConfigLoaderPathPlan {
+        explicit_path,
+        provider_root_dir,
+    }
 }
 
 const DEFAULT_CONFIG_NAME: &str = "config.toml";
@@ -410,9 +453,10 @@ fn scan_config_directory(
 #[cfg(test)]
 mod host_path_tests {
     use super::{
-        plan_auth_file_resolution_for_host, resolve_rcc_path_for_host,
-        resolve_rcc_user_dir_for_host, resolve_routecodex_config_path_for_host,
-        AuthFileResolvePlanInput, RouteCodexConfigPathResolveInput,
+        plan_auth_file_resolution_for_host, plan_routecodex_config_loader_paths_for_host,
+        resolve_rcc_path_for_host, resolve_rcc_user_dir_for_host,
+        resolve_routecodex_config_path_for_host, AuthFileResolvePlanInput,
+        RouteCodexConfigLoaderPathPlanInput, RouteCodexConfigPathResolveInput,
     };
     use std::env;
     use std::fs;
@@ -679,6 +723,69 @@ mod host_path_tests {
                 root.join(".rcc")
                     .join("auth")
                     .join("secret")
+                    .to_str()
+                    .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn plan_routecodex_config_loader_paths_matches_ts_explicit_path_resolution() {
+        let root = temp_root("loader-explicit");
+        let relative = "config.toml";
+        let current_dir = env::current_dir().unwrap();
+        let plan =
+            plan_routecodex_config_loader_paths_for_host(RouteCodexConfigLoaderPathPlanInput {
+                explicit_path: Some(relative),
+                routecodex_provider_dir: None,
+                rcc_provider_dir: None,
+            });
+        assert_eq!(
+            plan.explicit_path.as_deref(),
+            Some(current_dir.join(relative).to_str().unwrap())
+        );
+
+        let absolute = root.join("config.toml");
+        let plan =
+            plan_routecodex_config_loader_paths_for_host(RouteCodexConfigLoaderPathPlanInput {
+                explicit_path: Some(absolute.to_str().unwrap()),
+                routecodex_provider_dir: None,
+                rcc_provider_dir: None,
+            });
+        assert_eq!(
+            plan.explicit_path.as_deref(),
+            Some(absolute.to_str().unwrap())
+        );
+    }
+
+    #[test]
+    fn plan_routecodex_config_loader_paths_matches_provider_env_precedence() {
+        let root = temp_root("loader-provider");
+        let routecodex_provider_dir = root.join("routecodex-provider");
+        let rcc_provider_dir = root.join("rcc-provider");
+        let plan =
+            plan_routecodex_config_loader_paths_for_host(RouteCodexConfigLoaderPathPlanInput {
+                explicit_path: None,
+                routecodex_provider_dir: Some(routecodex_provider_dir.to_str().unwrap()),
+                rcc_provider_dir: Some(rcc_provider_dir.to_str().unwrap()),
+            });
+        assert_eq!(
+            plan.provider_root_dir.as_deref(),
+            Some(routecodex_provider_dir.to_str().unwrap())
+        );
+
+        let plan =
+            plan_routecodex_config_loader_paths_for_host(RouteCodexConfigLoaderPathPlanInput {
+                explicit_path: None,
+                routecodex_provider_dir: Some("   "),
+                rcc_provider_dir: Some("relative-provider"),
+            });
+        assert_eq!(
+            plan.provider_root_dir.as_deref(),
+            Some(
+                env::current_dir()
+                    .unwrap()
+                    .join("relative-provider")
                     .to_str()
                     .unwrap()
             )
