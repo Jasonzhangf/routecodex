@@ -27342,3 +27342,26 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Routing evidence: dry-run thinking request on 5520 selected cc.key1.gpt-5.5 because fwd.free.gpt-5.5 is first and available. Candidate order is cc -> asxs.crsa -> asxs.crsb -> 55ai -> 1token. Therefore 55AI is not expected to hit while free CC is healthy, and also not before ASXS in paid.
 - Gates: verify:architecture-ts-owner-ban PASS; verify:provider-failure-ban-blackbox PASS with scenario503.providerHealthFiles=[] and restartRequest.primaryHitsDelta=1.
 - Boundary: no code change in this check. If Jason wants 55AI earlier than ASXS or CC, change live config priority; current code behavior matches current config order.
+
+# 2026-07-07: Config snapshot dir resolution is Rust-owned
+
+- Scope: close `src/config/user-data-paths.ts` snapshot dir env resolution after pre-wire TS/native parity; no live startup and no `~/.rcc` edits.
+- Change:
+  - Added Rust `RccSnapshotsDirResolveInput` / `resolve_rcc_snapshots_dir_for_host_with_env` and NAPI/bridge `resolveRccSnapshotsDirJson` / `resolveRccSnapshotsDirNativeSync`.
+  - Added pre-wire parity blackbox `tests/config/user-data-snapshots-rust.spec.ts` for `RCC_SNAPSHOT_DIR` precedence, default under RCC user dir, and retired `~/.routecodex/codex-samples` rejection.
+  - Wired `src/config/user-data-paths.ts/js` to native for `resolveRccSnapshotsDirFromEnv`; removed TS `path.resolve` / `path.join` / `homedir` / retired snapshot helper logic from that file.
+  - Updated `config.path_resolution_surface` function/verification map so snapshot env precedence is Rust-owned.
+- Verification:
+  - Pre-wire Jest PASS: `tests/config/user-data-snapshots-rust.spec.ts` + `tests/config/user-data-paths.spec.ts` = 2 suites / 9 tests.
+  - Post-wire Jest PASS: same 2 suites / 9 tests.
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi resolve_rcc_snapshots_dir --lib -- --nocapture` PASS: 2 tests.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - `npm run verify:config-path-resolution-rust` PASS: `resolve_rcc` 6 tests + config path 3 tests.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface -- --json` PASS after commit: entries 12, current non-native prod TS files 10, explicit native-linked TS shells 2.
+  - `git diff --cached --check` PASS before commit.
+- Boundary:
+  - Commit: `76dc83c refactor(config): native snapshots dir plan`.
+  - `cargo fmt --check` at crate scope is blocked by unrelated existing Rust formatting drift across files outside this slice; not used as slice evidence.
+  - Remaining config TS is file IO / atomic write / injected fs shell / env publishing / authfile content read-cache / loader orchestration. These cannot shrink further without moving Node IO and test-injected fs boundaries into Rust; semantic parsing/path decisions are now native-owned.
