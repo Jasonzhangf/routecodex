@@ -228,6 +228,48 @@ export function updateRouteCodexTomlStringScalarInTableSync(input) {
         value: String(input.value ?? '')
     })));
 }
+export function decodeRouteCodexUserConfigFileSync(configPath) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.decodeRouteCodexUserConfigFileJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] decodeRouteCodexUserConfigFileJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') })));
+    return parseDecodedConfigFileOutput(output, 'user');
+}
+export function decodeRouteCodexProviderConfigFileSync(configPath) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.decodeRouteCodexProviderConfigFileJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] decodeRouteCodexProviderConfigFileJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') })));
+    return parseDecodedConfigFileOutput(output, 'provider');
+}
+export function decodeRouteCodexUserConfigTextSync(input) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.decodeRouteCodexUserConfigTextJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] decodeRouteCodexUserConfigTextJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({
+        raw: String(input.raw ?? ''),
+        ...(typeof input.configPath === 'string' ? { configPath: input.configPath } : {})
+    })));
+    return parseDecodedConfigTextOutput(output, 'user');
+}
+export function decodeRouteCodexProviderConfigTextSync(input) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.decodeRouteCodexProviderConfigTextJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] decodeRouteCodexProviderConfigTextJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({
+        raw: String(input.raw ?? ''),
+        ...(typeof input.configPath === 'string' ? { configPath: input.configPath } : {})
+    })));
+    return parseDecodedConfigTextOutput(output, 'provider');
+}
 export async function coerceRouteCodexProviderConfigV2(parsed, fallbackProviderId) {
     return coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId);
 }
@@ -360,6 +402,42 @@ function safeBridgeCwd() {
     catch {
         return undefined;
     }
+}
+function parseDecodedConfigFileOutput(output, kind) {
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error(`[llmswitch-bridge] RouteCodex ${kind} config decoder returned invalid payload`);
+    }
+    const record = output;
+    if (typeof record.path !== 'string' ||
+        record.format !== 'toml' ||
+        typeof record.raw !== 'string' ||
+        !record.parsed ||
+        typeof record.parsed !== 'object' ||
+        Array.isArray(record.parsed)) {
+        throw new Error(`[llmswitch-bridge] RouteCodex ${kind} config decoder returned invalid shape`);
+    }
+    return {
+        path: record.path,
+        format: 'toml',
+        raw: record.raw,
+        parsed: record.parsed,
+    };
+}
+function parseDecodedConfigTextOutput(output, kind) {
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error(`[llmswitch-bridge] RouteCodex ${kind} config text decoder returned invalid payload`);
+    }
+    const record = output;
+    if (record.format !== 'toml' ||
+        !record.parsed ||
+        typeof record.parsed !== 'object' ||
+        Array.isArray(record.parsed)) {
+        throw new Error(`[llmswitch-bridge] RouteCodex ${kind} config text decoder returned invalid shape`);
+    }
+    return {
+        format: 'toml',
+        parsed: record.parsed,
+    };
 }
 export function resolveRouteCodexConfigPathNativeSync(options = {}) {
     const binding = loadNativeBindingForConfigCodec();

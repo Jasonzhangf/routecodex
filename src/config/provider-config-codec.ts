@@ -1,10 +1,11 @@
 // feature_id: config.provider_config_codec
 import fs from 'node:fs/promises';
 
-import { coerceRouteCodexProviderConfigV2Sync } from '../modules/llmswitch/bridge.js';
-import { isRecord } from '../utils/common-utils.js';
+import {
+  coerceRouteCodexProviderConfigV2Sync,
+  decodeRouteCodexProviderConfigTextSync,
+} from '../modules/llmswitch/bridge.js';
 import type { ProviderConfigV2 } from './provider-v2-loader.js';
-import { parseTomlRecord } from './toml-basic.js';
 
 export type ProviderConfigFormat = 'toml';
 type UnknownRecord = Record<string, unknown>;
@@ -26,22 +27,21 @@ export function detectProviderConfigFormat(configPath: string): ProviderConfigFo
 }
 
 export function parseProviderConfigText(raw: string, format: ProviderConfigFormat): UnknownRecord {
-  if (!raw.trim()) {
-    return {};
+  if (format === 'toml') {
+    return decodeRouteCodexProviderConfigTextSync({ raw }).parsed;
   }
-  const parsed = parseTomlRecord(raw);
-  return isRecord(parsed) ? (parsed as UnknownRecord) : {};
+  throw new Error('[config] provider config JSON support removed; parser only accepts TOML');
 }
 
 export async function decodeProviderConfigFile(configPath: string): Promise<DecodedProviderConfigFile> {
+  detectProviderConfigFormat(configPath);
   const raw = await fs.readFile(configPath, 'utf8');
-  const format = detectProviderConfigFormat(configPath);
-  const parsed = parseProviderConfigText(raw, format);
+  const decoded = decodeRouteCodexProviderConfigTextSync({ raw, configPath });
   return {
     path: configPath,
-    format,
+    format: decoded.format,
     raw,
-    parsed
+    parsed: decoded.parsed,
   };
 }
 
@@ -49,14 +49,14 @@ export function decodeProviderConfigFileSync(
   configPath: string,
   fsImpl: ReadFileSyncLike
 ): DecodedProviderConfigFile {
+  detectProviderConfigFormat(configPath);
   const raw = fsImpl.readFileSync(configPath, 'utf8');
-  const format = detectProviderConfigFormat(configPath);
-  const parsed = parseProviderConfigText(raw, format);
+  const decoded = decodeRouteCodexProviderConfigTextSync({ raw, configPath });
   return {
     path: configPath,
-    format,
+    format: decoded.format,
     raw,
-    parsed
+    parsed: decoded.parsed,
   };
 }
 

@@ -21,6 +21,7 @@ mod chat_web_search_tool_schema;
 mod compat_field_mapping;
 mod compat_harvest_tool_calls_from_text;
 mod compat_tool_schema;
+mod config_file_codec;
 mod config_provider_codec;
 mod config_toml_codec;
 mod direct_decision;
@@ -234,6 +235,28 @@ pub fn update_route_codex_toml_string_scalar_in_table_json(
     input_json: String,
 ) -> NapiResult<String> {
     config_toml_codec::update_toml_string_scalar_in_table_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn decode_route_codex_user_config_file_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::decode_user_config_file_json(&input_json).map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn decode_route_codex_provider_config_file_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::decode_provider_config_file_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn decode_route_codex_user_config_text_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::decode_user_config_text_json(&input_json).map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn decode_route_codex_provider_config_text_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::decode_provider_config_text_json(&input_json)
         .map_err(napi::Error::from_reason)
 }
 

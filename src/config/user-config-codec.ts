@@ -2,8 +2,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { isRecord } from '../utils/common-utils.js';
-import { parseTomlRecord } from './toml-basic.js';
+import {
+  decodeRouteCodexUserConfigTextSync,
+} from '../modules/llmswitch/bridge.js';
 
 export type UserConfigFormat = 'toml';
 export type UnknownRecord = Record<string, unknown>;
@@ -26,25 +27,21 @@ export function detectUserConfigFormat(configPath: string): UserConfigFormat {
 }
 
 export function parseUserConfigText(raw: string, format: UserConfigFormat): UnknownRecord {
-  if (!raw.trim()) {
-    return {};
-  }
   if (format === 'toml') {
-    const parsed = parseTomlRecord(raw);
-    return isRecord(parsed) ? (parsed as UnknownRecord) : {};
+    return decodeRouteCodexUserConfigTextSync({ raw }).parsed;
   }
   throw new Error('[config] user config JSON support removed; parser only accepts TOML');
 }
 
 export async function decodeUserConfigFile(configPath: string): Promise<DecodedUserConfigFile> {
+  detectUserConfigFormat(configPath);
   const raw = await fs.readFile(configPath, 'utf8');
-  const format = detectUserConfigFormat(configPath);
-  const parsed = parseUserConfigText(raw, format);
+  const decoded = decodeRouteCodexUserConfigTextSync({ raw, configPath });
   return {
     path: configPath,
-    format,
+    format: decoded.format,
     raw,
-    parsed
+    parsed: decoded.parsed,
   };
 }
 
@@ -52,13 +49,13 @@ export function decodeUserConfigFileSync(
   configPath: string,
   fsImpl: ReadFileSyncLike
 ): DecodedUserConfigFile {
+  detectUserConfigFormat(configPath);
   const raw = fsImpl.readFileSync(configPath, 'utf8');
-  const format = detectUserConfigFormat(configPath);
-  const parsed = parseUserConfigText(raw, format);
+  const decoded = decodeRouteCodexUserConfigTextSync({ raw, configPath });
   return {
     path: configPath,
-    format,
+    format: decoded.format,
     raw,
-    parsed
+    parsed: decoded.parsed,
   };
 }
