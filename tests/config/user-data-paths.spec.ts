@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import {
   ensureRccUserDirEnvironment,
+  resolveRccPath,
   resolveRccProviderDir,
   resolveRccSnapshotsDirFromEnv,
   resolveRccSubdir,
@@ -103,5 +104,15 @@ describe('user-data-paths', () => {
     const home = await createTempDir('rcc-layout-');
     expect(resolveRccSubdir('provider', home)).toBe(path.join(home, '.rcc', 'provider'));
     expect(resolveRccProviderDir(home)).toBe(path.join(home, '.rcc', 'provider'));
+  });
+
+  it('keeps resolveRccPath equivalent to node path.join for normalized segments', async () => {
+    delete process.env.RCC_HOME;
+    delete process.env.ROUTECODEX_USER_DIR;
+    delete process.env.ROUTECODEX_HOME;
+
+    const home = await createTempDir('rcc-path-join-');
+    process.env.RCC_HOME = path.join(home, '.rcc');
+    expect(resolveRccPath('logs', '..', '/provider')).toBe(path.join(home, '.rcc', 'provider'));
   });
 });

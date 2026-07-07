@@ -1,9 +1,11 @@
 import path from 'node:path';
 import { homedir } from 'node:os';
+import {
+  resolveRccPathNativeSync,
+  resolveRccUserDirNativeSync
+} from '../modules/llmswitch/bridge/routing-integrations.js';
 
-const PRIMARY_DIR_NAME = '.rcc';
 const LEGACY_DIR_NAME = '.routecodex';
-const USER_DIR_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'] as const;
 const SNAPSHOT_DIR_ENV_KEYS = ['RCC_SNAPSHOT_DIR', 'ROUTECODEX_SNAPSHOT_DIR'] as const;
 export const RCC_SUBDIRS = {
   auth: 'auth',
@@ -45,12 +47,6 @@ function expandHome(value: string, homeDir?: string): string {
   return path.join(resolveHomeDir(homeDir), value.slice(2));
 }
 
-function isRetiredUserDirPath(value: string, homeDir?: string): boolean {
-  const normalized = path.resolve(expandHome(value, homeDir));
-  const retired = resolveRetiredRouteCodexUserDir(homeDir);
-  return normalized === retired;
-}
-
 function resolveRetiredSnapshotsDir(homeDir?: string): string {
   return path.join(resolveRetiredRouteCodexUserDir(homeDir), RCC_SUBDIRS.snapshots);
 }
@@ -61,12 +57,6 @@ function isRetiredSnapshotsDirPath(value: string, homeDir?: string): boolean {
   return normalized === retired;
 }
 
-function assertNotRetiredUserDirEnv(key: string, raw: string, homeDir?: string): void {
-  if (isRetiredUserDirPath(raw, homeDir)) {
-    throw new Error(`[config] ${key} points to retired ~/.routecodex root; use ~/.rcc`);
-  }
-}
-
 function assertNotRetiredSnapshotsDirEnv(key: string, raw: string, homeDir?: string): void {
   if (isRetiredSnapshotsDirPath(raw, homeDir)) {
     throw new Error(`[config] ${key} points to retired ~/.routecodex/codex-samples root; use ~/.rcc/codex-samples`);
@@ -74,14 +64,7 @@ function assertNotRetiredSnapshotsDirEnv(key: string, raw: string, homeDir?: str
 }
 
 export function resolveRccUserDir(homeDir?: string): string {
-  for (const key of USER_DIR_ENV_KEYS) {
-    const raw = String(process.env[key] || '').trim();
-    if (raw) {
-      assertNotRetiredUserDirEnv(key, raw, homeDir);
-      return path.resolve(expandHome(raw, homeDir));
-    }
-  }
-  return path.join(resolveHomeDir(homeDir), PRIMARY_DIR_NAME);
+  return resolveRccUserDirNativeSync(homeDir);
 }
 
 function resolveRetiredRouteCodexUserDir(homeDir?: string): string {
@@ -89,11 +72,11 @@ function resolveRetiredRouteCodexUserDir(homeDir?: string): string {
 }
 
 export function resolveRccPath(...segments: string[]): string {
-  return path.join(resolveRccUserDir(), ...segments);
+  return resolveRccPathNativeSync(segments);
 }
 
 export function resolveRccSubdir(key: RccSubdirKey, homeDir?: string): string {
-  return path.join(resolveRccUserDir(homeDir), RCC_SUBDIRS[key]);
+  return resolveRccPathNativeSync([RCC_SUBDIRS[key]], homeDir);
 }
 
 export function resolveRccAuthDir(homeDir?: string): string {
@@ -176,21 +159,15 @@ export function ensureRccUserDirEnvironment(homeDir?: string): string {
   const userDir = resolveRccUserDir(homeDir);
   const snapshotsDir = resolveRccSnapshotsDirFromEnv(homeDir);
   const rccHome = String(process.env.RCC_HOME || '').trim();
-  if (rccHome) {
-    assertNotRetiredUserDirEnv('RCC_HOME', rccHome, homeDir);
-  } else {
+  if (!rccHome) {
     process.env.RCC_HOME = userDir;
   }
   const routeUserDir = String(process.env.ROUTECODEX_USER_DIR || '').trim();
-  if (routeUserDir) {
-    assertNotRetiredUserDirEnv('ROUTECODEX_USER_DIR', routeUserDir, homeDir);
-  } else {
+  if (!routeUserDir) {
     process.env.ROUTECODEX_USER_DIR = userDir;
   }
   const routeHome = String(process.env.ROUTECODEX_HOME || '').trim();
-  if (routeHome) {
-    assertNotRetiredUserDirEnv('ROUTECODEX_HOME', routeHome, homeDir);
-  } else {
+  if (!routeHome) {
     process.env.ROUTECODEX_HOME = userDir;
   }
   for (const key of SNAPSHOT_DIR_ENV_KEYS) {

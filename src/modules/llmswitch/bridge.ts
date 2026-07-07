@@ -105,6 +105,8 @@ export {
   planRouteCodexProviderConfigV2FilesSync,
   resolveRouteCodexProviderConfigV2IdentitySync,
   loadRouteCodexProviderConfigsV2FromRootSync,
+  resolveRccPathNativeSync,
+  resolveRccUserDirNativeSync,
   getHubPipelineCtor,
   getHubPipelineCtorForImpl,
   resolveBaseDir

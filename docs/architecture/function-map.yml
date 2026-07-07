@@ -2733,16 +2733,20 @@ owners:
 
   - feature_id: config.path_resolution_surface
     status: active
-    summary: "user config path resolution and directory scan truth live in shared resolver; callers must not invent fallback paths"
-    owner_kind: ts_runtime_owner
-    owner_scope: "user config path resolution and directory scan truth live in shared resolver; callers must not invent fallback paths"
-    owner_module: src/config/config-paths.ts
+    summary: "RouteCodex user dir and RCC subpath resolution are Rust-owned; TS path callers stay native shells"
+    owner_kind: rust_ssot
+    owner_scope: "Rust owns RCC user dir env precedence, retired ~/.routecodex rejection, default ~/.rcc resolution, and RCC subpath joining; TS user-data-paths only publishes process env and keeps snapshot-env shell semantics"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
     canonical_types:
-      - ConfigPathOptions
-      - ConfigPathResult
+      - RccUserDirResolveInput
+      - RccPathResolveInput
     canonical_builders:
-      - resolveRouteCodexConfigPath
+      - resolve_rcc_user_dir_for_host_with_env
+      - resolve_rcc_path_for_host_with_env
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/config/unified-config-paths.ts
       - src/config/config-paths.ts
       - src/config/user-data-paths.ts
@@ -2760,14 +2764,16 @@ owners:
     forbidden_paths:
       - src/providers
     required_tests:
+      - tests/config/user-data-paths.spec.ts
       - tests/config/unified-config-paths.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
-    migration_target: ts
+      - npm run verify:config-path-resolution-rust
+    migration_target: rust
     notes:
       - "Missing config is fail-fast; no fallback path result is allowed."
-      - "Callers may pass explicit path, but auto-resolution truth stays in shared resolver."
+      - "RCC user dir env precedence and default ~/.rcc path resolution must not be reimplemented in TS; src/config/user-data-paths.ts is a thin native shell plus snapshot-env publisher."
 
   - feature_id: config.toml_codec
     status: active

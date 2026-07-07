@@ -27244,3 +27244,27 @@ Complete SSE rustification status (34 TS files):
 - Architecture review: map hygiene only, no semantic change, no ts_semantic_debt added.
 - D1 clarification: prior model session described user-data-paths rustification plan but did not commit it. Current state: src/config/user-data-paths.ts (full logic, 20+ callers in src/) + llmswitch-core/src/runtime/user-data-paths.ts (35 LOC native facade). minimal-ts-surface.json correctly classifies it as ts_io_shell_ok. Rust migration remains future L2 item.
 - Boundary: mode is L1 report-only. Action was limited to gate-blocking map hygiene fix. No managed live restart/replay.
+
+# 2026-07-07: RCC user path resolution is Rust-owned
+
+- Scope: continue config module rustification without wiring/live startup and without touching `~/.rcc`.
+- Change:
+  - `config.path_resolution_surface` moved from TS owner to Rust SSOT in `virtual_router_engine/instructions/path.rs`.
+  - NAPI `resolveRccUserDirJson` / `resolveRccPathJson` now accept explicit env snapshots for `RCC_HOME`, `ROUTECODEX_USER_DIR`, and `ROUTECODEX_HOME`; TS wrappers pass `process.env` on each call because Jest VM env mutation is not a reliable Rust `std::env` truth.
+  - `src/config/user-data-paths.ts/js` now delegates RCC user dir/subpath resolution to native and retains only snapshot env handling plus process-env publishing.
+  - Rust path join now preserves old Node `path.join()` lexical behavior for `..` and absolute-looking segments; added JS/Rust blackbox coverage.
+  - Added `npm run verify:config-path-resolution-rust` and updated function/verification maps.
+- Verification:
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi resolve_rcc --lib -- --nocapture` PASS: 4 tests.
+  - `npm run build:native-hotpath` PASS; required native exports OK.
+  - Focused config blackbox Jest PASS: 6 suites / 49 tests.
+  - Broader config matrix Jest printed PASS: 13 suites / 99 tests; it left an open handle and was interrupted after PASS output, so this is assertion evidence but not clean process-exit evidence.
+  - `npm run verify:config-path-resolution-rust` PASS.
+  - `npm run verify:config-toml-codec-rust` PASS: 7 tests.
+  - `npm run verify:config-provider-codec-rust` PASS: 9 tests.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `git diff --check` PASS.
+- Boundary:
+  - No runtime wiring, no managed restart, no live server startup, and no `~/.rcc` config edits were performed.
+  - Architecture review: no fallback or duplicate TS path resolver remains for RCC user dir/subpaths; TS snapshot-env shell remains because it is a separate snapshot config surface.

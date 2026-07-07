@@ -82,26 +82,44 @@ fn resolve_home_dir(home_dir: Option<&str>) -> Result<PathBuf, String> {
     Ok(absolutize_path(PathBuf::from(trimmed)))
 }
 
-pub(crate) fn resolve_rcc_user_dir_for_host(home_dir: Option<&str>) -> Result<PathBuf, String> {
+pub(crate) fn resolve_rcc_user_dir_for_host_with_env(
+    home_dir: Option<&str>,
+    env_values: &[(&str, Option<&str>)],
+) -> Result<PathBuf, String> {
     if let Some(explicit) = read_override_user_dir() {
         return Ok(explicit);
     }
     let home_dir = resolve_home_dir(home_dir)?;
     let legacy_dir = home_dir.join(".routecodex");
-    for key in ["RCC_HOME", "ROUTECODEX_USER_DIR", "ROUTECODEX_HOME"] {
-        if let Ok(value) = env::var(key) {
-            let raw = value.trim();
-            if raw.is_empty() {
-                continue;
-            }
-            let candidate = absolutize_path(expand_home(raw, &home_dir));
-            if candidate == legacy_dir {
-                continue;
-            }
-            return Ok(candidate);
+    for (key, value) in env_values {
+        let raw = value.unwrap_or("").trim();
+        if raw.is_empty() {
+            continue;
         }
+        let candidate = absolutize_path(expand_home(raw, &home_dir));
+        if candidate == legacy_dir {
+            return Err(format!(
+                "[config] {} points to retired ~/.routecodex root; use ~/.rcc",
+                key
+            ));
+        }
+        return Ok(candidate);
     }
     Ok(home_dir.join(".rcc"))
+}
+
+pub(crate) fn resolve_rcc_user_dir_for_host(home_dir: Option<&str>) -> Result<PathBuf, String> {
+    let rcc_home = env::var("RCC_HOME").ok();
+    let routecodex_user_dir = env::var("ROUTECODEX_USER_DIR").ok();
+    let routecodex_home = env::var("ROUTECODEX_HOME").ok();
+    resolve_rcc_user_dir_for_host_with_env(
+        home_dir,
+        &[
+            ("RCC_HOME", rcc_home.as_deref()),
+            ("ROUTECODEX_USER_DIR", routecodex_user_dir.as_deref()),
+            ("ROUTECODEX_HOME", routecodex_home.as_deref()),
+        ],
+    )
 }
 
 fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
@@ -112,11 +130,48 @@ pub(crate) fn resolve_rcc_path_for_host(
     segments: &[String],
     home_dir: Option<&str>,
 ) -> Result<PathBuf, String> {
-    let mut base = resolve_rcc_user_dir_for_host(home_dir)?;
+    resolve_rcc_path_for_host_with_env(
+        home_dir,
+        segments,
+        &[
+            ("RCC_HOME", env::var("RCC_HOME").ok().as_deref()),
+            (
+                "ROUTECODEX_USER_DIR",
+                env::var("ROUTECODEX_USER_DIR").ok().as_deref(),
+            ),
+            (
+                "ROUTECODEX_HOME",
+                env::var("ROUTECODEX_HOME").ok().as_deref(),
+            ),
+        ],
+    )
+}
+
+pub(crate) fn resolve_rcc_path_for_host_with_env(
+    home_dir: Option<&str>,
+    segments: &[String],
+    env_values: &[(&str, Option<&str>)],
+) -> Result<PathBuf, String> {
+    let base = resolve_rcc_user_dir_for_host_with_env(home_dir, env_values)?;
+    Ok(join_segments_like_node_path_join(base, segments))
+}
+
+fn join_segments_like_node_path_join(mut base: PathBuf, segments: &[String]) -> PathBuf {
     for segment in segments {
-        base.push(segment);
+        for component in Path::new(segment).components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    base.pop();
+                }
+                Component::Prefix(_) | Component::RootDir => {}
+                Component::Normal(value) => {
+                    base.push(value);
+                }
+            }
+        }
     }
-    Ok(base)
+    base
 }
 
 #[cfg(test)]
@@ -185,10 +240,9 @@ mod host_path_tests {
         let home = PathBuf::from("/tmp/rcc-legacy-probe");
         let legacy = home.join(".routecodex");
         let _rcc_home = EnvGuard::set("RCC_HOME", Some(legacy.to_str().unwrap()));
-        assert_eq!(
-            resolve_rcc_user_dir_for_host(Some(home.to_str().unwrap())).unwrap(),
-            home.join(".rcc")
-        );
+        let error = resolve_rcc_user_dir_for_host(Some(home.to_str().unwrap()))
+            .expect_err("retired RouteCodex root must fail fast");
+        assert!(error.contains("retired ~/.routecodex root"));
     }
 
     #[test]
@@ -205,6 +259,25 @@ mod host_path_tests {
             home.join(".rcc")
                 .join("logs")
                 .join("servertool-events.jsonl")
+        );
+    }
+
+    #[test]
+    fn resolve_rcc_path_for_host_matches_node_path_join_normalization() {
+        let _lock = lock_env();
+        let _env = clear_rcc_env();
+        let home = PathBuf::from("/tmp/rcc-path-normalize-probe");
+        assert_eq!(
+            resolve_rcc_path_for_host(
+                &[
+                    "logs".to_string(),
+                    "..".to_string(),
+                    "/provider".to_string()
+                ],
+                Some(home.to_str().unwrap()),
+            )
+            .unwrap(),
+            home.join(".rcc").join("provider")
         );
     }
 }

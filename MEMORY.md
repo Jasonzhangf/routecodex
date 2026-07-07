@@ -1425,6 +1425,14 @@
 - Required order for config/VR/pipeline wiring: source owner/map lookup -> module blackbox over fixtures copied from existing config shape -> old/new output comparison -> focused gates -> only then connection/wiring -> only then managed restart/live probe if explicitly in scope.
 - If blackbox is not complete, report "not wired" and the failing/unknown cases. Do not claim closure and do not start the server.
 
+# 2026-07-07: RCC user path resolution is Rust-owned
+
+- `config.path_resolution_surface` owns RCC user dir and subpath resolution through Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs`.
+- TS `src/config/user-data-paths.ts` must remain a native shell for `resolveRccUserDir()` / `resolveRccPath()` / `resolveRccSubdir()` and may keep only snapshot-env handling plus process-env publishing.
+- NAPI path resolver calls must pass explicit env snapshots for `RCC_HOME`, `ROUTECODEX_USER_DIR`, and `ROUTECODEX_HOME`; do not rely on Rust `std::env` seeing JS/Jest `process.env` mutations.
+- Rust path joining must preserve old Node `path.join()` lexical behavior for `..` and absolute-looking segment strings; `PathBuf::push` alone is not equivalent.
+- Verified on 2026-07-07 with Rust `resolve_rcc` tests (4), native hotpath build, focused config blackbox Jest (6 suites / 49 tests), broader config matrix PASS output (13 suites / 99 tests, open handle interrupted after PASS), root TS compile, TOML/provider Rust codec gates, function-map gate, and diff check. No managed live restart/replay or `~/.rcc` edits were performed.
+
 # 2026-07-07: Single-source config loader blackbox must separate legal input from runtime-materialized shapes
 
 - `loadRouteCodexConfig()` single-source input contract still rejects `virtualrouter.providers`; do not treat that shape as a legal pre-wire compatibility target for this loader entrypoint.

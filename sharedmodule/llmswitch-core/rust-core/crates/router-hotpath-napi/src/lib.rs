@@ -1312,6 +1312,12 @@ pub fn parse_routing_instruction_kinds_json(
 struct RccUserDirResolveInput {
     #[serde(default)]
     home_dir: Option<String>,
+    #[serde(default)]
+    rcc_home: Option<String>,
+    #[serde(default)]
+    routecodex_user_dir: Option<String>,
+    #[serde(default)]
+    routecodex_home: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1321,14 +1327,25 @@ struct RccPathResolveInput {
     home_dir: Option<String>,
     #[serde(default)]
     segments: Vec<String>,
+    #[serde(default)]
+    rcc_home: Option<String>,
+    #[serde(default)]
+    routecodex_user_dir: Option<String>,
+    #[serde(default)]
+    routecodex_home: Option<String>,
 }
 
 #[napi(js_name = "resolveRccUserDirJson")]
 pub fn resolve_rcc_user_dir_json(input_json: String) -> NapiResult<String> {
     let input: RccUserDirResolveInput = serde_json::from_str(&input_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
-    let path = virtual_router_engine::instructions::resolve_rcc_user_dir_for_host(
+    let path = virtual_router_engine::instructions::resolve_rcc_user_dir_for_host_with_env(
         input.home_dir.as_deref(),
+        &[
+            ("RCC_HOME", input.rcc_home.as_deref()),
+            ("ROUTECODEX_USER_DIR", input.routecodex_user_dir.as_deref()),
+            ("ROUTECODEX_HOME", input.routecodex_home.as_deref()),
+        ],
     )
     .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&path.to_string_lossy().to_string())
@@ -1339,9 +1356,14 @@ pub fn resolve_rcc_user_dir_json(input_json: String) -> NapiResult<String> {
 pub fn resolve_rcc_path_json(input_json: String) -> NapiResult<String> {
     let input: RccPathResolveInput = serde_json::from_str(&input_json)
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
-    let path = virtual_router_engine::instructions::resolve_rcc_path_for_host(
-        &input.segments,
+    let path = virtual_router_engine::instructions::resolve_rcc_path_for_host_with_env(
         input.home_dir.as_deref(),
+        &input.segments,
+        &[
+            ("RCC_HOME", input.rcc_home.as_deref()),
+            ("ROUTECODEX_USER_DIR", input.routecodex_user_dir.as_deref()),
+            ("ROUTECODEX_HOME", input.routecodex_home.as_deref()),
+        ],
     )
     .map_err(napi::Error::from_reason)?;
     serde_json::to_string(&path.to_string_lossy().to_string())

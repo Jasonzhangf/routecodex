@@ -1738,10 +1738,15 @@ verification:
   - feature_id: config.path_resolution_surface
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/config/user-data-paths.ts
       - src/config/unified-config-paths.ts
       - src/config/config-paths.ts
     contract:
+      - tests/config/user-data-paths.spec.ts
       - tests/config/unified-config-paths.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi resolve_rcc --lib -- --nocapture
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
@@ -1750,6 +1755,7 @@ verification:
       - npm run build:base
     notes:
       - "Missing config must fail fast; no fallback path result is allowed."
+      - "RCC user dir env precedence, retired ~/.routecodex rejection, default ~/.rcc, and subpath joining must stay Rust-owned; user-data-paths.ts is a native shell plus snapshot-env publisher."
 
   - feature_id: config.user_config_codec
     change_risk: high

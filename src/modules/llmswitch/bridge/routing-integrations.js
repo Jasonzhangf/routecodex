@@ -317,6 +317,41 @@ export function loadRouteCodexProviderConfigsV2FromRootSync(rootDir) {
     }
     return configs;
 }
+export function resolveRccUserDirNativeSync(homeDir) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.resolveRccUserDirJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] resolveRccUserDirJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({
+        rccHome: process.env.RCC_HOME,
+        routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+        routecodexHome: process.env.ROUTECODEX_HOME,
+        ...(typeof homeDir === 'string' ? { homeDir } : {})
+    })));
+    if (typeof output !== 'string' || !output.trim()) {
+        throw new Error('[llmswitch-bridge] RouteCodex user dir resolver returned invalid path');
+    }
+    return output;
+}
+export function resolveRccPathNativeSync(segments, homeDir) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.resolveRccPathJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] resolveRccPathJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({
+        segments: Array.isArray(segments) ? segments.map(String) : [],
+        rccHome: process.env.RCC_HOME,
+        routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+        routecodexHome: process.env.ROUTECODEX_HOME,
+        ...(typeof homeDir === 'string' ? { homeDir } : {})
+    })));
+    if (typeof output !== 'string' || !output.trim()) {
+        throw new Error('[llmswitch-bridge] RouteCodex path resolver returned invalid path');
+    }
+    return output;
+}
 function loadNativeBindingForConfigCodec() {
     const coreDir = resolveCorePackageDir('ts');
     const nativePath = path.join(coreDir, 'dist', 'native', 'router_hotpath_napi.node');
