@@ -5139,6 +5139,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('virtual router dry-run metadata envelope must stay Rust-owned', () => {
+    const runtimePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
+    );
+    const source = fs.readFileSync(runtimePath, 'utf8');
+    const findings = collectMatches(source, [
+      { label: 'TS dry-run metadata builder revived', pattern: /buildVirtualRouterDryRunMetadata/ },
+      { label: 'TS metadataCenterSnapshot reconstruction revived', pattern: /metadataCenterSnapshot:\s*snapshot/ },
+      { label: 'TS diagnostic excludedProviderKeys merge revived', pattern: /excludedProviderKeys['"]/ },
+      { label: 'TS diagnostic record guard revived', pattern: /function\s+isPlainRecord/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('compat profile registry TS parallel implementation must stay deleted', () => {
     const deletedFiles = [
       'sharedmodule/llmswitch-core/src/conversion/compat/profile-registry/header-policies.ts',

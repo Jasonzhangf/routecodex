@@ -1,7 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi::{Env, JsObject, JsUnknown, ValueType};
 use napi_derive::napi;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::sync::{Arc, RwLock};
 
 use super::engine::VirtualRouterEngineCore;
@@ -174,11 +174,12 @@ impl VirtualRouterEngineProxy {
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        let overrides = resolve_runtime_path_overrides(&metadata_value);
+        let diagnostic_metadata = prepare_diagnostic_metadata(&metadata_value);
+        let overrides = resolve_runtime_path_overrides(&diagnostic_metadata);
         let mut core = self.core.write().expect("core write lock");
         let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
             with_session_dir_override(overrides.session_dir.as_deref(), || {
-                core.diagnose_route(env, &request_value, &metadata_value)
+                core.diagnose_route(env, &request_value, &diagnostic_metadata)
             })
         });
         serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -225,6 +226,42 @@ fn resolve_runtime_path_overrides(metadata: &Value) -> RuntimePathOverrides {
     }
 }
 
+fn prepare_diagnostic_metadata(metadata: &Value) -> Value {
+    let mut metadata_record = metadata.as_object().cloned().unwrap_or_default();
+    let mut snapshot = metadata_record
+        .get("metadataCenterSnapshot")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_else(|| {
+            let mut generated = Map::new();
+            let runtime_control = metadata_record
+                .get("runtimeControl")
+                .cloned()
+                .filter(|value| value.is_object())
+                .unwrap_or_else(|| Value::Object(Map::new()));
+            generated.insert("runtimeControl".to_string(), runtime_control);
+            generated
+        });
+
+    for key in [
+        "requestId",
+        "sessionId",
+        "conversationId",
+        "excludedProviderKeys",
+        "continuation",
+    ] {
+        if let Some(value) = metadata_record.get(key).cloned() {
+            snapshot.insert(key.to_string(), value);
+        }
+    }
+
+    metadata_record.insert(
+        "metadataCenterSnapshot".to_string(),
+        Value::Object(snapshot),
+    );
+    Value::Object(metadata_record)
+}
+
 fn read_runtime_string(metadata: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
     for key in keys {
         if let Some(value) = metadata
@@ -250,7 +287,7 @@ impl VirtualRouterEngineProxy {}
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_runtime_path_overrides;
+    use super::{prepare_diagnostic_metadata, resolve_runtime_path_overrides};
     use serde_json::json;
 
     #[test]
@@ -287,5 +324,44 @@ mod tests {
             .and_then(|snapshot| snapshot.get("runtimeControl"))
             .and_then(|runtime_control| runtime_control.as_object());
         assert!(snapshot_runtime_control.is_none());
+    }
+
+    #[test]
+    fn diagnostic_metadata_builds_snapshot_from_minimal_metadata() {
+        let metadata = json!({
+            "requestId": "req-diag-minimal"
+        });
+        let prepared = prepare_diagnostic_metadata(&metadata);
+        assert_eq!(
+            prepared["metadataCenterSnapshot"]["requestId"].as_str(),
+            Some("req-diag-minimal")
+        );
+        assert!(prepared["metadataCenterSnapshot"]["runtimeControl"].is_object());
+    }
+
+    #[test]
+    fn diagnostic_metadata_merges_top_level_route_control_into_existing_snapshot() {
+        let metadata = json!({
+            "requestId": "req-diag",
+            "excludedProviderKeys": ["a.key.model"],
+            "metadataCenterSnapshot": {
+                "runtimeControl": {
+                    "routeHint": "default"
+                }
+            }
+        });
+        let prepared = prepare_diagnostic_metadata(&metadata);
+        assert_eq!(
+            prepared["metadataCenterSnapshot"]["runtimeControl"]["routeHint"].as_str(),
+            Some("default")
+        );
+        assert_eq!(
+            prepared["metadataCenterSnapshot"]["excludedProviderKeys"][0].as_str(),
+            Some("a.key.model")
+        );
+        assert_eq!(
+            prepared["metadataCenterSnapshot"]["requestId"].as_str(),
+            Some("req-diag")
+        );
     }
 }
