@@ -850,10 +850,9 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts`
-- `sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
-- `tests/servertool/entry-context-shell.spec.ts`
+- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
 
 Forbidden paths:
 - `src/providers`
@@ -1021,10 +1020,8 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
-- `tests/servertool/response-stage-prepass-shell.spec.ts`
 - `tests/servertool/execution-queue-shell.spec.ts`
 - `tests/servertool/execution-stage-shell.spec.ts`
-- `tests/servertool/entry-context-shell.spec.ts`
 - `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
@@ -1039,10 +1036,8 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
-- `tests/servertool/response-stage-prepass-shell.spec.ts`
 - `tests/servertool/execution-queue-shell.spec.ts`
 - `tests/servertool/execution-stage-shell.spec.ts`
-- `tests/servertool/entry-context-shell.spec.ts`
 - `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
 - `tests/servertool/server-side-tools.failfast.spec.ts`
 - `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
