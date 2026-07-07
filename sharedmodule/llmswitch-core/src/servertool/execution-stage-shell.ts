@@ -5,16 +5,20 @@ import type {
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
-import { prepareServertoolDispatchStage } from './dispatch-preparation-shell.js';
 import { runServertoolIoExecutionQueue } from './execution-queue-shell.js';
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
 import {
+  buildServertoolDispatchPlanInputWithNative,
   buildServertoolCliProjectionRuntimeBranchWithNative,
   materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome,
+  planServertoolToolCallDispatchWithNative,
   resolveServertoolPostExecutionBranchDecisionWithNative,
   resolveServertoolPreExecutionBranchDecisionWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import type { NativeServertoolResponseStageGate } from 'rcc-llmswitch-core/native/servertool-wrapper';
+import {
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
+} from './metadata-center-carrier.js';
 
 export async function runServertoolExecutionStage(args: {
   options: ServerSideToolEngineOptions;
@@ -27,12 +31,18 @@ export async function runServertoolExecutionStage(args: {
   excludeAutoHookIds: Set<string> | null;
   responseStageGatePlan: NativeServertoolResponseStageGate;
 }): Promise<ServerSideToolEngineResult> {
-  const { dispatchPlan } = prepareServertoolDispatchStage({
-    options: args.options,
-    toolCalls: args.toolCalls,
-    includeToolCallNames: args.includeToolCallNames,
-    excludeToolCallNames: args.excludeToolCallNames
-  });
+  const runtimeMetadata = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
+    args.options.adapterContext
+  );
+  const dispatchPlan = planServertoolToolCallDispatchWithNative(
+    buildServertoolDispatchPlanInputWithNative({
+      toolCalls: args.toolCalls,
+      disableToolCallHandlers: args.options.disableToolCallHandlers === true,
+      includeToolCallHandlerNames: args.includeToolCallNames != null ? [...args.includeToolCallNames] : null,
+      excludeToolCallHandlerNames: args.excludeToolCallNames != null ? [...args.excludeToolCallNames] : null,
+      runtimeMetadata
+    })
+  );
 
   const preExecutionBranchDecision = resolveServertoolPreExecutionBranchDecisionWithNative({
     executableToolCalls: dispatchPlan.executableToolCalls

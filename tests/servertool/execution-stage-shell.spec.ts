@@ -1,6 +1,27 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
+import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
-const prepareServertoolDispatchStage = jest.fn();
+function bindProviderProtocol(adapterContext: Record<string, unknown>, providerProtocol = 'openai-responses'): void {
+  const center = MetadataCenter.attach(adapterContext);
+  if (!center.readRuntimeControl().providerProtocol) {
+    center.writeRuntimeControl(
+      'providerProtocol',
+      providerProtocol,
+      {
+        module: 'tests/servertool/execution-stage-shell.spec.ts',
+        symbol: 'bindProviderProtocol',
+        stage: 'test'
+      }
+    );
+  }
+}
+
+const buildServertoolDispatchPlanInputWithNative = jest.fn((input: any) => input);
+const planServertoolToolCallDispatchWithNative = jest.fn((input: any) => ({
+  executableToolCalls: Array.isArray(input?.toolCalls) ? input.toolCalls : [],
+  skippedToolCalls: [],
+  noopToolCalls: []
+}));
 const resolveServertoolPreExecutionBranchDecisionWithNative = jest.fn();
 const resolveServertoolPostExecutionBranchDecisionWithNative = jest.fn();
 const buildServertoolCliProjectionRuntimeBranchWithNative = jest.fn();
@@ -9,17 +30,16 @@ const materializeNativeToolCallExecutionOutcome = jest.fn();
 const finalizeServertoolResponseStage = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/dispatch-preparation-shell.js',
-  () => ({
-    prepareServertoolDispatchStage
-  })
-);
-
-jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
+    buildServertoolDispatchPlanInputWithNative,
     buildServertoolCliProjectionRuntimeBranchWithNative,
+    inspectStopGatewaySignalWithNative: jest.fn((input: any) => input),
     materializeNativeToolCallExecutionOutcomeWithNative: materializeNativeToolCallExecutionOutcome,
+    normalizeStopMessageCompareContextWithNative: jest.fn((input: any) =>
+      input && typeof input === 'object' ? input : null
+    ),
+    planServertoolToolCallDispatchWithNative,
     resolveServertoolPostExecutionBranchDecisionWithNative,
     resolveServertoolPreExecutionBranchDecisionWithNative
   })
@@ -46,11 +66,12 @@ const { runServertoolExecutionStage } = await import(
 describe('execution-stage-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    prepareServertoolDispatchStage.mockReturnValue({
-      dispatchPlan: {
-        executableToolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}', executionMode: 'guarded' }]
-      }
-    });
+    buildServertoolDispatchPlanInputWithNative.mockImplementation((input: any) => input);
+    planServertoolToolCallDispatchWithNative.mockImplementation((input: any) => ({
+      executableToolCalls: Array.isArray(input?.toolCalls) ? input.toolCalls : [],
+      skippedToolCalls: [],
+      noopToolCalls: []
+    }));
     resolveServertoolPreExecutionBranchDecisionWithNative.mockReturnValue({
       projectClientExecCli: false,
       continueResponseStage: true
@@ -91,7 +112,17 @@ describe('execution-stage-shell', () => {
       )
     );
 
-    expect(source).toContain('prepareServertoolDispatchStage');
+    expect(source).not.toContain("from './dispatch-preparation-shell.js'");
+    expect(source).not.toContain('prepareServertoolDispatchStage');
+    expect(source).toContain('readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter');
+    expect(source).toContain('planServertoolToolCallDispatchWithNative');
+    expect(source).toContain('buildServertoolDispatchPlanInputWithNative');
+    expect(source).toContain('dispatchPlan = planServertoolToolCallDispatchWithNative(');
+    expect(source).not.toContain("from '../conversion/runtime-metadata.js'");
+    expect(source).not.toContain('readRuntimeMetadata(');
+    expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
+    expect(source).not.toContain('Servertool dispatch preparation requires metadata center runtime_control.providerProtocol');
+    expect(source).not.toContain('args.options.adapterContext as Record<string, unknown>');
     expect(source).toContain('resolveServertoolPreExecutionBranchDecisionWithNative');
     expect(source).toContain('resolveServertoolPostExecutionBranchDecisionWithNative');
     expect(source).toContain('buildServertoolCliProjectionRuntimeBranchWithNative');
@@ -135,6 +166,48 @@ describe('execution-stage-shell', () => {
     expect(source).not.toContain("mode: 'tool_flow'");
     expect(source).not.toContain('const baseForExecution = args.baseObject;');
     expect(source).not.toContain('isStopMessageAutoPreProjection');
+  });
+
+  test('builds dispatch plan directly from execution stage with MetadataCenter snapshot', async () => {
+    const adapterContext: Record<string, unknown> = {};
+    bindProviderProtocol(adapterContext, 'openai-responses');
+
+    await runServertoolExecutionStage({
+      options: {
+        requestId: 'req-dispatch-native',
+        entryEndpoint: '/v1/responses',
+        adapterContext
+      } as any,
+      baseObject: { ok: true } as any,
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+      contextBase: {} as any,
+      includeToolCallNames: new Set([' Web_Search ', 'exec_command']),
+      excludeToolCallNames: new Set([' Vision_Auto ']),
+      includeAutoHookIds: null,
+      excludeAutoHookIds: null,
+      responseStageGatePlan: { responseHookMatched: false }
+    });
+
+    expect(buildServertoolDispatchPlanInputWithNative).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }],
+        disableToolCallHandlers: false,
+        includeToolCallHandlerNames: [' Web_Search ', 'exec_command'],
+        excludeToolCallHandlerNames: [' Vision_Auto '],
+        runtimeMetadata: expect.objectContaining({
+          metadataCenterSnapshot: expect.objectContaining({
+            runtimeControl: expect.objectContaining({
+              providerProtocol: 'openai-responses'
+            })
+          })
+        })
+      })
+    );
+    expect(planServertoolToolCallDispatchWithNative).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
+      })
+    );
   });
 
   test('returns cli projection when pre-execution branch selects it', async () => {

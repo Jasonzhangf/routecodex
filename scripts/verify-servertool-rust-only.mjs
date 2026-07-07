@@ -2892,10 +2892,11 @@ function checkServertoolExecutionDispatchRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeCoreWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const executionStageShell = readRequired(TS_EXECUTION_STAGE_SHELL);
   assertContains(
     'servertool-execution-dispatch-rust-owner',
-    `${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`,
-    readRequired(`${SERVERTOOL_TS_DIR}/dispatch-preparation-shell.ts`),
+    TS_EXECUTION_STAGE_SHELL,
+    executionStageShell,
     'buildServertoolDispatchPlanInputWithNative'
   );
   assertContains(
@@ -5535,37 +5536,39 @@ function checkServertoolRustOutcomeCloseout() {
     TS_EXTRACT_TOOL_CALLS_SHELL,
     'extract-tool-calls-shell.ts must stay physically deleted; run-server-side-tool-engine-shell.ts owns the single native response-stage extraction call'
   );
-  const dispatchPreparationShell = readRequired(TS_DISPATCH_PREPARATION_SHELL);
+  assertMissingFile(
+    'servertool-dispatch-preparation-shell-deleted',
+    TS_DISPATCH_PREPARATION_SHELL,
+    'dispatch-preparation-shell.ts must stay physically deleted; execution-stage-shell.ts owns the single native dispatch preparation call'
+  );
   for (const marker of [
     "from '../conversion/runtime-metadata.js'",
     'readRuntimeMetadata(',
     'buildServertoolDispatchPlanInput(',
     '...(args.includeToolCallNames ? { includeToolCallHandlerNames: [...args.includeToolCallNames] } : {})',
     '...(args.excludeToolCallNames ? { excludeToolCallHandlerNames: [...args.excludeToolCallNames] } : {})',
-    'baseObject: JsonObject;',
     'baseForExecution: JsonObject;',
     'readProviderProtocolFromAnyBoundMetadataCenter',
     'Servertool dispatch preparation requires metadata center runtime_control.providerProtocol',
     'args.options.adapterContext as Record<string, unknown>',
   ]) {
-    if (dispatchPreparationShell.includes(marker)) {
+    if (executionStageShell.includes(marker)) {
       fail(
         'servertool-dispatch-preparation-metadata-center-only',
-        `dispatch-preparation-shell.ts must use MetadataCenter snapshot instead of runtime metadata marker ${marker}`
+        `execution-stage-shell.ts must use MetadataCenter snapshot instead of runtime metadata marker ${marker}`
       );
     }
   }
   for (const marker of [
-    'export function prepareServertoolDispatchStage(',
     'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
     'planServertoolToolCallDispatchWithNative',
     'buildServertoolDispatchPlanInputWithNative',
-    'dispatchPlan: planServertoolToolCallDispatchWithNative('
+    'dispatchPlan = planServertoolToolCallDispatchWithNative('
   ]) {
-    if (!dispatchPreparationShell.includes(marker)) {
+    if (!executionStageShell.includes(marker)) {
       fail(
         'servertool-dispatch-preparation-shell-owner',
-        `dispatch-preparation-shell.ts must keep dispatch preparation owner marker ${marker}`
+        `execution-stage-shell.ts must keep dispatch preparation owner marker ${marker}`
       );
     }
   }
@@ -5884,7 +5887,6 @@ function checkServertoolRustOutcomeCloseout() {
   const responseStageOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/response-stage-orchestration-shell.ts`);
   for (const marker of [
     'export async function runServertoolExecutionStage(',
-    'prepareServertoolDispatchStage',
     'resolveServertoolPreExecutionBranchDecisionWithNative',
     'resolveServertoolPostExecutionBranchDecisionWithNative',
     'const preExecutionBranchDecision = resolveServertoolPreExecutionBranchDecisionWithNative({',
