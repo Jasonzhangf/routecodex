@@ -1,5 +1,4 @@
-import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
-import type { JsonObject } from '../conversion/hub/types/json.js';
+import type { AdapterContext, JsonObject } from './types.js';
 import {
   containsSyntheticRouteCodexControlTextWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';

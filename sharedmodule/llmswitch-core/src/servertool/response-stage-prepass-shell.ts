@@ -1,9 +1,9 @@
 import type {
+  JsonObject,
   ServerSideToolEngineOptions,
   ServerToolHandlerContext
 } from './types.js';
 import type { ServerSideToolEngineResult } from './types.js';
-import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   planServertoolResponseStageGateWithNative,
   type NativeServertoolResponseStageGate

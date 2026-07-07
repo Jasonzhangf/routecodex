@@ -21,7 +21,10 @@ import {
 } from "../../../native/router-hotpath/native-sse-runtime.js";
 import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 
-import { readRuntimeControlFromAnyBoundMetadataCenter } from "../../../servertool/metadata-center-carrier.js";
+import {
+  METADATA_CENTER_SYMBOL,
+  readRuntimeControlFromAnyBoundMetadataCenter
+} from "../metadata-center-runtime-control-writer.js";
 import type {
   HubPipelineConfig,
   HubPipelineRequest,
@@ -104,8 +107,6 @@ type HubPipelineProviderProtocol =
   | "openai-responses"
   | "anthropic-messages"
   | "gemini-chat";
-
-import { METADATA_CENTER_SYMBOL } from '../metadata-center-runtime-control-writer.js';
 
 function preserveMetadataCenterBinding(source: Record<string, unknown>, target: Record<string, unknown>): void {
   const center = Reflect.get(source, METADATA_CENTER_SYMBOL);

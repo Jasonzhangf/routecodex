@@ -1,10 +1,10 @@
 import type {
+  JsonObject,
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
   ServerToolHandlerContext,
   ToolCall
 } from './types.js';
-import type { JsonObject } from '../conversion/hub/types/json.js';
 import { prepareServertoolDispatchStage } from './dispatch-preparation-shell.js';
 import { runServertoolIoExecutionQueue } from './execution-queue-shell.js';
 import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';

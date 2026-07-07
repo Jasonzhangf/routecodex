@@ -5,7 +5,7 @@ import { normalizeSnapshotStagePayloadWithNative } from '../../native/router-hot
 
 // feature_id: snapshot.stage_contract
 
-import { readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter } from '../../servertool/metadata-center-carrier.js';
+import { readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter } from './metadata-center-runtime-control-writer.js';
 
 interface SnapshotStageRecorderOptions {
   context: AdapterContext;

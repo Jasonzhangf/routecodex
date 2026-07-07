@@ -1,9 +1,9 @@
 import type {
+  JsonObject,
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
   ServerToolHandlerContext
 } from './types.js';
-import type { JsonObject } from '../conversion/hub/types/json.js';
 import {
   resolveServertoolResponseStageAutoHookPostApplicationWithNative,
   resolveServertoolResponseStageAutoHookPostDecisionWithNative,

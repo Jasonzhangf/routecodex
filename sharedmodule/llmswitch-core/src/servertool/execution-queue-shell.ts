@@ -1,8 +1,7 @@
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
-import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
-import type { ServerSideToolEngineOptions } from './types.js';
+import type { JsonObject, JsonValue, ServerSideToolEngineOptions } from './types.js';
 import { getServerToolHandler } from './registry-orchestration-shell.js';
 import {
   planServertoolNoopOutcomeWithNative,

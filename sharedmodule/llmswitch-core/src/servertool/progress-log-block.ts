@@ -1,5 +1,4 @@
-import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
-import type { StageRecorder } from '../conversion/hub/pipeline/hub-pipeline-types.js';
+import type { AdapterContext, StageRecorder } from './types.js';
 import * as ___ppath from "node:path";
 import { promises as ___ppfs } from "node:fs";
 import { resolveRccPath as ___resolveRccPath } from "../runtime/user-data-paths.js";

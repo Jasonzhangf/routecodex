@@ -1,7 +1,7 @@
-import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
-import type { StageRecorder } from '../conversion/hub/pipeline/hub-pipeline-types.js';
-import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
+  AdapterContext,
+  JsonObject,
+  StageRecorder,
   ServerSideToolEngineResult
 } from './types.js';
 import {
@@ -13,9 +13,9 @@ import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
 import {
-  applyNativeRuntimeControlWritePlan,
-  projectNativeMetadataWritePlanToRuntimeControlWritePlan
-} from '../conversion/hub/metadata-center-runtime-control-writer.js';
+  projectMetadataWritePlanToRuntimeControlWritePlanWithNative
+} from '../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { writeRuntimeControlToBoundMetadataCenter } from './metadata-center-carrier.js';
 
 const SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER = {
   module: 'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
@@ -44,14 +44,23 @@ export async function runServertoolEnginePostflight(args: {
 > {
   const { engineResult, runtimeAction, options, flowId, totalSteps } = args;
   if (engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object') {
-    const writePlan = projectNativeMetadataWritePlanToRuntimeControlWritePlan(engineResult.metadataWritePlan);
+    const writePlan = projectMetadataWritePlanToRuntimeControlWritePlanWithNative({
+      plan: engineResult.metadataWritePlan
+    });
     if (writePlan.runtimeControl) {
-      applyNativeRuntimeControlWritePlan({
-        metadata: options.adapterContext,
-        runtimeControl: writePlan.runtimeControl,
-        writer: SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER,
-        reason: 'rust servertool postflight runtime control'
-      });
+      for (const [key, value] of Object.entries(writePlan.runtimeControl)) {
+        if (value === undefined) {
+          continue;
+        }
+        writeRuntimeControlToBoundMetadataCenter({
+          metadata: options.adapterContext,
+          key,
+          value,
+          writer: SERVERTOOL_POSTFLIGHT_RUNTIME_CONTROL_WRITER,
+          reason: 'rust servertool postflight runtime control',
+          required: true
+        });
+      }
     }
   }
 

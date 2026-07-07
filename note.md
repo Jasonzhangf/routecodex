@@ -27428,3 +27428,27 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Hub-adjacent non-native files to keep classified/gated: `provider-response.ts` as Node stream/side-effect shell, `responses-conversation-store.ts` as Map/FS/timer persistence shell, Hub type-only files, `hub-stage-timing.ts` diagnostic IO, servertool/types TS type shell, plus non-Hub VR/error/runtime telemetry shells.
 - Active blockers to literal "zero .ts files" are host architecture boundaries, not Hub business logic: Node stream/SSE IO, MetadataCenter host object writes, response store persistence/Map/timers, public TS type declarations, and native binding wrappers. Achieving literal zero TS needs a generated bindings/declaration surface and Rust-backed host IO/store/lifecycle replacement, not just moving another Hub helper.
 - Gates run in this audit: `verify:llmswitch-minimal-ts-surface -- --json` PASS; `verify:llmswitch-rustification-audit -- --json` PASS; `verify:architecture-thin-wrapper-only` PASS; `verify:function-map-compile-gate` PASS; `verify:servertool-rust-only` PASS.
+
+# 2026-07-07: Servertool and Hub TS boundary coupling is closed
+
+- Scope: close servertool <-> Hub Pipeline TS intersection; no live restart/replay and no config/VR worker files touched.
+- Change:
+  - `sharedmodule/llmswitch-core/src/servertool/types.ts` now owns local `JsonObject` / `JsonValue` / `AdapterContext` / `StageRecorder` type aliases; servertool files no longer import Hub type files.
+  - `servertool/metadata-center-carrier.ts` owns only servertool-local MetadataCenter symbol/write/read IO and no longer imports Hub `metadata-center-runtime-control-writer.ts`.
+  - Hub `metadata-center-runtime-control-writer.ts` now owns Hub-side `readRuntimeControlFromAnyBoundMetadataCenter` and `readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter`; Hub files no longer import `servertool/metadata-center-carrier.ts`.
+  - `response-stage-orchestration-shell.ts` no longer imports Hub `recordStage` or `hub-stage-timing`; it keeps local diagnostic IO and still consumes Rust response-stage/native plans.
+  - Added `verify:servertool-rust-only` gate `servertool-hub-boundary-rust-owned` to forbid servertool imports from `../conversion/hub/**` and Hub imports from `servertool/metadata-center-carrier`.
+- Verification:
+  - `rg` confirmed zero `../conversion/hub` imports under `sharedmodule/llmswitch-core/src/servertool`.
+  - Focused Jest PASS: 3 suites / 52 tests (`response-stage-orchestration-shell`, `server-side-tools.failfast`, `servertool-active-orchestration-audit`).
+  - `cargo test -p servertool-core` PASS: 373 tests.
+  - `cargo test -p router-hotpath-napi servertool --lib` PASS: 168 tests, 2086 filtered.
+  - `npm run verify:servertool-rust-only` PASS.
+  - `npm run verify:llmswitch-core-tsc` PASS.
+  - `npx tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `npm run verify:function-map-compile-gate` PASS.
+  - `npm run verify:architecture-mainline-call-map` PASS.
+  - `npm run verify:llmswitch-minimal-ts-surface -- --json` PASS: entries 12, non-native prod TS files 10, explicit native-linked shells 2.
+  - `npm run verify:llmswitch-rustification-audit -- --json` PASS: `prodTsFileCount=135`, `prodTsLocTotal=27784`, `nonNativeFileCount=10`, `nonNativeLocTotal=2542`.
+  - `git diff --check` PASS.
+- Boundary: `provider-response.ts -> servertool/response-stage-orchestration-shell.ts` remains the single allowed Rust-planned servertool IO entrypoint; no MetadataCenter/type/timing TS coupling remains between servertool and Hub.

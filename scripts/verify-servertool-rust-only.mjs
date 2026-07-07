@@ -28,6 +28,7 @@ const ROOT = resolve(__dirname, '..');
 
 // ── Paths to scan ──────────────────────────────────────────────
 const SERVERTOOL_TS_DIR = `${ROOT}/sharedmodule/llmswitch-core/src/servertool`;
+const HUB_TS_DIR = `${ROOT}/sharedmodule/llmswitch-core/src/conversion/hub`;
 const RUST_SRC_DIR = `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`;
 const CHAT_SERVERTOOL_ORCHESTRATION = `${RUST_SRC_DIR}/chat_servertool_orchestration.rs`;
 const FUNCTION_MAP = `${ROOT}/docs/architecture/function-map.yml`;
@@ -6392,6 +6393,82 @@ function checkResponseStageMetadataCenterOnly() {
   );
 }
 
+function checkServertoolHubBoundaryRustOwned() {
+  const servertoolFiles = collectTsFiles(SERVERTOOL_TS_DIR);
+  for (const file of servertoolFiles) {
+    const source = readRequired(file);
+    for (const marker of [
+      '../conversion/hub/',
+      '../conversion/hub/metadata-center-runtime-control-writer.js',
+      '../conversion/hub/pipeline/',
+      '../conversion/hub/types/',
+      '../conversion/hub/pipeline/hub-stage-timing.js',
+      '../conversion/hub/pipeline/stages/utils.js',
+    ]) {
+      if (source.includes(marker)) {
+        fail(
+          'servertool-hub-boundary-rust-owned',
+          `${file.replace(`${ROOT}/`, '')} must not import Hub TS boundary marker ${marker}; servertool must use native Rust plans plus local IO/types`
+        );
+      }
+    }
+  }
+
+  const metadataCenterCarrier = readRequired(TS_METADATA_CENTER_CARRIER);
+  for (const marker of [
+    "Symbol.for('routecodex.metadataCenter')",
+    "Symbol.for('routecodex.metadataCenter.rustSnapshot')",
+    'writeRuntimeControlToBoundMetadataCenter',
+    'readRuntimeControlFromAnyBoundMetadataCenter',
+    'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
+  ]) {
+    if (!metadataCenterCarrier.includes(marker)) {
+      fail(
+        'servertool-hub-boundary-rust-owned',
+        `metadata-center-carrier.ts must keep servertool-local MetadataCenter IO marker ${marker}`
+      );
+    }
+  }
+
+  const hubMetadataWriter = readRequired(`${HUB_TS_DIR}/metadata-center-runtime-control-writer.ts`);
+  for (const marker of [
+    'readRuntimeControlFromAnyBoundMetadataCenter',
+    'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
+    'readProviderObservationFromAnyBoundMetadataCenter',
+  ]) {
+    if (!hubMetadataWriter.includes(marker)) {
+      fail(
+        'servertool-hub-boundary-rust-owned',
+        `Hub metadata writer must own Hub-side bound MetadataCenter reader marker ${marker}`
+      );
+    }
+  }
+
+  for (const file of collectTsFiles(HUB_TS_DIR)) {
+    const source = readRequired(file);
+    if (source.includes('servertool/metadata-center-carrier')) {
+      fail(
+        'servertool-hub-boundary-rust-owned',
+        `${file.replace(`${ROOT}/`, '')} must not import servertool/metadata-center-carrier; Hub reads bound MetadataCenter through its own writer`
+      );
+    }
+    const servertoolImportMatches = [...source.matchAll(/from\s+['"]([^'"]*servertool\/[^'"]+)['"]/g)];
+    for (const match of servertoolImportMatches) {
+      if (!match[1].endsWith('servertool/response-stage-orchestration-shell.js')) {
+        fail(
+          'servertool-hub-boundary-rust-owned',
+          `${file.replace(`${ROOT}/`, '')} has forbidden Hub->servertool import ${match[1]}; only the Rust-planned response-stage IO shell entrypoint is allowed`
+        );
+      }
+    }
+  }
+
+  pass(
+    'servertool-hub-boundary-rust-owned',
+    'servertool no longer imports Hub TS types/timing/MetadataCenter writer; Hub no longer imports servertool MetadataCenter carrier'
+  );
+}
+
 function checkServertoolAutoHookCallerThinShell() {
   assertMissingFile(
     'servertool-auto-hook-caller-thin-shell',
@@ -7434,6 +7511,7 @@ checkStopGatewayMetadataCenterOnly();
 checkStoplessNoTsRuntimeControlSpecialization();
 checkServertoolRustOutcomeCloseout();
 checkResponseStageMetadataCenterOnly();
+checkServertoolHubBoundaryRustOwned();
 checkServertoolAutoHookCallerThinShell();
 checkServertoolResponseStageGateThinShell();
 checkServertoolEngineStoplessSessionThinShell();

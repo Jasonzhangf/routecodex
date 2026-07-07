@@ -1,5 +1,5 @@
-import type { JsonObject } from '../conversion/hub/types/json.js';
 import type {
+  JsonObject,
   ServerSideToolEngineOptions,
   ServerToolHandlerContext,
   ToolCall

@@ -1,9 +1,30 @@
-import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
-import type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';
+export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 
-/**
- * ToolCall：对齐 OpenAI style 的工具调用表示。
- */
+export interface JsonObject {
+  [key: string]: JsonValue | undefined;
+}
+
+export interface AdapterContext {
+  requestId: string;
+  entryEndpoint: string;
+  providerProtocol: string;
+  providerId?: string;
+  providerKey?: string;
+  targetProviderKey?: string;
+  routeId?: string;
+  profileId?: string;
+  streamingHint?: 'auto' | 'force' | 'disable';
+  originalModelId?: string;
+  clientModelId?: string;
+  toolCallIdStyle?: 'fc' | 'preserve';
+  responsesResume?: JsonObject;
+  [key: string]: unknown;
+}
+
+export interface StageRecorder {
+  record(stage: string, payload: object): void;
+}
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -22,9 +43,6 @@ export interface ServerToolAutoHookTraceEvent {
   flowId?: string;
 }
 
-/**
- * ServerSideToolEngineOptions：ServerTool 引擎入参（ChatCompletion 视角）。
- */
 export interface ServerSideToolEngineOptions {
   chatResponse: JsonObject;
   adapterContext: AdapterContext;
@@ -80,9 +98,6 @@ export interface ServerToolAutoHookDescriptor {
   };
 }
 
-/**
- * ServerSideToolEngineResult：ServerTool 引擎出参。
- */
 export interface ServerSideToolEngineResult {
   mode: 'passthrough' | 'tool_flow';
   finalChatResponse: JsonObject;
@@ -90,9 +105,6 @@ export interface ServerSideToolEngineResult {
   metadataWritePlan?: JsonObject;
 }
 
-/**
- * ServerToolHandlerContext：单个工具 handler 的上下文入参。
- */
 export interface ServerToolHandlerContext {
   base: JsonObject;
   toolCall?: ToolCall;
@@ -108,6 +120,3 @@ export interface ServerToolHandlerResult {
   execution: ServerToolExecution;
   metadataWritePlan?: JsonObject;
 }
-
-// 方便其它模块使用的公共别名
-export type { JsonObject, JsonValue } from '../conversion/hub/types/json.js';

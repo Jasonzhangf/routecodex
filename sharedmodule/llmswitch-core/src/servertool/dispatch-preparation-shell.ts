@@ -1,5 +1,4 @@
-import type { JsonObject } from '../conversion/hub/types/json.js';
-import type { ServerSideToolEngineOptions, ToolCall } from './types.js';
+import type { JsonObject, ServerSideToolEngineOptions, ToolCall } from './types.js';
 import {
   planServertoolToolCallDispatchWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';

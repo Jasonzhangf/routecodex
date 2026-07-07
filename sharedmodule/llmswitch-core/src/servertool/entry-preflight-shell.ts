@@ -1,5 +1,4 @@
-import type { ServerSideToolEngineOptions, ServerSideToolEngineResult } from './types.js';
-import type { JsonObject } from '../conversion/hub/types/json.js';
+import type { JsonObject, ServerSideToolEngineOptions, ServerSideToolEngineResult } from './types.js';
 import {
   isAdapterClientDisconnectedWithNative,
   readServertoolEntryBaseObjectWithNative,

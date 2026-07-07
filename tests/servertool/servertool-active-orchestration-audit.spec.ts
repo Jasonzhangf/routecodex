@@ -693,7 +693,7 @@ const TARGETS = [
       'resolveServertoolEnginePostflightPayloadWithNative({',
       'buildServertoolPostflightObservationSummaryWithNative({',
       "args.stageRecorder.record('servertool.execution', summary);",
-      'projectNativeMetadataWritePlanToRuntimeControlWritePlan(engineResult.metadataWritePlan)',
+      'projectMetadataWritePlanToRuntimeControlWritePlanWithNative({',
       "engineResult.metadataWritePlan != null && typeof engineResult.metadataWritePlan === 'object'",
       'executed: runtimeAction.executed',
       'runtimeAction.progressStatus',

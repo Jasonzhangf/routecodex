@@ -5,7 +5,7 @@ import {
 } from '../../../../native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
-} from '../../../../servertool/metadata-center-carrier.js';
+} from '../../metadata-center-runtime-control-writer.js';
 
 // Thin TS bridge only carries metadata center bound context into native compat.
 

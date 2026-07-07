@@ -1,5 +1,4 @@
-import type { JsonObject } from '../conversion/hub/types/json.js';
-import type { AdapterContext } from '../conversion/hub/types/chat-envelope.js';
+import type { AdapterContext, JsonObject } from './types.js';
 import {
   inspectStopGatewaySignalWithNative,
   normalizeStopMessageCompareContextWithNative,
@@ -7,10 +6,8 @@ import {
   type StopMessageCompareContext
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
-import { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL } from '../conversion/hub/metadata-center-runtime-control-writer.js';
-
-// re-export for consumers that reference these via servertool module
-export { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL };
+export const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+export const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
 
 type RuntimeControlWriter = {
   module: string;

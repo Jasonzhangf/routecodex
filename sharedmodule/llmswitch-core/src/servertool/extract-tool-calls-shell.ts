@@ -1,5 +1,4 @@
-import type { JsonObject } from '../conversion/hub/types/json.js';
-import type { ToolCall } from './types.js';
+import type { JsonObject, ToolCall } from './types.js';
 import { runServertoolResponseStageWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
 function replaceJsonObjectInPlace(target: JsonObject, next: JsonObject): void {

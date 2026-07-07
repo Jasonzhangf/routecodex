@@ -1,9 +1,9 @@
 import type {
+  JsonObject,
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
   ServerToolHandlerContext
 } from './types.js';
-import type { JsonObject } from '../conversion/hub/types/json.js';
 import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import { finalizeServertoolResponseStageWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import type { NativeServertoolResponseStageGate } from 'rcc-llmswitch-core/native/servertool-wrapper';
