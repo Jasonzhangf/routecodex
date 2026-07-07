@@ -5350,7 +5350,6 @@ function checkStoplessNoTsRuntimeControlSpecialization() {
   const scanFiles = [
     `${SERVERTOOL_TS_DIR}/metadata-center-carrier.ts`,
     `${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`,
-    `${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`,
     `${ROOT}/sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`,
   ];
   for (const file of scanFiles) {
@@ -6689,7 +6688,12 @@ function checkServertoolEngineStoplessSessionThinShell() {
     'engine.ts must stay physically deleted; import engine-orchestration-shell.ts directly'
   );
   const engineSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`);
-  const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`);
+  assertMissingFile(
+    'servertool-engine-postflight-shell-owner',
+    `${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`,
+    'engine-postflight-shell.ts must stay physically deleted; engine-orchestration-shell.ts owns postflight IO around native postflight decisions'
+  );
+  const postflightSource = engineSource;
   const registryOrchestrationShell = readRequired(`${SERVERTOOL_TS_DIR}/registry-orchestration-shell.ts`);
   const autoHookCaller = readRequired(`${SERVERTOOL_TS_DIR}/auto-hook-caller.ts`);
   const executionQueueShell = readRequired(`${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`);
@@ -6822,7 +6826,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     if (!postflightSource.includes(marker)) {
       fail(
         'servertool-engine-stopless-session-thin-shell',
-        `engine-postflight-shell.ts must keep stopless session thin-shell marker ${marker}`
+        `engine-orchestration-shell.ts must keep stopless session thin-shell marker ${marker}`
       );
     }
   }
@@ -6848,7 +6852,7 @@ function checkServertoolEngineStoplessSessionThinShell() {
     if (postflightSource.includes(marker)) {
       fail(
         'servertool-engine-stopless-session-no-ts-owner',
-        `engine-postflight-shell.ts must not retain stopless projection semantic marker ${marker}`
+        `engine-orchestration-shell.ts must not retain stopless projection semantic marker ${marker}`
       );
     }
   }
@@ -7308,7 +7312,12 @@ function checkServertoolProgressLoggingFailFast() {
 
 function checkServertoolPostflightLoggingFailFast() {
   const postflightFile = `${SERVERTOOL_TS_DIR}/engine-postflight-shell.ts`;
-  const postflightSource = readRequired(postflightFile);
+  assertMissingFile(
+    'servertool-postflight-observation-rust-owner',
+    postflightFile,
+    'engine-postflight-shell.ts must stay physically deleted; engine-orchestration-shell.ts owns postflight IO around native postflight decisions'
+  );
+  const postflightSource = readRequired(`${SERVERTOOL_TS_DIR}/engine-orchestration-shell.ts`);
   const observationSpec = readRequired(`${ROOT}/tests/servertool/engine-observation-shell.spec.ts`);
   for (const marker of [
     'logNonBlocking:',
@@ -7345,7 +7354,7 @@ function checkServertoolPostflightLoggingFailFast() {
     if (postflightSource.includes(marker)) {
       fail(
         'servertool-postflight-observation-rust-owner',
-        `engine-postflight-shell.ts must not retain TS postflight observation semantic marker ${marker}`
+        `engine-orchestration-shell.ts must not retain TS postflight observation semantic marker ${marker}`
       );
     }
   }
@@ -7361,20 +7370,20 @@ function checkServertoolPostflightLoggingFailFast() {
     if (!postflightSource.includes(marker)) {
       fail(
         'servertool-postflight-observation-rust-owner',
-        `engine-postflight-shell.ts must keep native postflight observation marker ${marker}`
+        `engine-orchestration-shell.ts must keep native postflight observation marker ${marker}`
       );
     }
   }
   if (postflightSource.includes('record_servertool_execution_snapshot')) {
     fail(
       'servertool-postflight-log-fail-fast',
-      'engine-postflight-shell.ts must not convert execution snapshot recorder failures into non-blocking logs'
+      'engine-orchestration-shell.ts must not convert execution snapshot recorder failures into non-blocking logs'
     );
   }
   if (/stageRecorder\)[\s\S]{0,300}try\s*\{/.test(postflightSource)) {
     fail(
       'servertool-postflight-log-fail-fast',
-      'engine-postflight-shell.ts must not catch stageRecorder failures'
+      'engine-orchestration-shell.ts must not catch stageRecorder failures'
     );
   }
   assertContains(

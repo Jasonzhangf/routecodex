@@ -24,6 +24,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine.ts',
   'tests/servertool/cli-projection-runtime-shell.spec.ts',
   'tests/servertool/execution-handler-materialization-shell.spec.ts',
@@ -586,7 +587,7 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
+    file: 'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
     forbidden: [
       'function applyServertoolPostflightMetadataWritePlan(',
       'function buildStoplessProjectionMetadataCenterSnapshot(',

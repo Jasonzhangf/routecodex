@@ -32,9 +32,10 @@ describe('engine stopless session thin-shell guard', () => {
 
   test('runServerToolOrchestration delegates stopless session projection into the postflight shell', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
+    expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts')).toBe(false);
 
     expect(source).not.toContain('switch (runtimeAction.finalPayloadSource)');
     expect(source).not.toContain("case 'stop_message_cli_projection'");
@@ -43,7 +44,7 @@ describe('engine stopless session thin-shell guard', () => {
 
   test('runServerToolOrchestration does not locally derive stopless CLI projection context', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
 

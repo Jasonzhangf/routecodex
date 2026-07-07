@@ -161,7 +161,7 @@ describe('engine-observation-shell', () => {
   });
 
   test('postflight stage recorder failures are fail-fast', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
     const stageRecorder = {
       record: jest.fn(() => {
         throw new Error('postflight recorder down');
@@ -208,9 +208,10 @@ describe('engine-observation-shell', () => {
 
   test('postflight observation summary is native-owned', async () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
+    expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.ts')).toBe(false);
     expect(source).toContain('buildServertoolPostflightObservationSummaryWithNative({');
     expect(source).not.toContain('const followupSummary: Record<string, unknown> = {');
     expect(source).not.toContain("if ('payload' in followup)");
@@ -244,7 +245,7 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot;');
     expect(source).toContain('metadataCenterSnapshot: metadataCenterSnapshot ?? null');
 
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
     const stageRecorder = {
       record: jest.fn()
     };
@@ -306,7 +307,7 @@ describe('engine-observation-shell', () => {
   });
 
   test('postflight consumes Rust-projected flow id without interpreting flowIdSource in TS', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-postflight-shell.js');
+    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
     const logProgress = jest.fn();
 
     await expect(
