@@ -6,6 +6,8 @@ import {
   logRequestStart,
   logRequestComplete,
   logRequestError,
+  captureClientHeaders,
+  buildHandlerLogMetadata,
   readRequestBodyMetadata
 } from './handler-utils.js';
 
@@ -207,10 +209,19 @@ async function handleImageRequest(
       return;
     }
     const requestBodyMetadata = readRequestBodyMetadata(payload);
+    const clientHeaders = captureClientHeaders(req.headers);
+    const logMetadata = buildHandlerLogMetadata({
+      entryEndpoint,
+      headers: req.headers as Record<string, unknown>,
+      requestBodyMetadata,
+      clientHeaders,
+      portContext: ctx.portContext
+    });
 
     logRequestStart(entryEndpoint, requestId, {
       clientRequestId,
       ...(requestBodyMetadata ?? {}),
+      ...logMetadata,
       model,
       count,
       responseFormat,
@@ -250,6 +261,7 @@ async function handleImageRequest(
       query: req.query as Record<string, unknown>,
       body: pipelineBody,
       metadata: {
+        ...logMetadata,
         ...(requestBodyMetadata ?? {}),
         stream: false,
         clientRequestId,

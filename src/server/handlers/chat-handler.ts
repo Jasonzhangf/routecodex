@@ -10,6 +10,7 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
+  buildHandlerLogMetadata,
   buildHandlerPipelineMetadata,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
@@ -46,10 +47,18 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     const wantsSSE = acceptsSse || originalStream;
     const outboundStream = originalStream;
     applySystemPromptOverride(entryEndpoint, payload);
+    const logMetadata = buildHandlerLogMetadata({
+      entryEndpoint,
+      headers: req.headers as Record<string, unknown>,
+      requestBodyMetadata,
+      clientHeaders,
+      portContext: ctx.portContext
+    });
 
     logRequestStart(entryEndpoint, requestId, {
       clientRequestId,
       ...(requestBodyMetadata ?? {}),
+      ...logMetadata,
       inboundStream: wantsSSE,
       outboundStream,
       clientAcceptsSse: acceptsSse,
@@ -66,6 +75,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       query: req.query as Record<string, unknown>,
       body: pipelineBody,
       metadata: buildHandlerPipelineMetadata(requestBodyMetadata, {
+        ...logMetadata,
         stream: wantsSSE,
         clientRequestId,
         clientStream: acceptsSse || undefined,

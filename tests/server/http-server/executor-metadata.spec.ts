@@ -193,6 +193,37 @@ describe('executor metadata session daemon extraction', () => {
     expect(metadata.tmuxSessionId).toBe('tmux_only_scope_1');
     expect(metadata.sessionId).toBeUndefined();
     expect(metadata.conversationId).toBeUndefined();
+    expect(metadata.logSessionColorKey).toBe('rcc-session:tmux_only_scope_1');
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().sessionId).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().conversationId).toBeUndefined();
+  });
+
+  it('builds a log session color key from inbound codex scope without redefining request truth', () => {
+    const turnMetadata = JSON.stringify({
+      scope: {
+        tmux_session: 'tmux_log_scope_1'
+      },
+      cwd: '/tmp/routecodex-log-scope'
+    });
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-log-session-1',
+      headers: {
+        'user-agent': 'codex-cli',
+        'x-codex-turn-metadata': encodeURIComponent(turnMetadata)
+      },
+      query: {},
+      body: { input: [] },
+      metadata: {}
+    } as any);
+
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
+    expect(metadata.clientTmuxSessionId).toBe('tmux_log_scope_1');
+    expect(metadata.workdir).toBe('/tmp/routecodex-log-scope');
+    expect(metadata.logSessionColorKey).toBe('rcc-session:codex:tmux_log_scope_1:tmp_routecodex-log-scope');
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().sessionId).toBeUndefined();
   });
 
   it('attaches request-scoped metadata center with request truth provenance', () => {
@@ -517,7 +548,7 @@ describe('executor metadata session daemon extraction', () => {
     MetadataCenter.bind(relayPipelineMetadata, requestCenter!);
     const relayCenter = MetadataCenter.read(relayPipelineMetadata)!;
     relayCenter.writeContinuationContext(
-      'responsesRequestContext',
+      'responsesResume',
       {
         sessionId: 'sess-relay-ctx',
         conversationId: 'conv-relay-ctx'
@@ -544,7 +575,7 @@ describe('executor metadata session daemon extraction', () => {
     expect(mergedMetadata.responsesRequestContext).toBeUndefined();
 
     const center = MetadataCenter.read(mergedMetadata);
-    expect(center?.readContinuationContext().responsesRequestContext).toMatchObject({
+    expect(center?.readContinuationContext().responsesResume).toMatchObject({
       sessionId: 'sess-relay-ctx',
       conversationId: 'conv-relay-ctx'
     });
@@ -959,7 +990,12 @@ describe('executor metadata session daemon extraction', () => {
       sessionId: 'sess-submit-resume-center-1',
       conversationId: 'conv-submit-resume-center-1'
     });
-    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toEqual({});
+    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
+      requestId: 'req-center-submit-resume-center-1',
+      entryEndpoint: '/v1/responses.submit_tool_outputs'
+    });
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().sessionId).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().conversationId).toBeUndefined();
     expect(MetadataCenter.read(metadata)?.readRuntimeControl()).toMatchObject({
       routeHint: 'search/gateway-priority-5555-priority-search',
       retryProviderKey: 'minimonth.key1.MiniMax-M2.7'

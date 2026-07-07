@@ -9,6 +9,7 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
+  buildHandlerLogMetadata,
   buildHandlerPipelineMetadata,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
@@ -95,10 +96,18 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     const inboundStream = clientRequestedStream;
     const wantsStream = clientRequestedStream;
     const outboundStream = clientRequestedStream;
+    const logMetadata = buildHandlerLogMetadata({
+      entryEndpoint,
+      headers: req.headers as Record<string, unknown>,
+      requestBodyMetadata,
+      clientHeaders,
+      portContext: ctx.portContext
+    });
 
     logRequestStart(entryEndpoint, requestId, {
       clientRequestId,
       ...(requestBodyMetadata ?? {}),
+      ...logMetadata,
       inboundStream,
       outboundStream,
       model: inferredModel ?? jsonPayload?.model
@@ -112,6 +121,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       query: req.query as Record<string, unknown>,
       body: strippedPipelineBody,
       metadata: buildHandlerPipelineMetadata(requestBodyMetadata, {
+        ...logMetadata,
         stream: wantsStream,
         clientRequestId,
         inboundStream,

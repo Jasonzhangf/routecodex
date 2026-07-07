@@ -10,7 +10,10 @@ import {
   releaseMetadataCenterSlot,
   writeMetadataCenterSlot
 } from './metadata-center/dualwrite-api.js';
-import { extractSessionClientDaemonIdFromApiKey } from '../../../utils/session-client-token.js';
+import {
+  extractSessionClientDaemonIdFromApiKey,
+  extractSessionClientScopeIdFromApiKey
+} from '../../../utils/session-client-token.js';
 import {
   shouldTraceSessionScopeByContext
 } from '../../../utils/session-scope-trace.js';
@@ -37,6 +40,16 @@ const BUILD_REQUEST_METADATA_INBOUND_WRITER = {
   symbol: 'buildRequestMetadata',
   stage: 'HubReqInbound02Standardized'
 } as const;
+
+const SYNTHETIC_SESSION_PREFIX = 'rcc-session';
+
+export type InboundLogSessionContextInput = {
+  entryEndpoint: string;
+  headers?: Record<string, unknown>;
+  bodyMetadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  portContext?: Record<string, unknown> | null;
+};
 
 function logExecutorMetadataNonBlocking(
   stage: string,
@@ -133,6 +146,71 @@ function extractSessionDaemonId(
   if (authorization) {
     const match = authorization.match(/^(?:Bearer|ApiKey)\s+(.+)$/i);
     const fromAuth = extractSessionClientDaemonIdFromApiKey(match ? String(match[1]) : authorization);
+    if (fromAuth) {
+      return fromAuth;
+    }
+  }
+
+  return undefined;
+}
+
+function extractSessionScopeId(
+  userMeta: Record<string, unknown>,
+  headers: Record<string, unknown> | undefined,
+  clientHeaders?: Record<string, string>
+): string | undefined {
+  const directCandidates = [
+    userMeta.clientTmuxSessionId,
+    userMeta.client_tmux_session_id,
+    userMeta.tmuxSessionId,
+    userMeta.tmux_session_id,
+    userMeta.rccSessionClientTmuxSessionId,
+    userMeta.rcc_session_client_tmux_session_id
+  ];
+  for (const candidate of directCandidates) {
+    const normalized = normalizeToken(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  const headerSources: Array<Record<string, unknown> | undefined> = [
+    headers,
+    clientHeaders ? (clientHeaders as unknown as Record<string, unknown>) : undefined
+  ];
+  for (const source of headerSources) {
+    const explicit =
+      extractHeaderValue(source, 'x-routecodex-client-tmux-session-id')
+      || extractHeaderValue(source, 'x-rcc-client-tmux-session-id')
+      || extractHeaderValue(source, 'x-routecodex-tmux-session-id')
+      || extractHeaderValue(source, 'x-rcc-tmux-session-id')
+      || extractHeaderValue(source, 'x-tmux-session-id');
+    if (explicit) {
+      return explicit;
+    }
+    const fromTurnMetadata = extractSessionScopeFromTurnMetadata(
+      extractHeaderValue(source, 'x-codex-turn-metadata')
+    );
+    if (fromTurnMetadata) {
+      return fromTurnMetadata;
+    }
+  }
+
+  const fromApiKeyHeader =
+    extractHeaderValue(headers, 'x-routecodex-api-key')
+    || extractHeaderValue(headers, 'x-api-key')
+    || extractHeaderValue(headers, 'x-routecodex-apikey')
+    || extractHeaderValue(headers, 'api-key')
+    || extractHeaderValue(headers, 'apikey');
+  const fromApiKey = extractSessionClientScopeIdFromApiKey(fromApiKeyHeader);
+  if (fromApiKey) {
+    return fromApiKey;
+  }
+
+  const authorization = extractHeaderValue(headers, 'authorization');
+  if (authorization) {
+    const match = authorization.match(/^(?:Bearer|ApiKey)\s+(.+)$/i);
+    const fromAuth = extractSessionClientScopeIdFromApiKey(match ? String(match[1]) : authorization);
     if (fromAuth) {
       return fromAuth;
     }
@@ -258,14 +336,18 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
   }
 
   for (const candidate of candidates) {
+    const normalizedCandidate = candidate.trim();
+    if (!normalizedCandidate.startsWith('{') && !normalizedCandidate.startsWith('[')) {
+      continue;
+    }
     try {
-      const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      const parsed = JSON.parse(normalizedCandidate) as Record<string, unknown>;
       const fromJson = extractWorkdirFromTurnMetadataObject(parsed);
       if (fromJson) {
         return fromJson;
       }
-    } catch (jsonParseError) {
-      logExecutorMetadataNonBlocking('extractWorkdirFromTurnMetadata.jsonParse', jsonParseError);
+    } catch {
+      // Encoded turn metadata can include non-JSON candidates before decode/base64 expansion.
     }
 
     try {
@@ -312,12 +394,273 @@ function extractWorkdirFromTurnMetadataObject(parsed: Record<string, unknown>): 
   return undefined;
 }
 
+function extractSessionScopeFromTurnMetadata(rawTurnMetadata: string | undefined): string | undefined {
+  if (!rawTurnMetadata) {
+    return undefined;
+  }
+  const candidates = expandTurnMetadataCandidates(rawTurnMetadata);
+  for (const candidate of candidates) {
+    const normalizedCandidate = candidate.trim();
+    if (!normalizedCandidate.startsWith('{') && !normalizedCandidate.startsWith('[')) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(normalizedCandidate) as Record<string, unknown>;
+      const fromJson = extractSessionScopeFromTurnMetadataObject(parsed);
+      if (fromJson) {
+        return fromJson;
+      }
+    } catch {
+      // Encoded turn metadata can include non-JSON candidates before decode/base64 expansion.
+    }
+
+    try {
+      const params = new URLSearchParams(candidate);
+      const fromParams =
+        (params.get('sessionId') || '').trim()
+        || (params.get('session_id') || '').trim()
+        || (params.get('tmux_session') || '').trim()
+        || (params.get('tmuxSession') || '').trim()
+        || (params.get('tmuxSessionId') || '').trim()
+        || (params.get('tmux_session_id') || '').trim();
+      if (fromParams) {
+        return fromParams;
+      }
+    } catch (urlParamsError) {
+      logExecutorMetadataNonBlocking('extractSessionScopeFromTurnMetadata.urlSearchParams', urlParamsError);
+    }
+  }
+  return undefined;
+}
+
+function expandTurnMetadataCandidates(rawTurnMetadata: string): string[] {
+  const candidates = [rawTurnMetadata];
+  try {
+    candidates.push(decodeURIComponent(rawTurnMetadata));
+  } catch (decodeError) {
+    logExecutorMetadataNonBlocking('expandTurnMetadataCandidates.decodeURIComponent', decodeError);
+  }
+  for (const candidate of [...candidates]) {
+    const normalized = candidate.trim();
+    if (!normalized || !/^[A-Za-z0-9+/=_-]+$/.test(normalized) || normalized.length < 12) {
+      continue;
+    }
+    try {
+      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+      const decoded = Buffer.from(padded, 'base64').toString('utf8').trim();
+      if (decoded) {
+        candidates.push(decoded);
+      }
+    } catch (base64DecodeError) {
+      logExecutorMetadataNonBlocking('expandTurnMetadataCandidates.base64Decode', base64DecodeError);
+    }
+  }
+  return candidates;
+}
+
+function extractSessionScopeFromTurnMetadataObject(parsed: Record<string, unknown>): string | undefined {
+  const direct =
+    normalizeToken(parsed.sessionId)
+    || normalizeToken(parsed.session_id)
+    || normalizeToken(parsed.clientTmuxSessionId)
+    || normalizeToken(parsed.client_tmux_session_id)
+    || normalizeToken(parsed.rccSessionClientTmuxSessionId)
+    || normalizeToken(parsed.rcc_session_client_tmux_session_id)
+    || normalizeToken(parsed.tmux_session)
+    || normalizeToken(parsed.tmuxSession)
+    || normalizeToken(parsed.tmuxSessionId)
+    || normalizeToken(parsed.tmux_session_id);
+  if (direct) {
+    return direct;
+  }
+  const scope = parsed.scope && typeof parsed.scope === 'object' && !Array.isArray(parsed.scope)
+    ? parsed.scope as Record<string, unknown>
+    : undefined;
+  if (scope) {
+    const scoped =
+      normalizeToken(scope.sessionId)
+      || normalizeToken(scope.session_id)
+      || normalizeToken(scope.clientTmuxSessionId)
+      || normalizeToken(scope.client_tmux_session_id)
+      || normalizeToken(scope.rccSessionClientTmuxSessionId)
+      || normalizeToken(scope.rcc_session_client_tmux_session_id)
+      || normalizeToken(scope.tmux_session)
+      || normalizeToken(scope.tmuxSession)
+      || normalizeToken(scope.tmuxSessionId)
+      || normalizeToken(scope.tmux_session_id);
+    if (scoped) {
+      return scoped;
+    }
+  }
+  return undefined;
+}
+
 function normalizeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function normalizeSessionIdPart(value: unknown): string | undefined {
+  const normalized = normalizeToken(value);
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.replace(/[^A-Za-z0-9._:-]+/g, '_').replace(/^_+|_+$/g, '') || undefined;
+}
+
+function buildSyntheticLogSessionId(args: {
+  explicitSessionId?: string;
+  explicitConversationId?: string;
+  clientDaemonId?: string;
+  sessionScopeId?: string;
+  workdir?: string;
+  clientType?: string;
+}): string | undefined {
+  const explicit = normalizeToken(args.explicitSessionId);
+  if (explicit) {
+    return explicit;
+  }
+  const conversation = normalizeToken(args.explicitConversationId);
+  if (conversation) {
+    return conversation;
+  }
+  const parts = [
+    normalizeSessionIdPart(args.clientType),
+    normalizeSessionIdPart(args.clientDaemonId),
+    normalizeSessionIdPart(args.sessionScopeId),
+    normalizeSessionIdPart(args.workdir)
+  ].filter((part): part is string => Boolean(part));
+  if (parts.length === 0) {
+    return undefined;
+  }
+  return `${SYNTHETIC_SESSION_PREFIX}:${parts.join(':')}`;
+}
+
+function resolveEntryPortCandidate(
+  portContext: Record<string, unknown> | undefined,
+  userMeta: Record<string, unknown>,
+  bodyMeta: Record<string, unknown>
+): number | undefined {
+  return typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort)
+    ? Math.floor(portContext.matchedPort)
+    : typeof portContext?.localPort === 'number' && Number.isFinite(portContext.localPort)
+      ? Math.floor(portContext.localPort)
+      : typeof portContext?.entryPort === 'number' && Number.isFinite(portContext.entryPort)
+        ? Math.floor(portContext.entryPort)
+        : typeof userMeta.matchedPort === 'number' && Number.isFinite(userMeta.matchedPort)
+          ? Math.floor(userMeta.matchedPort)
+          : typeof userMeta.localPort === 'number' && Number.isFinite(userMeta.localPort)
+            ? Math.floor(userMeta.localPort)
+            : typeof userMeta.entryPort === 'number' && Number.isFinite(userMeta.entryPort)
+              ? Math.floor(userMeta.entryPort)
+              : typeof bodyMeta.matchedPort === 'number' && Number.isFinite(bodyMeta.matchedPort)
+                ? Math.floor(bodyMeta.matchedPort)
+                : typeof bodyMeta.localPort === 'number' && Number.isFinite(bodyMeta.localPort)
+                  ? Math.floor(bodyMeta.localPort)
+                  : typeof bodyMeta.entryPort === 'number' && Number.isFinite(bodyMeta.entryPort)
+                    ? Math.floor(bodyMeta.entryPort)
+                    : undefined;
+}
+
+function resolvePortContext(
+  userMeta: Record<string, unknown>,
+  bodyMeta: Record<string, unknown>,
+  explicitPortContext?: Record<string, unknown> | null
+): Record<string, unknown> | undefined {
+  if (explicitPortContext && Object.keys(explicitPortContext).length > 0) {
+    return explicitPortContext;
+  }
+  const userPortContext = asRecord(userMeta.portContext);
+  if (Object.keys(userPortContext).length > 0) {
+    return userPortContext;
+  }
+  const bodyPortContext = asRecord(bodyMeta.portContext);
+  return Object.keys(bodyPortContext).length > 0 ? bodyPortContext : undefined;
+}
+
+export function buildInboundLogSessionContext(input: InboundLogSessionContextInput): Record<string, unknown> {
+  const userMeta = asRecord(input.metadata);
+  const bodyMeta = asRecord(input.bodyMetadata);
+  const headers = asRecord(input.headers);
+  const normalizedClientHeaders =
+    cloneClientHeaders((userMeta as { clientHeaders?: unknown }).clientHeaders)
+    || cloneClientHeaders((headers?.['clientHeaders'] as Record<string, unknown> | undefined) ?? undefined);
+  const inboundUserAgent = extractHeaderValue(headers, 'user-agent');
+  const inboundOriginator = extractHeaderValue(headers, 'originator');
+  const resolvedUserAgent =
+    typeof userMeta.userAgent === 'string' && userMeta.userAgent.trim()
+      ? userMeta.userAgent.trim()
+      : inboundUserAgent;
+  const resolvedOriginator =
+    typeof userMeta.clientOriginator === 'string' && userMeta.clientOriginator.trim()
+      ? userMeta.clientOriginator.trim()
+      : inboundOriginator;
+  const requestHeaderSessionId = extractRequestSessionIdFromHeaders(headers, normalizedClientHeaders);
+  const requestHeaderConversationId = extractRequestConversationIdFromHeaders(headers, normalizedClientHeaders);
+  const resolvedSessionDaemonId = extractSessionDaemonId(userMeta, headers);
+  const inferredClientType = inferSessionClientType({
+    ...userMeta,
+    ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
+    ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
+  });
+  const resolvedWorkdir = extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders);
+  const resolvedTmuxSessionId = extractSessionScopeId(userMeta, headers, normalizedClientHeaders);
+  const requestTruthSource: Record<string, unknown> = {
+    ...bodyMeta,
+    ...userMeta
+  };
+  if (requestHeaderSessionId) {
+    requestTruthSource.sessionId = requestHeaderSessionId;
+    if (!requestTruthSource.conversationId) {
+      requestTruthSource.conversationId = requestHeaderSessionId;
+    }
+  }
+  if (requestHeaderConversationId) {
+    requestTruthSource.conversationId = requestHeaderConversationId;
+  }
+  const extractedSessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
+  const explicitSessionId = normalizeToken(extractedSessionIdentifiers.sessionId);
+  const explicitConversationId = normalizeToken(extractedSessionIdentifiers.conversationId);
+  const logSessionColorKey = buildSyntheticLogSessionId({
+    explicitSessionId,
+    explicitConversationId,
+    clientDaemonId: resolvedSessionDaemonId,
+    sessionScopeId: resolvedTmuxSessionId,
+    workdir: resolvedWorkdir,
+    clientType: inferredClientType
+  });
+  return {
+    ...(logSessionColorKey ? { logSessionColorKey } : {}),
+    ...(resolvedSessionDaemonId
+      ? {
+          clientDaemonId: resolvedSessionDaemonId,
+          sessionDaemonId: resolvedSessionDaemonId,
+          sessionClientDaemonId: resolvedSessionDaemonId
+        }
+      : {}),
+    ...(resolvedTmuxSessionId
+      ? {
+          clientTmuxSessionId: resolvedTmuxSessionId,
+          tmuxSessionId: resolvedTmuxSessionId
+        }
+      : {}),
+    ...(resolvedWorkdir
+      ? {
+          clientWorkdir: resolvedWorkdir,
+          workdir: resolvedWorkdir,
+          cwd: resolvedWorkdir
+        }
+      : {}),
+    ...(inferredClientType
+      ? {
+          sessionClientType: inferredClientType,
+          clientType: inferredClientType
+        }
+      : {})
+  };
 }
 
 function inferSessionClientType(metadata: Record<string, unknown>): string | undefined {
@@ -377,7 +720,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const userMeta = asRecord(input.metadata);
   const bodyMeta = asRecord(asRecord(input.body).metadata);
   const headers = asRecord(input.headers);
-  const portContext = asRecord(userMeta.portContext) ?? asRecord(bodyMeta.portContext);
+  const portContext = resolvePortContext(userMeta, bodyMeta);
   const inboundUserAgent = extractHeaderValue(headers, 'user-agent');
   const inboundOriginator = extractHeaderValue(headers, 'originator');
   const normalizedClientHeaders =
@@ -398,14 +741,26 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const routeHint = extractRouteHint(input);
   const processMode = (userMeta.processMode as string) || 'chat';
   let resolvedSessionDaemonId = extractSessionDaemonId(userMeta, headers);
-  const inferredClientType = inferSessionClientType(userMeta);
+  const inferredClientType = inferSessionClientType({
+    ...userMeta,
+    ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
+    ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
+  });
   const directWorkdir = extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders);
   const resolvedTmuxTarget = undefined;
   const resolvedWorkdir = directWorkdir;
-  const resolvedTmuxSessionId = undefined;
-  const tmuxSource = 'none';
+  const resolvedTmuxSessionId = extractSessionScopeId(userMeta, headers, normalizedClientHeaders);
+  const tmuxSource = resolvedTmuxSessionId ? 'inbound' : 'none';
+  const inboundLogSessionContext = buildInboundLogSessionContext({
+    entryEndpoint: input.entryEndpoint,
+    headers,
+    bodyMetadata: bodyMeta,
+    metadata: userMeta,
+    portContext
+  });
   const metadata: Record<string, unknown> = {
     ...userMeta,
+    ...inboundLogSessionContext,
     entryEndpoint: input.entryEndpoint,
     processMode,
     direction: 'request',
@@ -493,26 +848,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       reason: 'request entry client request id'
     });
   }
-  const entryPortCandidate =
-    typeof portContext?.matchedPort === 'number' && Number.isFinite(portContext.matchedPort)
-      ? Math.floor(portContext.matchedPort)
-      : typeof portContext?.localPort === 'number' && Number.isFinite(portContext.localPort)
-        ? Math.floor(portContext.localPort)
-        : typeof portContext?.entryPort === 'number' && Number.isFinite(portContext.entryPort)
-          ? Math.floor(portContext.entryPort)
-          : typeof userMeta.matchedPort === 'number' && Number.isFinite(userMeta.matchedPort)
-            ? Math.floor(userMeta.matchedPort)
-            : typeof userMeta.localPort === 'number' && Number.isFinite(userMeta.localPort)
-              ? Math.floor(userMeta.localPort)
-              : typeof userMeta.entryPort === 'number' && Number.isFinite(userMeta.entryPort)
-                ? Math.floor(userMeta.entryPort)
-                : typeof bodyMeta.matchedPort === 'number' && Number.isFinite(bodyMeta.matchedPort)
-                  ? Math.floor(bodyMeta.matchedPort)
-                  : typeof bodyMeta.localPort === 'number' && Number.isFinite(bodyMeta.localPort)
-                    ? Math.floor(bodyMeta.localPort)
-                    : typeof bodyMeta.entryPort === 'number' && Number.isFinite(bodyMeta.entryPort)
-                      ? Math.floor(bodyMeta.entryPort)
-                      : undefined;
+  const entryPortCandidate = resolveEntryPortCandidate(portContext, userMeta, bodyMeta);
   if (typeof entryPortCandidate === 'number') {
     const entryPortScope = String(entryPortCandidate);
     const existingPortScope = center.readRequestTruth().portScope;
@@ -562,7 +898,17 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     delete rt.responsesRequestContext;
     requestTruthSource.__rt = rt;
   }
-  const sessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
+  const extractedSessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
+  const existingSessionId = typeof extractedSessionIdentifiers.sessionId === 'string' && extractedSessionIdentifiers.sessionId.trim()
+    ? extractedSessionIdentifiers.sessionId.trim()
+    : undefined;
+  const existingConversationId = typeof extractedSessionIdentifiers.conversationId === 'string' && extractedSessionIdentifiers.conversationId.trim()
+    ? extractedSessionIdentifiers.conversationId.trim()
+    : undefined;
+  const sessionIdentifiers = {
+    ...(existingSessionId ? { sessionId: existingSessionId } : {}),
+    ...(existingConversationId ? { conversationId: existingConversationId } : {})
+  };
   const currentRequestTruth = center.readRequestTruth();
   if (sessionIdentifiers.sessionId && !currentRequestTruth.sessionId) {
     writeMetadataCenterSlot({
@@ -573,7 +919,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       writer: BUILD_REQUEST_METADATA_WRITER
     });
   }
-  if (sessionIdentifiers.sessionId) {
+  if (sessionIdentifiers.sessionId && normalizeToken(userMeta.sessionId)) {
     metadata.sessionId = sessionIdentifiers.sessionId;
   }
   if (sessionIdentifiers.conversationId && !currentRequestTruth.conversationId) {
@@ -585,7 +931,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       writer: BUILD_REQUEST_METADATA_WRITER
     });
   }
-  if (sessionIdentifiers.conversationId) {
+  if (sessionIdentifiers.conversationId && normalizeToken(userMeta.conversationId)) {
     metadata.conversationId = sessionIdentifiers.conversationId;
   }
   const responsesResumeSource =

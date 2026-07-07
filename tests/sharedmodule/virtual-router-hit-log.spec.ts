@@ -1,7 +1,6 @@
 import {
   createVirtualRouterHitRecord,
   formatVirtualRouterHit,
-  resolveRouteColor,
   resolveSessionColor,
   resolveSessionLogColorKey,
   toVirtualRouterHitEvent
@@ -15,6 +14,7 @@ describe('virtual-router hit log', () => {
       providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
       hitReason: 'thinking:user-input',
+      sessionId: 'session-hit-token-estimate',
       requestTokens: 1234.6
     }));
 
@@ -27,6 +27,7 @@ describe('virtual-router hit log', () => {
       poolId: 'thinking-primary',
       providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
+      sessionId: 'session-hit-token-missing',
       hitReason: 'thinking:user-input'
     }));
 
@@ -67,6 +68,7 @@ describe('virtual-router hit log', () => {
       providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
       hitReason: 'thinking:user-input',
+      sessionId: 'session-hit-penalty',
       selectionPenalty: 3
     }));
 
@@ -101,6 +103,7 @@ describe('virtual-router hit log', () => {
       poolId: 'thinking-primary',
       providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
+      sessionId: 'session-hit-routing-state',
       routingState: {
         stopMessageText: 'continue until done',
         stopMessageMaxRepeats: 3,
@@ -170,18 +173,17 @@ describe('virtual-router hit log', () => {
     expect(line).toContain(`sid=${sessionId} ${sessionColor}thinking/thinking-primary`);
   });
 
-  it('uses route color only when no session id is present', () => {
-    const line = formatVirtualRouterHit(createVirtualRouterHitRecord({
+  it('rejects virtual-router-hit formatting when no session id is present', () => {
+    const record = createVirtualRouterHitRecord({
       routeName: 'thinking',
       poolId: 'thinking-primary',
       providerKey: 'glm.key1.kimi-k2.5',
       modelId: 'kimi-k2.5',
       hitReason: 'thinking:user-input'
-    }));
+    });
 
     expect(resolveSessionColor()).toBeUndefined();
-    expect(line).toContain(`${resolveRouteColor('thinking')}[virtual-router-hit]\x1b[0m`);
-    expect(line).not.toContain(' sid=');
+    expect(() => formatVirtualRouterHit(record)).toThrow(/sessionId is required/);
   });
 
   it('prefers request session id over stable tmux scope for log color key', () => {

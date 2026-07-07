@@ -118,10 +118,7 @@ export interface HubPipeline {
   };
 }
 
-export type HubPipelineConfig = {
-  virtualRouter: unknown;
-  pipelineRuntimeConfig?: Record<string, unknown>;
-  [key: string]: unknown;
-};
+// HubPipelineConfig replaced by Record<string,unknown> - config goes directly via NAPI
+export type HubPipelineConfig = Record<string, unknown>;
 
 export type HubPipelineCtor = new (config: HubPipelineConfig) => HubPipeline;

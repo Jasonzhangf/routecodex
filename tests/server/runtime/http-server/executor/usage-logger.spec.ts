@@ -176,7 +176,7 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('\x1b[97m');
   });
 
-  it('keeps usage line on virtual-router-hit route color when request has no session key', async () => {
+  it('does not inherit virtual-router-hit route color when request has no session key', async () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const { colorizeVirtualRouterHitLogLine, registerRequestLogContext } = await import('../../../../../src/server/utils/request-log-color.js');
     const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
@@ -202,7 +202,8 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered.startsWith(routeColor)).toBe(true);
+    expect(rendered.startsWith(routeColor)).toBe(false);
+    expect(rendered.startsWith('\x1b')).toBe(false);
     expect(rendered).toContain('route=longcontext');
     expect(rendered).toContain('model=gpt-5.5->glm-5.2');
   });

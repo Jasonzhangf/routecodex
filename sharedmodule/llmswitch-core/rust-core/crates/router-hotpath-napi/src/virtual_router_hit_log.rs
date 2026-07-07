@@ -460,11 +460,14 @@ pub fn format_virtual_router_hit_json(
         .as_ref()
         .map(|p| format!("{}/{}", record.route_name, p))
         .unwrap_or_else(|| record.route_name.clone());
-    let session_color = record
+    let session_id = record
         .session_id
-        .as_ref()
-        .and_then(|s| resolve_session_color(s))
-        .unwrap_or_else(|| resolve_route_color(&record.route_name));
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| napi::Error::from_reason("virtual-router-hit sessionId is required"))?;
+    let session_color = resolve_session_color(session_id)
+        .ok_or_else(|| napi::Error::from_reason("virtual-router-hit sessionId is required"))?;
     let target_label = if !omit_set.contains("model") {
         match resolved_model {
             Some(m) => format!("{} -> {}.{}", route_label, provider_label, m),
@@ -484,12 +487,7 @@ pub fn format_virtual_router_hit_json(
         String::new()
     };
     let session_id_label: String = if !omit_set.contains("sessionId") {
-        record
-            .session_id
-            .as_ref()
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| format!(" sid={}", s.trim()))
-            .unwrap_or_default()
+        format!(" sid={}", session_id)
     } else {
         String::new()
     };

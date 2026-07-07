@@ -8,8 +8,8 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-request-bridge.js', () => ({
   buildResponsesConversationPortScopeForHttp: jest.fn(() => ({})),
   buildResponsesPipelineMetadataForHttp: jest.fn(() => ({})),
-  captureResponsesInboundToolHistoryErrorsampleForHttp: jest.fn(),
-  clearResponsesConversationOnHandlerFailureForHttp: jest.fn(),
+  captureResponsesInboundToolHistoryErrorsampleForHttp: jest.fn(async () => undefined),
+  clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
   clearResponsesConversationByRequestIdForHttp: jest.fn(),
   captureResponsesRequestContextForHttp: jest.fn(),
   recordResponsesResponseForHttp: jest.fn(),
@@ -138,5 +138,41 @@ describe('responses-handler request start logging', () => {
     expect(res.status).toHaveBeenCalledWith(400);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('▶ [/v1/responses.submit_tool_outputs]'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(' started'));
+  });
+
+  it('passes inbound log session color key into request start and pipeline metadata', async () => {
+    const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
+    const { resolveSessionAnsiColor } = await import('../../../src/utils/session-log-color.js');
+    const turnMetadata = JSON.stringify({
+      scope: { tmux_session: 'tmux-responses-log-scope' },
+      cwd: '/tmp/responses-log-project'
+    });
+    const req = makeReq({ model: 'gpt-5.5', input: [] });
+    req.headers = {
+      'user-agent': 'codex-cli',
+      'x-codex-turn-metadata': encodeURIComponent(turnMetadata)
+    };
+    const res = makeRes();
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: { id: 'resp_1', output: [] },
+      metadata: {}
+    }));
+
+    await handleResponses(req, res, {
+      executePipeline,
+      errorHandling: null,
+      portContext: { matchedPort: 5555, localPort: 5555 }
+    } as any);
+
+    const expectedKey = 'rcc-session:codex:tmux-responses-log-scope:tmp_responses-log-project';
+    const expectedColor = resolveSessionAnsiColor(expectedKey);
+    const rendered = String(warnSpy.mock.calls.find((call) => String(call[0] ?? '').includes('▶ [/v1/responses]'))?.[0] ?? '');
+    const metadata = (executePipeline.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> } | undefined)?.metadata;
+
+    expect(expectedColor).toBeDefined();
+    expect(rendered.startsWith(String(expectedColor))).toBe(true);
+    expect(metadata?.logSessionColorKey).toBe(expectedKey);
+    expect(metadata?.sessionId).toBeUndefined();
   });
 });

@@ -22,6 +22,7 @@ import {
 import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-center.js';
 import { writeMetadataCenterSlot } from '../runtime/http-server/metadata-center/dualwrite-api.js';
 import { readRuntimeControlProjection } from '../runtime/http-server/metadata-center/request-truth-readers.js';
+import { buildInboundLogSessionContext } from '../runtime/http-server/executor-metadata.js';
 export { sendPipelineResponse } from './handler-response-utils.js';
 import { assertClientResponseHasNoInternalCarriers as assertClientErrorBodyHasNoInternalCarriers } from './handler-response-utils.js';
 import { resolveInternalDebugErrorLogFields } from '../../debug/internal-error/index.js';
@@ -1021,6 +1022,27 @@ export function buildHandlerPipelineMetadata(
   delete merged.inboundStream;
   delete merged.outboundStream;
   return merged;
+}
+
+export function buildHandlerLogMetadata(args: {
+  entryEndpoint: string;
+  headers: Record<string, unknown>;
+  requestBodyMetadata?: Record<string, unknown>;
+  clientHeaders?: Record<string, string>;
+  portContext?: HandlerContext['portContext'];
+  metadata?: Record<string, unknown>;
+}): Record<string, unknown> {
+  return buildInboundLogSessionContext({
+    entryEndpoint: args.entryEndpoint,
+    headers: args.headers,
+    bodyMetadata: args.requestBodyMetadata,
+    metadata: {
+      ...(args.requestBodyMetadata ?? {}),
+      ...(args.clientHeaders ? { clientHeaders: args.clientHeaders } : {}),
+      ...(args.metadata ?? {})
+    },
+    portContext: args.portContext as Record<string, unknown> | undefined
+  });
 }
 
 // Phase Server-B: explicit whitelist + explicit denied list for client-supplied metadata.

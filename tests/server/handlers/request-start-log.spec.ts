@@ -1,6 +1,9 @@
 import { jest } from '@jest/globals';
 
-import { logRequestStart } from '../../../src/server/handlers/handler-utils.js';
+import {
+  buildHandlerLogMetadata,
+  logRequestStart
+} from '../../../src/server/handlers/handler-utils.js';
 
 describe('logRequestStart', () => {
   const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -69,6 +72,33 @@ describe('logRequestStart', () => {
     });
 
     const rendered = String(warnSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(expectedColor).toBeDefined();
+    expect(rendered.startsWith(String(expectedColor))).toBe(true);
+  });
+
+  it('builds request start color from inbound codex session scope', async () => {
+    const { resolveSessionAnsiColor } = await import('../../../src/utils/session-log-color.js');
+    const turnMetadata = JSON.stringify({
+      scope: { tmux_session: 'tmux-start-log-scope' },
+      cwd: '/tmp/start-log-project'
+    });
+    const logMetadata = buildHandlerLogMetadata({
+      entryEndpoint: '/v1/responses',
+      headers: {
+        'user-agent': 'codex-cli',
+        'x-codex-turn-metadata': encodeURIComponent(turnMetadata)
+      }
+    });
+    const expectedColor = resolveSessionAnsiColor(String(logMetadata.logSessionColorKey));
+
+    logRequestStart('/v1/responses', 'req-start-codex-scope-color', {
+      clientRequestId: 'client-start-codex-scope',
+      ...logMetadata,
+      inboundStream: true
+    });
+
+    const rendered = String(warnSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(logMetadata.logSessionColorKey).toBe('rcc-session:codex:tmux-start-log-scope:tmp_start-log-project');
     expect(expectedColor).toBeDefined();
     expect(rendered.startsWith(String(expectedColor))).toBe(true);
   });

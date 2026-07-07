@@ -13,6 +13,7 @@ import {
   logRequestComplete,
   logRequestError,
   captureClientHeaders,
+  buildHandlerLogMetadata,
   buildHandlerPipelineMetadata,
 } from './handler-utils.js';
 import {
@@ -201,12 +202,19 @@ export async function handleResponses(
       && (req.headers['accept'] as string).includes('text/event-stream');
     const responsesConversationPortScope = buildResponsesConversationPortScopeForHttp(ctx.portContext);
     const rawInputItems = countResponsesInputItems(payload);
+    const preRuntimeLogMetadata = buildHandlerLogMetadata({
+      entryEndpoint,
+      headers: req.headers as Record<string, unknown>,
+      clientHeaders,
+      portContext: ctx.portContext
+    });
     const preparedRuntime = await prepareResponsesHandlerRuntimeForHttp({
         payload: payload as Record<string, unknown>,
         entryEndpoint,
         responseIdFromPath: options.responseIdFromPath,
         requestId,
         requestMetadata: {
+          ...preRuntimeLogMetadata,
           clientHeaders,
         },
         portScope: responsesConversationPortScope,
@@ -215,9 +223,18 @@ export async function handleResponses(
         requestTimeoutMs,
       });
     const requestBodyMetadata = preparedRuntime.requestBodyMetadata;
+    const requestStartLogMetadata = buildHandlerLogMetadata({
+      entryEndpoint,
+      headers: req.headers as Record<string, unknown>,
+      requestBodyMetadata,
+      clientHeaders,
+      portContext: ctx.portContext,
+      metadata: preRuntimeLogMetadata
+    });
     emitRequestStart({
       clientRequestId,
       ...(requestBodyMetadata ?? {}),
+      ...requestStartLogMetadata,
       ...preparedRuntime.streamPlan.requestStartMeta,
       rawInputItems,
       rawInputShape: summarizeResponsesInputShape(payload),
@@ -260,6 +277,7 @@ export async function handleResponses(
       resumeMeta,
       requestContext,
     });
+    Object.assign(responsesPipelineMetadata, requestStartLogMetadata);
     MetadataCenter.attach(responsesPipelineMetadata);
     responsesPipelineMetadata.requestId = requestId;
     responsesPipelineMetadata.clientRequestId = clientRequestId;

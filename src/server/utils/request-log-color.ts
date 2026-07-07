@@ -2,16 +2,12 @@ import { resolveEffectiveRequestId } from './request-id-manager.js';
 import { resolveSessionAnsiColor, resolveSessionLogColorKey } from '../../utils/session-log-color.js';
 
 const ANSI_RESET = '\x1b[0m';
-const ANSI_PATTERN = /\x1b\[[0-9;]*m/;
-const ANSI_FALLBACK_LOG_COLOR = '\x1b[90m';
-const ANSI_DEFAULT_NORMAL_LOG_COLOR = '\x1b[36m';
 const ANSI_ERROR_LOG_COLOR = '\x1b[31m';
 const REQUEST_LOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
 const REQUEST_LOG_CONTEXT_MAX = 4096;
 
 type RequestLogContextRecord = {
   colorToken: string;
-  colorSource: 'session' | 'request_default' | 'virtual_router_hit';
   expiresAtMs: number;
 };
 
@@ -71,37 +67,7 @@ function resolveVirtualRouterHitSessionKey(text: string): string | undefined {
   return normalizeToken(sid);
 }
 
-function resolveVirtualRouterHitRouteColor(text: string): string | undefined {
-  const leadingColor = extractLeadingAnsiColor(text);
-  if (leadingColor) {
-    return leadingColor;
-  }
-  const markerColor = text.match(/(\x1b\[[0-9;]*m)\[virtual-router-hit\]/)?.[1];
-  return markerColor || undefined;
-}
-
 function resolveVirtualRouterHitColorToken(text: string): string | undefined {
-  const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
-  const requestKey = normalizeRequestKey(requestId);
-  const routeColor = resolveVirtualRouterHitRouteColor(text);
-  if (requestKey) {
-    const record = REQUEST_LOG_CONTEXT.get(requestKey);
-    if (record && record.expiresAtMs > Date.now()) {
-      if (record.colorSource !== 'session' && routeColor) {
-        const nextRecord: RequestLogContextRecord = {
-          colorToken: routeColor,
-          colorSource: 'virtual_router_hit',
-          expiresAtMs: Date.now() + REQUEST_LOG_CONTEXT_TTL_MS
-        };
-        REQUEST_LOG_CONTEXT.set(requestKey, nextRecord);
-        return nextRecord.colorToken;
-      }
-      return record.colorToken;
-    }
-    if (record) {
-      REQUEST_LOG_CONTEXT.delete(requestKey);
-    }
-  }
   const sessionKey = resolveVirtualRouterHitSessionKey(text);
   return sessionKey ? resolveSessionAnsiColor(sessionKey) : undefined;
 }
@@ -122,7 +88,7 @@ function pruneExpiredContext(nowMs: number): void {
 }
 
 export function resolveSessionLogColor(sessionId?: string): string {
-  return resolveSessionAnsiColor(sessionId) || '\x1b[36m';
+  return resolveSessionAnsiColor(sessionId) || '';
 }
 
 export function stripAnsiCodes(text: string): string {
@@ -140,32 +106,16 @@ export function registerRequestLogContext(
 ): void {
   const requestKey = normalizeRequestKey(requestId);
   const sessionKey = resolveSessionKey(context);
-  if (!requestKey || !context) {
+  if (!requestKey || !context || !sessionKey) {
     return;
   }
-  const colorToken = sessionKey ? resolveSessionAnsiColor(sessionKey) : ANSI_DEFAULT_NORMAL_LOG_COLOR;
+  const colorToken = resolveSessionAnsiColor(sessionKey);
   if (!colorToken) {
     return;
   }
-  const colorSource = sessionKey ? 'session' : 'request_default';
   const nowMs = Date.now();
-  const existing = REQUEST_LOG_CONTEXT.get(requestKey);
-  if (
-    existing
-    && existing.expiresAtMs > nowMs
-    && existing.colorSource !== 'request_default'
-    && colorSource === 'request_default'
-  ) {
-    REQUEST_LOG_CONTEXT.set(requestKey, {
-      ...existing,
-      expiresAtMs: nowMs + REQUEST_LOG_CONTEXT_TTL_MS
-    });
-    pruneExpiredContext(nowMs);
-    return;
-  }
   REQUEST_LOG_CONTEXT.set(requestKey, {
     colorToken,
-    colorSource,
     expiresAtMs: nowMs + REQUEST_LOG_CONTEXT_TTL_MS
   });
   pruneExpiredContext(nowMs);
@@ -190,7 +140,7 @@ export function resolveRequestLogColorToken(
   if (record) {
     REQUEST_LOG_CONTEXT.delete(requestKey);
   }
-  return ANSI_DEFAULT_NORMAL_LOG_COLOR;
+  return undefined;
 }
 
 export function colorizeRequestLog(
