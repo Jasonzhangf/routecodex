@@ -67,7 +67,30 @@ function resolveVirtualRouterHitSessionKey(text: string): string | undefined {
   return normalizeToken(sid);
 }
 
+function resolveVirtualRouterHitRequestKey(text: string): string | undefined {
+  const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
+  return normalizeRequestKey(requestId);
+}
+
+function resolveRegisteredRequestColorToken(requestKey: string | undefined): string | undefined {
+  if (!requestKey) {
+    return undefined;
+  }
+  const record = REQUEST_LOG_CONTEXT.get(requestKey);
+  if (record && record.expiresAtMs > Date.now()) {
+    return record.colorToken;
+  }
+  if (record) {
+    REQUEST_LOG_CONTEXT.delete(requestKey);
+  }
+  return undefined;
+}
+
 function resolveVirtualRouterHitColorToken(text: string): string | undefined {
+  const requestColor = resolveRegisteredRequestColorToken(resolveVirtualRouterHitRequestKey(text));
+  if (requestColor) {
+    return requestColor;
+  }
   const sessionKey = resolveVirtualRouterHitSessionKey(text);
   return sessionKey ? resolveSessionAnsiColor(sessionKey) : undefined;
 }
@@ -133,14 +156,7 @@ export function resolveRequestLogColorToken(
   if (!requestKey) {
     return undefined;
   }
-  const record = REQUEST_LOG_CONTEXT.get(requestKey);
-  if (record && record.expiresAtMs > Date.now()) {
-    return record.colorToken;
-  }
-  if (record) {
-    REQUEST_LOG_CONTEXT.delete(requestKey);
-  }
-  return undefined;
+  return resolveRegisteredRequestColorToken(requestKey);
 }
 
 export function colorizeRequestLog(

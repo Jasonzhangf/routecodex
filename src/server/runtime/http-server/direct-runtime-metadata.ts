@@ -20,6 +20,13 @@ const ROUTER_DIRECT_ROUTE_METADATA_PRIMITIVE_KEYS = [
   'session_id',
   'conversationId',
   'conversation_id',
+  'logSessionColorKey',
+  'clientTmuxSessionId',
+  'client_tmux_session_id',
+  'tmuxSessionId',
+  'tmux_session_id',
+  'rccSessionClientTmuxSessionId',
+  'rcc_session_client_tmux_session_id',
   'routecodexRoutingPolicyGroup',
   'routecodexLocalPort',
   'entryPort',
@@ -163,7 +170,18 @@ function projectRouteMetadataCenterSnapshot(
   copyStringArrayKey(out, snapshot ?? {}, 'excludedProviderKeys');
   copyStringArrayKey(out, flatMetadata, 'excludedProviderKeys');
   copyStringArrayKey(out, flatMetadata, 'allowedProviders');
-  for (const key of ['requestId', 'sessionId', 'conversationId'] as const) {
+  for (const key of [
+    'requestId',
+    'sessionId',
+    'conversationId',
+    'logSessionColorKey',
+    'clientTmuxSessionId',
+    'client_tmux_session_id',
+    'tmuxSessionId',
+    'tmux_session_id',
+    'rccSessionClientTmuxSessionId',
+    'rcc_session_client_tmux_session_id',
+  ] as const) {
     const fromRequestTruth = readNonEmptyString(requestTruth?.[key]);
     const fromFlat = readNonEmptyString(flatMetadata[key]);
     const value = fromRequestTruth ?? fromFlat;

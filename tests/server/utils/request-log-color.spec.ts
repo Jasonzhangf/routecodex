@@ -91,7 +91,7 @@ describe('request log color registry', () => {
     expect(String(logSpy.mock.calls[0]?.[0] ?? '').startsWith(String(expectedColor))).toBe(true);
   });
 
-  it('does not color virtual-router-hit lines from registered request context when sid is absent', () => {
+  it('colors virtual-router-hit lines from registered request context when sid is omitted', () => {
     const tmuxSessionId = 'tmux-vr-hit-context';
     const tmuxColor = resolveSessionAnsiColor(tmuxSessionId);
     let requestSessionId = 'session-vr-hit-context';
@@ -112,20 +112,22 @@ describe('request log color registry', () => {
     expect(expectedColor).toBeDefined();
     expect(tmuxColor).toBeDefined();
     expect(expectedColor).not.toBe(tmuxColor);
-    expect(line.startsWith(String(expectedColor))).toBe(false);
-    expect(line).toContain('\x1b[38;5;208m[virtual-router-hit]\x1b[0m');
+    expect(line.startsWith(String(expectedColor))).toBe(true);
+    expect(line).not.toContain('\x1b[38;5;208m[virtual-router-hit]\x1b[0m');
     expect(stripAnsiCodes(line)).toContain(`req=${requestId} tools/pool -> provider.model`);
     expect(line.includes('\x1b[97m')).toBe(false);
   });
 
-  it('does not let virtual-router-hit route color rewrite response and usage lines without a session key', () => {
+  it('uses one registered session color for virtual-router-hit, response, and usage lines', () => {
     const requestId = 'openai-responses-router-gpt-5.5-20260704T162136689-458956-727';
-    const requestColor = resolveRequestLogColorToken(requestId);
+    const expectedColor = resolveSessionAnsiColor('session-log-family-727');
     const routeColor = '\x1b[38;5;141m';
 
     registerRequestLogContext(requestId, {
-      clientRequestId: '8958-729'
+      clientRequestId: '8958-729',
+      logSessionColorKey: 'session-log-family-727'
     });
+    const requestColor = resolveRequestLogColorToken(requestId);
 
     const requestLine = colorizeRequestLog(`▶ [/v1/responses] request ${requestId} started`, requestId);
     const routerHitLine = colorizeVirtualRouterHitLogLine(
@@ -134,11 +136,13 @@ describe('request log color registry', () => {
     const responseLine = colorizeRequestLog(`✅ [/v1/responses] request ${requestId} completed`, requestId);
     const usageLine = colorizeRequestLog('[usage] req=8956-727 route=longcontext model=router->glm-5.2', requestId);
 
-    expect(requestColor).toBeUndefined();
-    expect(requestLine).toBe(`▶ [/v1/responses] request ${requestId} started`);
-    expect(routerHitLine.startsWith(routeColor)).toBe(true);
-    expect(responseLine).toBe(`✅ [/v1/responses] request ${requestId} completed`);
-    expect(usageLine).toBe('[usage] req=8956-727 route=longcontext model=router->glm-5.2');
+    expect(expectedColor).toBeDefined();
+    expect(requestColor).toBe(expectedColor);
+    expect(requestLine.startsWith(String(expectedColor))).toBe(true);
+    expect(routerHitLine.startsWith(String(expectedColor))).toBe(true);
+    expect(routerHitLine.startsWith(routeColor)).toBe(false);
+    expect(responseLine.startsWith(String(expectedColor))).toBe(true);
+    expect(usageLine.startsWith(String(expectedColor))).toBe(true);
     expect(stripAnsiCodes(routerHitLine)).toContain(`req=${requestId} longcontext/gateway-priority-5555-priority-longcontext`);
   });
 

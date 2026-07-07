@@ -109,4 +109,45 @@ describe('direct-runtime-metadata', () => {
     expect(projected).not.toHaveProperty('requestSemantics');
     expect(projected).not.toHaveProperty('self');
   });
+
+  it('preserves route log session color keys for virtual-router-hit formatting', () => {
+    const projected = buildRouterDirectRouteMetadata({
+      metadata: {
+        requestId: 'req-route-color',
+        clientRequestId: 'client-route-color',
+        routecodexRoutingPolicyGroup: 'gateway_priority_5520',
+        logSessionColorKey: 'codex-session-color',
+        clientTmuxSessionId: 'tmux-session-color',
+        tmuxSessionId: 'tmux-fallback-color',
+        rccSessionClientTmuxSessionId: 'rcc-tmux-color',
+      },
+      metadataCenterSnapshot: {
+        requestTruth: {
+          requestId: 'req-route-color',
+          sessionId: 'request-truth-session',
+          conversationId: 'conversation-color',
+        },
+      },
+      requestId: 'req-route-color',
+      entryEndpoint: '/v1/responses',
+    });
+
+    expect(projected).toMatchObject({
+      requestId: 'req-route-color',
+      clientRequestId: 'client-route-color',
+      logSessionColorKey: 'codex-session-color',
+      clientTmuxSessionId: 'tmux-session-color',
+      tmuxSessionId: 'tmux-fallback-color',
+      rccSessionClientTmuxSessionId: 'rcc-tmux-color',
+      metadataCenterSnapshot: {
+        requestId: 'req-route-color',
+        sessionId: 'request-truth-session',
+        conversationId: 'conversation-color',
+        logSessionColorKey: 'codex-session-color',
+        clientTmuxSessionId: 'tmux-session-color',
+        tmuxSessionId: 'tmux-fallback-color',
+        rccSessionClientTmuxSessionId: 'rcc-tmux-color',
+      },
+    });
+  });
 });
