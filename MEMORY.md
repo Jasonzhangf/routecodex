@@ -1250,9 +1250,16 @@
 
 - Rust SSOT: comment-preserving TOML string scalar patch semantics are owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs` through `update_toml_string_scalar_in_table_json`.
 - TS boundary: `src/config/toml-comment-preserving.ts` is a thin sync native shell only; it must not regain table scanning, key matching, comment spacing preservation, scalar escaping, table creation, or insertion-order logic.
-- User config writer remains a TS file IO shell for atomic writes and path/format orchestration; it delegates scalar patch semantics to `config.toml_codec`.
+- Superseded boundary on 2026-07-07: user config async real-file writes and scalar patch read/write are now Rust-owned through `config_file_codec`; TS `src/config/user-config-writer.ts` is a native shell. Provider async real-file writes are also Rust-owned; `writeProviderConfigFileSync(fsImpl)` remains the TS injected-filesystem boundary until init/test caller injection is removed.
 - Native export `updateRouteCodexTomlStringScalarInTableJson` is a required hotpath export.
 - Verified on 2026-07-06: Rust TOML codec tests, native hotpath build, focused TOML writer/config writer/grep Jest, `verify:config-ssot`, root TS compile, llmswitch-core TS compile, function-map gate, minimal TS surface, rustification audit, and diff check all passed.
+
+# 2026-07-07: Config async writers are Rust-owned
+
+- Rust SSOT: user config async writes, user scalar patch read/write, and provider config async writes are owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs`.
+- Native exports: `writeRouteCodexUserConfigFileJson`, `writeRouteCodexProviderConfigFileJson`, and `updateRouteCodexUserConfigStringScalarJson` are required hotpath exports.
+- TS boundary: `src/config/user-config-writer.ts` and async `writeProviderConfigFile()` are native shells only. `writeProviderConfigFileSync(fsImpl)` remains TS because init/authoring tests pass an injected synchronous filesystem; replacing it with Rust would bypass that host boundary.
+- Verified on 2026-07-07 with pre-wire Rust/TS writer parity (`tests/config/config-writer-rust.spec.ts`), post-wire config writer/grep Jest (4 suites / 25 tests), Rust `config_file_codec` tests (5), `verify:config-toml-codec-rust` (7), native hotpath build with required exports, root TS compile, function-map gate, minimal TS surface gate, and diff check. No managed live restart/replay or `~/.rcc` edits were performed.
 
 # 2026-07-06: Provider config v2 coercion is Rust-owned
 
