@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState,
+  saveRoutingInstructionStateSync,
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import {
@@ -432,6 +433,21 @@ describe('Routing instruction parsing and application', () => {
     expect(restored.stopMessageText).toBe('继续');
     expect(restored.stopMessageMaxRepeats).toBe(2);
     expect(restored.stopMessageUsed).toBe(0);
+  });
+
+  test('persistent state empty check is owned by native store semantics', () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-routing-state-empty-'));
+    try {
+      const emptyState = createState();
+      saveRoutingInstructionStateSync('session:native-empty-check', emptyState, temp);
+      expect(fs.existsSync(path.join(temp, 'session-native-empty-check.json'))).toBe(false);
+
+      const activeState = createState({ stopMessageText: '继续', stopMessageMaxRepeats: 2 });
+      saveRoutingInstructionStateSync('session:native-active-check', activeState, temp);
+      expect(fs.existsSync(path.join(temp, 'session-native-active-check.json'))).toBe(true);
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
   });
 
   testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)(

@@ -377,7 +377,7 @@ pub(crate) fn persist_routing_instruction_state_strict(
     })
 }
 
-fn is_persistent_key(key: &str) -> bool {
+pub(crate) fn is_persistent_key(key: &str) -> bool {
     key.starts_with("session:") || key.starts_with("conversation:") || key.starts_with("tmux:")
 }
 

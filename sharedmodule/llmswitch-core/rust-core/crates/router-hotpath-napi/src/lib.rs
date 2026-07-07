@@ -1258,6 +1258,27 @@ pub fn deserialize_routing_instruction_state_json(state_json: String) -> NapiRes
 }
 
 #[napi]
+pub fn is_routing_instruction_state_persistent_key_json(key: Option<String>) -> NapiResult<String> {
+    let persistent = key
+        .as_deref()
+        .map(virtual_router_engine::routing_state_store::is_persistent_key)
+        .unwrap_or(false);
+    serde_json::to_string(&persistent).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn is_routing_instruction_state_empty_json(state_json: String) -> NapiResult<String> {
+    let state_value: Value =
+        serde_json::from_str(&state_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let state = virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
+        &state_value,
+    )
+    .unwrap_or_default();
+    let empty = virtual_router_engine::routing_state_store::is_state_empty(&state);
+    serde_json::to_string(&empty).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn load_routing_instruction_state_json(
     key: String,
     session_dir: Option<String>,

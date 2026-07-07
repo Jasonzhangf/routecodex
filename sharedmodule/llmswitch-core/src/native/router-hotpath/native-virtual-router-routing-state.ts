@@ -186,32 +186,15 @@ function hydrateState(raw: Record<string, unknown>): RoutingInstructionState {
 }
 
 function isPersistentScopeKey(key: string | undefined): key is string {
-  return Boolean(
-    key &&
-      (key.startsWith('session:') ||
-        key.startsWith('conversation:') ||
-        key.startsWith('tmux:'))
-  );
+  const capability = 'isRoutingInstructionStatePersistentKeyJson';
+  const raw = invokeNativeString(capability, [key ?? null]);
+  return parseJson(raw) === true;
 }
 
 function isRoutingStateEmpty(state: RoutingInstructionState): boolean {
-  const stopText = typeof state.stopMessageText === 'string' ? state.stopMessageText.trim() : '';
-  const preCommand = typeof state.preCommandScriptPath === 'string' ? state.preCommandScriptPath.trim() : '';
-  return (
-    !state.forcedTarget &&
-    !state.preferTarget &&
-    state.allowedProviders.size === 0 &&
-    state.disabledProviders.size === 0 &&
-    state.disabledKeys.size === 0 &&
-    state.disabledModels.size === 0 &&
-    !stopText &&
-    !(typeof state.stopMessageProviderKey === 'string' && state.stopMessageProviderKey.trim()) &&
-    state.stopMessageMaxRepeats === undefined &&
-    state.stopMessageUsed === undefined &&
-    state.stopMessageStageMode === undefined &&
-    !preCommand &&
-    state.preCommandUpdatedAt === undefined
-  );
+  const capability = 'isRoutingInstructionStateEmptyJson';
+  const raw = invokeNativeString(capability, [stringifyForNative(capability, plainState(state))]);
+  return parseJson(raw) === true;
 }
 
 export function serializeRoutingInstructionState(state: RoutingInstructionState): Record<string, unknown> {

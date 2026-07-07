@@ -59,6 +59,8 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "planPrimaryExhaustedToDefaultPoolJson",
   "applyRoutingInstructionsJson",
   "deserializeRoutingInstructionStateJson",
+  "isRoutingInstructionStateEmptyJson",
+  "isRoutingInstructionStatePersistentKeyJson",
   "isPreCommandScriptPathAllowedJson",
   "loadRoutingInstructionStateJson",
   "mergeStopMessageFromPersistedJson",

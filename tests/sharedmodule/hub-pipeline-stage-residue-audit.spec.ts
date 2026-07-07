@@ -4275,6 +4275,27 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('../process/chat-process-session-usage.js');
   });
 
+  it('virtual router routing-state persistence predicates must stay Rust-owned', () => {
+    const filePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts',
+    );
+    const source = fs.readFileSync(filePath, 'utf8');
+    const predicateSource = source.slice(
+      source.indexOf('function isPersistentScopeKey'),
+      source.indexOf('export function serializeRoutingInstructionState'),
+    );
+    const findings = collectMatches(predicateSource, [
+      { label: 'TS persistent routing-state key prefix logic revived', pattern: /\.startsWith\(['"](?:session|conversation|tmux):['"]\)/ },
+      { label: 'TS empty routing-state target predicate revived', pattern: /!state\.(?:forcedTarget|preferTarget)/ },
+      { label: 'TS empty routing-state collection predicate revived', pattern: /state\.(?:allowedProviders|disabledProviders|disabledKeys|disabledModels)\.size/ },
+      { label: 'TS empty routing-state stop text predicate revived', pattern: /stopMessageText.*trim/ },
+      { label: 'TS empty routing-state pre-command predicate revived', pattern: /preCommandScriptPath.*trim/ },
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it('marker lifecycle shared helper must stay physically deleted', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts');
     expect(fs.existsSync(filePath)).toBe(false);
