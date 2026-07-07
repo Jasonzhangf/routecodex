@@ -2559,8 +2559,12 @@ function checkOrchestrationPolicyRustOwner() {
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
   const engineShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
-  const enginePreflightShell = readRequired(TS_ENGINE_PREFLIGHT_SHELL);
   const timeoutShell = readRequired(TS_TIMEOUT_ERROR_BLOCK);
+  assertMissingFile(
+    'servertool-engine-preflight-shell-owner',
+    TS_ENGINE_PREFLIGHT_SHELL,
+    'engine-preflight-shell.ts must stay physically deleted; engine-orchestration-shell.ts owns preflight IO around native preflight decisions'
+  );
 
   assertMissingFile(
     'servertool-orchestration-policy-ts-deleted',
@@ -2668,7 +2672,6 @@ function checkOrchestrationPolicyRustOwner() {
     'Math.max',
     'toLowerCase',
     'targetProviderKey',
-    'inspectStopGatewaySignal',
     'const timeoutPolicyInput = {',
     'const followupTimeoutPolicyInput = {',
     'parseServertoolTimeoutMsWithNative(timeoutPolicyInput)',
@@ -2727,8 +2730,8 @@ function checkOrchestrationPolicyRustOwner() {
   }
   assertContains(
     'servertool-orchestration-policy-ts-thin-shell',
-    TS_ENGINE_PREFLIGHT_SHELL,
-    enginePreflightShell,
+    TS_ENGINE_ORCHESTRATION_SHELL,
+    engineShell,
     'containsSyntheticRouteCodexControlTextWithNative'
   );
   for (const keyword of [
@@ -2879,6 +2882,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     );
   }
   const executionQueueShell = readRequired(TS_EXECUTION_QUEUE_SHELL);
+  const engineShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
   const rustExecutionBranch = readRequired(RUST_SERVERTOOL_EXECUTION_BRANCH_CONTRACT);
   const rustExecutionLoopEffect = readRequired(RUST_SERVERTOOL_EXECUTION_LOOP_EFFECT_CONTRACT);
   const rustExecutionLoopRuntimeAction = readRequired(RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT);
@@ -3095,7 +3099,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-engine-preflight-native-export', RUST_ROUTER_HOTPATH_NAPI_LIB, napiLib, 'pub fn plan_servertool_engine_preflight_json'],
     ['servertool-engine-preflight-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolEnginePreflightJson'],
     ['servertool-engine-preflight-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolEnginePreflightWithNative'],
-    ['servertool-engine-preflight-ts-thin-shell', TS_ENGINE_PREFLIGHT_SHELL, readRequired(TS_ENGINE_PREFLIGHT_SHELL), 'planServertoolEnginePreflightWithNative'],
+    ['servertool-engine-preflight-inline-thin-shell', TS_ENGINE_ORCHESTRATION_SHELL, engineShell, 'planServertoolEnginePreflightWithNative'],
     ['servertool-engine-orchestration-preflight-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_orchestration_preflight_action_contract.rs`, readRequired(`${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_orchestration_preflight_action_contract.rs`), 'pub fn plan_servertool_engine_orchestration_preflight_action'],
     ['servertool-engine-orchestration-preflight-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod engine_orchestration_preflight_action_contract'],
     ['servertool-engine-orchestration-preflight-action-native-export', `${RUST_SRC_DIR}/servertool_core_blocks.rs`, napiBlocks, 'plan_servertool_engine_orchestration_preflight_action_json'],
@@ -5579,8 +5583,12 @@ function checkServertoolRustOutcomeCloseout() {
       );
     }
   }
-  const enginePreflightShell = readRequired(TS_ENGINE_PREFLIGHT_SHELL);
   const engineOrchestrationShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
+  assertMissingFile(
+    'servertool-engine-preflight-shell-owner',
+    TS_ENGINE_PREFLIGHT_SHELL,
+    'engine-preflight-shell.ts must stay physically deleted; engine-orchestration-shell.ts owns preflight IO around native preflight decisions'
+  );
   for (const marker of [
     'export async function runServerToolOrchestrationShell(',
     'createProgressObservation({',
@@ -5720,10 +5728,10 @@ function checkServertoolRustOutcomeCloseout() {
     'preflightAction.logStopEntry',
     'preflightAction.logStopCompare',
   ]) {
-    if (!enginePreflightShell.includes(marker)) {
+    if (!engineOrchestrationShell.includes(marker)) {
       fail(
         'servertool-engine-preflight-shell-owner',
-        `engine-preflight-shell.ts must keep engine preflight owner marker ${marker}`
+        `engine-orchestration-shell.ts must keep engine preflight owner marker ${marker}`
       );
     }
   }
@@ -5743,10 +5751,10 @@ function checkServertoolRustOutcomeCloseout() {
     'String(preflightAction.action)',
     'args.adapterContext as Record<string, unknown>',
   ]) {
-    if (enginePreflightShell.includes(marker)) {
+    if (engineOrchestrationShell.includes(marker)) {
       fail(
         'servertool-engine-preflight-shell-no-local-observed-branch',
-        `engine-preflight-shell.ts must not derive preflight logging locally with marker ${marker}`
+        `engine-orchestration-shell.ts must not derive preflight logging locally with marker ${marker}`
       );
     }
   }

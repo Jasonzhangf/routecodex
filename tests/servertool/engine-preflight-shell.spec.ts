@@ -14,20 +14,99 @@ jest.unstable_mockModule(
   () => ({
     inspectStopGatewaySignal: inspectStopGatewaySignalMock,
     attachStopGatewayContext: attachStopGatewayContextMock,
+    readProviderProtocolFromAnyBoundMetadataCenter: jest.fn(() => 'openai-chat'),
+    readStopMessageCompareContext: jest.fn(() => null),
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter: jest.fn(() => null),
+    readRuntimeControlFromAnyBoundMetadataCenter: jest.fn(() => null),
+    writeRuntimeControlToBoundMetadataCenter: jest.fn(),
   })
 );
 
 jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
+    buildServertoolPostflightObservationSummaryWithNative: jest.fn(),
+    buildServertoolAutoHookTraceProgressEventWithNative: jest.fn(),
+    buildServertoolStopCompareProgressEventWithNative: jest.fn(),
+    buildServertoolStopEntryProgressEventWithNative: jest.fn(),
+    buildServertoolMatchSkippedProgressEventWithNative: jest.fn(),
+    normalizeServertoolProgressFlowIdWithNative: jest.fn((value: any) => value),
+    normalizeServertoolProgressResultWithNative: jest.fn((value: any) => value),
+    normalizeStopMessageCompareContextWithNative: jest.fn((value: any) => value),
+    formatStopMessageCompareContextWithNative: jest.fn(() => ''),
+    shouldUseServertoolGoldProgressHighlightWithNative: jest.fn(() => false),
     containsSyntheticRouteCodexControlTextWithNative: containsSyntheticRouteCodexControlTextMock,
+    readServertoolPrimaryAutoHookIdsWithNative: jest.fn(() => []),
+    planEngineSelectionStartWithNative: jest.fn(() => ({ overrides: {}, primaryAutoHookIds: [] })),
+    resolveEngineSelectionAfterRunWithNative: jest.fn(() => ({ rerunOverrides: null })),
+    planServertoolResponseStageGateWithNative: jest.fn(),
+    runServertoolResponseStageWithNative: jest.fn(() => ({ toolCalls: [] })),
+    readServertoolEntryBaseObjectWithNative: jest.fn((input: any) => input?.chatResponse ?? {}),
+    resolveServertoolEntryPreflightWithNative: jest.fn(() => ({ action: 'continue' })),
+    resolveServertoolEntryPreflightApplicationWithNative: jest.fn(() => ({ returnPassthrough: false })),
+    resolveServertoolRunEngineEntryPreflightDecisionWithNative: jest.fn(),
+    resolveServertoolRunEngineEntryPreflightApplicationWithNative: jest.fn(),
+    resolveServertoolRunEnginePrepassDecisionWithNative: jest.fn(),
+    resolveServertoolRunEnginePrepassApplicationWithNative: jest.fn(),
+    resolveServertoolResponseStagePrepassInitialDecisionWithNative: jest.fn(),
+    resolveServertoolResponseStagePrepassInitialApplicationWithNative: jest.fn(),
+    resolveServertoolResponseStagePrepassAfterAutoHookWithNative: jest.fn(),
+    resolveServertoolResponseStageAutoHookPreDecisionWithNative: jest.fn(),
+    resolveServertoolResponseStageAutoHookPreApplicationWithNative: jest.fn(),
+    resolveServertoolResponseStageAutoHookPostDecisionWithNative: jest.fn(),
+    resolveServertoolResponseStageAutoHookPostApplicationWithNative: jest.fn(),
+    finalizeServertoolResponseStageWithNative: jest.fn(),
+    extractServertoolResponseStageOrchestrationShellResultWithNative: jest.fn(),
+    materializeServertoolResponseStageOrchestrationOutputWithNative: jest.fn(),
+    resolveServertoolResponseStageOrchestrationGateApplicationWithNative: jest.fn(),
+    detectProviderResponseShapeWithNative: jest.fn(),
+    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => []),
+    planServertoolAutoHookQueueItemsWithNative: jest.fn(() => []),
+    resolveAutoHookRuntimeAttemptDecisionWithNative: jest.fn(),
+    resolveAutoHookCallerFinalizationDecisionWithNative: jest.fn(),
+    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(),
+    planServertoolRegistryBuiltinAutoHookEntriesWithNative: jest.fn(() => []),
+    resolveServertoolRegistryHandlerWithNative: jest.fn(),
+    planServertoolEntryContextWithNative: jest.fn(),
+    materializeServertoolPlannedResultWithNative: jest.fn(),
+    createServertoolExecutionLoopStateWithNative: jest.fn(),
+    resolveServertoolExecutionLoopInitialDecisionWithNative: jest.fn(),
+    applyServertoolExecutionLoopInitialDecisionWithNative: jest.fn(),
+    resolveServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
+    applyServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
+    appendServertoolExecutedRecordWithNative: jest.fn(),
+    planServertoolToolCallDispatchWithNative: jest.fn(),
+    planServertoolExecutionDispatchErrorWithNative: jest.fn(),
+    planServertoolHandlerErrorExecutionLoopEffectWithNative: jest.fn(),
+    planServertoolNoopExecutionLoopEffectWithNative: jest.fn(),
+    buildServertoolHandlerErrorToolOutputPayloadWithNative: jest.fn(),
+    materializeNativeToolCallExecutionOutcomeWithNative: jest.fn(),
+    resolveServertoolPreExecutionBranchDecisionWithNative: jest.fn(),
+    resolveServertoolPostExecutionBranchDecisionWithNative: jest.fn(),
+    buildServertoolCliProjectionRuntimeBranchWithNative: jest.fn(),
+    buildServertoolDispatchPlanInputWithNative: jest.fn(),
+    resolveServertoolProgressStageWithNative: jest.fn(),
+    resolveServertoolProgressToolNameWithNative: jest.fn(),
+    planServertoolNoopOutcomeWithNative: jest.fn(),
+    planServertoolTimeoutWatcherWithNative: jest.fn(),
+    isAdapterClientDisconnectedWithNative: jest.fn(),
+    createServertoolProviderProtocolErrorFromPlanWithNative: jest.fn((input: any) => input),
+    planServertoolEngineRuntimeActionWithNative: jest.fn(),
     planServertoolEnginePreflightWithNative: planServertoolEnginePreflightWithNativeMock,
+    planServertoolEngineTriggerObservationWithNative: jest.fn(),
+    resolveServertoolEngineMatchHitWithNative: jest.fn(),
     resolveServertoolEnginePreflightDecisionWithNative: resolveServertoolEnginePreflightDecisionWithNativeMock,
+    resolveServertoolEnginePostflightPayloadWithNative: jest.fn(),
+    resolveServertoolEngineSkipDecisionWithNative: jest.fn(),
+    resolveServertoolEngineOrchestrationPreflightDecisionWithNative: jest.fn(),
+    resolveServertoolTimeoutMsFromEnvCandidatesWithNative: jest.fn(),
+    planServertoolTimeoutErrorWithNative: jest.fn(),
+    planStoplessExecutionWithNative: jest.fn(),
   })
 );
 
 const { runEnginePreflight } = await import(
-  '../../sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.js'
+  '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js'
 );
 
 describe('engine-preflight-shell', () => {
@@ -70,11 +149,12 @@ describe('engine-preflight-shell', () => {
   test('keeps engine preflight planning and stop-gateway wiring in the owner shell', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile(
-        'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
+        'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
         'utf8'
       )
     );
 
+    expect(await import('node:fs').then((fs) => fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts'))).toBe(false);
     expect(source).toContain('planServertoolEnginePreflightWithNative');
     expect(source).not.toContain('args.adapterContext as Record<string, unknown>');
     expect(source).toContain('function runPreflightSideEffects(');

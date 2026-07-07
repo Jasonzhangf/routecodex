@@ -21,6 +21,7 @@ const DELETED_FILES = [
   'sharedmodule/llmswitch-core/src/servertool/execution-handler-materialization-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/entry-preflight-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/entry-context-shell.ts',
+  'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-finalize-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/response-stage-prepass-shell.ts',
   'sharedmodule/llmswitch-core/src/servertool/engine-observation-shell.ts',
@@ -269,7 +270,7 @@ const TARGETS = [
     ],
   },
   {
-    file: 'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
+    file: 'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
     forbidden: [
       'stopSignal.observed && preflightAction.action',
       'if (stopSignal.observed) {',

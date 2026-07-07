@@ -88,9 +88,10 @@ describe('engine stopless session thin-shell guard', () => {
 
   test('runServerToolOrchestration routes synthetic/direct preflight through native planning', () => {
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts',
+      'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
+    expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts')).toBe(false);
 
     expect(source).toContain('planServertoolEnginePreflightWithNative');
     expect(source).toContain('resolveServertoolEnginePreflightDecisionWithNative');
