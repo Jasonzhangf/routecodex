@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
-const resolveServertoolEntryContext = jest.fn();
 const runServertoolResponseStagePrePass = jest.fn();
 const runServertoolExecutionStage = jest.fn();
 const runServertoolResponseStageWithNative = jest.fn();
+const readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter = jest.fn(() => ({
+  runtimeControl: { providerProtocol: 'openai-responses' }
+}));
 const isAdapterClientDisconnectedWithNative = jest.fn(() => false);
 const readServertoolEntryBaseObjectWithNative = jest.fn((chatResponse: unknown) =>
   chatResponse != null && typeof chatResponse === 'object' && !Array.isArray(chatResponse)
@@ -23,6 +25,12 @@ const resolveServertoolEntryPreflightApplicationWithNative = jest.fn((input: any
   }
   return { throwError: false, returnResult: false, baseObject: input.entryPreflight.baseObject };
 });
+const planServertoolEntryContextWithNative = jest.fn(() => ({
+  includeToolCallNames: null,
+  excludeToolCallNames: null,
+  includeAutoHookIds: null,
+  excludeAutoHookIds: null
+}));
 const resolveServertoolRunEngineEntryPreflightDecisionWithNative = jest.fn((input: any) => input.entryPreflight);
 const resolveServertoolRunEngineEntryPreflightApplicationWithNative = jest.fn((input: any) =>
   input.entryPreflight.action === 'return_result'
@@ -34,13 +42,6 @@ const resolveServertoolRunEnginePrepassApplicationWithNative = jest.fn((input: a
   input.decision.action === 'return_result'
     ? { returnResult: true, result: input.decision.result }
     : { returnResult: false }
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/entry-context-shell.js',
-  () => ({
-    resolveServertoolEntryContext
-  })
 );
 
 jest.unstable_mockModule(
@@ -61,6 +62,7 @@ jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
   () => ({
     isAdapterClientDisconnectedWithNative,
+    planServertoolEntryContextWithNative,
     readServertoolEntryBaseObjectWithNative,
     resolveServertoolEntryPreflightApplicationWithNative,
     resolveServertoolEntryPreflightWithNative,
@@ -69,6 +71,13 @@ jest.unstable_mockModule(
     resolveServertoolRunEnginePrepassApplicationWithNative,
     resolveServertoolRunEnginePrepassDecisionWithNative,
     runServertoolResponseStageWithNative
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
+  () => ({
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
   })
 );
 
@@ -92,6 +101,9 @@ const { orchestrateServertoolEngine } = await import(
 describe('run-server-side-tool-engine-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter.mockReturnValue({
+      runtimeControl: { providerProtocol: 'openai-responses' }
+    });
     isAdapterClientDisconnectedWithNative.mockReturnValue(false);
     readServertoolEntryBaseObjectWithNative.mockImplementation((chatResponse: unknown) =>
       chatResponse != null && typeof chatResponse === 'object' && !Array.isArray(chatResponse)
@@ -110,6 +122,12 @@ describe('run-server-side-tool-engine-shell', () => {
         return { throwError: false, returnResult: true, result: input.entryPreflight.result };
       }
       return { throwError: false, returnResult: false, baseObject: input.entryPreflight.baseObject };
+    });
+    planServertoolEntryContextWithNative.mockReturnValue({
+      includeToolCallNames: null,
+      excludeToolCallNames: null,
+      includeAutoHookIds: null,
+      excludeAutoHookIds: null
     });
     resolveServertoolRunEngineEntryPreflightDecisionWithNative.mockImplementation((input: any) => input.entryPreflight);
     resolveServertoolRunEngineEntryPreflightApplicationWithNative.mockImplementation((input: any) =>
@@ -151,7 +169,12 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).toContain('runServertoolResponseStageWithNative');
     expect(source).toContain('applyServertoolResponseStageExtraction');
     expect(source).not.toContain('extractToolCallsFromResponseStage');
-    expect(source).toContain('resolveServertoolEntryContext');
+    expect(source).not.toContain("from './entry-context-shell.js'");
+    expect(source).not.toContain('resolveServertoolEntryContext');
+    expect(source).toContain('readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter');
+    expect(source).toContain('planServertoolEntryContextWithNative');
+    expect(source).toContain('return tokens != null ? new Set(tokens) : null;');
+    expect(source).toContain('runtimeMetadata: runtimeMetadataSnapshot');
     expect(source).toContain('runServertoolResponseStagePrePass');
     expect(source).toContain('runServertoolExecutionStage');
     expect(source).not.toContain("if (entryPreflight.action === 'return_result')");
@@ -176,7 +199,6 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(source).not.toContain('entryPreflight as { action: unknown }');
     expect(source).not.toContain('enginePrepassAction as { action: unknown }');
     expect(source).not.toContain('contextBase: entryContext.contextBase as ServerToolHandlerContext');
-    expect(source).not.toContain('ServerToolHandlerContext');
     expect(source).toContain('contextBase: entryContext.contextBase');
     expect(source).not.toContain('const base =');
     expect(source).not.toContain("typeof options.chatResponse === 'object'");
@@ -200,7 +222,8 @@ describe('run-server-side-tool-engine-shell', () => {
     ).rejects.toThrow('[servertool] invalid entry preflight result action');
 
     expect(runServertoolResponseStageWithNative).not.toHaveBeenCalled();
-    expect(resolveServertoolEntryContext).not.toHaveBeenCalled();
+    expect(readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter).not.toHaveBeenCalled();
+    expect(planServertoolEntryContextWithNative).not.toHaveBeenCalled();
     expect(runServertoolResponseStagePrePass).not.toHaveBeenCalled();
     expect(runServertoolExecutionStage).not.toHaveBeenCalled();
   });
@@ -236,15 +259,6 @@ describe('run-server-side-tool-engine-shell', () => {
     runServertoolResponseStageWithNative.mockReturnValue({
       normalizedPayload: { ok: true },
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
-    });
-    resolveServertoolEntryContext.mockReturnValue({
-      action: 'continue',
-      baseObject: { ok: true },
-      contextBase: { base: { ok: true }, toolCalls: [], adapterContext: {}, requestId: 'req-unknown-prepass', entryEndpoint: 'openai', providerProtocol: 'openai-chat' },
-      includeToolCallNames: null,
-      excludeToolCallNames: null,
-      includeAutoHookIds: null,
-      excludeAutoHookIds: null
     });
     runServertoolResponseStagePrePass.mockResolvedValue({
       action: 'continue_to_execution',
@@ -286,19 +300,88 @@ describe('run-server-side-tool-engine-shell', () => {
     expect(runServertoolResponseStageWithNative).not.toHaveBeenCalled();
   });
 
+  test('fails fast when entry context metadata snapshot is absent', async () => {
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter.mockReturnValue(null);
+
+    await expect(
+      orchestrateServertoolEngine({
+        chatResponse: { ok: true },
+        adapterContext: {},
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-no-metadata',
+        providerProtocol: 'openai-responses'
+      } as any)
+    ).rejects.toThrow('Servertool entry context requires MetadataCenter request truth or runtime_control snapshot');
+
+    expect(planServertoolEntryContextWithNative).not.toHaveBeenCalled();
+    expect(runServertoolResponseStagePrePass).not.toHaveBeenCalled();
+    expect(runServertoolExecutionStage).not.toHaveBeenCalled();
+  });
+
+  test('builds entry context from metadata snapshot and native filter plan', async () => {
+    const adapterContext = { req: true };
+    const metadataSnapshot = { runtimeControl: { providerProtocol: 'openai-responses' } };
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter.mockReturnValue(metadataSnapshot);
+    planServertoolEntryContextWithNative.mockReturnValue({
+      includeToolCallNames: ['web_search'],
+      excludeToolCallNames: ['vision_auto'],
+      includeAutoHookIds: ['stop_message_auto'],
+      excludeAutoHookIds: ['memory_cache_auto']
+    });
+    runServertoolResponseStagePrePass.mockResolvedValue({
+      action: 'continue_to_execution',
+      responseStageGatePlan: { nextAction: 'continue_to_execution' }
+    });
+    runServertoolExecutionStage.mockResolvedValue({
+      mode: 'passthrough',
+      finalChatResponse: { executed: true }
+    });
+
+    await expect(
+      orchestrateServertoolEngine({
+        chatResponse: { ok: true },
+        adapterContext,
+        entryEndpoint: '/v1/responses',
+        requestId: 'req-context',
+        includeToolCallHandlerNames: [' Web_Search '],
+        excludeToolCallHandlerNames: [' Vision_Auto '],
+        includeAutoHookIds: [' Stop_Message_Auto '],
+        excludeAutoHookIds: [' Memory_Cache_Auto '],
+        providerProtocol: 'openai-responses'
+      } as any)
+    ).resolves.toEqual({ mode: 'passthrough', finalChatResponse: { executed: true } });
+
+    expect(readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter).toHaveBeenCalledWith(adapterContext);
+    expect(planServertoolEntryContextWithNative).toHaveBeenCalledWith({
+      includeToolCallHandlerNames: [' Web_Search '],
+      excludeToolCallHandlerNames: [' Vision_Auto '],
+      includeAutoHookIds: [' Stop_Message_Auto '],
+      excludeAutoHookIds: [' Memory_Cache_Auto ']
+    });
+    expect(runServertoolResponseStagePrePass).toHaveBeenCalledWith(expect.objectContaining({
+      baseObject: { ok: true },
+      contextBase: expect.objectContaining({
+        base: { ok: true },
+        adapterContext,
+        requestId: 'req-context',
+        entryEndpoint: '/v1/responses',
+        runtimeMetadata: metadataSnapshot
+      }),
+      includeAutoHookIds: new Set(['stop_message_auto']),
+      excludeAutoHookIds: new Set(['memory_cache_auto'])
+    }));
+    expect(runServertoolExecutionStage).toHaveBeenCalledWith(expect.objectContaining({
+      includeToolCallNames: new Set(['web_search']),
+      excludeToolCallNames: new Set(['vision_auto']),
+      includeAutoHookIds: new Set(['stop_message_auto']),
+      excludeAutoHookIds: new Set(['memory_cache_auto'])
+    }));
+  });
+
   test('forwards pre-pass early result without entering execution stage', async () => {
     runServertoolResponseStageWithNative.mockReturnValue({
       normalizedPayload: { ok: true },
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
-    });
-    resolveServertoolEntryContext.mockReturnValue({
-      action: 'continue',
-      baseObject: { ok: true },
-      contextBase: { base: { ok: true }, toolCalls: [], adapterContext: {}, requestId: 'req-pass', entryEndpoint: 'openai', providerProtocol: 'openai-chat' },
-      includeToolCallNames: null,
-      excludeToolCallNames: null,
-      includeAutoHookIds: null,
-      excludeAutoHookIds: null
     });
     runServertoolResponseStagePrePass.mockResolvedValue({
       action: 'return_result',
@@ -335,15 +418,6 @@ describe('run-server-side-tool-engine-shell', () => {
     runServertoolResponseStageWithNative.mockReturnValue({
       normalizedPayload: { ok: true },
       toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{}' }]
-    });
-    resolveServertoolEntryContext.mockReturnValue({
-      action: 'continue',
-      baseObject: { ok: true },
-      contextBase: { base: { ok: true }, toolCalls: [], adapterContext: {}, requestId: 'req-pass', entryEndpoint: 'openai', providerProtocol: 'openai-chat' },
-      includeToolCallNames: null,
-      excludeToolCallNames: null,
-      includeAutoHookIds: null,
-      excludeAutoHookIds: null
     });
     runServertoolResponseStagePrePass.mockResolvedValue({
       action: 'continue_to_execution',

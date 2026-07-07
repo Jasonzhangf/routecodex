@@ -2,16 +2,20 @@ import type {
   JsonObject,
   ServerSideToolEngineOptions,
   ServerSideToolEngineResult,
+  ServerToolHandlerContext,
   ToolCall
 } from './types.js';
 import { runServertoolResponseStagePrePass } from './response-stage-prepass-shell.js';
 import { runServertoolExecutionStage } from './execution-stage-shell.js';
-import { resolveServertoolEntryContext } from './entry-context-shell.js';
 import {
   createServertoolProviderProtocolErrorFromPlan
 } from './timeout-error-block.js';
 import {
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
+} from './metadata-center-carrier.js';
+import {
   isAdapterClientDisconnectedWithNative,
+  planServertoolEntryContextWithNative,
   readServertoolEntryBaseObjectWithNative,
   resolveServertoolEntryPreflightApplicationWithNative,
   resolveServertoolEntryPreflightWithNative,
@@ -89,6 +93,56 @@ function applyServertoolEntryPreflight(options: ServerSideToolEngineOptions):
   };
 }
 
+function nativeEntryTokenSet(tokens: readonly string[] | null | undefined): Set<string> | null {
+  return tokens != null ? new Set(tokens) : null;
+}
+
+function applyServertoolEntryContext(args: {
+  options: ServerSideToolEngineOptions;
+  toolCalls: ToolCall[];
+  base: JsonObject;
+}): {
+  baseObject: JsonObject;
+  contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
+  includeToolCallNames: Set<string> | null;
+  excludeToolCallNames: Set<string> | null;
+  includeAutoHookIds: Set<string> | null;
+  excludeAutoHookIds: Set<string> | null;
+} {
+  const runtimeMetadataSnapshot = readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
+    args.options.adapterContext
+  );
+  if (!runtimeMetadataSnapshot) {
+    throw new Error('Servertool entry context requires MetadataCenter request truth or runtime_control snapshot');
+  }
+  const entryContextPlan = planServertoolEntryContextWithNative({
+    includeToolCallHandlerNames: args.options.includeToolCallHandlerNames,
+    excludeToolCallHandlerNames: args.options.excludeToolCallHandlerNames,
+    includeAutoHookIds: args.options.includeAutoHookIds,
+    excludeAutoHookIds: args.options.excludeAutoHookIds
+  });
+  const includeToolCallNames = nativeEntryTokenSet(entryContextPlan.includeToolCallNames);
+  const excludeToolCallNames = nativeEntryTokenSet(entryContextPlan.excludeToolCallNames);
+  const includeAutoHookIds = nativeEntryTokenSet(entryContextPlan.includeAutoHookIds);
+  const excludeAutoHookIds = nativeEntryTokenSet(entryContextPlan.excludeAutoHookIds);
+
+  return {
+    baseObject: args.base,
+    contextBase: {
+      base: args.base,
+      toolCalls: args.toolCalls,
+      adapterContext: args.options.adapterContext,
+      requestId: args.options.requestId,
+      entryEndpoint: args.options.entryEndpoint,
+      runtimeMetadata: runtimeMetadataSnapshot
+    },
+    includeToolCallNames,
+    excludeToolCallNames,
+    includeAutoHookIds,
+    excludeAutoHookIds
+  };
+}
+
 export async function orchestrateServertoolEngine(
   options: ServerSideToolEngineOptions
 ): Promise<ServerSideToolEngineResult> {
@@ -106,7 +160,7 @@ export async function orchestrateServertoolEngine(
     entryPreflightApplication.baseObject,
     options.requestId
   );
-  const entryContext = resolveServertoolEntryContext({
+  const entryContext = applyServertoolEntryContext({
     options,
     toolCalls,
     base: entryPreflightApplication.baseObject

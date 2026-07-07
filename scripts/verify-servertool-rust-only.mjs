@@ -5108,15 +5108,15 @@ function checkStoplessNoContextDataPlane() {
       );
     }
   }
-  const entryContextShell = readRequired(`${SERVERTOOL_TS_DIR}/entry-context-shell.ts`);
+  const runServerSideToolEngineShell = readRequired(TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL);
   for (const marker of [
     "from '../conversion/runtime-metadata.js'",
     'readRuntimeMetadata(',
   ]) {
-    if (entryContextShell.includes(marker)) {
+    if (runServerSideToolEngineShell.includes(marker)) {
       fail(
         'stopless-no-context-data-plane',
-        `entry-context-shell.ts must not restore servertool runtime metadata from internal meta marker ${marker}; use MetadataCenter snapshot only`
+        `run-server-side-tool-engine-shell.ts must not restore servertool runtime metadata from internal meta marker ${marker}; use MetadataCenter snapshot only`
       );
     }
   }
@@ -5762,57 +5762,11 @@ function checkServertoolRustOutcomeCloseout() {
     TS_ENTRY_PREFLIGHT_SHELL,
     'entry-preflight-shell.ts must stay physically deleted; run-server-side-tool-engine-shell.ts owns the native entry preflight call'
   );
-  const entryContextShell = readRequired(TS_ENTRY_CONTEXT_SHELL);
-  for (const marker of [
-    'export function resolveServertoolEntryContext(',
-    'planServertoolEntryContextWithNative',
-    'const includeToolCallNames =',
-    'const excludeToolCallNames =',
-    'const includeAutoHookIds =',
-    'const excludeAutoHookIds =',
-    'return tokens != null ? new Set(tokens) : null;',
-  ]) {
-    if (!entryContextShell.includes(marker)) {
-      fail(
-        'servertool-entry-context-shell-owner',
-        `entry-context-shell.ts must keep entry context owner marker ${marker}`
-      );
-    }
-  }
-  for (const marker of [
-    'export function asServertoolJsonObject(',
-    'asServertoolJsonObject(',
-    'readProviderProtocolFromAnyBoundMetadataCenter',
-    'Servertool entry context requires metadata center runtime_control.providerProtocol',
-    'args.options.adapterContext as Record<string, unknown>',
-  ]) {
-    if (entryContextShell.includes(marker)) {
-      fail(
-        'servertool-entry-context-shell-owner',
-        `entry-context-shell.ts must not restore local object helper marker ${marker}`
-      );
-    }
-  }
-  for (const marker of [
-    'function normalizeFilterTokenSet(',
-    "action: 'return_non_object_base'",
-    'if (!args.base)',
-    'entryContextPlan.includeToolCallNames.length > 0',
-    'entryContextPlan.excludeToolCallNames.length > 0',
-    'entryContextPlan.includeAutoHookIds.length > 0',
-    'entryContextPlan.excludeAutoHookIds.length > 0',
-    '.trim().toLowerCase()',
-    '.filter((hook): hook is',
-    '.filter(Boolean)',
-    'return tokens ? new Set(tokens) : null;',
-  ]) {
-    if (entryContextShell.includes(marker)) {
-      fail(
-        'servertool-entry-context-no-ts-normalization-owner',
-        `entry-context-shell.ts must not own filter normalization marker ${marker}`
-      );
-    }
-  }
+  assertMissingFile(
+    'servertool-entry-context-shell-deleted',
+    TS_ENTRY_CONTEXT_SHELL,
+    'entry-context-shell.ts must stay physically deleted; run-server-side-tool-engine-shell.ts owns the native entry context call'
+  );
   const runServerSideToolEngineShell = readRequired(TS_RUN_SERVER_SIDE_TOOL_ENGINE_SHELL);
   for (const marker of [
     'export async function orchestrateServertoolEngine(',
@@ -5825,7 +5779,10 @@ function checkServertoolRustOutcomeCloseout() {
     'entryPreflightApplication.errorPlan',
     'runServertoolResponseStageWithNative',
     'applyServertoolResponseStageExtraction',
-    'resolveServertoolEntryContext',
+    'readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter',
+    'planServertoolEntryContextWithNative',
+    'return tokens != null ? new Set(tokens) : null;',
+    'runtimeMetadata: runtimeMetadataSnapshot',
     'runServertoolResponseStagePrePass',
     'runServertoolExecutionStage',
     'resolveServertoolRunEngineEntryPreflightDecisionWithNative',
@@ -5842,6 +5799,8 @@ function checkServertoolRustOutcomeCloseout() {
   for (const marker of [
     "from './extract-tool-calls-shell.js'",
     'extractToolCallsFromResponseStage',
+    "from './entry-context-shell.js'",
+    'resolveServertoolEntryContext',
     "const passthroughResult = { mode: 'passthrough', finalChatResponse: options.chatResponse } as const;",
     "import type { JsonObject } from '../conversion/hub/types/json.js';",
     'const base =',
@@ -5861,6 +5820,15 @@ function checkServertoolRustOutcomeCloseout() {
     'entryPreflight as { action: unknown }',
     'enginePrepassAction as { action: unknown }',
     'contextBase: entryContext.contextBase as ServerToolHandlerContext',
+    'readProviderProtocolFromAnyBoundMetadataCenter',
+    'Servertool entry context requires metadata center runtime_control.providerProtocol',
+    "action: 'return_non_object_base'",
+    'if (!args.base)',
+    'entryContextPlan.includeToolCallNames.length > 0',
+    'entryContextPlan.excludeToolCallNames.length > 0',
+    'entryContextPlan.includeAutoHookIds.length > 0',
+    'entryContextPlan.excludeAutoHookIds.length > 0',
+    'return tokens ? new Set(tokens) : null;',
   ]) {
     if (runServerSideToolEngineShell.includes(marker)) {
       fail(
