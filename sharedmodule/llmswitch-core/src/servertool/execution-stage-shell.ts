@@ -6,10 +6,11 @@ import type {
   ToolCall
 } from './types.js';
 import { runServertoolIoExecutionQueue } from './execution-queue-shell.js';
-import { finalizeServertoolResponseStage } from './response-stage-finalize-shell.js';
+import { runServertoolResponseStageAutoHookPass } from './response-stage-auto-hook-shell.js';
 import {
   buildServertoolDispatchPlanInputWithNative,
   buildServertoolCliProjectionRuntimeBranchWithNative,
+  finalizeServertoolResponseStageWithNative,
   materializeNativeToolCallExecutionOutcomeWithNative as materializeNativeToolCallExecutionOutcome,
   planServertoolToolCallDispatchWithNative,
   resolveServertoolPostExecutionBranchDecisionWithNative,
@@ -19,6 +20,29 @@ import type { NativeServertoolResponseStageGate } from 'rcc-llmswitch-core/nativ
 import {
   readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter
 } from './metadata-center-carrier.js';
+
+async function applyServertoolResponseStageFinalize(args: {
+  options: ServerSideToolEngineOptions;
+  baseObject: JsonObject;
+  contextBase: Omit<ServerToolHandlerContext, 'toolCall'>;
+  includeAutoHookIds: Set<string> | null;
+  excludeAutoHookIds: Set<string> | null;
+  responseStageGatePlan: NativeServertoolResponseStageGate;
+}): Promise<ServerSideToolEngineResult> {
+  const responseStageAutoHook = await runServertoolResponseStageAutoHookPass({
+    options: args.options,
+    contextBase: args.contextBase,
+    includeAutoHookIds: args.includeAutoHookIds,
+    excludeAutoHookIds: args.excludeAutoHookIds,
+    responseStageGatePlan: args.responseStageGatePlan,
+    baseObject: args.baseObject
+  });
+  return finalizeServertoolResponseStageWithNative({
+    responseStageGatePlan: args.responseStageGatePlan,
+    baseObject: args.baseObject,
+    responseStageAutoHookResult: responseStageAutoHook
+  });
+}
 
 export async function runServertoolExecutionStage(args: {
   options: ServerSideToolEngineOptions;
@@ -84,7 +108,7 @@ export async function runServertoolExecutionStage(args: {
   if (!postExecutionBranchDecision.continueResponseStage) {
     throw new Error('[servertool] invalid post-execution branch action');
   }
-  return finalizeServertoolResponseStage({
+  return applyServertoolResponseStageFinalize({
     options: args.options,
     baseObject: args.baseObject,
     contextBase: args.contextBase,

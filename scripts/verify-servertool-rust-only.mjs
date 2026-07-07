@@ -105,7 +105,6 @@ const TS_ORCHESTRATION_POLICY = `${SERVERTOOL_TS_DIR}/orchestration-policy-block
 const TS_TIMEOUT_ERROR_BLOCK = `${SERVERTOOL_TS_DIR}/timeout-error-block.ts`;
 const TS_EXECUTION_SHELL = `${SERVERTOOL_TS_DIR}/execution-shell.ts`;
 const TS_EXECUTION_BRANCH_RUNTIME_SHELL = `${SERVERTOOL_TS_DIR}/execution-branch-runtime-shell.ts`;
-const TS_RESPONSE_STAGE_FINALIZE_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`;
 const TS_RESPONSE_STAGE_PREPASS_SHELL = `${SERVERTOOL_TS_DIR}/response-stage-prepass-shell.ts`;
 const TS_EXECUTION_QUEUE_SHELL = `${SERVERTOOL_TS_DIR}/execution-queue-shell.ts`;
 const TS_EXECUTION_STAGE_SHELL = `${SERVERTOOL_TS_DIR}/execution-stage-shell.ts`;
@@ -5461,7 +5460,7 @@ function checkServertoolRustOutcomeCloseout() {
       fail('servertool-cli-runtime-shell', `execution-stage-shell.ts must not carry legacy servertool marker ${marker}`);
     }
   }
-  if (executionStageShell.includes('}\n\n  return finalizeServertoolResponseStage({')) {
+  if (executionStageShell.includes("from './response-stage-finalize-shell.js'")) {
     fail(
       'servertool-execution-stage-no-implicit-finalize',
       'execution-stage-shell.ts must finalize only from explicit native continue_response_stage action'
@@ -5846,7 +5845,9 @@ function checkServertoolRustOutcomeCloseout() {
     'const postExecutionBranchDecision = resolveServertoolPostExecutionBranchDecisionWithNative({',
     'runServertoolIoExecutionQueue',
     'materializeNativeToolCallExecutionOutcome',
-    'finalizeServertoolResponseStage'
+    'runServertoolResponseStageAutoHookPass',
+    'finalizeServertoolResponseStageWithNative',
+    'responseStageAutoHookResult: responseStageAutoHook'
   ]) {
     if (!executionStageShell.includes(marker)) {
       fail(
@@ -6547,82 +6548,16 @@ function checkServertoolResponseStageGateThinShell() {
     'servertool-response-stage-gate-thin-shell',
     'deleted server-side-tools facade cannot retain response-stage wrapper alias'
   );
-
-  const responseStageFinalizeShell = readRequired(TS_RESPONSE_STAGE_FINALIZE_SHELL);
-  assertContains(
+  assertMissingFile(
     'servertool-response-stage-finalize-shell-owner',
-    TS_RESPONSE_STAGE_FINALIZE_SHELL,
-    responseStageFinalizeShell,
-    "contextBase: Omit<ServerToolHandlerContext, 'toolCall'>"
+    `${SERVERTOOL_TS_DIR}/response-stage-finalize-shell.ts`,
+    'response-stage-finalize-shell.ts must stay physically deleted; execution-stage-shell.ts owns the native response finalize call'
   );
-  assertContains(
+  assertMissingFile(
     'servertool-response-stage-finalize-shell-owner',
-    TS_RESPONSE_STAGE_FINALIZE_SHELL,
-    responseStageFinalizeShell,
-    'NativeServertoolResponseStageGate'
+    `${ROOT}/tests/servertool/response-stage-finalize-shell.spec.ts`,
+    'response-stage-finalize-shell.spec.ts must stay physically deleted; execution-stage-shell.spec.ts owns the finalize branch assertions'
   );
-  assertContains(
-    'servertool-response-stage-finalize-shell-owner',
-    TS_RESPONSE_STAGE_FINALIZE_SHELL,
-    responseStageFinalizeShell,
-    'runServertoolResponseStageAutoHookPass'
-  );
-  assertContains(
-    'servertool-response-stage-finalize-shell-owner',
-    TS_RESPONSE_STAGE_FINALIZE_SHELL,
-    responseStageFinalizeShell,
-    'responseStageGatePlan: args.responseStageGatePlan'
-  );
-  assertContains(
-    'servertool-response-stage-finalize-shell-owner',
-    TS_RESPONSE_STAGE_FINALIZE_SHELL,
-    responseStageFinalizeShell,
-    'finalizeServertoolResponseStageWithNative({'
-  );
-  assertContains(
-    'servertool-response-stage-finalize-shell-owner',
-    TS_RESPONSE_STAGE_FINALIZE_SHELL,
-    responseStageFinalizeShell,
-    'baseObject: args.baseObject'
-  );
-  assertContains(
-    'servertool-response-stage-finalize-shell-owner',
-    TS_RESPONSE_STAGE_FINALIZE_SHELL,
-    responseStageFinalizeShell,
-    'responseStageAutoHookResult: responseStageAutoHook'
-  );
-  for (const marker of [
-    "const passthroughResult = { mode: 'passthrough', finalChatResponse: args.baseObject } as const;",
-    'return passthroughResult;',
-    'mode: finalizeRuntimeAction.resultMode',
-    "return { mode: 'passthrough', finalChatResponse: args.baseObject };",
-    'initialResponseStageGatePlan',
-    'planServertoolResponseStageGateWithNative',
-    'readRuntimeControlFromAnyBoundMetadataCenter',
-    'responseHookMatched === true',
-    "responseStageAutoHook.action === 'return_passthrough_bypass'",
-    "if (finalizeRuntimeAction.action === 'return_auto_hook_result')",
-    'return responseStageAutoHook.result',
-    'return finalizeRuntimeAction.passthroughResult as ServerSideToolEngineResult',
-    'finalizeRuntimeAction as { action: string }',
-    'autoHookResult == null',
-    'autoHookResult as ServerSideToolEngineResult',
-    'native response-stage finalize requested auto-hook result but result was empty',
-    'responseStageGatePlan: Record<string, unknown>',
-    'planServertoolResponseStageRuntimeActionWithNative',
-    'switch (finalizeRuntimeAction.action)',
-    "hasAutoHookResult: responseStageAutoHook.action === 'return_auto_hook_result'",
-    'autoHookResult: responseStageAutoHook.action ===',
-    'return finalizeRuntimeAction.finalizeResult',
-    'invalid response-stage finalize action',
-  ]) {
-    if (responseStageFinalizeShell.includes(marker)) {
-      fail(
-        'servertool-response-stage-finalize-shell-no-local-carrier',
-        `response-stage-finalize-shell.ts must not restore local carrier marker ${marker}`
-      );
-    }
-  }
 
   const responseStagePrePassShell = readRequired(TS_RESPONSE_STAGE_PREPASS_SHELL);
   assertContains(
