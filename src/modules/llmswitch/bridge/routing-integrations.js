@@ -427,6 +427,21 @@ export function planRouteCodexConfigLoaderPathsNativeSync(input) {
     }
     return output;
 }
+export function planProviderConfigRootNativeSync(rootDir) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.planProviderConfigRootJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] planProviderConfigRootJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({ rootDir })));
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error('[llmswitch-bridge] Provider config root planner returned invalid payload');
+    }
+    if (typeof output.rootDir !== 'undefined' && typeof output.rootDir !== 'string') {
+        throw new Error('[llmswitch-bridge] Provider config root planner returned invalid rootDir');
+    }
+    return output;
+}
 function safeBridgeCwd() {
     try {
         const cwd = process.cwd();

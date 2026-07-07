@@ -2743,12 +2743,14 @@ owners:
       - RouteCodexConfigPathResolveInput
       - AuthFileResolvePlanInput
       - RouteCodexConfigLoaderPathPlanInput
+      - ProviderConfigRootPlanInput
     canonical_builders:
       - resolve_rcc_user_dir_for_host_with_env
       - resolve_rcc_path_for_host_with_env
       - resolve_routecodex_config_path_for_host
       - plan_auth_file_resolution_for_host
       - plan_routecodex_config_loader_paths_for_host
+      - plan_provider_config_root_for_host
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs

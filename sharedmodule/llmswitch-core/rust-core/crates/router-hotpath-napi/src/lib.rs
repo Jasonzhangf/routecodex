@@ -1376,6 +1376,13 @@ struct RouteCodexConfigLoaderPathPlanInputJson {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ProviderConfigRootPlanInputJson {
+    #[serde(default)]
+    root_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RouteCodexConfigPathResolveInputJson {
     #[serde(default)]
     preferred_path: Option<String>,
@@ -1469,6 +1476,18 @@ pub fn plan_routecodex_config_loader_paths_json(input_json: String) -> NapiResul
             explicit_path: input.explicit_path.as_deref(),
             routecodex_provider_dir: input.routecodex_provider_dir.as_deref(),
             rcc_provider_dir: input.rcc_provider_dir.as_deref(),
+        },
+    );
+    serde_json::to_string(&plan).map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+#[napi(js_name = "planProviderConfigRootJson")]
+pub fn plan_provider_config_root_json(input_json: String) -> NapiResult<String> {
+    let input: ProviderConfigRootPlanInputJson = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
+    let plan = virtual_router_engine::instructions::plan_provider_config_root_for_host(
+        virtual_router_engine::instructions::ProviderConfigRootPlanInput {
+            root_dir: input.root_dir.as_deref(),
         },
     );
     serde_json::to_string(&plan).map_err(|error| napi::Error::from_reason(error.to_string()))

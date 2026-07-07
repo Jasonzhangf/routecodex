@@ -531,6 +531,25 @@ export function planRouteCodexConfigLoaderPathsNativeSync(input: {
   };
 }
 
+export function planProviderConfigRootNativeSync(rootDir?: string): {
+  rootDir?: string;
+} {
+  const binding = loadNativeBindingForConfigCodec();
+  const fn = binding.planProviderConfigRootJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] planProviderConfigRootJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({ rootDir }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-bridge] Provider config root planner returned invalid payload');
+  }
+  const plan = output as AnyRecord;
+  if (typeof plan.rootDir !== 'undefined' && typeof plan.rootDir !== 'string') {
+    throw new Error('[llmswitch-bridge] Provider config root planner returned invalid rootDir');
+  }
+  return plan as { rootDir?: string };
+}
+
 function safeBridgeCwd(): string | undefined {
   try {
     const cwd = process.cwd();

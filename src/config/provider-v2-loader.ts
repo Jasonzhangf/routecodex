@@ -1,5 +1,7 @@
-import path from 'node:path';
-import { loadRouteCodexProviderConfigsV2FromRootSync } from '../modules/llmswitch/bridge.js';
+import {
+  loadRouteCodexProviderConfigsV2FromRootSync,
+  planProviderConfigRootNativeSync
+} from '../modules/llmswitch/bridge.js';
 import { resolveRccProviderDir } from './user-data-paths.js';
 
 type UnknownRecord = Record<string, unknown>;
@@ -15,10 +17,7 @@ export interface ProviderConfigV2 {
 }
 
 function resolveProviderRoot(rootDir?: string): string {
-  if (rootDir && rootDir.trim().length) {
-    return path.resolve(rootDir.trim());
-  }
-  return resolveRccProviderDir();
+  return planProviderConfigRootNativeSync(rootDir).rootDir ?? resolveRccProviderDir();
 }
 
 /**
