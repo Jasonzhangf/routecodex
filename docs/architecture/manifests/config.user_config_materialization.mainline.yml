@@ -1,0 +1,96 @@
+lifecycle_id: config.user_config_materialization.mainline
+summary: RouteCodex runtime config loading flows from the public TS shell into
+  the native Rust loader, then into Rust path/provider/materialization owners
+  before returning LoadedRouteCodexConfig.
+owner_feature_id: config.user_config_materialization
+entrypoint:
+  node_id: ConfigLoad01PublicShell
+  wiki_page: docs/architecture/wiki/mainline-call-graph.md
+  call_map_chain_id: config.user_config_materialization.mainline
+node_ids:
+  - ConfigLoad01PublicShell
+  - ConfigLoad02NativeBridge
+  - ConfigLoad03RustLoader
+  - ConfigLoad04UserConfigParsed
+  - ConfigLoad05RuntimeManifestCompiled
+  - ConfigLoad06LoadedConfigReturned
+  - HubConfig01PipelineRuntimeArtifact
+  - HubConfig02RuntimePolicyArtifacts
+  - HubConfig03RuntimeRouteTierArtifacts
+  - VrConfig01RustBootstrapArtifact
+  - VrConfig02NativeBootstrap
+edges:
+  - step_id: cfg-load-01
+    from_node: ConfigLoad01PublicShell
+    to_node: ConfigLoad02NativeBridge
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-load-02
+    from_node: ConfigLoad02NativeBridge
+    to_node: ConfigLoad03RustLoader
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-load-03
+    from_node: ConfigLoad03RustLoader
+    to_node: ConfigLoad04UserConfigParsed
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-load-04
+    from_node: ConfigLoad04UserConfigParsed
+    to_node: ConfigLoad05RuntimeManifestCompiled
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-load-05
+    from_node: ConfigLoad05RuntimeManifestCompiled
+    to_node: ConfigLoad06LoadedConfigReturned
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-runtime-vr-01
+    from_node: ConfigLoad05RuntimeManifestCompiled
+    to_node: VrConfig01RustBootstrapArtifact
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-runtime-vr-02
+    from_node: VrConfig01RustBootstrapArtifact
+    to_node: VrConfig02NativeBootstrap
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-runtime-hub-01
+    from_node: ConfigLoad05RuntimeManifestCompiled
+    to_node: HubConfig01PipelineRuntimeArtifact
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-runtime-hub-02
+    from_node: HubConfig01PipelineRuntimeArtifact
+    to_node: HubConfig02RuntimePolicyArtifacts
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+  - step_id: cfg-runtime-hub-03
+    from_node: HubConfig01PipelineRuntimeArtifact
+    to_node: HubConfig03RuntimeRouteTierArtifacts
+    status: anchored
+    owner_feature_id: config.user_config_materialization
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

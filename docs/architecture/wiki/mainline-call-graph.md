@@ -11,6 +11,64 @@ Render rules:
 - `partial` = edge is bound, but only part of the transition is concretely anchored
 - `binding pending` = edge intentionally left unresolved until code audit pins the real bridge
 
+## config.user_config_materialization.mainline
+
+RouteCodex runtime config loading flows from the public TS shell into the native Rust loader, then into Rust path/provider/materialization owners before returning LoadedRouteCodexConfig.
+
+Entry contract: `ConfigLoad01PublicShell` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  HubConfig03RuntimeRouteTierArtifacts["HubConfig03RuntimeRouteTierArtifacts"]
+  HubConfig02RuntimePolicyArtifacts["HubConfig02RuntimePolicyArtifacts"]
+  HubConfig01PipelineRuntimeArtifact["HubConfig01PipelineRuntimeArtifact"]
+  VrConfig02NativeBootstrap["VrConfig02NativeBootstrap"]
+  VrConfig01RustBootstrapArtifact["VrConfig01RustBootstrapArtifact"]
+  ConfigLoad06LoadedConfigReturned["ConfigLoad06LoadedConfigReturned"]
+  ConfigLoad05RuntimeManifestCompiled["ConfigLoad05RuntimeManifestCompiled"]
+  ConfigLoad04UserConfigParsed["ConfigLoad04UserConfigParsed"]
+  ConfigLoad03RustLoader["ConfigLoad03RustLoader"]
+  ConfigLoad02NativeBridge["ConfigLoad02NativeBridge"]
+  ConfigLoad01PublicShell["ConfigLoad01PublicShell"]
+  ConfigLoad01PublicShell -->|cfg-load-01| ConfigLoad02NativeBridge
+  ConfigLoad02NativeBridge -->|cfg-load-02| ConfigLoad03RustLoader
+  ConfigLoad03RustLoader -->|cfg-load-03| ConfigLoad04UserConfigParsed
+  ConfigLoad04UserConfigParsed -->|cfg-load-04| ConfigLoad05RuntimeManifestCompiled
+  ConfigLoad05RuntimeManifestCompiled -->|cfg-load-05| ConfigLoad06LoadedConfigReturned
+  ConfigLoad05RuntimeManifestCompiled -->|cfg-runtime-vr-01| VrConfig01RustBootstrapArtifact
+  VrConfig01RustBootstrapArtifact -->|cfg-runtime-vr-02| VrConfig02NativeBootstrap
+  ConfigLoad05RuntimeManifestCompiled -->|cfg-runtime-hub-01| HubConfig01PipelineRuntimeArtifact
+  HubConfig01PipelineRuntimeArtifact -->|cfg-runtime-hub-02| HubConfig02RuntimePolicyArtifacts
+  HubConfig01PipelineRuntimeArtifact -->|cfg-runtime-hub-03| HubConfig03RuntimeRouteTierArtifacts
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ConfigLoad01PublicShell anchored;
+  class ConfigLoad02NativeBridge anchored;
+  class ConfigLoad03RustLoader anchored;
+  class ConfigLoad04UserConfigParsed anchored;
+  class ConfigLoad05RuntimeManifestCompiled anchored;
+  class ConfigLoad06LoadedConfigReturned anchored;
+  class VrConfig01RustBootstrapArtifact anchored;
+  class VrConfig02NativeBootstrap anchored;
+  class HubConfig01PipelineRuntimeArtifact anchored;
+  class HubConfig02RuntimePolicyArtifacts anchored;
+  class HubConfig03RuntimeRouteTierArtifacts anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| cfg-load-01 | `ConfigLoad01PublicShell -> ConfigLoad02NativeBridge` | anchored | `loadRouteCodexConfig -> loadRouteCodexConfigNativeSync` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-load-02 | `ConfigLoad02NativeBridge -> ConfigLoad03RustLoader` | anchored | `loadRouteCodexConfigNativeSync -> load_route_codex_config_json` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-load-03 | `ConfigLoad03RustLoader -> ConfigLoad04UserConfigParsed` | anchored | `load_route_codex_config_json -> load_routecodex_config_json` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-load-04 | `ConfigLoad04UserConfigParsed -> ConfigLoad05RuntimeManifestCompiled` | anchored | `load_routecodex_config_json -> compile_routecodex_runtime_manifest_json` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-load-05 | `ConfigLoad05RuntimeManifestCompiled -> ConfigLoad06LoadedConfigReturned` | anchored | `load_routecodex_config_json -> materialize_routecodex_user_config_from_manifest_json` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-vr-01 | `ConfigLoad05RuntimeManifestCompiled -> VrConfig01RustBootstrapArtifact` | anchored | `resolveRouterBootstrapConfig -> compileRouteCodexRuntimeConfigManifest` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-vr-02 | `VrConfig01RustBootstrapArtifact -> VrConfig02NativeBootstrap` | anchored | `bootstrapVirtualRouter -> bootstrapVirtualRouterConfig` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-hub-01 | `ConfigLoad05RuntimeManifestCompiled -> HubConfig01PipelineRuntimeArtifact` | anchored | `setupRuntime -> getRuntimeConfigManifestFromBootstrapInput` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-hub-02 | `HubConfig01PipelineRuntimeArtifact -> HubConfig02RuntimePolicyArtifacts` | anchored | `extractProviderKeysFromPipelineRuntimeConfig -> compile_routecodex_runtime_manifest` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+| cfg-runtime-hub-03 | `HubConfig01PipelineRuntimeArtifact -> HubConfig03RuntimeRouteTierArtifacts` | anchored | `extractRoutingTiersForPipelineRuntimeConfigRoute -> compile_routecodex_runtime_manifest` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
+
 ## webui.config_editor_surface.mainline
 
 WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics.

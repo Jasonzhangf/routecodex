@@ -37,6 +37,7 @@ const mainline = YAML.parse(fs.readFileSync(mainlinePath, 'utf8'));
 fs.mkdirSync(outDir, { recursive: true });
 
 const chainToWikiPage = {
+  'config.user_config_materialization.mainline': 'docs/architecture/wiki/mainline-call-graph.md',
   'request.mainline':           'docs/architecture/wiki/mainline-call-graph.md',
   'response.mainline':          'docs/architecture/wiki/response-mainline-call-graph.md',
   'internal_error_numbering.mainline': 'docs/architecture/wiki/internal-error-numbering-mainline-source.md',
