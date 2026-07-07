@@ -68,6 +68,61 @@ chains:
         semantic_input: "normalized userConfig and compiled runtime manifest"
         semantic_output: "LoadedRouteCodexConfig with configPath, materialized userConfig, and providerProfiles"
         status: anchored
+      - step_id: cfg-runtime-vr-01
+        from_node: ConfigLoad05RuntimeManifestCompiled
+        to_node: VrConfig01RustBootstrapArtifact
+        caller_symbol: resolveRouterBootstrapConfig
+        caller_file: src/server/runtime/http-server/http-server-bootstrap.ts
+        callee_symbol: compileRouteCodexRuntimeConfigManifest
+        callee_file: src/config/user-config-loader.ts
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "materialized userConfig plus primary routingPolicyGroup"
+        semantic_output: "Rust RouteCodexRuntimeManifest with virtualRouterBootstrapInput attached as runtime carrier"
+        status: anchored
+      - step_id: cfg-runtime-vr-02
+        from_node: VrConfig01RustBootstrapArtifact
+        to_node: VrConfig02NativeBootstrap
+        caller_symbol: bootstrapVirtualRouter
+        caller_file: src/server/runtime/http-server/http-server-bootstrap.ts
+        callee_symbol: bootstrapVirtualRouterConfig
+        callee_file: src/modules/llmswitch/bridge/routing-integrations.ts
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "manifest.virtualRouterBootstrapInput only"
+        semantic_output: "VirtualRouterArtifacts.config/runtime produced from Rust artifact"
+        status: anchored
+      - step_id: cfg-runtime-hub-01
+        from_node: ConfigLoad05RuntimeManifestCompiled
+        to_node: HubConfig01PipelineRuntimeArtifact
+        caller_symbol: setupRuntime
+        caller_file: src/server/runtime/http-server/http-server-runtime-setup.ts
+        callee_symbol: getRuntimeConfigManifestFromBootstrapInput
+        callee_file: src/server/runtime/http-server/runtime-config-manifest-carrier.ts
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "router bootstrap input carrying non-enumerable Rust RouteCodexRuntimeManifest"
+        semantic_output: "manifest.pipelineRuntimeConfig for HubPipelineConfig"
+        status: anchored
+      - step_id: cfg-runtime-hub-02
+        from_node: HubConfig01PipelineRuntimeArtifact
+        to_node: HubConfig02RuntimePolicyArtifacts
+        caller_symbol: extractProviderKeysFromPipelineRuntimeConfig
+        caller_file: src/server/runtime/http-server/http-server-bootstrap.ts
+        callee_symbol: compile_routecodex_runtime_manifest
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "pipelineRuntimeConfig.routingProviderIds"
+        semantic_output: "router-port allowedProviders without reading authoring virtualrouter.routingPolicyGroups"
+        status: anchored
+      - step_id: cfg-runtime-hub-03
+        from_node: HubConfig01PipelineRuntimeArtifact
+        to_node: HubConfig03RuntimeRouteTierArtifacts
+        caller_symbol: extractRoutingTiersForPipelineRuntimeConfigRoute
+        caller_file: src/server/runtime/http-server/http-server-bootstrap.ts
+        callee_symbol: compile_routecodex_runtime_manifest
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+        owner_feature_id: config.user_config_materialization
+        semantic_input: "pipelineRuntimeConfig.routingTiersByRoute"
+        semantic_output: "primary-exhausted/default-pool route tiers without reading authoring virtualrouter.routingPolicyGroups"
+        status: anchored
 
   - chain_id: webui.config_editor_surface.mainline
     summary: "WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics."

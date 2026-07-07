@@ -5,7 +5,6 @@ import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-co
 async function compileVirtualRouterInput(userConfig: Record<string, unknown>, providerRootDir?: string, options?: Parameters<typeof compileRouteCodexRuntimeConfigManifest>[2]) {
   return (await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, options)).virtualRouterBootstrapInput;
 }
-import { extractProviderKeysForRoutingGroup } from '../../src/server/runtime/http-server/http-server-bootstrap.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
 
 /**
@@ -206,8 +205,13 @@ describe('virtual-router-builder: forwarder bootstrap (live config.toml)', () =>
     expect(raw).not.toMatch(/modelId\s*=/);
   });
 
-  skipUnless('5555 allowedProviders expands forwarders to real provider ids', () => {
-    const allowed = extractProviderKeysForRoutingGroup(liveConfig as Record<string, unknown>, 'gateway_priority_5555');
+  skipUnless('5555 allowedProviders expands forwarders through Rust pipelineRuntimeConfig', async () => {
+    const manifest = await compileRouteCodexRuntimeConfigManifest(
+      liveConfig as Record<string, unknown>,
+      '/Users/fanzhang/.rcc/provider',
+      { routingPolicyGroup: 'gateway_priority_5555' },
+    );
+    const allowed = manifest.pipelineRuntimeConfig.routingProviderIds;
     expect(allowed).toEqual(expect.arrayContaining([
       'asxs',
       'minimax',

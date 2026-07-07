@@ -221,6 +221,9 @@ fn compile_routecodex_runtime_manifest(input: &Value) -> Result<Value, String> {
         "hitLog",
         requested_group.as_deref(),
     );
+    let routing_provider_ids =
+        resolve_routing_provider_ids_with_forwarders(&routing, &forwarders, &referenced_forwarder_ids);
+    let routing_tiers_by_route = build_routing_tiers_by_route(&routing);
     let mut bootstrap_input = Map::new();
     bootstrap_input.insert("providers".to_string(), Value::Object(providers));
     bootstrap_input.insert("routing".to_string(), Value::Object(routing));
@@ -238,6 +241,14 @@ fn compile_routecodex_runtime_manifest(input: &Value) -> Result<Value, String> {
     }
 
     let mut pipeline_runtime_config = Map::new();
+    pipeline_runtime_config.insert(
+        "routingProviderIds".to_string(),
+        Value::Array(routing_provider_ids.into_iter().map(Value::String).collect()),
+    );
+    pipeline_runtime_config.insert(
+        "routingTiersByRoute".to_string(),
+        Value::Object(routing_tiers_by_route),
+    );
     if let Some(apply_patch_config) = apply_patch {
         pipeline_runtime_config.insert("applyPatch".to_string(), apply_patch_config);
     }
@@ -1484,14 +1495,14 @@ fn resolve_referenced_provider_ids_from_routing(routing: &Map<String, Value>) ->
             if let Some(targets) = record.get("targets").and_then(Value::as_array) {
                 for target in targets {
                     if let Some(provider_id) = pick_string(Some(target))
-                        .and_then(|key| parse_provider_id_from_provider_key(&key))
+                        .and_then(|key| parse_provider_id_from_route_target(&key))
                     {
                         provider_ids.insert(provider_id);
                     }
                 }
             }
             if let Some(provider_id) = pick_string(record.get("target"))
-                .and_then(|key| parse_provider_id_from_provider_key(&key))
+                .and_then(|key| parse_provider_id_from_route_target(&key))
             {
                 provider_ids.insert(provider_id);
             }
@@ -1502,7 +1513,7 @@ fn resolve_referenced_provider_ids_from_routing(routing: &Map<String, Value>) ->
                 .and_then(Value::as_object);
             if let Some(weights) = weights {
                 for target in weights.keys() {
-                    if let Some(provider_id) = parse_provider_id_from_provider_key(target) {
+                    if let Some(provider_id) = parse_provider_id_from_route_target(target) {
                         provider_ids.insert(provider_id);
                     }
                 }
@@ -1510,6 +1521,14 @@ fn resolve_referenced_provider_ids_from_routing(routing: &Map<String, Value>) ->
         }
     }
     provider_ids
+}
+
+fn parse_provider_id_from_route_target(target: &str) -> Option<String> {
+    let trimmed = target.trim();
+    if trimmed.starts_with("fwd.") {
+        return None;
+    }
+    parse_provider_id_from_provider_key(trimmed)
 }
 
 fn resolve_referenced_forwarder_ids_from_routing(routing: &Map<String, Value>) -> BTreeSet<String> {
@@ -1530,6 +1549,112 @@ fn resolve_referenced_forwarder_ids_from_routing(routing: &Map<String, Value>) -
         }
     }
     ids
+}
+
+fn resolve_routing_provider_ids_with_forwarders(
+    routing: &Map<String, Value>,
+    forwarders: &Option<Map<String, Value>>,
+    referenced_forwarder_ids: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut provider_ids = resolve_referenced_provider_ids_from_routing(routing);
+    let Some(forwarders_map) = forwarders else {
+        return provider_ids;
+    };
+    for forwarder_id in referenced_forwarder_ids {
+        let Some(forwarder) = forwarders_map.get(forwarder_id).and_then(Value::as_object) else {
+            continue;
+        };
+        let targets = forwarder
+            .get("targets")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for target in targets {
+            let provider_id = target
+                .as_object()
+                .and_then(|node| pick_string(node.get("providerId")))
+                .or_else(|| {
+                    target
+                        .as_object()
+                        .and_then(|node| pick_string(node.get("providerKey")))
+                        .and_then(|key| parse_provider_id_from_provider_key(&key))
+                });
+            if let Some(provider_id) = provider_id {
+                provider_ids.insert(provider_id);
+            }
+        }
+    }
+    provider_ids
+}
+
+fn build_routing_tiers_by_route(routing: &Map<String, Value>) -> Map<String, Value> {
+    let mut routes = Map::new();
+    for (route_name, route_entry) in routing {
+        let mut tiers = Vec::new();
+        for (index, entry) in route_entries(route_entry).into_iter().enumerate() {
+            let Some(record) = entry.as_object() else {
+                continue;
+            };
+            let id = pick_string(record.get("id"))
+                .unwrap_or_else(|| format!("{}:{}", route_name, index));
+            let targets = collect_routing_tier_targets(record);
+            let priority = record
+                .get("priority")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            let mut tier = Map::new();
+            tier.insert("id".to_string(), Value::String(id));
+            tier.insert(
+                "targets".to_string(),
+                Value::Array(targets.into_iter().map(Value::String).collect()),
+            );
+            tier.insert("priority".to_string(), Value::Number(priority.into()));
+            if record.get("backup").and_then(Value::as_bool) == Some(true) {
+                tier.insert("backup".to_string(), Value::Bool(true));
+            }
+            tiers.push(Value::Object(tier));
+        }
+        tiers.sort_by(|left, right| {
+            let left_priority = left
+                .as_object()
+                .and_then(|node| node.get("priority"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            let right_priority = right
+                .as_object()
+                .and_then(|node| node.get("priority"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            right_priority.cmp(&left_priority)
+        });
+        routes.insert(route_name.clone(), Value::Array(tiers));
+    }
+    routes
+}
+
+fn collect_routing_tier_targets(record: &Map<String, Value>) -> Vec<String> {
+    let mut targets = Vec::new();
+    if let Some(items) = record.get("targets").and_then(Value::as_array) {
+        for item in items {
+            push_unique_routing_target(&mut targets, item);
+        }
+    }
+    if let Some(target) = record.get("target") {
+        push_unique_routing_target(&mut targets, target);
+    }
+    if let Some(provider) = record.get("provider") {
+        push_unique_routing_target(&mut targets, provider);
+    }
+    targets
+}
+
+fn push_unique_routing_target(targets: &mut Vec<String>, value: &Value) {
+    let Some(target) = pick_string(Some(value)) else {
+        return;
+    };
+    if !targets.contains(&target) {
+        targets.push(target);
+    }
 }
 
 fn route_entries(entries: &Value) -> Vec<&Value> {

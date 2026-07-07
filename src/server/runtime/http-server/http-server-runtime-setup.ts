@@ -60,8 +60,12 @@ async function rebuildRoutingPolicyGroupHubPipelines(args: {
     ? (args.server.hubPipelinesByRoutingPolicyGroup as Map<string, HubPipeline>)
     : new Map<string, HubPipeline>();
   const next = new Map<string, HubPipeline>();
+  const nextPipelineRuntimeConfigs = new Map<string, Record<string, unknown>>();
   for (const group of groups) {
     const config = await args.server.buildHubPipelineConfigForRoutingPolicyGroup(group, args.baseConfig);
+    if (config.pipelineRuntimeConfig && typeof config.pipelineRuntimeConfig === 'object' && !Array.isArray(config.pipelineRuntimeConfig)) {
+      nextPipelineRuntimeConfigs.set(group, config.pipelineRuntimeConfig);
+    }
     const existing = previous.get(group);
     if (existing) {
       existing.updateVirtualRouterConfig(config.virtualRouter);
@@ -80,6 +84,7 @@ async function rebuildRoutingPolicyGroupHubPipelines(args: {
     }
   }
   args.server.hubPipelinesByRoutingPolicyGroup = next;
+  args.server.pipelineRuntimeConfigByRoutingPolicyGroup = nextPipelineRuntimeConfigs;
 }
 
 async function buildAllRouterGroupArtifacts(args: {

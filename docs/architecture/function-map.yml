@@ -2974,6 +2974,9 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/server/runtime/http-server/runtime-config-manifest-carrier.ts
+      - src/server/runtime/http-server/http-server-bootstrap.ts
+      - src/server/runtime/http-server/http-server-runtime-setup.ts
+      - src/server/runtime/http-server/index.ts
       - src/server/handlers/config-admin-handler.ts
     forbidden_paths:
       - src/server/runtime/http-server/daemon-admin
@@ -2986,6 +2989,7 @@ owners:
       - tests/config/routecodex-config-loader.v2-single-source.spec.ts
       - tests/config/provider-v2-loader.spec.ts
       - tests/config/runtime-config-materialization-rust.spec.ts
+      - tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
@@ -2996,6 +3000,7 @@ owners:
       - "Runtime/config callers consume Rust-compiled v2 source normalization, validation, routingPolicyGroup selection, materialized provider extraction, manifest-to-userConfig materialization, and materialized config output; they must not rebuild VR/provider-profile semantics locally."
       - "src/config/user-config-loader.ts remains a lower-level TS helper shell for direct materialization callers; implicit-v2 normalization, collectV2ConfigSourceErrors, primary routingPolicyGroup selection, materialized virtualrouter.providers extraction, and final virtualrouter materialized assignment must delegate to native."
       - "Server runtime carries the Rust-compiled RouteCodexRuntimeManifest from bootstrap into HubPipeline pipelineRuntimeConfig through a non-enumerable carrier; it must not recompile or consume VR-only bootstrap input."
+      - "Router-port allowedProviders and primary-exhausted/default-pool route tiers must come from Rust pipelineRuntimeConfig routing artifacts, not from TS reads of authoring virtualrouter.routingPolicyGroups."
       - "TS config loader is IO/profile shell only; no TS fallback materialization path is allowed."
 
   - feature_id: config.provider_profile_materialization

@@ -238,4 +238,16 @@ describe('Config Codec Gate', () => {
     );
     expect(output.trim()).toBe('');
   });
+
+  test('server runtime routing allowlist and tiers come from Rust pipelineRuntimeConfig artifacts', () => {
+    const rootDir = path.resolve(testDir, '..', '..');
+    const output = runGrep(
+      `grep -rn --include='*.ts' -E ` +
+      `'extractProviderKeysForRoutingGroup|extractRoutingTiersForRoutingGroupRoute|user config 缺少 virtualrouter\\.routing|Virtual router routes|Provider targets|routingProviderIds.*virtualrouter|routingTiersByRoute.*virtualrouter' ` +
+      `src/server/runtime/http-server src/index.ts ` +
+      `| grep -v 'node_modules'`,
+      rootDir
+    );
+    expect(output.trim()).toBe('');
+  });
 });

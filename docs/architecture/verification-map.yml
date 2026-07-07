@@ -1866,6 +1866,7 @@ verification:
       - tests/config/runtime-config-materialization-rust.spec.ts
       - tests/config/routecodex-config-loader.v2-single-source.spec.ts
       - tests/config/provider-v2-loader.spec.ts
+      - tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts
       - tests/grep/config-codec-gate.spec.ts
       - cargo test -p router-hotpath-napi config_file_codec --lib -- --nocapture
@@ -1878,6 +1879,7 @@ verification:
     notes:
       - "Rust runtime loader must match legacy TS loader blackbox semantics before wiring; after wiring, routecodex-config-loader.ts remains a native host-env shell only."
       - "Rust runtime materialization must remain the only place that normalizes implicit-v2 source, validates/projects v2 source layout, resolves primary routingPolicyGroup, extracts materialized providers, builds VR runtime manifest semantics, and applies manifest output back to userConfig.virtualrouter."
+      - "Server runtime route allowlist and route-tier helpers must consume pipelineRuntimeConfig.routingProviderIds/routingTiersByRoute only; tests must reject returning to authoring virtualrouter.routingPolicyGroups reads."
 
   - feature_id: config.provider_profile_materialization
     change_risk: high

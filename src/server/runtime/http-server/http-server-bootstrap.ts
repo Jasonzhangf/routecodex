@@ -490,10 +490,6 @@ export async function initializeRouteErrorHub(server: any): Promise<void> {
   }
 }
 
-/**
- * Extract all target provider keys from a routingPolicyGroup.
- * Used to inject allowedProviders per router port.
- */
 export interface RoutingPolicyGroupRouteTier {
   id: string;
   targets: string[];
@@ -501,15 +497,7 @@ export interface RoutingPolicyGroupRouteTier {
   backup?: boolean;
 }
 
-function readRoutingPolicyGroupsNode(userConfig: UnknownObject): Record<string, unknown> | null {
-  const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
-  if (vr && typeof vr.routingPolicyGroups === 'object' && !Array.isArray(vr.routingPolicyGroups)) {
-    return vr.routingPolicyGroups as Record<string, unknown>;
-  }
-  return null;
-}
-
-function normalizeRoutingTierTarget(value: unknown): string | null {
+function normalizePipelineRuntimeString(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
   }
@@ -517,7 +505,10 @@ function normalizeRoutingTierTarget(value: unknown): string | null {
   return trimmed || null;
 }
 
-function normalizeRoutingRouteName(routeName: string): string {
+function normalizeRoutingRouteName(routeName: unknown): string {
+  if (typeof routeName !== 'string') {
+    return '';
+  }
   const trimmed = routeName.trim();
   if (!trimmed) {
     return '';
@@ -526,172 +517,78 @@ function normalizeRoutingRouteName(routeName: string): string {
   return bare || '';
 }
 
-function collectRoutingTierTargets(entry: Record<string, unknown>): string[] {
-  const targets: string[] = [];
-  const pushTarget = (value: unknown): void => {
-    const normalized = normalizeRoutingTierTarget(value);
-    if (!normalized || targets.includes(normalized)) {
-      return;
-    }
-    targets.push(normalized);
-  };
-  if (Array.isArray(entry.targets)) {
-    for (const target of entry.targets) {
-      pushTarget(target);
-    }
-  }
-  pushTarget(entry.target);
-  pushTarget(entry.provider);
-  return targets;
-}
-
-export function extractProviderKeysForRoutingGroup(
-  userConfig: UnknownObject,
-  groupId: string,
+export function extractProviderKeysFromPipelineRuntimeConfig(
+  pipelineRuntimeConfig: UnknownObject | undefined,
 ): string[] {
-  const normalizeProviderId = (value: unknown): string | null => {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    const firstSegment = trimmed.split('.').map((part) => part.trim()).find(Boolean);
-    return firstSegment || null;
-  };
-  const collectProviderIdFromTargetNode = (targetNode: unknown, out: string[]): boolean => {
-    if (!targetNode || typeof targetNode !== 'object' || Array.isArray(targetNode)) {
-      return false;
-    }
-    const record = targetNode as Record<string, unknown>;
-    const providerId = normalizeProviderId(record.providerId);
-    if (providerId) {
-      out.push(providerId);
-      return true;
-    }
-    const providerKey = normalizeProviderId(record.providerKey);
-    if (providerKey) {
-      out.push(providerKey);
-      return true;
-    }
-    return false;
-  };
-  const collectForwarderTargetProviderIds = (forwarderId: string, out: string[]): boolean => {
-    const vr = userConfig?.virtualrouter as Record<string, unknown> | undefined;
-    const forwarders =
-      vr && vr.forwarders && typeof vr.forwarders === 'object' && !Array.isArray(vr.forwarders)
-        ? (vr.forwarders as Record<string, unknown>)
-        : null;
-    const forwarderNode = forwarders?.[forwarderId];
-    if (!forwarderNode || typeof forwarderNode !== 'object' || Array.isArray(forwarderNode)) {
-      return false;
-    }
-    const targets = Array.isArray((forwarderNode as Record<string, unknown>).targets)
-      ? ((forwarderNode as Record<string, unknown>).targets as unknown[])
-      : [];
-    let collected = false;
-    for (const target of targets) {
-      collected = collectProviderIdFromTargetNode(target, out) || collected;
-    }
-    return collected;
-  };
-  const groupsNode = readRoutingPolicyGroupsNode(userConfig);
-  if (!groupsNode) return [];
-  const groupNode =
-    groupsNode[groupId] && typeof groupsNode[groupId] === 'object'
-      ? (groupsNode[groupId] as Record<string, unknown>)
-      : null;
-  if (!groupNode) return [];
-  const routing =
-    groupNode.routing && typeof groupNode.routing === 'object'
-      ? (groupNode.routing as Record<string, unknown>)
-      : null;
-  if (!routing) return [];
-  const keys: string[] = [];
-  const collectTarget = (value: unknown): void => {
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed.startsWith('fwd.') && collectForwarderTargetProviderIds(trimmed, keys)) {
-        return;
-      }
-    }
-    const providerId = normalizeProviderId(value);
-    if (providerId) keys.push(providerId);
-  };
-  for (const routeEntry of Object.values(routing)) {
-    const pools = Array.isArray(routeEntry) ? routeEntry : [routeEntry];
-    for (const pool of pools) {
-      if (!pool || typeof pool !== 'object' || Array.isArray(pool)) continue;
-      const entry = pool as Record<string, unknown>;
-      if (Array.isArray(entry.targets)) {
-        for (const target of entry.targets) collectTarget(target);
-      }
-      collectTarget(entry.target);
-      collectTarget(entry.provider);
-      const weights =
-        entry.loadBalancing && typeof entry.loadBalancing === 'object' && !Array.isArray(entry.loadBalancing)
-          ? (entry.loadBalancing as Record<string, unknown>).weights
-          : undefined;
-      if (weights && typeof weights === 'object' && !Array.isArray(weights)) {
-        for (const target of Object.keys(weights)) collectTarget(target);
-      }
-    }
-  }
-  return [...new Set(keys)];
+  const values = Array.isArray(pipelineRuntimeConfig?.routingProviderIds)
+    ? pipelineRuntimeConfig.routingProviderIds
+    : [];
+  const ids = values
+    .map(normalizePipelineRuntimeString)
+    .filter((value): value is string => Boolean(value));
+  return [...new Set(ids)].sort();
 }
 
-export function extractRoutingTiersForRoutingGroupRoute(
-  userConfig: UnknownObject,
-  groupId: string,
+function normalizeRoutingTier(value: unknown): RoutingPolicyGroupRouteTier | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const id = normalizePipelineRuntimeString(record.id);
+  if (!id) {
+    return null;
+  }
+  const targets = Array.isArray(record.targets)
+    ? record.targets
+        .map(normalizePipelineRuntimeString)
+        .filter((target): target is string => Boolean(target))
+    : [];
+  const priority = typeof record.priority === 'number' && Number.isFinite(record.priority)
+    ? record.priority
+    : 0;
+  return {
+    id,
+    targets,
+    priority,
+    backup: record.backup === true ? true : undefined,
+  };
+}
+
+export function extractRoutingTiersForPipelineRuntimeConfigRoute(
+  pipelineRuntimeConfig: UnknownObject | undefined,
   routeName: string,
 ): RoutingPolicyGroupRouteTier[] {
   const normalizedRouteName = normalizeRoutingRouteName(routeName);
   if (!normalizedRouteName) {
     return [];
   }
-  const groupsNode = readRoutingPolicyGroupsNode(userConfig);
-  if (!groupsNode) {
-    return [];
-  }
-  const groupNode =
-    groupsNode[groupId] && typeof groupsNode[groupId] === 'object' && !Array.isArray(groupsNode[groupId])
-      ? (groupsNode[groupId] as Record<string, unknown>)
+  const routeMap =
+    pipelineRuntimeConfig?.routingTiersByRoute
+    && typeof pipelineRuntimeConfig.routingTiersByRoute === 'object'
+    && !Array.isArray(pipelineRuntimeConfig.routingTiersByRoute)
+      ? pipelineRuntimeConfig.routingTiersByRoute as Record<string, unknown>
       : null;
-  if (!groupNode) {
+  if (!routeMap) {
     return [];
   }
-  const routing =
-    groupNode.routing && typeof groupNode.routing === 'object' && !Array.isArray(groupNode.routing)
-      ? (groupNode.routing as Record<string, unknown>)
-      : null;
-  if (!routing) {
-    return [];
-  }
-  const buildTiers = (
+  const readTiers = (
     routeEntry: unknown,
-    routeKey: string,
     options?: { forceBackup?: boolean }
   ): RoutingPolicyGroupRouteTier[] => {
-    if (!routeEntry) {
-      return [];
-    }
-    const pools = Array.isArray(routeEntry) ? routeEntry : [routeEntry];
-    return pools
-    .filter((pool): pool is Record<string, unknown> => Boolean(pool) && typeof pool === 'object' && !Array.isArray(pool))
-    .map((entry, index) => ({
-      id:
-        typeof entry.id === 'string' && entry.id.trim()
-          ? entry.id.trim()
-          : `${routeKey}:${index}`,
-      targets: collectRoutingTierTargets(entry),
-      priority: typeof entry.priority === 'number' && Number.isFinite(entry.priority)
-        ? entry.priority
-        : 0,
-      backup: options?.forceBackup === true || entry.backup === true ? true : undefined,
-    }))
-    .sort((left, right) => right.priority - left.priority);
+    const entries = Array.isArray(routeEntry) ? routeEntry : [];
+    return entries
+      .map(normalizeRoutingTier)
+      .filter((tier): tier is RoutingPolicyGroupRouteTier => Boolean(tier))
+      .map((tier) => ({
+        ...tier,
+        backup: options?.forceBackup === true || tier.backup === true ? true : undefined,
+      }))
+      .sort((left, right) => right.priority - left.priority);
   };
-  const routeTiers = buildTiers(routing[normalizedRouteName], normalizedRouteName);
+  const routeTiers = readTiers(routeMap[normalizedRouteName]);
   if (normalizedRouteName === 'default') {
     return routeTiers;
   }
-  const defaultRouteTiers = buildTiers(routing.default, 'default', { forceBackup: true });
+  const defaultRouteTiers = readTiers(routeMap.default, { forceBackup: true });
   return [...routeTiers, ...defaultRouteTiers].sort((left, right) => right.priority - left.priority);
 }

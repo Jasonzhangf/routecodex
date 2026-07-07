@@ -40,8 +40,8 @@ import { ManagerDaemon } from '../../../manager/index.js';
 import { ensureServerScopedSessionDir, resolvePortScopedSessionDir } from './session-dir.js';
 import {
   shouldLogStageEvent,
-  extractProviderKeysForRoutingGroup,
-  extractRoutingTiersForRoutingGroupRoute,
+  extractProviderKeysFromPipelineRuntimeConfig,
+  extractRoutingTiersForPipelineRuntimeConfigRoute,
 } from './http-server-bootstrap.js';
 import { canonicalizeServerId } from './server-id.js';
 import { StatsManager } from './stats-manager.js';
@@ -397,6 +397,7 @@ export class RouteCodexHttpServer {
 
   private hubPipeline: HubPipeline | null = null;
   private hubPipelinesByRoutingPolicyGroup: Map<string, HubPipeline> = new Map();
+  private pipelineRuntimeConfigByRoutingPolicyGroup: Map<string, Record<string, unknown>> = new Map();
   private providerHandles: Map<string, ProviderHandle> = new Map();
   private providerKeyToRuntimeKey: Map<string, string> = new Map();
   private providerRuntimeInitErrors: Map<string, Error> = new Map();
@@ -491,7 +492,10 @@ export class RouteCodexHttpServer {
       getHubPipeline: (routingPolicyGroup?: string) => this.resolveHubPipelineForRoutingPolicyGroup(routingPolicyGroup),
       getModuleDependencies: () => this.getModuleDependencies(),
       getRoutingTiers: (routingPolicyGroup, routeName) =>
-        extractRoutingTiersForRoutingGroupRoute(this.userConfig, routingPolicyGroup, routeName),
+        extractRoutingTiersForPipelineRuntimeConfigRoute(
+          this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(routingPolicyGroup),
+          routeName,
+        ),
       executeNestedInput: (nestedInput) => this.executePortAwarePipeline(
         typeof nestedInput.metadata?.routecodexLocalPort === 'number'
         ? nestedInput.metadata.routecodexLocalPort
@@ -596,6 +600,14 @@ export class RouteCodexHttpServer {
       return this.hubPipelinesByRoutingPolicyGroup.get(group) ?? null;
     }
     return this.hubPipeline;
+  }
+
+  private resolvePipelineRuntimeConfigForRoutingPolicyGroup(routingPolicyGroup?: string): Record<string, unknown> | undefined {
+    const group = typeof routingPolicyGroup === 'string' ? routingPolicyGroup.trim() : '';
+    if (group) {
+      return this.pipelineRuntimeConfigByRoutingPolicyGroup.get(group);
+    }
+    return this.hubPipelineConfigForShadow?.pipelineRuntimeConfig as Record<string, unknown> | undefined;
   }
 
   private resolvePortSessionDir(portConfig?: PortConfig | null, localPort?: number): string | undefined {
@@ -1123,7 +1135,9 @@ export class RouteCodexHttpServer {
     // restrict routing to that group'''s provider pool (replaces global active group).
     let allowedProviders: string[] | undefined;
     if (portConfig?.mode === 'router' && portConfig.routingPolicyGroup) {
-      allowedProviders = extractProviderKeysForRoutingGroup(this.userConfig, portConfig.routingPolicyGroup);
+      allowedProviders = extractProviderKeysFromPipelineRuntimeConfig(
+        this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(portConfig.routingPolicyGroup),
+      );
     }
 
     // stopMessage 默认启用（true），除非端口显式配置 enabled=false。
@@ -1356,7 +1370,9 @@ export class RouteCodexHttpServer {
   ): Promise<RouterDirectOutcome> {
     const routingGroupProviders =
       portConfig.routingPolicyGroup
-        ? extractProviderKeysForRoutingGroup(this.userConfig, portConfig.routingPolicyGroup)
+        ? extractProviderKeysFromPipelineRuntimeConfig(
+          this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(portConfig.routingPolicyGroup),
+        )
         : undefined;
     const allowedProviders =
       retryState.allowedProvidersOverride && retryState.allowedProvidersOverride.length > 0
@@ -1490,9 +1506,8 @@ export class RouteCodexHttpServer {
         const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(error);
         const primaryExhaustedRoute = primaryExhaustedContext?.route;
         const primaryExhaustedTiers = primaryExhaustedRoute && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
-          ? extractRoutingTiersForRoutingGroupRoute(
-              this.userConfig,
-              metadataForHub.routecodexRoutingPolicyGroup,
+          ? extractRoutingTiersForPipelineRuntimeConfigRoute(
+              this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(metadataForHub.routecodexRoutingPolicyGroup),
               primaryExhaustedRoute,
             )
           : [];
@@ -1644,17 +1659,15 @@ export class RouteCodexHttpServer {
         });
       const routingDecisionTiers =
         routingDecisionRouteName && routingPolicyGroupForErrorErr05
-          ? extractRoutingTiersForRoutingGroupRoute(
-            this.userConfig,
-            routingPolicyGroupForErrorErr05,
+          ? extractRoutingTiersForPipelineRuntimeConfigRoute(
+            this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(routingPolicyGroupForErrorErr05),
             routingDecisionRouteName,
           )
           : [];
       const defaultRouteTiers =
         routingDecisionRouteName && routingPolicyGroupForErrorErr05
-          ? extractRoutingTiersForRoutingGroupRoute(
-            this.userConfig,
-            routingPolicyGroupForErrorErr05,
+          ? extractRoutingTiersForPipelineRuntimeConfigRoute(
+            this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(routingPolicyGroupForErrorErr05),
             'default',
           )
           : [];
@@ -1871,17 +1884,15 @@ export class RouteCodexHttpServer {
           });
         const routingDecisionTiers =
           routingDecisionRouteName && routingPolicyGroupForErrorErr05
-            ? extractRoutingTiersForRoutingGroupRoute(
-              this.userConfig,
-              routingPolicyGroupForErrorErr05,
+            ? extractRoutingTiersForPipelineRuntimeConfigRoute(
+              this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(routingPolicyGroupForErrorErr05),
               routingDecisionRouteName,
             )
             : [];
         const defaultRouteTiers =
           routingDecisionRouteName && routingPolicyGroupForErrorErr05
-            ? extractRoutingTiersForRoutingGroupRoute(
-              this.userConfig,
-              routingPolicyGroupForErrorErr05,
+            ? extractRoutingTiersForPipelineRuntimeConfigRoute(
+              this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(routingPolicyGroupForErrorErr05),
               'default',
             )
             : [];

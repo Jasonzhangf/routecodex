@@ -930,23 +930,6 @@ class RouteCodexApp {
       });
       this.httpServer.seedUserConfigForBootstrap(userConfig);
 
-      // 4.1 校验 virtualrouter 配置
-      const virtualRouter = getNestedRecord(userConfigRecord, ['virtualrouter']);
-      const routing = getNestedRecord(virtualRouter ?? userConfigRecord, ['routing']);
-      const routingRecord: UnknownRecord = routing ?? {};
-      if (Object.keys(routingRecord).length === 0) {
-        throw new Error(`user config 缺少 virtualrouter.routing，无法启动`);
-      }
-      const routeEntries = Object.entries(routingRecord);
-      const targetCount = routeEntries.reduce((acc, [, value]) => {
-        if (Array.isArray(value)) {
-          return acc + value.length;
-        }
-        return acc;
-      }, 0);
-      console.log(`🧱 Virtual router routes: ${routeEntries.length}`);
-      console.log(`🔑 Provider targets: ${targetCount}`);
-
       this.prepareRuntimeExitForensics(bindPort);
       if (hasMultiPortConfig) {
         delete process.env.ROUTECODEX_PORT;

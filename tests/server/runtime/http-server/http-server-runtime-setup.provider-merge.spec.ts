@@ -143,8 +143,17 @@ describe('http server runtime setup provider merge', () => {
     expect(capturedInputs[0]?.providers?.openai).toBeDefined();
     expect(capturedInputs[0]?.providers?.openai?.auth?.type).toBe('apiKey');
     expect(capturedHubConfigs).toHaveLength(1);
-    expect(capturedHubConfigs[0]?.pipelineRuntimeConfig).toEqual({
+    expect(capturedHubConfigs[0]?.pipelineRuntimeConfig).toMatchObject({
       applyPatch: { mode: 'client', allow: ['apply_patch'] },
+      routingProviderIds: ['openai'],
+      routingTiersByRoute: {
+        thinking: [
+          expect.objectContaining({
+            id: 'gateway-priority-5520-thinking',
+            targets: ['openai.key1.gpt-5.5-medium'],
+          }),
+        ],
+      },
     });
   });
 

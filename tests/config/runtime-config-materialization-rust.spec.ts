@@ -115,6 +115,16 @@ describe('Rust runtime config materialization', () => {
     expect(manifest.virtualRouterBootstrapInput.applyPatch).toEqual({ mode: 'client', allow: ['apply_patch'] });
     expect(manifest.virtualRouterBootstrapInput.hitLog).toEqual({ enabled: true, omit: ['headers'] });
     expect(manifest.pipelineRuntimeConfig.applyPatch).toEqual({ mode: 'client', allow: ['apply_patch'] });
+    expect(manifest.pipelineRuntimeConfig.routingProviderIds).toEqual(['freepool']);
+    expect(manifest.pipelineRuntimeConfig.routingTiersByRoute).toEqual({
+      default: [
+        {
+          id: 'beta-route',
+          targets: ['fwd.gpt.gpt-5.5'],
+          priority: 0
+        }
+      ]
+    });
   });
 
   it('fails fast when a forwarder provider target does not declare the requested model', () => {
