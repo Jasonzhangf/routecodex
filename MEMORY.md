@@ -1424,3 +1424,11 @@
 - Forbidden response to compatibility failure: editing Jason's real `~/.rcc` config files, removing fields from real config, or treating config edits as a fix for loader/runtime code defects. Existing real config is a compatibility sample; code must adapt or fail with a verified contract error.
 - Required order for config/VR/pipeline wiring: source owner/map lookup -> module blackbox over fixtures copied from existing config shape -> old/new output comparison -> focused gates -> only then connection/wiring -> only then managed restart/live probe if explicitly in scope.
 - If blackbox is not complete, report "not wired" and the failing/unknown cases. Do not claim closure and do not start the server.
+
+# 2026-07-07: apply_patch live replay closure requires route and SSE projection evidence
+
+- Unique marker: `routecodex-apply-patch-live-replay-20260707-124719881`.
+- Verified live replay on global release `routecodex/rcc 0.90.3643` after release install and managed restart: `/opt/homebrew/bin/rcc --version`, `/Users/fanzhang/.local/bin/rcc --version`, both install `current/package.json` files, and `/health` on 5555/5520/4444/10000 all reported `0.90.3643`.
+- Live apply_patch replay against `http://127.0.0.1:5555/v1/responses` passed with `eventCount=11`, `customInputCount=3`, `functionArgumentPatchLeakCount=0`, `deltaStreamCount=0`, and preserved raw patch text in client-visible `custom_tool_call.input`.
+- Live log evidence for request `openai-responses-router-gpt-5.5-20260707T124719881-472008-124`: `[virtual-router-hit] ... tools/gateway-priority-5555-priority-tools -> minimax[key1].MiniMax-M2.7 reason=tools:apply_patch-tool-choice`.
+- Guard rule: explicit `/v1/responses` `tool_choice:{type:"custom",name:"apply_patch"}` is a Rust Virtual Router `tools` route signal, and Responses SSE projection must normalize `response.created`, `response.in_progress`, terminal `response.completed`, and `response.done`; helper-only projection tests are insufficient.

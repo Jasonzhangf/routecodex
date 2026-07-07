@@ -27214,3 +27214,13 @@ Complete SSE rustification status (34 TS files):
 - Boundary:
   - No managed live restart/replay was run; this remains offline CLI/config closeout evidence.
   - Remaining direct provider codec functions are not providerId/root runtime reads; they are the file-scoped codec/writer shell and still need explicit owner-gated justification until fully removable.
+
+# 2026-07-07: apply_patch live replay closed on global release
+
+- Unique marker: `routecodex-apply-patch-live-replay-20260707-124719881`.
+- Installed release through `npm run install:release`; the script built native hotpath/servertool, ran release build gates, and restarted RouteCodex on 5555.
+- Version/health evidence after install: `/opt/homebrew/bin/rcc --version` = `0.90.3643`; `/Users/fanzhang/.local/bin/rcc --version` = `0.90.3643`; `/Volumes/extension/.rcc/install/current/package.json` and `/Users/fanzhang/.rcc/install/current/package.json` both `routecodex 0.90.3643`; `/health` on 5555/5520/4444/10000 all returned `ready=true`, `pipelineReady=true`, `version=0.90.3643`.
+- Live replay command passed: `RCC_APPLY_PATCH_ONLINE_URL=http://127.0.0.1:5555/v1/responses RCC_APPLY_PATCH_ONLINE_TIMEOUT_MS=180000 node scripts/tests/apply-patch-freeform-10000-online.mjs`.
+- Live replay output: `ok=true`, `eventCount=11`, `customInputCount=3`, `functionArgumentPatchLeakCount=0`, `deltaStreamCount=0`; client-visible `custom_tool_call.input` preserved the exact raw patch text.
+- Live log evidence: request `openai-responses-router-gpt-5.5-20260707T124719881-472008-124` routed to `tools/gateway-priority-5555-priority-tools -> minimax[key1].MiniMax-M2.7` with reason `tools:apply_patch-tool-choice`.
+- Follow-up gates passed after replay: focused Rust SSE projection gate (`project_responses_sse_frame_for_client`, 16 tests), `verify:repo-sanity`, `verify:function-map-compile-gate`, `verify:vr-no-ts-runtime`, `verify:llmswitch-rustification-audit`, `verify:config-provider-codec-rust`, and `verify:config-toml-codec-rust`.
