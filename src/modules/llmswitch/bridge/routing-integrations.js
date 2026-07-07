@@ -252,6 +252,24 @@ export function decodeRouteCodexProviderConfigTextSync(input) {
     })));
     return parseDecodedConfigTextOutput(output, 'provider');
 }
+export function detectRouteCodexUserConfigFormatSync(configPath) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.detectRouteCodexUserConfigFormatJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] detectRouteCodexUserConfigFormatJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') })));
+    return parseDetectedConfigFormatOutput(output, 'user');
+}
+export function detectRouteCodexProviderConfigFormatSync(configPath) {
+    const binding = loadNativeBindingForConfigCodec();
+    const fn = binding.detectRouteCodexProviderConfigFormatJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] detectRouteCodexProviderConfigFormatJson not available');
+    }
+    const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') })));
+    return parseDetectedConfigFormatOutput(output, 'provider');
+}
 export async function coerceRouteCodexProviderConfigV2(parsed, fallbackProviderId) {
     return coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId);
 }
@@ -526,6 +544,16 @@ function parseNativeTomlRecord(raw) {
         throw new Error('[llmswitch-bridge] RouteCodex TOML parser returned invalid payload');
     }
     return parsed;
+}
+function parseDetectedConfigFormatOutput(output, kind) {
+    if (!output || typeof output !== 'object' || Array.isArray(output)) {
+        throw new Error(`[llmswitch-bridge] RouteCodex ${kind} config format detector returned invalid payload`);
+    }
+    const format = output.format;
+    if (format !== 'toml') {
+        throw new Error(`[llmswitch-bridge] RouteCodex ${kind} config format detector returned invalid format`);
+    }
+    return 'toml';
 }
 const cachedHubPipelineCtorByImpl = {
     ts: null,

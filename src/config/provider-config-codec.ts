@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {
   coerceRouteCodexProviderConfigV2Sync,
   decodeRouteCodexProviderConfigTextSync,
+  detectRouteCodexProviderConfigFormatSync,
 } from '../modules/llmswitch/bridge.js';
 import type { ProviderConfigV2 } from './provider-v2-loader.js';
 
@@ -20,10 +21,7 @@ export interface DecodedProviderConfigFile {
 type ReadFileSyncLike = Pick<typeof import('node:fs'), 'readFileSync'>;
 
 export function detectProviderConfigFormat(configPath: string): ProviderConfigFormat {
-  if (!configPath.trim().toLowerCase().endsWith('.toml')) {
-    throw new Error(`[config] provider config JSON support removed; expected TOML file: ${configPath}`);
-  }
-  return 'toml';
+  return detectRouteCodexProviderConfigFormatSync(configPath);
 }
 
 export function parseProviderConfigText(raw: string, format: ProviderConfigFormat): UnknownRecord {

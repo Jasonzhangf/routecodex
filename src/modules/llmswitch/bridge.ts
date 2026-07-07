@@ -102,6 +102,8 @@ export {
   updateRouteCodexTomlStringScalarInTableSync,
   decodeRouteCodexUserConfigTextSync,
   decodeRouteCodexProviderConfigTextSync,
+  detectRouteCodexUserConfigFormatSync,
+  detectRouteCodexProviderConfigFormatSync,
   coerceRouteCodexProviderConfigV2,
   coerceRouteCodexProviderConfigV2Sync,
   planRouteCodexProviderConfigV2FilesSync,

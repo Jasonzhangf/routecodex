@@ -1,9 +1,9 @@
 // feature_id: config.user_config_codec
 import fs from 'node:fs/promises';
-import path from 'node:path';
 
 import {
   decodeRouteCodexUserConfigTextSync,
+  detectRouteCodexUserConfigFormatSync,
 } from '../modules/llmswitch/bridge.js';
 
 export type UserConfigFormat = 'toml';
@@ -19,11 +19,7 @@ export interface DecodedUserConfigFile {
 type ReadFileSyncLike = Pick<typeof import('node:fs'), 'readFileSync'>;
 
 export function detectUserConfigFormat(configPath: string): UserConfigFormat {
-  const ext = path.extname(configPath).trim().toLowerCase();
-  if (ext !== '.toml') {
-    throw new Error(`[config] user config JSON support removed; expected TOML file: ${configPath}`);
-  }
-  return 'toml';
+  return detectRouteCodexUserConfigFormatSync(configPath);
 }
 
 export function parseUserConfigText(raw: string, format: UserConfigFormat): UnknownRecord {

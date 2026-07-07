@@ -250,6 +250,17 @@ pub fn decode_route_codex_provider_config_text_json(input_json: String) -> NapiR
 }
 
 #[napi]
+pub fn detect_route_codex_user_config_format_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::detect_user_config_format_json(&input_json).map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn detect_route_codex_provider_config_format_json(input_json: String) -> NapiResult<String> {
+    config_file_codec::detect_provider_config_format_json(&input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
 pub fn coerce_route_codex_provider_config_v2_json(input_json: String) -> NapiResult<String> {
     config_provider_codec::coerce_provider_config_v2_from_parsed_json(&input_json)
         .map_err(napi::Error::from_reason)

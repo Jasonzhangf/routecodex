@@ -1768,6 +1768,7 @@ verification:
       - src/config/user-config-codec.ts
     contract:
       - tests/config/config-file-codec-rust.spec.ts
+      - tests/config/config-format-detect-rust.spec.ts
       - tests/config/toml-codec.spec.ts
       - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi config_file_codec --lib -- --nocapture
     integration:
@@ -1777,7 +1778,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "User config TOML text decode path must call Rust config_file_codec through a thin TS file-IO shell; config.json is a fail-fast rejected legacy path."
+      - "User config TOML format detection and text decode path must call Rust config_file_codec through a thin TS file-IO shell; config.json is a fail-fast rejected legacy path."
 
   - feature_id: config.toml_codec
     change_risk: high
@@ -1809,6 +1810,7 @@ verification:
       - src/modules/llmswitch/bridge/routing-integrations.ts
     contract:
       - tests/config/config-file-codec-rust.spec.ts
+      - tests/config/config-format-detect-rust.spec.ts
       - tests/config/toml-codec.spec.ts
       - tests/config/provider-v2-loader.spec.ts
       - npm run verify:config-provider-codec-rust
@@ -1820,7 +1822,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Provider config TOML text decode path must call Rust config_file_codec through a thin TS file-IO shell; provider v2 root loading/coercion must call Rust; config.v1.json/config.v2.json are removed legacy paths."
+      - "Provider config TOML format detection and text decode path must call Rust config_file_codec through a thin TS file-IO shell; provider v2 root loading/coercion must call Rust; config.v1.json/config.v2.json are removed legacy paths."
       - "Provider-update CLI/tooling/admin/init commands must not directly decode provider config files; update/sync/probe/maintenance/admin/init views must consume loadProviderConfigsV2/root loader output by providerId/root."
 
   - feature_id: config.provider_config_coercion

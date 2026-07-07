@@ -11,12 +11,26 @@ struct ConfigTextDecodeInput {
     config_path: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigFormatDetectInput {
+    config_path: String,
+}
+
 pub fn decode_user_config_text_json(input_json: &str) -> Result<String, String> {
     decode_config_text_json(input_json, ConfigFileKind::User)
 }
 
 pub fn decode_provider_config_text_json(input_json: &str) -> Result<String, String> {
     decode_config_text_json(input_json, ConfigFileKind::Provider)
+}
+
+pub fn detect_user_config_format_json(input_json: &str) -> Result<String, String> {
+    detect_config_format_json(input_json, ConfigFileKind::User)
+}
+
+pub fn detect_provider_config_format_json(input_json: &str) -> Result<String, String> {
+    detect_config_format_json(input_json, ConfigFileKind::Provider)
 }
 
 enum ConfigFileKind {
@@ -60,6 +74,14 @@ fn decode_config_text_json(input_json: &str, kind: ConfigFileKind) -> Result<Str
     .map_err(|err| format!("[config] failed to encode {} config text decode output: {err}", kind.label()))
 }
 
+fn detect_config_format_json(input_json: &str, kind: ConfigFileKind) -> Result<String, String> {
+    let input: ConfigFormatDetectInput = serde_json::from_str(input_json)
+        .map_err(|err| format!("[config] invalid {} config format detect input: {err}", kind.label()))?;
+    ensure_toml_path(input.config_path.trim(), &kind)?;
+    serde_json::to_string(&json!({ "format": "toml" }))
+        .map_err(|err| format!("[config] failed to encode {} config format output: {err}", kind.label()))
+}
+
 fn ensure_toml_path(config_path: &str, kind: &ConfigFileKind) -> Result<(), String> {
     if config_path.is_empty() {
         return Err(kind.format_error(config_path));
@@ -77,7 +99,10 @@ fn ensure_toml_path(config_path: &str, kind: &ConfigFileKind) -> Result<(), Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_provider_config_text_json, decode_user_config_text_json};
+    use super::{
+        decode_provider_config_text_json, decode_user_config_text_json,
+        detect_provider_config_format_json, detect_user_config_format_json,
+    };
     use serde_json::{json, Value};
 
     #[test]
@@ -138,5 +163,35 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("provider config JSON support removed"));
+    }
+
+    #[test]
+    fn detect_config_format_accepts_only_toml() {
+        let user: Value = serde_json::from_str(
+            &detect_user_config_format_json(&json!({ "configPath": "config.toml" }).to_string())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(user.get("format").and_then(Value::as_str), Some("toml"));
+
+        let provider: Value = serde_json::from_str(
+            &detect_provider_config_format_json(
+                &json!({ "configPath": "config.v2.toml" }).to_string(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(provider.get("format").and_then(Value::as_str), Some("toml"));
+
+        let user_error =
+            detect_user_config_format_json(&json!({ "configPath": "config.json" }).to_string())
+                .unwrap_err();
+        assert!(user_error.contains("user config JSON support removed"));
+
+        let provider_error = detect_provider_config_format_json(
+            &json!({ "configPath": "config.v2.json" }).to_string(),
+        )
+        .unwrap_err();
+        assert!(provider_error.contains("provider config JSON support removed"));
     }
 }

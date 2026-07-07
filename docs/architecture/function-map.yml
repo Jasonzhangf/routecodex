@@ -2830,6 +2830,7 @@ owners:
       - UserConfigFormat
       - DecodedUserConfigFile
     canonical_builders:
+     - detect_user_config_format_json
      - decode_user_config_text_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
@@ -2853,6 +2854,7 @@ owners:
       - src/providers
     required_tests:
       - tests/config/config-file-codec-rust.spec.ts
+      - tests/config/config-format-detect-rust.spec.ts
       - tests/config/toml-codec.spec.ts
       - tests/grep/config-codec-gate.spec.ts
     required_gates:
@@ -2860,7 +2862,7 @@ owners:
       - npm run verify:config-toml-codec-rust
     migration_target: rust
     notes:
-      - "No caller may parse user config with raw JSON.parse/TOML logic outside codec owner; src/config/user-config-codec.ts must call native decodeRouteCodexUserConfigTextSync for TOML text semantics."
+      - "No caller may parse user config with raw JSON.parse/TOML logic outside codec owner; src/config/user-config-codec.ts must call native detectRouteCodexUserConfigFormatSync and decodeRouteCodexUserConfigTextSync for file format and TOML text semantics."
       - "Legacy config.json support is removed; callers must use config.toml."
 
   - feature_id: config.provider_config_codec
@@ -2873,6 +2875,7 @@ owners:
       - ProviderConfigFormat
       - DecodedProviderConfigFile
     canonical_builders:
+     - detect_provider_config_format_json
      - decode_provider_config_text_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
@@ -2884,6 +2887,7 @@ owners:
       - src/server/runtime/http-server/executor
     required_tests:
       - tests/config/config-file-codec-rust.spec.ts
+      - tests/config/config-format-detect-rust.spec.ts
       - tests/config/toml-codec.spec.ts
       - tests/config/provider-v2-loader.spec.ts
       - tests/grep/config-codec-gate.spec.ts
@@ -2895,7 +2899,7 @@ owners:
     notes:
       - "Provider config single-file codec is now file-scoped; maintenance/admin/init/provider-update must not call provider-config-codec directly for providerId/root reads."
       - "Legacy config.v1.json/config.v2.json support is removed; provider config path is config.v2.toml."
-      - "Provider config v2 single-file text decode, root loading, and coercion are Rust-owned through decodeRouteCodexProviderConfigTextJson/loadRouteCodexProviderConfigsV2FromRootJson/coerceRouteCodexProviderConfigV2Json; src/config/provider-config-codec.ts remains single-file IO/path rejection shell."
+      - "Provider config v2 single-file format detection, text decode, root loading, and coercion are Rust-owned through detectRouteCodexProviderConfigFormatJson/decodeRouteCodexProviderConfigTextJson/loadRouteCodexProviderConfigsV2FromRootJson/coerceRouteCodexProviderConfigV2Json; src/config/provider-config-codec.ts remains single-file IO shell."
       - "Provider CLI/tooling/admin/init commands that address configs by providerId must read through loadProviderConfigsV2/root loader instead of decoding config.v2.toml directly; provider-update no longer accepts arbitrary provider config file paths."
 
   - feature_id: config.provider_config_coercion
