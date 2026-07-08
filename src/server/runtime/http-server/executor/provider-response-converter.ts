@@ -21,11 +21,10 @@ import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
 import {
-  bindRuntimeCarrierFromSource,
   readRuntimeControlProjection,
   readRuntimeDebugSnapshotProjection,
-  readRuntimeServerToolProjection,
 } from '../metadata-center/request-truth-readers.js';
+import { MetadataCenter } from '../metadata-center/metadata-center.js';
 
 import {
   asFlatRecord,
@@ -94,23 +93,37 @@ function buildChoicesArrayBridgeDebugDetails(args: {
   };
 }
 
-function buildBridgeAdapterContext(args: {
+const PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER = {
+  module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
+  symbol: 'syncBridgeRuntimeBackToPipelineMetadata',
+  stage: 'provider_response_runtime_control'
+} as const;
+
+const PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER = {
+  module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
+  symbol: 'syncBridgeRuntimeBackToPipelineMetadata',
+  stage: 'provider_response_debug_snapshot'
+} as const;
+
+function buildBridgeInvocationMetadata(args: {
   metadata: Record<string, unknown>;
   requestId: string;
   entryEndpoint?: string;
   providerProtocol?: string;
   serverToolsEnabled?: boolean;
 }): Record<string, unknown> {
-  const context: Record<string, unknown> = {
+  const bridgeMetadata: Record<string, unknown> = {
     ...args.metadata,
-    ...readRuntimeServerToolProjection(args.metadata),
     requestId: args.requestId,
     ...(args.entryEndpoint ? { entryEndpoint: args.entryEndpoint } : {}),
     ...(args.providerProtocol ? { providerProtocol: args.providerProtocol } : {}),
     ...(args.serverToolsEnabled !== undefined ? { serverToolsEnabled: args.serverToolsEnabled } : {}),
   };
-  bindRuntimeCarrierFromSource({ target: context, source: args.metadata });
-  return context;
+  const center = MetadataCenter.read(args.metadata);
+  if (center) {
+    MetadataCenter.bind(bridgeMetadata, center);
+  }
+  return bridgeMetadata;
 }
 
 function attachTimingBreakdown(response: PipelineExecutionResult): PipelineExecutionResult {
@@ -158,6 +171,47 @@ function shouldEnableHubStageRecorder(): boolean {
   ).trim().toLowerCase();
   return TRUTHY_VALUES.has(raw);
 }
+function syncBridgeRuntimeBackToPipelineMetadata(options: {
+  pipelineMetadata?: Record<string, unknown>;
+  bridgeMetadata: Record<string, unknown>;
+}): void {
+  const pipelineMetadata = asRecord(options.pipelineMetadata);
+  if (!pipelineMetadata) {
+    return;
+  }
+  const bridgeCenter = MetadataCenter.read(options.bridgeMetadata);
+  const pipelineCenter = MetadataCenter.read(pipelineMetadata);
+  if (bridgeCenter && !pipelineCenter) {
+    MetadataCenter.bind(pipelineMetadata, bridgeCenter);
+  } else if (bridgeCenter && pipelineCenter && pipelineCenter !== bridgeCenter) {
+    const runtimeControl = bridgeCenter.readRuntimeControl();
+    if (runtimeControl.stopless) {
+      pipelineCenter.writeRuntimeControl(
+        'stopless',
+        runtimeControl.stopless,
+        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        'provider response stopless runtime pipeline sync'
+      );
+    }
+    if (runtimeControl.stopMessageCompareContext) {
+      pipelineCenter.writeRuntimeControl(
+        'stopMessageCompareContext',
+        runtimeControl.stopMessageCompareContext,
+        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        'provider response stop-message compare pipeline sync'
+      );
+    }
+    const debugSnapshot = bridgeCenter.readDebugSnapshot();
+    if (Array.isArray(debugSnapshot.hubStageTop) && debugSnapshot.hubStageTop.length > 0) {
+      pipelineCenter.writeDebugSnapshot(
+        'hubStageTop',
+        debugSnapshot.hubStageTop,
+        PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER,
+        'provider response hub-stage-top debug snapshot sync'
+      );
+    }
+  }
+}
 
 function readRuntimeControlForProviderResponseConverter(
   metadata?: Record<string, unknown>
@@ -168,9 +222,12 @@ function readRuntimeControlForProviderResponseConverter(
   };
 }
 
-function readProviderProtocolForProviderResponseConverter(metadata?: Record<string, unknown>): string {
+function readProviderProtocolForProviderResponseConverter(args: {
+  metadata?: Record<string, unknown>;
+  bridgeMetadata?: Record<string, unknown>;
+}): string {
   const providerProtocol = readRuntimeControlForProviderResponseConverter(
-    metadata
+    args.metadata ?? args.bridgeMetadata
   ).providerProtocol;
   if (providerProtocol) {
     return providerProtocol;
@@ -191,7 +248,10 @@ export function buildResponseMetadataBagForProviderResponseConverter(args: {
     ...metadataBag,
     providerFamily
   };
-  bindRuntimeCarrierFromSource({ target: responseMetadataBag, source: metadataBag });
+  const center = MetadataCenter.read(metadataBag);
+  if (center) {
+    MetadataCenter.bind(responseMetadataBag, center);
+  }
   return responseMetadataBag;
 }
 
@@ -204,7 +264,6 @@ export type ConvertProviderResponseOptions = {
   requestId: string;
   serverToolsEnabled?: boolean;
   wantsStream: boolean;
-  entryOriginRequest?: Record<string, unknown> | undefined;
   processMode?: string;
   response: PipelineExecutionResult;
   pipelineMetadata?: Record<string, unknown>;
@@ -231,7 +290,7 @@ function buildProviderContextForResponseConversion(
     ...(asRecord(options.pipelineMetadata) ?? {}),
     ...(extensions ? { extensions } : {})
   };
-  const providerProtocol = readProviderProtocolForProviderResponseConverter(runtimeMetadata);
+  const providerProtocol = readProviderProtocolForProviderResponseConverter({ metadata: runtimeMetadata });
   return {
     requestId: options.requestId,
     providerType: (options.providerType || 'unknown') as ProviderContext['providerType'],
@@ -336,7 +395,7 @@ export async function convertProviderResponseIfNeeded(
     metadata: asRecord(options.pipelineMetadata),
     providerFamily: options.providerFamily
   });
-  const effectiveProviderProtocol = readProviderProtocolForProviderResponseConverter(responseMetadataBag);
+  const effectiveProviderProtocol = readProviderProtocolForProviderResponseConverter({ metadata: responseMetadataBag });
   const bridgeProviderResponseSeed = buildBridgeProviderResponseSeed(options.response, body);
   if (!bridgeProviderResponseSeed) {
     return options.response;
@@ -358,14 +417,17 @@ export async function convertProviderResponseIfNeeded(
     return options.response;
   }
   try {
-    const adapterContext = buildBridgeAdapterContext({
+    const bridgeMetadata = buildBridgeInvocationMetadata({
       metadata: responseMetadataBag,
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol: effectiveProviderProtocol,
       serverToolsEnabled: options.serverToolsEnabled !== false
     });
-    const bridgeProviderProtocol = effectiveProviderProtocol;
+    const bridgeProviderProtocol = readProviderProtocolForProviderResponseConverter({
+      metadata: responseMetadataBag,
+      bridgeMetadata
+    });
     const serverToolsEnabled = options.serverToolsEnabled !== false;
     let stageRecorder: unknown;
     if (shouldEnableHubStageRecorder()) {
@@ -375,8 +437,10 @@ export async function convertProviderResponseIfNeeded(
       });
       const snapshotRecorderStartMs = Date.now();
       stageRecorder = await bridgeCreateSnapshotRecorder(
-        adapterContext,
-        options.entryEndpoint || entry
+        bridgeMetadata,
+        typeof bridgeMetadata.entryEndpoint === 'string'
+          ? bridgeMetadata.entryEndpoint
+          : options.entryEndpoint || entry
       );
       logPipelineStage('convert.snapshot_recorder.completed', options.requestId, {
         entryEndpoint: options.entryEndpoint || entry,
@@ -399,10 +463,14 @@ export async function convertProviderResponseIfNeeded(
     const converted = await bridgeConvertProviderResponse({
       providerProtocol: bridgeProviderProtocol,
       providerResponse: bridgeProviderResponse,
-      context: adapterContext,
+      context: bridgeMetadata,
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
       stageRecorder
+    });
+    syncBridgeRuntimeBackToPipelineMetadata({
+      pipelineMetadata: options.pipelineMetadata,
+      bridgeMetadata
     });
     logPipelineStage('convert.bridge.completed', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,
