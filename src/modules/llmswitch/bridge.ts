@@ -21,10 +21,8 @@ export type {
 export {
   importCoreDist,
   requireCoreDist,
-  resolveImplForSubpath,
   resolveCoreModulePath,
-  type AnyRecord,
-  type LlmsImpl
+  type AnyRecord
 } from './bridge/module-loader.js';
 
 // Existing bridge exports.

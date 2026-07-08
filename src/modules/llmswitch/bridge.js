@@ -4,7 +4,7 @@
  * Single boundary module for llmswitch-core integration.
  */
 // Core module loading utilities.
-export { importCoreDist, requireCoreDist, resolveImplForSubpath, resolveCoreModulePath } from './bridge/module-loader.js';
+export { importCoreDist, requireCoreDist, resolveCoreModulePath } from './bridge/module-loader.js';
 // Existing bridge exports.
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests } from './bridge/snapshot-recorder.js';
 export { convertProviderResponse } from './bridge/response-converter.js';

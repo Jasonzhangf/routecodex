@@ -1350,7 +1350,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
-      - sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts
+      - src/modules/llmswitch/bridge/responses-conversation-store-host.ts
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
@@ -1365,6 +1365,7 @@ verification:
       - npm run build:base
     notes:
       - "Continuation save/restore and scope isolation must be keyed by entry protocol, continuationOwner, and conversation/session scope in Rust."
+      - "The old llmswitch-core `responses-conversation-store-native.ts` facade is forbidden; host IO must call native shared conversion semantics directly."
 
   - feature_id: hub.req_chatprocess.tool_governance
     change_risk: high

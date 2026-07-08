@@ -33,6 +33,33 @@ function resolveModuleDir(): string {
   return _moduleDir;
 }
 
+function buildNativeFailurePolicyBridge(mod: unknown): NativeFailurePolicyBridge | null {
+  const fn = (mod as { classifyProviderFailureJson?: unknown } | null)?.classifyProviderFailureJson;
+  if (typeof fn !== 'function') {
+    return null;
+  }
+  return {
+    classifyProviderFailure: (
+      statusCode: number | undefined,
+      errorCode: string | undefined,
+      upstreamCode: string | undefined,
+      isNetworkError: boolean
+    ) => {
+      const raw = (fn as (...args: unknown[]) => unknown)(
+        statusCode,
+        errorCode,
+        upstreamCode,
+        isNetworkError
+      );
+      const parsed = JSON.parse(String(raw)) as unknown;
+      if (parsed !== 'unrecoverable' && parsed !== 'recoverable') {
+        throw new Error('native classifyProviderFailureJson returned invalid classification');
+      }
+      return parsed;
+    }
+  };
+}
+
 export function loadNativeFailurePolicyBridge(): NativeFailurePolicyBridge | null {
   if (process.env.JEST_WORKER_ID !== undefined) {
     return null;
@@ -42,16 +69,16 @@ export function loadNativeFailurePolicyBridge(): NativeFailurePolicyBridge | nul
   }
   try {
     const nativeRequire = resolveNativeRequire();
-    const mod = nativeRequire('rcc-llmswitch-core');
-    if (mod && typeof mod.classifyProviderFailureJson === 'function') {
-      cachedNativeFailurePolicy = { classifyProviderFailure: mod.classifyProviderFailureJson };
+    const packageMod = buildNativeFailurePolicyBridge(nativeRequire('rcc-llmswitch-core'));
+    if (packageMod) {
+      cachedNativeFailurePolicy = packageMod;
       return cachedNativeFailurePolicy;
     }
     const nativePath = path.resolve(
       resolveModuleDir(),
-      '../../../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-failure-policy.js'
+      '../../../../sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node'
     );
-    cachedNativeFailurePolicy = nativeRequire(nativePath) as NativeFailurePolicyBridge;
+    cachedNativeFailurePolicy = buildNativeFailurePolicyBridge(nativeRequire(nativePath));
     return cachedNativeFailurePolicy;
   } catch {
     cachedNativeFailurePolicy = null;

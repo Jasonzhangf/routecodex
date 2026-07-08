@@ -21,9 +21,9 @@
       "import": "./dist/guidance/index.js",
       "types": "./dist/guidance/index.d.ts"
     },
-    "./v2/*": {
-      "import": "./dist/*.js",
-      "types": "./dist/*.d.ts"
+    "./v2/runtime/virtual-router-hit-log": {
+      "import": "./dist/runtime/virtual-router-hit-log.js",
+      "types": "./dist/runtime/virtual-router-hit-log.d.ts"
     },
     "./guidance": {
       "import": "./dist/guidance/index.js",

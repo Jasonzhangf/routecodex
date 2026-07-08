@@ -43,7 +43,7 @@ describe('Hub Pipeline request type topology contract', () => {
       'HubReqChatProcess03Governed',
       'HubReqOutbound05ProviderSemantic',
       'build_hub_req_chatprocess_03_from_hub_req_inbound_02',
-      'build_hub_req_outbound_05_from_hub_req_chatprocess_03',
+      'build_hub_req_outbound_05_from_vr_route_04_selected_target',
     ]) {
       expect(sources).toContain(token);
     }
@@ -97,7 +97,7 @@ describe('Hub Pipeline request type topology contract', () => {
     const registry = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs');
     const bindings = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
     const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
-    const tsBridge = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-vr-node-contracts.ts');
+    const tsBridge = read('src/modules/llmswitch/bridge/native-exports.ts');
     for (const token of [
       'describe_hub_pipeline_contracts',
       'describe_virtual_router_contracts',

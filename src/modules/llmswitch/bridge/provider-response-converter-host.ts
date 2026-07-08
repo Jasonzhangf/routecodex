@@ -86,14 +86,19 @@ type NativeSseRuntimeModule = {
   }) => { frames: string[] };
 };
 
-type ProviderResponseHelpersModule = {
-  resolveProviderResponseContextSignals?: (
-    context: AdapterContext,
-    entryEndpoint?: string
-  ) => { clientProtocol: 'openai-chat' | 'openai-responses' | 'anthropic-messages' };
-};
-
 type NativeRespSemanticsModule = {
+  resolveProviderResponseContextHelpersWithNative?: (input: {
+    context: AdapterContext;
+    legacyFollowupMarkerRaw?: unknown;
+    entryEndpoint?: string;
+    toolSurfaceModeRaw?: string;
+  }) => {
+    isServerToolFollowup?: boolean;
+    toolSurfaceShadowEnabled?: boolean;
+    clientProtocol: 'openai-chat' | 'openai-responses' | 'anthropic-messages';
+    displayModel?: string;
+    clientFacingRequestId: string;
+  };
   buildProviderSseStreamReadErrorDescriptorWithNative?: (input: {
     message: string;
     code?: string;
@@ -126,10 +131,6 @@ type MetadataCenterRuntimeControlWriterModule = {
   readContinuationContextFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
   readRequestTruthFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
   readRuntimeControlFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
-};
-
-type StageUtilsModule = {
-  recordStage?: (recorder: StageRecorder | undefined, stageId: string, payload: unknown) => void;
 };
 
 function requireModuleFn<TModule extends object, TFunction extends Function>(
@@ -192,10 +193,6 @@ const buildSseFramesFromJsonWithNative = requireCoreModuleFn<
   NativeSseRuntimeModule,
   NonNullable<NativeSseRuntimeModule['buildSseFramesFromJsonWithNative']>
 >('native/router-hotpath/native-sse-runtime', 'buildSseFramesFromJsonWithNative', 'native sse runtime');
-const resolveProviderResponseContextSignals = requireCoreModuleFn<
-  ProviderResponseHelpersModule,
-  NonNullable<ProviderResponseHelpersModule['resolveProviderResponseContextSignals']>
->('conversion/hub/response/provider-response-helpers', 'resolveProviderResponseContextSignals', 'provider response helpers');
 const buildProviderSseStreamReadErrorDescriptorWithNative = requireCoreModuleFn<
   NativeRespSemanticsModule,
   NonNullable<NativeRespSemanticsModule['buildProviderSseStreamReadErrorDescriptorWithNative']>
@@ -228,10 +225,10 @@ const readRuntimeControlFromBoundMetadataCenter = requireCoreModuleFn<
   MetadataCenterRuntimeControlWriterModule,
   NonNullable<MetadataCenterRuntimeControlWriterModule['readRuntimeControlFromBoundMetadataCenter']>
 >('conversion/hub/metadata-center-runtime-control-writer', 'readRuntimeControlFromBoundMetadataCenter', 'metadata writer');
-const recordStage = requireCoreModuleFn<
-  StageUtilsModule,
-  NonNullable<StageUtilsModule['recordStage']>
->('conversion/hub/pipeline/stages/utils', 'recordStage', 'stage utils');
+const resolveProviderResponseContextHelpersWithNative = requireCoreModuleFn<
+  NativeRespSemanticsModule,
+  NonNullable<NativeRespSemanticsModule['resolveProviderResponseContextHelpersWithNative']>
+>('native/router-hotpath/native-hub-pipeline-resp-semantics', 'resolveProviderResponseContextHelpersWithNative', 'native resp semantics');
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -239,6 +236,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function normalizeRecordPayload(payload: unknown): object {
+  if (isRecord(payload)) {
+    return payload;
+  }
+  if (typeof payload === 'string' && payload.trim()) {
+    try {
+      const parsed = JSON.parse(payload) as unknown;
+      if (isRecord(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function recordStage(recorder: StageRecorder | undefined, stageId: string, payload: unknown): void {
+  if (!recorder) {
+    return;
+  }
+  try {
+    recorder.record(stageId, normalizeRecordPayload(payload));
+  } catch (error) {
+    console.warn('[hub-pipeline] recordStage failed:', error instanceof Error ? error.message : String(error));
+  }
+}
+
+function resolveProviderResponseContextSignals(
+  context: AdapterContext,
+  entryEndpoint?: string
+): { clientProtocol: 'openai-chat' | 'openai-responses' | 'anthropic-messages' } {
+  const resolved = resolveProviderResponseContextHelpersWithNative({
+    context,
+    legacyFollowupMarkerRaw: null,
+    entryEndpoint,
+    toolSurfaceModeRaw: String(process.env.ROUTECODEX_HUB_TOOL_SURFACE_MODE || '')
+  });
+  if (!readString(resolved.clientFacingRequestId)) {
+    throw new Error('Rust provider response context helper returned no client-facing request id');
+  }
+  return { clientProtocol: resolved.clientProtocol };
 }
 
 function readString(value: unknown): string | undefined {

@@ -82,20 +82,52 @@ function getFailurePolicyModule() {
         return cachedFailurePolicyModule;
     }
     try {
-        cachedFailurePolicyModule = requireCoreDist('native/router-hotpath/native-failure-policy');
+        cachedFailurePolicyModule = buildFailurePolicyModuleFromRouterHotpathBinding(getRouterHotpathJsonBindingSync());
     }
     catch {
-        try {
-            cachedFailurePolicyModule = buildFailurePolicyModuleFromRouterHotpathBinding(getRouterHotpathJsonBindingSync());
-        }
-        catch {
-            cachedFailurePolicyModule = null;
-        }
+        cachedFailurePolicyModule = null;
     }
     if (!cachedFailurePolicyModule) {
         throw new Error('[llmswitch-bridge] native-failure-policy not available');
     }
     return cachedFailurePolicyModule;
+}
+function buildHubVrNodeContractsFromRouterHotpathBinding(binding) {
+    const required = [
+        'describeHubPipelineContractsJson',
+        'describeVirtualRouterContractsJson',
+        'describeMetaCarrierContractsJson',
+        'describePipelineContractJson',
+        'validatePipelineNodeContractBoundaryJson',
+    ];
+    if (!required.every((name) => typeof binding[name] === 'function')) {
+        return null;
+    }
+    const invoke = (capability, args = []) => {
+        const fn = binding[capability];
+        if (typeof fn !== 'function') {
+            throw new Error(`[llmswitch-bridge] ${capability} not available`);
+        }
+        const raw = fn(...args);
+        if (typeof raw !== 'string' || raw.length === 0) {
+            throw new Error(`[llmswitch-bridge] ${capability} returned empty result`);
+        }
+        const parsed = JSON.parse(raw);
+        return assertNativeObject(capability, parsed);
+    };
+    return {
+        describeHubPipelineContractsWithNative: () => invoke('describeHubPipelineContractsJson'),
+        describeVirtualRouterContractsWithNative: () => invoke('describeVirtualRouterContractsJson'),
+        describeMetaCarrierContractsWithNative: () => invoke('describeMetaCarrierContractsJson'),
+        describePipelineContractWithNative: (nodeId) => invoke('describePipelineContractJson', [String(nodeId || '')]),
+        describeServerContractsWithNative: () => invoke('describeServerContractsJson'),
+        describeServerModuleHelpWithNative: (moduleId) => invoke('describeServerModuleHelpJson', [String(moduleId || '')]),
+        validatePipelineNodeContractBoundaryWithNative: (nodeId, before, after) => invoke('validatePipelineNodeContractBoundaryJson', [
+            String(nodeId || ''),
+            JSON.stringify(before ?? null),
+            JSON.stringify(after ?? null),
+        ]),
+    };
 }
 function getHubVrNodeContracts() {
     if (cachedHubVrNodeContracts !== undefined) {
@@ -105,7 +137,7 @@ function getHubVrNodeContracts() {
         return cachedHubVrNodeContracts;
     }
     try {
-        cachedHubVrNodeContracts = requireCoreDist('native/router-hotpath/native-hub-vr-node-contracts');
+        cachedHubVrNodeContracts = buildHubVrNodeContractsFromRouterHotpathBinding(getRouterHotpathJsonBindingSync());
     }
     catch {
         cachedHubVrNodeContracts = null;
@@ -570,12 +602,18 @@ export function describeHubPipelineContractsNative() {
     }
     return fn();
 }
+export function describeHubPipelineContractsWithNative() {
+    return describeHubPipelineContractsNative();
+}
 export function describeVirtualRouterContractsNative() {
     const fn = getHubVrNodeContracts().describeVirtualRouterContractsWithNative;
     if (typeof fn !== 'function') {
         throw new Error('[llmswitch-bridge] describeVirtualRouterContractsWithNative not available');
     }
     return fn();
+}
+export function describeVirtualRouterContractsWithNative() {
+    return describeVirtualRouterContractsNative();
 }
 export function describeMetaCarrierContractsNative() {
     const fn = getHubVrNodeContracts().describeMetaCarrierContractsWithNative;
@@ -584,12 +622,32 @@ export function describeMetaCarrierContractsNative() {
     }
     return fn();
 }
+export function describeMetaCarrierContractsWithNative() {
+    return describeMetaCarrierContractsNative();
+}
 export function describePipelineContractNative(nodeId) {
     const fn = getHubVrNodeContracts().describePipelineContractWithNative;
     if (typeof fn !== 'function') {
         throw new Error('[llmswitch-bridge] describePipelineContractWithNative not available');
     }
     return fn(nodeId);
+}
+export function describePipelineContractWithNative(nodeId) {
+    return describePipelineContractNative(nodeId);
+}
+export function describeServerContractsWithNative() {
+    const fn = getHubVrNodeContracts().describeServerContractsWithNative;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] describeServerContractsWithNative not available');
+    }
+    return fn();
+}
+export function describeServerModuleHelpWithNative(moduleId) {
+    const fn = getHubVrNodeContracts().describeServerModuleHelpWithNative;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] describeServerModuleHelpWithNative not available');
+    }
+    return fn(moduleId);
 }
 export function validatePipelineNodeContractBoundaryNative(nodeId, before, after) {
     const fn = getHubVrNodeContracts().validatePipelineNodeContractBoundaryWithNative;

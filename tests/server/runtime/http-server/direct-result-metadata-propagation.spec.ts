@@ -2,28 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import { Readable } from 'node:stream';
 
 jest.unstable_mockModule(
-  '../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.js',
+  '../../../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js',
   () => {
     const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-      value && typeof value === 'object' && !Array.isArray(value)
-        ? value as Record<string, unknown>
-        : undefined;
+      value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
     const readString = (value: unknown): string | undefined =>
       typeof value === 'string' && value.trim() ? value.trim() : undefined;
-    const buildScopeKeys = (scope: Record<string, unknown>): string[] => {
-      const entryKind = readString(scope.entryKind) ?? 'responses';
-      const portScopeKey = readString(scope.portScopeKey);
-      const prefix = portScopeKey ? `${entryKind}:${portScopeKey}` : entryKind;
-      const keys: string[] = [];
-      const addScoped = (kind: string, value: unknown) => {
-        const text = readString(value);
-        if (!text) return;
-        keys.push(`${prefix}:${kind}:${text}`);
-      };
-      addScoped('session', scope.sessionId ?? scope.session_id);
-      addScoped('conversation', scope.conversationId ?? scope.conversation_id);
-      return [...new Set(keys)];
-    };
     const collectPendingToolCallIds = (input: Array<Record<string, unknown>>): string[] => {
       const ids: string[] = [];
       for (const item of input) {
@@ -34,264 +18,220 @@ jest.unstable_mockModule(
       }
       return ids;
     };
-    return ({
-    assertResponsesConversationStoreNativeAvailable: jest.fn(() => undefined),
-    pickPersistedFields: jest.fn((payload: Record<string, unknown>) => ({ ...payload })),
-    prepareConversationEntry: jest.fn((payload: Record<string, unknown>, context: Record<string, unknown>) => ({
-      basePayload: { ...payload },
-      input: Array.isArray(context.input) ? context.input : (Array.isArray(payload.input) ? payload.input : []),
-      tools: Array.isArray(payload.tools) ? payload.tools : undefined,
-    })),
-    convertOutputToInputItems: jest.fn((response: Record<string, unknown>) => {
-      const output = Array.isArray(response.output) ? response.output : [];
-      const items = output.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item));
-      const toolCalls = asRecord(asRecord(response.required_action)?.submit_tool_outputs)?.tool_calls;
-      if (Array.isArray(toolCalls)) {
-        for (const call of toolCalls) {
-          const record = asRecord(call);
-          if (!record) continue;
-          items.push({
-            type: 'function_call',
-            call_id: readString(record.call_id) ?? readString(record.id),
-            id: readString(record.id) ?? readString(record.call_id),
-            name: readString(record.name),
-            arguments: readString(record.arguments) ?? '{}',
-          });
-        }
+    const buildScopeKeys = (scope: Record<string, unknown>): string[] => {
+      const entryKind = readString(scope.entryKind) ?? 'responses';
+      const portScopeKey = readString(scope.portScopeKey);
+      const prefix = portScopeKey ? `${entryKind}:${portScopeKey}` : entryKind;
+      const keys: string[] = [];
+      for (const [kind, value] of [
+        ['session', scope.sessionId ?? scope.session_id],
+        ['conversation', scope.conversationId ?? scope.conversation_id],
+      ] as Array<[string, unknown]>) {
+        const text = readString(value);
+        if (text) keys.push(`${prefix}:${kind}:${text}`);
       }
-      return items;
-    }),
-    collectPendingToolCallIds: jest.fn(collectPendingToolCallIds),
-    restoreContinuationPayload: jest.fn((entry: any, payload: Record<string, unknown>) => ({
-      payload: {
-        ...payload,
-        previous_response_id: entry.lastResponseId,
-      },
-      meta: {
-        providerKey: entry.providerKey,
-      },
-    })),
-    materializeContinuationPayload: jest.fn((entry: any, payload: Record<string, unknown>) => ({
-      payload: {
-        ...payload,
-        previous_response_id: entry.lastResponseId,
-      },
-      meta: {
-        providerKey: entry.providerKey,
-      },
-    })),
-    resumeConversationPayload: jest.fn((entry: any, responseId: string, submitPayload: Record<string, unknown>) => ({
-      payload: {
-        ...entry.basePayload,
-        previous_response_id: responseId,
-        input: [
-          ...(Array.isArray(entry.input) ? entry.input : []),
-          ...(Array.isArray(submitPayload.tool_outputs) ? submitPayload.tool_outputs : []),
-        ],
-      },
-      meta: {
-        providerKey: entry.providerKey,
-      },
-    })),
-    stripStoredContextInputMedia: jest.fn((input: unknown) => ({
-      changed: false,
-      messages: Array.isArray(input) ? input : [],
-    })),
-    buildConversationScopePlan: jest.fn((input: unknown) => {
-      const record = asRecord(input) ?? {};
-      const scope = asRecord(record.scope) ?? asRecord(record.payload) ?? {};
-      const matchedPort = readString(scope.matchedPort);
-      const routingPolicyGroup = readString(scope.routingPolicyGroup);
-      const portScopeKey = readString(scope.portScopeKey)
-        ?? (matchedPort || routingPolicyGroup ? `${matchedPort ?? '*'}:${routingPolicyGroup ?? '*'}` : undefined);
-      return {
-        keys: buildScopeKeys({
-          ...scope,
-          ...(portScopeKey ? { portScopeKey } : {}),
-        }),
-        portScopeKey,
-      };
-    }),
-    planStoreTokens: jest.fn((input: unknown) => {
-      const record = asRecord(input) ?? {};
-      return {
-        providerKey: readString(record.providerKey) ?? readString(record.fallbackProviderKey),
-        sessionId: readString(record.sessionId),
-        conversationId: readString(record.conversationId),
-        entryKind: readString(record.entryKind) ?? 'responses',
-        continuationOwner: readString(record.continuationOwner) ?? readString(record.fallbackContinuationOwner),
-      };
-    }),
-    planPersistedEntry: jest.fn((input: any) => ({
-      action: input?.entry ? 'entry' : 'skip',
-      reason: input?.entry ? 'ok' : 'missing_entry',
-      entry: input?.entry,
-    })),
-    planPersistenceEligibility: jest.fn((entry: any) => ({
-      action: entry?.lastResponseId ? 'persist' : 'skip',
-      reason: entry?.lastResponseId ? 'has_response' : 'missing_response',
-      lastResponseId: entry?.lastResponseId,
-    })),
-    planConversationPreflight: jest.fn((input: any) => {
-      if (input?.mode === 'capture_request') {
-        const requestId = readString(input.requestId);
-        return requestId
-          ? { action: 'continue', reason: 'ok', requestId }
-          : { action: 'skip', reason: 'missing_request_id' };
-      }
-      if (input?.mode === 'record_response') {
-        const requestId = readString(input.requestId);
-        const responseId = readString(asRecord(input.response)?.id);
-        if (!requestId) return { action: 'throw', reason: 'missing_request_id', responseId };
-        if (!responseId) return { action: 'throw', reason: 'missing_response_id', requestId };
-        return { action: 'continue', reason: 'ok', requestId, responseId };
-      }
-      if (input?.mode === 'resume_conversation') {
-        const responseId = readString(input.responseId);
-        if (!responseId) return { action: 'throw', reason: 'missing_or_empty_response_id' };
-        if (!Array.isArray(asRecord(input.submitPayload)?.tool_outputs)) {
-          return { action: 'throw', reason: 'missing_tool_outputs', responseId };
-        }
-        return { action: 'continue', reason: 'ok', responseId };
-      }
-      return { action: 'continue', reason: 'ok' };
-    }),
-    planCapturedEntry: jest.fn((input: any) => ({
-      action: input?.requestId ? 'entry' : 'skip',
-      reason: input?.requestId ? 'ok' : 'missing_request_id',
-      entry: input?.requestId
-        ? {
-            requestId: input.requestId,
-            basePayload: { ...(asRecord(input.payload) ?? {}) },
-            input: Array.isArray(input.context?.input)
-              ? input.context.input
-              : Array.isArray(input.payload?.input)
-                ? input.payload.input
-                : [],
-            tools: Array.isArray(input.context?.toolsRaw)
-              ? input.context.toolsRaw
-              : Array.isArray(input.payload?.tools)
-                ? input.payload.tools
-                : undefined,
-            providerKey: readString(input.providerKey),
-            sessionId: readString(input.sessionId),
-            conversationId: readString(input.conversationId),
-            entryKind: readString(input.entryKind) ?? 'responses',
-            continuationOwner: 'relay',
-            scopeKeys: Array.isArray(input.scopeKeys) ? input.scopeKeys : [],
-            portScopeKey: readString(input.portScopeKey),
-            createdAt: typeof input.nowMs === 'number' ? input.nowMs : Date.now(),
-            updatedAt: typeof input.nowMs === 'number' ? input.nowMs : Date.now(),
+      return [...new Set(keys)];
+    };
+    return {
+      buildResponsesConversationScopePlanWithNative: jest.fn((input: any) => {
+        const record = asRecord(input) ?? {};
+        const scope = asRecord(record.scope) ?? asRecord(record.payload) ?? {};
+        const matchedPort = readString(scope.matchedPort);
+        const routingPolicyGroup = readString(scope.routingPolicyGroup);
+        const portScopeKey = readString(scope.portScopeKey)
+          ?? (matchedPort || routingPolicyGroup ? `${matchedPort ?? '*'}:${routingPolicyGroup ?? '*'}` : undefined);
+        return { keys: buildScopeKeys({ ...scope, ...(portScopeKey ? { portScopeKey } : {}) }), portScopeKey };
+      }),
+      collectResponsesPendingToolCallIdsWithNative: jest.fn(collectPendingToolCallIds),
+      convertResponsesOutputToInputItemsWithNative: jest.fn((response: any) => {
+        const output = Array.isArray(response?.output) ? response.output : [];
+        const items = output.filter((item: unknown): item is Record<string, unknown> => !!asRecord(item));
+        const toolCalls = asRecord(asRecord(response?.required_action)?.submit_tool_outputs)?.tool_calls;
+        if (Array.isArray(toolCalls)) {
+          for (const call of toolCalls) {
+            const record = asRecord(call);
+            if (!record) continue;
+            items.push({
+              type: 'function_call',
+              call_id: readString(record.call_id) ?? readString(record.id),
+              id: readString(record.id) ?? readString(record.call_id),
+              name: readString(record.name),
+              arguments: readString(record.arguments) ?? '{}',
+            });
           }
-        : undefined,
-    })),
-    planCapturePendingCleanup: jest.fn(() => ({
-      action: 'noop',
-      reason: 'ok',
-      detachRequestIds: [],
-    })),
-    planRecordScopeCleanup: jest.fn(() => ({
-      action: 'noop',
-      reason: 'ok',
-      detachRequestIds: [],
-    })),
-    planRecordContinuationFlag: jest.fn((input: any) => ({
-      allowContinuation: input?.allowContinuation === true || (Array.isArray(input?.pendingToolCallIds) && input.pendingToolCallIds.length > 0),
-      reason: 'ok',
-      pendingToolCallCount: Array.isArray(input?.pendingToolCallIds) ? input.pendingToolCallIds.length : 0,
-    })),
-    planRecordScopeEntryMatch: jest.fn((input: any) => {
-      const candidate = Array.isArray(input?.candidates) ? input.candidates[0] : undefined;
-      return candidate
-        ? { action: 'select', reason: 'ok', scopeKey: candidate.scopeKey, requestId: candidate.requestId }
-        : { action: 'none', reason: 'no_candidates' };
-    }),
-    planStoreSweep: jest.fn((input: any) => ({
-      action: 'noop',
-      reason: 'ok',
-      detachRequestIds: input?.mode === 'clear_unresolved'
-        ? (Array.isArray(input?.candidates)
-            ? input.candidates
-                .filter((candidate: any) => !readString(candidate?.lastResponseId))
-                .map((candidate: any) => readString(candidate?.requestId))
-                .filter(Boolean)
-            : [])
-        : [],
-    })),
-    planAttachEntryScopes: jest.fn((input: any) => ({
-      action: 'attach',
-      reason: 'ok',
-      scopeKeys: Array.isArray(input?.scopeKeys) ? input.scopeKeys : [],
-      detachRequestIds: [],
-    })),
-    planRebindRequestId: jest.fn((input: any) => (
-      input?.oldEntryExists && !input?.newEntryExists && readString(input?.oldId) && readString(input?.newId)
-        ? { action: 'rebind', reason: 'ok', oldId: input.oldId, newId: input.newId }
-        : { action: 'noop', reason: 'not_applicable' }
-    )),
-    planContinuationMeta: jest.fn((input: any) => ({
-      action: 'meta',
-      reason: 'ok',
-      meta: {
-        ...(asRecord(input?.meta) ?? {}),
-        ...(readString(input?.entry?.providerKey) ? { providerKey: input.entry.providerKey } : {}),
-      },
-    })),
-    planReleaseRequestPayload: jest.fn((entry: any) => ({
-      basePayload: { ...(asRecord(entry?.basePayload) ?? {}), input: [] },
-      releasedInputPrefix: Array.isArray(entry?.input) ? entry.input : [],
-      releasedPendingToolCallIds: collectPendingToolCallIds(Array.isArray(entry?.input) ? entry.input : []),
-      input: [],
-    })),
-    planScopeContinuationMatch: jest.fn((input: any) => {
-      const candidate = Array.isArray(input?.candidates) ? input.candidates[0] : undefined;
-      if (!candidate) return { action: 'none', reason: 'no_candidates' };
-      return {
-        action: input?.mode === 'materialize' ? 'materialize' : 'restore',
+        }
+        return items;
+      }),
+      materializeResponsesContinuationPayloadWithNative: jest.fn((entry: any, payload: Record<string, unknown>) => ({
+        payload: { ...payload, previous_response_id: entry.lastResponseId },
+        meta: { providerKey: entry.providerKey },
+      })),
+      restoreResponsesContinuationPayloadWithNative: jest.fn((entry: any, payload: Record<string, unknown>) => ({
+        payload: { ...payload, previous_response_id: entry.lastResponseId },
+        meta: { providerKey: entry.providerKey },
+      })),
+      resumeResponsesConversationPayloadWithNative: jest.fn((entry: any, responseId: string, submitPayload: Record<string, unknown>) => ({
+        payload: {
+          ...entry.basePayload,
+          previous_response_id: responseId,
+          input: [
+            ...(Array.isArray(entry.input) ? entry.input : []),
+            ...(Array.isArray(submitPayload.tool_outputs) ? submitPayload.tool_outputs : []),
+          ],
+        },
+        meta: { providerKey: entry.providerKey },
+      })),
+      planResponsesStoreTokensWithNative: jest.fn((input: any) => ({
+        providerKey: readString(input?.providerKey) ?? readString(input?.fallbackProviderKey),
+        sessionId: readString(input?.sessionId),
+        conversationId: readString(input?.conversationId),
+        entryKind: readString(input?.entryKind) ?? 'responses',
+        continuationOwner: readString(input?.continuationOwner) ?? readString(input?.fallbackContinuationOwner),
+      })),
+      planResponsesPersistedEntryWithNative: jest.fn((input: any) => ({
+        action: input?.entry ? 'entry' : 'skip',
+        reason: input?.entry ? 'ok' : 'missing_entry',
+        entry: input?.entry,
+      })),
+      planResponsesConversationPersistenceEligibilityWithNative: jest.fn((entry: any) => ({
+        action: entry?.lastResponseId ? 'persist' : 'skip',
+        reason: entry?.lastResponseId ? 'has_response' : 'missing_response',
+        lastResponseId: entry?.lastResponseId,
+      })),
+      planResponsesConversationPreflightWithNative: jest.fn((input: any) => {
+        if (input?.mode === 'capture_request') {
+          const requestId = readString(input.requestId);
+          return requestId ? { action: 'continue', reason: 'ok', requestId } : { action: 'skip', reason: 'missing_request_id' };
+        }
+        if (input?.mode === 'record_response') {
+          const requestId = readString(input.requestId);
+          const responseId = readString(asRecord(input.response)?.id);
+          if (!requestId) return { action: 'throw', reason: 'missing_request_id', responseId };
+          if (!responseId) return { action: 'throw', reason: 'missing_response_id', requestId };
+          return { action: 'continue', reason: 'ok', requestId, responseId };
+        }
+        if (input?.mode === 'resume_conversation') {
+          const responseId = readString(input.responseId);
+          if (!responseId) return { action: 'throw', reason: 'missing_or_empty_response_id' };
+          if (!Array.isArray(asRecord(input.submitPayload)?.tool_outputs)) return { action: 'throw', reason: 'missing_tool_outputs', responseId };
+          return { action: 'continue', reason: 'ok', responseId };
+        }
+        return { action: 'continue', reason: 'ok' };
+      }),
+      planResponsesCapturedEntryWithNative: jest.fn((input: any) => ({
+        action: input?.requestId ? 'entry' : 'skip',
+        reason: input?.requestId ? 'ok' : 'missing_request_id',
+        entry: input?.requestId
+          ? {
+              requestId: input.requestId,
+              basePayload: { ...(asRecord(input.payload) ?? {}) },
+              input: Array.isArray(input.context?.input)
+                ? input.context.input
+                : Array.isArray(input.payload?.input)
+                  ? input.payload.input
+                  : [],
+              tools: Array.isArray(input.context?.toolsRaw)
+                ? input.context.toolsRaw
+                : Array.isArray(input.payload?.tools)
+                  ? input.payload.tools
+                  : undefined,
+              providerKey: readString(input.providerKey),
+              sessionId: readString(input.sessionId),
+              conversationId: readString(input.conversationId),
+              entryKind: readString(input.entryKind) ?? 'responses',
+              continuationOwner: 'relay',
+              scopeKeys: Array.isArray(input.scopeKeys) ? input.scopeKeys : [],
+              portScopeKey: readString(input.portScopeKey),
+              createdAt: typeof input.nowMs === 'number' ? input.nowMs : Date.now(),
+              updatedAt: typeof input.nowMs === 'number' ? input.nowMs : Date.now(),
+            }
+          : undefined,
+      })),
+      planResponsesCapturePendingCleanupWithNative: jest.fn(() => ({ action: 'noop', reason: 'ok', detachRequestIds: [] })),
+      planResponsesRecordScopeCleanupWithNative: jest.fn(() => ({ action: 'noop', reason: 'ok', detachRequestIds: [] })),
+      planResponsesRecordContinuationFlagWithNative: jest.fn((input: any) => ({
+        allowContinuation: input?.allowContinuation === true || (Array.isArray(input?.pendingToolCallIds) && input.pendingToolCallIds.length > 0),
         reason: 'ok',
-        scopeKey: candidate.scopeKey,
-        requestId: candidate.requestId,
-        lastResponseId: candidate.lastResponseId,
-      };
-    }),
-    planResumeEntryMatch: jest.fn((input: any) => {
-      const candidate = Array.isArray(input?.candidates) ? input.candidates.find((item: any) => readString(item?.lastResponseId) === readString(input?.responseId)) ?? input.candidates[0] : undefined;
-      return candidate
-        ? {
-            action: 'select',
-            reason: 'ok',
-            source: candidate.source,
-            requestId: candidate.requestId,
-            lastResponseId: candidate.lastResponseId,
-            scopeKey: candidate.scopeKey,
-          }
-        : { action: 'none', reason: 'no_candidates' };
-    }),
-    planContinuationLookupByResponseId: jest.fn((input: any) => {
-      const entry = asRecord(input?.entry);
-      const responseId = readString(input?.responseId);
-      return entry && responseId
-        ? {
-            action: 'select',
-            reason: 'ok',
-            responseId,
-            providerKey: readString(entry.providerKey),
-            continuationOwner: readString(entry.continuationOwner),
-            entryKind: readString(entry.entryKind) ?? 'responses',
-            requestId: readString(entry.requestId),
-          }
-        : { action: 'none', reason: 'missing_entry' };
-    }),
-    planConversationRetention: jest.fn((entry: any, options: any) => {
-      if (!readString(entry?.lastResponseId)) {
-        return { action: 'clear', reason: 'missing_response' };
-      }
-      if (options?.keepForSubmitToolOutputs) {
-        return { action: 'noop', reason: 'keep_for_submit', lastResponseId: entry.lastResponseId };
-      }
-      return { action: 'release', reason: 'release', lastResponseId: entry.lastResponseId };
-    }),
-  });
+        pendingToolCallCount: Array.isArray(input?.pendingToolCallIds) ? input.pendingToolCallIds.length : 0,
+      })),
+      planResponsesRecordScopeEntryMatchWithNative: jest.fn((input: any) => {
+        const candidate = Array.isArray(input?.candidates) ? input.candidates[0] : undefined;
+        return candidate ? { action: 'select', reason: 'ok', scopeKey: candidate.scopeKey, requestId: candidate.requestId } : { action: 'none', reason: 'no_candidates' };
+      }),
+      planResponsesStoreSweepWithNative: jest.fn((input: any) => ({
+        action: 'noop',
+        reason: 'ok',
+        detachRequestIds: input?.mode === 'clear_unresolved'
+          ? (Array.isArray(input?.candidates)
+              ? input.candidates
+                  .filter((candidate: any) => !readString(candidate?.lastResponseId))
+                  .map((candidate: any) => readString(candidate?.requestId))
+                  .filter(Boolean)
+              : [])
+          : [],
+      })),
+      planResponsesAttachEntryScopesWithNative: jest.fn((input: any) => ({
+        action: 'attach',
+        reason: 'ok',
+        scopeKeys: Array.isArray(input?.scopeKeys) ? input.scopeKeys : [],
+        detachRequestIds: [],
+      })),
+      planResponsesRebindRequestIdWithNative: jest.fn((input: any) => (
+        input?.oldEntryExists && !input?.newEntryExists && readString(input?.oldId) && readString(input?.newId)
+          ? { action: 'rebind', reason: 'ok', oldId: input.oldId, newId: input.newId }
+          : { action: 'noop', reason: 'not_applicable' }
+      )),
+      planResponsesContinuationMetaWithNative: jest.fn((input: any) => ({
+        action: 'meta',
+        reason: 'ok',
+        meta: { ...(asRecord(input?.meta) ?? {}), ...(readString(input?.entry?.providerKey) ? { providerKey: input.entry.providerKey } : {}) },
+      })),
+      planResponsesReleaseRequestPayloadWithNative: jest.fn((entry: any) => ({
+        basePayload: { ...(asRecord(entry?.basePayload) ?? {}), input: [] },
+        releasedInputPrefix: Array.isArray(entry?.input) ? entry.input : [],
+        releasedPendingToolCallIds: collectPendingToolCallIds(Array.isArray(entry?.input) ? entry.input : []),
+        input: [],
+      })),
+      planResponsesScopeContinuationMatchWithNative: jest.fn((input: any) => {
+        const candidate = Array.isArray(input?.candidates) ? input.candidates[0] : undefined;
+        if (!candidate) return { action: 'none', reason: 'no_candidates' };
+        return {
+          action: input?.mode === 'materialize' ? 'materialize' : 'restore',
+          reason: 'ok',
+          scopeKey: candidate.scopeKey,
+          requestId: candidate.requestId,
+          lastResponseId: candidate.lastResponseId,
+        };
+      }),
+      planResponsesConversationResumeEntryMatchWithNative: jest.fn((input: any) => {
+        const candidate = Array.isArray(input?.candidates)
+          ? input.candidates.find((item: any) => readString(item?.lastResponseId) === readString(input?.responseId)) ?? input.candidates[0]
+          : undefined;
+        return candidate
+          ? { action: 'select', reason: 'ok', source: candidate.source, requestId: candidate.requestId, lastResponseId: candidate.lastResponseId, scopeKey: candidate.scopeKey }
+          : { action: 'none', reason: 'no_candidates' };
+      }),
+      planResponsesContinuationLookupByResponseIdWithNative: jest.fn((input: any) => {
+        const entry = asRecord(input?.entry);
+        const responseId = readString(input?.responseId);
+        return entry && responseId
+          ? {
+              action: 'select',
+              reason: 'ok',
+              responseId,
+              providerKey: readString(entry.providerKey),
+              continuationOwner: readString(entry.continuationOwner),
+              entryKind: readString(entry.entryKind) ?? 'responses',
+              requestId: readString(entry.requestId),
+            }
+          : { action: 'none', reason: 'missing_entry' };
+      }),
+      planResponsesConversationRetentionWithNative: jest.fn((entry: any, options: any) => {
+        if (!readString(entry?.lastResponseId)) return { action: 'clear', reason: 'missing_response' };
+        if (options?.keepForSubmitToolOutputs) return { action: 'noop', reason: 'keep_for_submit', lastResponseId: entry.lastResponseId };
+        return { action: 'release', reason: 'release', lastResponseId: entry.lastResponseId };
+      }),
+    };
   }
 );
 

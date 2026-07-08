@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { requireCoreDist } from './module-loader.js';
+import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 
 type AnyRecord = Record<string, unknown>;
 type ResponsesContinuationEntryKind = 'responses' | 'chat' | 'messages';
@@ -264,10 +264,107 @@ type ResponsesConversationStoreNativeModule = {
   };
 };
 
+function callNativeJson<T>(capability: string, ...args: unknown[]): T {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, (...jsonArgs: string[]) => string>;
+  const fn = binding[capability];
+  if (typeof fn !== 'function') {
+    throw new Error(`[responses-conversation-store-host] ${capability} not available`);
+  }
+  const raw = fn(...args.map((arg) => JSON.stringify(arg ?? null)));
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error(`[responses-conversation-store-host] ${capability} returned empty result`);
+  }
+  return JSON.parse(raw) as T;
+}
+
+function callNativeResumeJson<T>(
+  capability: string,
+  entry: unknown,
+  payload: unknown,
+  requestId?: string,
+  scopeKey?: string
+): T {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, (...jsonArgs: Array<string | undefined>) => string>;
+  const fn = binding[capability];
+  if (typeof fn !== 'function') {
+    throw new Error(`[responses-conversation-store-host] ${capability} not available`);
+  }
+  const raw = fn(JSON.stringify(entry ?? null), JSON.stringify(payload ?? null), requestId, scopeKey);
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error(`[responses-conversation-store-host] ${capability} returned empty result`);
+  }
+  return JSON.parse(raw) as T;
+}
+
+function callNativeResumeConversationJson<T>(
+  entry: unknown,
+  responseId: string,
+  submitPayload: unknown,
+  requestId?: string
+): T {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, (...jsonArgs: Array<string | undefined>) => string>;
+  const fn = binding.resumeResponsesConversationPayloadJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[responses-conversation-store-host] resumeResponsesConversationPayloadJson not available');
+  }
+  const raw = fn(JSON.stringify(entry ?? null), String(responseId ?? ''), JSON.stringify(submitPayload ?? null), requestId);
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error('[responses-conversation-store-host] resumeResponsesConversationPayloadJson returned empty result');
+  }
+  return JSON.parse(raw) as T;
+}
+
 function getResponsesConversationStoreNative(): ResponsesConversationStoreNativeModule {
-  return requireCoreDist<ResponsesConversationStoreNativeModule>(
-    'conversion/shared/responses-conversation-store-native'
-  );
+  return {
+    assertResponsesConversationStoreNativeAvailable: () => {
+      for (const name of [
+        'buildResponsesConversationScopePlanJson',
+        'collectResponsesPendingToolCallIdsJson',
+        'convertResponsesOutputToInputItemsJson',
+        'materializeResponsesContinuationPayloadJson',
+        'restoreResponsesContinuationPayloadJson',
+        'resumeResponsesConversationPayloadJson',
+        'planResponsesConversationPreflightJson',
+        'planResponsesCapturedEntryJson',
+        'planResponsesContinuationLookupByResponseIdJson',
+        'planResponsesContinuationMetaJson',
+        'planResponsesConversationRetentionJson',
+        'planResponsesStoreTokensJson',
+        'planResponsesScopeContinuationMatchJson',
+      ]) {
+        if (typeof (getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>)[name] !== 'function') {
+          throw new Error(`[responses-conversation-store-host] ${name} not available`);
+        }
+      }
+    },
+    buildConversationScopePlan: (input) => callNativeJson('buildResponsesConversationScopePlanJson', input),
+    collectPendingToolCallIds: (input) => callNativeJson('collectResponsesPendingToolCallIdsJson', input),
+    convertOutputToInputItems: (response) => callNativeJson('convertResponsesOutputToInputItemsJson', response),
+    materializeContinuationPayload: (entry, payload, requestId, scopeKey) =>
+      callNativeResumeJson('materializeResponsesContinuationPayloadJson', entry, payload, requestId, scopeKey),
+    restoreContinuationPayload: (entry, payload, requestId, scopeKey) =>
+      callNativeResumeJson('restoreResponsesContinuationPayloadJson', entry, payload, requestId, scopeKey),
+    resumeConversationPayload: (entry, responseId, submitPayload, requestId) =>
+      callNativeResumeConversationJson(entry, responseId, submitPayload, requestId),
+    planAttachEntryScopes: (input) => callNativeJson('planResponsesAttachEntryScopesJson', input),
+    planCapturePendingCleanup: (input) => callNativeJson('planResponsesCapturePendingCleanupJson', input),
+    planCapturedEntry: (input) => callNativeJson('planResponsesCapturedEntryJson', input),
+    planConversationPreflight: (input) => callNativeJson('planResponsesConversationPreflightJson', input),
+    planContinuationLookupByResponseId: (input) => callNativeJson('planResponsesContinuationLookupByResponseIdJson', input),
+    planContinuationMeta: (input) => callNativeJson('planResponsesContinuationMetaJson', input),
+    planConversationRetention: (entry, options) => callNativeJson('planResponsesConversationRetentionJson', entry, options),
+    planPersistedEntry: (input) => callNativeJson('planResponsesPersistedEntryJson', input),
+    planPersistenceEligibility: (entry, options) => callNativeJson('planResponsesConversationPersistenceEligibilityJson', entry, options),
+    planRebindRequestId: (input) => callNativeJson('planResponsesRebindRequestIdJson', input),
+    planReleaseRequestPayload: (entry) => callNativeJson('planResponsesReleaseRequestPayloadJson', entry),
+    planRecordScopeCleanup: (input) => callNativeJson('planResponsesRecordScopeCleanupJson', input),
+    planRecordContinuationFlag: (input) => callNativeJson('planResponsesRecordContinuationFlagJson', input),
+    planRecordScopeEntryMatch: (input) => callNativeJson('planResponsesRecordScopeEntryMatchJson', input),
+    planResumeEntryMatch: (input) => callNativeJson('planResponsesConversationResumeEntryMatchJson', input),
+    planStoreSweep: (input) => callNativeJson('planResponsesStoreSweepJson', input),
+    planStoreTokens: (input) => callNativeJson('planResponsesStoreTokensJson', input),
+    planScopeContinuationMatch: (input) => callNativeJson('planResponsesScopeContinuationMatchJson', input),
+  };
 }
 
 function requireResponsesStoreNativeFn<TFunction extends Function>(

@@ -5,16 +5,10 @@
  */
 
 export {
-  parsePrefixList,
-  matchesPrefix,
-  isEngineEnabled,
-  getEnginePrefixes,
-  resolveImplForSubpath,
   resolveCoreModulePath,
   importCoreDist,
   requireCoreDist,
-  type AnyRecord,
-  type LlmsImpl
+  type AnyRecord
 } from './module-loader.js';
 
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests, type SnapshotRecorder } from './snapshot-recorder.js';

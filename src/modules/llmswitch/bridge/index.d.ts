@@ -3,7 +3,7 @@
  *
  * Re-exports from bridge submodules.
  */
-export { parsePrefixList, matchesPrefix, isEngineEnabled, getEnginePrefixes, resolveImplForSubpath, resolveCoreModulePath, importCoreDist, requireCoreDist, type AnyRecord, type LlmsImpl } from './module-loader.js';
+export { resolveCoreModulePath, importCoreDist, requireCoreDist, type AnyRecord } from './module-loader.js';
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests, type SnapshotRecorder } from './snapshot-recorder.js';
 export { convertProviderResponse } from './response-converter.js';
 export { finalizeResponsesHandlerPayloadForHttp, prepareResponsesHandlerEntryForHttp, buildResponsesScopeContinuationExpiredErrorForHttp, buildResponsesResumeClientErrorForHttp, shouldProjectResponsesResumeClientErrorForHttp, captureResponsesRequestContextForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, recordResponsesResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp } from './responses-request-bridge.js';

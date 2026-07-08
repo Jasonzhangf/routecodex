@@ -23,7 +23,6 @@ const ensureRuntimeMetadata = requireCoreModuleFn('conversion/runtime-metadata',
 const planChatProcessSessionUsage = requireCoreModuleFn('native/router-hotpath/native-virtual-router-routing-state', 'planChatProcessSessionUsage', 'native routing state');
 const buildReadableFromSseFrames = requireCoreModuleFn('native/router-hotpath/native-sse-runtime', 'buildReadableFromSseFrames', 'native sse runtime');
 const buildSseFramesFromJsonWithNative = requireCoreModuleFn('native/router-hotpath/native-sse-runtime', 'buildSseFramesFromJsonWithNative', 'native sse runtime');
-const resolveProviderResponseContextSignals = requireCoreModuleFn('conversion/hub/response/provider-response-helpers', 'resolveProviderResponseContextSignals', 'provider response helpers');
 const buildProviderSseStreamReadErrorDescriptorWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-resp-semantics', 'buildProviderSseStreamReadErrorDescriptorWithNative', 'native resp semantics');
 const materializeProviderResponseSsePayloadWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-resp-semantics', 'materializeProviderResponseSsePayloadWithNative', 'native resp semantics');
 const applyNativeRuntimeControlWritePlan = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'applyNativeRuntimeControlWritePlan', 'metadata writer');
@@ -32,12 +31,52 @@ const readBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-cen
 const readContinuationContextFromBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readContinuationContextFromBoundMetadataCenter', 'metadata writer');
 const readRequestTruthFromBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readRequestTruthFromBoundMetadataCenter', 'metadata writer');
 const readRuntimeControlFromBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readRuntimeControlFromBoundMetadataCenter', 'metadata writer');
-const recordStage = requireCoreModuleFn('conversion/hub/pipeline/stages/utils', 'recordStage', 'stage utils');
+const resolveProviderResponseContextHelpersWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-resp-semantics', 'resolveProviderResponseContextHelpersWithNative', 'native resp semantics');
 function isRecord(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 function asRecord(value) {
     return isRecord(value) ? value : undefined;
+}
+function normalizeRecordPayload(payload) {
+    if (isRecord(payload)) {
+        return payload;
+    }
+    if (typeof payload === 'string' && payload.trim()) {
+        try {
+            const parsed = JSON.parse(payload);
+            if (isRecord(parsed)) {
+                return parsed;
+            }
+        }
+        catch {
+            return {};
+        }
+    }
+    return {};
+}
+function recordStage(recorder, stageId, payload) {
+    if (!recorder) {
+        return;
+    }
+    try {
+        recorder.record(stageId, normalizeRecordPayload(payload));
+    }
+    catch (error) {
+        console.warn('[hub-pipeline] recordStage failed:', error instanceof Error ? error.message : String(error));
+    }
+}
+function resolveProviderResponseContextSignals(context, entryEndpoint) {
+    const resolved = resolveProviderResponseContextHelpersWithNative({
+        context,
+        legacyFollowupMarkerRaw: null,
+        entryEndpoint,
+        toolSurfaceModeRaw: String(process.env.ROUTECODEX_HUB_TOOL_SURFACE_MODE || '')
+    });
+    if (!readString(resolved.clientFacingRequestId)) {
+        throw new Error('Rust provider response context helper returned no client-facing request id');
+    }
+    return { clientProtocol: resolved.clientProtocol };
 }
 function readString(value) {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;

@@ -56,7 +56,7 @@ describe('Server module help contract (Phase Server-A)', () => {
   });
 
   it('TS wrappers expose describeServerContractsWithNative and describeServerModuleHelpWithNative', () => {
-    const ts = readSrc('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-vr-node-contracts.ts');
+    const ts = readSrc('src/modules/llmswitch/bridge/native-exports.ts');
     expect(ts).toContain('describeServerContractsWithNative');
     expect(ts).toContain('describeServerModuleHelpWithNative');
   });

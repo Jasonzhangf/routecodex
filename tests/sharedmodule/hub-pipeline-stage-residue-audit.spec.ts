@@ -680,23 +680,30 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('provider response helper must not retain TS mapper canonicalization residue', () => {
-    const filePath = path.join(
-      process.cwd(),
+  it('provider response helper shell must stay deleted after host bridge direct native wiring', () => {
+    const repoRoot = process.cwd();
+    const retiredHelperPath = path.join(
+      repoRoot,
       'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
+      'utf8'
+    );
     const findings = collectMatches(source, [
       { label: 'ts-client-facing-request-id-fallback', pattern: /:\s*context\.requestId\b/ },
-      { label: 'ts-client-protocol-openai-chat-default', pattern: /:\s*['"]openai-chat['"]/ },
+      { label: 'ts-client-protocol-openai-chat-default', pattern: /(?:return\s*\{\s*clientProtocol\s*:\s*['"]openai-chat['"]|clientProtocol\s*=\s*['"]openai-chat['"]|clientProtocol\s*:\s*['"]openai-chat['"]\s*[,}])/ },
       { label: 'ts-client-protocol-branching-default', pattern: /resolved\.clientProtocol\s*===/ },
       { label: 'ts-display-model-trim-defaulting', pattern: /resolved\.displayModel\.trim\(\)/ },
       { label: 'exports zero-consumer client protocol type', pattern: /export\s+type\s+ClientProtocol\b/ },
       { label: 'exports zero-consumer context signals interface', pattern: /export\s+interface\s+ProviderResponseContextSignals\b/ },
     ]);
 
+    expect(fs.existsSync(retiredHelperPath)).toBe(false);
     expect(source).toContain('resolveProviderResponseContextSignals');
     expect(source).toContain('resolveProviderResponseContextHelpersWithNative');
+    expect(source).toContain("'native/router-hotpath/native-hub-pipeline-resp-semantics'");
+    expect(source).not.toContain('conversion/hub/response/provider-response-helpers');
     expect(findings).toEqual([]);
     expect(source).not.toContain('maybeCommitClockReservationFromContext');
     expect(source).not.toContain('ClockReservation');
@@ -1445,7 +1452,7 @@ describe('hub pipeline stage residue audit', () => {
       .map((fullPath) => path.relative(stageRoot, fullPath).split(path.sep).join('/'))
       .sort();
 
-    expect(files).toEqual(['utils.ts']);
+    expect(files).toEqual([]);
   });
 
   it('legacy hub feature runtime switch must be physically removed', () => {
@@ -4707,18 +4714,25 @@ describe('hub pipeline stage residue audit', () => {
 
   it('responses conversation continuation input source selection must be native-owned', () => {
     const repoRoot = process.cwd();
-    const nativeStoreSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts'),
+    const retiredNativeStorePath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts',
+    );
+    const hostStoreSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.ts'),
       'utf8'
     );
 
-    expect(nativeStoreSource).toContain('restoreResponsesContinuationPayloadWithNative');
-    expect(nativeStoreSource).toContain('materializeResponsesContinuationPayloadWithNative');
-    const restoreBlock = nativeStoreSource.match(
-      /export function restoreContinuationPayload\([\s\S]*?export function materializeContinuationPayload/u
+    expect(fs.existsSync(retiredNativeStorePath)).toBe(false);
+    expect(hostStoreSource).toContain('getRouterHotpathJsonBindingSync');
+    expect(hostStoreSource).toContain('restoreResponsesContinuationPayloadJson');
+    expect(hostStoreSource).toContain('materializeResponsesContinuationPayloadJson');
+    expect(hostStoreSource).not.toContain('conversion/shared/responses-conversation-store-native');
+    const restoreBlock = hostStoreSource.match(
+      /function restoreContinuationPayload\([\s\S]*?function materializeContinuationPayload/u
     )?.[0] ?? '';
-    const materializeBlock = nativeStoreSource.match(
-      /export function materializeContinuationPayload\([\s\S]*?export function stripStoredContextInputMedia/u
+    const materializeBlock = hostStoreSource.match(
+      /function materializeContinuationPayload\([\s\S]*?function stripStoredContextInputMedia/u
     )?.[0] ?? '';
 
     for (const block of [restoreBlock, materializeBlock]) {

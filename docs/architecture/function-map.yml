@@ -2098,10 +2098,11 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/context_helpers.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
     forbidden_paths:
       - src/providers
       - src/server
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts
     required_tests:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
@@ -2110,7 +2111,7 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - "TS `provider-response-helpers.ts` is native invocation and field-name mapping only; clientProtocol defaulting, request id fallback, display model trimming, followup parsing, and tool surface mode parsing belong to Rust/native parser."
+      - "The retired TS `provider-response-helpers.ts` shell must stay deleted; `provider-response-converter-host.ts` may call `resolveProviderResponseContextHelpersWithNative` directly, while clientProtocol defaulting, request id fallback, display model trimming, followup parsing, and tool surface mode parsing belong to Rust/native parser."
 
   - feature_id: hub.req_inbound_responses_context_capture
     status: active
@@ -4404,9 +4405,9 @@ owners:
       - stage_a_conversion_responses_store_owner_boundary
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
-      - sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts
-    forbidden_paths:
       - src/modules/llmswitch/bridge/responses-conversation-store-host.ts
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - tests/sharedmodule/responses-continuation-store.spec.ts
@@ -4418,6 +4419,7 @@ owners:
     migration_target: rust
     notes:
       - "Continuation scope isolation (entry_protocol + continuationOwner + conversation_scope) must be in Rust per ARCH-CNV-5."
+      - "The retired llmswitch-core TS native-store shell must stay physically deleted; host bridge may only perform store IO and call native-shared conversion semantics directly."
 
   - feature_id: hub.req_chatprocess.tool_governance
     status: active

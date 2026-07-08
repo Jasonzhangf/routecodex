@@ -1,3 +1,11 @@
+# 2026-07-09: llmswitch TS shell reference closeout continuation
+
+- Change: deleted `responses-conversation-store-native.ts` and rewired `responses-conversation-store-host.ts/js` to call direct `getRouterHotpathJsonBindingSync()` JSON capabilities for responses store plans/resume/materialize.
+- Change: deleted `native-hub-vr-node-contracts.ts`; red/live contract tests now import `src/modules/llmswitch/bridge/native-exports.js`, and `native-exports.ts/js` exposes the former contract-help/server-help functions from direct native binding wrappers.
+- Gate update: added package script `verify:llmswitch-ts-shell-reference-audit`; function/verification maps now mark the deleted responses store facade as forbidden and host store as IO bridge.
+- Verification so far: focused residue/direct-result Jest PASS 207/207; contract/help Jest PASS 221/221; root `tsc` PASS; strict TS shell reference audit PASS (`prodTsShellCount=97`, `coreModuleSubpathRefs=35`); rustification audit PASS (`prodTsFileCount=97`, `nonNativeFileCount=0`).
+- Boundary: full objective still active; remaining host bridge subpath refs include snapshot/runtime/routing/native-shared/native-resp/SSE paths from the strict audit.
+
 # 2026-07-08: servertool default registry/noop bridge removal
 
 - Requirement: stopmessage already goes CLI, web_search and vision_auto are moving CLI, and all other server-side tools are unwanted. Remove server-side dead business if CLI does not need this layer.
