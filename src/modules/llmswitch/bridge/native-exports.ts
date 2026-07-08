@@ -10,7 +10,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { resolveCorePackageDir } from '../core-loader.js';
-import { importCoreDist, requireCoreDist, type AnyRecord } from './module-loader.js';
+import type { AnyRecord } from './module-loader.js';
 import type { ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
 
 type NativeFailureClassification = unknown;
@@ -34,35 +34,6 @@ type NativeFailurePolicyModule = {
     reason: string;
   };
   getNetworkErrorCodes?: () => string[];
-};
-
-type NativeSharedConversionSemantics = {
-  mapChatToolsToBridgeWithNative?: (rawTools: unknown) => Array<Record<string, unknown>>;
-  injectMcpToolsForChatWithNative?: (tools: unknown[] | undefined, discoveredServers: string[]) => unknown[];
-  injectMcpToolsForResponsesWithNative?: (tools: unknown[] | undefined, discoveredServers: string[]) => unknown[];
-  normalizeAssistantTextToToolCallsWithNative?: (
-    message: Record<string, unknown>,
-    options?: Record<string, unknown>
-  ) => Record<string, unknown>;
-  captureReqInboundResponsesContextSnapshotWithNative?: (input: {
-    rawRequest: Record<string, unknown>;
-    requestId?: string;
-    toolCallIdStyle?: unknown;
-  }) => Record<string, unknown>;
-  planResponsesHandlerEntryWithNative?: (
-    payload: unknown,
-    entryEndpoint?: string,
-    responseIdFromPath?: string
-  ) => { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: Record<string, unknown> };
-  materializeProviderOwnedSubmitContextWithNative?: (
-    payload: unknown
-  ) => { payload: Record<string, unknown>; context: { input: unknown[] } } | null;
-  planResponsesRequestContextWithNative?: (input: unknown) => Record<string, unknown>;
-  planResponsesContinuationRequestActionWithNative?: (input: unknown) => Record<string, unknown>;
-  stripResponsesStoredContextInputMediaWithNative?: (
-    inputEntries: unknown,
-    placeholderText?: string
-  ) => { changed: boolean; messages: unknown[] };
 };
 
 type NativeChatProcessNodeResultSemantics = {
@@ -130,35 +101,6 @@ function readServertoolCliRouteHintFromRequestValue(value: unknown): string | un
   return parseServertoolCliRouteHintCandidate(record);
 }
 
-type NativeHubPipelineRespSemantics = {
-  buildAnthropicResponseFromChatWithNative?: (
-    chatResponse: unknown,
-    aliasMap?: Record<string, string>
-  ) => Record<string, unknown>;
-};
-
-type NativeHubBridgePolicySemantics = {
-  sanitizeProviderOutboundPayloadWithNative?: (input: {
-    protocol?: string;
-    compatibilityProfile?: string;
-    payload: Record<string, unknown>;
-  }) => Record<string, unknown>;
-  hasDeclaredApplyPatchToolWithNative?: (
-    payload: unknown
-  ) => boolean;
-  evaluateResponsesDirectRouteDecisionWithNative?: (input: {
-    payload: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-    inboundProtocol: string;
-    applyPatchMode?: string;
-  }) => {
-    providerWireValid: boolean;
-    requiresHubRelay: boolean;
-    reason?: string;
-    hasDeclaredApplyPatchTool?: boolean;
-  };
-};
-
 type NativeRouterHotpathJsonBinding = {
   // -- req_executor_pipeline_attempt batch #1 --
   normalizeExplicitRoutePoolJson?: (inputJson: string) => string;
@@ -168,6 +110,29 @@ type NativeRouterHotpathJsonBinding = {
   resolveEntryProtocolFromEndpointJson?: (entryEndpoint: string) => string;
   captureReqInboundResponsesContextSnapshotJson?: (inputJson: string) => string;
   planResponsesRequestContextJson?: (inputJson: string) => string;
+  planResponsesHandlerEntryJson?: (
+    payloadJson: string,
+    entryEndpoint?: string,
+    responseIdFromPath?: string
+  ) => string;
+  materializeProviderOwnedSubmitContextJson?: (payloadJson: string) => string;
+  planResponsesContinuationRequestActionJson?: (inputJson: string) => string;
+  stripResponsesStoredContextInputMediaJson?: (
+    inputEntriesJson: string,
+    placeholderText: string
+  ) => string;
+  mapChatToolsToBridgeJson?: (toolsJson: string) => string;
+  injectMcpToolsForChatJson?: (toolsJson: string, discoveredServersJson: string) => string;
+  injectMcpToolsForResponsesJson?: (toolsJson: string, discoveredServersJson: string) => string;
+  normalizeAssistantTextToToolCallsJson?: (
+    messageJson: string,
+    optionsJson?: string
+  ) => string;
+  buildAnthropicResponseFromChatJson?: (
+    chatResponseJson: string,
+    aliasMapJson: string
+  ) => string;
+  sanitizeProviderOutboundPayloadJson?: (inputJson: string) => string;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -288,16 +253,9 @@ type NativeHubVrNodeContracts = {
   ) => AnyRecord;
 };
 
-let cachedSharedSemantics: NativeSharedConversionSemantics | null | undefined;
-let cachedSharedSemanticsSync: NativeSharedConversionSemantics | null | undefined;
-let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
-let cachedHubBridgePolicySemantics: NativeHubBridgePolicySemantics | null | undefined;
-let cachedHubBridgePolicySemanticsSync: NativeHubBridgePolicySemantics | null | undefined;
 let cachedRouterHotpathJsonBindingSync: NativeRouterHotpathJsonBinding | null | undefined;
 let cachedHubVrNodeContracts: NativeHubVrNodeContracts | null | undefined;
-let sharedBindingsChecked: boolean | undefined;
-let respBindingsChecked: boolean | undefined;
 
 function buildFailurePolicyModuleFromRouterHotpathBinding(
   binding: NativeRouterHotpathJsonBinding
@@ -425,160 +383,6 @@ function getHubVrNodeContracts(): NativeHubVrNodeContracts {
   return cachedHubVrNodeContracts;
 }
 
-async function assertSharedBindings(): Promise<void> {
-  if (sharedBindingsChecked) {
-    return;
-  }
-  const shared = await getSharedConversionSemantics();
-  const missing: string[] = [];
-  if (typeof shared.mapChatToolsToBridgeWithNative !== 'function') {
-    missing.push('mapChatToolsToBridgeJson');
-  }
-  if (typeof shared.injectMcpToolsForChatWithNative !== 'function') {
-    missing.push('injectMcpToolsForChatJson');
-  }
-  if (typeof shared.injectMcpToolsForResponsesWithNative !== 'function') {
-    missing.push('injectMcpToolsForResponsesJson');
-  }
-  if (typeof shared.normalizeAssistantTextToToolCallsWithNative !== 'function') {
-    missing.push('normalizeAssistantTextToToolCallsJson');
-  }
-  if (typeof shared.captureReqInboundResponsesContextSnapshotWithNative !== 'function') {
-    missing.push('captureReqInboundResponsesContextSnapshotJson');
-  }
-  if (typeof shared.planResponsesHandlerEntryWithNative !== 'function') {
-    missing.push('planResponsesHandlerEntryJson');
-  }
-  if (typeof shared.materializeProviderOwnedSubmitContextWithNative !== 'function') {
-    missing.push('materializeProviderOwnedSubmitContextJson');
-  }
-  if (typeof shared.planResponsesRequestContextWithNative !== 'function') {
-    missing.push('planResponsesRequestContextJson');
-  }
-  if (typeof shared.planResponsesContinuationRequestActionWithNative !== 'function') {
-    missing.push('planResponsesContinuationRequestActionJson');
-  }
-  if (missing.length > 0) {
-    throw new Error(`[llmswitch-bridge] native shared bindings missing: ${missing.join(', ')}`);
-  }
-  sharedBindingsChecked = true;
-}
-
-async function assertRespBindings(): Promise<void> {
-  if (respBindingsChecked) {
-    return;
-  }
-  const resp = await getRespSemantics();
-  const missing: string[] = [];
-  if (typeof resp.buildAnthropicResponseFromChatWithNative !== 'function') {
-    missing.push('buildAnthropicResponseFromChatJson');
-  }
-  if (missing.length > 0) {
-    throw new Error(`[llmswitch-bridge] native resp bindings missing: ${missing.join(', ')}`);
-  }
-  respBindingsChecked = true;
-}
-
-async function getSharedConversionSemantics(): Promise<NativeSharedConversionSemantics> {
-  if (cachedSharedSemantics !== undefined) {
-    if (!cachedSharedSemantics) {
-      throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
-    }
-    return cachedSharedSemantics;
-  }
-  try {
-    cachedSharedSemantics = await importCoreDist<NativeSharedConversionSemantics>(
-      'native/router-hotpath/native-shared-conversion-semantics'
-    );
-  } catch {
-    cachedSharedSemantics = null;
-  }
-  if (!cachedSharedSemantics) {
-    throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
-  }
-  return cachedSharedSemantics;
-}
-
-function getSharedConversionSemanticsSync(): NativeSharedConversionSemantics {
-  if (cachedSharedSemanticsSync !== undefined) {
-    if (!cachedSharedSemanticsSync) {
-      throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
-    }
-    return cachedSharedSemanticsSync;
-  }
-  try {
-    cachedSharedSemanticsSync = requireCoreDist<NativeSharedConversionSemantics>(
-      'native/router-hotpath/native-shared-conversion-semantics'
-    );
-  } catch {
-    cachedSharedSemanticsSync = null;
-  }
-  if (!cachedSharedSemanticsSync) {
-    throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
-  }
-  return cachedSharedSemanticsSync;
-}
-
-async function getRespSemantics(): Promise<NativeHubPipelineRespSemantics> {
-  if (cachedRespSemantics !== undefined) {
-    if (!cachedRespSemantics) {
-      throw new Error('[llmswitch-bridge] native-hub-pipeline-resp-semantics not available');
-    }
-    return cachedRespSemantics;
-  }
-  try {
-    cachedRespSemantics = await importCoreDist<NativeHubPipelineRespSemantics>(
-      'native/router-hotpath/native-hub-pipeline-resp-semantics'
-    );
-  } catch {
-    cachedRespSemantics = null;
-  }
-  if (!cachedRespSemantics) {
-    throw new Error('[llmswitch-bridge] native-hub-pipeline-resp-semantics not available');
-  }
-  return cachedRespSemantics;
-}
-
-async function getHubBridgePolicySemantics(): Promise<NativeHubBridgePolicySemantics> {
-  if (cachedHubBridgePolicySemantics !== undefined) {
-    if (!cachedHubBridgePolicySemantics) {
-      throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
-    }
-    return cachedHubBridgePolicySemantics;
-  }
-  try {
-    cachedHubBridgePolicySemantics = await importCoreDist<NativeHubBridgePolicySemantics>(
-      'native/router-hotpath/native-hub-bridge-policy-semantics'
-    );
-  } catch {
-    cachedHubBridgePolicySemantics = null;
-  }
-  if (!cachedHubBridgePolicySemantics) {
-    throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
-  }
-  return cachedHubBridgePolicySemantics;
-}
-
-function getHubBridgePolicySemanticsSync(): NativeHubBridgePolicySemantics {
-  if (cachedHubBridgePolicySemanticsSync !== undefined) {
-    if (!cachedHubBridgePolicySemanticsSync) {
-      throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
-    }
-    return cachedHubBridgePolicySemanticsSync;
-  }
-  try {
-    cachedHubBridgePolicySemanticsSync = requireCoreDist<NativeHubBridgePolicySemantics>(
-      'native/router-hotpath/native-hub-bridge-policy-semantics'
-    );
-  } catch {
-    cachedHubBridgePolicySemanticsSync = null;
-  }
-  if (!cachedHubBridgePolicySemanticsSync) {
-    throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
-  }
-  return cachedHubBridgePolicySemanticsSync;
-}
-
 export function getRouterHotpathJsonBindingSync(): NativeRouterHotpathJsonBinding {
   if (cachedRouterHotpathJsonBindingSync !== undefined) {
     if (!cachedRouterHotpathJsonBindingSync) {
@@ -650,6 +454,30 @@ function invokeRouterHotpathJsonCapability(capability: string, args: unknown[]):
   }
 }
 
+function invokeRouterHotpathPreencodedCapability(capability: string, args: unknown[]): unknown {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
+  const fn = binding[capability];
+  if (typeof fn !== 'function') {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} not available`);
+  }
+  const raw = fn(...args);
+  if (raw instanceof Error) {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} native error: ${raw.message || 'unknown error'}`);
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as { message?: unknown }).message === 'string') {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} native error: ${String((raw as { message: unknown }).message)}`);
+  }
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} returned non-string or empty result`);
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(`[llmswitch-bridge] ${String(capability)} JSON parse failed: ${detail}`);
+  }
+}
+
 function assertNativeObject(capability: string, value: unknown): AnyRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`[llmswitch-bridge] ${String(capability)} returned invalid payload`);
@@ -657,57 +485,55 @@ function assertNativeObject(capability: string, value: unknown): AnyRecord {
   return value as AnyRecord;
 }
 
+function assertNativeArray(capability: string, value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`[llmswitch-bridge] ${String(capability)} returned invalid payload`);
+  }
+  return value;
+}
+
 function getChatProcessNodeResultSemantics(): NativeChatProcessNodeResultSemantics {
   return getRouterHotpathJsonBindingSync() as NativeChatProcessNodeResultSemantics;
 }
 
 export async function mapChatToolsToBridgeJson(rawTools: unknown): Promise<AnyRecord[]> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.mapChatToolsToBridgeWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] mapChatToolsToBridgeJson not available');
-  }
-  return fn(rawTools) as AnyRecord[];
+  const parsed = invokeRouterHotpathJsonCapability('mapChatToolsToBridgeJson', [
+    Array.isArray(rawTools) ? rawTools : [],
+  ]);
+  return assertNativeArray('mapChatToolsToBridgeJson', parsed) as AnyRecord[];
 }
 
 export async function injectMcpToolsForChatJson(
   tools: unknown[] | undefined,
   discoveredServers: string[]
 ): Promise<AnyRecord[]> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.injectMcpToolsForChatWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] injectMcpToolsForChatJson not available');
-  }
-  return fn(Array.isArray(tools) ? tools : [], Array.isArray(discoveredServers) ? discoveredServers : []) as AnyRecord[];
+  const parsed = invokeRouterHotpathJsonCapability('injectMcpToolsForChatJson', [
+    Array.isArray(tools) ? tools : [],
+    Array.isArray(discoveredServers) ? discoveredServers : [],
+  ]);
+  return assertNativeArray('injectMcpToolsForChatJson', parsed) as AnyRecord[];
 }
 
 export async function injectMcpToolsForResponsesJson(
   tools: unknown[] | undefined,
   discoveredServers: string[]
 ): Promise<AnyRecord[]> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.injectMcpToolsForResponsesWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] injectMcpToolsForResponsesJson not available');
-  }
-  return fn(Array.isArray(tools) ? tools : [], Array.isArray(discoveredServers) ? discoveredServers : []) as AnyRecord[];
+  const parsed = invokeRouterHotpathJsonCapability('injectMcpToolsForResponsesJson', [
+    Array.isArray(tools) ? tools : [],
+    Array.isArray(discoveredServers) ? discoveredServers : [],
+  ]);
+  return assertNativeArray('injectMcpToolsForResponsesJson', parsed) as AnyRecord[];
 }
 
 export async function normalizeAssistantTextToToolCallsJson(
   message: Record<string, unknown>,
   options?: Record<string, unknown>
 ): Promise<AnyRecord> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.normalizeAssistantTextToToolCallsWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] normalizeAssistantTextToToolCallsJson not available');
-  }
-  return fn(message, options) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('normalizeAssistantTextToToolCallsJson', [
+    message && typeof message === 'object' ? message : {},
+    options ?? null,
+  ]);
+  return assertNativeObject('normalizeAssistantTextToToolCallsJson', parsed);
 }
 
 export function captureReqInboundResponsesContextSnapshotJson(input: {
@@ -715,24 +541,25 @@ export function captureReqInboundResponsesContextSnapshotJson(input: {
   requestId?: string;
   toolCallIdStyle?: unknown;
 }): AnyRecord {
-  const mod = getSharedConversionSemanticsSync();
-  const fn = mod.captureReqInboundResponsesContextSnapshotWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] captureReqInboundResponsesContextSnapshotJson not available');
-  }
-  return fn(input) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('captureReqInboundResponsesContextSnapshotJson', [
+    input,
+  ]);
+  return assertNativeObject('captureReqInboundResponsesContextSnapshotJson', parsed);
 }
 
 export function stripResponsesStoredContextInputMediaNative(
   inputEntries: unknown,
   placeholderText = '[Image omitted]'
 ): { changed: boolean; messages: unknown[] } {
-  const mod = getSharedConversionSemanticsSync();
-  const fn = mod.stripResponsesStoredContextInputMediaWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] stripResponsesStoredContextInputMediaNative not available');
+  const parsed = invokeRouterHotpathJsonCapability('stripResponsesStoredContextInputMediaJson', [
+    Array.isArray(inputEntries) ? inputEntries : [],
+    String(placeholderText || '[Image omitted]'),
+  ]);
+  const row = assertNativeObject('stripResponsesStoredContextInputMediaJson', parsed);
+  if (typeof row.changed !== 'boolean' || !Array.isArray(row.messages)) {
+    throw new Error('[llmswitch-bridge] stripResponsesStoredContextInputMediaJson returned invalid payload');
   }
-  return fn(inputEntries, placeholderText);
+  return row as { changed: boolean; messages: unknown[] };
 }
 
 export async function captureReqInboundResponsesContextSnapshot(input: {
@@ -740,13 +567,7 @@ export async function captureReqInboundResponsesContextSnapshot(input: {
   requestId?: string;
   toolCallIdStyle?: unknown;
 }): Promise<AnyRecord> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.captureReqInboundResponsesContextSnapshotWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] captureReqInboundResponsesContextSnapshotJson not available');
-  }
-  return fn(input) as AnyRecord;
+  return captureReqInboundResponsesContextSnapshotJson(input);
 }
 
 export async function planResponsesHandlerEntry(
@@ -754,38 +575,53 @@ export async function planResponsesHandlerEntry(
   entryEndpoint?: string,
   responseIdFromPath?: string
 ): Promise<{ mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: AnyRecord }> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.planResponsesHandlerEntryWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] planResponsesHandlerEntryJson not available');
+  const parsed = invokeRouterHotpathPreencodedCapability('planResponsesHandlerEntryJson', [
+    stringifyNativeJsonArg('planResponsesHandlerEntryJson', payload ?? null),
+    entryEndpoint,
+    responseIdFromPath,
+  ]);
+  const row = assertNativeObject('planResponsesHandlerEntryJson', parsed);
+  if (
+    row.mode !== 'none'
+    && row.mode !== 'submit_tool_outputs'
+    && row.mode !== 'scope_materialize'
+  ) {
+    throw new Error('[llmswitch-bridge] planResponsesHandlerEntryJson returned invalid mode');
   }
-  return fn(payload, entryEndpoint, responseIdFromPath) as { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: AnyRecord };
+  if (!row.payload || typeof row.payload !== 'object' || Array.isArray(row.payload)) {
+    throw new Error('[llmswitch-bridge] planResponsesHandlerEntryJson returned invalid payload');
+  }
+  return row as { mode: 'none' | 'submit_tool_outputs' | 'scope_materialize'; responseId?: string; payload: AnyRecord };
 }
 
 export async function materializeProviderOwnedSubmitContext(input: {
   payload: Record<string, unknown>;
 }): Promise<{ payload: AnyRecord; context: { input: unknown[] } } | null> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.materializeProviderOwnedSubmitContextWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson not available');
+  const parsed = invokeRouterHotpathJsonCapability('materializeProviderOwnedSubmitContextJson', [
+    input.payload ?? null,
+  ]);
+  if (parsed === null) {
+    return null;
   }
-  return fn(input.payload) as { payload: AnyRecord; context: { input: unknown[] } } | null;
+  const row = assertNativeObject('materializeProviderOwnedSubmitContextJson', parsed);
+  if (!row.payload || typeof row.payload !== 'object' || Array.isArray(row.payload)) {
+    throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson returned invalid payload');
+  }
+  const context = row.context;
+  if (!context || typeof context !== 'object' || Array.isArray(context) || !Array.isArray((context as AnyRecord).input)) {
+    throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson returned invalid context');
+  }
+  return row as { payload: AnyRecord; context: { input: unknown[] } };
 }
 
 export async function planResponsesRequestContext(input: {
   payload: Record<string, unknown>;
   resumeMeta?: Record<string, unknown>;
 }): Promise<AnyRecord> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.planResponsesRequestContextWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] planResponsesRequestContextJson not available');
-  }
-  return fn(input) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('planResponsesRequestContextJson', [
+    input,
+  ]);
+  return assertNativeObject('planResponsesRequestContextJson', parsed);
 }
 
 export async function planResponsesContinuationRequestAction(input: {
@@ -795,26 +631,21 @@ export async function planResponsesContinuationRequestAction(input: {
   previousResponseId?: string;
   continuation?: Record<string, unknown> | null;
 }): Promise<AnyRecord> {
-  await assertSharedBindings();
-  const mod = await getSharedConversionSemantics();
-  const fn = mod.planResponsesContinuationRequestActionWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] planResponsesContinuationRequestActionJson not available');
-  }
-  return fn(input) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('planResponsesContinuationRequestActionJson', [
+    input,
+  ]);
+  return assertNativeObject('planResponsesContinuationRequestActionJson', parsed);
 }
 
 export async function buildAnthropicResponseFromChatJson(
   chatResponse: unknown,
   aliasMap?: Record<string, string>
 ): Promise<AnyRecord> {
-  await assertRespBindings();
-  const mod = await getRespSemantics();
-  const fn = mod.buildAnthropicResponseFromChatWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] buildAnthropicResponseFromChatJson not available');
-  }
-  return fn(chatResponse, aliasMap) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('buildAnthropicResponseFromChatJson', [
+    chatResponse ?? null,
+    aliasMap ?? null,
+  ]);
+  return assertNativeObject('buildAnthropicResponseFromChatJson', parsed);
 }
 
 export async function sanitizeProviderOutboundPayload(input: {
@@ -823,12 +654,15 @@ export async function sanitizeProviderOutboundPayload(input: {
   enforceLayout?: boolean;
   payload: Record<string, unknown>;
 }): Promise<AnyRecord> {
-  const mod = await getHubBridgePolicySemantics();
-  const fn = mod.sanitizeProviderOutboundPayloadWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] sanitizeProviderOutboundPayloadWithNative not available');
-  }
-  return fn(input) as AnyRecord;
+  const parsed = invokeRouterHotpathJsonCapability('sanitizeProviderOutboundPayloadJson', [
+    {
+      protocol: input.protocol,
+      compatibilityProfile: input.compatibilityProfile,
+      enforceLayout: input.enforceLayout,
+      payload: input.payload ?? {},
+    },
+  ]);
+  return assertNativeObject('sanitizeProviderOutboundPayloadJson', parsed);
 }
 
 export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {

@@ -1,3 +1,13 @@
+# 2026-07-09: native-exports host bridge shell loaders direct-native wired
+
+- Scope: continue llmswitch-core TS shell reference closeout for `src/modules/llmswitch/bridge/native-exports.ts/js`.
+- Change: removed host bridge loading of `native/router-hotpath/native-shared-conversion-semantics`, `native/router-hotpath/native-hub-pipeline-resp-semantics`, and `native/router-hotpath/native-hub-bridge-policy-semantics`.
+- Change: native-exports wrappers now call direct `router_hotpath_napi` JSON capabilities for shared conversion, MCP injection, Responses entry/context planning, media stripping, Anthropic response projection, and provider outbound sanitize policy; `planResponsesHandlerEntryJson` keeps its native `payloadJson + optional endpoint/path strings` signature.
+- Exact refs: `rg` for the old loader/function/subpath names in `native-exports.ts/js` returned zero matches.
+- Strict reference audit improved from `shellsWithHostTextRefs=9`, `coreModuleSubpathRefs=26` to `shellsWithHostTextRefs=6`, `coreModuleSubpathRefs=16`.
+- Verification PASS: focused Jest 207/207 (`mimoweb-text-harvest`, `native-required-exports-sse-stream`, `hub-pipeline-stage-residue-audit`); `verify:llmswitch-ts-shell-reference-audit`; zero-ts closeout; minimal TS surface; rustification audit; sharedmodule tsc; root tsc; `node --check native-exports.js`; `git diff --check`.
+- Remaining work: `snapshot-recorder.ts/js` and `routing-integrations.ts/js` still hold host bridge shell subpath refs; broader goal is not complete.
+
 # 2026-07-09: llmswitch host bridge snapshot/routing-state shell refs closed
 
 - Change: `runtime-integrations.ts/js` no longer loads `conversion/snapshot-utils`; snapshot preload/write now goes through direct `getRouterHotpathJsonBindingSync()` capabilities exposed by `native-exports.ts/js`.

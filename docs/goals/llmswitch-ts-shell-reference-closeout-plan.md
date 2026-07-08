@@ -179,6 +179,17 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 native-exports host bridge shell loaders direct-native wired
+
+- `src/modules/llmswitch/bridge/native-exports.ts/js` no longer imports `importCoreDist` / `requireCoreDist` from `module-loader.ts/js`.
+- Removed the remaining `native-shared-conversion-semantics`, `native-hub-pipeline-resp-semantics`, and `native-hub-bridge-policy-semantics` loader/cache paths from `native-exports.ts/js`.
+- Shared conversion, MCP injection, Responses handler/context/continuation planning, Responses stored media strip, Anthropic response projection, and provider outbound sanitize wrappers now call direct `router_hotpath_napi` JSON capabilities.
+- The bridge keeps `planResponsesHandlerEntryJson` on its native mixed signature: encoded payload JSON plus raw optional `entryEndpoint` and `responseIdFromPath` strings.
+- Exact scan for old `native-exports.ts/js` loader/subpath names returns zero matches.
+- Strict reference audit improved to `shellsWithHostTextRefs=6` and `coreModuleSubpathRefs=16`.
+- Verification passed: focused Jest 207/207, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule tsc, root tsc, JS syntax check, and `git diff --check`.
+- Remaining work: `snapshot-recorder.ts/js` and `routing-integrations.ts/js` still hold host bridge shell subpath refs; module-loader/package/internal fan-out closeout remains.
+
 ### 2026-07-09 provider response and runtime bridge refs direct-native wired
 
 - `src/modules/llmswitch/bridge/runtime-integrations.ts/js` now calls direct native JSON capabilities for SSE decode preload and provider runtime ingress policy; it no longer loads `native/router-hotpath/native-sse-runtime` or `native/router-hotpath/native-provider-runtime-ingress`.

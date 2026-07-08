@@ -8,7 +8,6 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { resolveCorePackageDir } from '../core-loader.js';
-import { importCoreDist, requireCoreDist } from './module-loader.js';
 function parseServertoolCliRouteHintCandidate(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return undefined;
@@ -47,16 +46,9 @@ function readServertoolCliRouteHintFromRequestValue(value) {
     }
     return parseServertoolCliRouteHintCandidate(record);
 }
-let cachedSharedSemantics;
-let cachedSharedSemanticsSync;
-let cachedRespSemantics;
 let cachedFailurePolicyModule;
-let cachedHubBridgePolicySemantics;
-let cachedHubBridgePolicySemanticsSync;
 let cachedRouterHotpathJsonBindingSync;
 let cachedHubVrNodeContracts;
-let sharedBindingsChecked;
-let respBindingsChecked;
 function buildFailurePolicyModuleFromRouterHotpathBinding(binding) {
     if (typeof binding.classifyProviderFailureJson !== 'function'
         || typeof binding.resolveProviderRetryExecutionPolicyJson !== 'function') {
@@ -147,139 +139,6 @@ function getHubVrNodeContracts() {
     }
     return cachedHubVrNodeContracts;
 }
-async function assertSharedBindings() {
-    if (sharedBindingsChecked) {
-        return;
-    }
-    const shared = await getSharedConversionSemantics();
-    const missing = [];
-    if (typeof shared.mapChatToolsToBridgeWithNative !== 'function') {
-        missing.push('mapChatToolsToBridgeJson');
-    }
-    if (typeof shared.injectMcpToolsForChatWithNative !== 'function') {
-        missing.push('injectMcpToolsForChatJson');
-    }
-    if (typeof shared.injectMcpToolsForResponsesWithNative !== 'function') {
-        missing.push('injectMcpToolsForResponsesJson');
-    }
-    if (typeof shared.normalizeAssistantTextToToolCallsWithNative !== 'function') {
-        missing.push('normalizeAssistantTextToToolCallsJson');
-    }
-    if (typeof shared.captureReqInboundResponsesContextSnapshotWithNative !== 'function') {
-        missing.push('captureReqInboundResponsesContextSnapshotJson');
-    }
-    if (typeof shared.planResponsesHandlerEntryWithNative !== 'function') {
-        missing.push('planResponsesHandlerEntryJson');
-    }
-    if (missing.length > 0) {
-        throw new Error(`[llmswitch-bridge] native shared bindings missing: ${missing.join(', ')}`);
-    }
-    sharedBindingsChecked = true;
-}
-async function assertRespBindings() {
-    if (respBindingsChecked) {
-        return;
-    }
-    const resp = await getRespSemantics();
-    const missing = [];
-    if (typeof resp.buildAnthropicResponseFromChatWithNative !== 'function') {
-        missing.push('buildAnthropicResponseFromChatJson');
-    }
-    if (missing.length > 0) {
-        throw new Error(`[llmswitch-bridge] native resp bindings missing: ${missing.join(', ')}`);
-    }
-    respBindingsChecked = true;
-}
-async function getSharedConversionSemantics() {
-    if (cachedSharedSemantics !== undefined) {
-        if (!cachedSharedSemantics) {
-            throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
-        }
-        return cachedSharedSemantics;
-    }
-    try {
-        cachedSharedSemantics = await importCoreDist('native/router-hotpath/native-shared-conversion-semantics');
-    }
-    catch {
-        cachedSharedSemantics = null;
-    }
-    if (!cachedSharedSemantics) {
-        throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
-    }
-    return cachedSharedSemantics;
-}
-function getSharedConversionSemanticsSync() {
-    if (cachedSharedSemanticsSync !== undefined) {
-        if (!cachedSharedSemanticsSync) {
-            throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
-        }
-        return cachedSharedSemanticsSync;
-    }
-    try {
-        cachedSharedSemanticsSync = requireCoreDist('native/router-hotpath/native-shared-conversion-semantics');
-    }
-    catch {
-        cachedSharedSemanticsSync = null;
-    }
-    if (!cachedSharedSemanticsSync) {
-        throw new Error('[llmswitch-bridge] native-shared-conversion-semantics not available');
-    }
-    return cachedSharedSemanticsSync;
-}
-async function getRespSemantics() {
-    if (cachedRespSemantics !== undefined) {
-        if (!cachedRespSemantics) {
-            throw new Error('[llmswitch-bridge] native-hub-pipeline-resp-semantics not available');
-        }
-        return cachedRespSemantics;
-    }
-    try {
-        cachedRespSemantics = await importCoreDist('native/router-hotpath/native-hub-pipeline-resp-semantics');
-    }
-    catch {
-        cachedRespSemantics = null;
-    }
-    if (!cachedRespSemantics) {
-        throw new Error('[llmswitch-bridge] native-hub-pipeline-resp-semantics not available');
-    }
-    return cachedRespSemantics;
-}
-async function getHubBridgePolicySemantics() {
-    if (cachedHubBridgePolicySemantics !== undefined) {
-        if (!cachedHubBridgePolicySemantics) {
-            throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
-        }
-        return cachedHubBridgePolicySemantics;
-    }
-    try {
-        cachedHubBridgePolicySemantics = await importCoreDist('native/router-hotpath/native-hub-bridge-policy-semantics');
-    }
-    catch {
-        cachedHubBridgePolicySemantics = null;
-    }
-    if (!cachedHubBridgePolicySemantics) {
-        throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
-    }
-    return cachedHubBridgePolicySemantics;
-}
-function getHubBridgePolicySemanticsSync() {
-    if (cachedHubBridgePolicySemanticsSync !== undefined) {
-        if (!cachedHubBridgePolicySemanticsSync) {
-            throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
-        }
-        return cachedHubBridgePolicySemanticsSync;
-    }
-    try {
-        cachedHubBridgePolicySemanticsSync = requireCoreDist('native/router-hotpath/native-hub-bridge-policy-semantics');
-    }
-    catch {
-        cachedHubBridgePolicySemanticsSync = null;
-    }
-    if (!cachedHubBridgePolicySemanticsSync) {
-        throw new Error('[llmswitch-bridge] native-hub-bridge-policy-semantics not available');
-    }
-    return cachedHubBridgePolicySemanticsSync;
-}
 export function getRouterHotpathJsonBindingSync() {
     if (cachedRouterHotpathJsonBindingSync !== undefined) {
         if (!cachedRouterHotpathJsonBindingSync) {
@@ -349,8 +208,38 @@ function invokeRouterHotpathJsonCapability(capability, args) {
         throw new Error(`[llmswitch-bridge] ${String(capability)} JSON parse failed: ${detail}`);
     }
 }
+function invokeRouterHotpathPreencodedCapability(capability, args) {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding[capability];
+    if (typeof fn !== 'function') {
+        throw new Error(`[llmswitch-bridge] ${String(capability)} not available`);
+    }
+    const raw = fn(...args);
+    if (raw instanceof Error) {
+        throw new Error(`[llmswitch-bridge] ${String(capability)} native error: ${raw.message || 'unknown error'}`);
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof raw.message === 'string') {
+        throw new Error(`[llmswitch-bridge] ${String(capability)} native error: ${String(raw.message)}`);
+    }
+    if (typeof raw !== 'string' || raw.length === 0) {
+        throw new Error(`[llmswitch-bridge] ${String(capability)} returned non-string or empty result`);
+    }
+    try {
+        return JSON.parse(raw);
+    }
+    catch (error) {
+        const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+        throw new Error(`[llmswitch-bridge] ${String(capability)} JSON parse failed: ${detail}`);
+    }
+}
 function assertNativeObject(capability, value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error(`[llmswitch-bridge] ${String(capability)} returned invalid payload`);
+    }
+    return value;
+}
+function assertNativeArray(capability, value) {
+    if (!Array.isArray(value)) {
         throw new Error(`[llmswitch-bridge] ${String(capability)} returned invalid payload`);
     }
     return value;
@@ -359,118 +248,115 @@ function getChatProcessNodeResultSemantics() {
     return getRouterHotpathJsonBindingSync();
 }
 export async function mapChatToolsToBridgeJson(rawTools) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.mapChatToolsToBridgeWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] mapChatToolsToBridgeJson not available');
-    }
-    return fn(rawTools);
+    const parsed = invokeRouterHotpathJsonCapability('mapChatToolsToBridgeJson', [
+        Array.isArray(rawTools) ? rawTools : [],
+    ]);
+    return assertNativeArray('mapChatToolsToBridgeJson', parsed);
 }
 export async function injectMcpToolsForChatJson(tools, discoveredServers) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.injectMcpToolsForChatWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] injectMcpToolsForChatJson not available');
-    }
-    return fn(Array.isArray(tools) ? tools : [], Array.isArray(discoveredServers) ? discoveredServers : []);
+    const parsed = invokeRouterHotpathJsonCapability('injectMcpToolsForChatJson', [
+        Array.isArray(tools) ? tools : [],
+        Array.isArray(discoveredServers) ? discoveredServers : [],
+    ]);
+    return assertNativeArray('injectMcpToolsForChatJson', parsed);
 }
 export async function injectMcpToolsForResponsesJson(tools, discoveredServers) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.injectMcpToolsForResponsesWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] injectMcpToolsForResponsesJson not available');
-    }
-    return fn(Array.isArray(tools) ? tools : [], Array.isArray(discoveredServers) ? discoveredServers : []);
+    const parsed = invokeRouterHotpathJsonCapability('injectMcpToolsForResponsesJson', [
+        Array.isArray(tools) ? tools : [],
+        Array.isArray(discoveredServers) ? discoveredServers : [],
+    ]);
+    return assertNativeArray('injectMcpToolsForResponsesJson', parsed);
 }
 export async function normalizeAssistantTextToToolCallsJson(message, options) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.normalizeAssistantTextToToolCallsWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] normalizeAssistantTextToToolCallsJson not available');
-    }
-    return fn(message, options);
+    const parsed = invokeRouterHotpathJsonCapability('normalizeAssistantTextToToolCallsJson', [
+        message && typeof message === 'object' ? message : {},
+        options ?? null,
+    ]);
+    return assertNativeObject('normalizeAssistantTextToToolCallsJson', parsed);
 }
 export function captureReqInboundResponsesContextSnapshotJson(input) {
-    const mod = getSharedConversionSemanticsSync();
-    const fn = mod.captureReqInboundResponsesContextSnapshotWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] captureReqInboundResponsesContextSnapshotJson not available');
-    }
-    return fn(input);
+    const parsed = invokeRouterHotpathJsonCapability('captureReqInboundResponsesContextSnapshotJson', [
+        input,
+    ]);
+    return assertNativeObject('captureReqInboundResponsesContextSnapshotJson', parsed);
 }
 export function stripResponsesStoredContextInputMediaNative(inputEntries, placeholderText = '[Image omitted]') {
-    const mod = getSharedConversionSemanticsSync();
-    const fn = mod.stripResponsesStoredContextInputMediaWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] stripResponsesStoredContextInputMediaNative not available');
+    const parsed = invokeRouterHotpathJsonCapability('stripResponsesStoredContextInputMediaJson', [
+        Array.isArray(inputEntries) ? inputEntries : [],
+        String(placeholderText || '[Image omitted]'),
+    ]);
+    const row = assertNativeObject('stripResponsesStoredContextInputMediaJson', parsed);
+    if (typeof row.changed !== 'boolean' || !Array.isArray(row.messages)) {
+        throw new Error('[llmswitch-bridge] stripResponsesStoredContextInputMediaJson returned invalid payload');
     }
-    return fn(inputEntries, placeholderText);
+    return row;
 }
 export async function captureReqInboundResponsesContextSnapshot(input) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.captureReqInboundResponsesContextSnapshotWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] captureReqInboundResponsesContextSnapshotJson not available');
-    }
-    return fn(input);
+    return captureReqInboundResponsesContextSnapshotJson(input);
 }
 export async function planResponsesHandlerEntry(payload, entryEndpoint, responseIdFromPath) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.planResponsesHandlerEntryWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] planResponsesHandlerEntryJson not available');
+    const parsed = invokeRouterHotpathPreencodedCapability('planResponsesHandlerEntryJson', [
+        stringifyNativeJsonArg('planResponsesHandlerEntryJson', payload ?? null),
+        entryEndpoint,
+        responseIdFromPath,
+    ]);
+    const row = assertNativeObject('planResponsesHandlerEntryJson', parsed);
+    if (row.mode !== 'none'
+        && row.mode !== 'submit_tool_outputs'
+        && row.mode !== 'scope_materialize') {
+        throw new Error('[llmswitch-bridge] planResponsesHandlerEntryJson returned invalid mode');
     }
-    return fn(payload, entryEndpoint, responseIdFromPath);
+    if (!row.payload || typeof row.payload !== 'object' || Array.isArray(row.payload)) {
+        throw new Error('[llmswitch-bridge] planResponsesHandlerEntryJson returned invalid payload');
+    }
+    return row;
 }
 export async function materializeProviderOwnedSubmitContext(input) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.materializeProviderOwnedSubmitContextWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson not available');
+    const parsed = invokeRouterHotpathJsonCapability('materializeProviderOwnedSubmitContextJson', [
+        input.payload ?? null,
+    ]);
+    if (parsed === null) {
+        return null;
     }
-    return fn(input.payload);
+    const row = assertNativeObject('materializeProviderOwnedSubmitContextJson', parsed);
+    if (!row.payload || typeof row.payload !== 'object' || Array.isArray(row.payload)) {
+        throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson returned invalid payload');
+    }
+    const context = row.context;
+    if (!context || typeof context !== 'object' || Array.isArray(context) || !Array.isArray(context.input)) {
+        throw new Error('[llmswitch-bridge] materializeProviderOwnedSubmitContextJson returned invalid context');
+    }
+    return row;
 }
 export async function planResponsesRequestContext(input) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.planResponsesRequestContextWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] planResponsesRequestContextJson not available');
-    }
-    return fn(input);
+    const parsed = invokeRouterHotpathJsonCapability('planResponsesRequestContextJson', [
+        input,
+    ]);
+    return assertNativeObject('planResponsesRequestContextJson', parsed);
 }
 export async function planResponsesContinuationRequestAction(input) {
-    await assertSharedBindings();
-    const mod = await getSharedConversionSemantics();
-    const fn = mod.planResponsesContinuationRequestActionWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] planResponsesContinuationRequestActionJson not available');
-    }
-    return fn(input);
+    const parsed = invokeRouterHotpathJsonCapability('planResponsesContinuationRequestActionJson', [
+        input,
+    ]);
+    return assertNativeObject('planResponsesContinuationRequestActionJson', parsed);
 }
 export async function buildAnthropicResponseFromChatJson(chatResponse, aliasMap) {
-    await assertRespBindings();
-    const mod = await getRespSemantics();
-    const fn = mod.buildAnthropicResponseFromChatWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] buildAnthropicResponseFromChatJson not available');
-    }
-    return fn(chatResponse, aliasMap);
+    const parsed = invokeRouterHotpathJsonCapability('buildAnthropicResponseFromChatJson', [
+        chatResponse ?? null,
+        aliasMap ?? null,
+    ]);
+    return assertNativeObject('buildAnthropicResponseFromChatJson', parsed);
 }
 export async function sanitizeProviderOutboundPayload(input) {
-    const mod = await getHubBridgePolicySemantics();
-    const fn = mod.sanitizeProviderOutboundPayloadWithNative;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] sanitizeProviderOutboundPayloadWithNative not available');
-    }
-    return fn(input);
+    const parsed = invokeRouterHotpathJsonCapability('sanitizeProviderOutboundPayloadJson', [
+        {
+            protocol: input.protocol,
+            compatibilityProfile: input.compatibilityProfile,
+            enforceLayout: input.enforceLayout,
+            payload: input.payload ?? {},
+        },
+    ]);
+    return assertNativeObject('sanitizeProviderOutboundPayloadJson', parsed);
 }
 export function hasDeclaredApplyPatchToolNative(payload) {
     const parsed = invokeRouterHotpathJsonCapability('hasDeclaredApplyPatchToolJson', [payload ?? null]);
