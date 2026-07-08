@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { projectResponsesClientPayloadForClientWithNative } from '../../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
-import { buildSseFramesFromJsonWithNative } from '../../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js';
+import { buildSseFramesFromJsonDirectNative } from '../../sharedmodule/helpers/sse-direct-native.js';
 
 describe('Responses client tool SSE contract', () => {
   function buildFrames(mode: 'pending' | 'resolved'): string[] {
@@ -60,7 +60,7 @@ describe('Responses client tool SSE contract', () => {
     ];
     const requestId = `req_tool_contract_${mode}`;
     const projected = projectResponsesClientPayloadForClientWithNative(rawPayload, toolsRaw, {});
-    const { frames } = buildSseFramesFromJsonWithNative({
+    const { frames } = buildSseFramesFromJsonDirectNative({
       protocol: 'openai-responses',
       response: projected,
       requestId,

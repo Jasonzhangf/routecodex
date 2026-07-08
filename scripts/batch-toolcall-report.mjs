@@ -6,6 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import { buildJsonFromSseWithNative, collectSseBodyText } from './helpers/sse-direct-native.mjs';
 
 const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const RESP_SAMPLES_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
@@ -82,9 +83,7 @@ async function runResponses(providerId) {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
   const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-  const { collectSseBodyText, buildJsonFromSseWithNative } = await import(sseLibPath);
   const { buildChatResponseFromResponses } = await import(bridgePath);
 
   ensureDir(RESP_OUT_DIR);
@@ -147,8 +146,6 @@ async function runAnthropic(providerId='glm-anthropic') {
   }
   const sseText = events.map(ev => `event: ${ev.event}\n`+`data: ${JSON.stringify(ev.data)}\n\n`).join('');
   fs.writeFileSync(sseLog, sseText, 'utf-8');
-  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
-  const { buildJsonFromSseWithNative } = await import(sseLibPath);
   const message = buildJsonFromSseWithNative({
     protocol: 'anthropic-messages',
     bodyText: sseText,

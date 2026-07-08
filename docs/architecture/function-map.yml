@@ -3851,29 +3851,27 @@ owners:
 
   - feature_id: sse.public_ts_lib_surface
     status: retired
-    summary: "Retired SSE public TS library surface; scripts and tests call the native SSE runtime bridge directly"
+    summary: "Retired SSE public TS library surface; scripts and tests call Rust/NAPI SSE dispatch directly"
     owner_kind: retired_ts_shell
-    owner_scope: "old public TS library shell is physically deleted; Hub/runtime/scripts use native-sse-runtime direct owner"
-    owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+    owner_scope: "old public TS library shell and old native-sse-runtime wrapper shell are physically deleted; Hub/runtime/scripts use Rust/NAPI direct owners"
+    owner_module: scripts/helpers/sse-direct-native.mjs
     canonical_types:
-      - NativeSseRuntimeProtocol
-      - NativeSseFramesInput
-      - NativeSseJsonInput
+      - SseRuntimeInput
     canonical_builders:
-      - buildSseFramesFromJsonWithNative
-      - buildJsonFromSseWithNative
+      - sse_public_ts_lib_surface_deleted_contract
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
+      - scripts/helpers/sse-direct-native.mjs
+      - tests/sharedmodule/helpers/sse-direct-native.ts
       - tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/sse/index.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - src/providers/core/runtime
       - src/server
       - sharedmodule/llmswitch-core/src/conversion/hub
       - sharedmodule/llmswitch-core/src/runtime
       - sharedmodule/llmswitch-core/src/servertool
-    forbidden_mentions_allowlist:
-      - NativeSseRuntimeProtocol
     required_tests:
       - tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts
     required_gates:
@@ -3881,7 +3879,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Old `sharedmodule/llmswitch-core/src/sse/index.ts` public shell is physically deleted; do not restore `sseToJson` / `jsonToSseFrames` aliases or `dist/sse/index.js` script imports."
+      - "Old `sharedmodule/llmswitch-core/src/sse/index.ts` public shell and `sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts` wrapper shell are physically deleted; do not restore `sseToJson` / `jsonToSseFrames` aliases or `dist/sse/index.js` / `dist/native/router-hotpath/native-sse-runtime.js` script imports."
 
   - feature_id: sse.runtime_rust_dispatch
     status: active
@@ -3897,11 +3895,15 @@ owners:
       - build_json_from_sse_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/runtime-integrations.ts
+      - scripts/helpers/sse-direct-native.mjs
+      - tests/sharedmodule/helpers/sse-direct-native.ts
       - docs/goals/sse-runtime-rust-only-closeout-plan.md
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/sse/index.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse
       - sharedmodule/llmswitch-core/src/sse/sse-to-json
       - sharedmodule/llmswitch-core/src/sse/registry
@@ -4065,10 +4067,10 @@ owners:
       - build_chat_sse_event_sequence_json
       - build_chat_json_from_sse_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
+      - tests/sharedmodule/helpers/sse-direct-native.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
@@ -4104,10 +4106,10 @@ owners:
       - build_gemini_sse_event_sequence_json
       - build_gemini_json_from_sse_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
+      - tests/sharedmodule/helpers/sse-direct-native.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:

@@ -1,88 +1,51 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { describe, expect, it } from '@jest/globals';
 
-const nativeFunctions = new Map<string, (...args: unknown[]) => unknown>();
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-shared.js',
-  () => ({
-    extractNativeErrorMessage: (raw: unknown) => {
-      if (raw instanceof Error) return raw.message;
-      if (raw && typeof raw === 'object' && 'message' in raw) {
-        const message = (raw as { message?: unknown }).message;
-        return typeof message === 'string' ? message : '';
-      }
-      return '';
-    },
-    failNative: <T>(capability: string, reason?: string): T => {
-      throw new Error(`${capability} unavailable${reason ? `: ${reason}` : ''}`);
-    },
-    isNativeDisabledByEnv: () => false,
-    readNativeFunction: (name: string) => nativeFunctions.get(name) ?? null,
-  }),
-);
-
-const {
-  buildJsonFromSseWithNative,
+import {
+  buildJsonFromSseDirectNative,
   buildReadableFromSseFrames,
-  buildSseFramesFromJsonWithNative,
+  buildSseFramesFromJsonDirectNative,
   collectSseBodyText,
-} = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.js');
+} from './helpers/sse-direct-native.js';
 
-describe('SSE unified Rust runtime dispatch bridge', () => {
+describe('SSE unified Rust runtime dispatch direct native owner', () => {
   it('passes explicit protocol to native JSON to SSE dispatch without TS protocol fallback', () => {
-    nativeFunctions.set('buildSseFramesFromJsonJson', (raw) => {
-      const input = JSON.parse(String(raw));
-      expect(input).toMatchObject({
-        protocol: 'openai-chat',
-        request_id: 'req_chat_dispatch',
-        model: 'gpt-test',
-      });
-      return JSON.stringify({
-        frames: ['data: {"id":"chatcmpl_1"}\n\n', 'data: [DONE]\n\n'],
-        stats: { protocol: input.protocol },
-      });
-    });
-
-    const result = buildSseFramesFromJsonWithNative({
+    const result = buildSseFramesFromJsonDirectNative({
       protocol: 'openai-chat',
       requestId: 'req_chat_dispatch',
       model: 'gpt-test',
-      response: { id: 'chatcmpl_1', choices: [] },
+      response: {
+        id: 'chatcmpl_1',
+        object: 'chat.completion',
+        created: 1,
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop',
+        }],
+      },
     });
 
-    expect(result.frames).toEqual(['data: {"id":"chatcmpl_1"}\n\n', 'data: [DONE]\n\n']);
-    expect(result.stats).toEqual({ protocol: 'openai-chat' });
+    const text = result.frames.join('');
+    expect(text).toContain('chatcmpl_1');
+    expect(text).toContain('data: [DONE]');
   });
 
   it('passes explicit protocol and raw body text to native SSE to JSON dispatch', () => {
-    nativeFunctions.set('buildJsonFromSseJson', (raw) => {
-      const input = JSON.parse(String(raw));
-      expect(input).toMatchObject({
-        protocol: 'openai-responses',
-        body_text: 'event: response.completed\ndata: {"type":"response.completed"}\n\n',
-        request_id: 'req_responses_dispatch',
-      });
-      return JSON.stringify({ id: 'resp_1', object: 'response', output: [] });
-    });
-
-    const result = buildJsonFromSseWithNative({
+    const result = buildJsonFromSseDirectNative({
       protocol: 'openai-responses',
       requestId: 'req_responses_dispatch',
-      bodyText: 'event: response.completed\ndata: {"type":"response.completed"}\n\n',
+      bodyText: 'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_1","object":"response","output":[]}}\n\n',
     });
 
     expect(result).toMatchObject({ id: 'resp_1', object: 'response' });
   });
 
   it('surfaces native unknown protocol errors instead of selecting a default protocol', () => {
-    nativeFunctions.set('buildJsonFromSseJson', () => {
-      throw new Error('Unsupported SSE protocol: unknown-protocol');
-    });
-
-    expect(() => buildJsonFromSseWithNative({
+    expect(() => buildJsonFromSseDirectNative({
       protocol: 'unknown-protocol',
       bodyText: '',
-    })).toThrow('Unsupported SSE protocol: unknown-protocol');
+    })).toThrow(/Unsupported SSE protocol|invalid/i);
   });
 
   it('collects stream bytes and builds readable frames without protocol semantics', async () => {

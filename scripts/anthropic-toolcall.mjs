@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import { buildJsonFromSseWithNative } from './helpers/sse-direct-native.mjs';
 
 const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const OUT_DIR = path.join(os.homedir(), '.routecodex', 'logs', 'anthropic-sse');
@@ -101,8 +102,6 @@ async function main() {
     .replace(/\n(?=event:)/g, '\n\n');
   fs.writeFileSync(sseLog, sseText, 'utf-8');
 
-  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
-  const { buildJsonFromSseWithNative } = await import(sseLibPath);
   const message = buildJsonFromSseWithNative({
     protocol: 'anthropic-messages',
     bodyText: sseText,

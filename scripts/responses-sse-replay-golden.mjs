@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { buildJsonFromSseWithNative } from './helpers/sse-direct-native.mjs';
 
 const DEFAULT_BASE = process.env.RCC_REPLAY_BASE || 'http://127.0.0.1:5555';
 const DEFAULT_KEY =
@@ -158,9 +159,7 @@ async function readSseFrames(stream) {
 
 async function convertSseFramesToJson(frames, requestId, model) {
   try {
-    const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
     const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-    const { buildJsonFromSseWithNative } = await import(sseLibPath);
     const { buildChatResponseFromResponses } = await import(bridgePath);
     const bodyText = frames.map((frame) => `${frame}\n\n`).join('');
     const json = buildJsonFromSseWithNative({

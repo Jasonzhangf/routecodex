@@ -2270,7 +2270,9 @@ verification:
   - feature_id: sse.public_ts_lib_surface
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
+      - scripts/helpers/sse-direct-native.mjs
+      - tests/sharedmodule/helpers/sse-direct-native.ts
     contract:
       - tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts
     integration: []
@@ -2280,15 +2282,17 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Retired public TS library `sharedmodule/llmswitch-core/src/sse/index.ts` must stay physically deleted; scripts/tests use `native/router-hotpath/native-sse-runtime` directly."
+      - "Retired public TS library `sharedmodule/llmswitch-core/src/sse/index.ts` must stay physically deleted; scripts/tests use direct Rust/NAPI helper bindings."
 
   - feature_id: sse.runtime_rust_dispatch
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - src/server/runtime/http-server/http-server-runtime-setup.ts
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/runtime-integrations.ts
+      - scripts/helpers/sse-direct-native.mjs
+      - tests/sharedmodule/helpers/sse-direct-native.ts
     contract:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
@@ -2306,7 +2310,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+      - tests/sharedmodule/helpers/sse-direct-native.ts
     contract:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration: []
@@ -2377,7 +2381,6 @@ verification:
   - feature_id: sse.chat_stream_projection
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
     contract:
@@ -2399,7 +2402,6 @@ verification:
   - feature_id: sse.anthropic_gemini_stream_projection
     change_risk: medium
     unit:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_sse_event_payload.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs

@@ -28094,3 +28094,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Script consumers now import `sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js` and call `buildJsonFromSseWithNative` / `collectSseBodyText` directly instead of the retired `dist/sse/index.js` public shell aliases.
 - Function/verification maps mark `sse.public_ts_lib_surface` retired and anchor its owner to `native-sse-runtime.ts`; residue tests lock the old shell path absent.
 - Verification PASS: `NODE_OPTIONS=--experimental-vm-modules` focused SSE runtime Jest 4/4; focused SSE index/residue Jest 197/197; script syntax checks; `verify:sse-architecture-boundary`; `verify:function-map-compile-gate`; sharedmodule/root `tsc`; strict shell audit `prodTsShellCount=73`, `shellsWithProdImporters=64`; zero-ts closeout; minimal TS surface; rustification audit `nonNativeFileCount=0`; `git diff --check`.
+
+# 2026-07-09: llmswitch native SSE runtime wrapper shell deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` after the public SSE index deletion.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts`.
+- Scripts now use `scripts/helpers/sse-direct-native.mjs` to load `router_hotpath_napi.node` and call `buildSseFramesFromJsonJson` / `buildJsonFromSseJson` directly; no new package/runtime TS shell was introduced.
+- Tests now use `tests/sharedmodule/helpers/sse-direct-native.ts` or mock `src/modules/llmswitch/bridge/native-exports.js` direct binding capabilities instead of importing/mocking the retired wrapper path.
+- Function/mainline/verification maps now record Rust `sse_runtime_dispatch.rs` plus host bridge direct NAPI callers (`provider-response-converter-host.ts`, `runtime-integrations.ts`) as the runtime owners; retired public-surface contract is anchored to the script helper only as deleted-shell evidence.
+- Verification PASS: focused SSE/provider-response/residue Jest 209/209; `verify:sse-architecture-boundary`; `verify:function-map-compile-gate`; strict shell audit `prodTsShellCount=72`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`; zero-ts closeout; minimal TS surface; rustification audit `nonNativeFileCount=0`; sharedmodule/root `tsc`; script syntax checks; `git diff --check`.

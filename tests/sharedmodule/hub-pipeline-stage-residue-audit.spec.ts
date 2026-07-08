@@ -4269,6 +4269,7 @@ describe('hub pipeline stage residue audit', () => {
   it('SSE public barrel shell must stay physically deleted', () => {
     const repoRoot = process.cwd();
     const filePath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/sse/index.ts');
+    const nativeWrapperPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts');
     const findings: string[] = [];
     for (const root of ['sharedmodule/llmswitch-core/src', 'src', 'scripts', 'tests', 'docs/architecture']) {
       const rootPath = path.join(repoRoot, root);
@@ -4280,15 +4281,20 @@ describe('hub pipeline stage residue audit', () => {
         if (relativePath === 'scripts/architecture/verify-sse-architecture-boundary.mjs') continue;
         if (relativePath === 'docs/architecture/function-map.yml') continue;
         if (relativePath === 'docs/architecture/verification-map.yml') continue;
-        if (relativePath === 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts') continue;
         const source = fs.readFileSync(candidate, 'utf8');
-        if (source.includes('sse/index.ts') || source.includes('dist/sse/index.js') || source.includes('sse/index.js')) {
+        if (
+          source.includes('sse/index.ts')
+          || source.includes('dist/sse/index.js')
+          || source.includes('sse/index.js')
+          || source.includes('dist/native/router-hotpath/native-sse-runtime.js')
+        ) {
           findings.push(relativePath);
         }
       }
     }
 
     expect(fs.existsSync(filePath)).toBe(false);
+    expect(fs.existsSync(nativeWrapperPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

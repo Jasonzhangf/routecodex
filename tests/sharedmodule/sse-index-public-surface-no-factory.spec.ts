@@ -13,12 +13,13 @@ describe('SSE index public surface retired boundary', () => {
     expect(fs.existsSync(sourcePath)).toBe(false);
   });
 
-  it('native SSE runtime remains the script/library entrypoint', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.js');
+  it('native SSE runtime wrapper shell stays physically deleted', () => {
+    const sourcePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts'
+    );
 
-    expect(typeof mod.buildJsonFromSseWithNative).toBe('function');
-    expect(typeof mod.buildSseFramesFromJsonWithNative).toBe('function');
-    expect(mod.defaultSseCodecRegistry).toBeUndefined();
+    expect(fs.existsSync(sourcePath)).toBe(false);
   });
 
   it('deleted runtime TS surfaces stay absent from SSE registry indirection path', () => {

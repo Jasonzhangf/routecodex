@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import { buildJsonFromSseWithNative, collectSseBodyText } from './helpers/sse-direct-native.mjs';
 
 const PROVIDER_ID = process.env.RCC_RESP_PROV || 'fai';
 const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
@@ -75,9 +76,6 @@ async function main() {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
-  const { collectSseBodyText, buildJsonFromSseWithNative } = await import(sseLibPath);
-
   const headers = { 'Content-Type':'application/json', 'OpenAI-Beta':'responses-2024-12-17', 'Authorization':`Bearer ${apiKey}`, 'User-Agent': 'RouteCodex/2.0 (+https://github.com/routecodex)'};
   const client = new HttpClient({ baseUrl, timeout:300000 });
   // Optional: use an exact golden request body ("same request")

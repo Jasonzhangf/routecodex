@@ -17,73 +17,115 @@ const buildSseFramesFromJsonWithNativeMock = jest.fn(() => ({
 }));
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
+  '../../src/modules/llmswitch/bridge/native-exports.js',
   () => ({
-    executeHubPipelineWithNative: executeHubPipelineWithNativeMock,
-    buildProviderResponseMetadataSnapshotWithNative: jest.fn(({
+    getRouterHotpathJsonBindingSync: () => ({
+      executeHubPipelineJson: (inputJson: string) => JSON.stringify(executeHubPipelineWithNativeMock(JSON.parse(inputJson))),
+      buildProviderResponseMetadataSnapshotJson: (inputJson: string) => {
+        const {
       hasBoundMetadataCenter,
       requestTruth,
       continuationContext,
       runtimeControl,
       directMetadataCenterSnapshot,
       nestedMetadataCenterSnapshot,
-    }: {
+        } = JSON.parse(inputJson) as {
       hasBoundMetadataCenter: boolean;
       requestTruth: Record<string, unknown>;
       continuationContext: Record<string, unknown>;
       runtimeControl: Record<string, unknown>;
       directMetadataCenterSnapshot?: Record<string, unknown> | null;
       nestedMetadataCenterSnapshot?: Record<string, unknown> | null;
-    }) => ({
+        };
+        return JSON.stringify({
       metadataCenterSnapshot: hasBoundMetadataCenter
         ? { requestTruth, continuationContext, runtimeControl }
         : directMetadataCenterSnapshot ?? nestedMetadataCenterSnapshot ?? null
-    })),
-    normalizeProviderResponseEffectPlanWithNative: normalizeProviderResponseEffectPlanWithNativeMock,
-    resolveProviderProtocolWithNative: jest.fn(({ metadataCenterSnapshot }: {
-      metadataCenterSnapshot?: { runtimeControl?: Record<string, unknown> } | null;
-    }) => ({
-      providerProtocol: metadataCenterSnapshot?.runtimeControl?.providerProtocol
-    })),
-    projectMetadataWritePlanToRuntimeControlWithNative: jest.fn(({ plan }: {
-      plan: Record<string, unknown>;
-    }) => Object.fromEntries(
-      Object.entries(plan).filter(([key, value]) => key !== 'learnedNote' && value !== null && value !== undefined)
-    )),
-    projectMetadataWritePlanToRuntimeControlWritePlanWithNative: jest.fn(({ plan }: {
-      plan: Record<string, unknown>;
-    }) => {
-      const runtimeControl = Object.fromEntries(
-        Object.entries(plan).filter(([key, value]) => key !== 'learnedNote' && value !== null && value !== undefined)
-      );
-      return {
-        runtimeControl: Object.keys(runtimeControl).length > 0 ? runtimeControl : null
-      };
-    }),
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js',
-  () => ({
-    buildProviderSseStreamReadErrorDescriptorWithNative: jest.fn(({ message }: { message: string }) => ({
+        });
+      },
+      normalizeProviderResponseEffectPlanJson: (inputJson: string) => JSON.stringify(
+        normalizeProviderResponseEffectPlanWithNativeMock(JSON.parse(inputJson))
+      ),
+      resolveProviderProtocolJson: (inputJson: string) => {
+        const input = JSON.parse(inputJson) as { metadataCenterSnapshot?: { runtimeControl?: Record<string, unknown> } | null };
+        return JSON.stringify({ providerProtocol: input.metadataCenterSnapshot?.runtimeControl?.providerProtocol });
+      },
+      publishResponsesRecordPlanJson: (
+        requestId: string,
+        responseJson: string,
+        contextJson: string,
+        runtimeStateWriteJson: string,
+        entryEndpoint: string
+      ) => JSON.stringify({
+        recordArgs: {
+          requestId,
+          response: JSON.parse(responseJson),
+          ...(JSON.parse(contextJson).sessionId ? { sessionId: JSON.parse(contextJson).sessionId } : {}),
+        },
+        finalizeArgs: { requestId, keepForSubmitToolOutputs: false },
+        usageArgs: { usage: JSON.parse(runtimeStateWriteJson)?.usage },
+        entryEndpoint,
+      }),
+      ensureRuntimeMetadataJson: (inputJson: string) => {
+        const carrier = JSON.parse(inputJson);
+        if (!carrier.__rt || typeof carrier.__rt !== 'object' || Array.isArray(carrier.__rt)) carrier.__rt = {};
+        return JSON.stringify(carrier);
+      },
+      buildProviderSseStreamReadErrorDescriptorJson: (inputJson: string) => {
+        const { message } = JSON.parse(inputJson) as { message: string };
+        return JSON.stringify({
       message,
       code: 'provider_response_sse_read_failed',
       upstreamCode: undefined,
       statusCode: 500,
       retryable: false,
       requestExecutorProviderErrorStage: 'provider_response_sse_read'
-    })),
-    materializeProviderResponseSsePayloadWithNative: materializeProviderResponseSsePayloadWithNativeMock,
-    normalizeChatUsageWithNative: jest.fn((payload: unknown) => payload),
-    normalizeResponsesToolCallArgumentsForClientWithNative: jest.fn((payload: unknown) => payload),
-    parseRespFormatEnvelopeWithNative: jest.fn((payload: unknown) => payload),
-    resolveProviderResponseContextHelpersWithNative: jest.fn(({ context, entryEndpoint }: { context: Record<string, unknown>; entryEndpoint?: string }) => ({
+        });
+      },
+      materializeProviderResponseSsePayloadJson: (inputJson: string) => JSON.stringify(
+        materializeProviderResponseSsePayloadWithNativeMock(JSON.parse(inputJson))
+      ),
+      resolveProviderResponseContextHelpersJson: (
+        contextJson: string,
+        _legacyFollowupMarkerJson: string,
+        entryEndpointJson: string
+      ) => {
+        const context = JSON.parse(contextJson) as Record<string, unknown>;
+        const entryEndpoint = JSON.parse(entryEndpointJson) as string | null;
+        return JSON.stringify({
       isServerToolFollowup: false,
       toolSurfaceShadowEnabled: false,
       clientProtocol: entryEndpoint === '/v1/responses' ? 'openai-responses' : 'openai-chat',
       clientFacingRequestId: typeof context.requestId === 'string' ? context.requestId : 'req-test'
-    }))
+        });
+      },
+      planChatProcessSessionUsageJson: (inputJson: string) => JSON.stringify(
+        planChatProcessSessionUsageMock(JSON.parse(inputJson)) ?? null
+      ),
+      buildSseFramesFromJsonJson: (inputJson: string) => {
+        const input = JSON.parse(inputJson) as {
+          protocol: string;
+          response: unknown;
+          request_id?: string;
+          model?: string;
+        };
+        return JSON.stringify(buildSseFramesFromJsonWithNativeMock({
+          protocol: input.protocol,
+          response: input.response,
+          requestId: input.request_id,
+          model: input.model,
+        }));
+      },
+      projectMetadataWritePlanToRuntimeControlWritePlanJson: (inputJson: string) => {
+        const { plan } = JSON.parse(inputJson) as { plan: Record<string, unknown> };
+        const runtimeControl = Object.fromEntries(
+          Object.entries(plan).filter(([key, value]) => key !== 'learnedNote' && value !== null && value !== undefined)
+        );
+        return JSON.stringify({
+          runtimeControl: Object.keys(runtimeControl).length > 0 ? runtimeControl : null
+        });
+      },
+    }),
   })
 );
 
@@ -96,36 +138,6 @@ jest.unstable_mockModule(
     responsesConversationStore: {
       getDebugStats: jest.fn(() => ({})),
     },
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js',
-  () => ({
-    planChatProcessSessionUsage: planChatProcessSessionUsageMock,
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
-  () => ({
-    readRuntimeMetadata: jest.fn(() => ({})),
-    ensureRuntimeMetadata: jest.fn((carrier: Record<string, unknown>) => {
-      const existing = carrier.__rt;
-      if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
-        return existing;
-      }
-      carrier.__rt = {};
-      return carrier.__rt as Record<string, unknown>;
-    }),
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.js',
-  () => ({
-    buildSseFramesFromJsonWithNative: buildSseFramesFromJsonWithNativeMock,
-    buildReadableFromSseFrames: (frames: string[]) => Readable.from(frames),
   })
 );
 

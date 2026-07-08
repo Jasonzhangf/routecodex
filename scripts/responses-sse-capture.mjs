@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import OpenAI from 'openai';
+import { buildJsonFromSseWithNative, collectSseBodyText } from './helpers/sse-direct-native.mjs';
 
 const BASEDIR = process.cwd();
 const CODEx_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
@@ -106,9 +107,7 @@ async function main() {
   const httpPath = pathToFileURL(path.join(BASEDIR, 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
   const bridgePath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-  const sseLibPath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
   const { buildResponsesRequestFromChat, buildChatResponseFromResponses } = await import(bridgePath);
-  const { collectSseBodyText, buildJsonFromSseWithNative } = await import(sseLibPath);
 
   // headers
   const headers = { 'Content-Type': 'application/json', 'OpenAI-Beta': 'responses-2024-12-17' };

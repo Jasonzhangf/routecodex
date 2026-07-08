@@ -11,14 +11,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, execSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { buildSingleGroupV2VirtualRouter } from './verification/build-v2-routing-config.mjs';
+import { buildJsonFromSseWithNative } from './helpers/sse-direct-native.mjs';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), '..');
-const require = createRequire(import.meta.url);
 
 const state = {
   serverProc: null,
@@ -29,7 +28,6 @@ const state = {
   tempDir: '',
 };
 let shuttingDown = false;
-let responsesSseModule = null;
 let requestAuthHeaderValue = 'Bearer install-verify';
 const INSTALL_VERIFY_MOCK_SAMPLE_REQ_ID = 'openai-responses-fai.default.gpt-5.1-gpt-5.1-20251211T125710-001';
 
@@ -73,52 +71,12 @@ function loadManualSample(kind) {
   return readJson(filePath);
 }
 
-async function importResponsesSseModule() {
-  if (responsesSseModule) return responsesSseModule;
-  const npmSpecifiers = [
-    'rcc-llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js'
-  ];
-  const resolvedNpmSpecifiers = npmSpecifiers
-    .map((specifier) => {
-      try {
-        return pathToFileURL(require.resolve(specifier)).href;
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
-  const localSpecifiers = npmSpecifiers
-    .map((specifier) => {
-      const relative = specifier.replace('rcc-llmswitch-core/dist/', '');
-      const localPath = path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', relative);
-      if (fs.existsSync(localPath)) {
-        return pathToFileURL(localPath).href;
-      }
-      return null;
-    })
-    .filter(Boolean);
-  for (const specifier of [...resolvedNpmSpecifiers, ...localSpecifiers]) {
-    try {
-      responsesSseModule = await import(specifier);
-      return responsesSseModule;
-    } catch (error) {
-      if (resolvedNpmSpecifiers.includes(specifier)) continue;
-      console.warn('⚠️ 加载 Responses SSE 模块失败:', error instanceof Error ? error.message : error);
-    }
-  }
-  throw new Error('无法找到 llmswitch-core public SSE native bridge 导出');
-}
-
 async function parseResponsesSsePayload(rawText) {
   if (!rawText || !rawText.trim()) {
     throw new Error('Responses SSE 响应为空');
   }
-  const mod = await importResponsesSseModule();
-  if (typeof mod.buildJsonFromSseWithNative !== 'function') {
-    throw new Error('llmswitch-core native SSE runtime 缺少 buildJsonFromSseWithNative 导出');
-  }
   const normalized = rawText.endsWith('\n\n') ? rawText : `${rawText}\n\n`;
-  const parsed = mod.buildJsonFromSseWithNative({
+  const parsed = buildJsonFromSseWithNative({
     protocol: 'openai-responses',
     bodyText: normalized,
     requestId: `install-verify-${Date.now()}`

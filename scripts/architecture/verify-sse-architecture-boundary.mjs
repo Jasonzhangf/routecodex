@@ -74,38 +74,38 @@ for (const forbidden of [
   }
 }
 
-const nativeBridgePath = 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts';
-const nativeBridge = read(nativeBridgePath);
-for (const required of [
-  'feature_id: sse.runtime_rust_dispatch',
-  'buildSseFramesFromJsonWithNative',
-  'buildJsonFromSseWithNative',
-  'buildReadableFromSseFrames',
-  'collectSseBodyText',
-  'readNativeFunction',
-  'buildSseFramesFromJsonJson',
-  'buildJsonFromSseJson',
-]) {
-  if (!nativeBridge.includes(required)) {
-    failures.push(`${nativeBridgePath}: missing native bridge marker ${required}`);
-  }
+const deletedNativeBridgePath = 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts';
+if (fs.existsSync(path.join(root, deletedNativeBridgePath))) {
+  failures.push(`${deletedNativeBridgePath}: retired SSE native TS wrapper must stay physically deleted`);
 }
-for (const forbidden of [
-  '../../../sse/',
-  '../../sse/',
-  '../sse/',
-  'new ChatJsonToSseConverter',
-  'new ResponsesJsonToSseConverter',
-  'new AnthropicJsonToSseConverter',
-  'new GeminiJsonToSseConverter',
-  'new ChatSseToJsonConverter',
-  'new ResponsesSseToJsonConverter',
-  'new AnthropicSseToJsonConverter',
-  'new GeminiSseToJsonConverter',
-  'defaultSseCodecRegistry',
+
+for (const [ownerPath, requiredMarkers] of [
+  ['src/modules/llmswitch/bridge/provider-response-converter-host.ts', [
+    'getRouterHotpathJsonBindingSync',
+    'buildSseFramesFromJsonJson',
+    'buildReadableFromSseFrames',
+  ]],
+  ['src/modules/llmswitch/bridge/runtime-integrations.ts', [
+    'getRouterHotpathJsonBindingSync',
+    'buildJsonFromSseJson',
+    'collectSseBodyText',
+  ]],
+  ['scripts/helpers/sse-direct-native.mjs', [
+    'router_hotpath_napi.node',
+    'buildSseFramesFromJsonJson',
+    'buildJsonFromSseJson',
+  ]],
+  ['tests/sharedmodule/helpers/sse-direct-native.ts', [
+    'router_hotpath_napi.node',
+    'buildSseFramesFromJsonJson',
+    'buildJsonFromSseJson',
+  ]],
 ]) {
-  if (nativeBridge.includes(forbidden)) {
-    failures.push(`${nativeBridgePath}: native bridge must not import/use TS SSE runtime wrapper: ${forbidden}`);
+  const source = read(ownerPath);
+  for (const marker of requiredMarkers) {
+    if (!source.includes(marker)) {
+      failures.push(`${ownerPath}: missing direct native SSE marker ${marker}`);
+    }
   }
 }
 

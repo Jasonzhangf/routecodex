@@ -1721,5 +1721,12 @@
 # 2026-07-09: SSE public index TS shell is retired
 
 - `sharedmodule/llmswitch-core/src/sse/index.ts` is physically deleted. Do not restore the public `sseToJson` / `jsonToSseFrames` aliases or `dist/sse/index.js` script dependency.
-- Scripts/tests needing SSE conversion should call `sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js` or source `native-sse-runtime.ts` directly and use `buildJsonFromSseWithNative` / `buildSseFramesFromJsonWithNative` / `collectSseBodyText`.
+- Scripts/tests needing SSE conversion should call direct `router_hotpath_napi.node` helpers; do not route through public `dist/sse/index.js`.
 - Current shell audit after this deletion is `prodTsShellCount=73`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Native SSE runtime TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts` is physically deleted. Do not restore `buildJsonFromSseWithNative` / `buildSseFramesFromJsonWithNative` / `collectSseBodyText` as a sharedmodule runtime wrapper surface.
+- Script evidence uses `scripts/helpers/sse-direct-native.mjs`; test evidence uses `tests/sharedmodule/helpers/sse-direct-native.ts`; both load `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node` and call `buildSseFramesFromJsonJson` / `buildJsonFromSseJson` directly.
+- Runtime ownership remains Rust `sse_runtime_dispatch.rs`; host IO callsites are `src/modules/llmswitch/bridge/provider-response-converter-host.ts` for JSON->SSE frames and `src/modules/llmswitch/bridge/runtime-integrations.ts` for SSE->JSON body collection/materialization.
+- Current shell audit after this deletion is `prodTsShellCount=72`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
