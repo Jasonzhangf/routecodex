@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { convertAnthropicRequest } from './helpers/anthropic-codec-direct-native.mjs';
 
 async function main() {
   // Input: an Anthropics-style Messages request JSON
@@ -18,18 +18,12 @@ async function main() {
   const raw = JSON.parse(txt);
   const requestId = raw?.requestId || `anthreq_${Date.now()}`;
 
-  const codecUrl = pathToFileURL(path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'v2', 'conversion', 'codecs', 'anthropic-openai-codec.js')).href;
-  const { AnthropicOpenAIConversionCodec } = await import(codecUrl);
-  const codec = new AnthropicOpenAIConversionCodec({});
-
-  const profile = { outgoingProtocol: 'openai-chat' };
   const context = { requestId, endpoint: '/v1/messages', entryEndpoint: '/v1/messages', metadata: {} };
 
-  const normalized = await codec.convertRequest(raw, profile, context);
+  const normalized = convertAnthropicRequest(raw, context);
   const outPath = path.join(outDir, `replay_${requestId}_convertRequest.json`);
   await fs.writeFile(outPath, JSON.stringify(normalized, null, 2), 'utf-8');
   console.log('Anthropic convertRequest done; output written to', outPath);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
-

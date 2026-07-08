@@ -1,9 +1,10 @@
 import {
-  AnthropicOpenAIConversionCodec,
-  buildAnthropicFromOpenAIChat,
-  buildAnthropicRequestFromOpenAIChat,
-  buildOpenAIChatFromAnthropic
-} from '../anthropic-openai-codec.js';
+  buildAnthropicFromOpenAIChatDirectNative as buildAnthropicFromOpenAIChat,
+  buildAnthropicFromOpenAIChatDirectNative as buildAnthropicRequestFromOpenAIChat,
+  buildOpenAIChatFromAnthropicDirectNative as buildOpenAIChatFromAnthropic,
+  convertAnthropicRequestDirectNative,
+  convertAnthropicResponseDirectNative,
+} from '../../../../../../tests/sharedmodule/helpers/anthropic-codec-direct-native.js';
 
 function findAnthropicToolOrderingViolation(messages: unknown): string | null {
   if (!Array.isArray(messages)) return null;
@@ -45,19 +46,11 @@ function findAnthropicToolOrderingViolation(messages: unknown): string | null {
   return pending.size > 0 ? 'dangling_tool_use_at_end' : null;
 }
 
-const profile = {
-  id: 'anthropic-openai-test',
-  incomingProtocol: 'anthropic-messages',
-  outgoingProtocol: 'openai-chat',
-  codec: 'anthropic-openai'
-} as any;
-
-describe('anthropic-openai-codec native wrapper', () => {
+describe('anthropic-openai codec direct native owner', () => {
   test('writes anthropicToolNameMap and maps anthropic tools into OpenAI chat request', async () => {
-    const codec = new AnthropicOpenAIConversionCodec({});
     const context = { requestId: 'req_codec_alias', metadata: {} } as any;
 
-    const result = await codec.convertRequest(
+    const result = convertAnthropicRequestDirectNative(
       {
         model: 'claude-3-7-sonnet',
         system: [{ type: 'text', text: 'You are helpful' }],
@@ -87,7 +80,6 @@ describe('anthropic-openai-codec native wrapper', () => {
           }
         ]
       },
-      profile,
       context
     );
 
@@ -273,8 +265,7 @@ describe('anthropic-openai-codec native wrapper', () => {
   });
 
   test('converts governed chat response back to anthropic using stored alias map', async () => {
-    const codec = new AnthropicOpenAIConversionCodec({});
-    const result = await codec.convertResponse(
+    const result = convertAnthropicResponseDirectNative(
       {
         id: 'chatcmpl_1',
         model: 'gpt-4.1',
@@ -303,7 +294,6 @@ describe('anthropic-openai-codec native wrapper', () => {
           completion_tokens: 6
         }
       },
-      profile,
       {
         requestId: 'req_codec_response',
         entryEndpoint: '/v1/messages',

@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
+import { buildOpenAIChatFromAnthropic } from '../helpers/anthropic-codec-direct-native.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
@@ -130,24 +131,20 @@ function resolveEntryEndpoint(doc, fallback = '/v1/messages') {
 }
 
 async function loadCoreModules() {
-  const anthPath = path.join(CORE_DIST, 'conversion', 'codecs', 'anthropic-openai-codec.js');
   const respPath = path.join(CORE_DIST, 'conversion', 'responses', 'responses-openai-bridge.js');
-  const anth = await import(pathToFileURL(anthPath).href);
   const resp = await import(pathToFileURL(respPath).href);
   const required = [
-    'buildOpenAIChatFromAnthropic',
     'buildResponsesRequestFromChat',
     'buildChatRequestFromResponses',
     'captureResponsesContext'
   ];
-  if (typeof anth.buildOpenAIChatFromAnthropic !== 'function') throw new Error('buildOpenAIChatFromAnthropic missing');
   if (typeof resp.buildResponsesRequestFromChat !== 'function' ||
       typeof resp.buildChatRequestFromResponses !== 'function' ||
       typeof resp.captureResponsesContext !== 'function') {
     throw new Error('Responses bridge helpers missing');
   }
   return {
-    buildOpenAIChatFromAnthropic: anth.buildOpenAIChatFromAnthropic,
+    buildOpenAIChatFromAnthropic,
     buildResponsesRequestFromChat: resp.buildResponsesRequestFromChat,
     buildChatRequestFromResponses: resp.buildChatRequestFromResponses,
     captureResponsesContext: resp.captureResponsesContext

@@ -2,7 +2,10 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import {
+  convertAnthropicRequest,
+  convertAnthropicResponse,
+} from './helpers/anthropic-codec-direct-native.mjs';
 
 async function pickLatestFinalizePre() {
   const dir = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
@@ -34,10 +37,6 @@ async function main() {
   const anthMsg = wrap?.inputData || wrap?.data || wrap; // Anthropic message shape
   const requestId = (wrap?.context?.requestId) || wrap?.requestId || `anthres_${Date.now()}`;
 
-  const codecUrl = pathToFileURL(path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'v2', 'conversion', 'codecs', 'anthropic-openai-codec.js')).href;
-  const { AnthropicOpenAIConversionCodec } = await import(codecUrl);
-  const codec = new AnthropicOpenAIConversionCodec({});
-
   // 按 v3 回环测试同样路径执行：
   // AnthropicMessage -> AnthReq-like -> ChatRequest -> fake ChatResponse -> AnthropicMessage'
   const anthReqLike = {
@@ -50,14 +49,13 @@ async function main() {
     ]
   };
 
-  const profileReq = { id: 'anthropic-standard', from: 'anthropic-messages', to: 'openai-chat' };
   const ctxReq = {
     endpoint: 'anthropic',
     entryEndpoint: '/v1/messages',
     stream: false,
     requestId
   };
-  const chatReq = await codec.convertRequest(anthReqLike, profileReq, ctxReq);
+  const chatReq = convertAnthropicRequest(anthReqLike, ctxReq);
 
   const mapStopToFinish = (sr) => {
     const v = String(sr || '');
@@ -83,7 +81,6 @@ async function main() {
     usage: {}
   };
 
-  const profileResp = { id: 'anthropic-standard', from: 'openai-chat', to: 'anthropic-messages' };
   const ctxResp = {
     endpoint: 'anthropic',
     entryEndpoint: '/v1/messages',
@@ -91,7 +88,7 @@ async function main() {
     requestId: `${requestId}_back`
   };
 
-  const normalized = await codec.convertResponse(fakeChatResp, profileResp, ctxResp);
+  const normalized = convertAnthropicResponse(fakeChatResp, ctxResp);
   const outPath = path.join(outDir, `replay_${requestId}_convertResponse.json`);
   await fs.writeFile(outPath, JSON.stringify(normalized, null, 2), 'utf-8');
   console.log('Anthropic convertResponse done; output written to', outPath);

@@ -4,8 +4,11 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { pathToFileURL } from 'url';
 import { buildJsonFromSseWithNative } from './helpers/sse-direct-native.mjs';
+import {
+  buildAnthropicRequestFromOpenAIChat,
+  buildOpenAIChatFromAnthropic,
+} from './helpers/anthropic-codec-direct-native.mjs';
 
 const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const OUT_DIR = path.join(os.homedir(), '.routecodex', 'logs', 'anthropic-sse');
@@ -57,8 +60,6 @@ async function main() {
     tool_choice: 'auto'
   };
 
-  const codecPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js')).href;
-  const { buildAnthropicRequestFromOpenAIChat, buildOpenAIChatFromAnthropic } = await import(codecPath);
   const req = buildAnthropicRequestFromOpenAIChat(chat);
   req.model = model;
   req.stream = true;

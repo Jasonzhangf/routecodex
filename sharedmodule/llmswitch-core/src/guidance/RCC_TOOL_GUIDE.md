@@ -97,7 +97,7 @@
 - Responses 桥接：`v2/conversion/responses/responses-openai-bridge.ts`
   - Responses→Chat 请求适配入口直接使用 bridge owner；请求语义继续下沉到 Rust req_inbound / req_chatprocess native 边界，禁止恢复 shared adapter 中转层。
 - OpenAI 编解码：Rust/NAPI `runOpenaiOpenaiRequestCodecJson`、`runOpenaiOpenaiResponseCodecJson`
-- Anthropic 编解码：`v2/conversion/codecs/anthropic-openai-codec.ts`
+- Anthropic 编解码：Rust/NAPI `buildOpenaiChatFromAnthropicJson`、`buildAnthropicFromOpenaiChatJson`
 
 ## 10. 端到端流程简述（CCR 对齐）
 1) Server 接收原始请求 → 交由 llmswitch-core v2 统一入口。

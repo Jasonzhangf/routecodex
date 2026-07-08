@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { buildOpenAIChatFromAnthropicFull } from '../helpers/anthropic-codec-direct-native.mjs';
 
 const SAMPLES_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'anthropic-messages');
 const RESPONSE_SUFFIX = '_provider-response.json';
@@ -58,23 +59,15 @@ function shallowHash(value) {
 async function loadCoreHelpers() {
   const distRoot = path.resolve('sharedmodule', 'llmswitch-core', 'dist');
   const nativeRespPath = path.join(distRoot, 'native', 'router-hotpath', 'native-hub-pipeline-resp-semantics.js');
-  const codecPath = path.join(distRoot, 'conversion', 'codecs', 'anthropic-openai-codec.js');
   if (!fs.existsSync(nativeRespPath)) {
     throw new Error('sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js 不存在，请先运行 npm run build:dev');
   }
-  if (!fs.existsSync(codecPath)) {
-    throw new Error('sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js 不存在');
-  }
   const nativeResp = await import(pathToFileURL(nativeRespPath).href);
-  const codec = await import(pathToFileURL(codecPath).href);
   if (
     typeof nativeResp.buildAnthropicResponseFromChatFullWithNative !== 'function' ||
     typeof nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative !== 'function'
   ) {
     throw new Error('llmswitch-core 缺少 native anthropic response 构造辅助函数');
-  }
-  if (typeof codec.buildOpenAIChatFromAnthropicFull !== 'function') {
-    throw new Error('anthropic-openai-codec 缺少 buildOpenAIChatFromAnthropicFull');
   }
   return {
     buildAnthropicResponseFromChat: (chatResponse, options) => {
@@ -92,7 +85,7 @@ async function loadCoreHelpers() {
       const parsed = JSON.parse(output);
       return JSON.parse(parsed.result);
     },
-    buildOpenAIChatFromAnthropicFull: codec.buildOpenAIChatFromAnthropicFull
+    buildOpenAIChatFromAnthropicFull
   };
 }
 

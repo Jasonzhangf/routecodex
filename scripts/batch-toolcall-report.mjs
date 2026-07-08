@@ -7,6 +7,10 @@ import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { buildJsonFromSseWithNative, collectSseBodyText } from './helpers/sse-direct-native.mjs';
+import {
+  buildAnthropicRequestFromOpenAIChat,
+  buildOpenAIChatFromAnthropic,
+} from './helpers/anthropic-codec-direct-native.mjs';
 
 const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const RESP_SAMPLES_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
@@ -127,8 +131,6 @@ async function runAnthropic(providerId='glm-anthropic') {
     model = route?.split('.')?.[1] || 'glm-4.6';
   }
   if (!apiKey) throw new Error('no apikey');
-  const codecPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js')).href;
-  const { buildAnthropicRequestFromOpenAIChat, buildOpenAIChatFromAnthropic } = await import(codecPath);
   const chat = { model:'dummy', messages:[{ role:'user', content:'Using tools, call add with {"a":2,"b":3}. Return only a function call.' }], tools:[{ type:'function', function:{ name:'add', description:'add two numbers', parameters:{ type:'object', properties:{ a:{type:'number'}, b:{type:'number'}}, required:['a','b'] } } }], tool_choice:'auto' };
   const req = buildAnthropicRequestFromOpenAIChat(chat);
   req.model = model; req.max_tokens = 256; req.stream = true;

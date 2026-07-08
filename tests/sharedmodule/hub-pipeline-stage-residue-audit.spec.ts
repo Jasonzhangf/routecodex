@@ -4278,7 +4278,11 @@ describe('hub pipeline stage residue audit', () => {
       if (!fs.existsSync(rootPath)) continue;
       for (const candidate of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
         const relativePath = path.relative(repoRoot, candidate);
-        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') continue;
+        if (
+          relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts'
+          || relativePath === 'docs/architecture/function-map.yml'
+          || relativePath === 'docs/architecture/verification-map.yml'
+        ) continue;
         if (relativePath === 'tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts') continue;
         if (relativePath === 'scripts/architecture/verify-sse-architecture-boundary.mjs') continue;
         if (relativePath === 'docs/architecture/function-map.yml') continue;
@@ -4549,6 +4553,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/bridge-instructions.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/bridge-policies.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/codecs/openai-openai-codec.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/compaction-detect.d.ts',
@@ -4605,9 +4610,48 @@ describe('hub pipeline stage residue audit', () => {
       if (!fs.existsSync(rootPath)) continue;
       for (const filePath of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
         const relativePath = path.relative(repoRoot, filePath);
-        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') continue;
+        if (
+          relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts'
+          || relativePath === 'docs/architecture/function-map.yml'
+          || relativePath === 'docs/architecture/verification-map.yml'
+        ) continue;
         const source = fs.readFileSync(filePath, 'utf8');
         if (source.includes('openai-openai-codec')) {
+          findings.push(relativePath);
+        }
+      }
+    }
+
+    expect(fs.existsSync(shellPath)).toBe(false);
+    expect(findings).toEqual([]);
+  });
+
+  it('Anthropic OpenAI codec TS shell must stay physically deleted', () => {
+    const repoRoot = process.cwd();
+    const shellPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts'
+    );
+    const refRoots = [
+      'sharedmodule/llmswitch-core/src',
+      'src',
+      'scripts',
+      'tests',
+      'docs/architecture',
+    ];
+    const findings: string[] = [];
+    for (const root of refRoots) {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) continue;
+      for (const filePath of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
+        const relativePath = path.relative(repoRoot, filePath);
+        if (
+          relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts'
+          || relativePath === 'docs/architecture/function-map.yml'
+          || relativePath === 'docs/architecture/verification-map.yml'
+        ) continue;
+        const source = fs.readFileSync(filePath, 'utf8');
+        if (source.includes('anthropic-openai-codec')) {
           findings.push(relativePath);
         }
       }

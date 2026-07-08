@@ -8,6 +8,10 @@ import path from 'path';
 import os from 'os';
 import { pathToFileURL } from 'url';
 import { ProviderFactory } from '../dist/providers/core/runtime/provider-factory.js';
+import {
+  buildAnthropicRequestFromOpenAIChat,
+  buildOpenAIChatFromAnthropic,
+} from './helpers/anthropic-codec-direct-native.mjs';
 
 const CODEx_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
 const RESPONSES_SAMPLE_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
@@ -23,23 +27,19 @@ const TARGET_PROTOCOLS = new Set(
 );
 
 const baseDir = process.cwd();
-const anthropicCodecPath = pathToFileURL(path.resolve(baseDir, 'sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js')).href;
 const responsesBridgePath = pathToFileURL(path.resolve(baseDir, 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
 
 let conversionsLoaded = null;
 let responsesInstructionsCache = null;
 async function getConversions() {
   if (conversionsLoaded) return conversionsLoaded;
-  const [anthModule, respModule] = await Promise.all([
-    import(anthropicCodecPath).catch(() => null),
-    import(responsesBridgePath).catch(() => null)
-  ]);
-  if (!anthModule || !respModule) {
+  const respModule = await import(responsesBridgePath).catch(() => null);
+  if (!respModule) {
     throw new Error('Conversion module missing. 请先构建 sharedmodule/llmswitch-core');
   }
   conversionsLoaded = {
-    buildAnthropicRequestFromOpenAIChat: anthModule.buildAnthropicRequestFromOpenAIChat,
-    buildOpenAIChatFromAnthropic: anthModule.buildOpenAIChatFromAnthropic,
+    buildAnthropicRequestFromOpenAIChat,
+    buildOpenAIChatFromAnthropic,
     buildResponsesRequestFromChat: respModule.buildResponsesRequestFromChat,
     buildChatResponseFromResponses: respModule.buildChatResponseFromResponses
   };

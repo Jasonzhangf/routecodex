@@ -1738,3 +1738,10 @@
 - Req-05 mainline owner is Rust `hub_pipeline_lib/engine.rs::execute` -> `req_outbound_stage3_compat::run_req_outbound_stage3_compat`; JSON NAPI entrypoints are evidence surfaces, not runtime TS owners.
 - Chat semantics tests using Rust HubPipeline must provide explicit minimal Virtual Router config, default provider route, and `metadataCenterSnapshot.runtimeControl.providerProtocol`; Rust VR correctly fail-fasts on missing routing config, missing metadataCenterSnapshot, or empty provider pool.
 - Current shell audit after this deletion is `prodTsShellCount=71`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Anthropic OpenAI codec TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts` is physically deleted. Do not restore `AnthropicOpenAIConversionCodec`, `buildOpenAIChatFromAnthropic`, `buildAnthropicRequestFromOpenAIChat`, or wrapper-local context map state as runtime TS ownership.
+- Tests/scripts needing Anthropic<->OpenAI codec evidence should call direct Rust/NAPI exports through helper code. Current direct exports are `buildOpenaiChatFromAnthropicJson` and `buildAnthropicFromOpenaiChatJson`.
+- Anthropic codec truth remains Rust `anthropic_openai_codec.rs`; the helper files under `tests/sharedmodule/helpers` and `scripts/helpers` are evidence/CLI glue only, not runtime owners.
+- Current shell audit after this deletion is `prodTsShellCount=70`, `shellsWithProdImporters=63`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.

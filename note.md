@@ -1,3 +1,10 @@
+# 2026-07-09: Anthropic OpenAI codec TS shell deleted
+
+- Scope: delete zero-production-import `sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts` after direct Rust/NAPI exports covered its request/response conversion evidence.
+- Change: tests and replay scripts now use direct native helpers (`tests/sharedmodule/helpers/anthropic-codec-direct-native.ts`, `scripts/helpers/anthropic-codec-direct-native.mjs`) calling `buildOpenaiChatFromAnthropicJson` and `buildAnthropicFromOpenaiChatJson`; no runtime TS codec wrapper remains.
+- Map update: function/verification maps mark the retired codec shell forbidden and require direct `router_hotpath_napi` evidence.
+- Verification PASS: script syntax checks for migrated Anthropic/replay scripts; focused Jest 199/199; `verify:function-map-compile-gate`; strict shell reference audit (`prodTsShellCount=70`, `shellsWithProdImporters=63`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); sharedmodule/root tsc; exact source ref scan only finds residue/map forbidden-path references; `git diff --check`.
+
 # 2026-07-09: Anthropic response runtime shell deleted
 
 - Scope: continue llmswitch-core TS shell closeout by deleting `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts`.

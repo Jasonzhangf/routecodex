@@ -20,6 +20,11 @@ import path from 'path';
 import os from 'os';
 import url from 'url';
 import { writeErrorSampleJson } from './lib/errorsamples.mjs';
+import {
+  buildAnthropicRequestFromOpenAIChat,
+  convertAnthropicRequest,
+  convertAnthropicResponse,
+} from './helpers/anthropic-codec-direct-native.mjs';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,31 +119,14 @@ async function main() {
   const anthReq = extractAnthRequestFromServerPre(reqFile);
   const anthResp = extractAnthResponseFromProviderPost(respFile);
 
-  // 动态引入 llmswitch-core：仅允许 sharedmodule/llmswitch-core/dist
-  const root = path.resolve(__dirname, '..');
-  const localCore = path.join(root, 'sharedmodule', 'llmswitch-core', 'dist');
-  const codecPath = path.join(localCore, 'v2', 'conversion', 'codecs', 'anthropic-openai-codec.js');
-  let coreMod = null;
-  try {
-    coreMod = await import(url.pathToFileURL(codecPath).href);
-  } catch {
-    console.error('无法定位 llmswitch-core Anthropic 编解码实现。请先在 sharedmodule/llmswitch-core 运行 `npm run build`。');
-    process.exit(3);
-  }
-  const Codec = coreMod.AnthropicOpenAIConversionCodec;
-  const buildAnthReq = coreMod.buildAnthropicRequestFromOpenAIChat;
-
-  const codec = new Codec({});
-  await codec.initialize();
-
   // 请求：A 直通 vs B 编解码
-  const chatReqReqSide = await codec.convertRequest(anthReq, { codec: 'anthropic-openai' }, {
+  const chatReqReqSide = convertAnthropicRequest(anthReq, {
     endpoint: 'messages',
     entryEndpoint: '/v1/messages',
     stream: false,
     requestId: 'compare-req'
   });
-  const anthReqChat = buildAnthReq(chatReqReqSide);
+  const anthReqChat = buildAnthropicRequestFromOpenAIChat(chatReqReqSide);
 
   const viewReqA = viewRequestAnth(anthReq);
   const viewReqB = viewRequestAnth(anthReqChat);
@@ -156,14 +144,13 @@ async function main() {
     ]
   };
 
-  const profileReq = { id: 'anthropic-standard', from: 'anthropic-messages', to: 'openai-chat' };
   const ctxReq = {
     endpoint: 'anthropic',
     entryEndpoint: '/v1/messages',
     stream: false,
     requestId: 'compare-resp-req'
   };
-  const chatReqRespSide = await codec.convertRequest(anthReqLike, profileReq, ctxReq);
+  const chatReqRespSide = convertAnthropicRequest(anthReqLike, ctxReq);
 
   const mapStopToFinish = (sr) => {
     const v = String(sr || '');
@@ -189,14 +176,13 @@ async function main() {
     usage: {}
   };
 
-  const profileResp = { id: 'anthropic-standard', from: 'openai-chat', to: 'anthropic-messages' };
   const ctxResp = {
     endpoint: 'anthropic',
     entryEndpoint: '/v1/messages',
     stream: false,
     requestId: 'compare-resp-back'
   };
-  const anthRespChat = await codec.convertResponse(fakeChatResp, profileResp, ctxResp);
+  const anthRespChat = convertAnthropicResponse(fakeChatResp, ctxResp);
 
   const viewRespA = viewResponseAnth(anthResp);
   const viewRespB = viewResponseAnth(anthRespChat);
