@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, test, jest } from '@jest/globals';
 
 const appendServertoolMatchSkippedProgressEventMock = jest.fn();
 const logProgressMock = jest.fn();
-const runPrimaryServerToolEngineSelectionMock = jest.fn();
 const readRuntimeControlFromAnyBoundMetadataCenterMock = jest.fn(() => null);
 const readRuntimeMetadataSnapshotFromAnyBoundMetadataCenterMock = jest.fn(() => null);
 const buildServertoolPostflightObservationSummaryWithNativeMock = jest.fn();
@@ -13,6 +12,13 @@ const resolveServertoolEnginePostflightPayloadWithNativeMock = jest.fn();
 const resolveServertoolEngineSkipDecisionWithNativeMock = jest.fn();
 const planStoplessExecutionWithNativeMock = jest.fn();
 const orchestrateServertoolEngineMock = jest.fn();
+const planEngineSelectionStartWithNativeMock = jest.fn(() => ({
+  overrides: {},
+  primaryAutoHookIds: []
+}));
+const resolveEngineSelectionAfterRunWithNativeMock = jest.fn(() => ({
+  rerunOverrides: null
+}));
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js',
@@ -24,13 +30,6 @@ jest.unstable_mockModule(
       logAutoHookTrace: jest.fn(),
       logStopCompare: jest.fn()
     }))
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/engine-selection-block.js',
-  () => ({
-    runPrimaryServerToolEngineSelection: runPrimaryServerToolEngineSelectionMock
   })
 );
 
@@ -73,6 +72,9 @@ jest.unstable_mockModule(
     detectProviderResponseShapeWithNative: jest.fn(() => 'chat_completion'),
     extractServertoolResponseStageOrchestrationShellResultWithNative: jest.fn((output: any) => output.shellResult),
     materializeServertoolResponseStageOrchestrationOutputWithNative: jest.fn(),
+    readServertoolPrimaryAutoHookIdsWithNative: jest.fn(() => []),
+    planEngineSelectionStartWithNative: planEngineSelectionStartWithNativeMock,
+    resolveEngineSelectionAfterRunWithNative: resolveEngineSelectionAfterRunWithNativeMock,
     planServertoolEngineRuntimeActionWithNative: planServertoolEngineRuntimeActionWithNativeMock,
     planServertoolEnginePreflightWithNative: jest.fn(() => ({
       action: 'continue_to_engine',
@@ -115,7 +117,7 @@ const { runServerToolOrchestrationShell } = await import(
 );
 
 function setSkippedEngineResult(chat: Record<string, unknown> = { id: 'chat-skip' }): void {
-  runPrimaryServerToolEngineSelectionMock.mockResolvedValue({
+  orchestrateServertoolEngineMock.mockResolvedValue({
     mode: 'passthrough',
     finalChatResponse: chat,
     execution: null,
@@ -138,7 +140,7 @@ function setHitEngineResult(args: {
   projectedFlowId?: string;
 } = {}): void {
   const execution = args.execution ?? { flowId: 'flow-match-hit' };
-  runPrimaryServerToolEngineSelectionMock.mockResolvedValue({
+  orchestrateServertoolEngineMock.mockResolvedValue({
     mode: 'tool_flow',
     finalChatResponse: args.finalChatResponse ?? { id: 'chat-hit' },
     execution,
@@ -187,6 +189,13 @@ describe('engine-observation-shell', () => {
     readRuntimeControlFromAnyBoundMetadataCenterMock.mockReturnValue(null);
     readRuntimeMetadataSnapshotFromAnyBoundMetadataCenterMock.mockReturnValue(null);
     buildServertoolPostflightObservationSummaryWithNativeMock.mockReturnValue({});
+    planEngineSelectionStartWithNativeMock.mockReturnValue({
+      overrides: {},
+      primaryAutoHookIds: []
+    });
+    resolveEngineSelectionAfterRunWithNativeMock.mockReturnValue({
+      rerunOverrides: null
+    });
     setSkippedEngineResult();
   });
 

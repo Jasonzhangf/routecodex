@@ -15,12 +15,18 @@ const planServertoolEngineTriggerObservationWithNativeMock = jest.fn(() => ({
   logStopEntry: null,
   logStopCompare: null
 }));
-const runPrimaryServerToolEngineSelectionMock = jest.fn();
 const logStopEntryMock = jest.fn();
 const logProgressMock = jest.fn();
 const logAutoHookTraceMock = jest.fn();
 const logStopCompareMock = jest.fn();
 const orchestrateServertoolEngineMock = jest.fn();
+const planEngineSelectionStartWithNativeMock = jest.fn(() => ({
+  overrides: {},
+  primaryAutoHookIds: []
+}));
+const resolveEngineSelectionAfterRunWithNativeMock = jest.fn(() => ({
+  rerunOverrides: null
+}));
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
@@ -50,8 +56,8 @@ jest.unstable_mockModule(
     shouldUseServertoolGoldProgressHighlightWithNative: jest.fn(() => false),
     containsSyntheticRouteCodexControlTextWithNative: containsSyntheticRouteCodexControlTextMock,
     readServertoolPrimaryAutoHookIdsWithNative: jest.fn(() => []),
-    planEngineSelectionStartWithNative: jest.fn(() => ({ overrides: {}, primaryAutoHookIds: [] })),
-    resolveEngineSelectionAfterRunWithNative: jest.fn(() => ({ rerunOverrides: null })),
+    planEngineSelectionStartWithNative: planEngineSelectionStartWithNativeMock,
+    resolveEngineSelectionAfterRunWithNative: resolveEngineSelectionAfterRunWithNativeMock,
     planServertoolResponseStageGateWithNative: jest.fn(),
     runServertoolResponseStageWithNative: jest.fn(() => ({ toolCalls: [] })),
     readServertoolEntryBaseObjectWithNative: jest.fn((input: any) => input?.chatResponse ?? {}),
@@ -101,7 +107,7 @@ jest.unstable_mockModule(
     resolveServertoolProgressStageWithNative: jest.fn(),
     resolveServertoolProgressToolNameWithNative: jest.fn(),
     planServertoolNoopOutcomeWithNative: jest.fn(),
-    planServertoolTimeoutWatcherWithNative: jest.fn(),
+    planServertoolTimeoutWatcherWithNative: jest.fn(() => ({ armed: false, timeoutMs: 1000 })),
     isAdapterClientDisconnectedWithNative: jest.fn(),
     createServertoolProviderProtocolErrorFromPlanWithNative: jest.fn((input: any) => input),
     planServertoolEngineRuntimeActionWithNative: jest.fn(),
@@ -115,13 +121,6 @@ jest.unstable_mockModule(
     resolveServertoolTimeoutMsFromEnvCandidatesWithNative: resolveServertoolTimeoutMsFromEnvCandidatesWithNativeMock,
     planServertoolTimeoutErrorWithNative: jest.fn(),
     planStoplessExecutionWithNative: jest.fn(),
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/engine-selection-block.js',
-  () => ({
-    runPrimaryServerToolEngineSelection: runPrimaryServerToolEngineSelectionMock
   })
 );
 
@@ -168,7 +167,14 @@ describe('engine-preflight-shell', () => {
         chat: preflight.chat
       };
     });
-    runPrimaryServerToolEngineSelectionMock.mockResolvedValue({
+    planEngineSelectionStartWithNativeMock.mockReturnValue({
+      overrides: {},
+      primaryAutoHookIds: []
+    });
+    resolveEngineSelectionAfterRunWithNativeMock.mockReturnValue({
+      rerunOverrides: null
+    });
+    orchestrateServertoolEngineMock.mockResolvedValue({
       mode: 'passthrough',
       finalChatResponse: { id: 'chat-3' },
       execution: null,
@@ -309,7 +315,7 @@ describe('engine-preflight-shell', () => {
       executed: false
     });
     expect(attachStopGatewayContextMock).not.toHaveBeenCalled();
-    expect(runPrimaryServerToolEngineSelectionMock).not.toHaveBeenCalled();
+    expect(orchestrateServertoolEngineMock).not.toHaveBeenCalled();
   });
 
   test('returns direct passthrough and logs trigger when native preflight disables stopless', async () => {

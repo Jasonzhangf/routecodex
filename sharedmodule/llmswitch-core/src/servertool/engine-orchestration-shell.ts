@@ -12,9 +12,6 @@ import {
   withTimeout
 } from './timeout-error-block.js';
 import {
-  runPrimaryServerToolEngineSelection
-} from './engine-selection-block.js';
-import {
   appendServertoolMatchSkippedProgressEvent,
   createServertoolProgressLogger
 } from './progress-log-block.js';
@@ -35,10 +32,13 @@ import {
   detectProviderResponseShapeWithNative,
   extractServertoolResponseStageOrchestrationShellResultWithNative,
   materializeServertoolResponseStageOrchestrationOutputWithNative,
+  planEngineSelectionStartWithNative,
   planServertoolEngineRuntimeActionWithNative,
   planServertoolEnginePreflightWithNative,
   planServertoolResponseStageGateWithNative,
   planServertoolEngineTriggerObservationWithNative,
+  readServertoolPrimaryAutoHookIdsWithNative,
+  resolveEngineSelectionAfterRunWithNative,
   resolveServertoolEngineMatchHitWithNative,
   resolveServertoolEnginePreflightDecisionWithNative,
   resolveServertoolEnginePostflightPayloadWithNative,
@@ -420,6 +420,23 @@ function resolveServerToolTimeoutMs(): number {
   });
 }
 
+async function runServertoolEngineWithNativeSelectionPlan(args: {
+  runEngine: (overrides: Partial<ServerSideToolEngineOptions>) => Promise<ServerToolEngineResult>;
+}): Promise<ServerToolEngineResult> {
+  const startPlan = planEngineSelectionStartWithNative({
+    primaryAutoHookIds: readServertoolPrimaryAutoHookIdsWithNative()
+  });
+  const firstResult = await args.runEngine(startPlan.overrides);
+  const afterRunDecision = resolveEngineSelectionAfterRunWithNative({
+    primaryAutoHookIds: startPlan.primaryAutoHookIds,
+    engineResult: firstResult
+  });
+  if (afterRunDecision.rerunOverrides != null) {
+    return args.runEngine(afterRunDecision.rerunOverrides);
+  }
+  return firstResult;
+}
+
 export async function runServerToolOrchestrationShell(
   options: ServerToolOrchestrationOptions
 ): Promise<ServerToolOrchestrationResult> {
@@ -462,7 +479,7 @@ export async function runServerToolOrchestrationShell(
     onAutoHookTrace: logAutoHookTrace
   };
 
-  const engineResult = await runPrimaryServerToolEngineSelection({
+  const engineResult = await runServertoolEngineWithNativeSelectionPlan({
     runEngine: (overrides: Partial<ServerSideToolEngineOptions>): Promise<ServerToolEngineResult> =>
       withTimeout(
         orchestrateServertoolEngine({

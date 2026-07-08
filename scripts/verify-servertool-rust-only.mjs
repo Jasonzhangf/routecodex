@@ -4189,7 +4189,7 @@ function checkEngineSelectionRustOwner() {
   const napiLib = readRequired(RUST_ROUTER_HOTPATH_NAPI_LIB);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
-  const engineSelectionShell = readRequired(TS_ENGINE_SELECTION);
+  const engineOrchestrationShell = readRequired(TS_ENGINE_ORCHESTRATION_SHELL);
 
   for (const needle of [
     'feature_id: hub.servertool_engine_selection',
@@ -4259,17 +4259,11 @@ function checkEngineSelectionRustOwner() {
       needle
     );
   }
-  for (const needle of [
-    'planEngineSelectionStartWithNative',
-    'resolveEngineSelectionAfterRunWithNative',
-  ]) {
-    assertContains(
-      'servertool-engine-selection-ts-thin-shell',
-      TS_ENGINE_SELECTION,
-      engineSelectionShell,
-      needle
-    );
-  }
+  assertMissingFile(
+    'servertool-engine-selection-shell-deleted',
+    TS_ENGINE_SELECTION,
+    'engine-selection-block.ts must stay physically deleted; engine-orchestration-shell consumes native engine selection plans directly'
+  );
   for (const needle of [
     "plan.action === 'rerun_excluding_primary_hooks'",
     "throw new Error('[servertool] invalid engine selection action')",
@@ -4281,17 +4275,10 @@ function checkEngineSelectionRustOwner() {
       needle
     );
   }
-  assertContains(
-    'servertool-engine-selection-ts-thin-shell',
-    TS_ENGINE_SELECTION,
-    engineSelectionShell,
-    'readServertoolPrimaryAutoHookIdsWithNative'
-  );
   for (const keyword of [
+    "from './engine-selection-block.js'",
     'SERVERTOOL_ENGINE_SELECTION_FEATURE_ID',
     'primaryAutoHookIds.length',
-    'engineResult.mode',
-    '!engineResult.execution',
     "mode === 'passthrough'",
     'function toEngineOverrides(',
     'planServertoolSkeletonDerivedConfigWithNative',
@@ -4314,28 +4301,32 @@ function checkEngineSelectionRustOwner() {
     'return await args.runEngine(afterRunPlan.overrides);',
     "[servertool] invalid engine selection action",
   ]) {
-    if (engineSelectionShell.includes(keyword)) {
+    if (engineOrchestrationShell.includes(keyword)) {
       fail(
         'servertool-engine-selection-no-ts-owner',
-        `Forbidden TS engine selection semantic "${keyword}" found in engine-selection-block.ts`
+        `Forbidden TS engine selection semantic "${keyword}" found in engine-orchestration-shell.ts`
       );
     }
   }
-  assertContains(
-    'servertool-engine-selection-ts-thin-shell',
-    TS_ENGINE_SELECTION,
-    engineSelectionShell,
-    'resolveEngineSelectionAfterRunWithNative'
-  );
-  assertContains(
-    'servertool-engine-selection-ts-thin-shell',
-    TS_ENGINE_SELECTION,
-    engineSelectionShell,
-    'return await args.runEngine(afterRunDecision.rerunOverrides);'
-  );
+  for (const needle of [
+    'readServertoolPrimaryAutoHookIdsWithNative',
+    'planEngineSelectionStartWithNative',
+    'resolveEngineSelectionAfterRunWithNative',
+    'runServertoolEngineWithNativeSelectionPlan({',
+    'const firstResult = await args.runEngine(startPlan.overrides);',
+    'return args.runEngine(afterRunDecision.rerunOverrides);',
+    'primaryAutoHookIds: startPlan.primaryAutoHookIds',
+  ]) {
+    assertContains(
+      'servertool-engine-selection-ts-thin-shell',
+      TS_ENGINE_ORCHESTRATION_SHELL,
+      engineOrchestrationShell,
+      needle
+    );
+  }
   pass(
     'servertool-engine-selection-no-ts-owner',
-    'engine-selection-block.ts is native-plan shell for primary hook first-pass and rerun decisions'
+    'engine selection stays Rust-owned and the standalone TS selection block is deleted'
   );
 }
 

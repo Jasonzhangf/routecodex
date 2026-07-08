@@ -13,19 +13,13 @@ const inspectStopGatewaySignal = jest.fn(() => ({
   eligible: true
 }));
 const runServerToolOrchestrationShell = jest.fn();
-const runPrimaryServerToolEngineSelection = jest.fn(async () => {
-  const result = await runServerToolOrchestrationShell();
-  return {
-    mode: result.executed ? 'tool_flow' : 'passthrough',
-    finalChatResponse: result.chat,
-    execution: result.executed
-      ? {
-          flowId: result.flowId ?? 'flow_response_stage'
-        }
-      : null,
-    metadataWritePlan: null
-  };
-});
+const planEngineSelectionStartWithNative = jest.fn(() => ({
+  overrides: {},
+  primaryAutoHookIds: []
+}));
+const resolveEngineSelectionAfterRunWithNative = jest.fn(() => ({
+  rerunOverrides: null
+}));
 
 jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
@@ -37,6 +31,9 @@ jest.unstable_mockModule(
     materializeServertoolResponseStageOrchestrationOutputWithNative,
     extractServertoolResponseStageOrchestrationShellResultWithNative,
     resolveServertoolResponseStageOrchestrationGateApplicationWithNative,
+    readServertoolPrimaryAutoHookIdsWithNative: jest.fn(() => []),
+    planEngineSelectionStartWithNative,
+    resolveEngineSelectionAfterRunWithNative,
     planServertoolEngineRuntimeActionWithNative: jest.fn((input: any) => ({
       action: 'return_servertool_cli_projection_final',
       executed: true,
@@ -108,13 +105,6 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/engine-selection-block.js',
-  () => ({
-    runPrimaryServerToolEngineSelection
-  })
-);
-
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js',
   () => ({
     appendServertoolMatchSkippedProgressEvent: jest.fn(),
@@ -130,7 +120,19 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js',
   () => ({
-    orchestrateServertoolEngine: runServerToolOrchestrationShell
+    orchestrateServertoolEngine: jest.fn(async () => {
+      const result = await runServerToolOrchestrationShell();
+      return {
+        mode: result.executed ? 'tool_flow' : 'passthrough',
+        finalChatResponse: result.chat,
+        execution: result.executed
+          ? {
+              flowId: result.flowId ?? 'flow_response_stage'
+            }
+          : null,
+        metadataWritePlan: null
+      };
+    })
   })
 );
 
@@ -187,6 +189,13 @@ describe('response-stage-orchestration-shell', () => {
     runServerToolOrchestrationShell.mockResolvedValue({
       chat: { id: 'resp_1' },
       executed: false
+    });
+    planEngineSelectionStartWithNative.mockReturnValue({
+      overrides: {},
+      primaryAutoHookIds: []
+    });
+    resolveEngineSelectionAfterRunWithNative.mockReturnValue({
+      rerunOverrides: null
     });
   });
 
