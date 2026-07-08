@@ -38,17 +38,13 @@ async function loadModules() {
   const bridgePolicies = await import('../../dist/conversion/bridge-policies.js');
   const nativeBridgePolicy = await import('../../dist/native/router-hotpath/native-hub-bridge-policy-semantics.js');
   const runtimeMetadata = await import('../../dist/conversion/runtime-metadata.js');
-  const compactionDetect = await import('../../dist/conversion/compaction-detect.js');
-  const mcpInjection = await import('../../dist/conversion/mcp-injection.js');
   return {
     bridgeActions,
     bridgeInstructions,
     bridgeMessageUtils,
     bridgePolicies,
     nativeBridgePolicy,
-    runtimeMetadata,
-    compactionDetect,
-    mcpInjection
+    runtimeMetadata
   };
 }
 
@@ -151,20 +147,6 @@ async function main() {
   bump(() => {
     const meta = modules.runtimeMetadata.ensureRuntimeMetadata({});
     assert.ok(meta && typeof meta === 'object');
-  });
-
-  // compaction-detect
-  bump(() => {
-    const should = modules.compactionDetect.isCompactionRequest({
-      messages: [{ role: 'user', content: 'Context checkpoint compaction: please summarize.' }]
-    });
-    assert.equal(typeof should, 'boolean');
-  });
-
-  // mcp-injection
-  bump(() => {
-    const tools = modules.mcpInjection.injectMcpToolsForChat([], ['context7']);
-    assert.ok(Array.isArray(tools));
   });
 
   const ratio = score(passed, total);

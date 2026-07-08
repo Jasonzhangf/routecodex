@@ -179,6 +179,17 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 zero-production-import conversion facades deleted
+
+- Physically deleted three zero-production-import TS shells after exact source scan proved no production importer and no host bridge/package export reachability:
+  - `sharedmodule/llmswitch-core/src/conversion/compaction-detect.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/mcp-injection.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/shared/tooling.ts`
+- `sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` no longer imports the retired dist facades as bridge/protocol coverage targets.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now locks these source files as retired/physically deleted.
+- Strict audit now reports `prodTsShellCount=94` with `nonNativeFileCount=0`; deleted files did not reduce `shellsWithProdImporters` because they already had no production importers.
+- Verification passed: sharedmodule `tsc`, root `tsc`, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, residue audit 191/191, and `git diff --check`.
+
 ### 2026-07-09 module-loader and responses response bridge CoreDist helpers removed
 
 - `src/modules/llmswitch/bridge/module-loader.ts/js` is now a path-resolution-only bridge and no longer implements `importCoreDist`, `requireCoreDist`, node `require` creation, Jest runtime detection, or TS dist module loading.
