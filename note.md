@@ -28133,3 +28133,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Architecture gates no longer read the retired wrapper source. They check required native exports and assert the old wrapper path stays physically absent.
 - `tests/sharedmodule/chat-semantics-stage1.spec.ts` now provides explicit minimal Virtual Router config, provider route, and MetadataCenter snapshot to match current Rust fail-fast contracts.
 - Verification PASS: focused Jest 220/220; req_outbound Responses/OpenAI rust-only architecture gates; `verify:function-map-compile-gate`; strict shell audit `prodTsShellCount=71`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`; zero-ts closeout; minimal TS surface; rustification audit `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact old wrapper ref scan only found forbidden/absent gate references; `git diff --check`.
+
+# 2026-07-09: llmswitch Responses OpenAI codec TS shell deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host codec shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/codecs/responses-openai-codec.ts`.
+- `sharedmodule/llmswitch-core/src/conversion/codecs/__tests__/responses-openai-codec.test.ts` now calls direct Rust/NAPI `runResponsesOpenaiRequestCodecJson` / `runResponsesOpenaiResponseCodecJson` through `tests/sharedmodule/helpers/responses-codec-direct-native.ts`.
+- Removed the old TS `ctxMap` test because request context is now explicit native output, not hidden TS wrapper state.
+- Added `conversion.shared.responses_openai` to function map, verification map, mainline call map, and wiki call graph; residue audit locks the old TS shell path physically absent.
+- Verification PASS: focused Responses codec/residue Jest 197/197; `verify:function-map-compile-gate`; strict shell audit `prodTsShellCount=67`, `shellsWithProdImporters=62`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=67`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; `rustfmt --check` for `responses_openai_codec.rs`; exact source/package ref scan; `git diff --check`.

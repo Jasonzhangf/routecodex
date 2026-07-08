@@ -5,6 +5,10 @@ use serde_json::{Map, Value};
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
 use crate::shared_json_utils::read_trimmed_string;
 
+// feature_id: conversion.shared.responses_openai
+// canonical_builder: stage_a_conversion_shared_responses_openai_owner_boundary
+pub(crate) fn stage_a_conversion_shared_responses_openai_owner_boundary() {}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct ResponsesOpenAiRequestOptions {

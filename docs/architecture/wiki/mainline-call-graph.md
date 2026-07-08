@@ -728,6 +728,7 @@ flowchart LR
 | stage-a-p0-03 | `HubRespChatProcess03Governed -> ResponsesContinuationStore` | anchored | `prepare_responses_conversation_entry_json -> restore_responses_continuation_payload_json` |  | `conversion.responses.store`<br/>Responses conversation store and continuation management |
 | stage-a-p0-04 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `apply_req_process_tool_governance -> apply_req_process_tool_governance_json` |  | `hub.req_chatprocess.tool_governance`<br/>Harvest text tool calls from request side and sanitize payloads |
 | stage-a-p0-05 | `HubRespInbound02Parsed -> HubRespChatProcess03Governed` | anchored | `govern_response_json -> strip_orphan_function_calls_tag_json` |  | `hub.resp_chatprocess.tool_governance`<br/>Harvest tool results, reverse apply_patch, strip internal tools |
+| stage-a-p0-06 | `ResponsesRequestInbound -> OpenAiChatCanonical` | anchored | `run_responses_openai_request_codec_json -> run_responses_openai_response_codec_json` |  | `conversion.shared.responses_openai`<br/>OpenAI Responses to OpenAI Chat protocol normalization and response projection |
 
 ## Shared Multi-Reference Functions
 

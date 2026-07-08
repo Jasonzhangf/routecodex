@@ -4557,6 +4557,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/codecs/openai-openai-codec.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/codecs/responses-openai-codec.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/compaction-detect.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/mcp-injection.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-host-policy.d.ts',
@@ -4688,6 +4689,41 @@ describe('hub pipeline stage residue audit', () => {
         ) continue;
         const source = fs.readFileSync(filePath, 'utf8');
         if (source.includes('gemini-openai-codec')) {
+          findings.push(relativePath);
+        }
+      }
+    }
+
+    expect(fs.existsSync(shellPath)).toBe(false);
+    expect(findings).toEqual([]);
+  });
+
+  it('Responses OpenAI codec TS shell must stay physically deleted', () => {
+    const repoRoot = process.cwd();
+    const shellPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/conversion/codecs/responses-openai-codec.ts'
+    );
+    const refRoots = [
+      'sharedmodule/llmswitch-core/src',
+      'src',
+      'scripts',
+      'tests',
+      'docs/architecture',
+    ];
+    const findings: string[] = [];
+    for (const root of refRoots) {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) continue;
+      for (const filePath of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
+        const relativePath = path.relative(repoRoot, filePath);
+        if (
+          relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts'
+          || relativePath === 'docs/architecture/function-map.yml'
+          || relativePath === 'docs/architecture/verification-map.yml'
+        ) continue;
+        const source = fs.readFileSync(filePath, 'utf8');
+        if (source.includes('responses-openai-codec')) {
           findings.push(relativePath);
         }
       }

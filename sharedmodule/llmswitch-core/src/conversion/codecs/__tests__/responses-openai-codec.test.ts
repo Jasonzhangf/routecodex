@@ -1,17 +1,13 @@
-import { ResponsesOpenAIConversionCodec } from '../responses-openai-codec.js';
+import {
+  requestContextFromNativeResult,
+  runResponsesOpenAIRequestCodecDirectNative,
+  runResponsesOpenAIResponseCodecDirectNative,
+} from '../../../../../../tests/sharedmodule/helpers/responses-codec-direct-native.js';
 import { buildResponsesPayloadFromChat } from '../../responses/responses-openai-bridge/response-payload.js';
 
-describe('responses-openai-codec native wrapper', () => {
-  const profile = {
-    id: 'responses-openai-test',
-    incomingProtocol: 'openai-responses',
-    outgoingProtocol: 'openai-chat',
-    codec: 'responses-openai'
-  } as any;
-
+describe('responses-openai codec direct native owner', () => {
   test('request maps responses input into openai chat request', async () => {
-    const codec = new ResponsesOpenAIConversionCodec({});
-    const result = await codec.convertRequest(
+    const native = runResponsesOpenAIRequestCodecDirectNative(
       {
         model: 'gpt-4.1',
         stream: true,
@@ -37,12 +33,11 @@ describe('responses-openai-codec native wrapper', () => {
           }
         ]
       },
-      profile,
       {
         requestId: 'req_responses_codec_request',
-        entryEndpoint: '/v1/responses'
-      } as any
+      }
     );
+    const result = native.request as Record<string, unknown>;
 
     expect((result as any).model).toBe('gpt-4.1');
     expect((result as any).stream).toBeUndefined();
@@ -57,8 +52,7 @@ describe('responses-openai-codec native wrapper', () => {
   });
 
   test('response maps chat tool calls back to responses required_action payload', async () => {
-    const codec = new ResponsesOpenAIConversionCodec({});
-    await codec.convertRequest(
+    const native = runResponsesOpenAIRequestCodecDirectNative(
       {
         model: 'gpt-4.1',
         input: [
@@ -83,14 +77,16 @@ describe('responses-openai-codec native wrapper', () => {
           }
         ]
       },
-      profile,
       {
         requestId: 'req_responses_codec_response',
-        entryEndpoint: '/v1/responses'
-      } as any
+      }
     );
+    const nativeContext = requestContextFromNativeResult(native, {
+      requestId: 'req_responses_codec_response',
+      entryEndpoint: '/v1/responses'
+    });
 
-    const result = await codec.convertResponse(
+    const result = runResponsesOpenAIResponseCodecDirectNative(
       {
         choices: [
           {
@@ -110,11 +106,7 @@ describe('responses-openai-codec native wrapper', () => {
           }
         ]
       },
-      profile,
-      {
-        requestId: 'req_responses_codec_response',
-        entryEndpoint: '/v1/responses'
-      } as any
+      nativeContext
     );
 
     expect((result as any).object).toBe('response');
@@ -246,32 +238,12 @@ describe('responses-openai-codec native wrapper', () => {
     });
   });
 
-  test('request context store prunes expired request ids', async () => {
-    const codec = new ResponsesOpenAIConversionCodec({});
-    const originalNow = Date.now;
-    let now = 1_000;
-    Date.now = () => now;
-    try {
-      await codec.convertRequest(
-        { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'one' }] }] },
-        profile,
-        {
-          requestId: 'req_responses_codec_old',
-          entryEndpoint: '/v1/responses'
-        } as any
-      );
-      now += 6 * 60_000;
-      await codec.convertRequest(
-        { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'two' }] }] },
-        profile,
-        {
-          requestId: 'req_responses_codec_new',
-          entryEndpoint: '/v1/responses'
-        } as any
-      );
-      expect(((codec as any).ctxMap as { size: number }).size).toBe(1);
-    } finally {
-      Date.now = originalNow;
-    }
+  test('request context is returned explicitly instead of hidden in TS state', async () => {
+    const native = runResponsesOpenAIRequestCodecDirectNative(
+      { model: 'gpt-4.1', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'one' }] }] },
+      { requestId: 'req_responses_codec_context' }
+    );
+    expect((native as any).context).toMatchObject({ requestId: 'req_responses_codec_context' });
+    expect((native as any).__ctxCreatedAt).toBeUndefined();
   });
 });
