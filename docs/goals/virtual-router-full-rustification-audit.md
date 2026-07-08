@@ -47,7 +47,7 @@
 | native-hub-pipeline-orchestration-semantics.ts | 271 | 27 | 2 |
 | native-shared-conversion-semantics-tools.ts | 265 | 7 | 8 |
 | native-hub-pipeline-governance-semantics.ts | 238 | 0 | 已删：2026-06-07 Phase 8F-6 |
-| native-hub-pipeline-session-identifiers-semantics.ts | 231 | 6 | 2 |
+| native-hub-pipeline-session-identifiers-semantics.ts | 已删：2026-07-09 direct `extractSessionIdentifiersJson` test evidence | 0 | 0 |
 | native-chat-process-node-result-semantics.ts | 226 | 6 | 2 |
 | native-hub-pipeline-orchestration-semantics-builders.ts | 313 | 12 | 2 |
 | native-hub-pipeline-semantic-mappers.ts | 149 | 7 | 2 |

@@ -2660,8 +2660,9 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired session header helper public NAPI wrappers must stay internal to session identifier extraction', () => {
     const repoRoot = process.cwd();
+    const retiredSessionIdentifierWrapperPath =
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_session_identifiers.rs',
     ];
@@ -2682,6 +2683,8 @@ describe('hub pipeline stage residue audit', () => {
       'normalize_header_key_public',
     ];
     const findings: string[] = [];
+
+    expect(fs.existsSync(path.join(repoRoot, retiredSessionIdentifierWrapperPath))).toBe(false);
 
     for (const relativePath of scannedFiles) {
       const absolutePath = path.join(repoRoot, relativePath);

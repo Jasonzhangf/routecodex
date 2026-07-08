@@ -27966,3 +27966,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - Residue audit locks `native-responses-sse-event-payload.ts` absent alongside the chat/anthropic/gemini event-payload wrappers.
 - Verification PASS: focused Responses SSE/residue Jest 220/220; `verify:sse-architecture-boundary`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=90`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); sharedmodule/root `tsc`; exact source ref scan for deleted wrapper path; `git diff --check`.
 - Follow-up caution remains: `native-virtual-router-bootstrap-providers.ts` is zero-prod but blocked until the Rust bootstrap contract matches existing auth-alias regression behavior.
+
+# 2026-07-09: llmswitch session identifier wrapper deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts`.
+- `tests/servertool/hub-pipeline-session-headers.spec.ts` now calls direct Rust/NAPI `extractSessionIdentifiersJson`; the old TS `extractSessionIdentifiersFromMetadataWithNative` wrapper is gone.
+- Residue audit now locks the wrapper path physically absent while keeping retired session header helper public NAPI exports forbidden.
+- Release snapshot test now checks a live dist anchor instead of preserving the retired wrapper path; also replaced its stale ESM `require(...)` version read with `fs.readFileSync` JSON parsing.
+- Verification PASS: focused Jest 202/202; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=89`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); exact source ref scan; `git diff --check`.

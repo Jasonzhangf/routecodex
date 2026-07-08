@@ -53,7 +53,7 @@ describe('install-release-snapshot', () => {
       'dist',
       'native',
       'router-hotpath',
-      'native-hub-pipeline-session-identifiers-semantics.js'
+      'native-router-hotpath-required-exports.js'
     );
 
     expect(fs.existsSync(requiredFile)).toBe(true);
@@ -78,7 +78,10 @@ describe('install-release-snapshot', () => {
 
     expect(manifest.kind).toBe('routecodex-release-snapshot');
     expect(manifest.releaseId).toMatch(/^routecodex-/);
-    expect(manifest.version).toBe(require(path.join(process.cwd(), 'package.json')).version);
+    const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')) as {
+      version: string;
+    };
+    expect(manifest.version).toBe(packageJson.version);
     expect(manifest.buildMode).toBe('release');
     expect(manifest.sourceRepoRoot).toBe(process.cwd());
     expect(manifest.buildRepoRoot).toBe(process.cwd());

@@ -189,6 +189,13 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Strict audit now reports `prodTsShellCount=90`, `nonNativeFileCount=0`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=8`.
 - Verification passed: focused Responses SSE/residue Jest 220/220, `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule `tsc`, root `tsc`, exact source ref scan for deleted wrapper path, and `git diff --check`.
 
+### 2026-07-09 session identifier wrapper deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts`.
+- `tests/servertool/hub-pipeline-session-headers.spec.ts` now calls direct Rust/NAPI `extractSessionIdentifiersJson` instead of the retired TS wrapper.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` locks the old wrapper path as physically absent while keeping the retired header-helper public NAPI symbols forbidden.
+- `tests/scripts/install-release-snapshot.spec.ts` now checks a still-live sharedmodule dist file instead of preserving the retired session identifier wrapper path.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

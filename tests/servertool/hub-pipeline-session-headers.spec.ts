@@ -1,8 +1,32 @@
-import { extractSessionIdentifiersFromMetadataWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.js';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const nodeRequire = createRequire(import.meta.url);
+const nativeBinding = nodeRequire(
+  path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+) as Record<string, unknown>;
+
+function extractSessionIdentifiersFromMetadataDirectNative(
+  metadata: Record<string, unknown> | undefined
+): { sessionId?: string; conversationId?: string } {
+  const fn = nativeBinding.extractSessionIdentifiersJson;
+  if (typeof fn !== 'function') {
+    throw new Error('extractSessionIdentifiersJson native export is required');
+  }
+  const raw = fn(JSON.stringify(metadata ?? null));
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error('extractSessionIdentifiersJson returned invalid payload');
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('extractSessionIdentifiersJson returned non-object payload');
+  }
+  return parsed as { sessionId?: string; conversationId?: string };
+}
 
 describe('extractSessionIdentifiersFromMetadata', () => {
   test('detects sessionId from direct metadata', () => {
-    const identifiers = extractSessionIdentifiersFromMetadataWithNative({
+    const identifiers = extractSessionIdentifiersFromMetadataDirectNative({
       sessionId: 'sess-direct',
     });
     expect(identifiers.sessionId).toBe('sess-direct');
@@ -10,7 +34,7 @@ describe('extractSessionIdentifiersFromMetadata', () => {
   });
 
   test('detects conversationId from direct metadata', () => {
-    const identifiers = extractSessionIdentifiersFromMetadataWithNative({
+    const identifiers = extractSessionIdentifiersFromMetadataDirectNative({
       conversation_id: 'conv-direct',
     });
     expect(identifiers.conversationId).toBe('conv-direct');
@@ -18,7 +42,7 @@ describe('extractSessionIdentifiersFromMetadata', () => {
   });
 
   test('detects sessionId from condensed sessionid header without deriving conversationId', () => {
-    const identifiers = extractSessionIdentifiersFromMetadataWithNative({
+    const identifiers = extractSessionIdentifiersFromMetadataDirectNative({
       clientHeaders: {
         sessionid: 'sess-123'
       }
@@ -28,7 +52,7 @@ describe('extractSessionIdentifiersFromMetadata', () => {
   });
 
   test('detects conversationId from condensed conversationid header', () => {
-    const identifiers = extractSessionIdentifiersFromMetadataWithNative({
+    const identifiers = extractSessionIdentifiersFromMetadataDirectNative({
       clientHeaders: {
         conversationid: 'conv-999'
       }
@@ -38,7 +62,7 @@ describe('extractSessionIdentifiersFromMetadata', () => {
   });
 
   test('detects identifiers from normalizedClientHeaders', () => {
-    const identifiers = extractSessionIdentifiersFromMetadataWithNative({
+    const identifiers = extractSessionIdentifiersFromMetadataDirectNative({
       normalizedClientHeaders: {
         'x-session-id': 'sess-normalized',
         'openai-conversation-id': 'conv-normalized'
@@ -49,7 +73,7 @@ describe('extractSessionIdentifiersFromMetadata', () => {
   });
 
   test('does not derive identifiers from raw request body metadata user_id', () => {
-    const identifiers = extractSessionIdentifiersFromMetadataWithNative({
+    const identifiers = extractSessionIdentifiersFromMetadataDirectNative({
       __raw_request_body: {
         metadata: {
           user_id: 'user_foo__session_5fae623b-22a7-49be-ac82-fb2f3b310878'
@@ -61,7 +85,7 @@ describe('extractSessionIdentifiersFromMetadata', () => {
   });
 
   test('does not parse session token from SSE rawText payload', () => {
-    const identifiers = extractSessionIdentifiersFromMetadataWithNative({
+    const identifiers = extractSessionIdentifiersFromMetadataDirectNative({
       __raw_request_body: {
         format: 'sse',
         rawText:
@@ -73,7 +97,7 @@ describe('extractSessionIdentifiersFromMetadata', () => {
   });
 
   test('does not parse codex-style generated session token from raw payload fallback', () => {
-    const identifiers = extractSessionIdentifiersFromMetadataWithNative({
+    const identifiers = extractSessionIdentifiersFromMetadataDirectNative({
       __raw_request_body: {
         metadata: {
           user_id:
