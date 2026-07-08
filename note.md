@@ -27954,3 +27954,15 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - Residue audit locks the three wrapper source paths as physically deleted and scans source roots for revival references.
 - Verification PASS: focused SSE/residue Jest 220/220; `verify:sse-architecture-boundary`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=91`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); sharedmodule/root `tsc`; exact source ref scan for deleted wrapper paths; `git diff --check`.
 - Follow-up caution: `native-virtual-router-bootstrap-providers.ts` is zero-prod but not safe to delete in this pass. Direct Rust NAPI did not satisfy the existing auth-alias regression expectations, so the attempted deletion was reverted before commit; do not remove that wrapper until the Rust bootstrap contract and tests are reconciled.
+
+# 2026-07-09: llmswitch Responses SSE wrapper deletion
+
+- Scope: continue `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` after chat/anthropic/gemini SSE event wrapper deletion.
+- Commit `b9e3e98 refactor(llmswitch): delete responses SSE wrapper`:
+  - Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts`.
+  - Added test-only direct native helper `tests/sharedmodule/helpers/responses-sse-direct-native.ts`; it calls `router_hotpath_napi.node` directly and is not a runtime TS owner.
+  - Moved Responses SSE descriptor/metadata/reasoning tests from the old TS wrapper to direct Rust/NAPI evidence.
+  - Function map and verification map now mark Responses SSE encode projection as direct Rust/NAPI-owned, with the old wrapper physically deleted.
+  - Residue audit locks `native-responses-sse-event-payload.ts` absent alongside the chat/anthropic/gemini event-payload wrappers.
+- Verification PASS: focused Responses SSE/residue Jest 220/220; `verify:sse-architecture-boundary`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=90`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); sharedmodule/root `tsc`; exact source ref scan for deleted wrapper path; `git diff --check`.
+- Follow-up caution remains: `native-virtual-router-bootstrap-providers.ts` is zero-prod but blocked until the Rust bootstrap contract matches existing auth-alias regression behavior.
