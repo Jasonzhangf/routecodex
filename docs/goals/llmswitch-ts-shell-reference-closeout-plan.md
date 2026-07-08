@@ -179,6 +179,16 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 module-loader and responses response bridge CoreDist helpers removed
+
+- `src/modules/llmswitch/bridge/module-loader.ts/js` is now a path-resolution-only bridge and no longer implements `importCoreDist`, `requireCoreDist`, node `require` creation, Jest runtime detection, or TS dist module loading.
+- `src/modules/llmswitch/core-loader.ts/js` no longer carries the dead `engine` implementation family, `rcc-llmswitch-engine` lookup, Jest source-prefer branch, or builtin TS source fallback; `importCoreModule` now imports only the resolved core dist URL and fails explicitly when the dist module is missing.
+- `src/modules/llmswitch/bridge/responses-response-bridge.ts/js` no longer exports `importResponsesHandlerCoreDist` / `requireResponsesHandlerCoreDist` and no longer loads `conversion/responses/responses-openai-bridge`; chat-completion JSON normalization now calls `buildResponsesPayloadFromChatNative` directly.
+- `docs/architecture/function-map.yml` no longer lists the deleted Responses CoreDist helpers as canonical builders.
+- Package export scan found no broad wildcard exports in `sharedmodule/llmswitch-core/package.json`.
+- Verification passed so far: root `tsc`, JS syntax checks for touched JS bridge/loader files, focused `responses-response-bridge.direct-json-protocol-guard` Jest 3/3, `verify:server-function-map-boundary`, and `verify:llmswitch-ts-shell-reference-audit`.
+- Verification caveat: `npm test -- --runTestsByPath ...` incorrectly ran the repo's default routing-instructions suite before the target file and failed on unrelated existing environment/sample/deleted-shell issues; the focused file was rerun with `npm run jest:run -- --runTestsByPath ... --runInBand` and passed.
+
 ### 2026-07-09 snapshot-recorder host bridge ref direct-native wired
 
 - `src/modules/llmswitch/bridge/snapshot-recorder.ts/js` no longer imports `importCoreDist` or loads the llmswitch-core snapshot recorder dist facade.

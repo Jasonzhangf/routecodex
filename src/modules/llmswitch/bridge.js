@@ -4,13 +4,13 @@
  * Single boundary module for llmswitch-core integration.
  */
 // Core module loading utilities.
-export { importCoreDist, requireCoreDist, resolveCoreModulePath } from './bridge/module-loader.js';
+export { resolveCoreModulePath } from './bridge/module-loader.js';
 // Existing bridge exports.
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests } from './bridge/snapshot-recorder.js';
 export { convertProviderResponse } from './bridge/response-converter.js';
 export { prepareResponsesHandlerEntryForHttp, buildResponsesScopeContinuationExpiredErrorForHttp, buildResponsesResumeClientErrorForHttp, shouldProjectResponsesResumeClientErrorForHttp, captureResponsesRequestContextForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, recordResponsesResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp } from './bridge/responses-request-bridge.js';
 export { buildClientSseKeepaliveFrameForHttp, } from './bridge/responses-sse-bridge.js';
-export { buildResponsesRequestLogContextForHttp, importResponsesHandlerCoreDist, normalizeResponsesClientPayloadForHttp, prepareResponsesJsonClientDispatchPlanForHttp, requireResponsesHandlerCoreDist, rebindResponsesConversationRequestIdForHttp, } from './bridge/responses-response-bridge.js';
+export { buildResponsesRequestLogContextForHttp, normalizeResponsesClientPayloadForHttp, normalizeResponsesJsonBodyForHttp, prepareResponsesJsonClientDispatchPlanForHttp, rebindResponsesConversationRequestIdForHttp, } from './bridge/responses-response-bridge.js';
 // Newly factored bridge modules.
 export { writeSnapshotViaHooks, preloadCriticalBridgeRuntimeModules, captureResponsesRequestContextForRequest, recordResponsesResponseForRequest, resumeResponsesConversation, resumeLatestResponsesContinuationByScope, materializeLatestResponsesContinuationByScope, rebindResponsesConversationRequestId, clearResponsesConversationByRequestId, finalizeResponsesConversationRequestRetention, clearAllResponsesConversationState, resetResponsesConversationStateForRestartSimulation, clearUnresolvedResponsesConversationRequests, buildResponsesJsonFromSseStreamWithNative, reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy } from './bridge/runtime-integrations.js';
 export { loadRoutingInstructionStateSync, saveRoutingInstructionStateAsync, saveRoutingInstructionStateSync, extractSessionIdentifiersFromMetadata } from './bridge/state-integrations.js';

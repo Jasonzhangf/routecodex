@@ -10,10 +10,7 @@
 
 import type { AnyRecord } from './module-loader.js';
 import {
-  importCoreDist,
-  requireCoreDist,
-} from './module-loader.js';
-import {
+  buildResponsesPayloadFromChatNative,
   planResponsesJsonClientDispatchNative,
   projectResponsesClientPayloadForClientNative,
 } from './native-exports.js';
@@ -113,16 +110,25 @@ export async function rebindResponsesConversationRequestIdForHttp(
   const { rebindResponsesConversationRequestId } = await import('./runtime-integrations.js');
   await rebindResponsesConversationRequestId(oldId, newId);
 }
-export function requireResponsesHandlerCoreDist<TModule extends object>(
-  specifier: string
-): TModule {
-  return requireCoreDist<TModule>(specifier);
-}
 
-export async function importResponsesHandlerCoreDist<TModule extends object>(
-  specifier: string
-): Promise<TModule> {
-  return await importCoreDist<TModule>(specifier);
+export async function normalizeResponsesJsonBodyForHttp(args: {
+  body: unknown;
+  entryEndpoint?: string;
+  requestLabel?: string;
+}): Promise<unknown> {
+  if (args.entryEndpoint !== '/v1/responses') {
+    return args.body;
+  }
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
+    return args.body;
+  }
+  const body = args.body as Record<string, unknown>;
+  if (body.object !== 'chat.completion') {
+    return args.body;
+  }
+  return buildResponsesPayloadFromChatNative(body, {
+    requestId: args.requestLabel,
+  });
 }
 
 export async function normalizeResponsesClientPayloadForHttp(args: {
@@ -178,7 +184,6 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
     routingPolicyGroup?: string;
   };
   metadata?: Record<string, unknown>;
-  resolveBridge?: typeof importResponsesHandlerCoreDist;
 }): Promise<{
   clientBody: unknown;
   sanitizedBody: unknown;
@@ -199,8 +204,13 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
       `[responses] unsupported JSON client dispatch action: ${String(dispatchPlan.action ?? 'unknown')}`
     );
   }
+  const normalizedJsonBody = await normalizeResponsesJsonBodyForHttp({
+    body: args.body,
+    entryEndpoint: args.entryEndpoint,
+    requestLabel: args.requestLabel,
+  });
   const clientBody = await normalizeResponsesClientPayloadForHttp({
-    payload: args.body,
+    payload: normalizedJsonBody,
     entryEndpoint: args.entryEndpoint,
     requestContext: args.requestContext,
     metadata: args.metadata,

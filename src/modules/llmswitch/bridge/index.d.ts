@@ -3,12 +3,12 @@
  *
  * Re-exports from bridge submodules.
  */
-export { resolveCoreModulePath, importCoreDist, requireCoreDist, type AnyRecord } from './module-loader.js';
+export { resolveCoreModulePath, type AnyRecord } from './module-loader.js';
 export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests, type SnapshotRecorder } from './snapshot-recorder.js';
 export { convertProviderResponse } from './response-converter.js';
 export { finalizeResponsesHandlerPayloadForHttp, prepareResponsesHandlerEntryForHttp, buildResponsesScopeContinuationExpiredErrorForHttp, buildResponsesResumeClientErrorForHttp, shouldProjectResponsesResumeClientErrorForHttp, captureResponsesRequestContextForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, recordResponsesResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp } from './responses-request-bridge.js';
 export { buildClientSseKeepaliveFrameForHttp, } from './responses-sse-bridge.js';
-export { buildResponsesRequestLogContextForHttp, importResponsesHandlerCoreDist, normalizeResponsesClientPayloadForHttp, prepareResponsesJsonClientDispatchPlanForHttp, requireResponsesHandlerCoreDist, rebindResponsesConversationRequestIdForHttp, } from './responses-response-bridge.js';
+export { buildResponsesRequestLogContextForHttp, normalizeResponsesClientPayloadForHttp, normalizeResponsesJsonBodyForHttp, prepareResponsesJsonClientDispatchPlanForHttp, rebindResponsesConversationRequestIdForHttp, } from './responses-response-bridge.js';
 export { writeSnapshotViaHooks, preloadCriticalBridgeRuntimeModules, resumeResponsesConversation, resumeLatestResponsesContinuationByScope, rebindResponsesConversationRequestId, clearUnresolvedResponsesConversationRequests, buildResponsesJsonFromSseStreamWithNative, reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy } from './runtime-integrations.js';
 export { loadRoutingInstructionStateSync, saveRoutingInstructionStateAsync, saveRoutingInstructionStateSync, extractSessionIdentifiersFromMetadata } from './state-integrations.js';
 export { bootstrapVirtualRouterConfig, resolveBaseDir } from './routing-integrations.js';

@@ -19,8 +19,6 @@ export type {
 
 // Core module loading utilities.
 export {
-  importCoreDist,
-  requireCoreDist,
   resolveCoreModulePath,
   type AnyRecord
 } from './bridge/module-loader.js';
@@ -48,10 +46,9 @@ export {
 } from './bridge/responses-sse-bridge.js';
 export {
   buildResponsesRequestLogContextForHttp,
-  importResponsesHandlerCoreDist,
   normalizeResponsesClientPayloadForHttp,
+  normalizeResponsesJsonBodyForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
-  requireResponsesHandlerCoreDist,
   rebindResponsesConversationRequestIdForHttp,
 } from './bridge/responses-response-bridge.js';
 

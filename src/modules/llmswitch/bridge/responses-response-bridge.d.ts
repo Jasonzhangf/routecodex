@@ -18,8 +18,11 @@ export declare function buildResponsesRequestLogContextForHttp(args: {
     usageLogInfo?: Record<string, unknown> | null;
 }): Record<string, unknown>;
 export declare function rebindResponsesConversationRequestIdForHttp(oldId?: string, newId?: string): Promise<void>;
-export declare function requireResponsesHandlerCoreDist<TModule extends object>(specifier: string): TModule;
-export declare function importResponsesHandlerCoreDist<TModule extends object>(specifier: string): Promise<TModule>;
+export declare function normalizeResponsesJsonBodyForHttp(args: {
+    body: unknown;
+    entryEndpoint?: string;
+    requestLabel?: string;
+}): Promise<unknown>;
 export declare function normalizeResponsesClientPayloadForHttp(args: {
     payload: unknown;
     entryEndpoint?: string;
@@ -37,6 +40,7 @@ export declare function prepareResponsesJsonClientDispatchPlanForHttp(args: {
     body: unknown;
     entryEndpoint?: string;
     requestLabel?: string;
+    continuationOwner?: string;
     requestContext?: {
         payload: AnyRecord;
         context: AnyRecord;
@@ -46,7 +50,6 @@ export declare function prepareResponsesJsonClientDispatchPlanForHttp(args: {
         routingPolicyGroup?: string;
     };
     metadata?: Record<string, unknown>;
-    resolveBridge?: typeof importResponsesHandlerCoreDist;
 }): Promise<{
     clientBody: unknown;
     sanitizedBody: unknown;

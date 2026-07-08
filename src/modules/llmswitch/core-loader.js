@@ -2,21 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-// Built-in sharedmodule path (relative to project root) — this is the primary source.
 const BUILTIN_SHARED_MODULE_REL = path.join('sharedmodule', 'llmswitch-core');
-const PACKAGE_CANDIDATES_BY_IMPL = {
-    ts: [
-        BUILTIN_SHARED_MODULE_REL,
-        path.join('node_modules', 'rcc-llmswitch-core')
-    ],
-    engine: [
-        path.join('node_modules', 'rcc-llmswitch-engine')
-    ]
-};
-const corePackageDirByImpl = {
-    ts: null,
-    engine: null
-};
+const PACKAGE_CANDIDATES = [
+    BUILTIN_SHARED_MODULE_REL,
+    path.join('node_modules', 'rcc-llmswitch-core'),
+];
+let corePackageDir = null;
 function getImportMetaUrlUnsafe() {
     try {
         return Function('return import.meta.url')();
@@ -24,9 +15,6 @@ function getImportMetaUrlUnsafe() {
     catch {
         return undefined;
     }
-}
-function isJestRuntime() {
-    return typeof process.env.JEST_WORKER_ID === 'string' && process.env.JEST_WORKER_ID.length > 0;
 }
 function resolveCoreLoaderModulePath() {
     const metaUrl = getImportMetaUrlUnsafe();
@@ -60,31 +48,6 @@ function resolveCoreLoaderModulePath() {
     }
     return path.join(process.cwd(), 'src/modules/llmswitch/core-loader.ts');
 }
-function createNodeRequire() {
-    const metaUrl = getImportMetaUrlUnsafe();
-    if (typeof metaUrl === 'string' && metaUrl.length > 0) {
-        try {
-            return createRequire(metaUrl);
-        }
-        catch {
-            // continue to path fallback
-        }
-    }
-    return createRequire(resolveCoreLoaderModulePath());
-}
-const nodeRequire = createNodeRequire();
-function getJestRequire() {
-    if (!isJestRuntime()) {
-        return null;
-    }
-    try {
-        const jestRequire = Function('return typeof require === "function" ? require : null')();
-        return typeof jestRequire === 'function' ? jestRequire : null;
-    }
-    catch {
-        return null;
-    }
-}
 function findPackageRootFromEntry(entryPath) {
     let current = path.dirname(entryPath);
     while (true) {
@@ -109,60 +72,50 @@ function tryResolvePackageRootViaRequire(packageName, baseUrl) {
         return null;
     }
 }
-export function resolveCorePackageDir(impl) {
-    const cached = corePackageDirByImpl[impl];
-    if (cached) {
-        return cached;
+function assertOnlyCoreDistImpl(impl) {
+    if (impl !== 'ts') {
+        throw new Error(`[llmswitch-core-loader] unsupported llmswitch core implementation: ${String(impl)}`);
     }
-    // 0) Prefer the built-in sharedmodule when it has a dist/ directory.
-    //    Resolve relative to the project root (directory containing package.json).
+}
+export function resolveCorePackageDir(impl = 'ts') {
+    assertOnlyCoreDistImpl(impl);
+    if (corePackageDir) {
+        return corePackageDir;
+    }
     const moduleDir = path.dirname(resolveCoreLoaderModulePath());
     const builtinCandidates = [
-        // From compiled dist/modules/llmswitch/ → ../../sharedmodule/llmswitch-core
         path.resolve(moduleDir, '..', '..', '..', BUILTIN_SHARED_MODULE_REL),
-        // From project CWD (runtime launch directory)
         path.resolve(process.cwd(), BUILTIN_SHARED_MODULE_REL),
     ];
     for (const builtinDir of builtinCandidates) {
         const distDir = path.join(builtinDir, 'dist');
         if (fs.existsSync(distDir) && fs.existsSync(path.join(distDir, 'index.js'))) {
-            corePackageDirByImpl[impl] = builtinDir;
+            corePackageDir = builtinDir;
             return builtinDir;
         }
     }
-    // 1) Prefer Node's resolver when possible (more robust under global installs and Jest ESM).
-    // Try resolution relative to this module, then relative to project CWD.
-    const packageNamesByImpl = {
-        ts: ['rcc-llmswitch-core'],
-        engine: ['rcc-llmswitch-engine']
-    };
     const baseUrls = [
         pathToFileURL(path.join(path.dirname(resolveCoreLoaderModulePath()), 'package.json')).href,
-        pathToFileURL(path.join(process.cwd(), 'package.json')).href
+        pathToFileURL(path.join(process.cwd(), 'package.json')).href,
     ];
-    for (const name of packageNamesByImpl[impl]) {
-        for (const baseUrl of baseUrls) {
-            const root = tryResolvePackageRootViaRequire(name, baseUrl);
-            if (root) {
-                corePackageDirByImpl[impl] = root;
-                return root;
-            }
+    for (const baseUrl of baseUrls) {
+        const root = tryResolvePackageRootViaRequire('rcc-llmswitch-core', baseUrl);
+        if (root) {
+            corePackageDir = root;
+            return root;
         }
     }
-    // 2) Fallback: walk up and find node_modules relative to runtime/module paths.
     const startDirs = [
-        // Normal runtime: resolve from this module's location.
         path.dirname(resolveCoreLoaderModulePath()),
-        // Jest/ts-jest ESM can execute from virtualized cache paths; fall back to project CWD.
-        process.cwd()
+        process.cwd(),
     ];
     for (const startDir of startDirs) {
         let currentDir = startDir;
         while (true) {
-            for (const pkgPath of PACKAGE_CANDIDATES_BY_IMPL[impl]) {
+            for (const pkgPath of PACKAGE_CANDIDATES) {
                 const candidate = path.join(currentDir, pkgPath);
                 if (fs.existsSync(candidate)) {
-                    corePackageDirByImpl[impl] = candidate;
+                    corePackageDir = candidate;
                     return candidate;
                 }
             }
@@ -173,10 +126,11 @@ export function resolveCorePackageDir(impl) {
             currentDir = parent;
         }
     }
-    const targets = PACKAGE_CANDIDATES_BY_IMPL[impl].map((pkg) => path.join('<project>', pkg)).join(' 或 ');
-    throw new Error(`[llmswitch-core-loader] 无法定位 llmswitch 核心库(${impl})，请执行 npm install 以确保 ${targets} 存在。`);
+    const targets = PACKAGE_CANDIDATES.map((pkg) => path.join('<project>', pkg)).join(' 或 ');
+    throw new Error(`[llmswitch-core-loader] 无法定位 llmswitch 核心库，请执行 npm install 以确保 ${targets} 存在。`);
 }
 function resolveCoreDistPath(subpath, impl) {
+    assertOnlyCoreDistImpl(impl);
     const clean = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
     const distDir = path.join(resolveCorePackageDir(impl), 'dist');
     const candidate = path.join(distDir, `${clean}.js`);
@@ -192,67 +146,6 @@ export function resolveCoreModuleUrl(subpath, impl = 'ts') {
     const modulePath = resolveCoreDistPath(subpath, impl);
     return pathToFileURL(modulePath).href;
 }
-function resolveBuiltinSourceModulePath(subpath, impl) {
-    if (impl !== 'ts') {
-        return null;
-    }
-    try {
-        const packageDir = resolveCorePackageDir(impl);
-        return path.join(packageDir, 'src', `${subpath.replace(/^\/*/, '').replace(/\.js$/i, '')}.ts`);
-    }
-    catch {
-        return null;
-    }
-}
 export async function importCoreModule(subpath, impl = 'ts') {
-    if (isJestRuntime()) {
-        const jestRequire = getJestRequire();
-        const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
-        if (sourcePath && jestRequire) {
-            try {
-                return jestRequire(sourcePath);
-            }
-            catch {
-                // fall through to dist-path fallback below
-            }
-        }
-        if (sourcePath) {
-            try {
-                return (await import(pathToFileURL(sourcePath).href));
-            }
-            catch {
-                // fall through to dist-path fallback below
-            }
-        }
-        const modulePath = resolveCoreDistPath(subpath, impl);
-        if (jestRequire) {
-            try {
-                return jestRequire(modulePath);
-            }
-            catch (error) {
-                const message = error instanceof Error ? error.message : String(error ?? '');
-                if (!/Must use import to load ES Module/i.test(message)) {
-                    throw error;
-                }
-            }
-        }
-        return (await import(pathToFileURL(modulePath).href));
-    }
-    const moduleUrl = resolveCoreModuleUrl(subpath, impl);
-    try {
-        return (await import(moduleUrl));
-    }
-    catch (error) {
-        const code = error instanceof Error ? error.code : undefined;
-        const sourcePath = resolveBuiltinSourceModulePath(subpath, impl);
-        if (sourcePath
-            && !isJestRuntime()
-            && (code === 'MODULE_NOT_FOUND'
-                || code === 'ERR_MODULE_NOT_FOUND'
-                || code === undefined)) {
-            const require = createRequire(resolveCoreLoaderModulePath());
-            return require(sourcePath);
-        }
-        throw error;
-    }
+    return (await import(resolveCoreModuleUrl(subpath, impl)));
 }

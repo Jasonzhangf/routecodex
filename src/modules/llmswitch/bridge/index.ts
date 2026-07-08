@@ -6,8 +6,6 @@
 
 export {
   resolveCoreModulePath,
-  importCoreDist,
-  requireCoreDist,
   type AnyRecord
 } from './module-loader.js';
 
@@ -30,10 +28,9 @@ export {
 } from './responses-sse-bridge.js';
 export {
   buildResponsesRequestLogContextForHttp,
-  importResponsesHandlerCoreDist,
   normalizeResponsesClientPayloadForHttp,
+  normalizeResponsesJsonBodyForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
-  requireResponsesHandlerCoreDist,
   rebindResponsesConversationRequestIdForHttp,
 } from './responses-response-bridge.js';
 export {

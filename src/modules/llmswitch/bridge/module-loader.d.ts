@@ -5,7 +5,5 @@
  */
 import { resolveCoreModulePath } from '../core-loader.js';
 type AnyRecord = Record<string, unknown>;
-declare function importCoreDist<TModule extends object = AnyRecord>(subpath: string): Promise<TModule>;
-declare function requireCoreDist<TModule extends object = AnyRecord>(subpath: string): TModule;
-export { resolveCoreModulePath, importCoreDist, requireCoreDist };
+export { resolveCoreModulePath };
 export type { AnyRecord };

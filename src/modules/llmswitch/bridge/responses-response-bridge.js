@@ -1,5 +1,4 @@
-import { importCoreDist, requireCoreDist, } from './module-loader.js';
-import { projectResponsesClientPayloadForClientNative, } from './native-exports.js';
+import { buildResponsesPayloadFromChatNative, planResponsesJsonClientDispatchNative, projectResponsesClientPayloadForClientNative, } from './native-exports.js';
 import { readRuntimeRequestTruthIdentifiers, } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 function asRecordForHttp(value) {
@@ -68,30 +67,19 @@ export async function rebindResponsesConversationRequestIdForHttp(oldId, newId) 
     const { rebindResponsesConversationRequestId } = await import('./runtime-integrations.js');
     await rebindResponsesConversationRequestId(oldId, newId);
 }
-export function normalizeResponsesJsonBodyForHttp(args) {
+export async function normalizeResponsesJsonBodyForHttp(args) {
     if (args.entryEndpoint !== '/v1/responses') {
-        return Promise.resolve(args.body);
+        return args.body;
     }
     if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
-        return Promise.resolve(args.body);
+        return args.body;
     }
     if (args.body.object !== 'chat.completion') {
-        return Promise.resolve(args.body);
+        return args.body;
     }
-    return (args.resolveBridge ?? importResponsesHandlerCoreDist)('conversion/responses/responses-openai-bridge').then((mod) => {
-        if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
-            throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
-        }
-        return mod.buildResponsesPayloadFromChat(args.body, {
-            requestId: args.requestLabel
-        });
+    return buildResponsesPayloadFromChatNative(args.body, {
+        requestId: args.requestLabel,
     });
-}
-export function requireResponsesHandlerCoreDist(specifier) {
-    return requireCoreDist(specifier);
-}
-export async function importResponsesHandlerCoreDist(specifier) {
-    return await importCoreDist(specifier);
 }
 export async function normalizeResponsesClientPayloadForHttp(args) {
     if (args.entryEndpoint !== '/v1/responses'
@@ -105,7 +93,7 @@ export async function normalizeResponsesClientPayloadForHttp(args) {
     if (!Array.isArray(toolsRaw)) {
         throw new Error('Responses client projection requires requestContext.context.toolsRaw');
     }
-    const projectedPayload = projectResponsesClientPayloadForClientNative({
+    return projectResponsesClientPayloadForClientNative({
         payload: args.payload,
         toolsRaw,
         metadata: args.metadata,
@@ -116,14 +104,26 @@ export async function normalizeResponsesClientPayloadForHttp(args) {
             }
             : undefined,
     });
-    return stripClientVisibleMetadataDeep(projectedPayload);
 }
 export async function prepareResponsesJsonClientDispatchPlanForHttp(args) {
+    const dispatchPlan = planResponsesJsonClientDispatchNative({
+        entryEndpoint: args.entryEndpoint,
+        continuationOwner: args.continuationOwner,
+        hasRequestContextToolsRaw: Array.isArray(args.requestContext?.context?.toolsRaw),
+    });
+    if (dispatchPlan.action === 'direct_passthrough') {
+        return {
+            clientBody: args.body,
+            sanitizedBody: args.body,
+        };
+    }
+    if (dispatchPlan.action !== 'project_client_payload') {
+        throw new Error(`[responses] unsupported JSON client dispatch action: ${String(dispatchPlan.action ?? 'unknown')}`);
+    }
     const normalizedJsonBody = await normalizeResponsesJsonBodyForHttp({
         body: args.body,
         entryEndpoint: args.entryEndpoint,
         requestLabel: args.requestLabel,
-        resolveBridge: args.resolveBridge,
     });
     const clientBody = await normalizeResponsesClientPayloadForHttp({
         payload: normalizedJsonBody,
@@ -135,22 +135,5 @@ export async function prepareResponsesJsonClientDispatchPlanForHttp(args) {
         clientBody,
         sanitizedBody: stripInternalKeysDeep(clientBody),
     };
-}
-function stripClientVisibleMetadataDeep(value) {
-    if (!value || typeof value !== 'object') {
-        return value;
-    }
-    if (Array.isArray(value)) {
-        return value.map((item) => stripClientVisibleMetadataDeep(item));
-    }
-    const record = value;
-    const out = {};
-    for (const [key, entry] of Object.entries(record)) {
-        if (key === 'metadata') {
-            continue;
-        }
-        out[key] = stripClientVisibleMetadataDeep(entry);
-    }
-    return out;
 }
 //# sourceMappingURL=responses-response-bridge.js.map

@@ -3765,10 +3765,9 @@ owners:
       - ResponsesResponseLifecycleBridgeFacade
     canonical_builders:
       - buildResponsesRequestLogContextForHttp
-      - importResponsesHandlerCoreDist
+      - normalizeResponsesJsonBodyForHttp
       - prepareResponsesJsonClientDispatchPlanForHttp
       - rebindResponsesConversationRequestIdForHttp
-      - requireResponsesHandlerCoreDist
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-response-bridge.ts
       - src/server/handlers/handler-response-sse.ts
