@@ -37,7 +37,7 @@ describe('StatsManager tool name canonicalization', () => {
     const stats = new StatsManager();
 
     stats.recordToolUsage(
-      { providerKey: 'deepseek-web.1', model: 'deepseek-reasoner' },
+      { providerKey: 'provider-a.1', model: 'model-a' },
       {
         output: [
           {

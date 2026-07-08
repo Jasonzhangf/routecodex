@@ -212,13 +212,13 @@ export function createListCommand(): Command {
 
 export function createAddCommand(): Command {
   return new Command('add')
-    .description('Interactively create a new provider v2 config (guided standard protocols + managed-auth built-ins)')
-    .option('-i, --id <id>', 'Provider id (e.g. my-openai, gemini, deepseek-web)')
+    .description('Interactively create a new provider v2 config (guided standard protocols)')
+    .option('-i, --id <id>', 'Provider id (e.g. my-openai, gemini, custom-openai)')
     .option('--root <dir>', 'Override provider root directory')
     .action(async (opts: { id?: string; root?: string }) => {
       let providerId = (opts.id || '').trim();
       if (!providerId) {
-        providerId = await ask('Provider id (e.g. my-openai, gemini, deepseek-web)', 'glm');
+        providerId = await ask('Provider id (e.g. my-openai, gemini, custom-openai)', 'glm');
       }
       if (!providerId.trim()) {
         console.error('Provider id is required');

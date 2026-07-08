@@ -1,67 +1,51 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
-const executeRequestStagePipelineMock = jest.fn(async ({ normalized }: Record<string, any>) => ({
-  providerPayload: normalized.payload,
-  metadata: normalized.metadata,
-  outputMetadata: normalized.metadata,
-  standardizedRequest: normalized.payload,
-  entryOriginRequest: normalized.payload,
-  effects: [],
-  diagnostics: [],
-}));
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js',
-  () => ({
-    createVirtualRouterRuntime: () => ({
-      initialize: jest.fn(),
-      updateDeps: jest.fn(),
-      registerProviderRuntimeIngress: jest.fn(),
-      unregisterProviderRuntimeIngress: jest.fn(),
-    }),
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.js',
-  () => ({
-    executeRequestStagePipeline: executeRequestStagePipelineMock,
-  })
-);
+const nativeCalls = {
+  create: jest.fn<(inputJson: string) => string>(),
+  execute: jest.fn<(handle: string, requestJson: string) => string>(),
+  dispose: jest.fn<(handle: string) => void>(),
+  updateConfig: jest.fn<(handle: string, configJson: string) => void>(),
+  updateDeps: jest.fn<(handle: string, depsJson: string) => void>(),
+  route: jest.fn<(handle: string, requestJson: string, metadataJson: string) => string>(),
+  diagnoseRoute: jest.fn<(handle: string, requestJson: string, metadataJson: string) => string>(),
+  getStatus: jest.fn<(handle: string) => string>(),
+  markConcurrencyScopeBusy: jest.fn<(handle: string, scopeKey: string) => void>(),
+  materializeRequest: jest.fn<(input: {
+    endpoint: string;
+    providerProtocol: string;
+    metadata: Record<string, unknown>;
+    metadataCenterSnapshot?: Record<string, unknown> | null;
+    payload: Record<string, unknown>;
+    payloadStream: boolean;
+  }) => {
+    endpoint: string;
+    entryEndpoint: string;
+    providerProtocol: string;
+    metadata: Record<string, unknown>;
+    metadataCenterSnapshot?: Record<string, unknown> | null;
+    processMode: 'chat';
+    direction: 'request';
+    stage: 'inbound';
+    stream: boolean;
+    disableSnapshots: boolean;
+  }>(),
+};
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.js',
   () => ({
-    extractModelHintFromMetadataWithNative: jest.fn(() => undefined),
-    resolveHubPipelineRequestProviderProtocolWithNative: jest.fn(({
-      providerProtocol,
-      runtimeControl
-    }: {
-      providerProtocol?: unknown;
-      runtimeControl?: Record<string, unknown> | null;
-    }) => ({
-      providerProtocol: typeof runtimeControl?.providerProtocol === 'string'
-        ? runtimeControl.providerProtocol
-        : providerProtocol
-    })),
-    resolveSseProtocolWithNative: jest.fn((_metadata: unknown, providerProtocol: string) => providerProtocol),
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/runtime-metadata.js',
-  () => ({
-    ensureRuntimeMetadata: jest.fn((carrier: Record<string, unknown>) => {
-      const existing = carrier.__rt;
-      if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
-        return existing;
-      }
-      carrier.__rt = {};
-      return carrier.__rt as Record<string, unknown>;
-    }),
-    readRuntimeMetadata: jest.fn(() => ({})),
-  })
+    createHubPipelineEngineJson: nativeCalls.create,
+    hubPipelineExecuteJson: nativeCalls.execute,
+    disposeHubPipelineEngineJson: nativeCalls.dispose,
+    updateHubPipelineVirtualRouterConfigJson: nativeCalls.updateConfig,
+    updateHubPipelineEngineDepsJson: nativeCalls.updateDeps,
+    hubPipelineVirtualRouterRouteJson: nativeCalls.route,
+    hubPipelineVirtualRouterDiagnoseRouteJson: nativeCalls.diagnoseRoute,
+    hubPipelineVirtualRouterStatusJson: nativeCalls.getStatus,
+    hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson: nativeCalls.markConcurrencyScopeBusy,
+    buildHubPipelineMaterializedRequestPlanWithNative: nativeCalls.materializeRequest,
+  }),
 );
 
 const { HubPipeline } = await import(
@@ -70,37 +54,50 @@ const { HubPipeline } = await import(
 
 const TEST_METADATA_WRITER = {
   module: 'tests/sharedmodule/hub-pipeline.metadata-center-provider-protocol.spec.ts',
-  symbol: 'bindProviderProtocol',
-  stage: 'test_runtime_control_provider_protocol'
+  symbol: 'bindRouteHint',
+  stage: 'test_runtime_control_route_hint'
 } as const;
 
-describe('HubPipeline metadata center providerProtocol contract', () => {
+describe('HubPipeline metadata center request-route contract', () => {
   beforeEach(() => {
-    executeRequestStagePipelineMock.mockClear();
+    for (const call of Object.values(nativeCalls)) {
+      call.mockReset();
+    }
+    nativeCalls.create.mockReturnValue(JSON.stringify({ handle: 'hp_metadata_center_test' }));
+    nativeCalls.execute.mockReturnValue(JSON.stringify({ requestId: 'req_1', success: true, metadata: {}, nodeResults: [] }));
+    nativeCalls.materializeRequest.mockImplementation((input) => ({
+      endpoint: input.endpoint,
+      entryEndpoint: input.endpoint,
+      providerProtocol: 'openai-responses',
+      metadata: input.metadata,
+      ...(input.metadataCenterSnapshot ? { metadataCenterSnapshot: input.metadataCenterSnapshot } : {}),
+      processMode: 'chat',
+      direction: 'request',
+      stage: 'inbound',
+      stream: false,
+      disableSnapshots: false,
+    }));
   });
 
-  it('prefers bound MetadataCenter runtimeControl.providerProtocol over flat metadata', async () => {
+  it('passes bound MetadataCenter snapshot into the native engine before provider route selection', async () => {
     const metadata: Record<string, unknown> = {
-      providerProtocol: 'openai-chat',
       entryEndpoint: '/v1/responses',
       direction: 'request',
       stage: 'inbound'
     };
     const center = MetadataCenter.attach(metadata);
     center.writeRuntimeControl(
-      'providerProtocol',
-      'openai-responses',
+      'routeHint',
+      'thinking',
       TEST_METADATA_WRITER,
-      'test-provider-protocol'
+      'test-route-hint'
     );
 
-    const pipeline = new HubPipeline({
-      virtualRouter: {} as any
-    });
+    const pipeline = new HubPipeline({ virtualRouter: {} as any });
 
     try {
       await pipeline.execute({
-        id: 'req-metadata-center-provider-protocol',
+        id: 'req-metadata-center-route-before-provider-protocol',
         endpoint: '/v1/responses',
         payload: {
           model: 'gpt-test',
@@ -109,48 +106,22 @@ describe('HubPipeline metadata center providerProtocol contract', () => {
         metadata
       } as any);
 
-      expect(executeRequestStagePipelineMock).toHaveBeenCalledWith(expect.objectContaining({
-        normalized: expect.objectContaining({
-          providerProtocol: 'openai-responses',
-          metadata: expect.objectContaining({
-            providerProtocol: 'openai-responses',
+      expect(nativeCalls.materializeRequest).toHaveBeenCalledWith(expect.objectContaining({
+        providerProtocol: '',
+        metadataCenterSnapshot: expect.objectContaining({
+          runtimeControl: expect.objectContaining({
+            routeHint: 'thinking',
           }),
         }),
       }));
-    } finally {
-      pipeline.dispose();
-    }
-  });
-
-  it('uses flat metadata providerProtocol when no MetadataCenter is bound', async () => {
-    const pipeline = new HubPipeline({
-      virtualRouter: {} as any
-    });
-
-    try {
-      await pipeline.execute({
-        id: 'req-flat-provider-protocol',
-        endpoint: '/v1/responses',
-        payload: {
-          model: 'gpt-test',
-          input: 'hi'
+      expect(JSON.parse(nativeCalls.execute.mock.calls[0]![1])).toMatchObject({
+        providerProtocol: 'openai-responses',
+        metadataCenterSnapshot: {
+          runtimeControl: {
+            routeHint: 'thinking',
+          },
         },
-        metadata: {
-          providerProtocol: 'openai-responses',
-          entryEndpoint: '/v1/responses',
-          direction: 'request',
-          stage: 'inbound'
-        }
-      } as any);
-
-      expect(executeRequestStagePipelineMock).toHaveBeenCalledWith(expect.objectContaining({
-        normalized: expect.objectContaining({
-          providerProtocol: 'openai-responses',
-          metadata: expect.objectContaining({
-            providerProtocol: 'openai-responses',
-          }),
-        }),
-      }));
+      });
     } finally {
       pipeline.dispose();
     }

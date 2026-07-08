@@ -62,13 +62,7 @@ interface ProviderAuthConfig {
   rawType?: string;
 }
 
-interface DeepSeekCompatRuntimeOptions {
-  strictToolRequired?: boolean;
-  toolProtocol?: "native" | "text";
-  contextFileEnabled?: boolean;
-}
-
-type AnthropicThinkingEffort = "low" | "medium" | "high" | "max";
+export type AnthropicThinkingEffort = "low" | "medium" | "high" | "max";
 
 interface AnthropicThinkingConfig {
   mode?: "disabled" | "enabled" | "adaptive";
@@ -107,7 +101,6 @@ export interface ProviderProfile {
   anthropicThinkingConfig?: AnthropicThinkingConfig;
   anthropicThinking?: string;
   anthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
-  deepseek?: DeepSeekCompatRuntimeOptions;
   /**
    * When true, this provider must be skipped for any request that
    * requires server-side tool orchestration (e.g. web_search).
@@ -152,7 +145,6 @@ export interface ProviderRuntimeProfile {
   anthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
   anthropicThinkingConfig?: AnthropicThinkingConfig;
   maxContextTokens?: number;
-  deepseek?: DeepSeekCompatRuntimeOptions;
   /**
    * Provider-level flag propagated from the materialized provider profile.
    * When true, VirtualRouterEngine will skip this runtime for any
@@ -273,7 +265,7 @@ interface VirtualRouterWebSearchEngineConfig {
   executionMode?: VirtualRouterWebSearchExecutionMode;
   /**
    * When executionMode=direct, controls how the upstream search capability is activated.
-   * - route: route selection itself enables native search behavior (e.g. deepseek-web search route).
+   * - route: route selection itself enables native search behavior.
    * - builtin: upstream requires a provider-native builtin search tool/schema.
    */
   directActivation?: VirtualRouterWebSearchDirectActivation;
@@ -514,7 +506,6 @@ export interface TargetMetadata {
   anthropicThinkingConfig?: AnthropicThinkingConfig;
   anthropicThinking?: string;
   anthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
-  deepseek?: DeepSeekCompatRuntimeOptions;
   /**
    * Route-level flags propagated from the virtual router.
    * These are derived from routing pools and webSearch config and

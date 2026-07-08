@@ -109,7 +109,7 @@
    - direct consumer 必须消费 `ErrorErr05ExecutionDecision`，在候选耗尽前不得直接 client-visible
 3. 候选优先：
    - 任何 provider 执行期错误（recoverable / unrecoverable / periodic_recovery），若当前 pool 仍有未排除候选，必须先按统一策略动作：
-     1) 进入统一错误动作队列 blocking wait（`1s -> 2s -> 3s -> repeat`）
+     1) 进入统一错误动作队列 blocking wait（`1s -> 3s -> 5s -> repeat`）
      2) 由策略决定 `retry_same_provider_once` 或 `exclude_and_reroute`
    - 候选耗尽后，才允许进入 `ErrorErr06ClientProjected`
 4. secondary / default pool 扩池：

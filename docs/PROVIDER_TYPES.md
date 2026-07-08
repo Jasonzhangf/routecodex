@@ -4,7 +4,7 @@
 - 上游“线协议 / wire”（Chat / Responses / Messages / Gemini 等）
 - Provider V2 选择的传输实现（openai/responses/anthropic/gemini…）
 
-> 品牌/家族（glm、qwen、lmstudio…）建议通过 `id`、`compatibilityProfile`、`auth.type` 等表达，而不是把品牌写成协议类型。
+> 品牌/家族（glm、lmstudio…）建议通过 `id`、`compatibilityProfile`、`auth.type` 等表达，而不是把品牌写成协议类型。
 
 ## 推荐使用的 type
 
@@ -31,19 +31,17 @@
 }
 ```
 
-### OpenAI-compatible（例如 GLM/Qwen/Kimi/DeepSeek Web 等）
+### OpenAI-compatible（例如 GLM/Kimi/ModelScope 等）
 
 仍然建议 `type: "openai"`，并通过 `compatibilityProfile` 做最小字段适配：
 
-- DeepSeek Web 账号模式建议：`type: "openai"` + `compatibilityProfile: "chat:deepseek-web"` + `auth.type = "deepseek-account"`。
-
 ```jsonc
 {
-  "id": "qwen",
+  "id": "glm",
   "type": "openai",
-  "baseURL": "https://portal.qwen.ai/v1",
-  "compatibilityProfile": "chat:qwen",
-  "auth": { "type": "qwen-oauth", "tokenFile": "default" }
+  "baseURL": "https://open.bigmodel.cn/api/paas/v4",
+  "compatibilityProfile": "chat:glm",
+  "auth": { "type": "apikey", "apiKey": "${GLM_API_KEY}" }
 }
 ```
 

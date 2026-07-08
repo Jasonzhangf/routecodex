@@ -1499,7 +1499,6 @@ export class HubRequestExecutor implements RequestExecutor {
               requestId: input.requestId,
               serverToolsEnabled,
               wantsStream: wantsStreamBase,
-              entryOriginRequest: pipelineResult.entryOriginRequest as Record<string, unknown> | undefined,
               requestSemantics,
               processMode: pipelineResult.processMode,
               response: normalized,
@@ -1778,7 +1777,6 @@ export class HubRequestExecutor implements RequestExecutor {
     requestId: string;
     serverToolsEnabled?: boolean;
     wantsStream: boolean;
-    entryOriginRequest?: Record<string, unknown>;
     requestSemantics?: Record<string, unknown>;
     processMode?: string;
     response: PipelineExecutionResult;

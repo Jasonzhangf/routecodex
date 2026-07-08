@@ -76,14 +76,14 @@ async function main() {
       }
     ],
     parameters: {
-      model: 'qwen3.5-plus',
+      model: 'model-a',
       stream: true,
       temperature: 0.2
     },
     metadata: {
       context: adapterContext,
       missingFields: [{ path: 'messages[1].content', reason: 'compat' }],
-      providerMetadata: { provider: 'qwen' },
+      providerMetadata: { provider: 'provider-a' },
       protocolState: { phase: 'chat' }
     },
     semantics: {
@@ -110,7 +110,7 @@ async function main() {
 
   const chatWithoutTools = {
     messages: [{ role: 'user', content: 'plain text' }],
-    parameters: { model: 'qwen3.5-plus', stream: false },
+    parameters: { model: 'model-a', stream: false },
     metadata: { context: adapterContext }
   };
 

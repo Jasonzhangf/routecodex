@@ -1629,10 +1629,6 @@ export function planServertoolOutcomeWithNative(input: unknown): unknown {
   return invokeRouterHotpathJsonCapability('planServertoolOutcomeJson', [input]);
 }
 
-export function planServertoolNoopOutcomeWithNative(input: unknown): unknown {
-  return invokeRouterHotpathJsonCapability('planServertoolNoopOutcomeJson', [input]);
-}
-
 export function planServertoolAutoHookQueuesWithNative(input: unknown): unknown {
   return invokeRouterHotpathJsonCapability('planServertoolAutoHookQueuesJson', [input]);
 }
@@ -2554,18 +2550,6 @@ export function planServertoolHandlerErrorExecutionLoopEffectWithNative(input: u
     mode: 'handler_error',
     toolCall: record.toolCall,
     handlerErrorMessage: record.handlerErrorMessage
-  });
-}
-
-// servertool-core bridge: planServertoolNoopExecutionLoopEffectWithNative
-export function planServertoolNoopExecutionLoopEffectWithNative(input: unknown): unknown {
-  const record = input && typeof input === 'object' && !Array.isArray(input)
-    ? input as Record<string, unknown>
-    : {};
-  return planServertoolExecutionLoopEffectWithNative({
-    mode: 'noop',
-    toolCall: record.toolCall,
-    noopOutcome: record.noopOutcome
   });
 }
 

@@ -3,7 +3,6 @@ import { DebugSessionManager } from './session-manager.js';
 import { HarnessRegistry } from './harness/registry.js';
 import { createDefaultHarnessRegistry } from './harness/defaults.js';
 import type { DefaultHarnessOptions } from './harness/defaults.js';
-import { DryRunRunner } from './harness/dry-runner.js';
 import { ReplayRunner } from './harness/replay-runner.js';
 import {
   readDebugErrorDiagArtifactInternal,
@@ -22,13 +21,11 @@ export function createDebugToolkit(options: DebugToolkitOptions = {}) {
   const store = options.store ?? new FileSnapshotStore(options.snapshotDirectory);
   const sessions = new DebugSessionManager(store);
   const registry = options.registry ?? createDefaultHarnessRegistry(options);
-  const dryRunner = new DryRunRunner(sessions, registry);
   const replayRunner = new ReplayRunner(sessions, registry);
   return {
     store,
     sessions,
     registry,
-    dryRunner,
     replayRunner
   };
 }

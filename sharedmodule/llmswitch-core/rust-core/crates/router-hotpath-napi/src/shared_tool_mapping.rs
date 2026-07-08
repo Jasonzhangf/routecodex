@@ -1549,18 +1549,10 @@ mod tests {
     #[test]
     fn shared_tool_mapping_deletion_gate_removed_deepseek_response_local_exec_family() {
         let path = crate_src_path("req_outbound_stage3_compat/deepseek_web/response.rs");
-        let Ok(source) = fs::read_to_string(&path) else {
-            return;
-        };
         assert!(
-            !source.contains("fn is_exec_command_family(name: &str) -> bool {"),
-            "local exec_command family helper still present in {}",
+            !path.exists(),
+            "removed deepseek_web response module must not be restored: {}",
             path.display()
-        );
-        assert!(
-            source.contains("normalize_routecodex_tool_name(Some(raw_name))")
-                || source.contains("normalize_routecodex_tool_name(function.get(\"name\").and_then(Value::as_str))"),
-            "deepseek_web/response.rs must use shared tool mapping truth directly"
         );
     }
 

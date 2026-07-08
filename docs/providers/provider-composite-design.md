@@ -52,7 +52,7 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
 - 基于 `providerId/providerKey` 选择最小家族差异：
   - `glm` → 复用 `GLMCompatibility`（最小清理、1210/1214、末条 tool 回显清噪）。
   - `lmstudio` → 复用 `LMStudioCompatibility`（最小字段映射）。
-  - `qwen` → 默认走最小路径（保持 OpenAI 形状），不启用旧 `qwen-compat` 的“input/parameters”改形状逻辑。
+  - Provider 差异默认走最小路径（保持 OpenAI 形状），禁止复活旧品牌 compat 改形状逻辑。
   - 其他 → passthrough/minimal。
 
 ## 与 BaseProvider 的集成
@@ -82,24 +82,23 @@ output/* → Provider.preprocessRequest(compat.request) → HTTP Provider → Pr
   - `anthropic` → AnthropicHttpProvider；
   - `gemini` → 预留。
 - 旧配置兼容（规范化）：
-  - 若发现 `providerType` ∈ {`glm`,`qwen`,`lmstudio`}，运行时规范化为 `openai` 并记录告警；品牌保留在 `providerId`，OAuth 方案通过 `auth.type = "<provider>-oauth"` 显式声明。
+  - 若发现旧品牌型 `providerType`，运行时规范化为 `openai` 并记录告警；品牌保留在 `providerId`，认证只允许 `auth.type = "apikey"`。
   - 不在 `llmswitch-core` 内判断品牌，品牌差异仅由 compat 聚合器处理（最小清理）。
 
 ## 迁移与兼容
 
-- 配置：将旧 `providerType: 'qwen'|'glm'|'lmstudio'` 规范化为 `providerType: 'openai'`，并通过 `providerId` + `auth.type = '<provider>-oauth'` 表达家族；保留警告日志。
-- Qwen：默认走 OpenAI 兼容端点 `/v1/chat/completions`；如需 native wire，需新增协议 id 与 codec，不能在 `openai-chat` 协议下改形状。
+- 配置：将旧品牌型 `providerType` 规范化为 `providerType: 'openai'`，并通过 `providerId` + `auth.type = 'apikey'` 表达家族；保留警告日志。
 
-### 配置示例（OAuth 品牌）
+### 配置示例（API Key）
 
 ```json
 {
   "type": "openai-standard",
   "config": {
     "providerType": "openai",
-    "baseUrl": "https://portal.qwen.ai/v1",
-    "auth": { "type": "qwen-oauth" },
-    "models": ["qwen3-coder-plus"]
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "auth": { "type": "apikey", "apiKeyEnv": "GLM_API_KEY" },
+    "models": ["glm-4"]
   }
 }
 ```

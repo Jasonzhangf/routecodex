@@ -10,7 +10,7 @@ This document describes how RouteCodex/llmswitch-core selects a `providerKey` fr
 
 - **providerKey**: `providerId.<keyAlias>.<modelId>` (example: `antigravity.gbplasu1.claude-sonnet-4-5-thinking`)
 - **pool**: A `RoutePoolTier` (`routing.<routeName>[]`), containing `targets` and a `mode`
-- **quotaView**: Shadow regression input used by tests to prove TS quota data cannot override Rust route truth. It is not a selection source of truth.
+- **availability state**: Rust-owned provider health and request-scoped exclusion metadata used during selection.
 
 ## Selection Engine I/O (for API/WebUI alignment)
 
@@ -40,20 +40,16 @@ This means selection output is always deterministic and explainable via `failure
 ## Provider stickiness
 
 Provider sticky and alias sticky queues are not Virtual Router primitives.
-Non-continuation requests are routed only by the current request, pool policy, quota, and health.
+Non-continuation requests are routed only by the current request, pool policy, request-scoped exclusions, and health.
 
 Continuation handling is separate:
 
 - direct/remote Responses continuation restores the recorded provider key because upstream owns the context;
 - local/relay continuation restores local context only and does not pin a provider.
 
-## Shadow Regression Principle
+## Removed Callback Principle
 
-`quotaView` is retained only as a shadow regression surface in tests.
-
-- Rust route truth remains authoritative.
-- TS `quotaView` may be poisoned in tests to prove it cannot override Rust decisions.
-- `quotaView` must not be treated as the primary selection source in docs or runtime wiring.
+Removed quota callback surfaces must not be restored. Rust route truth remains authoritative, and request-scoped exclusions must be explicit metadata.
 
 ## Config Example (WebUI field names)
 

@@ -18,7 +18,6 @@ const PROVIDER_KEYS = {
   'openai.default': 'openai',
   'anthropic.default': 'anthropic',
   'kimi.key1': 'kimi',
-  'qwen.key1': 'qwen',
   'iflow.key1': 'iflow',
   'tab.key1': 'tab',
   'crs.key1': 'crs',

@@ -65,13 +65,13 @@ function mergeObservedRoutePoolChainBaseline(
 
 describe('normalizeExplicitRoutePool', () => {
   it('normal array passes through', () => {
-    expect(normalizeExplicitRoutePoolBaseline(['deepseek-web.default', 'anthropic.default']))
-      .toEqual(['deepseek-web.default', 'anthropic.default']);
+    expect(normalizeExplicitRoutePoolBaseline(['provider-a.default', 'anthropic.default']))
+      .toEqual(['provider-a.default', 'anthropic.default']);
   });
 
   it('trims whitespace and filters empty', () => {
-    expect(normalizeExplicitRoutePoolBaseline(['  deepseek-web.default  ', '  ', 'anthropic.default']))
-      .toEqual(['deepseek-web.default', 'anthropic.default']);
+    expect(normalizeExplicitRoutePoolBaseline(['  provider-a.default  ', '  ', 'anthropic.default']))
+      .toEqual(['provider-a.default', 'anthropic.default']);
   });
 
   it('deduplicates preserving order', () => {

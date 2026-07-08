@@ -24,7 +24,6 @@ export interface NativeHubPipelineOrchestrationOutput {
   payload?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   standardizedRequest?: Record<string, unknown>;
-  entryOriginRequest?: Record<string, unknown>;
   error?: {
     code: string;
     message: string;
@@ -84,7 +83,6 @@ export {
   extractModelHintFromMetadataWithNative,
   buildHubPipelineMaterializedRequestPlanWithNative,
   normalizeHubEndpointWithNative,
-  resolveHubPipelineRequestProviderProtocolWithNative,
   resolveSseProtocolWithNative,
   planProviderResponseServertoolRuntimeActionsWithNative,
   runHubPipelineOrchestrationWithNative
@@ -135,4 +133,35 @@ export function updateHubPipelineVirtualRouterConfigJson(handle: string, configJ
 export function updateHubPipelineEngineDepsJson(handle: string, depsJson: string): void {
   const fn = requireNativeHotpathFn<NativeFunction2<string, string, void>>('updateHubPipelineEngineDepsJson');
   fn(handle, depsJson);
+}
+
+export function hubPipelineVirtualRouterRouteJson(
+  handle: string,
+  requestJson: string,
+  metadataJson: string
+): string {
+  const fn = requireNativeHotpathFn<(arg1: string, arg2: string, arg3: string) => string>('hubPipelineVirtualRouterRouteJson');
+  return fn(handle, requestJson, metadataJson);
+}
+
+export function hubPipelineVirtualRouterDiagnoseRouteJson(
+  handle: string,
+  requestJson: string,
+  metadataJson: string
+): string {
+  const fn = requireNativeHotpathFn<(arg1: string, arg2: string, arg3: string) => string>('hubPipelineVirtualRouterDiagnoseRouteJson');
+  return fn(handle, requestJson, metadataJson);
+}
+
+export function hubPipelineVirtualRouterStatusJson(handle: string): string {
+  const fn = requireNativeHotpathFn<NativeFunction1<string, string>>('hubPipelineVirtualRouterStatusJson');
+  return fn(handle);
+}
+
+export function hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson(
+  handle: string,
+  scopeKey: string
+): void {
+  const fn = requireNativeHotpathFn<NativeFunction2<string, string, void>>('hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson');
+  fn(handle, scopeKey);
 }

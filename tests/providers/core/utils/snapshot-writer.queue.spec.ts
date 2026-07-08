@@ -67,7 +67,7 @@ describe('provider snapshot writer queue', () => {
       phase: 'provider-response',
       requestId: 'req_queue_1',
       clientRequestId: 'req_queue_1',
-      providerKey: 'qwen.1.qwen3.6-plus',
+      providerKey: 'provider-a.1.model-a',
       entryEndpoint: '/v1/responses',
       entryPort: 5555,
       data: { seq: 1 }
@@ -76,7 +76,7 @@ describe('provider snapshot writer queue', () => {
       phase: 'provider-response',
       requestId: 'req_queue_2',
       clientRequestId: 'req_queue_2',
-      providerKey: 'qwen.1.qwen3.6-plus',
+      providerKey: 'provider-a.1.model-a',
       entryEndpoint: '/v1/responses',
       entryPort: 5555,
       data: { seq: 2 }
@@ -85,7 +85,7 @@ describe('provider snapshot writer queue', () => {
       phase: 'provider-response',
       requestId: 'req_queue_3',
       clientRequestId: 'req_queue_3',
-      providerKey: 'qwen.1.qwen3.6-plus',
+      providerKey: 'provider-a.1.model-a',
       entryEndpoint: '/v1/responses',
       entryPort: 5555,
       data: { seq: 3 }
@@ -94,7 +94,7 @@ describe('provider snapshot writer queue', () => {
       phase: 'provider-response',
       requestId: 'req_queue_4',
       clientRequestId: 'req_queue_4',
-      providerKey: 'qwen.1.qwen3.6-plus',
+      providerKey: 'provider-a.1.model-a',
       entryEndpoint: '/v1/responses',
       entryPort: 5555,
       data: { seq: 4 }

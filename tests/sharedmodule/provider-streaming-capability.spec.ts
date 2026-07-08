@@ -1,6 +1,5 @@
-import fs from 'node:fs';
-
-import { bootstrapVirtualRouterConfig, type ProviderRuntimeProfile } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import type { ProviderRuntimeProfile } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 
 function bootstrapProvider(providerId: string, provider: Record<string, unknown>, modelId: string): ProviderRuntimeProfile {
   const result = bootstrapVirtualRouterConfig({
@@ -22,20 +21,20 @@ function bootstrapProvider(providerId: string, provider: Record<string, unknown>
 
 describe('provider streaming capability normalization', () => {
   test('treats model supportsStreaming as capability auto instead of forcing always', () => {
-    const normalized = bootstrapProvider('qwenchat', {
-      id: 'qwenchat',
+    const normalized = bootstrapProvider('provider-auto-streaming-model', {
+      id: 'provider-auto-streaming-model',
       type: 'openai',
-      baseURL: 'https://chat.qwen.ai',
-      auth: { type: 'qwen-oauth', tokenFile: 'qwen-oauth-1-default' },
+      baseURL: 'https://example.test/openai',
+      auth: { type: 'apikey', apiKey: 'test-key' },
       models: {
-        'qwen3.6-plus': { supportsStreaming: true },
-        'qwen3.5-flash': { supportsStreaming: false }
+        'streaming-model': { supportsStreaming: true },
+        'nonstreaming-model': { supportsStreaming: false }
       }
-    }, 'qwen3.6-plus');
+    }, 'streaming-model');
 
     expect(normalized.streaming).toBeUndefined();
-    expect(normalized.modelStreaming?.['qwen3.6-plus']).toBe('auto');
-    expect(normalized.modelStreaming?.['qwen3.5-flash']).toBe('never');
+    expect(normalized.modelStreaming?.['streaming-model']).toBe('auto');
+    expect(normalized.modelStreaming?.['nonstreaming-model']).toBe('never');
   });
 
   test('treats provider-level supportsStreaming as capability auto instead of forcing always', () => {
@@ -64,12 +63,5 @@ describe('provider streaming capability normalization', () => {
         models: { 'default-model': {} }
       }, 'default-model')
     ).toThrow(/Hub Pipeline only supports process="chat"/i);
-  });
-
-  test('real qwenchat config no longer forces qwen3.6-plus outbound streaming', () => {
-    const raw = JSON.parse(fs.readFileSync('/Volumes/extension/.rcc/provider/qwenchat/config.v2.json', 'utf8'));
-    const normalized = bootstrapProvider('qwenchat', raw.provider ?? raw, 'qwen3.6-plus');
-
-    expect(normalized.modelStreaming?.['qwen3.6-plus']).toBe('auto');
   });
 });

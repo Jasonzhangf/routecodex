@@ -43,7 +43,7 @@
 ### Phase 1：硬编码常量 SSOT 化（常量层）
 
 **文件**：
-- `src/constants/index.ts` —— 增加 `API_BASE_URLS`（openai / anthropic / gemini / glm / qwen / deepseek baseURL）、`PROVIDER_TIMEOUTS`（各 provider 默认 timeout）、`PROVIDER_DEFAULT_MODELS`（gpt-4 / claude-3-haiku-20240307 / glm-4 / coder-model / deepseek-chat）、`SSE_DEFAULT_CAPS`。
+- `src/constants/index.ts` —— 增加 `API_BASE_URLS`（openai / anthropic / gemini / glm baseURL）、`PROVIDER_TIMEOUTS`（各 provider 默认 timeout）、`PROVIDER_DEFAULT_MODELS`（gpt-4 / claude-3-haiku-20240307 / glm-4 / model-a）、`SSE_DEFAULT_CAPS`。
 - `src/providers/core/config/service-profiles.ts` —— 引用 `constants.API_BASE_URLS.OPENAI` 等替换裸字符串。
 - `src/providers/core/runtime/provider-request-header-orchestrator.ts` —— `DEFAULT_PROVIDER.USER_AGENT` 已经统一在 `constants/index.ts`，确认调用点都走 `DEFAULT_PROVIDER.USER_AGENT`，删除散落 UA 字符串。
 - `src/cli/config/bootstrap-provider-templates.ts` —— `baseURL: 'https://api.anthropic.com/v1'` 等替换为 `API_BASE_URLS.ANTHROPIC`。

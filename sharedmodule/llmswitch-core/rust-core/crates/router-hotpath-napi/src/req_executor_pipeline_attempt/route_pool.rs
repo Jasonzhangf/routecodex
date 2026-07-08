@@ -141,18 +141,17 @@ mod tests {
 
     #[test]
     fn normalize_route_pool_normal() {
-        let input: Value = serde_json::json!(["deepseek-web.default", "anthropic.default"]);
+        let input: Value = serde_json::json!(["provider-a.default", "anthropic.default"]);
         let result = normalize_explicit_route_pool(input);
-        assert_eq!(result, vec!["deepseek-web.default", "anthropic.default"]);
+        assert_eq!(result, vec!["provider-a.default", "anthropic.default"]);
     }
 
     #[test]
     fn normalize_route_pool_whitespace_trim() {
         // Input: second element is whitespace → should be filtered
-        let input: Value =
-            serde_json::json!(["  deepseek-web.default  ", "  ", "anthropic.default"]);
+        let input: Value = serde_json::json!(["  provider-a.default  ", "  ", "anthropic.default"]);
         let result = normalize_explicit_route_pool(input);
-        assert_eq!(result, vec!["deepseek-web.default", "anthropic.default"]);
+        assert_eq!(result, vec!["provider-a.default", "anthropic.default"]);
     }
 
     #[test]

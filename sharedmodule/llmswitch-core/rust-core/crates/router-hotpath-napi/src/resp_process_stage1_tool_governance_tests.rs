@@ -281,7 +281,7 @@ fn test_prepare_payload_for_governance_does_not_guess_function_style_apply_patch
     let payload = serde_json::json!({
         "object": "response",
         "id": "resp_stage1_apply_patch",
-        "model": "qwenchat.qwen3.6-plus",
+        "model": "custom-model",
         "status": "completed",
         "output_text": "apply_patch(path=\"hello.txt\", content=\"hello\")",
         "output": []
@@ -400,7 +400,7 @@ fn test_govern_response_harvests_dsml_wrapper_inside_ran_transcript_with_right_g
             }],
             "__rcc_tool_governance": {
                 "requestedToolNames": ["view_image"],
-                "providerFamily": "deepseek-web"
+                "enableTextHarvest": true
             }
         }),
         client_protocol: "openai-chat".to_string(),
@@ -3511,7 +3511,6 @@ fn test_harvest_tool_calls_from_xml_named_tool_blocks() {
         payload: serde_json::json!({
             "__rcc_tool_governance": {
                 "enableTextHarvest": true,
-                "providerFamily": "deepseek"
             },
             "choices": [{
                 "message": {
@@ -3556,7 +3555,6 @@ fn test_harvest_tool_calls_from_xml_invoke_parameter_attribute_blocks() {
         payload: serde_json::json!({
             "__rcc_tool_governance": {
                 "enableTextHarvest": true,
-                "providerFamily": "deepseek"
             },
             "choices": [{
                 "message": {
@@ -3617,7 +3615,7 @@ fn test_collect_harvest_text_variants_masks_wrapper_lines_and_bullet_prefix() {
 fn test_harvest_text_tool_calls_recovers_bullet_prefixed_apply_patch_json_wrapper() {
     let mut payload = json!({
         "__rcc_tool_governance": {
-            "providerFamily": "qwen",
+            "enableTextHarvest": true,
             "requestedToolNames": ["apply_patch"]
         },
         "tools": [{
@@ -3658,7 +3656,7 @@ fn test_harvest_text_tool_calls_recovers_bullet_prefixed_apply_patch_json_wrappe
 fn test_harvest_text_tool_calls_recovers_noisy_exec_command_json_wrapper_with_trailing_status() {
     let mut payload = json!({
         "__rcc_tool_governance": {
-            "providerFamily": "deepseek-web",
+            "enableTextHarvest": true,
             "requestedToolNames": ["exec_command"]
         },
         "choices": [{
@@ -3697,7 +3695,7 @@ fn test_harvest_text_tool_calls_recovers_noisy_exec_command_json_wrapper_with_tr
 fn test_harvest_text_tool_calls_recovers_escaped_exec_command_transcript_with_trailing_text() {
     let mut payload = json!({
         "__rcc_tool_governance": {
-            "providerFamily": "deepseek-web",
+            "enableTextHarvest": true,
             "requestedToolNames": ["exec_command"]
         },
         "choices": [{
@@ -3724,7 +3722,7 @@ fn test_harvest_text_tool_calls_recovers_escaped_exec_command_transcript_with_tr
 fn test_harvest_text_tool_calls_recovers_trailing_exec_command_json_after_prose() {
     let mut payload = json!({
         "__rcc_tool_governance": {
-            "providerFamily": "deepseek-web",
+            "enableTextHarvest": true,
             "requestedToolNames": ["exec_command"]
         },
         "choices": [{
@@ -3747,7 +3745,7 @@ fn test_harvest_text_tool_calls_recovers_trailing_exec_command_json_after_prose(
 fn test_harvest_text_tool_calls_recovers_exec_command_inside_chunked_transcript_shape() {
     let mut payload = json!({
         "__rcc_tool_governance": {
-            "providerFamily": "deepseek-web",
+            "enableTextHarvest": true,
             "requestedToolNames": ["exec_command"]
         },
         "choices": [{
@@ -3770,7 +3768,7 @@ fn test_harvest_text_tool_calls_recovers_exec_command_inside_chunked_transcript_
 fn test_harvest_text_tool_calls_strips_right_gutter_noise_before_exec_command_recovery() {
     let mut payload = json!({
         "__rcc_tool_governance": {
-            "providerFamily": "deepseek-web",
+            "enableTextHarvest": true,
             "requestedToolNames": ["exec_command"]
         },
         "choices": [{
@@ -4410,7 +4408,7 @@ fn test_govern_response_preserves_malformed_rcc_wrapper_multiline_whitespace_whe
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
             "__rcc_tool_governance": {
-                "providerFamily": "deepseek-web",
+                "enableTextHarvest": true,
                 "requestedToolNames": ["exec_command"]
             },
             "choices": [{
@@ -4443,12 +4441,12 @@ fn test_govern_response_preserves_malformed_rcc_wrapper_multiline_whitespace_whe
 }
 
 #[test]
-fn test_govern_response_recovers_deepseek_web_update_plan_tool_call_without_name() {
+fn test_govern_response_recovers_generic_text_harvest_update_plan_tool_call_without_name() {
     let raw = "<tool_call>\n{\"explanation\":\"修复 scheduler 决策逻辑：当 execution_state 为 running 但 owner_loop_action 指示有 ready 任务可派发时，不应等待 running 完成而应直接派发。\",\"plan\":[{\"status\":\"in_progress\",\"step\":\"修改 scheduler.rs derive_scheduler_decision 中的 running 分支，允许覆盖为 dispatch_ready_task\"},{\"status\":\"pending\",\"step\":\"编译并测试修改\"},{\"status\":\"pending\",\"step\":\"清理状态并重新启动 daemon 验证\"}]}\n</tool_call>";
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
             "__rcc_tool_governance": {
-                "providerFamily": "deepseek-web",
+                "enableTextHarvest": true,
                 "requestedToolNames": ["update_plan"]
             },
             "choices": [{
@@ -4461,7 +4459,7 @@ fn test_govern_response_recovers_deepseek_web_update_plan_tool_call_without_name
         }),
         client_protocol: "openai-chat".to_string(),
         entry_endpoint: "/v1/chat/completions".to_string(),
-        request_id: "req_deepseek_web_update_plan_without_name".to_string(),
+        request_id: "req_generic_text_harvest_update_plan_without_name".to_string(),
     };
 
     let output = govern_response(input).unwrap();

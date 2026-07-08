@@ -10,15 +10,15 @@
 - `enabled`: 是否启用（默认建议 `true`）
 - `type`: provider 协议类型（见 `docs/PROVIDER_TYPES.md`）
 - `baseURL` / `baseUrl` / `endpoint`: 上游 API Base URL（任一字段均可）
-- `auth`: 认证配置（apiKey / oauth / cookie）
-- `compatibilityProfile`: 兼容配置（如 `chat:qwen`、`chat:glm`）
+- `auth`: 认证配置（apiKey / cookie）
+- `compatibilityProfile`: 兼容配置（如 `chat:glm`）
 - `headers`: 额外请求头
 - `process`: `chat`（默认）或 `passthrough`
 - `models`: 模型列表（键为 modelId；值可写 `supportsStreaming`、`maxTokens`、`maxContext` 等）
 
 ## 认证字段（auth）
 
-常见三类：
+常见类型：
 
 ### 1) API Key
 
@@ -26,15 +26,7 @@
 "auth": { "type": "apikey", "apiKey": "YOUR_API_KEY_HERE" }
 ```
 
-### 2) OAuth（tokenFile）
-
-```jsonc
-"auth": { "type": "qwen-oauth", "tokenFile": "default" }
-```
-
-> OAuth 详细说明（认证 / 刷新 / auto）：`docs/OAUTH.md`
-
-### 3) Cookie（cookieFile）
+### 2) Cookie（cookieFile）
 
 ```jsonc
 ```
@@ -72,23 +64,6 @@
 - 样本：`configsamples/provider/glm-anthropic/config.v1.json`
 - 关键点：`type: "anthropic"`（走 `/v1/messages` 协议）；适用于某些上游只提供 anthropic 入口的场景
 - 你需要：填写 `auth.apiKey`
-
-### Qwen（OAuth）
-
-- 样本：`configsamples/provider/qwen/config.v1.json`
-- 关键点：`auth.type: "qwen-oauth"` + `auth.tokenFile: "default"`（或写全路径）；`compatibilityProfile: "chat:qwen"`
-- 你需要：先完成一次 OAuth 登录生成 tokenFile（详见 `docs/OAUTH.md`）
-
-
-- 你需要：先完成一次 OAuth 登录生成 tokenFile
-
-### DeepSeek Web（账号）
-
-- 样本：`configsamples/provider/deepseek/config.v1.json`
-- 建议配置：`type: "openai"` + `compatibilityProfile: "chat:deepseek-web"`
-- 认证字段：`auth.type: "deepseek-account"`，并通过 `auth.entries[*].tokenFile` 提供账号 token 文件（支持多账号轮转）
-- 可选参数：`deepseek.strictToolRequired`、`deepseek.toolProtocol`、`deepseek.powTimeoutMs`、`deepseek.powMaxAttempts`、`deepseek.sessionReuseTtlMs`、`deepseek.contextFileEnabled`
-- 说明：Provider 层负责账号登录/会话/PoW/传输；工具调用标准化由 llmswitch-core compat 完成
 
 ### Kimi（API Key）
 

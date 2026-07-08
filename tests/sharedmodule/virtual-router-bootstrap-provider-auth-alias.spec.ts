@@ -10,11 +10,11 @@ describe('virtual-router native provider auth bootstrap', () => {
   let authDir = '';
 
   beforeEach(() => {
-    authDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-qwen-auth-'));
+    authDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-provider-auth-'));
     process.env.RCC_AUTH_DIR = authDir;
     process.env.ROUTECODEX_AUTH_DIR = authDir;
-    fs.writeFileSync(path.join(authDir, 'qwen-oauth-1-default.json'), '{}\n');
-    fs.writeFileSync(path.join(authDir, 'qwen-oauth-4-jasonqueque.json'), '{}\n');
+    fs.writeFileSync(path.join(authDir, 'provider-key-1.json'), '{}\n');
+    fs.writeFileSync(path.join(authDir, 'provider-key-4.json'), '{}\n');
   });
 
   afterEach(() => {
@@ -33,81 +33,57 @@ describe('virtual-router native provider auth bootstrap', () => {
     }
   });
 
-  it('keeps explicit qwen tokenFile providers single-entry instead of expanding the full oauth pool', () => {
+  it('keeps explicit apikey tokenFile providers single-entry instead of expanding the full pool', () => {
     const result = bootstrapProvidersWithNative({
       providersSource: {
-        'qwen-jasonqueque': {
+        'provider-explicit': {
           type: 'openai',
           baseURL: 'https://example.invalid/v1',
-          compatibilityProfile: 'chat:qwen',
-          auth: { type: 'qwen-oauth', tokenFile: 'qwen-oauth-4-jasonqueque' },
+          compatibilityProfile: 'compat:passthrough',
+          auth: { type: 'apikey', tokenFile: 'provider-key-4' },
           models: {
-            'qwen3.6-plus': {}
+            'model-a': {}
           }
         }
       }
     });
 
-    expect(Object.keys(result.runtimeEntries).filter((key) => key.startsWith('qwen-jasonqueque.'))).toEqual([
-      'qwen-jasonqueque.key1'
+    expect(Object.keys(result.runtimeEntries).filter((key) => key.startsWith('provider-explicit.'))).toEqual([
+      'provider-explicit.key1'
     ]);
-    expect(result.runtimeEntries['qwen-jasonqueque.key1']?.auth?.tokenFile).toBe('qwen-oauth-4-jasonqueque');
-    expect(result.aliasIndex.get('qwen-jasonqueque')).toEqual(['key1']);
-  });
-
-  it('injects qwen default headers with the current official qwen user-agent in native bootstrap', () => {
-    const result = bootstrapProvidersWithNative({
-      providersSource: {
-        qwen: {
-          id: 'qwen',
-          type: 'openai',
-          baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-          compatibilityProfile: 'chat:qwen',
-          auth: { type: 'qwen-oauth', tokenFile: 'qwen-oauth-1-default' },
-          models: {
-            'qwen3.6-plus': {}
-          }
-        }
-      }
-    });
-
-    const runtime = result.runtimeEntries['qwen.key1'];
-    expect(runtime).toBeTruthy();
-    expect(runtime?.headers?.['User-Agent']).toBe('QwenCode/0.14.3 (darwin; arm64)');
-    expect(runtime?.headers?.['X-DashScope-UserAgent']).toBe('QwenCode/0.14.3 (darwin; arm64)');
-    expect(runtime?.headers?.['X-DashScope-CacheControl']).toBe('enable');
-    expect(runtime?.headers?.['X-DashScope-AuthType']).toBe('qwen-oauth');
+    expect(result.runtimeEntries['provider-explicit.key1']?.auth?.tokenFile).toBe('provider-key-4');
+    expect(result.aliasIndex.get('provider-explicit')).toEqual(['key1']);
   });
 
   it('ignores empty auth.entries records instead of materializing phantom key aliases', () => {
     const result = bootstrapProvidersWithNative({
       providersSource: {
-        'deepseek-web': {
+        'provider-entries': {
           type: 'openai',
-          baseURL: 'https://chat.deepseek.com',
-          compatibilityProfile: 'chat:deepseek-web',
+          baseURL: 'https://example.invalid/v1',
+          compatibilityProfile: 'compat:passthrough',
           auth: {
-            type: 'deepseek-account',
+            type: 'apikey',
             entries: [
               {},
               {
-                alias: 'clary',
-                type: 'deepseek-account',
-                tokenFile: '~/.rcc/auth/deepseek-clary.json'
+                alias: 'primary',
+                type: 'apikey',
+                tokenFile: '~/.rcc/auth/provider-primary.json'
               }
             ]
           },
           models: {
-            'deepseek-v4-pro': {}
+            'model-a': {}
           }
         }
       }
     });
 
-    expect(Object.keys(result.runtimeEntries).filter((key) => key.startsWith('deepseek-web.'))).toEqual([
-      'deepseek-web.clary'
+    expect(Object.keys(result.runtimeEntries).filter((key) => key.startsWith('provider-entries.'))).toEqual([
+      'provider-entries.primary'
     ]);
-    expect(result.aliasIndex.get('deepseek-web')).toEqual(['clary']);
-    expect(result.runtimeEntries['deepseek-web.key1']).toBeUndefined();
+    expect(result.aliasIndex.get('provider-entries')).toEqual(['primary']);
+    expect(result.runtimeEntries['provider-entries.key1']).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 /// Extract the provider id (first dot-separated segment) from a provider key.
-/// e.g. "deepseek-web.3.deepseek-r1-search" -> Some("deepseek-web")
+/// e.g. "provider-a.3.model-search" -> Some("provider-a")
 pub(crate) fn extract_provider_id(provider_key: &str) -> Option<String> {
     let value = provider_key.trim();
     let first_dot = value.find('.')?;
@@ -10,7 +10,7 @@ pub(crate) fn extract_provider_id(provider_key: &str) -> Option<String> {
 }
 
 /// Extract the key alias (second dot-separated segment) from a provider key.
-/// e.g. "deepseek-web.3.deepseek-r1-search" -> Some("3")
+/// e.g. "provider-a.3.model-search" -> Some("3")
 pub(crate) fn extract_key_alias(provider_key: &str) -> Option<String> {
     let value = provider_key.trim();
     let first_dot = value.find('.')?;

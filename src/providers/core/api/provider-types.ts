@@ -42,7 +42,7 @@ export interface IProviderV2 extends ProviderModule {
  * - 'anthropic'  : Anthropic Messages wire（/v1/messages）
  * - 'gemini'     : Gemini Chat wire
  *
- * 注意：品牌/家族（glm、qwen 等）通过 providerId/providerFamily 表达，禁止写入 providerType。
+ * 注意：品牌/家族（glm 等）通过 providerId/providerFamily 表达，禁止写入 providerType。
  */
 export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mimoweb' | 'mock';
 

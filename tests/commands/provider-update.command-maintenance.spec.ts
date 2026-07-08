@@ -246,30 +246,6 @@ describe('provider-update command maintenance flows', () => {
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'oauth-provider', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');
 
-    const accountDir = path.join(root, 'account-provider');
-    await fs.mkdir(accountDir, { recursive: true });
-    await writeToml(
-      path.join(accountDir, 'config.v2.toml'),
-      {
-        version: '2.0.0',
-        providerId: 'account-provider',
-        provider: {
-          type: 'account-provider',
-          auth: { type: 'deepseek-account', entries: [{ tokenFile: '~/.rcc/auth/old-account.json' }] },
-          models: { m1: { supportsStreaming: true } },
-          defaultModel: 'm1'
-        }
-      }
-    );
-    answers.push('', 'deepseek-account', '~/.rcc/auth/new-account.json', 'm1', 'm1', 'y');
-    await expect(
-      createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'account-provider', '--root', root], { from: 'node' })
-    ).rejects.toThrow('process.exit:1');
-    answers.push('', 'qwen-oauth', '', 'm1', 'm1', 'y');
-    await expect(
-      createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'account-provider', '--root', root], { from: 'node' })
-    ).rejects.toThrow('process.exit:1');
-
     await expect(
       createProviderUpdateCommand().parseAsync(['node', 'provider', 'change', 'missing-provider', '--root', root], { from: 'node' })
     ).rejects.toThrow('process.exit:1');

@@ -288,7 +288,7 @@
      - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
    - Contract/test surface:
      - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts`
-     - `tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts`
+     - `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts`
      - `tests/server/http-server/executor-metadata.spec.ts`
      - `tests/server/runtime/http-server/request-executor.spec.ts`
 

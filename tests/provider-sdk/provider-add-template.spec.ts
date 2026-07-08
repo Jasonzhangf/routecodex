@@ -7,27 +7,8 @@ describe('provider add templates', () => {
     const templates = getProviderTemplates();
     expect(templates.some((tpl) => tpl.id === 'openai' && tpl.source === 'bootstrap-generic')).toBe(true);
     expect(templates.some((tpl) => tpl.id === 'responses' && tpl.source === 'bootstrap-generic')).toBe(true);
-    expect(templates.some((tpl) => tpl.id === 'qwen')).toBe(false);
+    expect(templates.some((tpl) => tpl.source === 'bootstrap-managed')).toBe(false);
     expect(templates.at(-1)?.id).toBe('custom');
-  });
-
-
-
-  it('supports credential-file overrides for account-style templates', () => {
-    const deepseekTemplate = getProviderTemplates().find((tpl) => tpl.id === 'deepseek-web');
-    expect(deepseekTemplate).toBeTruthy();
-    const provider = buildProviderFromTemplate(
-      'deepseek-web',
-      deepseekTemplate!,
-      deepseekTemplate!.defaultBaseUrl || 'https://chat.deepseek.com',
-      deepseekTemplate!.defaultAuthType || 'deepseek-account',
-      '',
-      '~/.routecodex/auth/deepseek-account-custom.json',
-      'deepseek-chat'
-    ) as Record<string, any>;
-
-    expect(provider.auth.type).toBe('deepseek-account');
-    expect(provider.auth.entries[0].tokenFile).toBe('~/.routecodex/auth/deepseek-account-custom.json');
   });
 
   it('supports additional models and explicit defaultModel override', () => {

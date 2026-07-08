@@ -3,7 +3,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 import type { JsonObject, JsonValue, ServerSideToolEngineOptions } from './types.js';
 import {
-  planServertoolNoopOutcomeWithNative,
   buildServertoolHandlerErrorToolOutputPayloadWithNative,
   resolveServertoolRegistryHandlerWithNative
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
@@ -16,7 +15,6 @@ import {
   createServertoolExecutionLoopStateWithNative,
   materializeServertoolPlannedResultWithNative as materializeServertoolPlannedResult,
   planServertoolHandlerErrorExecutionLoopEffectWithNative,
-  planServertoolNoopExecutionLoopEffectWithNative,
   resolveServertoolExecutionLoopInitialDecisionWithNative,
   resolveServertoolExecutionLoopResultDecisionWithNative,
   applyServertoolExecutionLoopInitialDecisionWithNative,
@@ -146,33 +144,6 @@ export async function runServertoolIoExecutionQueue(args: {
     if (shouldContinueLoop) {
       continue;
     }
-  }
-
-  for (const toolCall of args.dispatchPlan.noopToolCalls ?? []) {
-    const noopResult = planServertoolNoopOutcomeWithNative({
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
-      toolArguments: toolCall.arguments,
-      base: args.baseForExecution
-    });
-
-    replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse);
-
-    const noopEffectPlan = planServertoolNoopExecutionLoopEffectWithNative({
-      toolCall: {
-        id: toolCall.id,
-        name: toolCall.name,
-        arguments: toolCall.arguments,
-        executionMode: toolCall.executionMode ?? 'noop',
-        stripAfterExecute: toolCall.stripAfterExecute === true
-      },
-      noopOutcome: noopResult
-    });
-    executionState = appendServertoolExecutedRecordWithNative({
-      state: executionState,
-      toolCall: noopEffectPlan.toolCall,
-      execution: noopEffectPlan.execution
-    });
   }
 
   return executionState;

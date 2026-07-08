@@ -178,7 +178,7 @@ fn is_persistent_scope(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::virtual_router_engine::routing_state_store::GlobalRequestCounter;
+    use crate::virtual_router_engine::instructions::GlobalRequestCounter;
     use chrono::{Datelike, Local, Timelike};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};

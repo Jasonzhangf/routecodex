@@ -1,8 +1,7 @@
 use serde_json::Value;
 
 use super::protocol::{
-    resolve_hub_pipeline_request_provider_protocol,
-    resolve_provider_protocol_from_metadata_snapshot,
+    resolve_hub_client_protocol, resolve_provider_protocol_from_metadata_snapshot,
 };
 use crate::metadata_center::{build_metadata_center_from_snapshot, MetadataCenterReader};
 
@@ -31,6 +30,18 @@ fn read_trimmed_lower_string(value: Option<&Value>) -> Option<String> {
     read_trimmed_string(value).map(|value| value.to_ascii_lowercase())
 }
 
+fn read_snapshot_provider_protocol(value: Option<&Value>) -> Option<String> {
+    value?
+        .as_object()
+        .and_then(|snapshot| snapshot.get("runtimeControl"))
+        .and_then(Value::as_object)
+        .and_then(|runtime_control| runtime_control.get("providerProtocol"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Value, String> {
     let row = input.as_object().ok_or_else(|| {
         "Rust HubPipeline materialized request plan input must be object".to_string()
@@ -41,9 +52,6 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
         .get("metadata")
         .and_then(Value::as_object)
         .ok_or_else(|| "Rust HubPipeline materialized request plan missing metadata".to_string())?;
-    let provider_protocol = read_trimmed_string(row.get("providerProtocol")).ok_or_else(|| {
-        "Rust HubPipeline materialized request plan missing providerProtocol".to_string()
-    })?;
     let payload_stream = row
         .get("payloadStream")
         .and_then(Value::as_bool)
@@ -60,6 +68,32 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
     let direction = match read_trimmed_lower_string(metadata.get("direction")).as_deref() {
         Some("response") => "response",
         _ => "request",
+    };
+    let metadata_center_snapshot = row
+        .get("metadataCenterSnapshot")
+        .filter(|value| value.is_object())
+        .cloned()
+        .or_else(|| {
+            metadata
+                .get("metadataCenterSnapshot")
+                .filter(|value| value.is_object())
+                .cloned()
+        });
+    let explicit_provider_protocol = read_trimmed_string(row.get("providerProtocol"));
+    let flat_metadata_provider_protocol = read_trimmed_string(metadata.get("providerProtocol"));
+    let snapshot_provider_protocol =
+        read_snapshot_provider_protocol(metadata_center_snapshot.as_ref());
+    let provider_protocol = if direction == "response" {
+        snapshot_provider_protocol
+            .or(explicit_provider_protocol)
+            .or(flat_metadata_provider_protocol)
+            .ok_or_else(|| {
+                "Rust HubPipeline materialized request plan missing providerProtocol".to_string()
+            })?
+    } else {
+        explicit_provider_protocol
+            .or(flat_metadata_provider_protocol)
+            .unwrap_or_else(|| resolve_hub_client_protocol(&entry_endpoint))
     };
     let stage = match read_trimmed_lower_string(metadata.get("stage")).as_deref() {
         Some("outbound") => "outbound",
@@ -110,6 +144,7 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
     output_metadata.remove("__hubPolicyOverride");
     output_metadata.remove("__hubShadowCompare");
     output_metadata.remove("__disableHubSnapshots");
+    output_metadata.remove("metadataCenterSnapshot");
 
     let mut output = serde_json::Map::new();
     output.insert("endpoint".to_string(), Value::String(endpoint));
@@ -130,6 +165,9 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
         "disableSnapshots".to_string(),
         Value::Bool(disable_snapshots),
     );
+    if let Some(snapshot) = metadata_center_snapshot {
+        output.insert("metadataCenterSnapshot".to_string(), snapshot);
+    }
     if let Some(value) = hub_entry_mode {
         output.insert("hubEntryMode".to_string(), value);
     }
@@ -480,23 +518,6 @@ pub fn resolve_provider_protocol_json(input_json: String) -> napi::Result<String
     })
 }
 
-pub fn resolve_hub_pipeline_request_provider_protocol_json(
-    input_json: String,
-) -> napi::Result<String> {
-    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
-        napi::Error::from_reason(format!(
-            "invalid HubPipeline request providerProtocol resolver JSON: {error}"
-        ))
-    })?;
-    let output =
-        resolve_hub_pipeline_request_provider_protocol(&input).map_err(napi::Error::from_reason)?;
-    serde_json::to_string(&output).map_err(|error| {
-        napi::Error::from_reason(format!(
-            "serialize HubPipeline request providerProtocol resolver failed: {error}"
-        ))
-    })
-}
-
 #[cfg(test)]
 mod responses_direct_route_decision_tests {
     use super::*;
@@ -594,6 +615,48 @@ mod responses_direct_route_decision_tests {
         assert!(output["metadata"].get("__hubPolicyOverride").is_none());
         assert!(output["metadata"].get("__hubShadowCompare").is_none());
         assert!(output["metadata"].get("__disableHubSnapshots").is_none());
+    }
+
+    #[test]
+    fn materialized_request_plan_derives_request_protocol_from_entry_endpoint_before_route_selection(
+    ) {
+        let output = build_hub_pipeline_materialized_request_plan(&serde_json::json!({
+            "endpoint": "/v1/responses",
+            "payloadStream": false,
+            "payload": { "model": "gpt-test" },
+            "metadata": {
+                "entryEndpoint": "/v1/responses",
+                "direction": "request",
+                "stage": "inbound"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            output["providerProtocol"],
+            serde_json::json!("openai-responses")
+        );
+        assert_eq!(
+            output["metadata"]["providerProtocol"],
+            serde_json::json!("openai-responses")
+        );
+    }
+
+    #[test]
+    fn materialized_response_plan_requires_selected_provider_protocol() {
+        let error = build_hub_pipeline_materialized_request_plan(&serde_json::json!({
+            "endpoint": "/v1/responses",
+            "payloadStream": false,
+            "payload": { "status": "completed" },
+            "metadata": {
+                "entryEndpoint": "/v1/responses",
+                "direction": "response",
+                "stage": "inbound"
+            }
+        }))
+        .unwrap_err();
+
+        assert!(error.contains("missing providerProtocol"));
     }
 
     #[test]

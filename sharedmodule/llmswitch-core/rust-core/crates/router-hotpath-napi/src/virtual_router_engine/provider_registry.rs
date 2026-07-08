@@ -493,9 +493,7 @@ fn normalize_provider_protocol(outbound_profile: &str, provider_type: &str) -> S
         "responses" | "openai-responses" => "openai-responses".to_string(),
         "anthropic" | "claude" => "anthropic-messages".to_string(),
         "gemini" => "gemini-chat".to_string(),
-        "openai" | "glm" | "qwen" | "deepseek" | "lmstudio" | "mock" | "" => {
-            "openai-chat".to_string()
-        }
+        "openai" | "glm" | "lmstudio" | "mock" | "" => "openai-chat".to_string(),
         _ => "openai-chat".to_string(),
     }
 }

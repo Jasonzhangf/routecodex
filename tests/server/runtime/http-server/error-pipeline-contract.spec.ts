@@ -72,27 +72,28 @@ describe('Error Pipeline contract', () => {
     expect(source).toContain('await input.onProviderError?.(error, auditContext);');
     expect(source).not.toContain('isRecoverableDirectProviderError');
     expect(source).not.toContain('errorClassification:');
-    expect(source).toContain('throw error;');
+    expect(source).toContain('All router-direct failures');
   });
 
-  it('provider-direct reports provider transport errors through caller-owned ErrorErr hook', () => {
+  it('provider-direct consumes caller-owned ErrorErr05 action before any rethrow', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/provider-direct-pipeline.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).toContain('onProviderError?: (error: unknown, context: ProviderDirectAuditContext)');
-    expect(source).toContain('await options.onProviderError?.(error, auditContext);');
-    expect(source).toContain('throw error;');
+    expect(source).toContain('const errorAction = await options.onProviderError?.(error, auditContext);');
+    expect(source).toContain('if (errorAction && !errorAction.shouldRethrow)');
+    expect(source).toContain('errorAction,');
     expect(source).not.toContain('resolveRequestExecutorProviderFailurePlan');
     expect(source).not.toContain('errorClassification:');
   });
 
-  it('router-direct live path relays direct skips but keeps provider transport errors out of standard retry bridge', () => {
+  it('router-direct live path consumes ErrorErr05 before recursive retry/default-pool handling', () => {
     const filePath = path.join(ROOT, 'src/server/runtime/http-server/index.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).toContain('router-direct.send.error');
-    expect(source).toContain('resolveRequestExecutorProviderFailurePlan');
+    expect(source).toContain('await processProviderSendFailure({');
     expect(source).toContain('router-direct.retry.requested');
     expect(source).toContain('executeRouterDirectPipelineForPort(portConfig, input, retryState');
-    expect(source).toContain("source: 'router-direct'");
+    expect(source).toContain('defaultTierAvailable: defaultTierAvailableForDecision');
     expect(source).toContain('router-direct.relay');
     expect(source).not.toContain('router-direct.retry.standard_pipeline');
     expect(source).not.toContain("reason: 'router-direct-provider-failure-standard-retry'");
@@ -107,6 +108,7 @@ describe('Error Pipeline contract', () => {
     expect(source).toContain('provider-direct.send.error');
     expect(source).toContain("source: 'provider-direct'");
     expect(source).toContain('await resolveRequestExecutorProviderFailurePlan({');
+    expect(source).toContain('return decideDirectProviderRetry({');
     expect(source).toContain('routeName: \'port.provider-direct\'');
     expect(source).not.toContain('provider-direct.retry.standard_pipeline');
   });

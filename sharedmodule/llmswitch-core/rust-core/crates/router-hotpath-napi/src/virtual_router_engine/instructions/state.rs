@@ -304,10 +304,7 @@ fn apply_stop_message_instruction_to_state(
         );
     }
     if let Some(mode) = &instruction.ai_mode {
-        instruction_map.insert(
-            "stopMessageAiMode".to_string(),
-            Value::String(mode.clone()),
-        );
+        instruction_map.insert("stopMessageAiMode".to_string(), Value::String(mode.clone()));
     }
     if let Some(source) = &instruction.source {
         instruction_map.insert(

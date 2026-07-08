@@ -176,7 +176,7 @@ description: <1 句中文 ≤ 50 字>
 在 `references/50-rcc-config-ssot.md` 写明：
 
 - 路径真源顺序：`~/.rcc/config.toml` > `~/.rcc/config.<provider>.toml` > `~/.rcc/provider/<providerId>/config.v2.toml` > 派生 `~/config/merged-config.<port>.json`
-- 目录 layout：`auth/ backup-*/ camoufox-*/ config/ diag/ docs/ errorsamples/ guardian/ install/ log/ logs/ precommand/ provider/ quota/ run/ scripts/ servertool/ sessions/ state/ state-clean-backups/ statics/ stats/ windsurf-*/`
+- 目录 layout：`auth/ backup-*/ config/ diag/ docs/ errorsamples/ guardian/ install/ log/ logs/ precommand/ provider/ run/ scripts/ servertool/ sessions/ state/ state-clean-backups/ statics/ stats/ windsurf-*/`
 - provider config schema（v2）：
   - 顶层 `version / providerId`
   - `[provider]` id / enabled / type / baseURL / compatibilityProfile / transportBackend / defaultModel

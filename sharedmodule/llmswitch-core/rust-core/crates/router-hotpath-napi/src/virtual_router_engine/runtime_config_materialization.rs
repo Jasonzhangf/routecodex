@@ -221,8 +221,11 @@ fn compile_routecodex_runtime_manifest(input: &Value) -> Result<Value, String> {
         "hitLog",
         requested_group.as_deref(),
     );
-    let routing_provider_ids =
-        resolve_routing_provider_ids_with_forwarders(&routing, &forwarders, &referenced_forwarder_ids);
+    let routing_provider_ids = resolve_routing_provider_ids_with_forwarders(
+        &routing,
+        &forwarders,
+        &referenced_forwarder_ids,
+    );
     let routing_tiers_by_route = build_routing_tiers_by_route(&routing);
     let mut bootstrap_input = Map::new();
     bootstrap_input.insert("providers".to_string(), Value::Object(providers));
@@ -243,7 +246,12 @@ fn compile_routecodex_runtime_manifest(input: &Value) -> Result<Value, String> {
     let mut pipeline_runtime_config = Map::new();
     pipeline_runtime_config.insert(
         "routingProviderIds".to_string(),
-        Value::Array(routing_provider_ids.into_iter().map(Value::String).collect()),
+        Value::Array(
+            routing_provider_ids
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+        ),
     );
     pipeline_runtime_config.insert(
         "routingTiersByRoute".to_string(),
@@ -1598,10 +1606,7 @@ fn build_routing_tiers_by_route(routing: &Map<String, Value>) -> Map<String, Val
             let id = pick_string(record.get("id"))
                 .unwrap_or_else(|| format!("{}:{}", route_name, index));
             let targets = collect_routing_tier_targets(record);
-            let priority = record
-                .get("priority")
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
+            let priority = record.get("priority").and_then(Value::as_i64).unwrap_or(0);
             let mut tier = Map::new();
             tier.insert("id".to_string(), Value::String(id));
             tier.insert(

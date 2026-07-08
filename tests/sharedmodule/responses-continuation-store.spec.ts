@@ -7,6 +7,7 @@ import {
   clearAllResponsesConversationState,
   clearResponsesConversationByRequestId,
   clearUnresolvedResponsesConversationRequests,
+  lookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
   rebindResponsesConversationRequestId,
@@ -664,6 +665,68 @@ describe('responses conversation store plain continuation restore', () => {
       restoredFromResponseId: 'resp-provider-switch-success-1',
       previousRequestId: providerAttempt2,
       providerKey: 'crs.key2.gpt-5.4'
+    });
+  });
+
+  it('keeps the canonical entry request id recordable after provider request id rebind', () => {
+    captureResponsesRequestContext({
+      requestId: track('req-provider-switch-router-alias-1'),
+      sessionId: 'sess-provider-switch-alias',
+      conversationId: 'conv-provider-switch-alias',
+      providerKey: 'crs.key1.gpt-5.4',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        tools: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: { type: 'object', properties: {} }
+          }
+        ]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'provider switch then continue' }]
+          }
+        ],
+        toolsRaw: [
+          {
+            type: 'function',
+            name: 'exec_command',
+            parameters: { type: 'object', properties: {} }
+          }
+        ]
+      }
+    });
+
+    const providerAttempt = track('req-provider-switch-alias-attempt-1');
+    rebindResponsesConversationRequestId('req-provider-switch-router-alias-1', providerAttempt);
+
+    recordResponsesResponse({
+      requestId: 'req-provider-switch-router-alias-1',
+      providerKey: 'crs.key1.gpt-5.4',
+      response: {
+        id: 'resp-provider-switch-alias-success-1',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'ok' }]
+          }
+        ]
+      }
+    });
+
+    const lookup = lookupResponsesContinuationByResponseId('resp-provider-switch-alias-success-1');
+    expect(lookup).toMatchObject({
+      responseId: 'resp-provider-switch-alias-success-1',
+      requestId: providerAttempt,
+      providerKey: 'crs.key1.gpt-5.4'
     });
   });
 

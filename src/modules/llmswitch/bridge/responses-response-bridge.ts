@@ -41,6 +41,14 @@ function asRecordForHttp(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function readTrimmedStringForHttp(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
 const RESPONSES_DEBUG = (process.env.ROUTECODEX_RESPONSES_DEBUG || '').trim() === '1';
 
 function summarizeDebugToolsForHttp(tools: unknown): Record<string, unknown> {
@@ -73,6 +81,18 @@ export function buildResponsesRequestLogContextForHttp(args: {
   const metadata = asRecordForHttp(args.metadata);
   const usageLogInfo = asRecordForHttp(args.usageLogInfo);
   const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
+  const sessionId =
+    readTrimmedStringForHttp(usageLogInfo.sessionId)
+    ?? readTrimmedStringForHttp(usageLogInfo.session_id)
+    ?? readTrimmedStringForHttp(metadata.sessionId)
+    ?? readTrimmedStringForHttp(metadata.session_id)
+    ?? requestTruth.sessionId;
+  const conversationId =
+    readTrimmedStringForHttp(usageLogInfo.conversationId)
+    ?? readTrimmedStringForHttp(usageLogInfo.conversation_id)
+    ?? readTrimmedStringForHttp(metadata.conversationId)
+    ?? readTrimmedStringForHttp(metadata.conversation_id)
+    ?? requestTruth.conversationId;
   return {
     logSessionColorKey: usageLogInfo.logSessionColorKey ?? metadata.logSessionColorKey,
     clientTmuxSessionId: usageLogInfo.clientTmuxSessionId ?? metadata.clientTmuxSessionId,
@@ -83,10 +103,10 @@ export function buildResponsesRequestLogContextForHttp(args: {
       usageLogInfo.rccSessionClientTmuxSessionId ?? metadata.rccSessionClientTmuxSessionId,
     rcc_session_client_tmux_session_id:
       usageLogInfo.rcc_session_client_tmux_session_id ?? metadata.rcc_session_client_tmux_session_id,
-    sessionId: usageLogInfo.sessionId ?? requestTruth.sessionId,
-    session_id: usageLogInfo.session_id ?? requestTruth.sessionId,
-    conversationId: usageLogInfo.conversationId ?? requestTruth.conversationId,
-    conversation_id: usageLogInfo.conversation_id ?? requestTruth.conversationId
+    sessionId,
+    session_id: sessionId,
+    conversationId,
+    conversation_id: conversationId
   };
 }
 

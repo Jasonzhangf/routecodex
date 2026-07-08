@@ -19,7 +19,7 @@
 
 ```toml
 [[virtualrouter.routingPolicyGroups."default".routing.thinking]]
-target = "qwen.qwen3-coder"
+target = "provider-a.model-a"
 weight = 10
 priority = 200
 [virtualrouter.routingPolicyGroups."default".routing.thinking.routeParams]
@@ -33,7 +33,7 @@ priority = 100
 reasoning_effort = "high"
 
 [[virtualrouter.routingPolicyGroups."default".routing.tools]]
-target = "qwen.qwen3-coder"
+target = "provider-a.model-a"
 weight = 10
 priority = 200
 [virtualrouter.routingPolicyGroups."default".routing.tools.routeParams]

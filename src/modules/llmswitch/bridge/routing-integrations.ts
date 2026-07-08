@@ -8,8 +8,40 @@ import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { resolveCorePackageDir } from '../core-loader.js';
-import { importCoreDist, resolveImplForSubpath } from './module-loader.js';
+import { importCoreDist, requireCoreDist, resolveImplForSubpath } from './module-loader.js';
 import type { AnyRecord, LlmsImpl } from './module-loader.js';
+
+type NativeHubPipelineOrchestrationSemantics = {
+  createHubPipelineEngineJson?: (inputJson: string) => string;
+  disposeHubPipelineEngineJson?: (handle: string) => void;
+  hubPipelineExecuteJson?: (handle: string, requestJson: string) => string;
+  updateHubPipelineEngineDepsJson?: (handle: string, depsJson: string) => void;
+  updateHubPipelineVirtualRouterConfigJson?: (handle: string, configJson: string) => void;
+};
+
+let cachedNativeHubPipelineOrchestrationSemantics:
+  | NativeHubPipelineOrchestrationSemantics
+  | null = null;
+
+function getNativeHubPipelineOrchestrationSemantics(): NativeHubPipelineOrchestrationSemantics {
+  if (!cachedNativeHubPipelineOrchestrationSemantics) {
+    cachedNativeHubPipelineOrchestrationSemantics =
+      requireCoreDist<NativeHubPipelineOrchestrationSemantics>(
+        'native/router-hotpath/native-hub-pipeline-orchestration-semantics'
+      );
+  }
+  return cachedNativeHubPipelineOrchestrationSemantics;
+}
+
+function requireNativeHubPipelineFn<T extends Function>(
+  name: keyof NativeHubPipelineOrchestrationSemantics
+): T {
+  const fn = getNativeHubPipelineOrchestrationSemantics()[name];
+  if (typeof fn !== 'function') {
+    throw new Error(`[llmswitch-bridge] ${String(name)} not available`);
+  }
+  return fn as unknown as T;
+}
 
 function getImportMetaUrlUnsafe(): string | undefined {
   try {
@@ -897,6 +929,89 @@ export async function getHubPipelineCtorForImpl(impl: LlmsImpl): Promise<HubPipe
     cachedHubPipelineCtorByImpl[impl] = Ctor;
   }
   return cachedHubPipelineCtorByImpl[impl]!;
+}
+
+// ---------------------------------------------------------------------------
+// Native handle-mode HubPipeline entry points.
+// Preferred for server runtime: server stores opaque handle, calls
+// executeHubPipelineNative / disposeHubPipelineNative, and never imports the
+// TS HubPipeline class. TS HubPipeline class is kept only for legacy callers
+// (getHubPipelineCtor / getHubPipelineCtorForImpl above).
+// ---------------------------------------------------------------------------
+
+export function createHubPipelineNative(config: AnyRecord): string {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('[llmswitch-bridge] createHubPipelineNative requires a JSON object config');
+  }
+  const createHubPipelineEngineJson = requireNativeHubPipelineFn<(inputJson: string) => string>(
+    'createHubPipelineEngineJson'
+  );
+  const result = createHubPipelineEngineJson(JSON.stringify(config));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch (error) {
+    throw new Error(`[llmswitch-bridge] createHubPipelineNative returned invalid payload: ${String(error)}`);
+  }
+  const handle = (parsed as { handle?: unknown } | null)?.handle;
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] createHubPipelineNative returned invalid handle');
+  }
+  return handle;
+}
+
+export function executeHubPipelineNative(handle: string, request: AnyRecord): AnyRecord {
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] executeHubPipelineNative requires non-empty handle');
+  }
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new Error('[llmswitch-bridge] executeHubPipelineNative requires JSON object request');
+  }
+  const hubPipelineExecuteJson = requireNativeHubPipelineFn<(handle: string, requestJson: string) => string>(
+    'hubPipelineExecuteJson'
+  );
+  const raw = hubPipelineExecuteJson(handle, JSON.stringify(request));
+  try {
+    return JSON.parse(raw) as AnyRecord;
+  } catch (error) {
+    throw new Error(`[llmswitch-bridge] executeHubPipelineNative returned invalid payload: ${String(error)}`);
+  }
+}
+
+export function updateHubPipelineVirtualRouterConfigNative(handle: string, config: AnyRecord): void {
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] updateHubPipelineVirtualRouterConfigNative requires non-empty handle');
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('[llmswitch-bridge] updateHubPipelineVirtualRouterConfigNative requires JSON object config');
+  }
+  const updateHubPipelineVirtualRouterConfigJson = requireNativeHubPipelineFn<
+    (handle: string, configJson: string) => void
+  >('updateHubPipelineVirtualRouterConfigJson');
+  updateHubPipelineVirtualRouterConfigJson(handle, JSON.stringify(config));
+}
+
+export function updateHubPipelineEngineDepsNative(handle: string, deps: AnyRecord): void {
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] updateHubPipelineEngineDepsNative requires non-empty handle');
+  }
+  if (!deps || typeof deps !== 'object' || Array.isArray(deps)) {
+    throw new Error('[llmswitch-bridge] updateHubPipelineEngineDepsNative requires JSON object deps');
+  }
+  const updateHubPipelineEngineDepsJson = requireNativeHubPipelineFn<
+    (handle: string, depsJson: string) => void
+  >('updateHubPipelineEngineDepsJson');
+  updateHubPipelineEngineDepsJson(handle, JSON.stringify(deps));
+}
+
+export function disposeHubPipelineNative(handle: string): void {
+  if (typeof handle !== 'string' || !handle) {
+    return;
+  }
+  const disposeHubPipelineEngineJson = requireNativeHubPipelineFn<(handle: string) => void>(
+    'disposeHubPipelineEngineJson'
+  );
+  disposeHubPipelineEngineJson(handle);
 }
 
 export function resolveBaseDir(): string {

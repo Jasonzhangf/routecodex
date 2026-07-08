@@ -1,11 +1,85 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { HubPipeline } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.js';
 import { executeRequestStagePipeline } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.js';
 import { buildRequestMetadata } from '../../src/server/runtime/http-server/executor-metadata.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 describe('hub pipeline Rust responses provider payload regression', () => {
+  it('projects providerPayload and selected target from native engine handle output', async () => {
+    const pipeline = new HubPipeline({
+      virtualRouter: {
+        providers: {
+          'snapshot.key1.gpt-5.5': {
+            providerKey: 'snapshot.key1.gpt-5.5',
+            providerType: 'openai',
+            runtimeKey: 'snapshot.key1',
+            modelId: 'gpt-5.5',
+            outboundProfile: 'openai-responses',
+            endpoint: 'mock://snapshot',
+            auth: { type: 'apikey', apiKey: 'snapshot-key' }
+          }
+        },
+        routing: {
+          default: [{
+            id: 'default-priority',
+            mode: 'priority',
+            targets: ['snapshot.key1.gpt-5.5']
+          }]
+        }
+      }
+    });
+
+    try {
+      const result = await pipeline.execute({
+        id: 'req_native_handle_executor_contract',
+        endpoint: '/v1/responses',
+        payload: {
+          model: 'gpt-5.5',
+          input: 'route from native handle'
+        },
+        metadata: {
+          entryEndpoint: '/v1/responses',
+          metadataCenterSnapshot: {
+            requestTruth: {
+              requestId: 'req_native_handle_executor_contract',
+              sessionId: 'native-handle-contract-session'
+            },
+            runtimeControl: {
+              preselectedRoute: {
+                target: {
+                  providerKey: 'snapshot.key1.gpt-5.5',
+                  providerType: 'openai',
+                  runtimeKey: 'snapshot.key1',
+                  modelId: 'gpt-5.5',
+                  outboundProfile: 'openai-responses'
+                },
+                decision: {
+                  routeName: 'thinking/gateway-priority-5555-priority-thinking'
+                },
+                diagnostics: { source: 'test' }
+              }
+            }
+          }
+        }
+      });
+
+      expect(result.providerPayload).toMatchObject({
+        model: 'gpt-5.5'
+      });
+      expect(result.target).toMatchObject({
+        providerKey: 'snapshot.key1.gpt-5.5',
+        outboundProfile: 'openai-responses'
+      });
+      expect(result.routingDecision).toMatchObject({
+        routeName: 'thinking/gateway-priority-5555-priority-thinking'
+      });
+    } finally {
+      pipeline.dispose();
+    }
+  });
+
   it('keeps /v1/responses tool requests as Responses wire payload for openai-responses providers', () => {
     const result = runHubPipelineLibWithNative({
       config: { virtualRouter: {} },

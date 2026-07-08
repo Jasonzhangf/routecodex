@@ -95,11 +95,14 @@ const providerDirect = read('src/server/runtime/http-server/provider-direct-pipe
 if (!providerDirect.includes('onProviderError?: (error: unknown, context: ProviderDirectAuditContext)')) {
   failures.push('provider-direct-pipeline must expose an ErrorErr onProviderError hook');
 }
-if (!providerDirect.includes('await options.onProviderError?.(error, auditContext);')) {
-  failures.push('provider-direct-pipeline must await ErrorErr reporting before rethrow');
+if (!providerDirect.includes('const errorAction = await options.onProviderError?.(error, auditContext);')) {
+  failures.push('provider-direct-pipeline must await ErrorErr05 action from caller-owned onProviderError hook');
 }
-if (!providerDirect.includes('throw error;')) {
-  failures.push('provider-direct-pipeline must rethrow original provider error after ErrorErr reporting');
+if (!providerDirect.includes('if (errorAction && !errorAction.shouldRethrow)')) {
+  failures.push('provider-direct-pipeline must consume non-rethrow ErrorErr05 action instead of always rethrowing');
+}
+if (!providerDirect.includes('errorAction,')) {
+  failures.push('provider-direct-pipeline must return caller-owned ErrorErr05 action to the HTTP/direct consumer');
 }
 
 const serverIndex = read('src/server/runtime/http-server/index.ts');
@@ -113,7 +116,16 @@ if (!/onProviderError:\s*async\s*\(error,\s*context\)/.test(serverIndex)) {
   failures.push('http-server provider-direct live path must wire an async onProviderError hook');
 }
 if (!serverIndex.includes('await resolveRequestExecutorProviderFailurePlan({')) {
-  failures.push('http-server direct paths must consume the ErrorErr05 decision wrapper');
+  failures.push('http-server provider-direct path must build the ErrorErr05 decision wrapper');
+}
+if (!serverIndex.includes('return decideDirectProviderRetry({')) {
+  failures.push('http-server provider-direct path must consume ErrorErr05 via typed direct decision action');
+}
+if (!serverIndex.includes('await processProviderSendFailure({')) {
+  failures.push('http-server router-direct path must consume ErrorErr05 through processProviderSendFailure');
+}
+if (!serverIndex.includes('router-direct.retry.requested')) {
+  failures.push('http-server router-direct path must drive recursive retry/default-pool handling after ErrorErr05 consumption');
 }
 
 failures.push(...lineFindings(
@@ -165,5 +177,5 @@ if (failures.length > 0) {
 
 console.log('[verify:error-pipeline-contract] ok');
 console.log('- provider-local autoRetry runtime semantics absent');
-console.log('- provider-direct/router-direct provider failures enter ErrorErr hook before rethrow');
+console.log('- provider-direct/router-direct provider failures enter ErrorErr05 action consumption before projection');
 console.log('- provider policy/direct/executor stay independent from ErrorHandlingCenter');

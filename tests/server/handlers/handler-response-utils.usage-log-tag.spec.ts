@@ -63,7 +63,7 @@ describe('sendPipelineResponse usage log tag forwarding', () => {
         usageLogInfo: {
           requestStartedAtMs: Date.now() - 10,
           finishReason: 'stop',
-          providerDecodeTag: 'qwen.nonstream=json',
+          providerDecodeTag: 'provider-a.nonstream=json',
           usage: {
             input_tokens: 1,
             output_tokens: 1
@@ -77,7 +77,7 @@ describe('sendPipelineResponse usage log tag forwarding', () => {
     expect(logUsageSummary).toHaveBeenCalledTimes(1);
     expect(logUsageSummary.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
-        providerDecodeTag: 'qwen.nonstream=json'
+        providerDecodeTag: 'provider-a.nonstream=json'
       })
     );
   });

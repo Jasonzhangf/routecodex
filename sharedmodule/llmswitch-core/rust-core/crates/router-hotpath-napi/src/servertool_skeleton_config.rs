@@ -12,79 +12,19 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
         "version": 1,
         "servertool": {
             "enabled": true,
-            "internalTools": {
-
-                "continue_execution": {
-                    "name": "continue_execution",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "continue_execution" },
-                    "execution": { "mode": "client_inject_only", "stripAfterExecute": true }
-                },
-                "stop_message_auto": {
-                    "name": "stop_message_auto",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "auto", "canonicalName": "stop_message_auto", "phase": "default", "priority": 40 },
-                    "execution": { "mode": "auto_hook", "stripAfterExecute": true }
-                },
-                "reasoningstop": {
-                    "name": "reasoningStop",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "reasoningStop" },
-                    "execution": { "mode": "guarded", "stripAfterExecute": true }
-                },
-                "web_search": {
-                    "name": "web_search",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "web_search" },
-                    "execution": { "mode": "backend", "stripAfterExecute": true }
-                },
-                "recursive_detection_guard": {
-                    "name": "recursive_detection_guard",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "auto", "canonicalName": "recursive_detection_guard", "phase": "pre", "priority": 5 },
-                    "execution": { "mode": "auto_hook", "stripAfterExecute": true }
-                },
-                "vision_auto": {
-                    "name": "vision_auto",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "auto", "canonicalName": "vision_auto", "phase": "post", "priority": 60 },
-                    "execution": { "mode": "auto_hook", "stripAfterExecute": true }
-                },
-
-
-                "exec_command": {
-                    "name": "exec_command",
-                    "enabled": true,
-                    "kind": "internal",
-                    "trigger": { "type": "tool_call", "canonicalName": "exec_command" },
-                    "execution": { "mode": "guarded", "stripAfterExecute": true }
-                },
-            },
+            "internalTools": {},
             "skeleton": {
                 "finalizeStrip": { "enabled": true, "requireFinalizedMarker": true },
                 "autoHooks": {
-                    "optionalPrimaryOrder": ["vision_auto", "stop_message_auto"],
+                    "optionalPrimaryOrder": [],
                     "mandatoryOrder": []
                 },
                 "pendingInjection": {
                     "messageKinds": ["assistant_tool_calls", "tool_outputs"]
                 },
                 "progress": {
-                    "toolNameByFlowId": {
-                        "continue_execution_flow": "continue_execution",
-                        "stop_message_flow": "stop_message_auto",
-                        "exec_command_guard": "exec_command_guard",
-                        "web_search_flow": "web_search",
-                        "vision_flow": "vision_auto",
-                        "recursive_detection_guard": "recursive_detection_guard"
-                    },
-                    "goldHighlightFlowIds": ["continue_execution_flow"]
+                    "toolNameByFlowId": {},
+                    "goldHighlightFlowIds": []
                 },
                 "followup": {
                     "genericInjectionOps": [
@@ -101,23 +41,7 @@ fn build_default_servertool_skeleton_document_value() -> serde_json::Value {
                         "compact_tool_content"
                     ],
                     "flowPolicy": {
-                        "profilesByFlowId": {
-
-                            "exec_command_guard": {
-                                "autoLimit": true,
-                                "flowOnlyLoopLimit": true
-                            },
-                            "stop_message_flow": {
-                                "noFollowup": true,
-                                "seedLoopPayload": true
-                            },
-                            "reasoning_stop_guard_flow": {},
-                            "reasoning_stop_continue_flow": {},
-                            "reasoning_stop_finalize_flow": {},
-                            "continue_execution_flow": {},
-
-                            "web_search_flow": {}
-                        }
+                        "profilesByFlowId": {}
                     }
                 }
             },
@@ -1208,16 +1132,17 @@ pub fn plan_servertool_followup_runtime_json(flow_id: String) -> NapiResult<Stri
     let normalized_flow_id = flow_id.trim().to_string();
     let profile = resolve_servertool_followup_flow_profile(&normalized_flow_id);
     let profile_obj = profile.as_object();
+    let has_profile = profile_obj.is_some();
     let runtime_plan = json!({
         "flowId": if normalized_flow_id.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(normalized_flow_id.clone()) },
-        "outcomeMode": if profile_obj.and_then(|v| v.get("noFollowup")).and_then(|v| v.as_bool()) == Some(true) {
+        "outcomeMode": if !has_profile || profile_obj.and_then(|v| v.get("noFollowup")).and_then(|v| v.as_bool()) == Some(true) {
             "skip"
         } else if profile_obj.and_then(|v| v.get("clientInjectOnly")).and_then(|v| v.as_bool()) == Some(true) {
             "client_inject_only"
         } else {
             "reenter"
         },
-        "noFollowup": profile_obj.and_then(|v| v.get("noFollowup")).and_then(|v| v.as_bool()).unwrap_or(false),
+        "noFollowup": !has_profile || profile_obj.and_then(|v| v.get("noFollowup")).and_then(|v| v.as_bool()).unwrap_or(false),
         "autoLimit": profile_obj.and_then(|v| v.get("autoLimit")).and_then(|v| v.as_bool()).unwrap_or(false),
         "flowOnlyLoopLimit": profile_obj.and_then(|v| v.get("flowOnlyLoopLimit")).and_then(|v| v.as_bool()).unwrap_or(false),
         "clientInjectOnly": profile_obj.and_then(|v| v.get("clientInjectOnly")).and_then(|v| v.as_bool()).unwrap_or(false),
@@ -1288,12 +1213,17 @@ mod tests {
                 .get("registeredToolCallHandlers")
                 .and_then(Value::as_array)
                 .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            parsed
+                .get("registeredToolCallHandlers")
+                .and_then(Value::as_array)
+                .unwrap()
                 .iter()
-                .any(
-                    |entry| entry.get("name").and_then(Value::as_str) == Some("web_search")
-                        && entry.get("executionMode").and_then(Value::as_str) == Some("backend")
-                ),
-            true
+                .any(|entry| entry.get("name").and_then(Value::as_str) == Some("web_search")),
+            false
         );
     }
 
@@ -1307,7 +1237,7 @@ mod tests {
                         "id": "call_1",
                         "name": "web_search",
                         "arguments": "{}",
-                        "executionMode": "backend",
+                        "executionMode": "guarded",
                         "stripAfterExecute": true
                     }
                 }],
@@ -1372,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    fn skeleton_does_not_register_apply_patch_servertool() {
+    fn default_skeleton_has_no_server_side_tool_registry_entries() {
         let raw = get_default_servertool_skeleton_document_json().expect("skeleton json");
         let parsed: Value = serde_json::from_str(&raw).expect("parse skeleton");
         let internal_tools = parsed
@@ -1380,7 +1310,31 @@ mod tests {
             .and_then(|v| v.get("internalTools"))
             .and_then(|v| v.as_object())
             .expect("internal tools object");
-        assert!(!internal_tools.contains_key("apply_patch"));
+        assert!(internal_tools.is_empty());
+        for removed in [
+            "continue_execution",
+            "stop_message_auto",
+            "reasoningstop",
+            "web_search",
+            "recursive_detection_guard",
+            "vision_auto",
+            "exec_command",
+            "apply_patch",
+        ] {
+            assert!(
+                !internal_tools.contains_key(removed),
+                "{removed} must not be registered"
+            );
+        }
+
+        let optional = parsed
+            .get("servertool")
+            .and_then(|v| v.get("skeleton"))
+            .and_then(|v| v.get("autoHooks"))
+            .and_then(|v| v.get("optionalPrimaryOrder"))
+            .and_then(|v| v.as_array())
+            .expect("optional primary order");
+        assert!(optional.is_empty());
 
         let progress = parsed
             .get("servertool")
@@ -1389,7 +1343,7 @@ mod tests {
             .and_then(|v| v.get("toolNameByFlowId"))
             .and_then(|v| v.as_object())
             .expect("toolNameByFlowId object");
-        assert!(!progress.contains_key("apply_patch_guard"));
+        assert!(progress.is_empty());
 
         let profiles = parsed
             .get("servertool")
@@ -1399,8 +1353,7 @@ mod tests {
             .and_then(|v| v.get("profilesByFlowId"))
             .and_then(|v| v.as_object())
             .expect("profilesByFlowId object");
-        assert!(!profiles.contains_key("apply_patch_guard"));
-        assert!(!profiles.contains_key("apply_patch_read_before_retry_guard"));
+        assert!(profiles.is_empty());
     }
 
     #[test]
@@ -1418,13 +1371,13 @@ mod tests {
         );
         assert_eq!(
             parsed.get("seedLoopPayload").and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         assert!(parsed.get("stopMessageFollowupPolicy").is_none());
     }
 
     #[test]
-    fn skeleton_owns_vision_auto_hook_order() {
+    fn default_skeleton_has_no_primary_auto_hook_order() {
         let raw = get_default_servertool_skeleton_document_json().expect("skeleton json");
         let parsed: Value = serde_json::from_str(&raw).expect("parse skeleton");
         let internal_tools = parsed
@@ -1432,14 +1385,7 @@ mod tests {
             .and_then(|v| v.get("internalTools"))
             .and_then(|v| v.as_object())
             .expect("internal tools object");
-        assert!(internal_tools.contains_key("vision_auto"));
-        assert_eq!(
-            internal_tools["vision_auto"]
-                .get("trigger")
-                .and_then(|v| v.get("type"))
-                .and_then(|v| v.as_str()),
-            Some("auto")
-        );
+        assert!(internal_tools.is_empty());
         let optional = parsed
             .get("servertool")
             .and_then(|v| v.get("skeleton"))
@@ -1451,7 +1397,7 @@ mod tests {
             .iter()
             .filter_map(|item| item.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(ids, vec!["vision_auto", "stop_message_auto"]);
+        assert!(ids.is_empty());
     }
 
     #[test]
@@ -1461,19 +1407,14 @@ mod tests {
         let parsed: Value = serde_json::from_str(&raw).expect("parse derived");
         assert_eq!(
             parsed["autoHookQueueConfig"]["optionalPrimaryOrder"],
-            json!(["vision_auto", "stop_message_auto"])
+            json!([])
         );
         assert_eq!(
             parsed["pendingInjectionConfig"]["messageKinds"],
             json!(["assistant_tool_calls", "tool_outputs"])
         );
         assert_eq!(
-            parsed["followupConfig"]["flowPolicy"]["profilesByFlowId"]["stop_message_flow"]
-                ["seedLoopPayload"],
-            true
-        );
-        assert_eq!(
-            parsed["followupConfig"]["flowPolicy"]["profilesByFlowId"]["web_search_flow"],
+            parsed["followupConfig"]["flowPolicy"]["profilesByFlowId"],
             json!({})
         );
         assert_eq!(
@@ -1495,7 +1436,7 @@ mod tests {
         let parsed: Value = serde_json::from_str(&raw).expect("parse registration");
         assert_eq!(parsed["name"], "web_search");
         assert_eq!(parsed["trigger"], "tool_call");
-        assert_eq!(parsed["executionMode"], "backend");
+        assert_eq!(parsed["executionMode"], "guarded");
 
         let auto_raw = normalize_servertool_registration_spec_json(
             json!({
@@ -1520,74 +1461,49 @@ mod tests {
         let raw = resolve_servertool_tool_spec_json(json!({ "name": "web-search" }).to_string())
             .expect("tool spec");
         let parsed: Value = serde_json::from_str(&raw).expect("parse tool spec");
-        assert_eq!(parsed["name"], "web_search");
-        assert_eq!(parsed["execution"]["mode"], "backend");
+        assert_eq!(parsed, Value::Null);
 
         let reasoning_stop =
             resolve_servertool_tool_spec_json(json!({ "name": "reasoningStop" }).to_string())
                 .expect("reasoningStop tool spec");
         let reasoning_stop_parsed: Value =
             serde_json::from_str(&reasoning_stop).expect("parse reasoningStop tool spec");
-        assert_eq!(reasoning_stop_parsed["name"], "reasoningStop");
-        assert_eq!(reasoning_stop_parsed["execution"]["mode"], "guarded");
+        assert_eq!(reasoning_stop_parsed, Value::Null);
     }
 
     #[test]
-    fn builtin_handler_catalog_is_rust_planned() {
+    fn builtin_handler_catalog_has_no_default_server_side_entries() {
         let names = plan_servertool_builtin_handler_names_json(json!({}).to_string())
             .expect("builtin names");
         let names_value: Value = serde_json::from_str(&names).expect("parse builtin names");
-        assert_eq!(names_value["names"], json!(["stop_message_auto"]));
+        assert_eq!(names_value["names"], json!([]));
 
         let auto_entries = plan_servertool_builtin_auto_handler_entries_json(json!({}).to_string())
             .expect("builtin auto entries");
         let auto_entries_value: Value =
             serde_json::from_str(&auto_entries).expect("parse builtin auto entries");
-        assert_eq!(
-            auto_entries_value["entries"][0]["name"],
-            "stop_message_auto"
-        );
-        assert_eq!(
-            auto_entries_value["entries"][0]["autoHook"]["phase"],
-            "default"
-        );
+        assert_eq!(auto_entries_value["entries"], json!([]));
 
         let record_entries =
             plan_servertool_builtin_handler_record_entries_json(json!({}).to_string())
                 .expect("builtin record entries");
         let record_entries_value: Value =
             serde_json::from_str(&record_entries).expect("parse builtin record entries");
-        assert_eq!(
-            record_entries_value["entries"][0]["registration"]["executionMode"],
-            "auto_hook"
-        );
+        assert_eq!(record_entries_value["entries"], json!([]));
 
         let entry = plan_servertool_builtin_handler_entry_json(
             json!({ "name": "stop_message_auto" }).to_string(),
         )
         .expect("builtin entry");
         let entry_value: Value = serde_json::from_str(&entry).expect("parse builtin entry");
-        assert_eq!(entry_value["action"], "return_entry");
-        assert_eq!(entry_value["entry"]["name"], "stop_message_auto");
-        assert_eq!(entry_value["entry"]["trigger"], "auto");
-        assert_eq!(
-            entry_value["entry"]["execution"],
-            json!({ "kind": "builtin", "builtinName": "stop_message_auto" })
-        );
-        assert_eq!(
-            entry_value["entry"]["registration"]["executionMode"],
-            "auto_hook"
-        );
-        assert_eq!(entry_value["entry"]["autoHook"]["phase"], "default");
-        assert_eq!(entry_value["entry"]["autoHook"]["priority"], 40);
-        assert_eq!(entry_value["entry"]["autoHook"]["order"], -1);
+        assert_eq!(entry_value["action"], "return_none");
 
         let resolved = resolve_servertool_builtin_handler_entry_json(
             json!({ "name": "stop_message_auto" }).to_string(),
         )
         .expect("resolved builtin entry");
         let resolved_value: Value = serde_json::from_str(&resolved).expect("parse resolved entry");
-        assert_eq!(resolved_value["name"], "stop_message_auto");
+        assert_eq!(resolved_value, Value::Null);
 
         let unsupported =
             plan_servertool_builtin_handler_entry_json(json!({ "name": "web_search" }).to_string())
@@ -1616,7 +1532,7 @@ mod tests {
         .expect("lookup builtin plan");
         let lookup_builtin_value: Value =
             serde_json::from_str(&lookup_builtin).expect("parse lookup builtin");
-        assert_eq!(lookup_builtin_value["action"], json!("return_builtin"));
+        assert_eq!(lookup_builtin_value["action"], json!("return_none"));
         assert_eq!(
             lookup_builtin_value["canonicalName"],
             json!("stop_message_auto")
@@ -1637,7 +1553,7 @@ mod tests {
             resolve_servertool_registered_name_json(json!({ "name": "web_search" }).to_string())
                 .expect("registered name");
         let registered_value: Value = serde_json::from_str(&registered).expect("parse registered");
-        assert_eq!(registered_value["registered"], json!(true));
+        assert_eq!(registered_value["registered"], json!(false));
         let missing =
             resolve_servertool_registered_name_json(json!({ "name": "missing" }).to_string())
                 .expect("missing name");
@@ -1651,7 +1567,7 @@ mod tests {
             json!({ "flowId": " web_search_flow " }).to_string(),
         )
         .expect("progress tool");
-        assert_eq!(known, "\"web_search\"");
+        assert_eq!(known, "\"web_search_flow\"");
 
         let unknown = resolve_servertool_progress_tool_name_json(
             json!({ "flowId": " custom_flow " }).to_string(),
@@ -1665,10 +1581,10 @@ mod tests {
         assert_eq!(empty, "\"unknown\"");
 
         let gold = should_use_servertool_gold_progress_highlight_json(
-            json!({ "flowId": " continue_execution_flow " }).to_string(),
+            json!({ "flowId": " retired_flow " }).to_string(),
         )
         .expect("gold highlight");
-        assert_eq!(gold, "true");
+        assert_eq!(gold, "false");
 
         let regular = should_use_servertool_gold_progress_highlight_json(
             json!({ "flowId": " web_search_flow " }).to_string(),

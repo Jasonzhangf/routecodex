@@ -41,7 +41,6 @@ type HubPipelineLibInput = {
 
 type HubPipelineLibOutput = HubPipelineOutput & {
   standardizedRequest?: Record<string, unknown>;
-  entryOriginRequest?: Record<string, unknown>;
   effectPlan: {
     effects: Array<Record<string, unknown>>;
   };
@@ -99,6 +98,7 @@ export type HubPipelineMaterializedRequestPlan = {
   entryEndpoint: string;
   providerProtocol: string;
   metadata: Record<string, unknown>;
+  metadataCenterSnapshot?: Record<string, unknown> | null;
   processMode: 'chat';
   direction: 'request' | 'response';
   stage: 'inbound' | 'outbound';
@@ -548,16 +548,6 @@ export function resolveProviderProtocolWithNative(input: {
   return parseProviderProtocolPlan(raw) ?? fail('invalid payload');
 }
 
-export function resolveHubPipelineRequestProviderProtocolWithNative(input: {
-  providerProtocol?: unknown;
-  runtimeControl?: Record<string, unknown> | null;
-}): ProviderProtocolPlan {
-  const capability = 'resolveHubPipelineRequestProviderProtocolJson';
-  const fail = (reason?: string) => failNativeRequired<ProviderProtocolPlan>(capability, reason);
-  const raw = callNativeJsonString(capability, input);
-  return parseProviderProtocolPlan(raw) ?? fail('invalid payload');
-}
-
 export function projectMetadataWritePlanToRuntimeControlWithNative(input: {
   plan: Record<string, unknown>;
 }): Record<string, unknown> {
@@ -613,6 +603,7 @@ export function buildHubPipelineMaterializedRequestPlanWithNative(input: {
   endpoint: string;
   providerProtocol: string;
   metadata: Record<string, unknown>;
+  metadataCenterSnapshot?: Record<string, unknown> | null;
   payload: Record<string, unknown>;
   payloadStream: boolean;
 }): HubPipelineMaterializedRequestPlan {
@@ -640,6 +631,10 @@ export function buildHubPipelineMaterializedRequestPlanWithNative(input: {
   if (typeof parsed.stream !== 'boolean' || typeof parsed.disableSnapshots !== 'boolean') {
     return fail('invalid payload');
   }
+  const metadataCenterSnapshot = parsed.metadataCenterSnapshot;
+  if (metadataCenterSnapshot !== undefined && metadataCenterSnapshot !== null && (typeof metadataCenterSnapshot !== 'object' || Array.isArray(metadataCenterSnapshot))) {
+    return fail('invalid payload');
+  }
   const hubEntryMode = parsed.hubEntryMode === 'chat_process' ? 'chat_process' : undefined;
   if (parsed.hubEntryMode !== undefined && hubEntryMode === undefined) {
     return fail('invalid payload');
@@ -657,6 +652,7 @@ export function buildHubPipelineMaterializedRequestPlanWithNative(input: {
     entryEndpoint,
     providerProtocol,
     metadata: parsed.metadata as Record<string, unknown>,
+    ...(metadataCenterSnapshot ? { metadataCenterSnapshot: metadataCenterSnapshot as Record<string, unknown> } : {}),
     processMode,
     direction,
     stage,

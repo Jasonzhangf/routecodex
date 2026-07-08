@@ -120,7 +120,7 @@ describe('ProviderConfig v2 loader', () => {
 
   it('fails fast when retired config.v2.json remains next to config.v2.toml', async () => {
     const root = await createTempDir('provider-v2-');
-    const providerDir = path.join(root, 'deepseek-web');
+    const providerDir = path.join(root, 'sample-provider');
     await fs.mkdir(providerDir, { recursive: true });
 
     await expect(fs.writeFile(
@@ -128,9 +128,9 @@ describe('ProviderConfig v2 loader', () => {
       `${JSON.stringify(
         {
           version: '2.0.0',
-          providerId: 'deepseek-web',
+          providerId: 'sample-provider',
           provider: {
-            id: 'deepseek-web',
+            id: 'sample-provider',
             type: 'openai',
             baseURL: 'https://json.example.com'
           }
@@ -144,10 +144,10 @@ describe('ProviderConfig v2 loader', () => {
       path.join(providerDir, 'config.v2.toml'),
       [
         'version = "2.0.0"',
-        'providerId = "deepseek-web"',
+        'providerId = "sample-provider"',
         '',
         '[provider]',
-        'id = "deepseek-web"',
+        'id = "sample-provider"',
         'type = "openai"',
         'baseURL = "https://toml.example.com"',
         ''

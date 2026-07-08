@@ -439,6 +439,7 @@ async function withScenarioRuntime(options, fn) {
       setEnv('ROUTECODEX_SESSION_DIR', sessionDir),
       setEnv('ROUTECODEX_SNAPSHOT', '0'),
       setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'),
+      setEnv('ROUTECODEX_TRAFFIC_STORE_ROOT', path.join(tmpDir, 'traffic')),
       setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', String(responsesTimeoutMs)),
       setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', String(maxProviderAttempts))
     );
@@ -513,7 +514,7 @@ async function run503Scenario() {
     );
 
     const first = await postResponses(firstServer.httpHarness.baseUrl);
-    assert.equal(first.status, 200);
+    assert.equal(first.status, 200, `first 503 scenario response body=${first.body} primaryHits=${primaryHits} backupHits=${backupHits}`);
     assert.match(first.body, /ok-from-backup-503/);
     assert.equal(primaryHits, 1);
     assert.equal(backupHits, 1);

@@ -13,14 +13,10 @@ Source of truth: `src/cli.ts` (wiring) + command implementations in `src/cli/com
 | `config` | `src/cli/register/status-config-commands.ts` | `src/cli/commands/config.ts` | Writes config file; reads existing config | Returns (no direct `ctx.exit` in this file) |
 | `status` | `src/cli/register/status-config-commands.ts` | `src/cli/commands/status.ts` | Network `fetch` to server status endpoint | Returns (no direct `ctx.exit` in this file) |
 | `start` | `src/cli/register/start-command.ts` | `src/cli/commands/start.ts` | Reads config; may write temp config + pid file; may `fetch` shutdown; may kill PIDs; spawns server (`node dist/index.js`) | Uses `ctx.exit(...)` for success/error paths |
-| `stop` | `src/cli/register/stop-command.ts` | `src/cli/commands/stop.ts` | Reads config (release); kill PIDs; optional token-daemon stop | `ctx.exit(1)` on config/stop failures; otherwise returns |
+| `stop` | `src/cli/register/stop-command.ts` | `src/cli/commands/stop.ts` | Reads config (release); kill PIDs | `ctx.exit(1)` on config/stop failures; otherwise returns |
 | `restart` | `src/cli/register/restart-command.ts` | `src/cli/commands/restart.ts` | Reads config; kill PIDs; may `fetch` shutdown; spawns server; writes pid file | Uses `ctx.exit(...)` for success/error paths |
 | `code` | `src/cli/register/code-command.ts` | `src/cli/commands/code.ts` | Reads config for `apikey`; may `fetch /ready`; may spawn server; spawns `claude` | Uses `ctx.exit(...)` for success/error paths |
 | `provider-update` *(optional)* | `src/cli.ts` dynamic import | `src/commands/provider-update.ts` | Reads/writes provider config and lists; may call RouteCodex HTTP endpoint for probing | Uses `process.exit(1)` in multiple branches |
-| `camoufox-fp` *(optional)* | `src/cli.ts` dynamic import | `src/commands/camoufox-fp.ts` | Reads fingerprint JSON on disk | Sets `process.exitCode` on errors |
-| `camoufox-backfill` *(optional)* | `src/cli.ts` dynamic import | `src/commands/camoufox-backfill.ts` | Backfills fingerprints (disk IO) | Uses `process.exitCode` on errors (by pattern) |
-| `token-daemon` *(optional)* | `src/cli.ts` dynamic import | `src/commands/token-daemon.ts` | Spawns background daemon; reads/writes snapshots | Uses `process.exit(...)` / `process.exitCode` in command handlers |
-| `oauth` *(optional)* | `src/cli.ts` dynamic import | `src/commands/oauth.ts` | Triggers OAuth flows (Camoufox/browser automation) | Returns; may set exit codes on failures (subcommands) |
 | `validate` *(optional)* | `src/cli.ts` dynamic import | `src/commands/validate.ts` | `fetch` health + API; may spawn `rcc start`; reads payload file | Calls `process.exit(1)` on failures |
 
 ## Contracts (inputs/outputs) — extracted from `.option(...)`

@@ -2,6 +2,7 @@
 //! NAPI blocks for servertool-core — stop gateway, loop guard, budget counter.
 
 use serde::{Deserialize, Serialize};
+use servertool_core::auto_hook_execution_contract;
 use servertool_core::auto_hook_runtime_contract;
 use servertool_core::blocked_report_contract;
 use servertool_core::cli_contract;
@@ -3577,37 +3578,6 @@ fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
         serde_json::json!("boom")
     );
 
-    let noop = plan_servertool_execution_loop_effect_json(
-        &serde_json::json!({
-            "mode": "noop",
-            "toolCall": {
-                "id": "call_continue_1",
-                "name": "continue_execution",
-                "arguments": "{}",
-                "executionMode": "guarded",
-                "stripAfterExecute": false
-            },
-            "noopOutcome": {
-                "flowId": "continue_execution_flow",
-                "chatResponse": {}
-            }
-        })
-        .to_string(),
-    )
-    .expect("execution loop effect noop plan");
-    let noop_value: serde_json::Value = serde_json::from_str(&noop).expect("parse noop plan");
-    assert_eq!(
-        noop_value["toolCall"]["executionMode"],
-        serde_json::json!("noop")
-    );
-    assert_eq!(
-        noop_value["toolCall"]["stripAfterExecute"],
-        serde_json::json!(true)
-    );
-    assert_eq!(
-        noop_value["execution"]["flowId"],
-        serde_json::json!("continue_execution_flow")
-    );
 }
 
 #[test]

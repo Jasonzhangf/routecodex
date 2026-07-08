@@ -8,19 +8,38 @@ import {
   disposeHubPipelineEngineJson,
   updateHubPipelineVirtualRouterConfigJson,
   updateHubPipelineEngineDepsJson,
-  resolveHubPipelineRequestProviderProtocolWithNative,
+  hubPipelineVirtualRouterRouteJson,
+  hubPipelineVirtualRouterDiagnoseRouteJson,
+  hubPipelineVirtualRouterStatusJson,
+  hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson,
   buildHubPipelineMaterializedRequestPlanWithNative,
 } from "../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics.js";
+import {
+  readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter,
+} from "../metadata-center-runtime-control-writer.js";
 
 function readJsonString(raw: unknown): string {
   if (typeof raw === "string") return raw;
   try { return JSON.stringify(raw); } catch { return String(raw); }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
 export type HubPipelineConfig = Record<string, unknown>;
 export type HubPipelineResult = Record<string, unknown>;
 export type HubPipelineNodeResult = Record<string, unknown>;
 export type NormalizedRequest = Record<string, unknown>;
+
+export type HubPipelineVirtualRouterFacade = {
+  route: (request: Record<string, unknown>, metadata?: Record<string, unknown>) => Record<string, unknown>;
+  diagnoseRoute: (request: Record<string, unknown>, metadata?: Record<string, unknown>) => Record<string, unknown>;
+  getStatus: () => Record<string, unknown>;
+  markConcurrencyScopeBusy: (scopeKey: string) => void;
+};
 
 export interface HubPipelineRequest {
   id?: string;
@@ -49,6 +68,28 @@ export class HubPipeline {
     updateHubPipelineVirtualRouterConfigJson(this.handle, readJsonString(config));
   }
 
+  getVirtualRouter(): HubPipelineVirtualRouterFacade {
+    const handle = this.handle;
+    return {
+      route(request: Record<string, unknown>, metadata: Record<string, unknown> = {}): Record<string, unknown> {
+        return JSON.parse(
+          hubPipelineVirtualRouterRouteJson(handle, readJsonString(request), readJsonString(metadata))
+        ) as Record<string, unknown>;
+      },
+      diagnoseRoute(request: Record<string, unknown>, metadata: Record<string, unknown> = {}): Record<string, unknown> {
+        return JSON.parse(
+          hubPipelineVirtualRouterDiagnoseRouteJson(handle, readJsonString(request), readJsonString(metadata))
+        ) as Record<string, unknown>;
+      },
+      getStatus(): Record<string, unknown> {
+        return JSON.parse(hubPipelineVirtualRouterStatusJson(handle)) as Record<string, unknown>;
+      },
+      markConcurrencyScopeBusy(scopeKey: string): void {
+        hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson(handle, String(scopeKey ?? ""));
+      },
+    };
+  }
+
   dispose(): void {
     disposeHubPipelineEngineJson(this.handle);
   }
@@ -56,26 +97,18 @@ export class HubPipeline {
   async execute(request: Record<string, unknown> & { endpoint: string; payload: unknown }): Promise<Record<string, unknown>> {
     const metadata = (request.metadata ?? {}) as Record<string, unknown>;
     const endpoint = request.endpoint;
-    const metadataCenterSnapshot = metadata.metadataCenterSnapshot;
-    const runtimeControl = metadataCenterSnapshot &&
-      typeof metadataCenterSnapshot === "object" &&
-      !Array.isArray(metadataCenterSnapshot)
-      ? (metadataCenterSnapshot as Record<string, unknown>).runtimeControl
-      : undefined;
-    const providerProtocol = resolveHubPipelineRequestProviderProtocolWithNative({
-      providerProtocol: metadata.providerProtocol,
-      runtimeControl: runtimeControl && typeof runtimeControl === "object" && !Array.isArray(runtimeControl)
-        ? runtimeControl as Record<string, unknown>
-        : null,
-    }).providerProtocol;
-
+    const metadataCenterSnapshot =
+      readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(metadata)?.metadataCenterSnapshot
+      ?? asRecord(metadata.metadataCenterSnapshot)
+      ?? null;
     const payload = request.payload instanceof Readable
       ? {}
       : (request.payload as Record<string, unknown>);
     const materialized = buildHubPipelineMaterializedRequestPlanWithNative({
       endpoint,
-      providerProtocol,
+      providerProtocol: typeof metadata.providerProtocol === "string" ? metadata.providerProtocol : "",
       metadata,
+      metadataCenterSnapshot,
       payload,
       payloadStream: request.payload instanceof Readable,
     });
@@ -87,6 +120,7 @@ export class HubPipeline {
       providerProtocol: materialized.providerProtocol,
       payload,
       metadata: materialized.metadata,
+      ...(materialized.metadataCenterSnapshot ? { metadataCenterSnapshot: materialized.metadataCenterSnapshot } : {}),
       stream: materialized.stream,
       processMode: materialized.processMode,
       direction: materialized.direction,

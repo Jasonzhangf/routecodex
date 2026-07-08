@@ -39,11 +39,11 @@ describe('resolveRuntimeAuth API-key-only auth normalization', () => {
       endpoint: 'https://api.example.com/v1',
       auth: {
         type: 'apikey',
-        rawType: 'deepseek-account',
-        tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
+        rawType: 'legacy-account',
+        tokenFile: '~/.routecodex/auth/legacy-account-1.json'
       }
     } as unknown as ProviderRuntimeProfile;
 
-    await expect(resolveRuntimeAuth(createServerStub(), runtime)).rejects.toThrow(/deepseek-account auth has been removed/);
+    await expect(resolveRuntimeAuth(createServerStub(), runtime)).rejects.toThrow(/legacy-account auth has been removed/);
   });
 });

@@ -83,7 +83,6 @@ export interface HubPipelineExecutionResult {
   requestId?: string;
   providerPayload?: Record<string, unknown>;
   standardizedRequest?: Record<string, unknown>;
-  entryOriginRequest?: Record<string, unknown>;
   processedRequest?: Record<string, unknown>;
   target?: {
     providerKey: string;

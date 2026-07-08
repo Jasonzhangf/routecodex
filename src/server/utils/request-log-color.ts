@@ -5,6 +5,7 @@ const ANSI_RESET = '\x1b[0m';
 const ANSI_ERROR_LOG_COLOR = '\x1b[31m';
 const REQUEST_LOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
 const REQUEST_LOG_CONTEXT_MAX = 4096;
+const REQUEST_LOG_CONTEXT_GLOBAL_KEY = Symbol.for('routecodex.requestLogColorContext.v1');
 
 type RequestLogContextRecord = {
   colorToken: string;
@@ -13,7 +14,13 @@ type RequestLogContextRecord = {
 
 type RequestLogColorContext = Record<string, unknown>;
 
-const REQUEST_LOG_CONTEXT = new Map<string, RequestLogContextRecord>();
+const requestLogContextGlobal = globalThis as typeof globalThis & {
+  [REQUEST_LOG_CONTEXT_GLOBAL_KEY]?: Map<string, RequestLogContextRecord>;
+};
+const REQUEST_LOG_CONTEXT =
+  requestLogContextGlobal[REQUEST_LOG_CONTEXT_GLOBAL_KEY]
+  ?? new Map<string, RequestLogContextRecord>();
+requestLogContextGlobal[REQUEST_LOG_CONTEXT_GLOBAL_KEY] = REQUEST_LOG_CONTEXT;
 
 function isConsoleColorEnabled(): boolean {
   const routecodexForceColor = String(
@@ -70,6 +77,28 @@ function resolveVirtualRouterHitSessionKey(text: string): string | undefined {
 function resolveVirtualRouterHitRequestKey(text: string): string | undefined {
   const requestId = text.match(/\breq=([^ \x1b]+)/)?.[1];
   return normalizeRequestKey(requestId);
+}
+
+function normalizeInlineRequestToken(value: string | undefined): string | undefined {
+  return normalizeRequestKey(value?.replace(/[,"'}\])]+$/g, ''));
+}
+
+function resolveRequestScopedLogLineRequestKey(text: string): string | undefined {
+  const patterns = [
+    /\brequest=([^ \x1b,)}\]]+)/,
+    /\brequestId["']?\s*[:=]\s*["']?([^"'\s,)}\]]+)/,
+    /["']requestId["']\s*:\s*["']([^"']+)["']/,
+    /\brequest\s+([^ \x1b]+)\s+(?:started|completed|failed)\b/,
+    /\breq=([^ \x1b,)}\]]+)/
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const requestKey = normalizeInlineRequestToken(match?.[1]);
+    if (requestKey) {
+      return requestKey;
+    }
+  }
+  return undefined;
 }
 
 function resolveRegisteredRequestColorToken(requestKey: string | undefined): string | undefined {
@@ -185,6 +214,24 @@ export function colorizeVirtualRouterHitLogLine(text: string): string {
   }
   const color = resolveVirtualRouterHitColorToken(text);
   if (!color) {
+    return text;
+  }
+  return `${color}${stripAnsiCodes(text)}${ANSI_RESET}`;
+}
+
+export function colorizeRequestScopedLogLine(text: string): string {
+  if (!text || !isConsoleColorEnabled()) {
+    return text;
+  }
+  const virtualRouterHitLine = colorizeVirtualRouterHitLogLine(text);
+  if (virtualRouterHitLine !== text) {
+    return virtualRouterHitLine;
+  }
+  const color = resolveRegisteredRequestColorToken(resolveRequestScopedLogLineRequestKey(text));
+  if (!color) {
+    return text;
+  }
+  if (text.startsWith(color) && text.endsWith(ANSI_RESET)) {
     return text;
   }
   return `${color}${stripAnsiCodes(text)}${ANSI_RESET}`;

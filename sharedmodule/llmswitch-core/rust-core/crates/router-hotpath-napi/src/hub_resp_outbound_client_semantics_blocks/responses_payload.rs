@@ -402,6 +402,48 @@ fn is_client_visible_servertool_cli_shell(
 
 type PendingToolCall = (usize, String, String, String);
 
+fn restore_generated_function_call_statuses(payload: &mut Value, pending_call_ids: &HashSet<String>) {
+    let Some(output) = payload
+        .as_object_mut()
+        .and_then(|record| record.get_mut("output"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+
+    for item in output {
+        let Some(row) = item.as_object_mut() else {
+            continue;
+        };
+        if row.get("type").and_then(Value::as_str) != Some("function_call") {
+            continue;
+        }
+        let call_id = row
+            .get("call_id")
+            .or_else(|| row.get("id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let is_pending = call_id
+            .map(|value| {
+                pending_call_ids.contains(value)
+                    || value
+                        .strip_prefix("fc_")
+                        .map(|stripped| pending_call_ids.contains(stripped))
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        row.insert(
+            "status".to_string(),
+            Value::String(if is_pending {
+                "in_progress".to_string()
+            } else {
+                "completed".to_string()
+            }),
+        );
+    }
+}
+
 fn build_chat_payload_from_anthropic_message_for_responses(
     response_row: &Map<String, Value>,
 ) -> Value {
@@ -961,6 +1003,10 @@ pub(crate) fn build_responses_payload_from_chat_core(
         .into_iter()
         .filter(|(_, call_id, _, _)| !executed_ids.contains(call_id))
         .collect::<Vec<PendingToolCall>>();
+    let pending_call_ids = pending_calls
+        .iter()
+        .map(|(_, call_id, _, _)| call_id.clone())
+        .collect::<HashSet<String>>();
 
     if !pending_calls.is_empty() {
         if let Some(index) = message_output_index {
@@ -1065,11 +1111,13 @@ pub(crate) fn build_responses_payload_from_chat_core(
         );
     }
 
-    Ok(finalize_client_responses_payload(
+    let mut finalized = finalize_client_responses_payload(
         Value::Object(out),
         response_row,
         context,
-    ))
+    );
+    restore_generated_function_call_statuses(&mut finalized, &pending_call_ids);
+    Ok(finalized)
 }
 
 #[cfg(test)]

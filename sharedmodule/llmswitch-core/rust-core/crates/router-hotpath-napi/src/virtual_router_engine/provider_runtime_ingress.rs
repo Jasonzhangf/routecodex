@@ -70,11 +70,8 @@ pub(crate) fn route_with_registered_runtime(
     metadata: &Value,
     expected_routing_policy_group: Option<&str>,
 ) -> Result<Value, String> {
-    let core = resolve_registered_runtime(
-        metadata,
-        expected_routing_policy_group,
-        "route selection",
-    )?;
+    let core =
+        resolve_registered_runtime(metadata, expected_routing_policy_group, "route selection")?;
     let mut guard = core
         .write()
         .map_err(|_| "registered virtual router runtime lock poisoned".to_string())?;
@@ -94,10 +91,7 @@ pub(crate) fn is_provider_available_with_registered_runtime(
     let mut guard = core
         .write()
         .map_err(|_| "registered virtual router runtime lock poisoned".to_string())?;
-    Ok(guard.is_provider_available(
-        unsafe { Env::from_raw(std::ptr::null_mut()) },
-        provider_key,
-    ))
+    Ok(guard.is_provider_available(unsafe { Env::from_raw(std::ptr::null_mut()) }, provider_key))
 }
 
 #[derive(Clone, Copy)]

@@ -49,7 +49,7 @@ const response = await hubPipeline.handleChat(request);
 ```
 
 ## 调试与快照
-- `src/debug/` 提供统一的 SnapshotStore、DryRunRunner、ReplayRunner。
+- `src/debug/` 提供统一的 SnapshotStore、ReplayRunner。
 - CLI 可以通过 `npm run snapshot:inspect -- --rid <RID>` 查看各阶段的快照摘要。
 - Provider Harness（`src/debug/harnesses/provider-harness.ts`）允许在不调用上游的情况下检查 runtime payload。
 

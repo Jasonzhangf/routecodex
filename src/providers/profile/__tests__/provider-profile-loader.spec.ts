@@ -174,14 +174,14 @@ describe('provider-profile-loader', () => {
     expect(result.byId).toEqual({});
   });
 
-  it('rejects removed qwenchat provider type', () => {
+  it('rejects removed web provider type', () => {
     const config: Record<string, unknown> = {
       providers: {
-        qwenchat: {
-          type: 'qwenchat'
+        legacyWeb: {
+          type: 'legacy-web'
         }
       }
     };
-    expect(() => buildProviderProfiles(config)).toThrow(/unsupported type \"qwenchat\"/i);
+    expect(() => buildProviderProfiles(config)).toThrow(/unsupported type \"legacy-web\"/i);
   });
 });

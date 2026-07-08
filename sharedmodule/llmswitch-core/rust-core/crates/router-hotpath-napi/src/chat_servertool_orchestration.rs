@@ -29,9 +29,6 @@ pub(crate) fn build_servertool_cli_projection_01_from_hub_resp_chatprocess_03() 
     "routecodex servertool run <toolName> --input-json <json>"
 }
 
-/// Tool names treated as pure noop — acknowledged and auto-continued without handler execution.
-/// Outcome is a standard delta: tool_outputs entry + clientInjectOnly followup.
-const NOOP_SERVERTOOL_NAMES: [&str; 1] = ["continue_execution"];
 const CLIENT_EXEC_CLI_PROJECTION_TOOL_NAMES: [&str; 1] = ["servertool_fixture"];
 
 fn is_visible_text_field(key: Option<&str>) -> bool {
@@ -75,15 +72,8 @@ pub(crate) struct ChatWebSearchPlanOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ChatContinueExecutionPlanOutput {
-    pub(crate) should_inject: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct ChatServerToolBundlePlanOutput {
     pub(crate) web_search: ChatWebSearchPlanOutput,
-    pub(crate) continue_execution: ChatContinueExecutionPlanOutput,
 }
 
 #[derive(Debug, Serialize)]
@@ -1105,13 +1095,6 @@ fn is_canonical_chat_completion_payload(payload: &Value) -> bool {
     first.get("message").and_then(|v| v.as_object()).is_some()
 }
 
-pub(crate) fn build_continue_execution_operations(should_inject: bool) -> Value {
-    let _ = should_inject;
-    // continue_execution remains a server-side compatibility handler for historical/upstream tool calls,
-    // but it must no longer be injected into the model-visible request tool surface.
-    Value::Array(Vec::new())
-}
-
 fn read_runtime_metadata_bool(runtime_metadata: &Value, key: &str) -> bool {
     runtime_metadata
         .as_object()
@@ -1385,21 +1368,6 @@ fn resolve_chat_web_search_plan(
     }
 }
 
-fn resolve_continue_execution_plan(
-    runtime_metadata: &Value,
-    has_active_stop_message: bool,
-) -> ChatContinueExecutionPlanOutput {
-    if read_runtime_metadata_bool(runtime_metadata, "serverToolFollowup") || has_active_stop_message
-    {
-        return ChatContinueExecutionPlanOutput {
-            should_inject: false,
-        };
-    }
-    ChatContinueExecutionPlanOutput {
-        should_inject: true,
-    }
-}
-
 #[napi]
 pub fn plan_chat_web_search_operations_json(
     request_json: String,
@@ -1416,14 +1384,10 @@ pub fn plan_chat_web_search_operations_json(
 pub(crate) fn plan_chat_servertool_orchestration_bundle(
     request: &Value,
     runtime_metadata: &Value,
-    has_active_stop_message: bool,
+    _has_active_stop_message: bool,
 ) -> ChatServerToolBundlePlanOutput {
     ChatServerToolBundlePlanOutput {
         web_search: resolve_chat_web_search_plan(&request, &runtime_metadata),
-        continue_execution: resolve_continue_execution_plan(
-            &runtime_metadata,
-            has_active_stop_message,
-        ),
     }
 }
 
@@ -1691,14 +1655,6 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
             });
             continue;
         }
-        if NOOP_SERVERTOOL_NAMES.contains(&normalized_name.as_str()) {
-            noop_tool_calls.push(ServertoolDispatchNoopOutput {
-                id: tool_call.id,
-                name: normalized_name,
-                arguments: tool_call.arguments,
-            });
-            continue;
-        }
         if CLIENT_EXEC_CLI_PROJECTION_TOOL_NAMES.contains(&normalized_name.as_str()) {
             executable_tool_calls.push(ServertoolDispatchCandidateOutput {
                 id: tool_call.id,
@@ -1732,102 +1688,6 @@ pub fn plan_servertool_tool_call_dispatch_json(input_json: String) -> NapiResult
         skipped_tool_calls,
     };
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn plan_servertool_noop_outcome_json(input_json: String) -> NapiResult<String> {
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct NoopInput {
-        tool_call_id: String,
-        tool_name: String,
-        tool_arguments: Option<String>,
-        /// The base chat response payload to inject the tool_output into.
-        base: Value,
-    }
-
-    #[derive(Debug, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct NoopOutput {
-        /// Updated chat response with tool_outputs appended.
-        chat_response: Value,
-        flow_id: String,
-        followup: Value,
-        /// The injected tool output content.
-        tool_content: Value,
-    }
-
-    let input: NoopInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let tool_name = normalize_routecodex_tool_name(Some(input.tool_name.as_str()))
-        .unwrap_or_else(|| input.tool_name.trim().to_ascii_lowercase());
-    if tool_name != "continue_execution" {
-        return Err(napi::Error::from_reason(format!(
-            "unsupported noop servertool: {}",
-            input.tool_name
-        )));
-    }
-    let visible_summary =
-        resolve_continue_execution_visible_summary(input.tool_arguments.as_deref())
-            .map_err(napi::Error::from_reason)?;
-    let client_inject_text = if visible_summary.is_empty() {
-        "继续执行".to_string()
-    } else {
-        visible_summary.clone()
-    };
-
-    // Build the standard noop tool output content
-    let tool_content = serde_json::json!({
-        "ok": true,
-        "executed": true,
-        "noop": true,
-        "action": "continue_execution"
-    });
-
-    // Append tool_outputs entry
-    let mut chat_response = input.base;
-    let existing_outputs = chat_response
-        .get("tool_outputs")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mut new_outputs = existing_outputs.clone();
-    new_outputs.push(serde_json::json!({
-        "tool_call_id": input.tool_call_id,
-        "name": tool_name,
-        "content": tool_content.to_string()
-    }));
-    if let Some(obj) = chat_response.as_object_mut() {
-        obj.insert("tool_outputs".to_string(), Value::Array(new_outputs));
-    }
-    let output = NoopOutput {
-        chat_response,
-        flow_id: "continue_execution_flow".to_string(),
-        followup: serde_json::json!({
-            "metadata": {
-                "clientInjectText": client_inject_text,
-                "visibleSummary": visible_summary,
-            }
-        }),
-        tool_content,
-    };
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-fn resolve_continue_execution_visible_summary(arguments: Option<&str>) -> Result<String, String> {
-    let Some(raw) = arguments.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Ok(String::new());
-    };
-    let parsed: Value = serde_json::from_str(raw)
-        .map_err(|_| "continue_execution arguments must be a JSON object".to_string())?;
-    let Some(record) = parsed.as_object() else {
-        return Err("continue_execution arguments must be a JSON object".to_string());
-    };
-    match record.get("summary") {
-        Some(Value::String(text)) => Ok(text.trim().to_string()),
-        Some(Value::Null) | None => Ok(String::new()),
-        Some(_) => Err("continue_execution summary must be a string".to_string()),
-    }
 }
 
 fn build_assistant_tool_call_message_value(tool_calls: &[Value]) -> Value {
@@ -2516,63 +2376,6 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_servertool_noop_outcome_extracts_continue_execution_summary() {
-        let output = plan_servertool_noop_outcome_json(
-            json!({
-                "toolCallId": "call_continue",
-                "toolName": "continue_execution",
-                "toolArguments": "{\"summary\":\" Processing data... \"}",
-                "base": {
-                    "choices": [{
-                        "message": {
-                            "role": "assistant",
-                            "content": null
-                        }
-                    }]
-                }
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let parsed: Value = serde_json::from_str(output.as_str()).unwrap();
-        assert_eq!(parsed["flowId"], "continue_execution_flow");
-        assert_eq!(
-            parsed["followup"]["metadata"]["clientInjectText"],
-            "Processing data..."
-        );
-        assert_eq!(
-            parsed["followup"]["metadata"]["visibleSummary"],
-            "Processing data..."
-        );
-        assert!(parsed.get("executionContext").is_none());
-        assert_eq!(
-            parsed["chatResponse"]["tool_outputs"][0]["name"],
-            "continue_execution"
-        );
-    }
-
-    #[test]
-    fn test_plan_servertool_noop_outcome_defaults_empty_continue_execution_summary() {
-        let output = plan_servertool_noop_outcome_json(
-            json!({
-                "toolCallId": "call_continue",
-                "toolName": "continue_execution",
-                "toolArguments": "{}",
-                "base": {}
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let parsed: Value = serde_json::from_str(output.as_str()).unwrap();
-        assert_eq!(
-            parsed["followup"]["metadata"]["clientInjectText"],
-            "继续执行"
-        );
-        assert_eq!(parsed["followup"]["metadata"]["visibleSummary"], "");
-        assert!(parsed.get("executionContext").is_none());
-    }
-
-    #[test]
     fn test_plan_stop_message_persisted_lookup_json_uses_servertool_core_contract() {
         let input = json!({
             "record": {
@@ -2841,7 +2644,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_servertool_response_stage_extracts_internal_tool_and_assigns_id() {
+    fn test_run_servertool_response_stage_extracts_owned_internal_tool_and_assigns_id() {
         let mut payload = json!({
             "choices": [
                 {
@@ -2851,8 +2654,8 @@ mod tests {
                             {
                                 "type": "function",
                                 "function": {
-                                    "name": "continue_execution",
-                                    "arguments": "{\"action\":\"list\"}"
+                                    "name": "web_search",
+                                    "arguments": "{\"query\":\"routecodex\"}"
                                 }
                             }
                         ]
@@ -2863,7 +2666,7 @@ mod tests {
         let tool_calls =
             extract_tool_calls_from_chat_payload_mut(&mut payload, "req_sample_source_id").unwrap();
         assert_eq!(tool_calls.len(), 1);
-        assert_eq!(tool_calls[0].name, "continue_execution");
+        assert_eq!(tool_calls[0].name, "web_search");
         assert!(tool_calls[0].id.starts_with("call_"));
         assert_eq!(tool_calls[0].id.len(), 29);
     }
@@ -3319,11 +3122,11 @@ mod tests {
     #[test]
     fn test_plan_servertool_tool_call_dispatch_filters_and_selects_registered_handlers() {
         let raw = serde_json::json!({
-            "toolCalls": [
-                { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" },
-                { "id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
-                { "id": "call_3", "name": "unknown_tool", "arguments": "{}" }
-            ],
+        "toolCalls": [
+            { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" },
+            { "id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+            { "id": "call_3", "name": "unknown_tool", "arguments": "{}" }
+        ],
             "disableToolCallHandlers": false,
             "includeToolCallHandlerNames": ["sample_client_tool", "exec_command", "unknown_tool"],
             "excludeToolCallHandlerNames": ["exec_command"],
@@ -3334,14 +3137,14 @@ mod tests {
                     "executionMode": "client_inject_only",
                     "stripAfterExecute": true
                 },
-                {
-                    "name": "continue_execution",
-                    "trigger": "tool_call",
-                    "executionMode": "guarded",
-                    "stripAfterExecute": true
-                }
-            ]
-        });
+            {
+                "name": "sample_disabled_tool",
+                "trigger": "tool_call",
+                "executionMode": "guarded",
+                "stripAfterExecute": true
+            }
+        ]
+    });
         let output = plan_servertool_tool_call_dispatch_json(raw.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
         let executable = parsed
@@ -4139,17 +3942,6 @@ pub fn web_search_is_gemini_engine(provider_key_json: String) -> NapiResult<Stri
     serde_json::to_string(&web_search_engine_matches_family(
         provider_key.as_deref().unwrap_or(""),
         "gemini",
-    ))
-    .map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
-pub fn web_search_is_qwen_engine(provider_key_json: String) -> NapiResult<String> {
-    let provider_key: Option<String> = serde_json::from_str(&provider_key_json)
-        .map_err(|e| napi::Error::from_reason(format!("deserialize providerKey: {e}")))?;
-    serde_json::to_string(&web_search_engine_matches_family(
-        provider_key.as_deref().unwrap_or(""),
-        "qwen",
     ))
     .map_err(|e| napi::Error::from_reason(e.to_string()))
 }

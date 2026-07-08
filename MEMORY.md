@@ -1,3 +1,10 @@
+# 2026-07-08: servertool server-side registry defaults are retired
+
+- Verified rule: CLI-owned servertools must not remain in the default server-side skeleton registry. Default `servertool_skeleton_config.rs` keeps `internalTools`, primary auto-hook order, progress flow map, and followup profiles empty.
+- Verified rule: missing servertool followup profile means skip/no-followup, not reenter/client-inject. `continue_execution` noop dispatch/outcome/effect bridge is retired and must stay physically absent.
+- Gate rule: `verify:servertool-rust-only` forbids `planServertoolNoop*`, `noopResult`, `noopEffectPlan`, and default skeleton registry/profile resurrection markers for `continue_execution`, `stop_message_auto`, `reasoningstop`, `web_search`, `vision_auto`, `exec_command`, and old flow ids.
+- Evidence: Rust focused tests for `execution_loop_effect_contract` 3/3, `servertool_skeleton_config` 17/17, `chat_servertool_orchestration` 44/44, and `plans_servertool_execution_loop_effect_via_servertool_core_bridge` 1/1 passed; native hotpath build passed; focused servertool Jest passed 123/123; `verify:servertool-rust-only`, root `tsc --noEmit`, function-map compile gate, mainline call-map, and mainline manifest sync passed.
+
 # 2026-07-06: rcc start defaults foreground, daemon is explicit
 
 - Correction: `rcc start` / `rcc start --snap` must default to foreground startup logs, not a silent daemon supervisor summary. It still performs managed takeover/restart by default; daemon mode requires explicit `ROUTECODEX_START_DAEMON=1` / `RCC_START_DAEMON=1`.

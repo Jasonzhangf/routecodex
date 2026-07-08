@@ -4,7 +4,7 @@
  * Responses provider replay harness.
  *
  * 加载 codex 样本 → 转换为 Chat → Responses 请求 → 直接调用 Responses Provider。
- * 支持替换系统提示词、dry-run 只看 preprocess、或真实发到上游。
+ * 支持替换系统提示词并真实发到上游。
  */
 
 import fs from 'node:fs';
@@ -28,7 +28,6 @@ function usage(err) {
       [--target c4m.gpt-5.1]
       [--system-source <anthropic-sample.json>]
       [--entry-endpoint </v1/messages>]
-      [--dry-run]
       [--dump ./tmp/replay.json]
 `);
   process.exit(err ? 1 : 0);
@@ -42,7 +41,6 @@ function parseArgs() {
     target: DEFAULT_TARGET,
     systemSource: null,
     entryEndpoint: null,
-    dryRun: false,
     dumpPath: null
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -52,7 +50,6 @@ function parseArgs() {
     else if (arg === '--target') opts.target = argv[++i];
     else if (arg === '--system-source') opts.systemSource = argv[++i];
     else if (arg === '--entry-endpoint') opts.entryEndpoint = argv[++i];
-    else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '--dump') opts.dumpPath = argv[++i];
     else if (arg === '--help' || arg === '-h') usage();
     else usage(`Unknown argument: ${arg}`);
@@ -324,21 +321,6 @@ async function main() {
         entryEndpoint: providerRequest.metadata.entryEndpoint
       }
     };
-
-    if (options.dryRun) {
-      console.log('[replay] dry-run preprocess only');
-      const { createDebugToolkit } = await import(pathToFileURL(path.join(ROOT, 'dist/debug/index.js')).href);
-      const toolkit = createDebugToolkit({ snapshotDirectory: path.join(ROOT, 'logs', 'debug') });
-      const result = await toolkit.dryRunner.runProviderPreprocess({
-        runtime,
-        request: providerRequest,
-        metadata: providerMetadata,
-        sessionId: process.env.REPLAY_SESSION_ID || undefined,
-        nodeId: 'provider.replay'
-      });
-      console.log(JSON.stringify(result.processed?.data || result.processed, null, 2));
-      return;
-    }
 
     const { provider, runtimeHelpers } = await initProvider(runtime);
     try {

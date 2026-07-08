@@ -4,7 +4,7 @@ import type {
   ProviderHarnessExecuteInput,
   ProviderHarnessMetadata,
   ProviderHarnessRuntime,
-  ProviderDryRunResult,
+  ProviderReplayResult,
   ProviderHarnessResult
 } from '../types.js';
 import type { TargetMetadata } from '../../modules/pipeline/orchestrator/pipeline-context.js';
@@ -29,10 +29,10 @@ export class ReplayRunner {
 
   async replayProvider(
     options: ReplayOptions & { runtimeOverride?: ProviderHarnessRuntime }
-  ): Promise<ProviderDryRunResult[]> {
+  ): Promise<ProviderReplayResult[]> {
     const harness = this.registry.require<ProviderHarnessExecuteInput, ProviderHarnessResult>('provider.preprocess');
     const snapshots = await this.listSnapshots(options);
-    const results: ProviderDryRunResult[] = [];
+    const results: ProviderReplayResult[] = [];
     for (const snapshot of snapshots) {
       const metadata = toProviderMetadata(snapshot.metadata);
       if (!metadata) {

@@ -1972,7 +1972,8 @@ pub(crate) fn project_responses_sse_frame_for_client(
             }
         }
     } else if event_name == "response.completed" || event_name == "response.done" {
-        let normalized = project_responses_terminal_event_payload_for_client(data, tools_raw, metadata);
+        let normalized =
+            project_responses_terminal_event_payload_for_client(data, tools_raw, metadata);
         if normalized != *data {
             output_frame = replace_frame_data(frame, &normalized);
         }

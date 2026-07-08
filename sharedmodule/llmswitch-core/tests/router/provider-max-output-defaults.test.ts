@@ -61,28 +61,28 @@ describe('virtual-router provider max output defaults', () => {
     expect(requestWithOverride.parameters.max_tokens).toBe(16384);
   });
 
-  test('qwen targets are clamped by hard output cap at request normalization time', () => {
+  test('provider targets are clamped by hard output cap at request normalization time', () => {
     const { bootstrapped, routerEngine } = buildRouterEngine({
       virtualrouter: {
         providers: {
-          qwen: {
-            type: 'qwen',
+          capped: {
+            type: 'openai',
             endpoint: 'https://example.invalid/v1/chat/completions',
             auth: {
-              type: 'oauth',
-              oauthProviderId: 'qwen'
+              type: 'apiKey',
+              value: 'sk-test'
             },
             models: {
-              'qwen3.6-plus': {}
+              'model-a': {}
             }
           }
         },
         routing: {
-          default: ['qwen.qwen3.6-plus']
+          default: ['capped.model-a']
         }
       }
     } as const);
-    const qwenTarget = bootstrapped.providers['qwen.1.qwen3.6-plus'];
+    const cappedTarget = bootstrapped.providers['capped.1.model-a'];
 
     const oversized = {
       parameters: {
@@ -90,7 +90,7 @@ describe('virtual-router provider max output defaults', () => {
         max_output_tokens: 128000
       }
     } as any;
-    applyMaxTokensPolicyForRequest(oversized, qwenTarget, routerEngine);
+    applyMaxTokensPolicyForRequest(oversized, cappedTarget, routerEngine);
 
     expect(oversized.parameters.max_tokens).toBe(65536);
     expect(oversized.parameters.max_output_tokens).toBe(65536);

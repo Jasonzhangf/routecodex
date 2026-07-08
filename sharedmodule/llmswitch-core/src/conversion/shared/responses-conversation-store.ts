@@ -819,7 +819,11 @@ class ResponsesConversationStore {
   }
 
   private detachEntry(entry: ConversationEntry): void {
-    this.requestMap.delete(entry.requestId);
+    for (const [requestId, candidate] of this.requestMap.entries()) {
+      if (candidate === entry) {
+        this.requestMap.delete(requestId);
+      }
+    }
     if (entry.lastResponseId) {
       this.responseIndex.delete(entry.lastResponseId);
     }

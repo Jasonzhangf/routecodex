@@ -22,6 +22,10 @@ const allowlist = [
     pathContains: 'src/server/runtime/http-server/executor/request-executor-provider-failure.ts',
     textContains: 'emitProviderErrorAndWait',
   },
+  {
+    pathContains: 'src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts',
+    textContains: 'emitProviderErrorAndWait',
+  },
 ];
 
 function listFiles(relRoot) {

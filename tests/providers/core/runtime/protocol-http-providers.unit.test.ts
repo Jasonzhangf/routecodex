@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, test } from '@jest/globals';
+import { describe, expect, test } from '@jest/globals';
 import { jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -56,19 +56,10 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integra
 const { HttpTransportProvider } = await import('../../../../src/providers/core/runtime/http-transport-provider.js');
 const { HttpRequestExecutor } = await import('../../../../src/providers/core/runtime/http-request-executor.js');
 const { ResponsesProvider } = await import('../../../../src/providers/core/runtime/responses-provider.js');
-const { OAuthRecoveryHandler } = await import('../../../../src/providers/core/runtime/transport/oauth-recovery-handler.js');
 const { AnthropicProtocolClient } = await import('../../../../src/client/anthropic/anthropic-protocol-client.js');
-const { DeepSeekHttpProvider } = await import('../../../../src/providers/core/runtime/deepseek-http-provider.js');
 const { attachProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
 
 const emptyDeps: ModuleDependencies = {} as ModuleDependencies;
-const tempDirs: string[] = [];
-
-afterEach(async () => {
-  for (const dir of tempDirs.splice(0, tempDirs.length)) {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-});
 
 describe('Protocol HTTP providers (V2) - basic behavior', () => {
   test('RED: HttpTransportProvider health check treats HTTP 404 as healthy without startup failure', async () => {
@@ -844,69 +835,6 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect((result as any).data.status).toBe('completed');
   });
 
-  test('DeepSeek auth refresh replay accepts JSON response when retry request asked for SSE', async () => {
-    const refreshCredentials = jest.fn(async () => {});
-    const handler = new OAuthRecoveryHandler({
-      authProvider: { refreshCredentials } as any,
-      providerType: 'deepseek',
-      config: {
-        id: 'deepseek-refresh-json-over-sse',
-        type: 'openai-http-provider',
-        config: {
-          auth: { type: 'oauth', rawType: 'deepseek-account' }
-        }
-      } as any,
-      httpClient: {
-        post: async () => {
-          throw new Error('MUST_NOT_REISSUE_JSON_REQUEST');
-        },
-        postStream: async () => {
-          throw new Error('MUST_NOT_USE_STREAM_ONLY_PATH');
-        },
-        postStreamOrResponse: async () => ({
-          kind: 'response',
-          responseKind: 'json',
-          response: {
-            data: {
-              id: 'chatcmpl-refresh-json',
-              object: 'chat.completion',
-              choices: [
-                { index: 0, message: { role: 'assistant', content: 'refresh-json-ok' }, finish_reason: 'stop' }
-              ]
-            },
-            status: 200,
-            statusText: 'OK',
-            headers: { 'content-type': 'application/json' },
-            url: 'https://example.invalid/v1/chat/completions'
-          }
-        })
-      } as any
-    });
-    const wrapUpstreamSseResponse = jest.fn(async () => {
-      throw new Error('MUST_NOT_PARSE_JSON_AS_SSE');
-    });
-    const result = await handler.tryRecoverOAuthAndReplay(
-      Object.assign(new Error('expired'), { status: 401, statusCode: 401 }),
-      {
-        targetUrl: 'https://example.invalid/v1/chat/completions',
-        body: { model: 'deepseek-v4-pro', stream: true, messages: [] },
-        headers: { Authorization: 'Bearer old' },
-        wantsSse: true
-      } as any,
-      { model: 'deepseek-v4-pro', stream: true },
-      false,
-      { requestId: 'req-refresh-json-over-sse', providerKey: 'deepseek.key1.deepseek-v4-pro' } as any,
-      async () => ({ Authorization: 'Bearer refreshed' }),
-      async (headers: Record<string, string>) => headers,
-      (headers: Record<string, string>) => ({ ...headers, Accept: 'text/event-stream' }),
-      wrapUpstreamSseResponse
-    );
-
-    expect(refreshCredentials).toHaveBeenCalledTimes(1);
-    expect(wrapUpstreamSseResponse).not.toHaveBeenCalled();
-    expect((result as any).data.choices[0].message.content).toBe('refresh-json-ok');
-  });
-
   test('HttpTransportProvider/anthropic derives SSE intent from context metadata and request stream flags', () => {
     const config: OpenAIStandardConfig = {
       id: 'test-anthropic',
@@ -936,34 +864,6 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     const body: Record<string, unknown> = {};
     provider.prepareSseRequestBody(body);
     expect(body.stream).toBe(true);
-  });
-
-  test('DeepSeekHttpProvider keeps openai providerType and deepseek module type', async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-deepseek-protocol-'));
-    tempDirs.push(tempDir);
-    const tokenFile = path.join(tempDir, 'deepseek-account-1.json');
-    await fs.writeFile(tokenFile, JSON.stringify({ access_token: 'deepseek-token' }, null, 2) + '\n', 'utf8');
-
-    const config: OpenAIStandardConfig = {
-      id: 'test-deepseek',
-      type: 'deepseek-http-provider',
-      config: {
-        providerType: 'openai',
-        providerId: 'deepseek',
-        auth: {
-          type: 'apikey',
-          rawType: 'deepseek-account',
-          apiKey: '',
-          tokenFile
-        }
-      }
-    } as unknown as OpenAIStandardConfig;
-
-    const provider = new DeepSeekHttpProvider(config, emptyDeps);
-    await provider.initialize();
-
-    expect(provider.providerType).toBe('openai');
-    expect(provider.type).toBe('deepseek-http-provider');
   });
 
 });

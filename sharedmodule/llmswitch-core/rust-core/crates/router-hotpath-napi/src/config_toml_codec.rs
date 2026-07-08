@@ -242,7 +242,8 @@ fn parse_toml_record_lenient(raw: &str) -> Result<Value, String> {
         }
 
         if line.starts_with("[[") && line.ends_with("]]") {
-            let path = parse_table_path(line.trim_start_matches("[[").trim_end_matches("]]").trim())?;
+            let path =
+                parse_table_path(line.trim_start_matches("[[").trim_end_matches("]]").trim())?;
             ensure_header_target(&mut root, &path, true)
                 .map_err(|err| format!("{err} at line {line_number}"))?;
             current_path = path;
@@ -258,10 +259,14 @@ fn parse_toml_record_lenient(raw: &str) -> Result<Value, String> {
         }
 
         let Some(eq) = line.find('=') else {
-            return Err(format!("[config] invalid TOML assignment \"{line}\" at line {line_number}"));
+            return Err(format!(
+                "[config] invalid TOML assignment \"{line}\" at line {line_number}"
+            ));
         };
         if eq == 0 {
-            return Err(format!("[config] invalid TOML assignment \"{line}\" at line {line_number}"));
+            return Err(format!(
+                "[config] invalid TOML assignment \"{line}\" at line {line_number}"
+            ));
         }
 
         let key_path = parse_table_path(line[..eq].trim())?;
@@ -481,10 +486,14 @@ fn parse_inline_table_lenient(raw: &str) -> Result<Value, String> {
     }
     for entry in split_top_level(body, ',') {
         let Some(eq) = entry.find('=') else {
-            return Err(format!("[config] invalid TOML inline table entry \"{entry}\""));
+            return Err(format!(
+                "[config] invalid TOML inline table entry \"{entry}\""
+            ));
         };
         if eq == 0 {
-            return Err(format!("[config] invalid TOML inline table entry \"{entry}\""));
+            return Err(format!(
+                "[config] invalid TOML inline table entry \"{entry}\""
+            ));
         }
         let key_path = parse_table_path(entry[..eq].trim())?;
         let value = parse_toml_value_lenient(entry[(eq + 1)..].trim())?;
@@ -493,7 +502,11 @@ fn parse_inline_table_lenient(raw: &str) -> Result<Value, String> {
     Ok(record)
 }
 
-fn ensure_header_target(root: &mut Value, path: &[String], as_array_table: bool) -> Result<(), String> {
+fn ensure_header_target(
+    root: &mut Value,
+    path: &[String],
+    as_array_table: bool,
+) -> Result<(), String> {
     let mut cursor = root;
     for (index, segment) in path.iter().enumerate() {
         let is_leaf = index == path.len() - 1;
@@ -508,7 +521,9 @@ fn ensure_header_target(root: &mut Value, path: &[String], as_array_table: bool)
 
 fn ensure_child_record<'a>(parent: &'a mut Value, key: &str) -> Result<&'a mut Value, String> {
     let Value::Object(map) = parent else {
-        return Err(format!("[config] TOML path \"{key}\" collides with a non-object value"));
+        return Err(format!(
+            "[config] TOML path \"{key}\" collides with a non-object value"
+        ));
     };
     let entry = map
         .entry(key.to_string())
@@ -518,7 +533,9 @@ fn ensure_child_record<'a>(parent: &'a mut Value, key: &str) -> Result<&'a mut V
             unreachable!();
         };
         let Some(last) = items.last_mut() else {
-            return Err(format!("[config] TOML path \"{key}\" points to an empty array-table"));
+            return Err(format!(
+                "[config] TOML path \"{key}\" points to an empty array-table"
+            ));
         };
         if !last.is_object() {
             return Err(format!(
@@ -528,7 +545,9 @@ fn ensure_child_record<'a>(parent: &'a mut Value, key: &str) -> Result<&'a mut V
         return Ok(last);
     }
     if !entry.is_object() {
-        return Err(format!("[config] TOML path \"{key}\" collides with a non-object value"));
+        return Err(format!(
+            "[config] TOML path \"{key}\" collides with a non-object value"
+        ));
     }
     Ok(entry)
 }
@@ -707,8 +726,7 @@ disabled = false
         )
         .unwrap();
         let value: Value = serde_json::from_str(&parsed).unwrap();
-        let targets =
-            &value["virtualrouter"]["forwarders"]["fwd.paid.gpt-5.5"]["targets"];
+        let targets = &value["virtualrouter"]["forwarders"]["fwd.paid.gpt-5.5"]["targets"];
         assert_eq!(targets.as_array().unwrap().len(), 2);
         assert_eq!(targets[0]["providerId"], "cc");
         assert_eq!(targets[1]["providerId"], "asxs");

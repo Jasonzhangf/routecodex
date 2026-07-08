@@ -257,8 +257,8 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
   const rawType = typeof auth.rawType === 'string' ? auth.rawType.trim().toLowerCase() : '';
 
   if (authType === 'apikey') {
-    if (rawType === 'deepseek-account') {
-      throw new Error(`[runtime-providers] deepseek-account auth has been removed for runtime ${runtime.runtimeKey || runtime.providerId}`);
+    if (rawType.includes('account') || rawType.includes('token') || rawType.includes('oauth')) {
+      throw new Error(`[runtime-providers] credential-file auth has been removed for runtime ${runtime.runtimeKey || runtime.providerId}`);
     }
     const value = await server.resolveApiKeyValue(runtime, auth);
     return { ...auth, type: 'apikey', value };

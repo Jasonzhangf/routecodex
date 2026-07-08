@@ -16,7 +16,8 @@ use crate::virtual_router_engine::runtime_config_materialization::{
     build_routecodex_provider_profiles_json, compile_routecodex_runtime_manifest_json,
     extract_routecodex_materialized_provider_configs_json,
     materialize_routecodex_user_config_from_manifest_json,
-    normalize_routecodex_v2_runtime_source_json, resolve_primary_routecodex_routing_policy_group_json,
+    normalize_routecodex_v2_runtime_source_json,
+    resolve_primary_routecodex_routing_policy_group_json,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -124,11 +125,12 @@ pub fn update_user_config_string_scalar_json(input_json: &str) -> Result<String,
 pub fn load_routecodex_config_json(input_json: &str) -> Result<String, String> {
     let input: RouteCodexConfigLoadInput = serde_json::from_str(input_json)
         .map_err(|err| format!("[config] invalid routecodex config load input: {err}"))?;
-    let path_plan = plan_routecodex_config_loader_paths_for_host(RouteCodexConfigLoaderPathPlanInput {
-        explicit_path: input.explicit_path.as_deref(),
-        routecodex_provider_dir: input.routecodex_provider_dir.as_deref(),
-        rcc_provider_dir: input.rcc_provider_dir.as_deref(),
-    });
+    let path_plan =
+        plan_routecodex_config_loader_paths_for_host(RouteCodexConfigLoaderPathPlanInput {
+            explicit_path: input.explicit_path.as_deref(),
+            routecodex_provider_dir: input.routecodex_provider_dir.as_deref(),
+            rcc_provider_dir: input.rcc_provider_dir.as_deref(),
+        });
     let config_path = match path_plan.explicit_path.as_deref() {
         Some(path) => Path::new(path).to_path_buf(),
         None => resolve_routecodex_config_path_for_host(RouteCodexConfigPathResolveInput {
@@ -147,8 +149,12 @@ pub fn load_routecodex_config_json(input_json: &str) -> Result<String, String> {
         })?,
     };
     let config_path_text = config_path.to_string_lossy().to_string();
-    let raw = fs::read_to_string(&config_path)
-        .map_err(|err| format!("Failed to read config file {}: {err}", config_path.display()))?;
+    let raw = fs::read_to_string(&config_path).map_err(|err| {
+        format!(
+            "Failed to read config file {}: {err}",
+            config_path.display()
+        )
+    })?;
     let decoded_json = decode_config_text_json(
         &json!({
             "configPath": config_path_text,
@@ -159,10 +165,9 @@ pub fn load_routecodex_config_json(input_json: &str) -> Result<String, String> {
     )?;
     let decoded: Value = serde_json::from_str(&decoded_json)
         .map_err(|err| format!("[config] failed to decode user config load output: {err}"))?;
-    let parsed = decoded
-        .get("parsed")
-        .cloned()
-        .ok_or_else(|| "[config] routecodex config load output missing parsed user config".to_string())?;
+    let parsed = decoded.get("parsed").cloned().ok_or_else(|| {
+        "[config] routecodex config load output missing parsed user config".to_string()
+    })?;
     let normalized = extract_user_config_object(
         &normalize_routecodex_v2_runtime_source_json(json!({ "userConfig": parsed }).to_string())
             .map_err(|err| err.to_string())?,
@@ -192,7 +197,10 @@ pub fn load_routecodex_config_json(input_json: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
     {
-        options.insert("routingPolicyGroup".to_string(), Value::String(group.to_string()));
+        options.insert(
+            "routingPolicyGroup".to_string(),
+            Value::String(group.to_string()),
+        );
     }
     let manifest_json = compile_routecodex_runtime_manifest_json(
         json!({
@@ -255,8 +263,12 @@ impl ConfigFileKind {
 }
 
 fn decode_config_text_json(input_json: &str, kind: ConfigFileKind) -> Result<String, String> {
-    let input: ConfigTextDecodeInput = serde_json::from_str(input_json)
-        .map_err(|err| format!("[config] invalid {} config text decode input: {err}", kind.label()))?;
+    let input: ConfigTextDecodeInput = serde_json::from_str(input_json).map_err(|err| {
+        format!(
+            "[config] invalid {} config text decode input: {err}",
+            kind.label()
+        )
+    })?;
     if let Some(config_path) = input.config_path.as_deref() {
         ensure_toml_path(config_path.trim(), &kind)?;
     }
@@ -270,20 +282,37 @@ fn decode_config_text_json(input_json: &str, kind: ConfigFileKind) -> Result<Str
         "format": "toml",
         "parsed": parsed,
     }))
-    .map_err(|err| format!("[config] failed to encode {} config text decode output: {err}", kind.label()))
+    .map_err(|err| {
+        format!(
+            "[config] failed to encode {} config text decode output: {err}",
+            kind.label()
+        )
+    })
 }
 
 fn detect_config_format_json(input_json: &str, kind: ConfigFileKind) -> Result<String, String> {
-    let input: ConfigFormatDetectInput = serde_json::from_str(input_json)
-        .map_err(|err| format!("[config] invalid {} config format detect input: {err}", kind.label()))?;
+    let input: ConfigFormatDetectInput = serde_json::from_str(input_json).map_err(|err| {
+        format!(
+            "[config] invalid {} config format detect input: {err}",
+            kind.label()
+        )
+    })?;
     ensure_toml_path(input.config_path.trim(), &kind)?;
-    serde_json::to_string(&json!({ "format": "toml" }))
-        .map_err(|err| format!("[config] failed to encode {} config format output: {err}", kind.label()))
+    serde_json::to_string(&json!({ "format": "toml" })).map_err(|err| {
+        format!(
+            "[config] failed to encode {} config format output: {err}",
+            kind.label()
+        )
+    })
 }
 
 fn write_config_file_json(input_json: &str, kind: ConfigFileKind) -> Result<String, String> {
-    let input: ConfigFileWriteInput = serde_json::from_str(input_json)
-        .map_err(|err| format!("[config] invalid {} config write input: {err}", kind.label()))?;
+    let input: ConfigFileWriteInput = serde_json::from_str(input_json).map_err(|err| {
+        format!(
+            "[config] invalid {} config write input: {err}",
+            kind.label()
+        )
+    })?;
     if let Some(format) = input.format.as_deref() {
         if format != "toml" {
             return Err(kind.writer_format_error());
@@ -336,7 +365,12 @@ fn encode_persisted_config_output(
         "raw": raw,
         "parsed": parsed,
     }))
-    .map_err(|err| format!("[config] failed to encode {} config write output: {err}", kind.label()))
+    .map_err(|err| {
+        format!(
+            "[config] failed to encode {} config write output: {err}",
+            kind.label()
+        )
+    })
 }
 
 fn write_raw_config_atomically(config_path: &str, raw: &str) -> Result<(), String> {
@@ -345,7 +379,8 @@ fn write_raw_config_atomically(config_path: &str, raw: &str) -> Result<(), Strin
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
     let tmp_path = format!("{config_path}.tmp.{}.{}", process::id(), wrote_at_ms);
-    fs::write(&tmp_path, raw).map_err(|err| format!("Failed to write config file {tmp_path}: {err}"))?;
+    fs::write(&tmp_path, raw)
+        .map_err(|err| format!("Failed to write config file {tmp_path}: {err}"))?;
     fs::rename(&tmp_path, config_path)
         .map_err(|err| format!("Failed to move config file {tmp_path} to {config_path}: {err}"))
 }
@@ -373,7 +408,9 @@ fn collect_source_errors(user_config: &Value) -> Result<Vec<String>, String> {
     let errors = value
         .get("errors")
         .and_then(Value::as_array)
-        .ok_or_else(|| "[config] native loader source validator returned invalid errors".to_string())?;
+        .ok_or_else(|| {
+            "[config] native loader source validator returned invalid errors".to_string()
+        })?;
     Ok(errors
         .iter()
         .filter_map(Value::as_str)
@@ -391,7 +428,10 @@ fn extract_provider_configs(user_config: &Value) -> Result<Option<Value>, String
     match value.get("providerConfigs") {
         Some(Value::Null) | None => Ok(None),
         Some(configs) if configs.is_object() => Ok(Some(configs.clone())),
-        _ => Err("[config] native loader provider extractor returned invalid providerConfigs".to_string()),
+        _ => Err(
+            "[config] native loader provider extractor returned invalid providerConfigs"
+                .to_string(),
+        ),
     }
 }
 
@@ -429,16 +469,19 @@ fn load_provider_configs_for_loader(
 }
 
 fn extract_provider_profiles(user_config: &Value) -> Result<Value, String> {
-    let raw = build_routecodex_provider_profiles_json(json!({ "userConfig": user_config }).to_string())
-        .map_err(|err| err.to_string())?;
+    let raw =
+        build_routecodex_provider_profiles_json(json!({ "userConfig": user_config }).to_string())
+            .map_err(|err| err.to_string())?;
     let value: Value = serde_json::from_str(&raw)
         .map_err(|err| format!("[config] failed to decode provider profiles: {err}"))?;
-    let profiles = value
-        .get("providerProfiles")
-        .cloned()
-        .ok_or_else(|| "[config] native provider profile builder missing providerProfiles".to_string())?;
+    let profiles = value.get("providerProfiles").cloned().ok_or_else(|| {
+        "[config] native provider profile builder missing providerProfiles".to_string()
+    })?;
     if !profiles.is_object() {
-        return Err("[config] native provider profile builder returned invalid providerProfiles".to_string());
+        return Err(
+            "[config] native provider profile builder returned invalid providerProfiles"
+                .to_string(),
+        );
     }
     Ok(profiles)
 }
@@ -520,7 +563,8 @@ mod tests {
     #[test]
     fn decode_provider_config_text_rejects_json_path() {
         let error = decode_provider_config_text_json(
-            &json!({ "configPath": "config.v2.json", "raw": "{\"version\":\"2.0.0\"}\n" }).to_string(),
+            &json!({ "configPath": "config.v2.json", "raw": "{\"version\":\"2.0.0\"}\n" })
+                .to_string(),
         )
         .unwrap_err();
         assert!(error.contains("provider config JSON support removed"));

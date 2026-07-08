@@ -385,6 +385,11 @@ fn latest_stopless_cli_output_from_items(items: Option<&Value>) -> Option<Map<St
         let Some(row) = item.as_object() else {
             continue;
         };
+        if let Some(output) = row.get("output").or_else(|| row.get("content")) {
+            if let Some(parsed) = parse_stopless_cli_output(output) {
+                return Some(parsed);
+            }
+        }
         let item_type = row
             .get("type")
             .and_then(Value::as_str)
@@ -395,11 +400,7 @@ fn latest_stopless_cli_output_from_items(items: Option<&Value>) -> Option<Map<St
             item_type.as_str(),
             "function_call_output" | "tool_result" | "tool_message"
         ) {
-            if let Some(output) = row.get("output").or_else(|| row.get("content")) {
-                if let Some(parsed) = parse_stopless_cli_output(output) {
-                    return Some(parsed);
-                }
-            }
+            continue;
         }
         let role = row
             .get("role")
@@ -421,6 +422,121 @@ fn latest_stopless_cli_output_from_items(items: Option<&Value>) -> Option<Map<St
 fn latest_stopless_cli_output(request: &Map<String, Value>) -> Option<Map<String, Value>> {
     latest_stopless_cli_output_from_items(request.get("input"))
         .or_else(|| latest_stopless_cli_output_from_items(request.get("messages")))
+        .or_else(|| latest_stopless_cli_output_from_items(request.get("tool_outputs")))
+}
+
+fn latest_stopless_runtime_control_from_guidance(request: &Map<String, Value>) -> Option<Value> {
+    latest_stopless_runtime_control_from_guidance_items(request.get("input"))
+        .or_else(|| latest_stopless_runtime_control_from_guidance_items(request.get("messages")))
+}
+
+fn latest_stopless_runtime_control_from_guidance_items(items: Option<&Value>) -> Option<Value> {
+    let items = items?.as_array()?;
+    for item in items.iter().rev() {
+        let mut texts = Vec::new();
+        collect_string_segments(item, &mut texts);
+        for text in texts.iter().rev() {
+            if let Some(stopless) = build_stopless_runtime_control_from_guidance_text(text) {
+                return Some(stopless);
+            }
+        }
+    }
+    None
+}
+
+fn collect_string_segments(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(text) => out.push(text.clone()),
+        Value::Array(items) => {
+            for item in items {
+                collect_string_segments(item, out);
+            }
+        }
+        Value::Object(row) => {
+            for value in row.values() {
+                collect_string_segments(value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn build_stopless_runtime_control_from_guidance_text(text: &str) -> Option<Value> {
+    if !text.contains("上一轮执行结果") || !text.contains("repeatCount=") {
+        return None;
+    }
+    let repeat_count = parse_repeat_count_from_guidance(text)?;
+    let max_repeats = parse_max_repeats_from_guidance(text).unwrap_or(3);
+    let reason_code = parse_guidance_token_after(text, "reasonCode=");
+    let missing_fields = parse_guidance_token_after(text, "missingFields=").map(|raw| {
+        raw.split(|ch| ch == ',' || ch == '，')
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .map(|field| Value::String(field.to_string()))
+            .collect::<Vec<_>>()
+    });
+
+    let mut stopless = Map::new();
+    stopless.insert(
+        "flowId".to_string(),
+        Value::String("stop_message_flow".to_string()),
+    );
+    stopless.insert(
+        "repeatCount".to_string(),
+        Value::Number(repeat_count.into()),
+    );
+    stopless.insert("maxRepeats".to_string(), Value::Number(max_repeats.into()));
+    stopless.insert("active".to_string(), Value::Bool(true));
+    if let Some(reason_code) = reason_code.clone() {
+        stopless.insert(
+            "triggerHint".to_string(),
+            Value::String(normalize_stopless_runtime_trigger_hint(&reason_code).to_string()),
+        );
+        let mut feedback = Map::new();
+        feedback.insert("reasonCode".to_string(), Value::String(reason_code));
+        if let Some(missing_fields) = missing_fields {
+            feedback.insert("missingFields".to_string(), Value::Array(missing_fields));
+        }
+        stopless.insert("schemaFeedback".to_string(), Value::Object(feedback));
+    }
+    Some(Value::Object(stopless))
+}
+
+fn parse_repeat_count_from_guidance(text: &str) -> Option<u64> {
+    let raw = text.split("repeatCount=").nth(1)?;
+    parse_leading_u64(raw)
+}
+
+fn parse_max_repeats_from_guidance(text: &str) -> Option<u64> {
+    let raw = text.split("repeatCount=").nth(1)?;
+    let after_slash = raw.split('/').nth(1)?;
+    parse_leading_u64(after_slash)
+}
+
+fn parse_leading_u64(raw: &str) -> Option<u64> {
+    let digits: String = raw
+        .chars()
+        .skip_while(|ch| ch.is_whitespace())
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse::<u64>().ok()
+    }
+}
+
+fn parse_guidance_token_after(text: &str, marker: &str) -> Option<String> {
+    let raw = text.split(marker).nth(1)?;
+    let token = raw
+        .split(|ch: char| ch == '；' || ch == ';' || ch == '。' || ch == '\n' || ch == '\r')
+        .next()?
+        .trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
 }
 
 fn latest_stopless_cli_output_from_resume(resume: Option<&Value>) -> Option<Map<String, Value>> {
@@ -532,8 +648,12 @@ fn normalize_stopless_runtime_trigger_hint(token: &str) -> &'static str {
 fn build_stopless_runtime_control_from_cli(
     row: &Map<String, Value>,
     metadata_center: &MetadataCenter,
+    allow_without_session_id: bool,
 ) -> Option<Value> {
-    let session_id = request_truth_session_id(metadata_center)?;
+    let session_id = request_truth_session_id(metadata_center);
+    if session_id.is_none() && !allow_without_session_id {
+        return None;
+    }
     let repeat_count = read_u64_field(row, "repeatCount", "repeat_count").or_else(|| {
         row.get("input")
             .and_then(Value::as_object)
@@ -581,7 +701,9 @@ fn build_stopless_runtime_control_from_cli(
 
     let mut stopless = Map::new();
     stopless.insert("flowId".to_string(), Value::String(flow_id));
-    stopless.insert("sessionId".to_string(), Value::String(session_id));
+    if let Some(session_id) = session_id {
+        stopless.insert("sessionId".to_string(), Value::String(session_id));
+    }
     stopless.insert(
         "repeatCount".to_string(),
         Value::Number(repeat_count.into()),
@@ -614,6 +736,48 @@ fn build_initial_stopless_runtime_control(metadata_center: &MetadataCenter) -> O
         "active": true,
         "updatedAt": now_millis()
     }))
+}
+
+fn clone_stopless_runtime_control_from_snapshot(snapshot: &Value) -> Option<Value> {
+    let stopless = snapshot
+        .get("runtimeControl")
+        .and_then(Value::as_object)
+        .and_then(|runtime_control| runtime_control.get("stopless"))
+        .and_then(Value::as_object)?;
+    if stopless
+        .get("active")
+        .and_then(Value::as_bool)
+        .is_some_and(|active| !active)
+    {
+        return None;
+    }
+    let repeat_count = read_u64_field(stopless, "repeatCount", "repeat_count")?;
+    let max_repeats = read_u64_field(stopless, "maxRepeats", "max_repeats").unwrap_or(3);
+    let flow_id = read_trimmed_string(stopless.get("flowId"))
+        .or_else(|| read_trimmed_string(stopless.get("flow_id")))
+        .unwrap_or_else(|| "stop_message_flow".to_string());
+
+    let mut cloned = Map::new();
+    cloned.insert("flowId".to_string(), Value::String(flow_id));
+    cloned.insert(
+        "repeatCount".to_string(),
+        Value::Number(repeat_count.into()),
+    );
+    cloned.insert("maxRepeats".to_string(), Value::Number(max_repeats.into()));
+    cloned.insert("active".to_string(), Value::Bool(true));
+    if let Some(trigger_hint) = read_trimmed_string(stopless.get("triggerHint"))
+        .or_else(|| read_trimmed_string(stopless.get("trigger_hint")))
+    {
+        cloned.insert("triggerHint".to_string(), Value::String(trigger_hint));
+    }
+    if let Some(schema_feedback) = stopless
+        .get("schemaFeedback")
+        .or_else(|| stopless.get("schema_feedback"))
+        .filter(|value| value.is_object())
+    {
+        cloned.insert("schemaFeedback".to_string(), schema_feedback.clone());
+    }
+    Some(Value::Object(cloned))
 }
 
 fn write_stopless_runtime_control(metadata: &mut Map<String, Value>, stopless: Value) {
@@ -753,20 +917,35 @@ pub fn apply_req_process_tool_governance(
         .or_else(|| latest_stopless_cli_output_from_request_semantics(&request));
     if let Some(stopless) = stopless_cli_output
         .as_ref()
-        .and_then(|row| build_stopless_runtime_control_from_cli(row, &metadata_center))
+        .and_then(|row| {
+            build_stopless_runtime_control_from_cli(
+                row,
+                &metadata_center,
+                input
+                    .has_active_stop_message_for_continue_execution
+                    .unwrap_or(false),
+            )
+        })
     {
         write_stopless_runtime_control(&mut metadata, stopless);
-    } else if has_current_session_id
-        && should_inject_stopless_system_instruction(&metadata_center)
-        && !has_terminal_stopless_turn
+    } else if !has_terminal_stopless_turn
         && metadata
             .get("runtime_control")
             .and_then(Value::as_object)
             .and_then(|runtime_control| runtime_control.get("stopless"))
             .is_none()
     {
-        if let Some(stopless) = build_initial_stopless_runtime_control(&metadata_center) {
+        if let Some(stopless) =
+            clone_stopless_runtime_control_from_snapshot(&input.metadata_center_snapshot)
+                .or_else(|| latest_stopless_runtime_control_from_guidance(&request))
+        {
             write_stopless_runtime_control(&mut metadata, stopless);
+        } else if has_current_session_id
+            && should_inject_stopless_system_instruction(&metadata_center)
+        {
+            if let Some(stopless) = build_initial_stopless_runtime_control(&metadata_center) {
+                write_stopless_runtime_control(&mut metadata, stopless);
+            }
         }
     }
     if has_terminal_stopless_turn {

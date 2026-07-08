@@ -10,6 +10,13 @@ import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { compileRouteCodexRuntimeConfigManifest } from '../../../config/user-config-loader.js';
 import { trafficGovernorIsAtCapacity } from '../../../modules/traffic-governor/index.js';
 import { getRuntimeConfigManifestFromBootstrapInput } from './runtime-config-manifest-carrier.js';
+import {
+  createHubPipelineNative,
+  disposeHubPipelineNative,
+  executeHubPipelineNative,
+  updateHubPipelineEngineDepsNative,
+  updateHubPipelineVirtualRouterConfigNative
+} from '../../../modules/llmswitch/bridge/routing-integrations.js';
 
 type RoutingProviderScope = {
   providerKeys: string[];
@@ -56,10 +63,14 @@ async function rebuildRoutingPolicyGroupHubPipelines(args: {
   baseConfig: HubPipelineConfig;
 }): Promise<void> {
   const groups = collectRouterRoutingPolicyGroups(args.server);
+  // Path B: per-group pipelines are stored as opaque native handles (strings).
+  // server.hubPipelinesByRoutingPolicyGroup holds { handle, virtualRouter } so
+  // updateVirtualRouterConfigNative can re-use existing handles without
+  // re-creating them.
   const previous = args.server.hubPipelinesByRoutingPolicyGroup instanceof Map
-    ? (args.server.hubPipelinesByRoutingPolicyGroup as Map<string, HubPipeline>)
-    : new Map<string, HubPipeline>();
-  const next = new Map<string, HubPipeline>();
+    ? (args.server.hubPipelinesByRoutingPolicyGroup as Map<string, GroupHubPipelineHandle>)
+    : new Map<string, GroupHubPipelineHandle>();
+  const next = new Map<string, GroupHubPipelineHandle>();
   const nextPipelineRuntimeConfigs = new Map<string, Record<string, unknown>>();
   for (const group of groups) {
     const config = await args.server.buildHubPipelineConfigForRoutingPolicyGroup(group, args.baseConfig);
@@ -68,16 +79,17 @@ async function rebuildRoutingPolicyGroupHubPipelines(args: {
     }
     const existing = previous.get(group);
     if (existing) {
-      existing.updateVirtualRouterConfig(config.virtualRouter);
+      updateHubPipelineVirtualRouterConfigNative(existing.handle, config.virtualRouter as Record<string, unknown>);
       next.set(group, existing);
     } else {
-      next.set(group, new args.hubCtor(config));
+      const handle = createHubPipelineNative(config as unknown as Record<string, unknown>);
+      next.set(group, { handle });
     }
   }
   for (const [group, pipeline] of previous.entries()) {
     if (!next.has(group)) {
       try {
-        (pipeline as { dispose?: () => void }).dispose?.();
+        disposeHubPipelineNative(pipeline.handle);
       } catch (error) {
         logRuntimeSetupNonBlockingError('setupRuntime.disposeGroupHubPipeline', error, { group });
       }
@@ -86,6 +98,8 @@ async function rebuildRoutingPolicyGroupHubPipelines(args: {
   args.server.hubPipelinesByRoutingPolicyGroup = next;
   args.server.pipelineRuntimeConfigByRoutingPolicyGroup = nextPipelineRuntimeConfigs;
 }
+type GroupHubPipelineHandle = { handle: string };
+
 
 async function buildAllRouterGroupArtifacts(args: {
   server: any;
@@ -342,24 +356,23 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
     hubConfig.routingStateStore = routingStateStore;
   }
   if (!server.hubPipeline) {
-    server.hubPipeline = new hubCtor(hubConfig);
+    server.hubPipeline = createHubPipelineNative(hubConfig as unknown as Record<string, unknown>);
   } else {
-    const existing = server.hubPipeline as {
-      updateRuntimeDeps?: (deps: { healthStore?: unknown; routingStateStore?: unknown }) => void;
-      updateVirtualRouterConfig?: (config: unknown) => void;
-    };
-    try {
-      existing.updateRuntimeDeps?.({
-        ...(healthStore ? { healthStore } : {}),
-        ...(routingStateStore ? { routingStateStore } : {})
-      });
-    } catch (error) {
-      logRuntimeSetupNonBlockingError('setupRuntime.updateRuntimeDeps', error, {
-        hasHealthStore: Boolean(healthStore),
-        hasRoutingStateStore: Boolean(routingStateStore)
-      });
+    const existing = typeof server.hubPipeline === 'string' ? server.hubPipeline : null;
+    if (existing) {
+      try {
+        updateHubPipelineEngineDepsNative(existing, {
+          ...(healthStore ? { healthStore } : {}),
+          ...(routingStateStore ? { routingStateStore } : {})
+        });
+      } catch (error) {
+        logRuntimeSetupNonBlockingError('setupRuntime.updateRuntimeDeps', error, {
+          hasHealthStore: Boolean(healthStore),
+          hasRoutingStateStore: Boolean(routingStateStore)
+        });
+      }
+      updateHubPipelineVirtualRouterConfigNative(existing, bootstrapArtifacts.config as unknown as Record<string, unknown>);
     }
-    server.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
   }
 
   await rebuildRoutingPolicyGroupHubPipelines({ server, hubCtor, baseConfig: hubConfig });

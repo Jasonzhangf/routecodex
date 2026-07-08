@@ -3,157 +3,56 @@ import { describe, expect, it } from '@jest/globals';
 import { buildRoutingHintsConfigFragment, inspectProviderConfig } from '../../src/provider-sdk/provider-inspect.js';
 
 describe('provider inspect', () => {
-  it('treats removed qwen provider as plain custom openai config without catalog wiring', () => {
+  it('inspects custom OpenAI-compatible providers without removed catalog wiring', () => {
     const inspection = inspectProviderConfig(
       {
         version: '2.0.0',
-        providerId: 'qwen',
+        providerId: 'custom-coder',
         provider: {
-          id: 'qwen',
+          id: 'custom-coder',
           type: 'openai',
-          baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-          auth: { type: 'qwen-oauth' },
+          baseURL: 'https://api.example.com/v1',
+          auth: { type: 'apikey' },
           models: {
-            'qwen3.5-plus': { supportsStreaming: true },
             'coder-model': { supportsStreaming: true }
           }
         }
       },
-      { configPath: '/tmp/provider/qwen/config.v2.json' }
+      { configPath: '/tmp/provider/custom-coder/config.v2.json' }
     );
 
-    expect(inspection.providerId).toBe('qwen');
+    expect(inspection.providerId).toBe('custom-coder');
     expect(inspection.catalogId).toBeUndefined();
     expect(inspection.providerType).toBe('openai');
-    expect(inspection.authType).toBe('qwen-oauth');
+    expect(inspection.authType).toBe('apikey');
     expect(inspection.defaultModel).toBe('coder-model');
-    expect(inspection.models).toEqual(['coder-model', 'qwen3.5-plus']);
-    expect(inspection.routeTargets.default).toBe('qwen.coder-model');
+    expect(inspection.models).toEqual(['coder-model']);
+    expect(inspection.routeTargets.default).toBe('custom-coder.coder-model');
     expect(inspection.routeTargets.webSearch).toBeUndefined();
     expect(inspection.webSearch).toBeUndefined();
     expect(inspection.capabilities).toMatchObject({ supportsCoding: true, supportsTools: true });
-    expect(inspection.configPath).toBe('/tmp/provider/qwen/config.v2.json');
-  });
-
-  it('infers deepseek-web multimodal + web_search routing from config aliases/capabilities', () => {
-    const inspection = inspectProviderConfig(
-      {
-        version: '2.0.0',
-        providerId: 'deepseek-web',
-        provider: {
-          id: 'deepseek-web',
-          type: 'openai',
-          baseURL: 'https://chat.deepseek.com',
-          compatibilityProfile: 'chat:deepseek-web',
-          auth: { type: 'deepseek-account' },
-          models: {
-            'deepseek-chat': {
-              supportsStreaming: true,
-              capabilities: ['web_search', 'multimodal'],
-              aliases: ['deepseek-v4-flash', 'deepseek-v4-flash-nothinking', 'deepseek-v4-flash-search', 'deepseek-v4-flash-search-nothinking', 'deepseek-v4-vision', 'deepseek-v4-vision-nothinking']
-            },
-            'deepseek-reasoner': {
-              supportsStreaming: true,
-              capabilities: ['web_search', 'multimodal'],
-              aliases: ['deepseek-v4-pro', 'deepseek-v4-pro-nothinking', 'deepseek-v4-pro-search', 'deepseek-v4-pro-search-nothinking']
-            }
-          }
-        }
-      } as any,
-      { includeRoutingHints: true }
-    );
-
-    expect(inspection.routeTargets.default).toBe('deepseek-web.deepseek-chat');
-    // Per Jason 2026-06-20, route targets must reference canonical model
-    // keys declared in `provider.models`. Aliases like
-    // `deepseek-v4-flash-search-nothinking` are display-only.
-    expect(inspection.routeTargets.tools).toBe('deepseek-web.deepseek-chat');
-    expect(inspection.routeTargets.webSearch).toBe('deepseek-web.deepseek-chat');
-    expect(inspection.routeTargets.multimodal).toBe('deepseek-web.deepseek-chat');
-    expect(inspection.webSearch).toMatchObject({
-      engineId: 'deepseek:web_search',
-      routeTarget: 'deepseek-web.deepseek-chat',
-      providerKey: 'deepseek-web.deepseek-chat',
-      modelId: 'deepseek-chat',
-      executionMode: 'direct'
-    });
-    expect(inspection.capabilities).toMatchObject({
-      supportsMultimodal: true,
-      supportsTools: true,
-      supportsReasoning: true
-    });
-    expect(inspection.routingHints?.routing).toMatchObject({
-      tools: [
-        {
-          id: 'tools-primary',
-          loadBalancing: {
-            weights: { 'deepseek-web.deepseek-chat': 1 }
-          }
-        }
-      ],
-      multimodal: [
-        {
-          id: 'multimodal-primary',
-          loadBalancing: {
-            weights: { 'deepseek-web.deepseek-chat': 1 }
-          }
-        }
-      ],
-      web_search: [
-        {
-          id: 'web_search-primary',
-          loadBalancing: {
-            weights: { 'deepseek-web.deepseek-chat': 1 }
-          }
-        }
-      ]
-    });
-  });
-
-  it('does not build routing hints for removed qwen provider catalog wiring', () => {
-    const inspection = inspectProviderConfig(
-      {
-        version: '2.0.0',
-        providerId: 'qwen',
-        provider: {
-          id: 'qwen',
-          type: 'openai',
-          baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-          auth: { type: 'qwen-oauth' },
-          models: {
-            'qwen3.5-plus': { supportsStreaming: true },
-            'coder-model': { supportsStreaming: true }
-          }
-        }
-      },
-      { includeRoutingHints: true }
-    );
-
-    expect(inspection.routingHints?.routing).toMatchObject({
-      default: [{ id: 'default-primary' }],
-      thinking: [{ id: 'thinking-primary' }],
-      tools: [{ id: 'tools-primary' }],
-      coding: [{ id: 'coding-primary' }]
-    });
-    expect(inspection.routingHints?.policyOptions).toBeUndefined();
+    expect(inspection.configPath).toBe('/tmp/provider/custom-coder/config.v2.json');
   });
 
   it('builds a paste-ready config fragment from routing hints', () => {
     const inspection = inspectProviderConfig(
       {
         version: '2.0.0',
-        providerId: 'deepseek-web',
+        providerId: 'custom-search',
         provider: {
-          id: 'deepseek-web',
+          id: 'custom-search',
           type: 'openai',
-          compatibilityProfile: 'chat:deepseek-web',
-          auth: { type: 'deepseek-account' },
+          auth: { type: 'apikey' },
           models: {
-            'deepseek-chat': {
+            'search-model': {
               supportsStreaming: true,
-              capabilities: ['web_search', 'multimodal'],
-              aliases: ['deepseek-v4-flash', 'deepseek-v4-flash-nothinking', 'deepseek-v4-flash-search', 'deepseek-v4-flash-search-nothinking', 'deepseek-v4-vision']
+              capabilities: ['web_search']
             }
+          },
+          webSearch: {
+            engineId: 'custom:web_search',
+            executionMode: 'direct',
+            modelId: 'search-model'
           }
         }
       },
@@ -176,7 +75,7 @@ describe('provider inspect', () => {
             webSearch: {
               engines: [
                 {
-                  id: 'deepseek:web_search'
+                  id: 'custom:web_search'
                 }
               ]
             }

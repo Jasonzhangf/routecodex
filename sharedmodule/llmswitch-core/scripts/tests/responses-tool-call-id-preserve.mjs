@@ -18,7 +18,7 @@ async function main() {
     object: 'response',
     created_at: Math.floor(Date.now() / 1000),
     status: 'completed',
-    model: 'lmstudio-qwen',
+    model: 'lmstudio-model-a',
     output: [
       {
         id: 'fc_provider_1',

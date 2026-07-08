@@ -87,7 +87,7 @@ async function main() {
       capturedContext: {
         __hub_capture: {
           missingFields: [{ path: 'messages[0].content', reason: 'compat' }],
-          providerMetadata: { provider: 'qwen' },
+          providerMetadata: { provider: 'provider-a' },
           protocolState: { stage: 'outbound' }
         }
       }

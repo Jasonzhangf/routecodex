@@ -1251,6 +1251,14 @@ describe('client connection timeout hint', () => {
     const baseMetadata = {
       __rt: {
         preselectedRoute
+      },
+      runtime_control: {
+        preselectedRoute
+      },
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          preselectedRoute
+        }
       }
     };
     writeMetadataCenterSlot({
@@ -1280,6 +1288,14 @@ describe('client connection timeout hint', () => {
 
     const firstAttempt = decorateMetadataForAttempt(baseMetadata, 1, new Set<string>());
     expect((firstAttempt.__rt as { preselectedRoute?: unknown }).preselectedRoute).toEqual(preselectedRoute);
+    expect((firstAttempt.runtime_control as { preselectedRoute?: unknown }).preselectedRoute).toEqual(preselectedRoute);
+    expect(
+      (
+        firstAttempt.metadataCenterSnapshot as
+          | { runtimeControl?: { preselectedRoute?: unknown } }
+          | undefined
+      )?.runtimeControl?.preselectedRoute
+    ).toEqual(preselectedRoute);
     expect(MetadataCenter.read(firstAttempt)?.readRuntimeControl().preselectedRoute).toEqual(preselectedRoute);
 
     const retryAttempt = decorateMetadataForAttempt(
@@ -1290,11 +1306,82 @@ describe('client connection timeout hint', () => {
 
     expect(retryAttempt.excludedProviderKeys).toEqual(['minimax.key1.MiniMax-M3']);
     expect((retryAttempt.__rt as { preselectedRoute?: unknown }).preselectedRoute).toBeUndefined();
+    expect((retryAttempt.runtime_control as { preselectedRoute?: unknown } | undefined)?.preselectedRoute).toBeUndefined();
+    expect(
+      (
+        retryAttempt.metadataCenterSnapshot as
+          | { runtimeControl?: { preselectedRoute?: unknown } }
+          | undefined
+      )?.runtimeControl?.preselectedRoute
+    ).toBeUndefined();
     expect(MetadataCenter.read(retryAttempt)?.readRuntimeControl().preselectedRoute).toBeUndefined();
     expect(MetadataCenter.read(retryAttempt)?.readRuntimeControl().providerProtocol).toBe('openai-responses');
     expect(buildMetadataCenterRustSnapshot(retryAttempt).runtimeControl?.preselectedRoute).toBeUndefined();
     expect(buildMetadataCenterRustSnapshot(retryAttempt).runtimeControl?.providerProtocol).toBe('openai-responses');
     expect((baseMetadata.__rt as { preselectedRoute?: unknown }).preselectedRoute).toBe(preselectedRoute);
+  });
+
+  it('preserves router-direct relay MetadataCenter route control when rebuilding request metadata', () => {
+    const preselectedRoute = {
+      target: {
+        providerKey: 'orangeai.key1.glm-5.2',
+        runtimeKey: 'orangeai.key1',
+        outboundProfile: 'openai-chat'
+      },
+      decision: {
+        routeName: 'thinking',
+        providerKey: 'orangeai.key1.glm-5.2'
+      },
+      diagnostics: {
+        reason: 'thinking:user-input'
+      }
+    };
+    const relayMetadata: Record<string, unknown> = {
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      routecodexLocalPort: 5555
+    };
+    writeMetadataCenterSlot({
+      target: relayMetadata,
+      family: 'runtime_control',
+      key: 'preselectedRoute',
+      value: preselectedRoute,
+      writer: {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'preserves router-direct relay MetadataCenter route control when rebuilding request metadata',
+        stage: 'test'
+      },
+      reason: 'simulate router-direct relay preselected route'
+    });
+    writeMetadataCenterSlot({
+      target: relayMetadata,
+      family: 'runtime_control',
+      key: 'providerProtocol',
+      value: 'openai-chat',
+      writer: {
+        module: 'tests/server/http-server/executor-metadata.spec.ts',
+        symbol: 'preserves router-direct relay MetadataCenter route control when rebuilding request metadata',
+        stage: 'test'
+      },
+      reason: 'simulate router-direct relay provider protocol'
+    });
+
+    const rebuilt = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-router-direct-relay-1',
+      headers: {},
+      query: {},
+      body: {
+        model: 'gpt-5.5',
+        input: 'hello'
+      },
+      metadata: relayMetadata
+    } as any);
+
+    expect(MetadataCenter.read(rebuilt)?.readRuntimeControl().preselectedRoute).toEqual(preselectedRoute);
+    expect(MetadataCenter.read(rebuilt)?.readRuntimeControl().providerProtocol).toBe('openai-chat');
+    expect(buildMetadataCenterRustSnapshot(rebuilt).runtimeControl?.preselectedRoute).toEqual(preselectedRoute);
+    expect(buildMetadataCenterRustSnapshot(rebuilt).runtimeControl?.providerProtocol).toBe('openai-chat');
   });
 });
 

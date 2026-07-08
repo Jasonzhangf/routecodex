@@ -85,9 +85,7 @@ const input = {
 };
 
 const { config } = bootstrapVirtualRouterConfig(input);
-const engine = new VirtualRouterEngine({
-  quotaView: () => ({ inPool: true })
-});
+const engine = new VirtualRouterEngine();
 engine.initialize(config);
 
 {
@@ -210,9 +208,7 @@ engine.initialize(config);
   };
 
   const { config: explicitConfig } = bootstrapVirtualRouterConfig(explicitRouteInput);
-  const explicitEngine = new VirtualRouterEngine({
-    quotaView: () => ({ inPool: true })
-  });
+  const explicitEngine = new VirtualRouterEngine();
   explicitEngine.initialize(explicitConfig);
 
   const request = createRequest({

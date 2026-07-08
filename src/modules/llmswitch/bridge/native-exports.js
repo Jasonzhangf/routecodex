@@ -1043,10 +1043,6 @@ export function planServertoolOutcomeWithNative(input) {
   return invokeRouterHotpathJsonCapability('planServertoolOutcomeJson', [input]);
 }
 
-export function planServertoolNoopOutcomeWithNative(input) {
-  return invokeRouterHotpathJsonCapability('planServertoolNoopOutcomeJson', [input]);
-}
-
 export function planServertoolAutoHookQueuesWithNative(input) {
   return invokeRouterHotpathJsonCapability('planServertoolAutoHookQueuesJson', [input]);
 }

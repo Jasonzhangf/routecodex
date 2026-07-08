@@ -56,16 +56,9 @@ export type ServertoolDispatchCandidate = {
   executionMode: string;
   stripAfterExecute: boolean;
 };
-export type ServertoolDispatchNoop = {
-  id: string;
-  name: string;
-  arguments: string;
-  executionMode?: string;
-  stripAfterExecute?: boolean;
-};
 export type ServertoolDispatchPlan = {
   executableToolCalls: ServertoolDispatchCandidate[];
-  noopToolCalls: ServertoolDispatchNoop[];
+  noopToolCalls: [];
   skippedToolCalls: Array<{ id: string; name: string; reason: string }>;
 };
 export type ServertoolDispatchPlanInput = {
@@ -120,11 +113,6 @@ export type ServertoolAutoHookQueueItems<T> = {
   }>;
 };
 export type ServertoolFollowupRuntimePlan = Record<string, unknown>;
-export type ServertoolNoopOutcome = {
-  chatResponse: JsonObject;
-  flowId: string;
-  toolContent: Record<string, unknown>;
-};
 export type ServertoolProgressEvent = {
   flowId: string;
   tool: string;
@@ -369,8 +357,6 @@ export declare function buildServertoolStopEntryProgressEventWithNative(input: u
 export declare function buildServertoolStopCompareProgressEventWithNative(input: unknown): ServertoolProgressEvent;
 export declare function planServertoolToolCallDispatchWithNative(input: unknown): ServertoolDispatchPlan;
 
-export declare function planServertoolNoopOutcomeWithNative(input: unknown): ServertoolNoopOutcome;
-
 export declare function planServertoolAutoHookQueueItemsWithNative<T>(input: unknown): ServertoolAutoHookQueueItems<T>;
 
 // 18 servertool-core native wrappers consumed by shell files
@@ -433,8 +419,6 @@ export declare function planServertoolEntryContextWithNative(input: unknown): Na
 export declare function planServertoolExecutionDispatchErrorWithNative(input: unknown): ServertoolErrorPlan;
 
 export declare function planServertoolHandlerErrorExecutionLoopEffectWithNative(input: unknown): NativeExecutionLoopEffectPlan & { handlerErrorMessage: string };
-
-export declare function planServertoolNoopExecutionLoopEffectWithNative(input: unknown): NativeExecutionLoopEffectPlan;
 
 export declare function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: unknown): NativeServertoolRegistryAutoHookEntry[];
 

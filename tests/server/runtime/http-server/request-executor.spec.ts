@@ -650,8 +650,8 @@ describe('HubRequestExecutor failover', () => {
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
     process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '3';
     const providerA = 'XLC.key1.glm-5.2';
-    const providerB = 'tokenrelay.key1.deepseek-v4-pro';
-    const routePool = [providerA, providerB, 'XLC.key2.deepseek-v4-pro'];
+    const providerB = 'tokenrelay.key1.model-c';
+    const routePool = [providerA, providerB, 'XLC.key2.model-c'];
 
     const failingProcess = jest.fn(async () => {
       throw Object.assign(new Error('model_not_found'), {
@@ -792,7 +792,7 @@ describe('HubRequestExecutor failover', () => {
             model: 'gpt-5.4'
           },
           providerPayload: {
-            model: providerKey === providerB ? 'deepseek-v4-pro' : 'glm-5.2',
+            model: providerKey === providerB ? 'model-c' : 'glm-5.2',
             messages: [{ role: 'user', content: 'ping tokenrelay' }]
           },
           target: {
@@ -800,7 +800,7 @@ describe('HubRequestExecutor failover', () => {
             providerType: 'openai',
             outboundProfile: 'openai-chat',
             runtimeKey: providerKey,
-            modelId: providerKey === providerB ? 'deepseek-v4-pro' : 'glm-5.2'
+            modelId: providerKey === providerB ? 'model-c' : 'glm-5.2'
           },
           routingDecision: {
             routeName: 'thinking',
@@ -929,11 +929,11 @@ describe('HubRequestExecutor failover', () => {
       async acquire() {
         return {
           permit: {
-            runtimeKey: 'deepseek-web.2',
-            providerKey: 'deepseek-web.2.deepseek-v4-pro',
+            runtimeKey: 'provider-a.2',
+            providerKey: 'provider-a.2.model-c',
             requestId: 'req-1',
             leaseId: 'lease-1',
-            stateKey: 'deepseek-web.2',
+            stateKey: 'provider-a.2',
             maxInFlight: 1
           },
           policy: {
@@ -975,9 +975,9 @@ describe('HubRequestExecutor failover', () => {
       trafficGovernor: fakeTrafficGovernor
     });
     expect(busyCallback).not.toBeNull();
-    busyCallback?.('deepseek-web.2', true);
-    busyCallback?.('deepseek-web.2', false);
-    expect(marks).toEqual(['busy:deepseek-web.2', 'idle:deepseek-web.2']);
+    busyCallback?.('provider-a.2', true);
+    busyCallback?.('provider-a.2', false);
+    expect(marks).toEqual(['busy:provider-a.2', 'idle:provider-a.2']);
   });
 
   test('fails fast on acquire-time concurrency saturation and reroutes to the next route candidate', async () => {
@@ -1270,11 +1270,11 @@ describe('HubRequestExecutor failover', () => {
       attempt: 1,
       maxAttempts: 6,
       stage: 'host.response_contract',
-      providerKey: 'qwenchat.aliasA',
+      providerKey: 'provider-a.aliasA',
       runtimeKey: 'runtime:one',
       logicalRequestChainKey: 'req-response-contract-host',
       logicalChainRetryLimitStageRequestId: 'req-response-contract-host',
-      routePool: ['qwenchat.aliasA', 'tab.aliasB'],
+      routePool: ['provider-a.aliasA', 'tab.aliasB'],
       runtimeManager: {
         resolveRuntimeKey: () => 'runtime:one'
       },
@@ -1325,11 +1325,11 @@ describe('HubRequestExecutor failover', () => {
       attempt: 1,
       maxAttempts: 6,
       stage: 'host.response_contract',
-      providerKey: 'qwenchat.aliasA',
+      providerKey: 'provider-a.aliasA',
       runtimeKey: 'runtime:one',
       logicalRequestChainKey: 'req-missing-tool-call-host',
       logicalChainRetryLimitStageRequestId: 'req-missing-tool-call-host',
-      routePool: ['qwenchat.aliasA', 'tab.aliasB'],
+      routePool: ['provider-a.aliasA', 'tab.aliasB'],
       runtimeManager: {
         resolveRuntimeKey: () => 'runtime:one'
       },
@@ -2208,13 +2208,13 @@ describe('HubRequestExecutor failover', () => {
         },
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'deepseek.key1.deepseek-v4-pro',
+        providerKey: 'deepseek.key1.model-c',
         runtimeKey: 'runtime:deepseek',
         logicalRequestChainKey: 'req-network-fetch-failed',
         logicalChainRetryLimitStageRequestId: 'req-network-fetch-failed',
         routePool: [
-          'deepseek.key1.deepseek-v4-pro',
-          'deepseek.key2.deepseek-v4-pro'
+          'deepseek.key1.model-c',
+          'deepseek.key2.model-c'
         ],
         runtimeManager: {
           resolveRuntimeKey: () => 'runtime:deepseek'
@@ -2232,7 +2232,7 @@ describe('HubRequestExecutor failover', () => {
           decisionLabel: 'exclude_and_reroute'
         })
       }));
-      expect(Array.from(networkExcluded)).toEqual(['deepseek.key1.deepseek-v4-pro']);
+      expect(Array.from(networkExcluded)).toEqual(['deepseek.key1.model-c']);
 
 
       const notFoundExcluded = new Set<string>();
@@ -2255,7 +2255,7 @@ describe('HubRequestExecutor failover', () => {
         logicalChainRetryLimitStageRequestId: 'req-http-404',
         routePool: [
           'mimo.key1.mimo-v2.5-pro',
-          'whitedrem.key1.deepseek-v4-pro'
+          'whitedrem.key1.model-c'
         ],
         runtimeManager: {
           resolveRuntimeKey: () => 'runtime:mimo'
@@ -2291,13 +2291,13 @@ describe('HubRequestExecutor failover', () => {
         },
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'deepseek.key1.deepseek-v4-pro',
+        providerKey: 'deepseek.key1.model-c',
         runtimeKey: 'runtime:deepseek',
         logicalRequestChainKey: 'req-sqlite-busy',
         logicalChainRetryLimitStageRequestId: 'req-sqlite-busy',
         routePool: [
-          'deepseek.key1.deepseek-v4-pro',
-          'deepseek.key2.deepseek-v4-pro'
+          'deepseek.key1.model-c',
+          'deepseek.key2.model-c'
         ],
         runtimeManager: {
           resolveRuntimeKey: () => 'runtime:deepseek'
@@ -2315,7 +2315,7 @@ describe('HubRequestExecutor failover', () => {
           decisionLabel: 'exclude_and_reroute'
         })
       }));
-      expect(Array.from(sqliteBusyExcluded)).toEqual(['deepseek.key1.deepseek-v4-pro']);
+      expect(Array.from(sqliteBusyExcluded)).toEqual(['deepseek.key1.model-c']);
 
     await expect(__requestExecutorTestables.resolveProviderRetryExecutionPlan({
       error: Object.assign(new Error('followup failed'), {
@@ -2336,7 +2336,7 @@ describe('HubRequestExecutor failover', () => {
       runtimeKey: 'runtime:ali-coding-plan',
       logicalRequestChainKey: 'req-followup',
       logicalChainRetryLimitStageRequestId: 'req-followup',
-      routePool: ['ali-coding-plan.key1.kimi-k2.5', 'qwen.1.qwen3.6-plus'],
+      routePool: ['ali-coding-plan.key1.kimi-k2.5', 'provider-b.1.model-a'],
       runtimeManager: {
         resolveRuntimeKey: () => 'runtime:ali-coding-plan'
       },
@@ -2608,8 +2608,8 @@ describe('HubRequestExecutor failover', () => {
 
   test('backs off recoverable pool exhaustion before retrying route selection', async () => {
     jest.useFakeTimers();
-    const providerKey = 'deepseek-web.1.deepseek-chat';
-    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-wait' } }), 'openai-chat');
+    const providerKey = 'provider-a.1.model-a';
+    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-wait' } }));
 
     const runtimeManager = {
       resolveRuntimeKey: (key: string) => key,
@@ -3998,7 +3998,7 @@ describe('HubRequestExecutor failover', () => {
 
   test('reroutes 429 instead of same-provider retry when route pool still exposes an alternative candidate', async () => {
     const primaryProviderKey = 'glm.key1.glm-4.7';
-    const fallbackProviderKey = 'qwen.key2.qwen3.5-27b';
+    const fallbackProviderKey = 'provider-b.key2.model-b';
     const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
       statusCode: 429,
       code: 'HTTP_429'
@@ -4092,8 +4092,8 @@ describe('HubRequestExecutor failover', () => {
   });
 
   test('excludes each provider on repeated 429 when route pool has another candidate', async () => {
-    const providerA = 'openrouter.key1.qwen/qwen3.6-plus:free';
-    const providerB = 'qwen.2-135.qwen3.6-plus';
+    const providerA = 'openrouter.key1.openai/model-a:free';
+    const providerB = 'provider-b.2-135.model-a';
     const error429A = Object.assign(new Error('HTTP 429: provider A rate limited'), {
       statusCode: 429,
       code: 'HTTP_429'
@@ -4328,7 +4328,7 @@ describe('HubRequestExecutor failover', () => {
     jest.useFakeTimers();
     const providerA = 'tabglm.key1.glm-5.1';
     const providerB = 'crs.key2.gpt-5.3-codex';
-    const providerC = 'ali-coding-plan.key1.qwen3.6-plus';
+    const providerC = 'ali-coding-plan.key1.model-a';
     const authErrorA = Object.assign(new Error('HTTP 500: provider A overloaded'), {
       statusCode: 500
     });
@@ -4424,8 +4424,8 @@ describe('HubRequestExecutor failover', () => {
   });
 
   test('retries same provider when upstream SSE error event is retryable network failure', async () => {
-    const firstProviderKey = 'deepseek-web.primary.deepseek-chat';
-    const secondProviderKey = 'deepseek-web.backup.deepseek-chat';
+    const firstProviderKey = 'provider-a.primary.model-a';
+    const secondProviderKey = 'provider-a.backup.model-a';
 
     const failingProcess = jest.fn()
       .mockResolvedValueOnce({
@@ -4652,7 +4652,7 @@ describe('HubRequestExecutor failover', () => {
   });
 
   test('surfaces readable SSE error message when upstream error event is non-retryable', async () => {
-    const providerKey = 'deepseek-web.primary.deepseek-chat';
+    const providerKey = 'provider-a.primary.model-a';
 
     const failingProcess = jest.fn(async () => ({
       status: 200,

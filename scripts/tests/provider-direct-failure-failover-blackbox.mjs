@@ -43,7 +43,7 @@ async function main() {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-direct-failover-'));
   const home = path.join(tmp, 'home'); const sessionDir = path.join(tmp, 'sessions');
   await fs.mkdir(home, { recursive: true }); await fs.mkdir(sessionDir, { recursive: true });
-  const restores = [setEnv('HOME', home), setEnv('RCC_HOME', path.join(home, '.rcc')), setEnv('ROUTECODEX_SESSION_DIR', sessionDir), setEnv('ROUTECODEX_SNAPSHOT', '0'), setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'), setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', '15000'), setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', '3')];
+  const restores = [setEnv('HOME', home), setEnv('RCC_HOME', path.join(home, '.rcc')), setEnv('ROUTECODEX_SESSION_DIR', sessionDir), setEnv('ROUTECODEX_TRAFFIC_STORE_ROOT', path.join(tmp, 'traffic')), setEnv('ROUTECODEX_SNAPSHOT', '0'), setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'), setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', '15000'), setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', '3')];
   const servers = [];
   try {
     await import('../../dist/modules/traffic-governor/index.js');
@@ -64,7 +64,7 @@ async function main() {
     const text = await res.text();
     assert.equal(res.status, 200, text);
     assert.match(text, /ok-from-direct-backup/);
-    assert.equal(primaryHits, 3, 'direct mode should retry primary exactly three times');
+    assert.equal(primaryHits, 1, 'direct mode should exclude the failed provider after the first ErrorErr05 decision');
     assert.equal(backupHits, 1, 'direct mode should reroute to backup in the same request');
     console.log(JSON.stringify({ ok: true, primaryHits, backupHits }, null, 2));
   } finally {

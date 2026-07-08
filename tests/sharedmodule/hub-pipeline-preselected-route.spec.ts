@@ -402,6 +402,64 @@ describe('HubPipeline preselected route ownership', () => {
       .toBe('openai-responses');
   });
 
+  it('projects retry excludedProviderKeys into metadataCenterSnapshot for Rust VR retry selection', async () => {
+    const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
+
+    await executeRequestStagePipeline({
+      normalized: createNormalized({
+        metadata: withMetadataCenter({
+          requestId: 'req_retry_exclusion_snapshot',
+          excludedProviderKeys: ['preselected.key1.gpt-5.5'],
+        }, (center) => {
+          center.writeRuntimeControl('providerProtocol', 'openai-responses', TEST_WRITER, 'test provider protocol');
+        }),
+      }),
+      routerEngine: routerEngine as never,
+      config: {
+        virtualRouter: {
+          providers: {
+            'preselected.key1.gpt-5.5': {
+              providerKey: 'preselected.key1.gpt-5.5',
+              providerType: 'openai',
+              runtimeKey: 'preselected.key1',
+              modelId: 'gpt-5.5',
+              endpoint: 'mock://preselected-1',
+              auth: { type: 'apikey', apiKey: 'k1' },
+            },
+            'preselected.key2.gpt-5.5': {
+              providerKey: 'preselected.key2.gpt-5.5',
+              providerType: 'openai',
+              runtimeKey: 'preselected.key2',
+              modelId: 'gpt-5.5',
+              endpoint: 'mock://preselected-2',
+              auth: { type: 'apikey', apiKey: 'k2' },
+            },
+          },
+          routing: {
+            default: [
+              {
+                id: 'default',
+                mode: 'priority',
+                targets: ['preselected.key1.gpt-5.5', 'preselected.key2.gpt-5.5'],
+              },
+            ],
+          },
+        },
+      } as never,
+    });
+
+    expect(mockRunHubPipelineLibWithNative).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        metadata: expect.objectContaining({
+          excludedProviderKeys: ['preselected.key1.gpt-5.5'],
+        }),
+        metadataCenterSnapshot: expect.objectContaining({
+          excludedProviderKeys: ['preselected.key1.gpt-5.5'],
+        }),
+      }),
+    }));
+  });
+
   it('reuses MetadataCenter runtime preselectedRoute without reading flat routecodex residue', async () => {
     const routerEngine = { route: jest.fn(() => { throw new Error('route should not be called'); }) };
 

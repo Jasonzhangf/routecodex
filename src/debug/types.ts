@@ -77,15 +77,7 @@ export interface ProviderHarnessResult {
   context?: Record<string, unknown>;
 }
 
-export interface ProviderDryRunOptions {
-  runtime: ProviderHarnessRuntime;
-  request: Record<string, unknown>;
-  metadata: ProviderHarnessMetadata;
-  sessionId?: string;
-  nodeId?: string;
-}
-
-export interface ProviderDryRunResult {
+export interface ProviderReplayResult {
   processed: unknown;
   metadata: ProviderHarnessMetadata;
 }

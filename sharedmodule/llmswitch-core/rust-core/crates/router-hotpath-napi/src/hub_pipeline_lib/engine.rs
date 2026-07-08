@@ -140,7 +140,11 @@ impl HubPipelineEngine {
                 ));
             };
             router
-                .route(unsafe { Env::from_raw(std::ptr::null_mut()) }, &request, &metadata)
+                .route(
+                    unsafe { Env::from_raw(std::ptr::null_mut()) },
+                    &request,
+                    &metadata,
+                )
                 .map_err(|message| {
                     HubPipelineError::new(
                         "hub_pipeline_virtual_router_facade_route_failed",

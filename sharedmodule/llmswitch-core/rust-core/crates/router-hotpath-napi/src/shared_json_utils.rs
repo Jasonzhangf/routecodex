@@ -892,22 +892,10 @@ mod tests {
     {
         let path =
             crate_src_path("req_outbound_stage3_compat/deepseek_web/request/prompt/content.rs");
-        let Ok(source) = fs::read_to_string(&path) else {
-            return;
-        };
         assert!(
-            !source.contains(
-                "map.get(key)
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())"
-            ),
-            "deepseek_web/request/prompt/content.rs still owns local map-key trim clone"
-        );
-        assert!(
-            source.contains("read_object_trimmed_string(obj, \"cmd\")")
-                || source.contains("read_object_trimmed_string(obj, \"justification\")"),
-            "deepseek_web/request/prompt/content.rs must route map-key trim through shared read_object_trimmed_string truth"
+            !path.exists(),
+            "removed deepseek_web prompt content module must not be restored: {}",
+            path.display()
         );
     }
 
@@ -930,17 +918,10 @@ mod tests {
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_deepseek_web_local_clone() {
         let path = crate_src_path("req_outbound_stage3_compat/deepseek_web.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn read_trimmed_string(value: Option<&Value>) -> Option<String>"),
-            "local read_trimmed_string clone still present in {}",
+            !path.exists(),
+            "removed deepseek_web compat module must not be restored: {}",
             path.display()
-        );
-        assert!(
-            source.contains("shared_json_utils::read_trimmed_string")
-                || source.contains("use crate::shared_json_utils::read_trimmed_string"),
-            "deepseek_web.rs must use shared read_trimmed_string truth"
         );
     }
 

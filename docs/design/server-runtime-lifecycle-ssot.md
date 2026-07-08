@@ -61,11 +61,9 @@
 
 - `server-<port>.pid`（迁移到 `state/runtime-lifecycle/ports/<port>/pid.cache` 或 `run/pids/server-<port>.pid`）
 - `daemon-stop-<port>.json`（迁移到 `state/runtime-lifecycle/ports/<port>/stop-intent.json`）
-- `token-daemon.pid`（迁移到 `state/runtime-lifecycle/daemon/token-daemon.pid`）
-- `token-stats.json` / `token-stats.json.tmp-*`（合并到 `state/runtime-lifecycle/token/stats.json` + 同目录 `.lock`）
 - `config.dbittai.toml` / `config.long.omlx.toml`（已迁 config.v2 体系，移入 `config/archive/`）
 - `config.toml.bak-*`（移入 `config/archive/`）
-- `camoufox-fp/` / `camoufox-profiles/` / `windsurf-ls/` / `windsurf-workspaces/` / `rcc-protocols/`（迁出 `~/.rcc` 顶层，挂 `integrations/<tool>/`）
+- `windsurf-ls/` / `windsurf-workspaces/` / `rcc-protocols/`（迁出 `~/.rcc` 顶层，挂 `integrations/<tool>/`）
 
 ## 3. 生命周期阶段
 
@@ -127,7 +125,6 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 ### 5.1 物理位置
 
 - 受管 server instance：`<rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache`。
-- token daemon：`<rccUserDir>/state/runtime-lifecycle/daemon/token-daemon.pid`。
 - guardian：`<rccUserDir>/state/runtime-lifecycle/guardian/guardian.pid`（仅 guardian 模式）。
 
 ### 5.2 行为约束
@@ -152,10 +149,9 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 
 ## 7. tmp / bak / archive 收口
 
-- `token-stats.json` + `token-stats.json.tmp-*`：迁 `state/runtime-lifecycle/token/stats.json` + 原子写（`tmp -> rename`）。启动时清理 `>7d` 的 stale tmp。
 - `config.toml.bak-*`：迁 `config/archive/`，按 `config.toml.bak-<UTC>.toml` 命名。
 - `config.<provider>.toml`（dbittai / omlx 等已迁 v2 的）：迁 `config/archive/legacy-variants/`。
-- `camoufox-*` / `windsurf-*` / `rcc-protocols/`：迁出 `~/.rcc`，挂 `~/rcc-protocols/`、`~/.rcc/integrations/<tool>/` 或外部 dir，由各自 skill 真源管理。
+- `windsurf-*` / `rcc-protocols/`：迁出 `~/.rcc`，挂 `~/rcc-protocols/`、`~/.rcc/integrations/<tool>/` 或外部 dir，由各自 skill 真源管理。
 
 ## 8. 真源唯一性
 

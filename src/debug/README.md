@@ -1,7 +1,7 @@
 # Debug Toolkit
 
 ## Purpose
-Debug toolkit provides snapshot, dry-run, and replay capabilities for offline testing and inspection. Does not modify Hub Pipeline behavior.
+Debug toolkit provides snapshot and replay capabilities for offline testing and inspection. Does not modify Hub Pipeline behavior.
 
 ## Components
 ```
@@ -12,8 +12,7 @@ src/debug/
 ├── session-manager.ts       # debug session lifecycle
 ├── harness-registry.ts      # harness registration
 ├── harnesses/
-│   └── provider-harness.ts  # provider-layer dry-run
-├── dry-runner.ts            # dry-run controller
+│   └── provider-harness.ts  # provider-layer replay harness
 └── replay-runner.ts         # snapshot replay
 ```
 

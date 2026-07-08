@@ -64,10 +64,7 @@ fn build_runtime_route_config(routing_policy_group: &str) -> serde_json::Value {
     })
 }
 
-fn build_runtime_route_request(
-    request_id: &str,
-    routing_policy_group: &str,
-) -> serde_json::Value {
+fn build_runtime_route_request(request_id: &str, routing_policy_group: &str) -> serde_json::Value {
     json!({
         "requestId": request_id,
         "endpoint": "/v1/responses",
@@ -104,7 +101,8 @@ fn execute_hub_pipeline_json_uses_registered_runtime_health_for_route_selection(
     let routing_policy_group = "gateway_priority_5555";
     let virtual_router = build_runtime_route_config(routing_policy_group);
     let mut core = VirtualRouterEngineCore::new();
-    core.initialize(&virtual_router).expect("runtime router init");
+    core.initialize(&virtual_router)
+        .expect("runtime router init");
     let core = Arc::new(RwLock::new(core));
     register_runtime(&core);
 

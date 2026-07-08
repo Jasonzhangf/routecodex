@@ -56,7 +56,6 @@ src/debug/
     registry.ts                  # HarnessRegistry
     provider.ts                  # ProviderPreprocessHarness
   runner/
-    dry-runner.ts                # DryRunRunner
     replay-runner.ts             # ReplayRunner
     policy-carrier.ts            # 新增：把 policy violation 转 carrier，禁止手工 copy
   diag/

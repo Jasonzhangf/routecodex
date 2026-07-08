@@ -1,8 +1,23 @@
 import { afterAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 
+function readSessionToken(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  ...createBridgeHttpServerMock(),
+  ...createBridgeHttpServerMock({
+    extractSessionIdentifiersFromMetadata: (meta: Record<string, unknown> | undefined) => ({
+      ...(readSessionToken(meta, ['sessionId', 'session_id']) ? { sessionId: readSessionToken(meta, ['sessionId', 'session_id']) } : {}),
+      ...(readSessionToken(meta, ['conversationId', 'conversation_id']) ? { conversationId: readSessionToken(meta, ['conversationId', 'conversation_id']) } : {})
+    })
+  }),
 }));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-request-bridge.js', () => ({
@@ -166,7 +181,7 @@ describe('responses-handler request start logging', () => {
     } as any);
 
     const expectedSessionId = 'rcc-session:codex:tmux-responses-log-scope:tmp_responses-log-project';
-    const expectedColor = resolveSessionAnsiColor('tmux-responses-log-scope');
+    const expectedColor = resolveSessionAnsiColor(expectedSessionId);
     const rendered = String(warnSpy.mock.calls.find((call) => String(call[0] ?? '').includes('▶ [/v1/responses]'))?.[0] ?? '');
     const metadata = (executePipeline.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> } | undefined)?.metadata;
 
@@ -175,5 +190,45 @@ describe('responses-handler request start logging', () => {
     expect(metadata?.logSessionColorKey).toBe(expectedSessionId);
     expect(metadata?.sessionId).toBe(expectedSessionId);
     expect(metadata?.conversationId).toBe(expectedSessionId);
+  });
+
+  it('passes responses client_metadata session id into request start and pipeline metadata', async () => {
+    const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
+    const { resolveSessionAnsiColor } = await import('../../../src/utils/session-log-color.js');
+    const sessionId = '019f34fe-5f32-7c71-8931-9ab3d18422a3';
+    const req = makeReq({
+      model: 'gpt-5.5',
+      input: [],
+      client_metadata: {
+        session_id: sessionId,
+        thread_id: sessionId,
+        turn_id: '019f3cdf-9e6c-7ab3-bd5e-336ba07236d3'
+      }
+    });
+    req.headers = {
+      'user-agent': 'codex-cli'
+    };
+    const res = makeRes();
+    const executePipeline = jest.fn(async () => ({
+      status: 200,
+      body: { id: 'resp_1', output: [] },
+      metadata: {}
+    }));
+
+    await handleResponses(req, res, {
+      executePipeline,
+      errorHandling: null,
+      portContext: { matchedPort: 5555, localPort: 5555 }
+    } as any);
+
+    const expectedColor = resolveSessionAnsiColor(sessionId);
+    const rendered = String(warnSpy.mock.calls.find((call) => String(call[0] ?? '').includes('▶ [/v1/responses]'))?.[0] ?? '');
+    const metadata = (executePipeline.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> } | undefined)?.metadata;
+
+    expect(expectedColor).toBeDefined();
+    expect(rendered.startsWith(String(expectedColor))).toBe(true);
+    expect(metadata?.logSessionColorKey).toBe(sessionId);
+    expect(metadata?.sessionId).toBe(sessionId);
+    expect(metadata?.conversationId).toBe(sessionId);
   });
 });

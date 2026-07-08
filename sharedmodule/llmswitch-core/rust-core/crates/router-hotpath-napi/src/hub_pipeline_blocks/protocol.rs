@@ -59,26 +59,6 @@ pub(crate) fn resolve_provider_protocol_from_metadata_snapshot(
     }))
 }
 
-pub(crate) fn resolve_hub_pipeline_request_provider_protocol(
-    input: &Value,
-) -> Result<Value, String> {
-    let root = input.as_object().ok_or_else(|| {
-        "HubPipeline providerProtocol resolver input must be an object".to_string()
-    })?;
-    let runtime_control = root.get("runtimeControl").and_then(Value::as_object);
-    let provider_protocol = runtime_control
-        .and_then(|row| row.get("providerProtocol"))
-        .and_then(Value::as_str)
-        .or_else(|| root.get("providerProtocol").and_then(Value::as_str))
-        .ok_or_else(|| {
-            "HubPipeline requires metadata center runtime_control.providerProtocol".to_string()
-        })?;
-
-    Ok(json!({
-        "providerProtocol": resolve_provider_protocol(provider_protocol)?
-    }))
-}
-
 pub(crate) fn resolve_hub_client_protocol(entry_endpoint: &str) -> String {
     let lowered = entry_endpoint.to_ascii_lowercase();
     if lowered.contains("/v1/responses") {
@@ -196,39 +176,6 @@ mod tests {
             "metadataCenterSnapshot": {
                 "runtimeControl": {}
             }
-        }))
-        .unwrap_err();
-
-        assert!(error.contains("runtime_control.providerProtocol"));
-    }
-
-    #[test]
-    fn resolves_hub_pipeline_request_provider_protocol_from_runtime_control() {
-        let output = resolve_hub_pipeline_request_provider_protocol(&json!({
-            "providerProtocol": "openai-chat",
-            "runtimeControl": {
-                "providerProtocol": " responses "
-            }
-        }))
-        .unwrap();
-
-        assert_eq!(output["providerProtocol"], json!("openai-responses"));
-    }
-
-    #[test]
-    fn resolves_hub_pipeline_request_provider_protocol_from_flat_metadata() {
-        let output = resolve_hub_pipeline_request_provider_protocol(&json!({
-            "providerProtocol": " anthropic "
-        }))
-        .unwrap();
-
-        assert_eq!(output["providerProtocol"], json!("anthropic-messages"));
-    }
-
-    #[test]
-    fn rejects_missing_hub_pipeline_request_provider_protocol() {
-        let error = resolve_hub_pipeline_request_provider_protocol(&json!({
-            "runtimeControl": {}
         }))
         .unwrap_err();
 

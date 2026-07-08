@@ -50,8 +50,9 @@ export interface DirectRetryPlanLike {
   retrySwitchPlan?: { switchAction?: string } | null | undefined;
   excludedCurrentProvider?: boolean;
   allowRetryBeyondAttemptBudget?: boolean;
-  routePoolRemainingAfterExclusion?: string[];
+  routePoolRemainingAfterExclusion?: readonly string[];
   defaultPoolAvailable?: boolean;
+  policyExhausted?: boolean;
   mayProject?: boolean;
 }
 
@@ -170,11 +171,21 @@ export interface DecideDirectProviderRetryArgs {
  * attempt.
  */
 export function decideDirectProviderRetry(args: DecideDirectProviderRetryArgs): DirectRetryDecision {
-  const { error, retryExecutionPlan: _plan, providerKey: _providerKey } = args;
-  void _plan;
-  void _providerKey;
-  // Reverse contract: always rethrow so http-error-mapper can apply the
-  // proper projection (including 204/CLIENT_DISCONNECTED for client_disconnect).
+  const { error, retryExecutionPlan, providerKey } = args;
+  if (isClientDisconnectLikeError(error)) {
+    return rethrowDecision(error, new Set());
+  }
+  if (retryExecutionPlan.mayProject === true && retryExecutionPlan.policyExhausted === true) {
+    return rethrowDecision(error, new Set());
+  }
+  if (
+    retryExecutionPlan.shouldRetry
+    && retryExecutionPlan.retrySwitchPlan?.switchAction === 'exclude_and_reroute'
+    && retryExecutionPlan.excludedCurrentProvider === true
+    && retryExecutionPlan.mayProject !== true
+  ) {
+    return requestRerouteDecision(error, new Set(), new Set(providerKey ? [providerKey] : []));
+  }
   return rethrowDecision(error, new Set());
 }
 

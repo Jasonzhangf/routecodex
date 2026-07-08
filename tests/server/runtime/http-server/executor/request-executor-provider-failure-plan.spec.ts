@@ -1,6 +1,16 @@
+import { afterEach, describe, expect, jest, test } from '@jest/globals';
 import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
+import {
+  registerErrorActionQueueHook,
+  resetErrorActionQueueStateForTests
+} from '../../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue';
 
 describe('request-executor-provider-failure-plan', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    resetErrorActionQueueStateForTests();
+  });
+
   test('protocol boundary conflicts never exclude providers from VR route hits', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(
@@ -39,6 +49,69 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
     expect(plan.retryExecutionPlan.retrySwitchPlan).toBeUndefined();
     expect(excludedProviderKeys.has('minimax.key1.MiniMax-M3')).toBe(false);
+  });
+
+  test('provider failure plan records and blocks through global error action queue', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-06-28T00:00:00.000Z'));
+    const events: unknown[] = [];
+    const logs: Array<{ stage: string; details?: Record<string, unknown> }> = [];
+    const unregister = registerErrorActionQueueHook((event) => events.push(event));
+    let resolved = false;
+
+    const promise = resolveRequestExecutorProviderFailurePlan({
+      error: Object.assign(new Error('upstream 503'), {
+        code: 'HTTP_503',
+        upstreamCode: 'HTTP_503',
+        statusCode: 503
+      }),
+      retryError: {
+        statusCode: 503,
+        errorCode: 'HTTP_503',
+        upstreamCode: 'HTTP_503',
+        reason: 'upstream 503'
+      },
+      requestId: 'req-provider-error-backoff',
+      providerKey: 'p1.gpt-test',
+      providerId: 'p1',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-responses',
+      routeName: 'search',
+      runtimeKey: 'runtime:p1',
+      dependencies: {} as any,
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      logicalRequestChainKey: 'logical-provider-error-backoff',
+      logicalChainRetryLimitStageRequestId: 'logical-provider-error-backoff',
+      routePool: ['p1.gpt-test', 'p2.gpt-test'],
+      excludedProviderKeys: new Set<string>(),
+      recordAttempt: () => undefined,
+      logStage: (stage, _requestId, details) => {
+        logs.push({ stage, details });
+      },
+      metadata: { entryPort: 5555 },
+      logNonBlockingError: () => undefined
+    }).then((plan) => {
+      resolved = true;
+      return plan;
+    });
+
+    await jest.advanceTimersByTimeAsync(999);
+    expect(resolved).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    const plan = await promise;
+    unregister();
+
+    expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
+    expect(events).toEqual([
+      expect.objectContaining({ type: 'record', category: 'global_error', delayMs: 1000 }),
+      expect.objectContaining({ type: 'wait_start', category: 'global_error', delayMs: 1000 }),
+      expect.objectContaining({ type: 'wait_end', category: 'global_error', delayMs: 1000 })
+    ]);
+    expect(logs.some((entry) => entry.stage === 'provider.error_action_backoff_wait')).toBe(true);
+    expect(logs.some((entry) => entry.stage === 'provider.error_action_backoff_wait.completed')).toBe(true);
   });
 
   test('local CLIENT_TOOL_ARGS_INVALID conversion failures remain recoverable only when they affect health', async () => {

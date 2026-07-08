@@ -98,17 +98,17 @@ describe('Routing instruction parsing and application', () => {
   });
 
   test('sticky:provider.model instructions are ignored because provider sticky is not a routing primitive', () => {
-    const instructions = parseRoutingInstructions(buildMessages('<**sticky:deepseek-web.deepseek-chat**>'));
+    const instructions = parseRoutingInstructions(buildMessages('<**sticky:provider-a.model-a**>'));
     expect(instructions).toHaveLength(0);
   });
 
   test('force:provider.model instructions are parsed as force target', () => {
-    const instructions = parseRoutingInstructions(buildMessages('<**force:deepseek-web.deepseek-chat**>'));
+    const instructions = parseRoutingInstructions(buildMessages('<**force:provider-a.model-a**>'));
     expect(instructions).toHaveLength(1);
     const instruction = instructions[0];
     expect(instruction.type).toBe('force');
-    expect(instruction.provider).toBe('deepseek-web');
-    expect(instruction.model).toBe('deepseek-chat');
+    expect(instruction.provider).toBe('provider-a');
+    expect(instruction.model).toBe('model-a');
     expect(instruction.pathLength).toBe(2);
   });
 

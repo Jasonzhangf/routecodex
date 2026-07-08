@@ -1,5 +1,6 @@
 /**
  * Port Config Validator — Per-Port Authoritative Config
+ * feature_id: server.port_config_provider_failure_exemption
  *
  * Validation rules:
  * 1. Router mode: MUST have routingPolicyGroup, MUST NOT have providerBinding/protocolBehavior
@@ -11,8 +12,6 @@
 
 import type { PortConfig, ProtocolBehavior } from './port-config-types.js';
 import type { ProviderProtocol } from './types.js';
-
-// feature_id: server.port_config_provider_failure_exemption
 
 export interface PortValidationError {
   port: number;
@@ -114,11 +113,11 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
         });
       }
     }
-    if (rawConfig.providerFailureExemption !== undefined && rawConfig.providerFailureExemption !== null) {
+    if ('providerFailureExemption' in config && (config as Record<string, unknown>).providerFailureExemption !== undefined) {
       errors.push({
         port,
         field: 'providerFailureExemption',
-        message: 'providerFailureExemption has been removed'
+        message: 'providerFailureExemption has been removed; provider errors must enter ErrorErr05'
       });
     }
     return errors;
@@ -146,11 +145,11 @@ function validatePortConfig(config: PortConfig): PortValidationError[] {
         message: 'Provider mode does not support sameProtocolBehavior'
       });
     }
-    if (rawConfig.providerFailureExemption !== undefined && rawConfig.providerFailureExemption !== null) {
+    if ('providerFailureExemption' in config && (config as Record<string, unknown>).providerFailureExemption !== undefined) {
       errors.push({
         port,
         field: 'providerFailureExemption',
-        message: 'providerFailureExemption has been removed'
+        message: 'providerFailureExemption has been removed; provider errors must enter ErrorErr05'
       });
     }
   }

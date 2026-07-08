@@ -1,3 +1,12 @@
+# 2026-07-08: servertool default registry/noop bridge removal
+
+- Requirement: stopmessage already goes CLI, web_search and vision_auto are moving CLI, and all other server-side tools are unwanted. Remove server-side dead business if CLI does not need this layer.
+- Change: default Rust servertool skeleton now has empty `internalTools`, empty primary auto-hook order, empty progress map, and empty followup profiles; missing followup profile now plans `outcomeMode="skip"` and `noFollowup=true`.
+- Change: removed `continue_execution` noop servertool business path from dispatch/orchestration/TS queue/native wrapper generation/tests/gate expectations; execution-loop effect contract is handler-error only.
+- Gate update: `verify:servertool-rust-only` now forbids noop bridge markers and default skeleton registry/profile resurrection markers.
+- Verification: `cargo test -p servertool-core execution_loop_effect_contract` PASS 3; `cargo test -p router-hotpath-napi servertool_skeleton_config` PASS 17; `cargo test -p router-hotpath-napi chat_servertool_orchestration` PASS 44; `cargo test -p router-hotpath-napi plans_servertool_execution_loop_effect_via_servertool_core_bridge` PASS 1; `npm run build:native-hotpath` PASS; focused servertool Jest PASS 123/123; `npm run verify:servertool-rust-only` PASS; root `tsc --noEmit` PASS; `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, and `verify:architecture-mainline-manifest-sync` PASS.
+- Boundary: no live replay/restart claimed for this source/gate slice; repo has many unrelated dirty files from other workers, so stage/commit only exact touched files.
+
 # 2026-07-08: request/session log color failed-response closeout
 
 - Symptom still observed: same visible session can show different colors across `[virtual-router-hit]`, `[usage]`, and response/failure logs.

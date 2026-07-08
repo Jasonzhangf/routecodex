@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 import type { ServerSideToolEngineResult } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 
-const DEFAULT_PRIMARY_AUTO_HOOK_IDS = ['vision_auto', 'stop_message_auto'];
+const DEFAULT_PRIMARY_AUTO_HOOK_IDS: string[] = [];
 
 const orchestrateServertoolEngineMock = jest.fn();
 const readServertoolPrimaryAutoHookIdsWithNativeMock = jest.fn(() => DEFAULT_PRIMARY_AUTO_HOOK_IDS);

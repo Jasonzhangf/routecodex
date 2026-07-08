@@ -670,7 +670,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const pipelineResultTwo: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
-        providerKey: 'qwen.aliasB',
+        providerKey: 'provider-a.aliasB',
         providerType: 'responses',
         outboundProfile: 'openai-responses',
         runtimeKey: 'runtime:two',
@@ -737,7 +737,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const pipelineResultOne: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
-        providerKey: 'qwenchat.aliasA',
+        providerKey: 'provider-a.aliasA',
         providerType: 'openai',
         outboundProfile: 'openai-chat',
         runtimeKey: 'runtime:one',
@@ -831,7 +831,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       const pipelineResult: PipelineExecutionResult = {
         providerPayload: { data: { messages: [{ role: 'user', content: 'retry me' }] } },
         target: {
-          providerKey: 'qwenchat.aliasA',
+          providerKey: 'provider-a.aliasA',
           providerType: 'openai',
           outboundProfile: 'openai-chat',
           runtimeKey: 'runtime:one',
@@ -897,7 +897,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       const pipelineResult: PipelineExecutionResult = {
         providerPayload: { data: { messages: [{ role: 'user', content: 'retry me' }] } },
         target: {
-          providerKey: 'qwenchat.aliasA',
+          providerKey: 'provider-a.aliasA',
           providerType: 'openai',
           outboundProfile: 'openai-chat',
           runtimeKey: 'runtime:one',
@@ -948,7 +948,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       const snapshotRequestDir = path.join(
         snapshotDir,
         'openai-chat',
-        'qwenchat.aliasA',
+        'provider-a.aliasA',
         'req_sanitized_placeholder_errorsample'
       );
       expect(fs.existsSync(path.join(snapshotRequestDir, 'provider-request-contract.json'))).toBe(true);
@@ -994,7 +994,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
         metadata: {}
       } as any,
       target: {
-        providerKey: 'qwenchat.aliasA',
+        providerKey: 'provider-a.aliasA',
         providerType: 'openai',
         outboundProfile: 'openai-chat',
         runtimeKey: 'runtime:one',
@@ -1504,12 +1504,12 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const pipelineResultDeepSeek: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
-        providerKey: 'deepseek-web.3.deepseek-chat',
+        providerKey: 'provider-a.3.model-a',
         providerType: 'responses',
         outboundProfile: 'openai-responses',
         runtimeKey: 'runtime:deepseek',
         processMode: 'standard',
-        compatibilityProfile: 'chat:deepseek-web'
+        compatibilityProfile: 'chat:provider-a'
       },
       processMode: 'standard',
       metadata: {}
@@ -1555,10 +1555,10 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       metadata: {
         stream: false,
         inboundStream: false,
-        compatibilityProfile: 'chat:qwen',
+        compatibilityProfile: 'compat:passthrough',
         target: {
-          providerKey: 'qwen.1.coder-model',
-          compatibilityProfile: 'chat:qwen'
+          providerKey: 'provider-b.1.coder-model',
+          compatibilityProfile: 'compat:passthrough'
         }
       } as Record<string, unknown>
     };
@@ -1567,12 +1567,12 @@ describe('HubRequestExecutor single attempt behaviour', () => {
 
     expect(convertSpy).toHaveBeenCalledTimes(1);
     const convertOptions = convertSpy.mock.calls[0]?.[0] as { pipelineMetadata?: Record<string, unknown> };
-    expect(convertOptions?.pipelineMetadata?.compatibilityProfile).toBe('chat:deepseek-web');
+    expect(convertOptions?.pipelineMetadata?.compatibilityProfile).toBe('chat:provider-a');
     expect((convertOptions?.pipelineMetadata?.target as Record<string, unknown>)?.providerKey).toBe(
-      'deepseek-web.3.deepseek-chat'
+      'provider-a.3.model-a'
     );
     expect((convertOptions?.pipelineMetadata?.target as Record<string, unknown>)?.compatibilityProfile).toBe(
-      'chat:deepseek-web'
+      'chat:provider-a'
     );
   });
 
@@ -1748,18 +1748,18 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const pipelineResult: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
-        providerKey: 'deepseek-web.berg.deepseek-v4-pro',
+        providerKey: 'provider-a.berg.model-c',
         providerType: 'openai',
         outboundProfile: 'openai-responses',
-        runtimeKey: 'deepseek-web.berg',
+        runtimeKey: 'provider-a.berg',
         processMode: 'standard'
       },
       routingDecision: {
         routeName: 'coding',
         pool: [
-          'deepseek-web.berg.deepseek-v4-pro',
-          'deepseek-web.spence.deepseek-v4-pro',
-          'deepseek-web.sargent.deepseek-v4-pro'
+          'provider-a.berg.model-c',
+          'provider-a.spence.model-c',
+          'provider-a.sargent.model-c'
         ]
       } as unknown as { routeName?: string },
       processMode: 'standard',
@@ -1767,9 +1767,9 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     };
     const { executor, request, runtimeManager } = createExecutor(pipelineResult, handle);
     runtimeManager.resolveRuntimeKey = jest.fn((providerKey?: string) => {
-      if (providerKey === 'deepseek-web.berg.deepseek-v4-pro') return 'deepseek-web.berg';
-      if (providerKey === 'deepseek-web.spence.deepseek-v4-pro') return 'deepseek-web.spence';
-      if (providerKey === 'deepseek-web.sargent.deepseek-v4-pro') return 'deepseek-web.sargent';
+      if (providerKey === 'provider-a.berg.model-c') return 'provider-a.berg';
+      if (providerKey === 'provider-a.spence.model-c') return 'provider-a.spence';
+      if (providerKey === 'provider-a.sargent.model-c') return 'provider-a.sargent';
       return undefined;
     }) as unknown as ProviderRuntimeManager['resolveRuntimeKey'];
 
@@ -2093,7 +2093,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
       target: {
         providerKey: 'tab.key1',
         providerType: 'responses',
-        compatibilityProfile: 'chat:deepseek-web',
+        compatibilityProfile: 'chat:provider-a',
         outboundProfile: 'openai-responses',
         runtimeKey: 'runtime:one',
         processMode: 'standard'

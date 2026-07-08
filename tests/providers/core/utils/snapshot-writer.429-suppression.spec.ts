@@ -48,7 +48,7 @@ describe('provider snapshot 429 suppression', () => {
 
     try {
       const requestId = 'req_429_purge';
-      const providerKey = 'qwen.1.qwen3.6-plus';
+      const providerKey = 'provider-a.1.model-a';
       const folder = 'openai-responses';
       const providerDir = path.join(tempDir, folder, normalizeToken(providerKey), requestId);
       const legacyDir = path.join(tempDir, folder, requestId);
@@ -108,7 +108,7 @@ describe('provider snapshot 429 suppression', () => {
         type: 'response',
         requestId: 'req_429_retry',
         clientRequestId: 'req_429_retry',
-        providerKey: 'qwen.1.qwen3.6-plus',
+        providerKey: 'provider-a.1.model-a',
         entryEndpoint: '/v1/responses',
         entryPort: 5555,
         data: {

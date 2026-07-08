@@ -1,4 +1,4 @@
-# Daemon / Token / Providers / Config V2 管理 API 设计
+# Daemon / Credentials / Providers / Config V2 管理 API 设计
 
 > 目标：为 Daemon 管理 UI 和基于 Config V2 的 Provider 管理视图提供一组 **只读或低风险** 的 HTTP JSON API。  
 > 所有 API 均由 HTTP server 提供，数据来源于 ManagerDaemon、虚拟路由和 Config V2，禁止在此层做路由/工具语义决策。
@@ -12,8 +12,8 @@
   - HTTP 状态码 4xx/5xx。
   - Body: `{ "error": { "message": string, "code"?: string, ... } }`
 - 仅暴露**非敏感字段**：
-  - 不返回 access_token / refresh_token / client_secret 等。
-  - 对 token 文件路径等敏感信息仅返回相对路径或掩码版本。
+  - 不返回 API key 本体。
+  - 对 credential 文件路径等敏感信息仅返回相对路径或掩码版本。
 
 ---
 
@@ -34,7 +34,6 @@
   "manager": {
     "active": true,
     "modules": [
-      { "id": "token", "status": "leader", "details": { "intervalSec": 60 } },
       { "id": "health", "status": "running" },
       { "id": "routing", "status": "running", "stickyEnabled": true }
     ]
@@ -50,7 +49,7 @@
 
 ## 3. Credentials 管理 API
 
-> 注意：所有 API 必须避免泄露敏感字段，只用于展示凭证状态和触发安全的 verify/refresh 操作。
+> 注意：所有 API 必须避免泄露敏感字段，只用于展示 API key credential 状态和触发安全的 verify 操作。
 
 ### 3.1 `GET /daemon/credentials`
 
@@ -60,14 +59,13 @@
 ```jsonc
 [
   {
-    "id": "glm-oauth-1-186",
-    "kind": "oauth",
-    "providerFamily": "gemini",
-    "alias": "glm-186",
-    "tokenFile": "~/.rcc/auth/glm-oauth-1-186.json",
-    "projectId": "my-project",
-    "expiresAt": 1736500000000,
-    "expiresInSec": 3600,
+    "id": "glm-apikey-1-default",
+    "kind": "apikey",
+    "providerFamily": "glm",
+    "alias": "default",
+    "credentialFile": "~/.rcc/auth/glm-apikey-1-default.key",
+    "expiresAt": null,
+    "expiresInSec": null,
     "status": "valid", // valid | expiring | expired | invalid
     "lastError": null
   }
@@ -75,8 +73,8 @@
 ```
 
 - 数据来源：
-  - Token 文件扫描器（现有 `scanProviderTokenFiles` 等）。
-  - `readTokenFile` + `evaluateTokenState`。
+  - API key credential 文件扫描器。
+  - credential 文件存在性与非空校验。
 
 ### 3.2 `GET /daemon/credentials/:id`
 
@@ -85,18 +83,15 @@
 
 ```jsonc
 {
-  "id": "glm-oauth-1-186",
-  "kind": "oauth",
-  "providerFamily": "gemini",
-  "alias": "glm-186",
-  "tokenFile": "~/.rcc/auth/glm-oauth-1-186.json",
-  "projectId": "my-project",
-  "expiresAt": 1736500000000,
-  "expiresInSec": 3600,
+  "id": "glm-apikey-1-default",
+  "kind": "apikey",
+  "providerFamily": "glm",
+  "alias": "default",
+  "credentialFile": "~/.rcc/auth/glm-apikey-1-default.key",
+  "expiresAt": null,
+  "expiresInSec": null,
   "status": "valid",
   "lastError": null,
-  "issuer": "https://accounts.google.com",
-  "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
   "createdAt": 1736400000000,
   "updatedAt": 1736499900000
 }
@@ -122,26 +117,6 @@
   - 仅在本地发起一次轻量级验证，不做重试风暴。
   - 失败时只记录错误，不修改配置文件。
 
-### 3.4 `POST /daemon/credentials/:id/refresh`
-
-- 用途：在安全前提下触发一次刷新（如果支持 refresh_token）。
-- 响应示例：
-
-```jsonc
-{
-  "ok": true,
-  "id": "glm-oauth-1-186",
-  "status": "refreshed",
-  "expiresAt": 1736503600000
-}
-```
-
-- 约束：
-  - 必须遵守现有 token-daemon 的刷新策略，不与后台自动刷新逻辑冲突。
-  - 若不支持手动刷新，应返回 `400` 或 `409` 并给出明确错误信息。
-
----
-
 ## 4. Providers 运行时视图 API
 
 ### 4.1 `GET /providers/runtimes`
@@ -158,7 +133,7 @@
     "protocol": "gemini-chat",
     "series": "gemini-pro",
     "enabled": true,
-    "boundCredentialId": "glm-oauth-1-186",
+    "boundCredentialId": "glm-apikey-1-default",
     "health": {
       "status": "ok",
       "lastErrorAt": null,

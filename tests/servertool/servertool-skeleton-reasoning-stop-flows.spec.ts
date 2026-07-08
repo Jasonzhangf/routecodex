@@ -14,11 +14,7 @@ const skeletonDocument = {
         genericInjectionOps: [],
         nativeSupportedOps: [],
         flowPolicy: {
-          profilesByFlowId: {
-            reasoning_stop_guard_flow: {},
-            reasoning_stop_finalize_flow: {},
-            reasoning_stop_continue_flow: {}
-          }
+          profilesByFlowId: {}
         }
       }
     },
@@ -68,12 +64,13 @@ jest.unstable_mockModule(
 );
 
 describe('servertool skeleton reasoning-stop flow profiles', () => {
-  test('exposes reasoning stop flows as native followup policy truth', () => {
+  test('does not expose reasoning stop flows through server-side skeleton policy', () => {
     const doc = skeletonDocument;
     const profiles = doc.servertool.skeleton.followup.flowPolicy.profilesByFlowId ?? {};
 
-    expect(profiles.reasoning_stop_guard_flow).toBeDefined();
-    expect(profiles.reasoning_stop_finalize_flow).toBeDefined();
-    expect(profiles.reasoning_stop_continue_flow).toBeDefined();
+    expect(profiles).toEqual({});
+    expect(profiles.reasoning_stop_guard_flow).toBeUndefined();
+    expect(profiles.reasoning_stop_finalize_flow).toBeUndefined();
+    expect(profiles.reasoning_stop_continue_flow).toBeUndefined();
   });
 });

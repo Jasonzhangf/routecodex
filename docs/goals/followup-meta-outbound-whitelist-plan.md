@@ -91,7 +91,7 @@ Out of Scope：
 重点文件：
 - `src/providers/core/runtime/provider-request-preprocessor.ts`
 - `src/providers/core/runtime/responses-provider.ts`
-- `src/providers/profile/families/qwen-profile.ts`
+- `src/providers/profile/families/glm-profile.ts`
 - `src/providers/core/runtime/deepseek-http-provider-helpers.ts`
 - `src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts`
 
@@ -130,7 +130,7 @@ Out of Scope：
 - `src/providers/core/runtime/provider-request-preprocessor.ts`
 - `src/providers/core/runtime/provider-runtime-metadata.ts`
 - `src/providers/core/runtime/responses-provider.ts`
-- `src/providers/profile/families/qwen-profile.ts`
+- `src/providers/profile/families/glm-profile.ts`
 - `src/providers/core/runtime/deepseek-http-provider-helpers.ts`
 - `src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts`
 
@@ -164,7 +164,7 @@ Out of Scope：
 - native allowlist / policy 对应 Rust 真源文件
 - `src/providers/core/runtime/provider-request-preprocessor.ts`
 - `src/providers/core/runtime/responses-provider.ts`
-- `src/providers/profile/families/qwen-profile.ts`
+- `src/providers/profile/families/glm-profile.ts`
 - `src/providers/core/runtime/deepseek-http-provider-helpers.ts`
 - `src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts`
 - `src/server/runtime/http-server/executor/provider-response-converter.ts`
@@ -209,7 +209,7 @@ Out of Scope：
 1. submit_tool_outputs continuation 仍正常
 2. servertool followup 仍正常
 3. direct / relay / same-protocol responses passthrough 不回归
-4. qwen / responses provider / transport metadata 读取路径正常
+4. provider-a / responses provider / transport metadata 读取路径正常
 
 ### 第三组：构建与实机验证
 1. 目标测试集通过

@@ -842,7 +842,6 @@ describe('servertool CLI native bridge', () => {
   it('uses Rust-owned execution loop effect planning', () => {
     expect(
       planServertoolExecutionLoopEffectWithNative({
-        mode: 'handler_error',
         toolCall: {
           id: 'call_fail_1',
           name: 'web_search',
@@ -863,34 +862,6 @@ describe('servertool CLI native bridge', () => {
         flowId: 'web_search_error'
       },
       handlerErrorMessage: 'unknown'
-    });
-
-    expect(
-      planServertoolExecutionLoopEffectWithNative({
-        mode: 'noop',
-        toolCall: {
-          id: 'call_continue_1',
-          name: 'continue_execution',
-          arguments: '{}',
-          executionMode: 'guarded',
-          stripAfterExecute: false
-        },
-      noopOutcome: {
-        flowId: 'continue_execution_flow',
-        chatResponse: {}
-      }
-      })
-    ).toEqual({
-      toolCall: {
-        id: 'call_continue_1',
-        name: 'continue_execution',
-        arguments: '{}',
-        executionMode: 'noop',
-        stripAfterExecute: true
-      },
-      execution: {
-        flowId: 'continue_execution_flow'
-      }
     });
   });
 

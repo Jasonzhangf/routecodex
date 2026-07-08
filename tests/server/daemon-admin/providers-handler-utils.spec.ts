@@ -1,11 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
 import { validateProviderIdInput } from '../../../src/server/runtime/http-server/daemon-admin/providers-handler-utils.js';
-import { SUPPORTED_OAUTH_PROVIDERS } from '../../../src/server/runtime/http-server/daemon-admin/credentials-handler-utils.js';
 
 describe('validateProviderIdInput', () => {
   it('accepts safe provider ids', () => {
     expect(validateProviderIdInput('openrouter')).toEqual({ ok: true, providerId: 'openrouter' });
-    expect(validateProviderIdInput('qwenchat.2-135')).toEqual({ ok: true, providerId: 'qwenchat.2-135' });
+    expect(validateProviderIdInput('providerchat.2-135')).toEqual({ ok: true, providerId: 'providerchat.2-135' });
     expect(validateProviderIdInput(' tabglm_key-1 ')).toEqual({ ok: true, providerId: 'tabglm_key-1' });
   });
 
@@ -28,11 +27,5 @@ describe('validateProviderIdInput', () => {
     const bad65 = `a${'b'.repeat(64)}`;
     expect(validateProviderIdInput(ok64)).toEqual({ ok: true, providerId: ok64 });
     expect(validateProviderIdInput(bad65).ok).toBe(false);
-  });
-});
-
-describe('daemon-admin credential oauth provider allowlist', () => {
-  it('allows ecodev token authorization and refresh routes to use shared OAuth lifecycle', () => {
-    expect(SUPPORTED_OAUTH_PROVIDERS.has('ecodev')).toBe(true);
   });
 });

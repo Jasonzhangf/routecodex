@@ -420,6 +420,52 @@ fn build_default_floor_candidates_ignoring_exclusions(
     )
 }
 
+fn collect_default_floor_candidate_targets_ignoring_exclusions(
+    provider_registry: &ProviderRegistry,
+    forwarder_registry: &crate::virtual_router_engine::forwarder::ForwarderRegistry,
+    targets: &[String],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for target in targets {
+        if crate::virtual_router_engine::forwarder::ForwarderRegistry::is_forwarder_id(target) {
+            let Some(entry) = forwarder_registry.get(target) else {
+                continue;
+            };
+            let mut forwarder_targets = entry.targets.clone();
+            if entry.strategy
+                == crate::virtual_router_engine::forwarder::ForwarderStrategy::Priority
+            {
+                forwarder_targets.sort_by(|left, right| {
+                    left.priority
+                        .unwrap_or(i64::MAX)
+                        .cmp(&right.priority.unwrap_or(i64::MAX))
+                });
+            }
+            for item in forwarder_targets {
+                if item.disabled || provider_registry.get(&item.provider_key).is_none() {
+                    continue;
+                }
+                if !out.contains(&item.provider_key) {
+                    out.push(item.provider_key);
+                }
+            }
+            continue;
+        }
+        if provider_registry.get(target).is_some() && !out.contains(target) {
+            out.push(target.clone());
+        }
+    }
+    out
+}
+
+fn filter_router_direct_protocol(
+    _provider_registry: &ProviderRegistry,
+    candidates: Vec<String>,
+    _router_direct_inbound_protocol: Option<&str>,
+) -> Vec<String> {
+    candidates
+}
+
 impl VirtualRouterEngineCore {
     /// Apply standard candidate filters: routing state, excluded keys, and provider availability.
     /// This is the single filter chain used by all selection paths (forced, prefer, pool).
@@ -756,7 +802,16 @@ impl VirtualRouterEngineCore {
                         }
                     }
                 }
-                if pool_candidate_targets.is_empty() {
+                let default_floor_candidate_targets = if route_name == DEFAULT_ROUTE {
+                    collect_default_floor_candidate_targets_ignoring_exclusions(
+                        &self.provider_registry,
+                        &self.forwarder_registry,
+                        &pool.targets,
+                    )
+                } else {
+                    Vec::new()
+                };
+                if pool_candidate_targets.is_empty() && default_floor_candidate_targets.is_empty() {
                     continue;
                 }
                 let execution_route_pool = expand_route_pool_targets_for_execution_decision(
@@ -768,9 +823,14 @@ impl VirtualRouterEngineCore {
                 } else {
                     route_execution_pool.clone()
                 };
+                let effective_pool_candidate_targets = if pool_candidate_targets.is_empty() {
+                    default_floor_candidate_targets.clone()
+                } else {
+                    pool_candidate_targets.clone()
+                };
                 let mut floor_candidates = apply_non_availability_filters(
                     &self.provider_registry,
-                    &pool_candidate_targets,
+                    &effective_pool_candidate_targets,
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
@@ -780,18 +840,18 @@ impl VirtualRouterEngineCore {
                     let default_floor_candidates =
                         build_default_floor_candidates_ignoring_exclusions(
                             &self.provider_registry,
-                            &pool_candidate_targets,
+                            &effective_pool_candidate_targets,
                             routing_state,
                             server_tool_required,
                             bound_alias_prefix,
                         );
-                    if default_floor_candidates.len() == 1 {
+                    if !default_floor_candidates.is_empty() {
                         floor_candidates = default_floor_candidates;
                     }
                 }
                 let mut available = self.apply_standard_filters(
                     env,
-                    &pool_candidate_targets,
+                    &effective_pool_candidate_targets,
                     routing_state,
                     &excluded_keys,
                     server_tool_required,
@@ -881,7 +941,10 @@ impl VirtualRouterEngineCore {
                                 "unavailableProviders": unavailable
                             }));
                         }
-                        if route_name == DEFAULT_ROUTE && default_floor_selection.is_none() {
+                        if route_name == DEFAULT_ROUTE
+                            && requested_route != DEFAULT_ROUTE
+                            && default_floor_selection.is_none()
+                        {
                             default_floor_selection = Some(
                                 SelectionResult::new(
                                     filtered_candidates[0].clone(),
@@ -1138,9 +1201,7 @@ fn build_unavailable_providers_details(
 
 fn infer_model_family_hint(model: &str) -> Option<&'static str> {
     let lower = model.trim().to_ascii_lowercase();
-    for token in [
-        "sonnet", "gemini", "claude", "gpt", "glm", "qwen", "deepseek",
-    ] {
+    for token in ["sonnet", "gemini", "claude", "gpt", "glm"] {
         if lower.contains(token) {
             return Some(token);
         }
@@ -2492,6 +2553,130 @@ mod tests {
             )
             .expect("second selection should succeed");
         assert_eq!(second.provider_key, first.provider_key);
+    }
+
+    #[test]
+    fn default_route_keeps_forwarder_floor_when_shared_route_exclusions_empty_pool() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "minimax.key1.MiniMax-M3".to_string(),
+            json!({
+                "providerKey": "minimax.key1.MiniMax-M3",
+                "providerType": "anthropic",
+                "providerProtocol": "anthropic-messages",
+                "modelId": "MiniMax-M3",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "minimax.key1.MiniMax-M2.7".to_string(),
+            json!({
+                "providerKey": "minimax.key1.MiniMax-M2.7",
+                "providerType": "openai",
+                "providerProtocol": "openai-responses",
+                "modelId": "MiniMax-M2.7",
+                "enabled": true
+            }),
+        );
+        providers.insert(
+            "minimonth.key1.MiniMax-M2.7".to_string(),
+            json!({
+                "providerKey": "minimonth.key1.MiniMax-M2.7",
+                "providerType": "openai",
+                "providerProtocol": "openai-responses",
+                "modelId": "MiniMax-M2.7",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.minimax.MiniMax-M3".to_string(),
+            json!({
+                "forwarderId": "fwd.minimax.MiniMax-M3",
+                "protocol": "anthropic",
+                "modelId": "MiniMax-M3",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "stickyKey": "session",
+                "targets": [
+                    { "providerKey": "minimax.key1.MiniMax-M3", "priority": 1, "disabled": false }
+                ]
+            }),
+        );
+        forwarders.insert(
+            "fwd.minimax.MiniMax-M2.7".to_string(),
+            json!({
+                "forwarderId": "fwd.minimax.MiniMax-M2.7",
+                "protocol": "openai",
+                "modelId": "MiniMax-M2.7",
+                "resolutionMode": "model-first",
+                "strategy": "weighted",
+                "stickyKey": "session",
+                "targets": [
+                    { "providerKey": "minimax.key1.MiniMax-M2.7", "weight": 1, "disabled": false },
+                    { "providerKey": "minimonth.key1.MiniMax-M2.7", "weight": 5, "disabled": false }
+                ]
+            }),
+        );
+        let provider_keys = keys.into_iter().collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+
+        let shared_targets = vec!["fwd.minimax.MiniMax-M3", "fwd.minimax.MiniMax-M2.7"];
+        let routing = Map::from_iter([
+            (
+                "search".to_string(),
+                Value::Array(vec![json!({
+                    "id": "gateway-priority-search",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": shared_targets.clone()
+                })]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![json!({
+                    "id": "gateway-priority-default",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": shared_targets.clone()
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+
+        let classification = ClassificationResult {
+            route_name: "search".to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec!["search".to_string()],
+        };
+        let selected = core
+            .select_provider(
+                "search",
+                &json!({
+                    "excludedProviderKeys": [
+                        "minimax.key1.MiniMax-M3",
+                        "minimax.key1.MiniMax-M2.7",
+                        "minimonth.key1.MiniMax-M2.7"
+                    ]
+                }),
+                &classification,
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("default forwarder floor must keep one provider selectable");
+
+        assert_eq!(selected.route_used, "default");
+        assert_eq!(selected.provider_key, "minimax.key1.MiniMax-M3");
     }
 
     #[test]

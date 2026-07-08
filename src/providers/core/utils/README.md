@@ -8,7 +8,7 @@ Provider core utils module contains utility functions and helpers used by provid
 ├── snapshot-writer. ts         # Snapshot writing for debugging
 ├── provider-error- logger. ts  # Provider-specific error logging
 └── provider-type- utils. ts    # Provider type conversion utilities```## Key Components### HttpClient
-HTTP client with:- Automatic retry through the unified error action queue (`1s -> 2s -> 3s` blocking cycle)- Timeout management- Connection pooling### ProviderErrorReporterReports provider errors to the central error handling system with full context including dependencies and request metadata.### SnapshotWriterWrites detailed snapshots of provider requests/responses for debugging and regression analysis.
+HTTP client with:- Automatic retry through the unified error action queue (`1s -> 3s -> 5s` blocking cycle)- Timeout management- Connection pooling### ProviderErrorReporterReports provider errors to the central error handling system with full context including dependencies and request metadata.### SnapshotWriterWrites detailed snapshots of provider requests/responses for debugging and regression analysis.
 ## Usage```typescript
 import { HttpClient } from './http-client. js';const client = new HttpClient({ timeout: 30000, retries: 3 });```## Related Documentation
 - `src/providers/core/runtime/` - Provider runtime implementations

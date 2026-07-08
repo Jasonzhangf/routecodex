@@ -9,16 +9,8 @@ const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
 const planServertoolHandlerErrorExecutionLoopEffectWithNative = jest.fn((input: any) =>
   planServertoolExecutionLoopEffectWithNative({
-    mode: 'handler_error',
     toolCall: input?.toolCall,
     handlerErrorMessage: input?.handlerErrorMessage
-  })
-);
-const planServertoolNoopExecutionLoopEffectWithNative = jest.fn((input: any) =>
-  planServertoolExecutionLoopEffectWithNative({
-    mode: 'noop',
-    toolCall: input?.toolCall,
-    noopOutcome: input?.noopOutcome
   })
 );
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
@@ -89,7 +81,6 @@ jest.unstable_mockModule(
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionLoopEffectWithNative,
     planServertoolHandlerErrorExecutionLoopEffectWithNative,
-    planServertoolNoopExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
     resolveServertoolExecutionLoopInitialDecisionWithNative,
     resolveServertoolExecutionLoopResultDecisionWithNative,
@@ -99,7 +90,6 @@ jest.unstable_mockModule(
     appendServertoolExecutedRecordWithNative,
     runStoplessBuiltinHandlerForRuntimeWithNative,
     resolveServertoolRegistryHandlerWithNative: getServerToolHandler,
-    planServertoolNoopOutcomeWithNative: jest.fn(),
     buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
     planServertoolToolCallDispatchWithNative: jest.fn(),
     buildServertoolHandlerErrorToolOutputPayloadWithNative
@@ -182,12 +172,10 @@ describe('execution-queue-shell', () => {
     }));
     planServertoolExecutionLoopEffectWithNative.mockImplementation((input: any) => ({
       toolCall: {
-        ...input.toolCall,
-        executionMode: 'noop',
-        stripAfterExecute: true
+        ...input.toolCall
       },
       execution: {
-        flowId: `${String(input?.toolCall?.name ?? '').trim()}_effect`
+        flowId: `${String(input?.toolCall?.name ?? '').trim()}_error`
       },
       handlerErrorMessage:
         typeof input?.handlerErrorMessage === 'string'
@@ -245,7 +233,7 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain('errorEffectPlan.handlerErrorMessage as string');
     expect(source).toContain('message: errorEffectPlan.handlerErrorMessage');
     expect(source).toContain('planServertoolHandlerErrorExecutionLoopEffectWithNative');
-    expect(source).toContain('planServertoolNoopExecutionLoopEffectWithNative');
+    expect(source).not.toContain('planServertoolNoopExecutionLoopEffectWithNative');
     expect(source).not.toContain("mode: 'handler_error'");
     expect(source).not.toContain("mode: 'noop'");
     expect(source).not.toContain("String(lastErr ?? 'unknown')");
@@ -260,12 +248,10 @@ describe('execution-queue-shell', () => {
     expect(source).not.toContain("nativeExecutionMode: entry?.registration.executionMode ?? ''");
     expect(source).not.toContain("toolCall: errorEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall']");
     expect(source).not.toContain('execution: errorEffectPlan.execution as ServerToolExecution');
-    expect(source).not.toContain("toolCall: noopEffectPlan.toolCall as NativeServertoolExecutedRecord['toolCall']");
-    expect(source).not.toContain('execution: noopEffectPlan.execution as ServerToolExecution');
     expect(source).not.toContain('result.chatResponse as JsonObject');
     expect(source).toContain('replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse)');
-    expect(source).not.toContain('noopResult.chatResponse as JsonObject');
-    expect(source).toContain('replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse)');
+    expect(source).not.toContain('noopResult.chatResponse');
+    expect(source).not.toContain('replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse)');
     expect(source).not.toContain('buildServertoolHandlerErrorToolOutputPayloadWithNative({\n          base: args.baseForExecution as Record<string, unknown>,\n          toolCallId: toolCall.id,\n          toolName: toolCall.name,\n          message: errorEffectPlan.handlerErrorMessage\n        }) as JsonObject');
     expect(source).not.toContain('base: args.baseForExecution as Record<string, unknown>');
     expect(source).toContain('const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({');
@@ -277,9 +263,9 @@ describe('execution-queue-shell', () => {
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).toContain('toolCall: errorEffectPlan.toolCall');
     expect(source).toContain('execution: errorEffectPlan.execution');
-    expect(source).toContain('toolCall: noopEffectPlan.toolCall');
-    expect(source).toContain('execution: noopEffectPlan.execution');
-    expect(source).toContain('noopOutcome: noopResult');
+    expect(source).not.toContain('toolCall: noopEffectPlan.toolCall');
+    expect(source).not.toContain('execution: noopEffectPlan.execution');
+    expect(source).not.toContain('noopOutcome: noopResult');
     expect(source).not.toContain('flowId: noopFlowId');
     expect(source).not.toContain('noopFlowId');
     expect(source).not.toContain('buildServertoolDispatchPlanInputWithNative');

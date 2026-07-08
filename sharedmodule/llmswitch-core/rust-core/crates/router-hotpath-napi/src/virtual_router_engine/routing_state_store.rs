@@ -6,89 +6,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::instructions::{InstructionTarget, RoutingInstructionState};
+use super::instructions::{GlobalRequestCounter, InstructionTarget, RoutingInstructionState};
+
+const GLOBAL_COUNTER_KEY: &str = "__global_request_counter__";
 
 const RCC_HOME_ENV: &str = "RCC_HOME";
 const ROUTECODEX_USER_DIR_ENV: &str = "ROUTECODEX_USER_DIR";
 const ROUTECODEX_HOME_ENV: &str = "ROUTECODEX_HOME";
 const NO_SESSION_DIR_OVERRIDE_SENTINEL: &str = "__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__";
 const GLOBAL_REQUEST_COUNTER_FILENAME: &str = "global-request-counter.json";
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct GlobalRequestCounter {
-    #[serde(default)]
-    pub total_requests: i64,
-    #[serde(default)]
-    pub daily_requests: i64,
-    #[serde(default)]
-    pub last_request_day: Option<String>,
-    #[serde(default)]
-    pub last_request_day_start_ms: Option<i64>,
-    #[serde(default)]
-    pub last_request_at_ms: i64,
-}
-
-impl GlobalRequestCounter {
-    pub(crate) fn new() -> Self {
-        Self {
-            total_requests: 0,
-            daily_requests: 0,
-            last_request_day: None,
-            last_request_day_start_ms: None,
-            last_request_at_ms: 0,
-        }
-    }
-
-    pub(crate) fn tick(&mut self, now_ms: i64) -> (i64, i64) {
-        let (current_day, day_start_ms) = local_day_for_timestamp_ms(now_ms);
-        if self.last_request_day.as_deref() != Some(current_day.as_str()) {
-            self.daily_requests = 0;
-        }
-        self.total_requests = self.total_requests.saturating_add(1).max(1);
-        self.daily_requests = self.daily_requests.saturating_add(1).max(1);
-        self.last_request_day = Some(current_day);
-        self.last_request_day_start_ms = Some(day_start_ms);
-        self.last_request_at_ms = now_ms;
-        (self.total_requests, self.daily_requests)
-    }
-
-    pub(crate) fn current_local_day() -> (String, i64) {
-        local_day_for_timestamp_ms(chrono::Utc::now().timestamp_millis())
-    }
-
-    pub(crate) fn parse_day_start_ms(day: &str) -> Option<i64> {
-        if day.len() != 10
-            || day.as_bytes().get(4) != Some(&b'-')
-            || day.as_bytes().get(7) != Some(&b'-')
-        {
-            return None;
-        }
-        let date = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()?;
-        let midnight = date.and_hms_opt(0, 0, 0)?;
-        match chrono::Local.from_local_datetime(&midnight) {
-            chrono::LocalResult::Single(dt) => Some(dt.timestamp_millis()),
-            chrono::LocalResult::Ambiguous(earliest, _) => Some(earliest.timestamp_millis()),
-            chrono::LocalResult::None => None,
-        }
-    }
-}
-
-fn local_day_for_timestamp_ms(now_ms: i64) -> (String, i64) {
-    use chrono::Datelike;
-
-    let local = chrono::DateTime::from_timestamp_millis(now_ms)
-        .map(|dt| dt.with_timezone(&chrono::Local))
-        .unwrap_or_else(chrono::Local::now);
-    let day = format!(
-        "{:04}-{:02}-{:02}",
-        local.year(),
-        local.month(),
-        local.day()
-    );
-    let start_ms = GlobalRequestCounter::parse_day_start_ms(&day).unwrap_or(now_ms);
-    (day, start_ms)
-}
 
 #[derive(Clone)]
 enum SessionDirOverride {
@@ -1148,5 +1074,4 @@ mod isolation_tests {
             let _ = fs::remove_file(p);
         }
     }
-
 }

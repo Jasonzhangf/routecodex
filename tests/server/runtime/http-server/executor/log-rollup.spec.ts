@@ -37,8 +37,8 @@ describe('log rollup', () => {
     recordVirtualRouterHitRollup({
       routeName: 'default',
       poolId: 'tools-primary',
-      providerKey: 'qwen.1',
-      model: 'qwen3.6-plus',
+      providerKey: 'provider-a.1',
+      model: 'model-a',
       sessionId: 'sid-a',
       projectPath: '/tmp/project-a',
       activeInFlight: 1,
@@ -47,8 +47,8 @@ describe('log rollup', () => {
     recordVirtualRouterHitRollup({
       routeName: 'default',
       poolId: 'tools-primary',
-      providerKey: 'qwen.1',
-      model: 'qwen3.6-plus',
+      providerKey: 'provider-a.1',
+      model: 'model-a',
       sessionId: 'sid-a',
       projectPath: '/tmp/project-a',
       activeInFlight: 2,
@@ -59,8 +59,8 @@ describe('log rollup', () => {
       requestId: 'req-a-1',
       routeName: 'default',
       poolId: 'tools-primary',
-      providerKey: 'qwen.1',
-      model: 'qwen3.6-plus',
+      providerKey: 'provider-a.1',
+      model: 'model-a',
       sessionId: 'sid-a',
       projectPath: '/tmp/project-a',
       latencyMs: 1000,
@@ -76,8 +76,8 @@ describe('log rollup', () => {
       requestId: 'req-a-2',
       routeName: 'default',
       poolId: 'tools-primary',
-      providerKey: 'qwen.1',
-      model: 'qwen3.6-plus',
+      providerKey: 'provider-a.1',
+      model: 'model-a',
       sessionId: 'sid-a',
       projectPath: '/tmp/project-a',
       latencyMs: 1200,
@@ -93,7 +93,7 @@ describe('log rollup', () => {
     flushLogRollup('manual');
     const lines = logSpy.mock.calls.map((call) => String(call[0] ?? ''));
     expect(lines.some((line) => line.includes('[virtual-router-hit][1m]'))).toBe(true);
-    expect(lines.some((line) => line.includes('provider=qwen.1.qwen3.6-plus hits=2'))).toBe(true);
+    expect(lines.some((line) => line.includes('provider=provider-a.1.model-a hits=2'))).toBe(true);
     expect(lines.some((line) => line.includes('concurrency avg=1.50/4.00'))).toBe(true);
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(true);
     expect(lines.some((line) => line.includes('avg.total=1100ms'))).toBe(true);
@@ -194,8 +194,8 @@ describe('log rollup', () => {
     recordVirtualRouterHitRollup({
       routeName: 'default',
       poolId: 'tools-primary',
-      providerKey: 'qwen.1',
-      model: 'qwen3.6-plus',
+      providerKey: 'provider-a.1',
+      model: 'model-a',
       sessionId: 'sid-a',
       projectPath: '/tmp/project-a',
       activeInFlight: 1,
@@ -312,9 +312,9 @@ describe('log rollup', () => {
     recordUsageRollup({
       requestId: 'req-cache-rt',
       routeName: 'thinking',
-      poolId: 'thinking-deepseek-web-primary',
-      providerKey: 'deepseek-web.clary',
-      model: 'deepseek-v4-pro',
+      poolId: 'thinking-provider-a-primary',
+      providerKey: 'provider-a.clary',
+      model: 'model-a',
       sessionId: 'sid-cache-rt',
       projectPath: '/tmp/project-cache-rt',
       latencyMs: 10000,
@@ -346,7 +346,7 @@ describe('log rollup', () => {
     recordUsageRollup({
       requestId: 'req-cache-rt-openai-responses',
       routeName: 'thinking',
-      poolId: 'thinking-deepseek-web-primary',
+      poolId: 'thinking-provider-a-primary',
       providerKey: 'openai.resp',
       model: 'gpt-5.4',
       providerProtocol: 'openai-responses',
@@ -379,9 +379,9 @@ describe('log rollup', () => {
     recordUsageRollup({
       requestId: 'req-cache-rt-suppressed',
       routeName: 'thinking',
-      poolId: 'thinking-deepseek-web-primary',
-      providerKey: 'deepseek-web.clary',
-      model: 'deepseek-v4-pro',
+      poolId: 'thinking-provider-a-primary',
+      providerKey: 'provider-a.clary',
+      model: 'model-a',
       sessionId: 'sid-cache-rt-suppressed',
       projectPath: '/tmp/project-cache-rt',
       latencyMs: 10000,

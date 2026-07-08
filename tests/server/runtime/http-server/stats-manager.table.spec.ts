@@ -100,7 +100,7 @@ describe('StatsManager provider summary table output', () => {
     });
 
     stats.recordRequestStart('req-final-2');
-    stats.bindProvider('req-final-2', { providerKey: 'qwen.1', model: 'qwen3.5-plus' });
+    stats.bindProvider('req-final-2', { providerKey: 'provider-a.1', model: 'model-a' });
     stats.recordCompletion('req-final-2', {
       usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 }
     });
@@ -111,6 +111,6 @@ describe('StatsManager provider summary table output', () => {
     expect(output).toContain('[Stats][final][session]');
     expect(output).toContain('[Stats][final][historical]');
     expect(output).toContain('glm.2-173 / kimi-k2.5 1 10 4 4');
-    expect(output).toContain('qwen.1 / qwen3.5-plus 1 8 2 2');
+    expect(output).toContain('provider-a.1 / model-a 1 8 2 2');
   });
 });

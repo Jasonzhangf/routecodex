@@ -34,28 +34,6 @@
           "apiKey": "${GLM_API_KEY}"
         }
       },
-      "qwen": {
-        "id": "qwen",
-        "enabled": true,
-        "type": "openai",
-        "baseURL": "https://portal.qwen.ai/v1",
-        "compatibilityProfile": "chat:qwen",
-        "auth": {
-          "type": "qwen-oauth",
-          "tokenFile": "default"
-        },
-        "models": {
-          "qwen3-coder-plus": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "qwen3.5-plus": {
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          }
-        }
-      },
       "kimi": {
         "id": "kimi",
         "enabled": true,
@@ -425,8 +403,7 @@
           "id": "search-primary",
           "mode": "priority",
           "targets": [
-            "iflow.kimi-k2",
-            "qwen.qwen3-coder-plus"
+            "iflow.kimi-k2"
           ],
           "force": true
         }
@@ -435,14 +412,14 @@
         {
           "id": "background-primary",
           "mode": "round-robin",
-          "targets": ["glm.glm-4.7", "qwen.qwen3-coder-plus"]
+          "targets": ["glm.glm-4.7"]
         }
       ],
       "tools": [
         {
           "id": "tools-primary",
           "mode": "priority",
-          "targets": ["glm.glm-4.7:200", "qwen.qwen3-coder-plus:100", "iflow.kimi-k2:50"]
+          "targets": ["glm.glm-4.7:200", "iflow.kimi-k2:50"]
         }
       ]
     },
@@ -454,11 +431,6 @@
           "description": "iFlow Kimi K2 web search backend",
           "default": true,
           "searchEngineList": ["GOOGLE"]
-        },
-        {
-          "id": "qwen",
-          "providerKey": "qwen.qwen3-coder-plus",
-          "description": "Qwen3 Coder Plus web search backend"
         }
       ],
       "injectPolicy": "selective",

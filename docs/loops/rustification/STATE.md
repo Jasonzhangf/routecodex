@@ -2,7 +2,7 @@
 
 kill_switch: inactive
 mode: L1 report-only
-last_run_id: 2026-07-07T23:44:48+08:00-public-barrel-residue-red-gate
+last_run_id: 2026-07-08T00:30:00+08:00-public-ambient-declaration-delete
 
 ## Current Baseline
 
@@ -44,6 +44,10 @@ reports `prodTsFileCount=126`, `prodTsLocTotal=27379`,
   stats-center TS IO shell. `verify:llmswitch-minimal-ts-surface` gates against
   reintroducing those public exports and against changing VR contracts back to a
   runtime `export *`.
+- Root `src/types/llmswitch-core.d.ts` ambient declarations for
+  `rcc-llmswitch-core/dist/...` are physically deleted after source import audit
+  proved there are no remaining consumers. The residue audit now includes this
+  declaration file in the deleted legacy facade list.
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` also locks the
   same public-barrel shrink at the residue-audit layer: provider-response and
   stats-center root exports must stay absent, and VR contracts must stay

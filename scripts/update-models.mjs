@@ -4,7 +4,7 @@
  * RouteCodex config (defaults to ~/.rcc/config.json).
  *
  * Usage:
- *   node scripts/update-models.mjs --provider qwen-provider [--write] [--config path]
+ *   node scripts/update-models.mjs --provider <provider-id> [--write] [--config path]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,18 +33,6 @@ function resolveConfigPath(explicit){
     throw new Error('Unable to resolve configuration path');
   }
   return path.resolve(candidate);
-}
-
-function findQwenToken(){
-  const home=process.env.HOME||'';
-  const rc=path.join(home,'.routecodex','tokens','qwen-default.json');
-  try{ if(fs.existsSync(rc)) { const t=readJson(rc); if(t && (t.access_token||t.AccessToken)) return t; } }catch{}
-  const dir=path.join(home,'.cli-proxy-api');
-  try{
-    const list=fs.readdirSync(dir).filter(n=>/^qwen-.*\.json$/i.test(n)).sort();
-    for(const f of list){ const t=readJson(path.join(dir,f)); if(t && (t.access_token||t.AccessToken)) return t; }
-  }catch{}
-  return null;
 }
 
 async function fetchModels(baseURL, auth){
@@ -84,16 +72,13 @@ async function main(){
   const providers = vr.providers || {};
   const p = providers[args.provider];
   if(!p){ throw new Error(`Provider not found in config: ${args.provider}`); }
-  const baseURL = p.baseURL || p.baseUrl || 'https://api.qwen.ai/v1';
+  const baseURL = p.baseURL || p.baseUrl;
+  if (!baseURL) {
+    throw new Error(`Provider ${args.provider} is missing baseURL`);
+  }
 
   let bearer = null;
-  // Only for qwen: try token files
-  if (/qwen/i.test(args.provider) || /qwen/i.test(baseURL)){
-    const tok = findQwenToken();
-    if(tok) bearer = tok.access_token || tok.AccessToken;
-  }
-  // Otherwise, try apikey in config
-  if(!bearer && Array.isArray(p.apiKey) && p.apiKey[0]){
+  if(Array.isArray(p.apiKey) && p.apiKey[0]){
     bearer = p.apiKey[0];
   }
 

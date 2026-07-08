@@ -52,7 +52,6 @@ const nativeServertoolCoreTypedExports = new Set([
   'planServertoolHandlerMaterializationForPlannedWithNative',
   'planServertoolHandlerMaterializationWithNative',
   'planServertoolHookScheduleWithNative',
-  'planServertoolNoopExecutionLoopEffectWithNative',
   'planServertoolRegistryAutoHookDescriptorsWithNative',
   'planServertoolRegistryBuiltinAutoHookEntriesWithNative',
   'planServertoolRegistryLookupActionWithNative',
@@ -154,16 +153,9 @@ export type ServertoolDispatchCandidate = {
   executionMode: string;
   stripAfterExecute: boolean;
 };
-export type ServertoolDispatchNoop = {
-  id: string;
-  name: string;
-  arguments: string;
-  executionMode?: string;
-  stripAfterExecute?: boolean;
-};
 export type ServertoolDispatchPlan = {
   executableToolCalls: ServertoolDispatchCandidate[];
-  noopToolCalls: ServertoolDispatchNoop[];
+  noopToolCalls: [];
   skippedToolCalls: Array<{ id: string; name: string; reason: string }>;
 };
 export type ServertoolDispatchPlanInput = {
@@ -218,11 +210,6 @@ export type ServertoolAutoHookQueueItems<T> = {
   }>;
 };
 export type ServertoolFollowupRuntimePlan = Record<string, unknown>;
-export type ServertoolNoopOutcome = {
-  chatResponse: JsonObject;
-  flowId: string;
-  toolContent: Record<string, unknown>;
-};
 export type ServertoolProgressEvent = {
   flowId: string;
   tool: string;
@@ -475,7 +462,6 @@ export declare function buildServertoolStopEntryProgressEventWithNative(input: u
 export declare function buildServertoolStopCompareProgressEventWithNative(input: unknown): ServertoolProgressEvent;
 export declare function planServertoolToolCallDispatchWithNative(input: unknown): ServertoolDispatchPlan;
 export declare function planServertoolOutcomeWithNative(input: unknown): ServertoolOutcomePlan;
-export declare function planServertoolNoopOutcomeWithNative(input: unknown): ServertoolNoopOutcome;
 export declare function planServertoolAutoHookQueuesWithNative(input: unknown): ServertoolAutoHookQueues;
 export declare function planServertoolAutoHookQueueItemsWithNative<T>(input: unknown): ServertoolAutoHookQueueItems<T>;
 
@@ -592,7 +578,6 @@ export declare function planServertoolHandlerMaterializationForPlannedWithNative
 export declare function planServertoolHandlerMaterializationWithNative(input: unknown): unknown;
 export declare function planServertoolHookScheduleWithNative(input: unknown): unknown;
 export declare function planServertoolLoopStateWithNative(input: unknown): unknown;
-export declare function planServertoolNoopExecutionLoopEffectWithNative(input: unknown): NativeExecutionLoopEffectPlan;
 export declare function planServertoolRegistryAutoHookDescriptorsWithNative(input: unknown): unknown;
 export declare function planServertoolRegistryBuiltinAutoHookEntriesWithNative(input: unknown): NativeServertoolRegistryAutoHookEntry[];
 export declare function planServertoolRegistryLookupActionWithNative(input: unknown): unknown;

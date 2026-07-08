@@ -1,8 +1,6 @@
 use serde_json::{Map, Value};
 
-use crate::chat_servertool_orchestration::{
-    build_continue_execution_operations, plan_chat_servertool_orchestration_bundle,
-};
+use crate::chat_servertool_orchestration::plan_chat_servertool_orchestration_bundle;
 use crate::chat_web_search_tool_schema::build_web_search_tool_append_operations;
 use crate::hub_req_inbound_context_capture::resolve_client_inject_ready as resolve_client_inject_ready_from_metadata;
 use crate::web_search_mode::{
@@ -197,7 +195,7 @@ pub(crate) fn apply_hub_operations(request: &mut Map<String, Value>, operations:
 pub(crate) fn maybe_apply_servertool_orchestration(
     request: &mut Map<String, Value>,
     metadata: &Map<String, Value>,
-    has_active_stop_message_for_continue_execution: bool,
+    _has_active_stop_message_for_continue_execution: bool,
 ) {
     let client_inject_ready = resolve_client_inject_ready(metadata);
     if !client_inject_ready {
@@ -205,12 +203,10 @@ pub(crate) fn maybe_apply_servertool_orchestration(
     }
 
     let runtime_metadata = read_runtime_metadata(metadata);
-    let has_active_stop_message = has_active_stop_message_for_continue_execution;
-
     let bundle_plan = plan_chat_servertool_orchestration_bundle(
         &Value::Object(request.clone()),
         &Value::Object(runtime_metadata.clone()),
-        has_active_stop_message,
+        false,
     );
 
     let mut operations: Vec<Value> = Vec::new();
@@ -227,11 +223,6 @@ pub(crate) fn maybe_apply_servertool_orchestration(
         }
     }
 
-    if let Value::Array(ops) =
-        build_continue_execution_operations(bundle_plan.continue_execution.should_inject)
-    {
-        operations.extend(ops);
-    }
     if operations.is_empty() {
         return;
     }

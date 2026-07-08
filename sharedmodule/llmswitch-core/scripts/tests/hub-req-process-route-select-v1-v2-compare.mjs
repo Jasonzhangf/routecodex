@@ -109,7 +109,7 @@ function buildCases() {
         clientModelId: 'already-set-norm'
       },
       target: {
-        providerKey: 'qwen.qwen3.5-plus',
+        providerKey: 'provider-a.model-a',
         providerType: 'openai-responses',
         processMode: 'chat'
       },

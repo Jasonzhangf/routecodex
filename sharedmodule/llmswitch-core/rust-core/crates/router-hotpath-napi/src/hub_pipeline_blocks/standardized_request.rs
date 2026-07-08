@@ -1,8 +1,5 @@
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
 use crate::hub_req_inbound_context_capture::normalize_responses_input_items;
-use crate::hub_req_inbound_tool_call_normalization::{
-    build_stop_hook_guidance_text_from_output, build_stop_hook_reasoning_stop_output_text,
-};
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 use crate::shared_json_utils::read_trimmed_string;
 use crate::virtual_router_engine::derive_model_id;
@@ -162,6 +159,17 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
             );
         }
     }
+    if let Some(stopless) = derive_stopless_runtime_control_from_payload(payload) {
+        let runtime_control = metadata
+            .entry("runtime_control".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !runtime_control.is_object() {
+            *runtime_control = Value::Object(Map::new());
+        }
+        if let Some(runtime_control) = runtime_control.as_object_mut() {
+            runtime_control.insert("stopless".to_string(), stopless);
+        }
+    }
 
     let mut semantics = semantics_from_payload.unwrap_or_default();
     if let Some(previous_response_id) = previous_response_id.clone() {
@@ -314,6 +322,159 @@ fn normalize_submit_tool_outputs_as_responses_input(tool_outputs: Vec<Value>) ->
             Value::Object(normalized)
         })
         .collect()
+}
+
+fn derive_stopless_runtime_control_from_payload(payload: &Map<String, Value>) -> Option<Value> {
+    latest_stopless_cli_output_from_items(payload.get("input"))
+        .or_else(|| latest_stopless_cli_output_from_items(payload.get("tool_outputs")))
+        .or_else(|| latest_stopless_cli_output_from_items(payload.get("messages")))
+        .and_then(|row| build_stopless_runtime_control_from_cli(&row))
+}
+
+fn latest_stopless_cli_output_from_items(items: Option<&Value>) -> Option<Map<String, Value>> {
+    let items = items?.as_array()?;
+    for item in items.iter().rev() {
+        let Some(row) = item.as_object() else {
+            continue;
+        };
+        if let Some(output) = row.get("output").or_else(|| row.get("content")) {
+            if let Some(parsed) = parse_stopless_cli_output(output) {
+                return Some(parsed);
+            }
+        }
+    }
+    None
+}
+
+fn parse_stopless_cli_output(value: &Value) -> Option<Map<String, Value>> {
+    let parsed = match value {
+        Value::String(raw) => serde_json::from_str::<Value>(raw.trim()).ok()?,
+        Value::Object(_) => value.clone(),
+        _ => return None,
+    };
+    let row = parsed.as_object()?.clone();
+    let tool_name = read_trimmed_string(row.get("toolName"))
+        .or_else(|| read_trimmed_string(row.get("tool_name")))
+        .or_else(|| read_trimmed_string(row.get("tool")));
+    let flow_id = read_trimmed_string(row.get("flowId"))
+        .or_else(|| read_trimmed_string(row.get("flow_id")))
+        .or_else(|| read_nested_string_field(&row, "input", "flowId", "flow_id"));
+    let has_stopless_counter = read_u64_field(&row, "repeatCount", "repeat_count")
+        .or_else(|| {
+            row.get("input")
+                .and_then(Value::as_object)
+                .and_then(|input| read_u64_field(input, "repeatCount", "repeat_count"))
+        })
+        .is_some();
+    if tool_name.as_deref() != Some("stop_message_auto")
+        && !(flow_id.as_deref() == Some("stop_message_flow") && has_stopless_counter)
+    {
+        return None;
+    }
+    Some(row)
+}
+
+fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<Value> {
+    let repeat_count = read_u64_field(row, "repeatCount", "repeat_count").or_else(|| {
+        row.get("input")
+            .and_then(Value::as_object)
+            .and_then(|input| read_u64_field(input, "repeatCount", "repeat_count"))
+    })?;
+    let max_repeats = read_u64_field(row, "maxRepeats", "max_repeats")
+        .or_else(|| {
+            row.get("input")
+                .and_then(Value::as_object)
+                .and_then(|input| read_u64_field(input, "maxRepeats", "max_repeats"))
+        })
+        .unwrap_or(3);
+    let flow_id = read_trimmed_string(row.get("flowId"))
+        .or_else(|| read_trimmed_string(row.get("flow_id")))
+        .or_else(|| read_nested_string_field(row, "input", "flowId", "flow_id"))
+        .unwrap_or_else(|| "stop_message_flow".to_string());
+    let reason_code = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))
+        .and_then(Value::as_object)
+        .and_then(|feedback| {
+            read_trimmed_string(feedback.get("reasonCode"))
+                .or_else(|| read_trimmed_string(feedback.get("reason_code")))
+        });
+    let trigger_hint = row
+        .get("schemaGuidance")
+        .or_else(|| row.get("schema_guidance"))
+        .and_then(Value::as_object)
+        .and_then(|guidance| {
+            read_trimmed_string(guidance.get("triggerHint"))
+                .or_else(|| read_trimmed_string(guidance.get("trigger_hint")))
+        })
+        .or_else(|| read_nested_string_field(row, "input", "triggerHint", "trigger_hint"))
+        .or_else(|| read_trimmed_string(row.get("triggerHint")))
+        .or_else(|| read_trimmed_string(row.get("trigger_hint")))
+        .or(reason_code)
+        .map(|token| normalize_stopless_runtime_trigger_hint(&token).to_string());
+    let schema_feedback = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))
+        .and_then(Value::as_object)
+        .map(|feedback| Value::Object(feedback.clone()));
+
+    let mut stopless = Map::new();
+    stopless.insert("flowId".to_string(), Value::String(flow_id));
+    stopless.insert(
+        "repeatCount".to_string(),
+        Value::Number(repeat_count.into()),
+    );
+    stopless.insert("maxRepeats".to_string(), Value::Number(max_repeats.into()));
+    stopless.insert("active".to_string(), Value::Bool(true));
+    if let Some(trigger_hint) = trigger_hint {
+        stopless.insert("triggerHint".to_string(), Value::String(trigger_hint));
+    }
+    if let Some(schema_feedback) = schema_feedback {
+        stopless.insert("schemaFeedback".to_string(), schema_feedback);
+    }
+    Some(Value::Object(stopless))
+}
+
+fn read_u64_field(row: &Map<String, Value>, camel: &str, snake: &str) -> Option<u64> {
+    row.get(camel)
+        .or_else(|| row.get(snake))
+        .and_then(Value::as_u64)
+}
+
+fn read_nested_string_field<'a>(
+    row: &'a Map<String, Value>,
+    owner: &str,
+    camel: &str,
+    snake: &str,
+) -> Option<String> {
+    row.get(owner)
+        .and_then(Value::as_object)
+        .and_then(|nested| {
+            read_trimmed_string(nested.get(camel))
+                .or_else(|| read_trimmed_string(nested.get(snake)))
+        })
+}
+
+fn normalize_stopless_runtime_trigger_hint(token: &str) -> &'static str {
+    match token.trim() {
+        "stop_schema_missing" | "no_schema" => "no_schema",
+        "stop_schema_reason_missing"
+        | "stop_schema_terminal_missing_fields"
+        | "stop_schema_stopreason_missing_or_non_numeric"
+        | "stop_schema_needs_user_input_missing_next_step"
+        | "stop_schema_next_step_missing"
+        | "stop_schema_forcestop_reason_missing"
+        | "stop_schema_continue_without_next_step"
+        | "invalid_schema" => "invalid_schema",
+        "stop_schema_continue_next_step" | "non_terminal_schema" => "non_terminal_schema",
+        "stop_schema_budget_exhausted" | "budget_exhausted" => "budget_exhausted",
+        "stop_schema_finished"
+        | "stop_schema_blocked"
+        | "stop_schema_needs_user_input"
+        | "stop_schema_forcestop"
+        | "schema_pass" => "schema_pass",
+        _ => "no_schema",
+    }
 }
 
 fn copy_optional_payload_fields(

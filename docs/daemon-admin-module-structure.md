@@ -18,8 +18,7 @@
   - 新的管理 API 只“读”这些模块暴露的状态或执行低风险动作（例如触发一次 verify），不直接操作 llmswitch-core 的内部路由逻辑。
 
 - **前端 UI 为独立模块**
-  - 静态设计页面保留在 `docs/daemon-admin-ui.html`。
-  - 真正运行时的管理 UI 视图将作为 HTTP server 提供的静态页面（后续实现阶段接入），前端通过一组只读 JSON API 获取数据。
+  - 运行时的管理 UI 视图作为 HTTP server 提供的静态页面，前端通过一组只读 JSON API 获取数据。
 
 ---
 
@@ -73,9 +72,8 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
     - `POST /daemon/credentials/:id/verify`
     - `POST /daemon/credentials/:id/refresh`
   - 依赖：
-    - 现有 token 文件扫描、解析工具：
+    - 现有 authfile 扫描、解析工具：
       - `providers/auth/token-scanner` 系列
-      - `token-daemon/token-utils` 中的 `readTokenFile` / `evaluateTokenState`
     - 必须避免返回敏感字段（access_token / refresh_token 等），只返回文件路径、issuer、project_id 等非敏感信息。
 
 - `daemon-admin/providers-runtime-handler.ts`
@@ -123,14 +121,11 @@ registerDaemonAdminRoutes({
 
 ### 3.1 设计稿与运行时文件的关系
 
-- 设计稿：
-  - `docs/daemon-admin-ui.html` 保留为设计 Mock，展示完整的 UI 布局和交互。
-
-- 运行时静态页面（后续实现阶段）：
+- 运行时静态页面：
   - 计划通过 HTTP server 暴露一个只读页面，例如：
     - `GET /daemon/admin` → 返回一个内嵌或打包好的 HTML。
   - 为了减少重复，推荐方案：
-    - 在构建流程中，将 `docs/daemon-admin-ui.html` 复制/压缩到构建输出目录（例如 `dist/daemon-admin/index.html`）。
+    - 在构建流程中生成真实 Web UI artifact（例如 `dist/daemon-admin/index.html`）。
     - 在 HTTP server 中提供一个简单的静态文件响应（不在本次设计中实现具体逻辑）。
 
 ### 3.2 前端脚本组织（后续）

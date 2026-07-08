@@ -209,7 +209,7 @@ flowchart TB
     PRE --> DETECT{"request.model = provider.model?"}
 
     DETECT -->|"是"| DM_VALIDATE["验证 provider + model 存在"]
-    DM_VALIDATE --> DM_MEDIA{"media fallback?<br/>(Qwen+local video)"}
+    DM_VALIDATE --> DM_MEDIA{"media fallback?<br/>(provider media fallback)"}
     DM_MEDIA -->|"否"| DM_SELECT["list_keys → filter_by_state<br/>→ standard_filters → round-robin"]
     DM_SELECT --> DM_RETURN["返回 DIRECT 结果"]
 
@@ -296,7 +296,7 @@ flowchart TB
 
 **Virtual Router 的职责边界**：
 - 基于**通用特征**（capability、priority、health、quota）做路由决策
-- 不识别任何 provider 名字（qwen、gemini、claude 等）
+- 不识别任何 provider 名字（provider-a、gemini、claude 等）
 - 不做 provider-specific 的 fallback、黑名单、优先级调整
 
 **Hub Pipeline 的职责边界**：
@@ -306,24 +306,24 @@ flowchart TB
 
 **Provider 配置的职责边界**：
 - 显式声明 capabilities（`multimodal`、`web_search`、`video` 等）
-- 显式声明 `series` / `authFamily`（用于系列冷却、认证家族黑名单）
+- 显式声明 `series` / `credentialGroup`（用于系列冷却、credential group 黑名单）
 - 显式声明协议类型（`providerProtocol` / `outboundProfile`）
 
 ### 5a. VR 热路径特判（必须移除）
 
 以下 5 处硬编码在 VR 的**运行时决策路径**中，违反了职责边界：
 
-#### 5a-1. Qwen 媒体回退特判
+#### 5a-1. provider 媒体回退特判
 
 **位置**：`routing/direct_model.rs:48-71`
 
 ```rust
-// 当前：检查 provider_id == "qwen" && model == "qwen3.5-plus"
-if provider_id.trim().to_lowercase() != "qwen" { return false; }
-let is_qwen35_plus = model == "qwen3.5-plus" || ... ;
+// 当前：检查 provider_id == "provider-a" && model == "model-a"
+if provider_id.trim().to_lowercase() != "provider-a" { return false; }
+let is_provider_a_model = model == "model-a" || ... ;
 ```
 
-**问题**：VR 知道"qwen"这个 provider 名字和"qwen3.5-plus"这个 model 名字。
+**问题**：VR 知道"provider-a"这个 provider 名字和"model-a"这个 model 名字。
 
 **替代方案**：
 - Provider 配置中声明 `directModelMediaFallback: true` 或 `mediaHandling: "relay_fallback"`
@@ -352,22 +352,22 @@ let series = match series_raw.as_str() {
 - VR 只读已声明的 series 做冷却传播，不做字符串匹配
 - 所有 provider 都能使用 series 冷却，不限于 3 个
 
-#### 5a-3. Qwen 认证家族黑名单
+#### 5a-3. provider credential group 黑名单
 
 **位置**：`engine/events.rs:147-169`
 
 ```rust
-// 当前：检查 provider_key 是否以 "qwen." 开头
-if !provider_key.starts_with("qwen.") { return false; }
-// 然后黑名单所有 qwen.* 的 key
-for key in self.provider_registry.list_provider_keys("qwen") { ... }
+// 当前：检查 provider_key 是否以 "provider-a." 开头
+if !provider_key.starts_with("provider-a.") { return false; }
+// 然后黑名单所有 provider-a.* 的 key
+for key in self.provider_registry.list_provider_keys("provider-a") { ... }
 ```
 
-**问题**：VR 知道"qwen"这个 provider ID。
+**问题**：VR 知道"provider-a"这个 provider ID。
 
 **替代方案**：
-- Provider 配置中声明 `authFamily: "qwen-oauth"`（或类似）
-- 当认证错误发生时，黑名单所有同 `authFamily` 的 provider
+- Provider 配置中声明 `credentialGroup: "provider-a-primary"`（或类似）
+- 当credential 错误发生时，黑名单所有同 `credentialGroup` 的 provider
 - 通用的 "auth error family blacklist" 机制
 
 #### 5a-4. Multimodal 优先级特判（responses/gemini）
@@ -413,7 +413,7 @@ match capability {
 - 配置示例：
   ```json
   {
-    "providerKey": "qwen.key1.qwen3.5-plus",
+    "providerKey": "provider-a.key1.model-a",
     "capabilities": ["multimodal", "video"]
   }
   ```
@@ -427,8 +427,8 @@ match capability {
 | `provider_bootstrap.rs` | Header 注入、provider type 检测 | **保留**。这是 config bootstrap 阶段，不在请求热路径。但应移出 `virtual_router_engine/` 到独立的 `bootstrap/` 模块 |
 | `hub_pipeline_blocks/protocol.rs` | 协议别名映射、endpoint 推断 | **保留**。这是 pipeline 的协议层职责 |
 | `hub_pipeline_blocks/process_mode.rs` | "sticky"/"force" 指令透传 | **保留**。这是指令透传机制，与 provider 无关 |
-| `text_harvest_detection.rs` | DeepSeek/Qwen text tool family | **保留**。这是 tool governance 层职责 |
-| TS: `hub-pipeline-max-tokens-policy.ts` | Qwen max output tokens cap | **可保留**。但建议改为配置驱动 |
+| `text_harvest_detection.rs` | explicit text tool harvest switch | **保留**。这是 tool governance 层职责 |
+| TS: `hub-pipeline-max-tokens-policy.ts` | provider max output tokens cap | **可保留**。但建议改为配置驱动 |
 | TS: `responses-openai-bridge.ts` | forceWebSearch 注入 | **可保留**。bridge 层行为 |
 | `provider-resolution-config.json` | Keyword → providerType 映射 | **保留**。这是配置，是正确的方式 |
 
@@ -436,9 +436,9 @@ match capability {
 
 | # | 改动 | 文件 | 类型 | 优先级 |
 |---|------|------|------|--------|
-| 1 | 移除 Qwen 名字特判，改为 `directModelMediaFallback` 配置声明 | `routing/direct_model.rs` | **VR 热路径** | P0 |
+| 1 | 移除 provider 名字特判，改为 `directModelMediaFallback` 配置声明 | `routing/direct_model.rs` | **VR 热路径** | P0 |
 | 2 | 移除 series 名称硬编码和 model_id 推断，改为配置显式 `series` | `engine/events.rs:631-677` | **VR 热路径** | P0 |
-| 3 | 移除 `qwen.` 前缀黑名单，改为 `authFamily` 配置 | `engine/events.rs:147-169` | **VR 热路径** | P0 |
+| 3 | 移除 provider 前缀黑名单，改为 `credentialGroup` 配置 | `engine/events.rs:147-169` | **VR 热路径** | P0 |
 | 4 | 废弃 `build_route_candidates()` 替代为通用分组 | `routing/config.rs:171-214` | **VR 热路径** | P1 |
 | 5 | 移除 `has_default_capability` 推断，改为纯配置声明 | `provider_registry.rs:310-334` | **VR 热路径** | P1 |
 | 6 | 将 `provider_bootstrap.rs` 移出 `virtual_router_engine/` | — | 模块重组 | P2 |
@@ -451,9 +451,9 @@ match capability {
   Hub Pipeline ──request──►  Virtual Router                    │
                                         │  • classify (通用)     │
                                         │  • select (通用)       │
-                                        │  • ❌ Qwen 特判        │ ← 不该在这里
+                                        │  • ❌ provider 特判        │ ← 不该在这里
                                         │  • ❌ series 硬编码     │ ← 不该在这里
-                                        │  • ❌ authFamily 推断   │ ← 不该在这里
+                                        │  • ❌ credentialGroup 推断   │ ← 不该在这里
                                         │  • ❌ 能力推断          │ ← 不该在这里
                                         └─────────────────────┘
 
@@ -463,7 +463,7 @@ match capability {
                                         │  • classify (通用)     │
   (provider 配置显式声明)                   │  • select (通用)       │
    • capabilities                         │  • series             │ ← 从配置读取
-   • authFamily                           │  • authFamily         │ ← 从配置读取
+   • credentialGroup                           │  • credentialGroup         │ ← 从配置读取
    • directModelMediaFallback             │  • 能力检查           │ ← 从配置读取
                                         └─────────────────────┘
                                               ▲
@@ -477,10 +477,10 @@ match capability {
 
 ```json
 {
-  "providerKey": "qwen.key1.qwen3.5-plus",
+  "providerKey": "provider-a.key1.model-a",
   "capabilities": ["multimodal", "video", "web_search"],
-  "series": "qwen-max",
-  "authFamily": "qwen-oauth",
+  "series": "model-family-a",
+  "credentialGroup": "provider-a-primary",
   "directModelMediaFallback": true,
   "maxOutputTokens": 65536
 }

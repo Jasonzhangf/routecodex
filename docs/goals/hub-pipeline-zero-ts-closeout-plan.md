@@ -50,7 +50,7 @@ Observed from source/doc-only audit on 2026-07-08 after the latest zero-consumer
   - `telemetry/stats-center.ts` (`ts_io_shell_ok`)
 - Current hard reference locks:
 - `sharedmodule/llmswitch-core/src/index.ts` still publicly exports native bootstrap/provider ingress/failure policy and type-only VR contracts; provider-response and stats-center root exports are removed and gated.
-  - `src/types/llmswitch-core.d.ts` still declares public modules for `provider-response.js`, `virtual-router-contracts.js`, `native-router-hotpath-policy.js`, and `stats-center.js`.
+  - `src/types/llmswitch-core.d.ts` has been physically deleted after source import audit found no remaining `rcc-llmswitch-core/dist/...` ambient module consumers; residue gate blocks restoration.
   - `conversion/hub/pipeline/hub-pipeline-types.ts` has been physically deleted after source/test/script import audit found no runtime/source consumers; residue gate blocks restoration and re-export.
   - `scripts/lib/build-core-utils.mjs` still requires dist outputs for `conversion/hub/response/provider-response.js` and `conversion/shared/responses-conversation-store.js`.
   - `responses.continuation.mainline` edge `rct-06` is still `convertProviderResponse -> recordResponsesResponse`, so store deletion is blocked until the canonical save edge no longer names TS caller/callee.

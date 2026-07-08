@@ -1,14 +1,15 @@
 /**
  * Real red/green tests for provider-direct candidate-exhaustion contract.
  *
- * Provider-direct has no route-pool expansion today, but its consumer still
- * must consume the unified ErrorErr05 decision instead of doing a raw 4xx early
- * projection. The minimal contract is:
+ * Provider-direct must consume the unified ErrorErr05 decision instead of doing
+ * a raw 4xx/5xx early projection. The minimal contract is:
  *   1. client_disconnect → rethrow original error for final 204 projection,
  *      with no excluded-provider mutation.
- *   2. only bound provider and recoverable error → rethrow original error
- *      (no synthetic reroute, no infinite loop).
- *   3. non-recoverable plan → rethrow original error.
+ *   2. mayProject=false + defaultPoolAvailable=true → request reroute/re-entry,
+ *      not rethrow.
+ *   3. mayProject=false + routePoolRemainingAfterExclusion non-empty →
+ *      request reroute/re-entry, not rethrow.
+ *   4. mayProject=true + policyExhausted=true → rethrow/project is allowed.
  *
  * Owner: `decideDirectProviderRetry` in src/server/runtime/http-server/index.ts
  */
@@ -28,6 +29,10 @@ function plan(over: Partial<Plan> = {}): Plan {
       switchAction: 'exclude_and_reroute',
     } as Plan['retrySwitchPlan'],
     excludedCurrentProvider: true,
+    routePoolRemainingAfterExclusion: ['p2'],
+    defaultPoolAvailable: false,
+    policyExhausted: false,
+    mayProject: false,
     ...over,
   } as Plan;
 }
@@ -45,25 +50,52 @@ describe('provider-direct.candidate-exhaustion', () => {
     expect(decision.mutatedExcluded).toEqual(new Set());
   });
 
-  it('[reverse] recoverable error on single bound provider → rethrow original error', () => {
+  it('[forward] current pool exhausted but defaultPoolAvailable=true → request reroute/re-entry, not rethrow', () => {
     const decision = decideDirectProviderRetry({
-      retryExecutionPlan: plan(),
+      retryExecutionPlan: plan({
+        routePoolRemainingAfterExclusion: [],
+        defaultPoolAvailable: true,
+        policyExhausted: false,
+        mayProject: false,
+      }),
       error: { code: 'PROVIDER_TRANSPORT', message: 'upstream 5xx' },
       providerKey: 'p1',
     });
-    expect(decision.action).toBe('rethrow');
-    expect(decision.shouldRecurse).toBe(false);
-    expect(decision.mutatedExcluded).toEqual(new Set());
+    expect(decision.action).toBe('request_reroute');
+    expect(decision.shouldRecurse).toBe(true);
+    expect(decision.shouldRethrow).toBe(false);
+    expect(decision.mutatedExcluded).toEqual(new Set(['p1']));
   });
 
-  it('[reverse] non-recoverable plan → rethrow original error', () => {
+  it('[forward] routePoolRemainingAfterExclusion non-empty → request reroute/re-entry, not rethrow', () => {
+    const decision = decideDirectProviderRetry({
+      retryExecutionPlan: plan({
+        routePoolRemainingAfterExclusion: ['p2'],
+        defaultPoolAvailable: false,
+        policyExhausted: false,
+        mayProject: false,
+      }),
+      error: { statusCode: 503, code: 'HTTP_503', message: 'upstream unavailable' },
+      providerKey: 'p1',
+    });
+    expect(decision.action).toBe('request_reroute');
+    expect(decision.shouldRecurse).toBe(true);
+    expect(decision.shouldRethrow).toBe(false);
+    expect(decision.mutatedExcluded).toEqual(new Set(['p1']));
+  });
+
+  it('[reverse] mayProject=true + policyExhausted=true → rethrow/project allowed', () => {
     const decision = decideDirectProviderRetry({
       retryExecutionPlan: {
         shouldRetry: false,
         retrySwitchPlan: undefined,
-        excludedCurrentProvider: false,
+        excludedCurrentProvider: true,
+        routePoolRemainingAfterExclusion: [],
+        defaultPoolAvailable: false,
+        policyExhausted: true,
+        mayProject: true,
       } as Plan,
-      error: { code: 'special_400', message: 'malformed request' },
+      error: { code: 'HTTP_503', message: 'all candidates exhausted' },
       providerKey: 'p1',
     });
     expect(decision.action).toBe('rethrow');

@@ -915,9 +915,9 @@ fn extract_provider_auth_entries(
         .unwrap_or_default()
         .trim()
         .to_lowercase();
-    if base_raw_type == "deepseek-account" {
+    if is_removed_auth_type(base_raw_type.as_str()) {
         return Err(format!(
-            "Provider {} uses removed account auth; configure auth.type=apikey",
+            "Provider {} uses removed non-apikey auth; configure auth.type=apikey",
             provider_id
         ));
     }
@@ -1065,7 +1065,7 @@ fn push_auth_entry(
         return Err(format!("Provider {} auth.type must be apiKey", provider_id));
     }
     let raw_type_lower = raw_type_source.trim().to_lowercase();
-    if raw_type_lower.contains("oauth") || raw_type_lower == "deepseek-account" {
+    if is_removed_auth_type(raw_type_lower.as_str()) {
         return Err(format!(
             "Provider {} uses removed auth type {}; configure auth.type=apikey",
             provider_id, raw_type_source
@@ -1116,7 +1116,7 @@ fn interpret_auth_type(value: Option<&str>) -> AuthTypeInfo {
             raw: Some(raw.to_string()),
         };
     }
-    if lower.contains("oauth") || lower == "deepseek-account" {
+    if is_removed_auth_type(lower.as_str()) {
         return AuthTypeInfo {
             auth_type: "removed".to_string(),
             raw: Some(raw.to_string()),
@@ -1126,6 +1126,12 @@ fn interpret_auth_type(value: Option<&str>) -> AuthTypeInfo {
         auth_type: "apiKey".to_string(),
         raw: Some(raw.to_string()),
     }
+}
+
+fn is_removed_auth_type(lower_raw_type: &str) -> bool {
+    lower_raw_type.contains("oauth")
+        || lower_raw_type.contains("account")
+        || lower_raw_type.contains("token")
 }
 
 #[cfg(test)]
@@ -1399,7 +1405,7 @@ mod alias_tests {
                 "enabled": true,
                 "type": "openai",
                 "baseURL": "https://example.invalid/v1",
-                "auth": { "type": "deepseek-account" },
+                "auth": { "type": "legacy-account" },
                 "models": { "m": {} }
             }
         });

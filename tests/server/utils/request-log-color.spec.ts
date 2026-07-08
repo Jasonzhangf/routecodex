@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 
 import {
   colorizeVirtualRouterHitLogLine,
+  colorizeRequestScopedLogLine,
   colorizeRequestLog,
   registerRequestLogContext,
   resolveRequestLogColorToken,
@@ -390,6 +391,21 @@ describe('request log color registry', () => {
 
     expect(line.startsWith('\x1b[31m')).toBe(true);
     expect(line).toContain('503');
+  });
+
+  it('colors handler response diagnostics from the registered request session', () => {
+    const requestId = 'openai-responses-router-gpt-5.5-20260708T091500000-477999-6001';
+    const sessionId = 'handler-response-color-session';
+    const expectedColor = resolveSessionAnsiColor(sessionId);
+
+    registerRequestLogContext(requestId, { sessionId });
+    const line = colorizeRequestScopedLogLine(
+      `[handler-response] response.sse.client_close request=${requestId} {"status":200,"trigger":"close"}`
+    );
+
+    expect(expectedColor).toBeDefined();
+    expect(line.startsWith(String(expectedColor))).toBe(true);
+    expect(stripAnsiCodes(line)).toContain(`request=${requestId}`);
   });
 
   it('does not inject ansi color when console is not tty and force color is unset', () => {

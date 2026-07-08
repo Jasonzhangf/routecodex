@@ -1,7 +1,6 @@
 {
   "version": "1.0.0",
   "virtualrouterMode": "v1",
-  "oauthBrowser": "camoufox",
   "httpserver": {
     "port": 5520,
     "apikey": "${ROUTECODEX_HTTP_API_KEY:-}",
@@ -180,52 +179,6 @@
           "responses": {
             "process": "chat",
             "streaming": "always"
-          }
-        }
-      },
-      "deepseek-web": {
-        "id": "deepseek-web",
-        "enabled": true,
-        "type": "openai",
-        "baseURL": "https://chat.deepseek.com",
-        "compatibilityProfile": "chat:deepseek-web",
-        "auth": {
-          "type": "deepseek-account",
-          "entries": [
-            {
-              "alias": "1",
-              "type": "deepseek-account",
-              "tokenFile": "~/.routecodex/auth/deepseek-account-1.json"
-            },
-            {
-              "alias": "2",
-              "type": "deepseek-account",
-              "tokenFile": "~/.routecodex/auth/deepseek-account-2.json"
-            },
-            {
-              "alias": "3",
-              "type": "deepseek-account",
-              "tokenFile": "~/.routecodex/auth/deepseek-account-3.json"
-            }
-          ]
-        },
-        "deepseek": {
-          "strictToolRequired": true,
-          "toolProtocol": "text",
-          "powTimeoutMs": 15000,
-          "powMaxAttempts": 2,
-          "sessionReuseTtlMs": 1800000
-        },
-        "models": {
-          "deepseek-chat": {
-            "maxTokens": 64000,
-            "maxContext": 512000,
-            "supportsStreaming": true
-          },
-          "deepseek-reasoner": {
-            "maxTokens": 64000,
-            "maxContext": 512000,
-            "supportsStreaming": true
           }
         }
       },
@@ -738,33 +691,6 @@
           }
         }
       },
-      "qwen": {
-        "id": "qwen",
-        "enabled": true,
-        "type": "openai",
-        "baseURL": "https://portal.qwen.ai/v1",
-        "compatibilityProfile": "chat:qwen",
-        "auth": {
-          "type": "qwen-oauth",
-          "tokenFile": "default"
-        },
-        "models": {
-          "qwen3-coder-plus": {
-            "maxTokens": 64000,
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "qwen3.5-plus": {
-            "maxContext": 1000000,
-            "supportsStreaming": true
-          },
-          "qwen3-coder": {
-            "maxTokens": 64000,
-            "maxContext": 256000,
-            "supportsStreaming": true
-          }
-        }
-      },
       "tab": {
         "id": "tab",
         "enabled": true,
@@ -833,9 +759,7 @@
             "crs.gpt-5.3-codex",
             "tab.gpt-5.3-codex",
             "tabglm.glm-4.7",
-            "gemini.models/gemini-2.5-pro",
-            "deepseek-web.deepseek-reasoner",
-            "deepseek-web.deepseek-chat"
+            "gemini.models/gemini-2.5-pro"
           ]
         },
         {
@@ -858,14 +782,6 @@
             "crs.gpt-5.3-codex",
             "tab.gpt-5.3-codex"
           ]
-        },
-        {
-          "id": "coding-qwen-backup",
-          "backup": true,
-          "mode": "priority",
-          "targets": [
-            "qwen.qwen3-coder-plus"
-          ]
         }
       ],
       "longcontext": [
@@ -887,15 +803,6 @@
           "targets": [
             "gemini.models/gemini-2.5-pro"
           ]
-        },
-        {
-          "id": "longcontext-backup",
-          "backup": true,
-          "mode": "priority",
-          "targets": [
-            "deepseek-web.deepseek-chat",
-            "deepseek-web.deepseek-reasoner"
-          ]
         }
       ],
       "thinking": [
@@ -915,8 +822,7 @@
           "backup": true,
           "mode": "priority",
           "targets": [
-            "gemini.models/gemini-2.5-pro",
-            "deepseek-web.deepseek-chat"
+            "gemini.models/gemini-2.5-pro"
           ]
         }
       ],

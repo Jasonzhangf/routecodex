@@ -47,8 +47,8 @@ describe('request-id-manager', () => {
     }).providerRequestId;
 
     const enhanced = enhanceProviderRequestId(base, {
-      providerId: 'deepseek-web.1',
-      model: 'deepseek-chat'
+      providerId: 'provider-a.1',
+      model: 'model-a'
     });
 
     expect(enhanced).not.toBe(base);

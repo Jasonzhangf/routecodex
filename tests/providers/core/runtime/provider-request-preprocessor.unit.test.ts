@@ -5,7 +5,7 @@ import { ProviderRequestPreprocessor } from '../../../../src/providers/core/runt
 describe('provider-request-preprocessor', () => {
   it('keeps assistant content untouched (no provider-layer semantic text rewrite)', () => {
     const req = {
-      model: 'qwenchat.qwen3.6-plus',
+      model: 'provider-a.model-a',
       messages: [
         { role: 'system', content: 'you are assistant' },
         {
@@ -26,7 +26,7 @@ describe('provider-request-preprocessor', () => {
   it('keeps responses-style input assistant text untouched', () => {
     const req = {
       data: {
-        model: 'qwenchat.qwen3.6-plus',
+        model: 'provider-a.model-a',
         input: [
           {
             role: 'assistant',
@@ -52,11 +52,11 @@ describe('provider-request-preprocessor', () => {
     const { extractProviderRuntimeMetadata } = await import('../../../../src/providers/core/runtime/provider-runtime-metadata.js');
     const runtimeMetadata = { metadata: { clientHeaders: { authorization: 'Bearer x' } } } as any;
     const req = {
-      model: 'qwen3.5-plus',
+      model: 'provider-model',
       metadata: {
         entryEndpoint: '/api/v1/indices/plugin/web_search',
         stream: true,
-        qwenWebSearch: true,
+        providerWebSearch: true,
         clientHeaders: { authorization: 'Bearer x' },
       },
       client_metadata: { session_id: 'client-session' },

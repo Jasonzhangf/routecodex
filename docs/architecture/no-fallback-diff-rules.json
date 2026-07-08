@@ -65,11 +65,6 @@
       "pathContains": "scripts/verify-servertool-rust-only.mjs"
     },
     {
-      "ruleId": "fallback-keyword",
-      "pathContains": "scripts/camoufox/launch-auth.mjs",
-      "textContains": "fallback"
-    },
-    {
       "ruleId": "degrade-keyword",
       "pathContains": "src/types/debug-types.ts"
     },
@@ -145,10 +140,6 @@
     {
       "pathContains": "src/commands/oauth.ts",
       "textContains": "return null;"
-    },
-    {
-      "pathContains": "src/token-daemon/token-daemon.ts",
-      "textContains": "return existingForAlias;"
     },
     {
       "ruleId": "empty-default-operator",
@@ -298,21 +289,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/tools/semantic-replay-snapshot-loader.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/token-daemon/history-store.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/token-daemon/token-daemon.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/token-daemon/token-utils.ts",
       "textContains": ""
     },
     {
@@ -502,11 +478,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/providers/auth/deepseek-account-auth.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/providers/auth/oauth-auth.ts",
       "textContains": ""
     },
@@ -603,11 +574,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/commands/provider-update.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/commands/token-daemon.ts",
       "textContains": ""
     },
     {
@@ -1242,16 +1208,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/token-daemon/index.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/token-daemon/server-utils.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/token-portal/fingerprint-summary.ts",
       "textContains": ""
     },
@@ -1353,11 +1309,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/architecture/verify-function-map-boundary-mentions.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/camoufox/launch-auth.mjs",
       "textContains": ""
     },
     {
@@ -1702,22 +1653,7 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/providers/auth/deepseek-account-token-acquirer.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-    "pathContains": "src/providers/auth/oauth-lifecycle.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/providers/core/config/camoufox-actions.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/providers/core/config/camoufox-launcher.ts",
+      "pathContains": "src/providers/auth/oauth-lifecycle.ts",
       "textContains": ""
     },
     {
@@ -2117,11 +2053,6 @@
       "ruleId": "fallback-keyword",
       "pathContains": "src/utils/local-connect-host.ts",
       "textContains": "no-fallback policy"
-    },
-    {
-      "ruleId": "fallback-keyword",
-      "pathContains": "src/providers/core/config/camoufox-launcher.ts",
-      "textContains": "refusing direct oauthUrl retry"
     }
   ]
 }

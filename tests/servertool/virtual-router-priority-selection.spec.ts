@@ -1,6 +1,19 @@
 import { jest } from '@jest/globals';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
+function buildRouteMetadata(requestId: string): any {
+  return {
+    requestId,
+    entryEndpoint: '/v1/responses',
+    metadataCenterSnapshot: {
+      runtimeControl: {
+        providerProtocol: 'openai-responses',
+        routeHint: 'default'
+      }
+    }
+  };
+}
+
 describe('virtual-router priority pool selection', () => {
   test('priority pools do not round-robin when all targets are healthy', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -38,12 +51,7 @@ describe('virtual-router priority pool selection', () => {
       } as any);
 
       const request: any = { model: 'gpt-5.2', messages: [{ role: 'user', content: 'hi' }], tools: [], parameters: {} };
-      const metadata: any = {
-        requestId: 'req_priority_rr',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        routeHint: 'default'
-      };
+      const metadata = buildRouteMetadata('req_priority_rr');
 
       const first = engine.route(request, metadata).target.providerKey;
       const second = engine.route(request, metadata).target.providerKey;
@@ -93,12 +101,7 @@ describe('virtual-router priority pool selection', () => {
       } as any);
 
       const request: any = { model: 'gpt-5.2', messages: [{ role: 'user', content: 'hi' }], tools: [], parameters: {} };
-      const metadata: any = {
-        requestId: 'req_priority_penalty',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        routeHint: 'default'
-      };
+      const metadata = buildRouteMetadata('req_priority_penalty');
 
       expect(engine.route(request, metadata).target.providerKey).toBe(primary);
     } finally {
@@ -142,12 +145,7 @@ describe('virtual-router priority pool selection', () => {
       } as any);
 
       const request: any = { model: 'gpt-5.2', messages: [{ role: 'user', content: 'hi' }], tools: [], parameters: {} };
-      const metadata: any = {
-        requestId: 'req_priority_alias_rr',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
-        routeHint: 'default'
-      };
+      const metadata = buildRouteMetadata('req_priority_alias_rr');
 
       const first = engine.route(request, metadata).target.providerKey;
       const second = engine.route(request, metadata).target.providerKey;

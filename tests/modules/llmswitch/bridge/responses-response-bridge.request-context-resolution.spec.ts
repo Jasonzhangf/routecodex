@@ -5,6 +5,31 @@ import { join } from 'node:path';
 const root = process.cwd();
 
 describe('responses-response-bridge request-context resolution', () => {
+  it('keeps metadata session id as the request log color identity when usage has only a log key', async () => {
+    const { buildResponsesRequestLogContextForHttp } = await import(
+      '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'
+    );
+    const { resolveSessionLogColorKey } = await import('../../../../src/utils/session-log-color.ts');
+
+    const context = buildResponsesRequestLogContextForHttp({
+      metadata: {
+        sessionId: 'visible-session-color',
+        conversationId: 'visible-conversation-color',
+        logSessionColorKey: 'metadata-log-key'
+      },
+      usageLogInfo: {
+        logSessionColorKey: 'usage-route-color-key'
+      }
+    });
+
+    expect(context.sessionId).toBe('visible-session-color');
+    expect(context.session_id).toBe('visible-session-color');
+    expect(context.conversationId).toBe('visible-conversation-color');
+    expect(context.conversation_id).toBe('visible-conversation-color');
+    expect(resolveSessionLogColorKey(context)).toBe(resolveSessionLogColorKey({ sessionId: 'visible-session-color' }));
+    expect(resolveSessionLogColorKey(context)).not.toBe(resolveSessionLogColorKey({ logSessionColorKey: 'usage-route-color-key' }));
+  });
+
   it('requires requestContext.context.toolsRaw as the explicit client projection input', async () => {
     const { normalizeResponsesClientPayloadForHttp } = await import(
       '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'

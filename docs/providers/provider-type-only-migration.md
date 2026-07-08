@@ -1,6 +1,6 @@
 # Provider 按协议类型划分（Type-only）迁移指南
 
-本文档描述从“按品牌/家族（glm/qwen/lmstudio）”到“按协议类型（openai/responses/anthropic/gemini）”的迁移要求与示例。
+本文档描述从旧“按品牌/家族”到“按协议类型（openai/responses/anthropic/gemini）”的迁移要求与示例。
 
 ## 目标
 
@@ -9,16 +9,16 @@
   - `responses`（OpenAI Responses wire）
   - `anthropic`（Anthropic Messages wire）
   - `gemini`（预留）
-- 品牌/家族名仅通过 `providerId` 标识；OAuth 方案使用 `auth.type = "<provider>-oauth"` 显式声明。
+- 品牌/家族名仅通过 `providerId` 标识；认证只允许 `auth.type = "apikey"`。
 - `providerProtocol` 由 BasePipeline 路由阶段注入，Provider/Composite 只做守卫，不自行推断。
 
 ## 迁移规则
 
 1. 配置层
-   - 将原 `providerType: 'glm'|'qwen'|'lmstudio'` 替换为 `providerType: 'openai'`。
+   - 将旧品牌型 `providerType` 替换为协议型 `providerType: 'openai'`。
    - 将家族名写入：
      - `providerId`（路由家族）；
-     - `auth.type = "<provider>-oauth"`（OAuth 场景）。
+     - `auth.type = "apikey"`。
    - Responses/Anthropic 按照协议类型分别设置 `providerType: 'responses' | 'anthropic'`。
 
 2. 代码层
@@ -26,20 +26,6 @@
    - 兼容逻辑内聚到 ProviderComposite，品牌差异由 openai-compat-aggregator 内部处理（最小清理）。
 
 ## 配置示例
-
-### Qwen（OAuth）
-
-```json
-{
-  "type": "openai-standard",
-  "config": {
-    "providerType": "openai",
-    "baseUrl": "https://portal.qwen.ai/v1",
-    "auth": { "type": "qwen-oauth" },
-    "models": ["qwen3-coder-plus"]
-  }
-}
-```
 
 ### GLM（API Key）
 

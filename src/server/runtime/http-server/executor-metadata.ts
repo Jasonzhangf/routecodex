@@ -1106,6 +1106,18 @@ export function decorateMetadataForAttempt(
       delete rt.preselectedRoute;
       clone.__rt = rt;
     }
+    const runtimeControl =
+      clone.runtime_control && typeof clone.runtime_control === 'object' && !Array.isArray(clone.runtime_control)
+        ? { ...(clone.runtime_control as Record<string, unknown>) }
+        : undefined;
+    if (runtimeControl && Object.prototype.hasOwnProperty.call(runtimeControl, 'preselectedRoute')) {
+      delete runtimeControl.preselectedRoute;
+      if (Object.keys(runtimeControl).length > 0) {
+        clone.runtime_control = runtimeControl;
+      } else {
+        delete clone.runtime_control;
+      }
+    }
     releaseMetadataCenterSlot({
       target: clone,
       family: 'runtime_control',
@@ -1120,6 +1132,22 @@ export function decorateMetadataForAttempt(
       writer: ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER,
       reason: 'retry provider pin is single-use and must not force provider retry attempts'
     });
+    const snapshot = clone.metadataCenterSnapshot;
+    if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+      const snapshotRecord = snapshot as Record<string, unknown>;
+      const nextSnapshotRecord = { ...snapshotRecord };
+      const snapshotRuntimeControl = snapshotRecord.runtimeControl;
+      if (snapshotRuntimeControl && typeof snapshotRuntimeControl === 'object' && !Array.isArray(snapshotRuntimeControl)) {
+        const nextRuntimeControl = { ...(snapshotRuntimeControl as Record<string, unknown>) };
+        delete nextRuntimeControl.preselectedRoute;
+        if (Object.keys(nextRuntimeControl).length > 0) {
+          nextSnapshotRecord.runtimeControl = nextRuntimeControl;
+        } else {
+          delete nextSnapshotRecord.runtimeControl;
+        }
+      }
+      clone.metadataCenterSnapshot = nextSnapshotRecord;
+    }
   }
   return clone;
 }

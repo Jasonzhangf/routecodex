@@ -427,9 +427,6 @@ export function resolveAnthropicRemoteImagePolicy(context: ProviderContext, prov
   if (providerHint.includes('ali-coding-plan') || modelHint.startsWith('kimi-k2.5')) {
     return 'inline';
   }
-  if (providerHint.startsWith('qwen') || modelHint.includes('qwen3-vl')) {
-    return 'direct_then_inline';
-  }
   return 'direct';
 }
 

@@ -96,58 +96,6 @@ async function main() {
   {
     const result = runReqOutboundStage3CompatWithNative({
       payload: {
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: 'hello-qwen-native' }],
-        max_tokens: 128,
-        tools: [{ type: 'function', function: { name: 'exec_command', description: 'ignored' } }]
-      },
-      adapterContext: {
-        requestId: 'req_outbound_compat_cov_native_5',
-        providerProtocol: 'openai-chat',
-        compatibilityProfile: 'chat:qwen'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'chat:qwen');
-    assert.equal(result.payload.model, 'coder-model');
-    assert.equal(result.payload.messages?.[0]?.content, 'hello-qwen-native');
-    assert.equal(result.payload.max_tokens, 128);
-    assert.equal(result.payload.tools?.[0]?.function?.name, 'exec_command');
-  }
-
-  {
-    const result = runReqOutboundStage3CompatWithNative({
-      payload: {
-        model: 'deepseek-chat',
-        chat_session_id: 'sess_native_ds_1',
-        messages: [
-          { role: 'system', content: 'follow contract' },
-          {
-            role: 'assistant',
-            content: null,
-            tool_calls: [{ type: 'function', function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' } }]
-          },
-          { role: 'user', content: 'run' }
-        ],
-        tools: [{ type: 'function', function: { name: 'exec_command', description: 'run shell' } }]
-      },
-      adapterContext: {
-        requestId: 'req_outbound_compat_cov_native_deepseek_1',
-        providerProtocol: 'openai-chat',
-        compatibilityProfile: 'chat:deepseek-web',
-        routeId: 'search-primary'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'chat:deepseek-web');
-    assert.equal(result.payload.search_enabled, true);
-    assert.equal(result.payload.thinking_enabled, false);
-    assert.equal(typeof result.payload.prompt, 'string');
-  }
-
-  {
-    const result = runReqOutboundStage3CompatWithNative({
-      payload: {
         requestId: 'gemini_native_req_1',
         web_search: { enabled: true },
         tools: [
@@ -300,68 +248,6 @@ async function main() {
     });
     assert.equal(result.nativeApplied, true);
     assert.equal(result.appliedProfile, 'chat:claude-code');
-  }
-
-  {
-    const result = runRespInboundStage3CompatWithNative({
-      payload: {
-        data: {
-          id: 'qwen_resp_native_1',
-          model: 'qwen3-plus',
-          choices: [
-            {
-              message: {
-                role: 'assistant',
-                content: 'native-qwen-response',
-                tool_calls: [{ function: { name: 'exec_command', arguments: { cmd: 'pwd' } } }]
-              },
-              finish_reason: 'tool_calls'
-            }
-          ]
-        }
-      },
-      adapterContext: {
-        requestId: 'req_resp_inbound_compat_cov_native_7',
-        providerProtocol: 'openai-chat',
-        compatibilityProfile: 'chat:qwen'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'chat:qwen');
-    assert.equal(result.payload.object, 'chat.completion');
-    assert.equal(result.payload.choices?.[0]?.message?.content, 'native-qwen-response');
-    assert.equal(result.payload.choices?.[0]?.finish_reason, 'tool_calls');
-  }
-
-  {
-    const result = runRespInboundStage3CompatWithNative({
-      payload: {
-        code: 0,
-        msg: '',
-        data: {
-          choices: [
-            {
-              finish_reason: 'stop',
-              message: {
-                role: 'assistant',
-                tool_calls: [],
-                content:
-                  '<function_calls>{"tool_calls":[{"id":"call_native_ds_1","type":"function","function":{"name":"shell_command","arguments":{"command":"pwd","cwd":"/tmp"}}}]}</function_calls>'
-              }
-            }
-          ]
-        }
-      },
-      adapterContext: {
-        requestId: 'req_resp_inbound_compat_cov_native_8',
-        providerProtocol: 'openai-chat',
-        compatibilityProfile: 'chat:deepseek-web'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'chat:deepseek-web');
-    assert.equal(result.payload.choices?.[0]?.finish_reason, 'tool_calls');
-    assert.equal(result.payload.metadata?.deepseek?.toolCallState, 'text_tool_calls');
   }
 
   console.log('✅ coverage-hub-req-outbound-compat passed');

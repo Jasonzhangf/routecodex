@@ -993,6 +993,80 @@ export class RouteCodexHttpServer {
     };
   }
 
+  private buildRouterRelayPreselectedInput(
+    portConfig: PortConfig,
+    input: PipelineExecutionInput,
+    nextInput: PipelineExecutionInput,
+    metadata: Record<string, unknown>,
+    reason: string,
+  ): PipelineExecutionInput {
+    const runtimeControl = readRuntimeControlProjection(metadata);
+    if (runtimeControl.preselectedRoute) {
+      return nextInput;
+    }
+    const routingPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
+    const routerEngine = routingPipeline?.getVirtualRouter?.();
+    if (!routerEngine || typeof routerEngine.route !== 'function') {
+      return nextInput;
+    }
+    const rawPayload = requireDirectPassthroughPayloadObject(input.body);
+    const metadataCenterSnapshot = buildMetadataCenterSnapshot(metadata);
+    const metadataForRoute = {
+      ...metadata,
+      metadataCenterSnapshot,
+    };
+    const routeResult = routerEngine.route(rawPayload as never, metadataForRoute as never) as {
+      target?: Record<string, unknown>;
+      decision?: Record<string, unknown>;
+      diagnostics?: Record<string, unknown>;
+    };
+    if (!routeResult.target || !routeResult.decision) {
+      return nextInput;
+    }
+    const relayMetadata = {
+      ...(nextInput.metadata ?? {}),
+    };
+    bindExistingMetadataCenter(metadata, relayMetadata);
+    const preselectedRoute = {
+      target: routeResult.target,
+      decision: routeResult.decision,
+      diagnostics: routeResult.diagnostics ?? {},
+    };
+    writeMetadataCenterRuntimeControl(
+      relayMetadata,
+      'preselectedRoute',
+      preselectedRoute,
+      reason
+    );
+    const providerProtocol =
+      typeof routeResult.target.outboundProfile === 'string' && routeResult.target.outboundProfile.trim()
+        ? routeResult.target.outboundProfile.trim()
+        : undefined;
+    if (providerProtocol) {
+      writeMetadataCenterRuntimeControl(
+        relayMetadata,
+        'providerProtocol',
+        providerProtocol,
+        `${reason}: provider protocol`
+      );
+    }
+    this.logStage('router-relay.preselected_route', input.requestId, {
+      routeName:
+        typeof routeResult.decision.routeName === 'string'
+          ? routeResult.decision.routeName
+          : undefined,
+      providerKey:
+        typeof routeResult.target.providerKey === 'string'
+          ? routeResult.target.providerKey
+          : undefined,
+      reason,
+    });
+    return {
+      ...nextInput,
+      metadata: relayMetadata,
+    };
+  }
+
   private resolveRuntimeKeyForProviderBinding(bindingKey?: string, metadata?: Record<string, unknown>): string | undefined {
     if (!bindingKey) {
       return undefined;
@@ -1320,6 +1394,24 @@ export class RouteCodexHttpServer {
           });
         }
         return await this.executePipeline(this.buildHubPipelineInput(nextInput));
+      }
+      if (mustRelayLocalResponsesContinuation) {
+        this.logStage('router-direct.skipped', input.requestId, {
+          reason: 'relay_owned_responses_continuation',
+          routingPolicyGroup: portConfig?.routingPolicyGroup,
+          sameProtocolBehavior: portConfig?.sameProtocolBehavior,
+          continuationOwner: resumeContinuationOwner,
+        });
+      }
+      if (portConfig?.mode === 'router') {
+        const relayInput = this.buildRouterRelayPreselectedInput(
+            portConfig,
+            input,
+            nextInput,
+            metadata,
+            'router relay request preselected route'
+        );
+        return await this.executePipeline(this.buildHubPipelineInput(relayInput));
       }
       return await this.executePipeline(this.buildHubPipelineInput(nextInput));
     }
@@ -2501,7 +2593,7 @@ export class RouteCodexHttpServer {
               ...(typeof statusCode === 'number' ? { statusCode } : {}),
             },
           });
-          void decideDirectProviderRetry({
+          return decideDirectProviderRetry({
             retryExecutionPlan: directFailurePlan.retryExecutionPlan,
             error,
             providerKey: context.providerKey,

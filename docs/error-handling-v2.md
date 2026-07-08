@@ -115,7 +115,7 @@
    - 直接客户端可见
    - 不切 provider
 3. `recoverable`
-- 进入统一错误动作队列阻塞等待（`1s -> 3s -> 5s -> repeat`）
+   - 进入统一错误动作队列阻塞等待（`1s -> 3s -> 5s -> repeat`）
    - 若当前 pool 仍有候选，优先 `exclude_and_reroute`
    - 仅在明确允许时才 `retry_same_provider_once`
 4. `unrecoverable / periodic_recovery`

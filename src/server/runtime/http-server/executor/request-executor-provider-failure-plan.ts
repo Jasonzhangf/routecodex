@@ -20,12 +20,43 @@ import {
 import {
   resolveProviderRetryExecutionPlan
 } from './request-executor-retry-execution-plan.js';
+import { emitProviderErrorAndWait } from '../../../../providers/core/utils/provider-error-reporter.js';
+import {
+  recordErrorActionBackoff,
+  waitErrorActionBackoffWithGate
+} from './request-executor-error-action-queue.js';
 
 type RuntimeManager = {
   resolveRuntimeKey(providerKey?: string, metadata?: Record<string, unknown>): string | undefined;
 };
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
+
+function readErrorBackoffPortScope(metadata?: Record<string, unknown>): string {
+  const entryPort = metadata?.entryPort ?? metadata?.matchedPort ?? metadata?.port;
+  if (typeof entryPort === 'number' && Number.isFinite(entryPort)) {
+    return `port:${Math.floor(entryPort)}`;
+  }
+  if (typeof entryPort === 'string' && entryPort.trim()) {
+    return `port:${entryPort.trim()}`;
+  }
+  return 'port:unknown';
+}
+
+function buildProviderErrorBackoffScope(args: {
+  metadata?: Record<string, unknown>;
+  providerKey?: string;
+  routeName?: string;
+  stage: string;
+}): string {
+  const providerKey = typeof args.providerKey === 'string' && args.providerKey.trim()
+    ? args.providerKey.trim()
+    : 'provider:unknown';
+  const routeName = typeof args.routeName === 'string' && args.routeName.trim()
+    ? args.routeName.trim()
+    : 'route:unknown';
+  return `${readErrorBackoffPortScope(args.metadata)}|${providerKey}|${routeName}|${args.stage}`;
+}
 
 export async function resolveRequestExecutorProviderFailurePlan(args: {
   error: unknown;
@@ -160,6 +191,37 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
       stageHint: reportStage
     });
   }
+  const providerErrorBackoffScope = buildProviderErrorBackoffScope({
+    metadata: args.metadata,
+    providerKey: args.providerKey,
+    routeName: args.routeName,
+    stage: reportStage
+  });
+  const providerErrorBackoffDelayMs = recordErrorActionBackoff({
+    category: 'global_error',
+    scopeKey: providerErrorBackoffScope
+  });
+  args.logStage('provider.error_action_backoff_wait', args.requestId, {
+    providerKey: args.providerKey,
+    routeName: args.routeName,
+    stage: reportStage,
+    scopeKey: providerErrorBackoffScope,
+    delayMs: providerErrorBackoffDelayMs
+  });
+  await waitErrorActionBackoffWithGate({
+    category: 'global_error',
+    scopeKey: providerErrorBackoffScope,
+    ms: providerErrorBackoffDelayMs,
+    signal: args.abortSignal,
+    logNonBlockingError: args.logNonBlockingError
+  });
+  args.logStage('provider.error_action_backoff_wait.completed', args.requestId, {
+    providerKey: args.providerKey,
+    routeName: args.routeName,
+    stage: reportStage,
+    scopeKey: providerErrorBackoffScope,
+    delayMs: providerErrorBackoffDelayMs
+  });
   const retryTelemetryPlan =
     retryExecutionPlan.shouldRetry && retryExecutionPlan.retrySwitchPlan
       ? buildProviderRetryTelemetryPlan({

@@ -2983,6 +2983,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     'execution: noopEffectPlan.execution as ServerToolExecution',
     'result.chatResponse as JsonObject',
     'noopResult.chatResponse as JsonObject',
+    'noopResult.chatResponse',
     'buildServertoolHandlerErrorToolOutputPayloadWithNative({\n          base: args.baseForExecution as Record<string, unknown>,\n          toolCallId: toolCall.id,\n          toolName: toolCall.name,\n          message: errorEffectPlan.handlerErrorMessage\n        }) as JsonObject',
     'base: args.baseForExecution as Record<string, unknown>',
     'if (lastErr) {',
@@ -2992,6 +2993,11 @@ function checkServertoolExecutionDispatchRustOwner() {
     'lastErr instanceof Error ? lastErr.message : lastErr',
     "mode: 'handler_error'",
     "mode: 'noop'",
+    'planServertoolNoopExecutionLoopEffectWithNative',
+    'replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse)',
+    'toolCall: noopEffectPlan.toolCall',
+    'execution: noopEffectPlan.execution',
+    'noopOutcome: noopResult',
     'flowId: noopFlowId',
     'noopFlowId',
     'executedToolCalls: [],',
@@ -3030,20 +3036,15 @@ function checkServertoolExecutionDispatchRustOwner() {
     'planned != null ? await materializeServertoolPlannedResult',
     'hasMaterializedResult: result != null',
     'replaceJsonObjectInPlace(args.baseForExecution, result.chatResponse)',
-    'replaceJsonObjectInPlace(args.baseForExecution, noopResult.chatResponse)',
     'const toolOutputPayload = buildServertoolHandlerErrorToolOutputPayloadWithNative({',
     'base: args.baseForExecution',
     'planServertoolHandlerErrorExecutionLoopEffectWithNative',
-    'planServertoolNoopExecutionLoopEffectWithNative',
     'resolveServertoolExecutionLoopInitialDecisionWithNative',
     'resolveServertoolExecutionLoopResultDecisionWithNative',
     'applyServertoolExecutionLoopInitialDecisionWithNative',
     'applyServertoolExecutionLoopResultDecisionWithNative',
     'toolCall: errorEffectPlan.toolCall',
     'execution: errorEffectPlan.execution',
-    'toolCall: noopEffectPlan.toolCall',
-    'execution: noopEffectPlan.execution',
-    'noopOutcome: noopResult',
   ]) {
     assertContains(
       'servertool-execution-dispatch-rust-owner',
@@ -3138,9 +3139,7 @@ function checkServertoolExecutionDispatchRustOwner() {
     ['servertool-execution-loop-effect-required-export', NATIVE_REQUIRED_EXPORTS, requiredExports, 'planServertoolExecutionLoopEffectJson'],
     ['servertool-execution-loop-effect-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolExecutionLoopEffectWithNative'],
     ['servertool-execution-loop-effect-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolHandlerErrorExecutionLoopEffectWithNative'],
-    ['servertool-execution-loop-effect-native-bridge', NATIVE_SERVERTOOL_CORE_WRAPPER, nativeCoreWrapper, 'planServertoolNoopExecutionLoopEffectWithNative'],
     ['servertool-execution-loop-effect-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'planServertoolHandlerErrorExecutionLoopEffectWithNative'],
-    ['servertool-execution-loop-effect-ts-thin-shell', TS_EXECUTION_QUEUE_SHELL, executionQueueShell, 'planServertoolNoopExecutionLoopEffectWithNative'],
     ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'feature_id: hub.servertool_execution_loop_runtime_action_contract'],
     ['servertool-execution-loop-runtime-action-rust-owner', RUST_SERVERTOOL_EXECUTION_LOOP_RUNTIME_ACTION_CONTRACT, rustExecutionLoopRuntimeAction, 'pub fn plan_servertool_execution_loop_runtime_action'],
     ['servertool-execution-loop-runtime-action-rust-owner', `${ROOT}/sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`, servertoolCoreLib, 'pub mod execution_loop_runtime_action_contract'],
@@ -3300,6 +3299,15 @@ function checkServertoolSkeletonConfigRustOwner() {
   const rustSkeletonConfig = readRequired(`${RUST_SRC_DIR}/servertool_skeleton_config.rs`);
   const nativeWrapper = readRequired(NATIVE_SERVERTOOL_CORE_WRAPPER);
   const requiredExports = readRequired(NATIVE_REQUIRED_EXPORTS);
+  const defaultSkeletonStart = rustSkeletonConfig.indexOf('fn build_default_servertool_skeleton_document_value()');
+  const defaultSkeletonEnd = rustSkeletonConfig.indexOf('fn read_document_from_input');
+  if (defaultSkeletonStart < 0 || defaultSkeletonEnd <= defaultSkeletonStart) {
+    fail(
+      'servertool-skeleton-config-rust-owner',
+      'default servertool skeleton builder must stay visible in Rust source for dead server-side registry gate'
+    );
+  }
+  const defaultSkeleton = rustSkeletonConfig.slice(defaultSkeletonStart, defaultSkeletonEnd);
 
   for (const needle of [
     'pub fn plan_servertool_skeleton_derived_config_json',
@@ -3336,6 +3344,43 @@ function checkServertoolSkeletonConfigRustOwner() {
       requiredExports,
       needle
     );
+  }
+  assertContains(
+    'servertool-skeleton-default-empty-registry',
+    `${RUST_SRC_DIR}/servertool_skeleton_config.rs`,
+    defaultSkeleton,
+    '"internalTools": {}'
+  );
+  assertContains(
+    'servertool-skeleton-default-empty-registry',
+    `${RUST_SRC_DIR}/servertool_skeleton_config.rs`,
+    defaultSkeleton,
+    '"optionalPrimaryOrder": []'
+  );
+  for (const marker of [
+    '"continue_execution": {',
+    '"stop_message_auto": {',
+    '"reasoningstop": {',
+    '"web_search": {',
+    '"recursive_detection_guard": {',
+    '"vision_auto": {',
+    '"exec_command": {',
+    '"optionalPrimaryOrder": ["vision_auto", "stop_message_auto"]',
+    '"continue_execution_flow"',
+    '"stop_message_flow"',
+    '"web_search_flow"',
+    '"vision_flow"',
+    '"exec_command_guard"',
+    '"reasoning_stop_guard_flow"',
+    '"reasoning_stop_continue_flow"',
+    '"reasoning_stop_finalize_flow"'
+  ]) {
+    if (defaultSkeleton.includes(marker)) {
+      fail(
+        'servertool-skeleton-default-empty-registry',
+        `default servertool skeleton must not restore server-side registry/profile marker ${marker}`
+      );
+    }
   }
   assertMissingFile(
     'servertool-skeleton-config-deleted',

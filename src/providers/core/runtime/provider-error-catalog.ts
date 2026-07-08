@@ -104,7 +104,7 @@ export function normalizeKnownProviderError(input: {
     return ALIAS_INDEX.get('INSUFFICIENT_QUOTA');
   }
 
-  // Some providers (e.g. certain openai-compatible routers, deepseek-web relay) wrap
+  // Some openai-compatible routers wrap
   // account-pool exhaustion as HTTP 400 with the message
   // "All available accounts exhausted". That is a quota-style condition, not a real
   // request validation error, so it must be normalised to the same quota class as

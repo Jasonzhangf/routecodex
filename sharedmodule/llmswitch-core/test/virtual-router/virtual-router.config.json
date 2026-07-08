@@ -57,7 +57,6 @@
         "priority": 0,
         "targets": [
           "fc.gpt-5.1-codex-max",
-          "qwen.qwen3-coder-plus",
           "c4m.gpt-5.1-codex"
         ]
       }
@@ -67,8 +66,7 @@
         "id": "background-primary",
         "priority": 0,
         "targets": [
-          "glm.glm-4.6",
-          "qwen.qwen3-coder-plus"
+          "glm.glm-4.6"
         ]
       }
     ],
@@ -77,8 +75,7 @@
         "id": "tools-primary",
         "priority": 0,
         "targets": [
-          "glm.glm-4.6",
-          "qwen.qwen3-coder-plus"
+          "glm.glm-4.6"
         ]
       }
     ]
@@ -131,18 +128,6 @@
       "outboundProfile": "openai-chat",
       "compatibilityProfile": "compat:passthrough",
       "defaultModel": "kimi-for-coding"
-    },
-    "qwen.qwen3-coder-plus": {
-      "providerKey": "qwen.qwen3-coder-plus",
-      "providerType": "openai",
-      "endpoint": "https://api.fake-qwen/v1/chat/completions",
-      "auth": {
-        "type": "apiKey",
-        "secretRef": "ROUTECODEX_PROVIDER_QWEN"
-      },
-      "outboundProfile": "openai-chat",
-      "compatibilityProfile": "chat:qwen",
-      "defaultModel": "qwen3-coder-plus"
     }
   },
   "classifier": {

@@ -6,90 +6,65 @@ import {
 import { buildServertoolDispatchPlanInputWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { buildServertoolOutcomePlanInputWithNative } from 'rcc-llmswitch-core/native/servertool-wrapper';
 
-const EXECUTABLE_TOOL_NAME = 'web_search';
-const EXECUTABLE_TOOL_EXECUTION_MODE = 'backend';
-const EXECUTABLE_TOOL_STRIP_AFTER_EXECUTE = true;
-
-function executableToolSpec(): {
-  name: string;
-  executionMode: string;
-  stripAfterExecute: boolean;
-} {
-  return {
-    name: EXECUTABLE_TOOL_NAME,
-    executionMode: EXECUTABLE_TOOL_EXECUTION_MODE,
-    stripAfterExecute: EXECUTABLE_TOOL_STRIP_AFTER_EXECUTE
-  };
-}
+const CLI_OWNED_TOOL_NAME = 'web_search';
 
 describe('server-side-tools native dispatch planner', () => {
   test('builds dispatch-plan input through Rust owner instead of TS registered-handler synthesis', () => {
-    const spec = executableToolSpec();
     const input = buildServertoolDispatchPlanInputWithNative({
-      toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
+      toolCalls: [{ id: 'call_1', name: CLI_OWNED_TOOL_NAME, arguments: '{}' }],
       disableToolCallHandlers: false
     });
 
-    expect(input.registeredToolCallHandlers).toContainEqual({
-      name: spec.name,
-      trigger: 'tool_call',
-      executionMode: spec.executionMode,
-      stripAfterExecute: spec.stripAfterExecute
-    });
-    expect(input.toolCalls).toEqual([{ id: 'call_1', name: spec.name, arguments: '{}' }]);
+    expect(input.registeredToolCallHandlers).toEqual([]);
+    expect(input.toolCalls).toEqual([{ id: 'call_1', name: CLI_OWNED_TOOL_NAME, arguments: '{}' }]);
   });
 
-  test('builds dispatch-plan handler truth from Rust skeleton config', () => {
-    const spec = executableToolSpec();
+  test('does not dispatch CLI-owned tools from the server-side skeleton registry', () => {
     const input = buildServertoolDispatchPlanInputWithNative({
-      toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
+      toolCalls: [{ id: 'call_1', name: CLI_OWNED_TOOL_NAME, arguments: '{}' }],
       disableToolCallHandlers: false
     });
 
-    expect(input.registeredToolCallHandlers).toContainEqual({
-      name: spec.name,
-      trigger: 'tool_call',
-      executionMode: spec.executionMode,
-      stripAfterExecute: spec.stripAfterExecute
-    });
+    expect(input.registeredToolCallHandlers).toEqual([]);
 
     const plan = planServertoolToolCallDispatchWithNative(input);
-    expect(plan.executableToolCalls).toHaveLength(1);
-    expect(plan.executableToolCalls[0]).toMatchObject({
+    expect(plan.executableToolCalls).toHaveLength(0);
+    expect(plan.skippedToolCalls).toContainEqual(expect.objectContaining({
       id: 'call_1',
-      name: spec.name,
-      executionMode: spec.executionMode,
-      stripAfterExecute: spec.stripAfterExecute
-    });
+      name: CLI_OWNED_TOOL_NAME,
+      reason: 'no_registered_tool_call_handler'
+    }));
   });
 
-  test('respects include/exclude filters against skeleton-owned tool specs', () => {
-    const spec = executableToolSpec();
-
+  test('include/exclude filters do not restore removed server-side handlers', () => {
     const included = planServertoolToolCallDispatchWithNative(
       buildServertoolDispatchPlanInputWithNative({
-        toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
+        toolCalls: [{ id: 'call_1', name: CLI_OWNED_TOOL_NAME, arguments: '{}' }],
         disableToolCallHandlers: false,
-        includeToolCallHandlerNames: [spec.name]
+        includeToolCallHandlerNames: [CLI_OWNED_TOOL_NAME]
       })
     );
-    expect(included.executableToolCalls).toHaveLength(1);
+    expect(included.executableToolCalls).toHaveLength(0);
+    expect(included.skippedToolCalls).toContainEqual(expect.objectContaining({
+      id: 'call_1',
+      name: CLI_OWNED_TOOL_NAME,
+      reason: 'no_registered_tool_call_handler'
+    }));
 
     const excluded = planServertoolToolCallDispatchWithNative(
       buildServertoolDispatchPlanInputWithNative({
-        toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
+        toolCalls: [{ id: 'call_1', name: CLI_OWNED_TOOL_NAME, arguments: '{}' }],
         disableToolCallHandlers: false,
-        excludeToolCallHandlerNames: [spec.name]
+        excludeToolCallHandlerNames: [CLI_OWNED_TOOL_NAME]
       })
     );
     expect(excluded.executableToolCalls).toHaveLength(0);
   });
 
   test('disables all tool_call handlers without mutating tool list', () => {
-    const spec = executableToolSpec();
     const plan = planServertoolToolCallDispatchWithNative(
       buildServertoolDispatchPlanInputWithNative({
-        toolCalls: [{ id: 'call_1', name: spec.name, arguments: '{}' }],
+        toolCalls: [{ id: 'call_1', name: CLI_OWNED_TOOL_NAME, arguments: '{}' }],
         disableToolCallHandlers: true
       })
     );
@@ -98,39 +73,38 @@ describe('server-side-tools native dispatch planner', () => {
     expect(plan.skippedToolCalls).toHaveLength(1);
     expect(plan.skippedToolCalls[0]).toMatchObject({
       id: 'call_1',
-      name: spec.name,
+      name: CLI_OWNED_TOOL_NAME,
       reason: 'tool_call_handlers_disabled'
     });
   });
 
   test('returns skeleton-driven mixed outcome contract for executed subset', () => {
-    const spec = executableToolSpec();
     const executionState = {
       executedToolCalls: [
         {
           toolCall: {
             id: 'call_dispatch_1',
-            name: spec.name,
+            name: CLI_OWNED_TOOL_NAME,
             arguments: '{}',
-            executionMode: spec.executionMode,
-            stripAfterExecute: spec.stripAfterExecute
+            executionMode: 'guarded',
+            stripAfterExecute: true
           },
           execution: {
-            flowId: `${spec.name}_ok`
+            flowId: `${CLI_OWNED_TOOL_NAME}_ok`
           }
         }
       ],
       executedIds: ['call_dispatch_1'],
-      executedFlowIds: [`${spec.name}_ok`],
+      executedFlowIds: [`${CLI_OWNED_TOOL_NAME}_ok`],
       lastExecution: {
-        flowId: `${spec.name}_ok`
+        flowId: `${CLI_OWNED_TOOL_NAME}_ok`
       }
     };
 
     const outcome = planServertoolOutcomeWithNative(
       buildServertoolOutcomePlanInputWithNative({
         toolCalls: [
-          { id: 'call_dispatch_1', name: spec.name, arguments: '{}' },
+          { id: 'call_dispatch_1', name: CLI_OWNED_TOOL_NAME, arguments: '{}' },
           { id: 'call_dispatch_2', name: 'client_side_tool', arguments: '{}' }
         ],
         executionState
@@ -140,7 +114,7 @@ describe('server-side-tools native dispatch planner', () => {
     expect(outcome).toMatchObject({
       outcomeMode: 'mixed_client_tools',
       requiresPendingInjection: true,
-      primaryExecutionMode: spec.executionMode,
+      primaryExecutionMode: 'guarded',
       flowId: 'servertool_mixed'
     });
     expect(outcome.remainingToolCallIds).toEqual(['call_dispatch_2']);

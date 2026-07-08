@@ -34,8 +34,8 @@ mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_pipeline;
 mod hub_pipeline_blocks;
-mod hub_pipeline_engine;
 mod hub_pipeline_contracts;
+mod hub_pipeline_engine;
 mod hub_pipeline_lib;
 mod hub_pipeline_session_identifiers;
 mod hub_pipeline_types;
@@ -273,9 +273,7 @@ pub fn write_route_codex_provider_config_file_json(input_json: String) -> NapiRe
 }
 
 #[napi]
-pub fn update_route_codex_user_config_string_scalar_json(
-    input_json: String,
-) -> NapiResult<String> {
+pub fn update_route_codex_user_config_string_scalar_json(input_json: String) -> NapiResult<String> {
     config_file_codec::update_user_config_string_scalar_json(&input_json)
         .map_err(napi::Error::from_reason)
 }
@@ -909,15 +907,6 @@ pub fn resolve_provider_protocol_json(input_json: String) -> NapiResult<String> 
     hub_pipeline_blocks::napi_bindings::resolve_provider_protocol_json(input_json)
 }
 
-#[napi(js_name = "resolveHubPipelineRequestProviderProtocolJson")]
-pub fn resolve_hub_pipeline_request_provider_protocol_json(
-    input_json: String,
-) -> NapiResult<String> {
-    hub_pipeline_blocks::napi_bindings::resolve_hub_pipeline_request_provider_protocol_json(
-        input_json,
-    )
-}
-
 #[napi(js_name = "buildRequestStageMetadataDispatchJson")]
 pub fn build_request_stage_metadata_dispatch_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_blocks::napi_bindings::build_request_stage_metadata_dispatch_json(input_json)
@@ -1290,9 +1279,7 @@ pub fn is_routing_instruction_state_empty_json(state_json: String) -> NapiResult
 }
 
 #[napi]
-pub fn should_save_routing_instruction_state_sync_json(
-    key: Option<String>,
-) -> NapiResult<String> {
+pub fn should_save_routing_instruction_state_sync_json(key: Option<String>) -> NapiResult<String> {
     let should_sync = key
         .as_deref()
         .map(virtual_router_engine::routing_state_store::should_save_sync)

@@ -1,7 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import {
-  detectInboundProtocolFromRequest,
   executeProviderDirectPipeline,
+  resolveInboundProtocolFromEntryPath,
 } from '../../../../src/server/runtime/http-server/provider-direct-pipeline.js';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
 
@@ -38,7 +38,7 @@ describe('provider-direct-pipeline', () => {
     await expect(
       executeProviderDirectPipeline(
         { messages: [{ role: 'user', content: 'hello' }] },
-        { path: '/v1/chat/completions', headers: {} },
+        '/v1/chat/completions',
         {
           portConfig: {
             port: 5000,
@@ -48,7 +48,7 @@ describe('provider-direct-pipeline', () => {
             providerBinding: 'mock.model',
           },
           resolveProvider: () => handle,
-          detectInboundProtocol: detectInboundProtocolFromRequest,
+          resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
         },
       ),
     ).rejects.toThrow(/protocolBehavior=direct requires matching protocols/i);
@@ -65,7 +65,7 @@ describe('provider-direct-pipeline', () => {
           ],
           stream: true,
         },
-        { path: '/v1/chat/completions', headers: {} },
+        '/v1/chat/completions',
         {
           portConfig: {
             port: 5001,
@@ -75,7 +75,7 @@ describe('provider-direct-pipeline', () => {
             providerBinding: 'mock.model',
           },
           resolveProvider: () => handle,
-          detectInboundProtocol: detectInboundProtocolFromRequest,
+          resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
         },
       ),
     ).rejects.toThrow(/Provider mode relay must run through Hub Pipeline\/chat process/i);
@@ -89,7 +89,7 @@ describe('provider-direct-pipeline', () => {
         {
           messages: [{ role: 'user', content: 'hello' }],
         },
-        { path: '/v1/chat/completions', headers: {} },
+        '/v1/chat/completions',
         {
           portConfig: {
             port: 5002,
@@ -99,7 +99,7 @@ describe('provider-direct-pipeline', () => {
             providerBinding: 'mock.model',
           },
           resolveProvider: () => handle,
-          detectInboundProtocol: () => 'unknown-protocol' as any,
+          resolveInboundProtocol: () => 'unknown-protocol' as any,
         },
       ),
     ).rejects.toThrow(/Provider mode relay must run through Hub Pipeline\/chat process/i);
@@ -121,7 +121,7 @@ describe('provider-direct-pipeline', () => {
     try {
       const result = await executeProviderDirectPipeline(
         requestPayload,
-        { path: '/v1/responses', headers: {} },
+        '/v1/responses',
         {
           portConfig: {
             port: 5003,
@@ -131,7 +131,7 @@ describe('provider-direct-pipeline', () => {
             providerBinding: 'mock.model',
           },
           resolveProvider: () => handle,
-          detectInboundProtocol: detectInboundProtocolFromRequest,
+          resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
           onSnapshotBefore: (payload) => beforeSnapshots.push(payload),
           onSnapshotAfter: (response) => afterSnapshots.push(response),
         },
@@ -151,7 +151,7 @@ describe('provider-direct-pipeline', () => {
     }
   });
 
-  it('reports provider-mode direct errors through ErrorErr hook and rethrows original error', async () => {
+  it('returns caller-owned ErrorErr05 action instead of rethrowing when provider-direct error is still reroutable', async () => {
     const error = Object.assign(new Error('HTTP 503: upstream unavailable'), {
       statusCode: 503,
       code: 'HTTP_503',
@@ -163,11 +163,19 @@ describe('provider-direct-pipeline', () => {
       model: 'mimo-v2.5-pro',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
     } as Record<string, unknown>;
+    const action = {
+      action: 'request_reroute',
+      shouldRecurse: true,
+      shouldRethrow: false,
+      mutatedExcluded: new Set(['mock.model']),
+      error,
+    };
+    onProviderError.mockResolvedValueOnce(action as never);
 
     await expect(
       executeProviderDirectPipeline(
         requestPayload,
-        { path: '/v1/responses', headers: {} },
+        '/v1/responses',
         {
           portConfig: {
             port: 5007,
@@ -177,11 +185,17 @@ describe('provider-direct-pipeline', () => {
             providerBinding: 'mock.model',
           },
           resolveProvider: () => handle,
-          detectInboundProtocol: detectInboundProtocolFromRequest,
+          resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
           onProviderError,
         },
       ),
-    ).rejects.toBe(error);
+    ).resolves.toMatchObject({
+      errorAction: expect.objectContaining({
+        action: 'request_reroute',
+        shouldRecurse: true,
+        shouldRethrow: false,
+      }),
+    });
 
     expect(onProviderError).toHaveBeenCalledTimes(1);
     const [source, ctx] = onProviderError.mock.calls[0] as any[];
@@ -234,7 +248,7 @@ describe('provider-direct-pipeline', () => {
 
     const result = await executeProviderDirectPipeline(
       requestPayload,
-      { path: '/v1/chat/completions', headers: {} },
+      '/v1/chat/completions',
       {
         portConfig: {
           port: 5005,
@@ -244,7 +258,7 @@ describe('provider-direct-pipeline', () => {
           providerBinding: 'mock.model',
         },
         resolveProvider: () => handle,
-        detectInboundProtocol: detectInboundProtocolFromRequest,
+        resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
       },
     );
 
@@ -282,7 +296,7 @@ describe('provider-direct-pipeline', () => {
     await expect(
       executeProviderDirectPipeline(
         requestPayload,
-        { path: '/v1/chat/completions', headers: {} },
+        '/v1/chat/completions',
         {
           portConfig: {
             port: 5006,
@@ -292,7 +306,7 @@ describe('provider-direct-pipeline', () => {
             providerBinding: 'mock.model',
           },
           resolveProvider: () => handle,
-          detectInboundProtocol: detectInboundProtocolFromRequest,
+          resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
         },
       ),
     ).rejects.toThrow(/Provider mode relay must run through Hub Pipeline\/chat process/i);
@@ -309,7 +323,7 @@ describe('provider-direct-pipeline', () => {
 
     const result = await executeProviderDirectPipeline(
       requestPayload,
-      { path: '/v1/responses', headers: {} },
+      '/v1/responses',
       {
         portConfig: {
           port: 5004,
@@ -319,7 +333,7 @@ describe('provider-direct-pipeline', () => {
           providerBinding: 'mock.model',
         },
         resolveProvider: () => handle,
-        detectInboundProtocol: detectInboundProtocolFromRequest,
+        resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
         preparePayload: (payload) => {
           payload.reasoning = { effort: 'high' };
         },

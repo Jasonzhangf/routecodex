@@ -9,6 +9,7 @@
 import type { PortConfig } from './port-config-types.js';
 import { checkDirectProtocolMatch, resolveActualBehavior } from './port-config-validator.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
+import type { DirectRetryDecision } from './direct-decision.js';
 
 export interface ProviderDirectPipelineOptions {
   portConfig: PortConfig;
@@ -20,8 +21,8 @@ export interface ProviderDirectPipelineOptions {
   ) => void;
   onSnapshotBefore?: (payload: Record<string, unknown>, context: { port: number; providerKey: string; protocol: ProviderProtocol }) => void;
   onSnapshotAfter?: (result: unknown, context: { port: number; providerKey: string; protocol: ProviderProtocol }) => void;
-  /** Called when provider-mode direct transport fails; caller must report through ErrorErr01-06. */
-  onProviderError?: (error: unknown, context: ProviderDirectAuditContext) => Promise<void> | void;
+  /** Called when provider-mode direct transport fails; caller must report through ErrorErr01-06 and return the ErrorErr05 action. */
+  onProviderError?: (error: unknown, context: ProviderDirectAuditContext) => Promise<DirectRetryDecision | void> | DirectRetryDecision | void;
 }
 
 export interface ProviderDirectAuditContext {
@@ -34,7 +35,8 @@ export interface ProviderDirectAuditContext {
 }
 
 export interface ProviderDirectPipelineResult {
-  response: unknown;
+  response?: unknown;
+  errorAction?: DirectRetryDecision;
   providerHandle: ProviderHandle;
   actualBehavior: 'direct' | 'relay';
   inboundProtocol: ProviderProtocol;
@@ -108,7 +110,18 @@ export async function executeProviderDirectPipeline(
       ? await providerHandle.instance.processIncomingDirect(payloadToSend)
       : await providerHandle.instance.processIncoming(payloadToSend);
   } catch (error) {
-    await options.onProviderError?.(error, auditContext);
+    const errorAction = await options.onProviderError?.(error, auditContext);
+    if (errorAction && !errorAction.shouldRethrow) {
+      return {
+        errorAction,
+        providerHandle,
+        actualBehavior,
+        inboundProtocol,
+        providerProtocol: providerHandle.providerProtocol,
+        externalLatencyStartedAtMs: providerStartedAtMs,
+        externalLatencyMs: Math.max(0, Date.now() - providerStartedAtMs),
+      };
+    }
     throw error;
   }
   const externalLatencyMs = Math.max(0, Date.now() - providerStartedAtMs);

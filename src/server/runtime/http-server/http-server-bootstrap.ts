@@ -65,7 +65,15 @@ export function registerDaemonAdminUiRoute(server: any): void {
   server.app.get(['/daemon/admin', '/daemon/admin/'], async (_req: unknown, res: any) => {
     try {
       const fs = await import('node:fs/promises');
-      const html = await fs.readFile(packagedBuiltIndex, 'utf8');
+      let html = '';
+      try {
+        html = await fs.readFile(packagedBuiltIndex, 'utf8');
+      } catch (error) {
+        logBootstrapNonBlockingError('registerDaemonAdminUiRoute.readBuiltIndex', error, {
+          builtIndex: packagedBuiltIndex
+        });
+        throw error;
+      }
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       res.setHeader('Pragma', 'no-cache');

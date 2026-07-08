@@ -258,7 +258,7 @@ describe('Chat semantics stage 1 bridge', () => {
           engines: [
             {
               id: 'deepseek:web_search',
-              providerKey: 'deepseek-web.deepseek-chat-search',
+              providerKey: 'provider-a.model-a-search',
               default: true
             },
             {

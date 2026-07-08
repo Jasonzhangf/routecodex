@@ -617,6 +617,7 @@ verification:
     contract:
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - tests/sharedmodule/hub-pipeline-rust-responses-provider-payload.regression.spec.ts
       - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
     integration:
       - tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts
@@ -2277,7 +2278,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/src/sse/index.ts
     contract:
-      - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
       - tests/sharedmodule/sse-stream-mode-native.spec.ts
     integration: []
     smoke:
@@ -2297,7 +2297,7 @@ verification:
       - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
     contract:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
-      - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
+      - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
     integration: []
     smoke:
       - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi sse_runtime_dispatch --lib -- --nocapture

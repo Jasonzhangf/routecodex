@@ -27,16 +27,8 @@ const planServertoolExecutionDispatchErrorWithNative = jest.fn();
 const planServertoolExecutionLoopEffectWithNative = jest.fn();
 const planServertoolHandlerErrorExecutionLoopEffectWithNative = jest.fn((input: any) =>
   planServertoolExecutionLoopEffectWithNative({
-    mode: 'handler_error',
     toolCall: input?.toolCall,
     handlerErrorMessage: input?.handlerErrorMessage
-  })
-);
-const planServertoolNoopExecutionLoopEffectWithNative = jest.fn((input: any) =>
-  planServertoolExecutionLoopEffectWithNative({
-    mode: 'noop',
-    toolCall: input?.toolCall,
-    noopOutcome: input?.noopOutcome
   })
 );
 const planServertoolExecutionLoopRuntimeActionWithNative = jest.fn();
@@ -125,7 +117,6 @@ jest.unstable_mockModule(
     planServertoolExecutionDispatchErrorWithNative,
     planServertoolExecutionLoopEffectWithNative,
     planServertoolHandlerErrorExecutionLoopEffectWithNative,
-    planServertoolNoopExecutionLoopEffectWithNative,
     planServertoolExecutionLoopRuntimeActionWithNative,
     resolveServertoolExecutionLoopInitialDecisionWithNative,
     resolveServertoolExecutionLoopResultDecisionWithNative,
@@ -174,7 +165,6 @@ jest.unstable_mockModule(
       message: '[servertool] stop message fetch failed',
       details: input ?? {}
     })),
-    planServertoolNoopOutcomeWithNative: jest.fn(),
     planServertoolOutcomeWithNative,
     buildServertoolDispatchPlanInputWithNative: jest.fn((input: any) => input),
     buildServertoolOutcomePlanInputWithNative,
@@ -228,7 +218,7 @@ describe('execution queue dispatch runtime', () => {
     expect(source).not.toContain('resultLoopDecision.action');
     expect(source).toContain('handlerErrorMessage: lastErr');
     expect(source).toContain('planServertoolHandlerErrorExecutionLoopEffectWithNative');
-    expect(source).toContain('planServertoolNoopExecutionLoopEffectWithNative');
+    expect(source).not.toContain('planServertoolNoopExecutionLoopEffectWithNative');
     expect(source).not.toContain("mode: 'handler_error'");
     expect(source).not.toContain("mode: 'noop'");
     expect(source).not.toContain('errorEffectPlan.handlerErrorMessage as string');
@@ -287,29 +277,17 @@ describe('execution queue dispatch runtime', () => {
       return { action: 'continue_without_effect' };
     });
     planServertoolExecutionLoopEffectWithNative.mockImplementation((input: any) => {
-      if (input?.mode === 'handler_error') {
-        return {
-          toolCall: input.toolCall,
-          execution: {
-            flowId: `${String(input?.toolCall?.name ?? '').trim()}_error`
-          },
-          handlerErrorMessage:
-            typeof input?.handlerErrorMessage === 'string'
-              ? input.handlerErrorMessage.trim() || 'unknown'
-              : typeof input?.handlerErrorMessage?.message === 'string'
-                ? input.handlerErrorMessage.message.trim() || 'unknown'
-              : 'unknown'
-        };
-      }
       return {
-        toolCall: {
-          ...input.toolCall,
-          executionMode: 'noop',
-          stripAfterExecute: true
-        },
+        toolCall: input.toolCall,
         execution: {
-          flowId: String(input?.noopOutcome?.flowId ?? 'continue_execution_flow')
-        }
+          flowId: `${String(input?.toolCall?.name ?? '').trim()}_error`
+        },
+        handlerErrorMessage:
+          typeof input?.handlerErrorMessage === 'string'
+            ? input.handlerErrorMessage.trim() || 'unknown'
+            : typeof input?.handlerErrorMessage?.message === 'string'
+              ? input.handlerErrorMessage.message.trim() || 'unknown'
+              : 'unknown'
       };
     });
     planServertoolExecutionOutcomeRuntimeActionWithNative.mockImplementation((input: any) => {
@@ -535,71 +513,4 @@ describe('execution queue dispatch runtime', () => {
     expect(result.executedToolCalls).toEqual([]);
   });
 
-  test('uses Rust-owned execution loop effect planning for noop tool-call records', async () => {
-    const { planServertoolNoopOutcomeWithNative } = await import('rcc-llmswitch-core/native/servertool-wrapper');
-    (planServertoolNoopOutcomeWithNative as jest.Mock).mockReturnValue({
-      chatResponse: {
-        id: 'chatcmpl-noop',
-        tool_outputs: [{ tool_call_id: 'call_continue_1', name: 'continue_execution', content: '{"ok":true}' }]
-      },
-      flowId: 'continue_execution_flow',
-      followup: { requestIdSuffix: ':continue_execution_followup' }
-    });
-
-    const result = await runServertoolIoExecutionQueue({
-      dispatchPlan: {
-        executableToolCalls: [],
-        noopToolCalls: [
-          {
-            id: 'call_continue_1',
-            name: 'continue_execution',
-            arguments: '{}',
-            executionMode: 'guarded',
-            stripAfterExecute: false
-          }
-        ]
-      },
-      options: {
-        requestId: 'req-execution-loop-noop-1',
-        adapterContext: {}
-      } as any,
-      contextBase: {
-        adapterContext: {},
-        requestId: 'req-execution-loop-noop-1',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses'
-      } as any,
-      baseForExecution: { id: 'chatcmpl-base' } as any
-    });
-
-    expect(planServertoolNoopExecutionLoopEffectWithNative).toHaveBeenCalledWith({
-      toolCall: {
-        id: 'call_continue_1',
-        name: 'continue_execution',
-        arguments: '{}',
-        executionMode: 'guarded',
-        stripAfterExecute: false
-      },
-      noopOutcome: {
-        chatResponse: {
-          id: 'chatcmpl-noop',
-          tool_outputs: [{ tool_call_id: 'call_continue_1', name: 'continue_execution', content: '{"ok":true}' }]
-        },
-        flowId: 'continue_execution_flow',
-        followup: { requestIdSuffix: ':continue_execution_followup' }
-      }
-    });
-    expect(result.executedToolCalls[0]).toMatchObject({
-      toolCall: {
-        id: 'call_continue_1',
-        name: 'continue_execution',
-        arguments: '{}',
-        executionMode: 'noop',
-        stripAfterExecute: true
-      },
-      execution: {
-        flowId: 'continue_execution_flow'
-      }
-    });
-  });
 });

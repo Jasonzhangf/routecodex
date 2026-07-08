@@ -1379,6 +1379,193 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
 }
 
 #[test]
+fn test_submit_tool_outputs_stopless_cli_updates_runtime_control() {
+    let cli_output = serde_json::json!({
+        "ok": true,
+        "kind": "stop_message_auto",
+        "tool": "stop_message_auto",
+        "input": {
+            "flowId": "stop_message_flow",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "triggerHint": "invalid_schema"
+        },
+        "schemaFeedback": {
+            "reasonCode": "stop_schema_next_step_missing",
+            "missingFields": ["next_step"]
+        }
+    });
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.3-codex",
+          "tool_outputs": [
+            {
+              "tool_call_id": "call_stop_retry",
+              "output": cli_output.to_string()
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses.submit_tool_outputs",
+          "clientInjectReady": true
+        }),
+        entry_endpoint: "/v1/responses.submit_tool_outputs".to_string(),
+        request_id: "req_submit_stopless_runtime_control".to_string(),
+        has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(stopless["flowId"].as_str(), Some("stop_message_flow"));
+    assert_eq!(stopless["repeatCount"].as_u64(), Some(1));
+    assert_eq!(stopless["maxRepeats"].as_u64(), Some(3));
+    assert_eq!(stopless["triggerHint"].as_str(), Some("invalid_schema"));
+    assert_eq!(
+        stopless["schemaFeedback"]["reasonCode"].as_str(),
+        Some("stop_schema_next_step_missing")
+    );
+}
+
+#[test]
+fn test_materialized_stopless_turn_preserves_snapshot_runtime_control() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.3-codex",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{
+                "type": "input_text",
+                "text": "上一轮执行结果：repeatCount=1/3；reasonCode=stop_schema_next_step_missing；missingFields=next_step。"
+              }]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object" }
+              }
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses",
+          "clientInjectReady": true
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_materialized_stopless_snapshot_control".to_string(),
+        has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            },
+            "stopless": {
+              "active": true,
+              "flowId": "stop_message_flow",
+              "repeatCount": 1,
+              "maxRepeats": 3,
+              "triggerHint": "invalid_schema",
+              "schemaFeedback": {
+                "reasonCode": "stop_schema_next_step_missing",
+                "missingFields": ["next_step"]
+              }
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(stopless["flowId"].as_str(), Some("stop_message_flow"));
+    assert_eq!(
+        stopless["repeatCount"].as_u64(),
+        Some(1),
+        "materialized request must not reset snapshot stopless control to 0"
+    );
+    assert_eq!(stopless["maxRepeats"].as_u64(), Some(3));
+    assert_eq!(stopless["triggerHint"].as_str(), Some("invalid_schema"));
+    assert_eq!(
+        stopless["schemaFeedback"]["reasonCode"].as_str(),
+        Some("stop_schema_next_step_missing")
+    );
+}
+
+#[test]
+fn test_materialized_stopless_guidance_updates_runtime_control_without_snapshot() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.3-codex",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{
+                "type": "input_text",
+                "text": "上一轮执行结果：repeatCount=1/3；reasonCode=stop_schema_next_step_missing；missingFields=next_step。\n任务还没完成，但当前没有明确 next_step；缺少这些字段：next_step。"
+              }]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object" }
+              }
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses",
+          "clientInjectReady": true
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_materialized_stopless_guidance_control".to_string(),
+        has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(stopless["flowId"].as_str(), Some("stop_message_flow"));
+    assert_eq!(
+        stopless["repeatCount"].as_u64(),
+        Some(1),
+        "materialized stopless guidance is current request truth and must not reinitialize to 0"
+    );
+    assert_eq!(stopless["maxRepeats"].as_u64(), Some(3));
+    assert_eq!(stopless["triggerHint"].as_str(), Some("invalid_schema"));
+    assert_eq!(
+        stopless["schemaFeedback"]["reasonCode"].as_str(),
+        Some("stop_schema_next_step_missing")
+    );
+    assert_eq!(
+        stopless["schemaFeedback"]["missingFields"][0].as_str(),
+        Some("next_step")
+    );
+}
+
+#[test]
 fn test_terminal_schema_pass_stopless_turn_strips_reasoning_stop_controls() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({

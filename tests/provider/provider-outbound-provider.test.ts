@@ -87,8 +87,8 @@ describe('Provider outbound → upstream (openai-chat)', () => {
     expect((call.headers || {})['Accept']).toBe('application/json');
   });
 
-  test('qwen: passthrough compat + provider shaping', async () => {
-    const golden = loadGolden('qwen', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
+  test('openai passthrough compat + provider shaping', async () => {
+    const golden = loadGolden('openai', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
 
     const provider = new HttpTransportProvider({
       type: 'openai-standard',
@@ -110,7 +110,7 @@ describe('Provider outbound → upstream (openai-chat)', () => {
     const requestModel = (golden as any)?.model ?? 'coder-model';
     const request: any = { data: { ...golden, model: requestModel, stream: true, metadata: { foo: 'bar' } } };
     attachProviderRuntimeMetadata(request, {
-      requestId: 'req_test_qwen', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'qwen'
+      requestId: 'req_test_openai_passthrough', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'provider-a'
     });
 
     const res = await provider.sendRequest(request);

@@ -169,13 +169,13 @@ for (const stage of forbiddenRuntimeStages) {
 }
 
 const responseProjectionStage = Array.isArray(manifest?.stages)
-  ? manifest.stages.find((stage) => stage?.node_id === 'MetaResp07ServertoolContextProjected')
+  ? manifest.stages.find((stage) => stage?.node_id === 'MetaResp07BridgeMetadataBound')
   : undefined;
 if (!responseProjectionStage) {
-  fail(`${files.manifest}: missing stage MetaResp07ServertoolContextProjected`, failures);
+  fail(`${files.manifest}: missing stage MetaResp07BridgeMetadataBound`, failures);
 } else if (Array.isArray(responseProjectionStage.write_families) && responseProjectionStage.write_families.length > 0) {
   fail(
-    `${files.manifest}: MetaResp07ServertoolContextProjected must stay read-only and have no write_families`,
+    `${files.manifest}: MetaResp07BridgeMetadataBound must stay read-only and have no write_families`,
     failures,
   );
 }

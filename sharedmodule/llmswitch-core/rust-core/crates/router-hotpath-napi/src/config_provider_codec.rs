@@ -193,8 +193,12 @@ struct ProviderConfigFileEntry {
 }
 
 fn read_provider_dirs(root: &Path) -> Result<Vec<ProviderDirEntry>, String> {
-    let entries = fs::read_dir(root)
-        .map_err(|err| format!("[config] failed to read provider root {}: {err}", root.display()))?;
+    let entries = fs::read_dir(root).map_err(|err| {
+        format!(
+            "[config] failed to read provider root {}: {err}",
+            root.display()
+        )
+    })?;
     let mut dirs = Vec::new();
     for entry_result in entries {
         let entry = entry_result.map_err(|err| {
@@ -258,16 +262,22 @@ fn read_provider_config_files(
     let files = planned
         .get("files")
         .and_then(Value::as_array)
-        .ok_or_else(|| "[config] provider config file planner returned invalid files".to_string())?;
+        .ok_or_else(|| {
+            "[config] provider config file planner returned invalid files".to_string()
+        })?;
     files
         .iter()
         .map(|file| {
             let file_name = read_trimmed_string(file.get("fileName")).ok_or_else(|| {
                 "[config] provider config file planner returned invalid fileName".to_string()
             })?;
-            let is_base_file = file.get("isBaseFile").and_then(Value::as_bool).ok_or_else(|| {
-                "[config] provider config file planner returned invalid isBaseFile".to_string()
-            })?;
+            let is_base_file =
+                file.get("isBaseFile")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| {
+                        "[config] provider config file planner returned invalid isBaseFile"
+                            .to_string()
+                    })?;
             Ok(ProviderConfigFileEntry {
                 path: dir.path.join(&file_name),
                 file_name,
@@ -420,8 +430,7 @@ fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
 mod tests {
     use super::{
         coerce_provider_config_v2_from_parsed_json, load_provider_configs_v2_from_root_json,
-        plan_provider_config_v2_files_json,
-        resolve_provider_config_v2_identity_json,
+        plan_provider_config_v2_files_json, resolve_provider_config_v2_identity_json,
     };
     use serde_json::Value;
     use std::fs;

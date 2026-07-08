@@ -1273,10 +1273,10 @@ fn test_build_router_metadata_input_preserves_forced_provider_and_disabled_alias
         "metadata": {
             "__shadowCompareForcedProviderKey": " ali-coding-plan.key1.kimi-k2.5 ",
             "disabledProviderKeyAliases": [
-                " qwen.1 ",
+                " provider-a.1 ",
                 "",
                 null,
-                "qwen.2"
+                "provider-a.2"
             ]
         }
     });
@@ -1294,7 +1294,7 @@ fn test_build_router_metadata_input_preserves_forced_provider_and_disabled_alias
                 .iter()
                 .filter_map(|entry| entry.as_str())
                 .collect::<Vec<_>>()),
-        Some(vec!["qwen.1", "qwen.2"])
+        Some(vec!["provider-a.1", "provider-a.2"])
     );
 }
 

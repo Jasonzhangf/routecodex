@@ -89,7 +89,7 @@ Owner：
 
 ### `error.backoff_action_queue`
 
-职责：统一 blocking wait 队列，固定 `1s -> 2s -> 3s -> repeat`，执行 wait 但不定义 provider classification。
+职责：统一 blocking wait 队列，固定 `1s -> 3s -> 5s -> repeat`，执行 wait 但不定义 provider classification。
 
 Owner：
 

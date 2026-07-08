@@ -38,20 +38,20 @@ describe('config writers', () => {
     const filePath = path.join(root, 'config.toml');
     await fs.writeFile(
       filePath,
-      ['# top comment', 'oauthBrowser = "chrome"', ''].join('\n'),
+      ['# top comment', 'logLevel = "info"', ''].join('\n'),
       'utf8'
     );
 
     const persisted = await updateUserConfigStringScalar({
       configPath: filePath,
       tablePath: [],
-      key: 'oauthBrowser',
-      value: 'camoufox',
+      key: 'logLevel',
+      value: 'debug',
     });
 
     expect(persisted.format).toBe('toml');
     expect(persisted.raw).toContain('# top comment');
-    expect(persisted.raw).toContain('oauthBrowser = "camoufox"');
+    expect(persisted.raw).toContain('logLevel = "debug"');
   });
 
   it('writes provider config based on target extension', async () => {

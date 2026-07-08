@@ -27,7 +27,6 @@ export type HubPipelineResult = {
    * semantics (e.g. tool alias maps) required for correct client remap.
    */
   standardizedRequest?: Record<string, unknown>;
-  entryOriginRequest?: Record<string, unknown>;
   /**
    * Request after chat_process/tool governance. Carries canonical semantics
    * (e.g. tool alias maps) required for correct client remap.
@@ -120,10 +119,6 @@ export async function runHubPipeline(
     standardizedRequest:
       result.standardizedRequest && typeof result.standardizedRequest === 'object'
         ? (result.standardizedRequest as Record<string, unknown>)
-        : undefined,
-    entryOriginRequest:
-      result.entryOriginRequest && typeof result.entryOriginRequest === 'object'
-        ? (result.entryOriginRequest as Record<string, unknown>)
         : undefined,
     processedRequest:
       result.processedRequest && typeof result.processedRequest === 'object'

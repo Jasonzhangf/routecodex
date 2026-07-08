@@ -50,8 +50,8 @@ describe('HttpRequestExecutor provider HTTP retry boundary', () => {
         requestId: 'req_retry_pow_refresh',
         startTime: Date.now(),
         profile: {} as any,
-        providerKey: 'deepseek-web.3.deepseek-v4-pro',
-        providerId: 'deepseek-web'
+        providerKey: 'provider-a.3.model-a',
+        providerId: 'provider-a'
       } as any
     )).rejects.toMatchObject({ statusCode: 502 });
 

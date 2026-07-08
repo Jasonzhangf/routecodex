@@ -4029,6 +4029,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/pipeline/tests/README.md',
       'tests/sharedmodule/responses-openai-pipeline-request-parameters.spec.ts',
       'src/types/llmswitch-core-api-shim.d.ts',
+      'src/types/llmswitch-core.d.ts',
       'tests/sharedmodule/hub-policy-provider-outbound-reasoning-filter.spec.ts',
       'tests/sharedmodule/hub-policy-observe-allowlist.spec.ts',
       'sharedmodule/llmswitch-core/scripts/tests/coverage-request-tool-list-filter.mjs',
@@ -5066,12 +5067,13 @@ describe('hub pipeline stage residue audit', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
+      { label: 'calls stale request providerProtocol resolver before route selection', pattern: /resolveHubPipelineRequestProviderProtocolWithNative/ },
       { label: 'selects providerProtocol from runtimeControl in TS', pattern: /runtimeControl\?\.[\s\n]*providerProtocol/ },
       { label: 'fallbacks providerProtocol from metadata in TS', pattern: /metadata\.providerProtocol[\s\S]{0,80}\?\?/ },
       { label: 'throws providerProtocol missing from TS selector', pattern: /HubPipeline requires metadata center runtime_control\.providerProtocol/ },
     ]);
 
-    expect(source).toContain('resolveHubPipelineRequestProviderProtocolWithNative');
+    expect(source).toContain('buildHubPipelineMaterializedRequestPlanWithNative');
     expect(findings).toEqual([]);
   });
 

@@ -456,7 +456,7 @@ fn test_profile_selection() {
     let input = ReqOutboundCompatInput {
         payload: json!({"model": "deepseek-chat"}),
         adapter_context: AdapterContext {
-            compatibility_profile: Some("deepseek-compat".to_string()),
+            compatibility_profile: Some("compat-passthrough-test".to_string()),
             provider_protocol: Some("openai-chat".to_string()),
             request_id: Some("req_456".to_string()),
             entry_endpoint: Some("/v1/chat".to_string()),

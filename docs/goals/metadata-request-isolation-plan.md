@@ -69,7 +69,7 @@
    - 当前状态：direct/passthrough 已删除 top-level `metadata`，但还要覆盖 submit_tool_outputs / direct SSE / JSON send 路径红测。
    - 加固方向：在 `sanitizeResponsesProviderOutboundBody` 前后建立明确 invariant；不得靠 sanitizer 掩盖上游污染。
 
-7. `src/client/openai/chat-protocol-client.ts`、`src/client/gemini/gemini-protocol-client.ts`、`src/providers/profile/families/qwen-profile.ts`、`src/providers/profile/families/glm-profile.ts`
+7. `src/client/openai/chat-protocol-client.ts`、`src/client/gemini/gemini-protocol-client.ts`、`src/providers/profile/families/glm-profile.ts`、`src/providers/profile/families/glm-profile.ts`
    - 当前状态：主路径已删除或不恢复 metadata。
    - 加固方向：补测试防回归，确保后续 provider profile 不重新引入 metadata。
 
@@ -266,7 +266,7 @@ metadata 必须是无状态、短生命周期、闭环内控制语义：
 
 15. `src/server/handlers/images-handler.ts`
     - 问题：images 入口把 client `payload.metadata` 合并进 chat pipeline body 的 `metadata` 字段。
-    - 修复：image generation 控制语义改为显式 `qwenImageGeneration` 字段；client metadata 只进入 carrier，不进入 body。
+    - 修复：image generation 控制语义改为显式 `providerImageGeneration` 字段；client metadata 只进入 carrier，不进入 body。
 
 ### 新增验证
 

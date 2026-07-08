@@ -1100,6 +1100,7 @@ owners:
     required_tests:
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/hub-pipeline-router-metadata.spec.ts
+      - tests/sharedmodule/hub-pipeline-rust-responses-provider-payload.regression.spec.ts
       - tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
@@ -3888,7 +3889,6 @@ owners:
     forbidden_mentions_allowlist:
       - NativeSseRuntimeProtocol
     required_tests:
-      - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
       - tests/sharedmodule/sse-stream-mode-native.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
@@ -3925,7 +3925,7 @@ owners:
       - NativeSseRuntimeProtocol
     required_tests:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
-      - tests/sharedmodule/hub-pipeline-normalize-request-sse-protocol.spec.ts
+      - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate

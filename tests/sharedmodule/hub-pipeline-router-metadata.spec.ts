@@ -18,7 +18,7 @@ describe('hub pipeline router metadata builder', () => {
       },
       metadata: {
         __shadowCompareForcedProviderKey: 'ali-coding-plan.key1.kimi-k2.5',
-        disabledProviderKeyAliases: ['qwen.1', 'qwen.2'],
+        disabledProviderKeyAliases: ['provider-a.1', 'provider-a.2'],
         estimatedInputTokens: 123
       }
     });
@@ -26,7 +26,7 @@ describe('hub pipeline router metadata builder', () => {
     expect(output).toMatchObject({
       requestId: 'req-followup-router-meta',
       __shadowCompareForcedProviderKey: 'ali-coding-plan.key1.kimi-k2.5',
-      disabledProviderKeyAliases: ['qwen.1', 'qwen.2'],
+      disabledProviderKeyAliases: ['provider-a.1', 'provider-a.2'],
       estimatedInputTokens: 123
     });
   });

@@ -23,20 +23,11 @@ describe('provider-update helper utilities', () => {
     });
     expect(authFromKeys).toBe('${A_KEY}');
 
-    const oauth = __providerUpdateTestables.normalizeAuthForProviderUpdate({
-      type: 'qwen-oauth',
-      tokenFile: '~/.rcc/auth/qwen.json',
+    expect(() => __providerUpdateTestables.normalizeAuthForProviderUpdate({
+      type: 'legacy-oauth',
+      tokenFile: '~/.rcc/auth/legacy.json',
       scopes: ['a', 'b']
-    });
-    expect(oauth).toEqual({
-      type: 'oauth',
-      tokenFile: '~/.rcc/auth/qwen.json',
-      clientId: undefined,
-      clientSecret: undefined,
-      tokenUrl: undefined,
-      deviceCodeUrl: undefined,
-      scopes: ['a', 'b']
-    });
+    })).toThrow('OAuth auth has been removed');
 
     const apikey = __providerUpdateTestables.normalizeAuthForProviderUpdate({
       type: 'apikey',

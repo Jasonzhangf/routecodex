@@ -340,7 +340,7 @@ mod tests {
                         "text": concat!(
                             "执行受阻，请建单：\n",
                             "```json\n",
-                            "{\"type\":\"blocked\",\"summary\":\"deepseek token refresh failed\",\"blocker\":\"HTTP 401 from oauth endpoint\",\"impact\":\"cannot continue auth flow\",\"next_action\":\"rotate credential and retry\",\"evidence\":[\"requestId=req_1\",\"provider=deepseek-web.3\"]}\n",
+                            "{\"type\":\"blocked\",\"summary\":\"provider credential failed\",\"blocker\":\"HTTP 401 from upstream\",\"impact\":\"cannot continue request\",\"next_action\":\"rotate credential and retry\",\"evidence\":[\"requestId=req_1\",\"provider=provider-a.3\"]}\n",
                             "```"
                         )
                     }
@@ -348,15 +348,15 @@ mod tests {
             }
         ]))
         .expect("blocked report");
-        assert_eq!(report.summary, "deepseek token refresh failed");
-        assert_eq!(report.blocker, "HTTP 401 from oauth endpoint");
+        assert_eq!(report.summary, "provider credential failed");
+        assert_eq!(report.blocker, "HTTP 401 from upstream");
         assert_eq!(
             report.next_action.as_deref(),
             Some("rotate credential and retry")
         );
         assert_eq!(
             report.evidence,
-            vec!["requestId=req_1", "provider=deepseek-web.3"]
+            vec!["requestId=req_1", "provider=provider-a.3"]
         );
     }
 

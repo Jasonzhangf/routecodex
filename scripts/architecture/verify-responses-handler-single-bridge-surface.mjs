@@ -45,7 +45,6 @@ const checks = [
       'res.write(`event: error',
       'attachResponsesRequestContextToResultForHttp(',
       'captureResponsesRequestContextForHttp(',
-      'seedResponsesToolCallResponseForHttp(',
       'shouldManageResponsesConversationForHttp(',
       'const originalStream =',
       'const outboundStream =',

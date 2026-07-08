@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
-  colorizeVirtualRouterHitLogLine,
+  colorizeRequestScopedLogLine,
   extractLeadingAnsiColor,
   stripAnsiCodes
 } from '../../utils/request-log-color.js';
@@ -100,7 +100,7 @@ export function installPortLogConsoleRouter(): void {
     const prefix = resolvePortPrefix(context, port);
     const routedArgs =
       args.length === 1 && typeof args[0] === 'string'
-        ? [colorizeVirtualRouterHitLogLine(args[0])]
+        ? [colorizeRequestScopedLogLine(args[0])]
         : args;
     const prefixedArgs = prefixArgsWithPort(routedArgs, prefix);
     if (port) {

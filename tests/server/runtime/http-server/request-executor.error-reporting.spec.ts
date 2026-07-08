@@ -477,7 +477,7 @@ describe('HubRequestExecutor provider error reporting', () => {
           metadata: {}
         } as any,
         target: {
-          providerKey: 'qwenchat.aliasA',
+          providerKey: 'provider-a.aliasA',
           providerType: 'openai',
           outboundProfile: 'openai-chat',
           runtimeKey: 'runtime:key',
@@ -549,7 +549,7 @@ describe('HubRequestExecutor provider error reporting', () => {
           tools: declaredTools
         },
         target: {
-          providerKey: 'qwenchat.aliasA',
+          providerKey: 'provider-a.aliasA',
           providerType: 'openai',
           outboundProfile: 'openai-chat',
           runtimeKey: 'runtime:key',

@@ -184,7 +184,7 @@ async function main() {
       {
         __rt: {
           webSearch: webSearchConfig([
-            { id: 'deepseek:web_search', providerKey: 'deepseek-web.key.deepseek-chat', executionMode: 'direct', directActivation: 'route', default: true },
+            { id: 'direct:web_search', providerKey: 'provider-direct.key.model-a', executionMode: 'direct', directActivation: 'route', default: true },
             { id: 'bing-main', providerKey: 'bing.default.search' }
           ], 'always')
         }
@@ -200,7 +200,7 @@ async function main() {
         __rt: {
           webSearch: webSearchConfig([
             { id: 'bing-main', providerKey: 'bing.default.search' },
-            { id: 'ds-second', providerKey: 'deepseek-web.key.deepseek-chat', executionMode: 'direct', directActivation: 'route', default: false }
+            { id: 'direct-second', providerKey: 'provider-direct.key.model-a', executionMode: 'direct', directActivation: 'route', default: false }
           ], 'always')
         }
       }
@@ -214,7 +214,7 @@ async function main() {
       {
         __rt: {
           webSearch: webSearchConfig([
-            { id: 'deepseek:web_search', providerKey: 'deepseek-web.key.deepseek-reasoner', executionMode: 'direct', directActivation: 'route', default: true },
+            { id: 'direct:web_search', providerKey: 'provider-direct.key.model-b', executionMode: 'direct', directActivation: 'route', default: true },
             { id: 'bing-main', providerKey: 'bing.default.search', executionMode: 'servertool' }
           ], 'selective')
         }
@@ -229,7 +229,7 @@ async function main() {
       {
         __rt: {
           webSearch: webSearchConfig([
-            { id: 'bad', providerKey: 'deepseek-web.key.other-model', default: true }
+            { id: 'bad', providerKey: 'provider-direct.key.other-model', default: true }
           ], 'always')
         }
       }

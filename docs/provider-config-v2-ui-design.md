@@ -170,7 +170,7 @@
 1. **后端只读 API 草案实现**
    - 在 daemon / host 中实现 `/config/providers/v2*` 只读接口。
    - 确保敏感字段（密钥、token 值）不会出现在返回数据中。
-2. **在现有 `daemon-admin-ui.html` 里接入 Providers(Config V2) 子视图**
+2. **在现有 daemon admin Web UI 里接入 Providers(Config V2) 子视图**
    - 添加二级 Tab 切换。
    - 用静态假数据先跑通布局，再替换为 API 请求。
 3. **与 Credentials / Runtime health 联动**
@@ -178,4 +178,3 @@
 4. **Config V2 ready 之后对齐实际 schema**
    - 一旦 Config V2 schema 固定，更新此文档中的字段命名与示例。
    - 清理临时字段，保持“Config 驱动”原则：UI 只读配置，不干预 llmswitch-core 的路由 / 工具逻辑。
-

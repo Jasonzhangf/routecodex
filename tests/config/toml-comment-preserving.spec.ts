@@ -6,18 +6,18 @@ describe('toml-comment-preserving writer', () => {
 # 顶层注释
 version = "2.0.0"
 virtualrouterMode = "v2"
-oauthBrowser = "default"   # OAuth 浏览器选择
+logLevel = "info"   # 日志级别
 
 [httpserver]
 # HTTP 服务端口
 host = "127.0.0.1"
 port = 5555
 `;
-    const after = updateTomlStringScalarInTable(before, [], 'oauthBrowser', 'camoufox');
+    const after = updateTomlStringScalarInTable(before, [], 'logLevel', 'debug');
     expect(after).toContain('# RouteCodex user config');
     expect(after).toContain('# 顶层注释');
-    expect(after).toContain('# OAuth 浏览器选择');
-    expect(after).toContain('oauthBrowser = "camoufox"   # OAuth 浏览器选择');
+    expect(after).toContain('# 日志级别');
+    expect(after).toContain('logLevel = "debug"   # 日志级别');
     expect(after).toContain('[httpserver]');
     expect(after).toContain('# HTTP 服务端口');
     expect(after).toContain('port = 5555');
@@ -29,19 +29,19 @@ port = 5555
 [httpserver]
 host = "127.0.0.1"
 `;
-    const after = updateTomlStringScalarInTable(before, [], 'oauthBrowser', 'camoufox');
-    expect(after).toContain('oauthBrowser = "camoufox"');
-    const oauthIdx = after.indexOf('oauthBrowser');
+    const after = updateTomlStringScalarInTable(before, [], 'logLevel', 'debug');
+    expect(after).toContain('logLevel = "debug"');
+    const logLevelIdx = after.indexOf('logLevel');
     const sectionIdx = after.indexOf('[httpserver]');
-    expect(oauthIdx).toBeLessThan(sectionIdx);
+    expect(logLevelIdx).toBeLessThan(sectionIdx);
   });
 
   it('appends root-level key at top when no sections exist', () => {
     const before = `version = "2.0.0"
 virtualrouterMode = "v2"
 `;
-    const after = updateTomlStringScalarInTable(before, [], 'oauthBrowser', 'camoufox');
-    expect(after).toContain('oauthBrowser = "camoufox"');
+    const after = updateTomlStringScalarInTable(before, [], 'logLevel', 'debug');
+    expect(after).toContain('logLevel = "debug"');
     expect(after).toContain('version = "2.0.0"');
   });
 
@@ -85,8 +85,8 @@ activeRoutingPolicyGroup = "default"
 enabled = true
 tickMs = 1500
 `;
-    const after = updateTomlStringScalarInTable(before, ['virtualrouter'], 'oauthBrowser', 'camoufox');
-    expect(after).toContain('oauthBrowser = "camoufox"');
+    const after = updateTomlStringScalarInTable(before, ['virtualrouter'], 'logLevel', 'debug');
+    expect(after).toContain('logLevel = "debug"');
     expect(after).toContain('activeRoutingPolicyGroup = "default"');
     expect(after).toContain('enabled = true');
     expect(after).toContain('tickMs = 1500');

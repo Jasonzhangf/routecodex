@@ -141,6 +141,23 @@ function readRequestTruthFromAnyBoundMetadataCenter(
   return metadata ? readRequestTruthFromAnyBoundMetadataCenter(metadata) : undefined;
 }
 
+function readContinuationContextFromAnyBoundMetadataCenter(
+  target: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!target) {
+    return undefined;
+  }
+  const center = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  if (center && typeof center.readContinuationContext === 'function') {
+    const continuationContext = center.readContinuationContext();
+    return continuationContext && typeof continuationContext === 'object' && !Array.isArray(continuationContext)
+      ? { ...continuationContext }
+      : undefined;
+  }
+  const metadata = asRecord(target.metadata);
+  return metadata ? readContinuationContextFromAnyBoundMetadataCenter(metadata) : undefined;
+}
+
 function readProviderObservationFromAnyBoundMetadataCenter(
   target: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
@@ -164,13 +181,15 @@ export function readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(
   const targetRecord = asRecord(target);
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(targetRecord);
   const requestTruth = readRequestTruthFromAnyBoundMetadataCenter(targetRecord);
+  const continuationContext = readContinuationContextFromAnyBoundMetadataCenter(targetRecord);
   const providerObservation = readProviderObservationFromAnyBoundMetadataCenter(targetRecord);
-  if (!runtimeControl && !requestTruth && !providerObservation) {
+  if (!runtimeControl && !requestTruth && !continuationContext && !providerObservation) {
     return undefined;
   }
   return {
     metadataCenterSnapshot: {
       requestTruth: requestTruth ?? {},
+      continuationContext: continuationContext ?? {},
       runtimeControl: runtimeControl ?? {},
       providerObservation: providerObservation ?? {}
     }
