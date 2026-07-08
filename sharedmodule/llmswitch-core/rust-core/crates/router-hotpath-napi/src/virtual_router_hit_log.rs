@@ -252,33 +252,8 @@ fn summarize_stop_message_runtime(
 }
 
 // ---------------------------------------------------------------------------
-// Session log color palette
+// Session log color
 // ---------------------------------------------------------------------------
-
-const SESSION_LOG_COLOR_PALETTE: &[&str] = &[
-    "\x1b[32m",
-    "\x1b[33m",
-    "\x1b[34m",
-    "\x1b[35m",
-    "\x1b[36m",
-    "\x1b[92m",
-    "\x1b[93m",
-    "\x1b[94m",
-    "\x1b[95m",
-    "\x1b[96m",
-    "\x1b[38;5;202m",
-    "\x1b[38;5;208m",
-    "\x1b[38;5;214m",
-    "\x1b[38;5;220m",
-    "\x1b[38;5;45m",
-    "\x1b[38;5;51m",
-    "\x1b[38;5;39m",
-    "\x1b[38;5;75m",
-    "\x1b[38;5;141m",
-    "\x1b[38;5;177m",
-    "\x1b[38;5;171m",
-    "\x1b[38;5;207m",
-];
 
 fn hash_session_log_color_token(value: &str) -> u32 {
     let mut hash: u32 = 0x811c9dc5;
@@ -294,14 +269,41 @@ fn hash_session_log_color_token(value: &str) -> u32 {
     hash
 }
 
-fn resolve_session_color(session_id: &str) -> Option<&'static str> {
+fn hsl_to_rgb(hue: f64, saturation: f64, lightness: f64) -> (u8, u8, u8) {
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let hue_prime = hue / 60.0;
+    let x = chroma * (1.0 - ((hue_prime % 2.0) - 1.0).abs());
+    let (r1, g1, b1) = if hue_prime < 1.0 {
+        (chroma, x, 0.0)
+    } else if hue_prime < 2.0 {
+        (x, chroma, 0.0)
+    } else if hue_prime < 3.0 {
+        (0.0, chroma, x)
+    } else if hue_prime < 4.0 {
+        (0.0, x, chroma)
+    } else if hue_prime < 5.0 {
+        (x, 0.0, chroma)
+    } else {
+        (chroma, 0.0, x)
+    };
+    let m = lightness - chroma / 2.0;
+    let to_channel = |v: f64| -> u8 { ((v + m).clamp(0.0, 1.0) * 255.0).round() as u8 };
+    (to_channel(r1), to_channel(g1), to_channel(b1))
+}
+
+fn resolve_session_color(session_id: &str) -> Option<String> {
     if session_id.trim().is_empty() {
         return None;
     }
     let hash = hash_session_log_color_token(session_id.trim());
-    SESSION_LOG_COLOR_PALETTE
-        .get((hash % SESSION_LOG_COLOR_PALETTE.len() as u32) as usize)
-        .copied()
+    let mut hue = (hash % 3600) as f64 / 10.0;
+    if !(18.0..342.0).contains(&hue) {
+        hue = (hue + 47.0) % 360.0;
+    }
+    let saturation = 0.62 + (((hash >> 12) & 0xff) as f64 / 255.0) * 0.24;
+    let lightness = 0.50 + (((hash >> 20) & 0xff) as f64 / 255.0) * 0.16;
+    let (r, g, b) = hsl_to_rgb(hue, saturation, lightness);
+    Some(format!("\x1b[38;2;{};{};{}m", r, g, b))
 }
 
 fn resolve_route_color(route_name: &str) -> &'static str {
@@ -672,9 +674,7 @@ pub fn resolve_route_color_str(route_name: String) -> String {
 
 #[napi]
 pub fn resolve_session_color_str(session_id: Option<String>) -> napi::Result<String> {
-    let result: Option<String> = session_id
-        .as_ref()
-        .and_then(|s| resolve_session_color(s).map(ToString::to_string));
+    let result: Option<String> = session_id.as_ref().and_then(|s| resolve_session_color(s));
     serde_json::to_string(&result)
         .map_err(|e| napi::Error::from_reason(format!("serialize: {}", e)))
 }
@@ -835,6 +835,17 @@ pub fn to_virtual_router_hit_event_json(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn session_color_is_stable_and_not_palette_bucket_colliding() {
+        let first = resolve_session_color("active-session-color-2").expect("first color");
+        let second = resolve_session_color("active-session-color-3").expect("second color");
+        let first_again = resolve_session_color("active-session-color-2").expect("stable color");
+
+        assert!(first.starts_with("\x1b[38;2;"));
+        assert_eq!(first, first_again);
+        assert_ne!(first, second);
+    }
 
     #[test]
     fn virtual_router_hit_log_contract_is_native_owned() {

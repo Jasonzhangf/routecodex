@@ -178,6 +178,15 @@ describe('virtual-router hit log', () => {
     expect(line).toContain(`sid=${sessionId} ${sessionColor}thinking/thinking-primary`);
   });
 
+  it('does not reuse the same visible color for adjacent active sessions', () => {
+    const first = resolveSessionColor('active-session-color-2');
+    const second = resolveSessionColor('active-session-color-3');
+
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(first).not.toBe(second);
+  });
+
   it('rejects virtual-router-hit formatting when no session id is present', () => {
     const record = createVirtualRouterHitRecord({
       routeName: 'thinking',
