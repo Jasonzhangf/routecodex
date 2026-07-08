@@ -1,4 +1,7 @@
-import { augmentOpenAITools, buildSystemToolGuidance } from '../../sharedmodule/llmswitch-core/src/guidance/index.js';
+import {
+  augmentOpenAIToolsDirectNative,
+  buildSystemToolGuidanceDirectNative
+} from './helpers/tool-guidance-direct-native.js';
 
 describe('tool guidance for nested apply_patch prevention', () => {
   it('injects explicit no-nesting guidance into exec_command tool description', () => {
@@ -18,7 +21,7 @@ describe('tool guidance for nested apply_patch prevention', () => {
       }
     ];
 
-    const out = augmentOpenAITools(tools) as any[];
+    const out = augmentOpenAIToolsDirectNative(tools) as any[];
     const desc = String(out?.[0]?.function?.description || '');
     expect(desc).toContain('[Codex ExecCommand Guidance]');
     expect(desc).toContain('Use exec_command only for shell execution');
@@ -27,7 +30,7 @@ describe('tool guidance for nested apply_patch prevention', () => {
   });
 
   it('generic system guidance no longer owns apply_patch policy text', () => {
-    const guidance = buildSystemToolGuidance();
+    const guidance = buildSystemToolGuidanceDirectNative();
     expect(guidance).not.toContain('apply_patch');
     expect(guidance).not.toContain('Failed to find expected lines');
     expect(guidance).not.toContain('GNU line-number ranges');
@@ -50,7 +53,7 @@ describe('tool guidance for nested apply_patch prevention', () => {
       }
     ];
 
-    const out = augmentOpenAITools(tools) as any[];
+    const out = augmentOpenAIToolsDirectNative(tools) as any[];
     const desc = String(out?.[0]?.function?.description || '');
     expect(desc).not.toContain('apply_patch');
     expect(desc).not.toContain('File writes are FORBIDDEN via shell');
@@ -71,7 +74,7 @@ describe('tool guidance for nested apply_patch prevention', () => {
       }
     ];
 
-    const out = augmentOpenAITools(tools) as any[];
+    const out = augmentOpenAIToolsDirectNative(tools) as any[];
     const desc = String(out?.[0]?.function?.description || '');
     expect(desc).toBe('Edit files by patch');
     expect(out?.[0]?.function?.parameters?.properties?.patch).toBeUndefined();
@@ -93,7 +96,7 @@ describe('tool guidance for nested apply_patch prevention', () => {
       }
     ];
 
-    const out = augmentOpenAITools(tools) as any[];
+    const out = augmentOpenAIToolsDirectNative(tools) as any[];
     const patchDesc = String(out?.[0]?.function?.parameters?.properties?.patch?.description || '');
     expect(patchDesc).toBe('');
   });
@@ -118,7 +121,7 @@ describe('tool guidance for nested apply_patch prevention', () => {
       }
     ];
 
-    const out = augmentOpenAITools(tools) as any[];
+    const out = augmentOpenAIToolsDirectNative(tools) as any[];
     expect(out?.[0]?.function?.parameters?.properties?.filePath?.type).toBe('string');
     const patchDesc = String(out?.[0]?.function?.parameters?.properties?.patch?.description || '');
     expect(patchDesc).toBe('');

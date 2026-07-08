@@ -17,17 +17,9 @@
       "import": "./dist/conversion/switch-orchestrator.js",
       "types": "./dist/conversion/switch-orchestrator.d.ts"
     },
-    "./v2/guidance": {
-      "import": "./dist/guidance/index.js",
-      "types": "./dist/guidance/index.d.ts"
-    },
     "./v2/runtime/virtual-router-hit-log": {
       "import": "./dist/runtime/virtual-router-hit-log.js",
       "types": "./dist/runtime/virtual-router-hit-log.d.ts"
-    },
-    "./guidance": {
-      "import": "./dist/guidance/index.js",
-      "types": "./dist/guidance/index.d.ts"
     },
     "./native/servertool-wrapper": {
       "import": "./dist/native/servertool-wrapper.js",

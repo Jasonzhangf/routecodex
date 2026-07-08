@@ -4515,52 +4515,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('system tool guidance text must be native-owned', () => {
+  it('system tool guidance TS shell must stay physically deleted', () => {
     const guidePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/guidance/index.ts');
-    const source = fs.readFileSync(guidePath, 'utf8');
-
-    expect(source).toContain('buildSystemToolGuidanceJson');
-    expect(source).toContain('augmentOpenAIToolsJson');
-    expect(source).toContain('augmentAnthropicToolsJson');
-    const buildSystemBlock = source.match(
-      /export function buildSystemToolGuidance\(\): string \{[\s\S]*?\n\}/u
-    )?.[0] ?? '';
-    const augmentOpenAIBlock = source.match(
-      /export function augmentOpenAITools\(tools: unknown\[\]\): unknown\[\] \{[\s\S]*?\n\}/u
-    )?.[0] ?? '';
-    const augmentAnthropicBlock = source.match(
-      /export function augmentAnthropicTools\(tools: unknown\[\]\): unknown\[\] \{[\s\S]*?\n\}/u
-    )?.[0] ?? '';
-    const forbiddenPatterns = [
-      { label: 'local bullet formatter', pattern: /const bullet\s*=/u },
-      { label: 'local guidance line array', pattern: /const lines:\s*string\[\]/u },
-      { label: 'local guidance line push', pattern: /lines\.push/u },
-      { label: 'local guidance join', pattern: /lines\.join\(/u },
-    ];
-    const findings = forbiddenPatterns
-      .filter(({ pattern }) => pattern.test(buildSystemBlock))
-      .map(({ label }) => label);
-
-    const augmentForbiddenPatterns = [
-      { label: 'local exec guidance', pattern: /Codex ExecCommand Guidance/u },
-      { label: 'local shell guidance', pattern: /Codex Shell Guidance/u },
-      { label: 'local plan guidance', pattern: /Codex Plan Guidance/u },
-      { label: 'local mcp guidance', pattern: /Codex MCP Guidance/u },
-      { label: 'local view image guidance', pattern: /Codex ViewImage Guidance/u },
-      { label: 'local append once', pattern: /appendOnce/u },
-      { label: 'local object schema mutation', pattern: /ensureObjectSchema/u },
-      { label: 'local parameters mutation', pattern: /\.parameters\s*=/u },
-      { label: 'local input schema mutation', pattern: /\.input_schema\s*=/u },
-    ];
-    for (const block of [augmentOpenAIBlock, augmentAnthropicBlock]) {
-      for (const rule of augmentForbiddenPatterns) {
-        if (rule.pattern.test(block)) {
-          findings.push(rule.label);
-        }
-      }
-    }
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(guidePath)).toBe(false);
   });
 
   it('tool args JSON artifact repair must be native-owned', () => {

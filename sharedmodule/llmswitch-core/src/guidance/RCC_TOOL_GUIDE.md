@@ -91,7 +91,7 @@
 - 不做“容错默认值”式的沉默回退；一旦验证/解析失败，快速暴露问题并在上层捕获处理。
 
 ## 9. 参考实现位置（llmswitch-core v2）
-- 指引模块：`v2/guidance/index.ts`
+- 指引模块：Rust/NAPI `buildSystemToolGuidanceJson`、`augmentOpenAIToolsJson`、`augmentAnthropicToolsJson`
 - 工具治理入口：`v2/conversion/shared/tool-governor.ts`
 - 工具 canonicalize（native）：`rust-core/crates/router-hotpath-napi/src/hub_reasoning_tool_normalizer.rs`
 - Responses 桥接：`v2/conversion/responses/responses-openai-bridge.ts`

@@ -28001,3 +28001,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Tests now use direct Rust/native host bridge exports for stop-gateway/stop-message compare decisions and the server HTTP `MetadataCenter` API for request-local `runtime_control` write/read evidence.
 - `verify-metadata-center-dualwrite-api` no longer allows the deleted servertool-local migration shell as a direct MetadataCenter writer; release-install verifier no longer imports the deleted dist subpath.
 - Verification PASS: focused Jest 207/207; sharedmodule/root `tsc`; `verify:metadata-center-dualwrite-api`; metadata-center manifest/write-boundary gates; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=86`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); exact prod/script/package ref scan for deleted path; `git diff --check`.
+
+# 2026-07-09: llmswitch guidance public TS shell deletion
+
+- Scope: continued TS shell reference closeout, package subpath narrowing.
+- Deleted `sharedmodule/llmswitch-core/src/guidance/index.ts`.
+- Removed `./guidance` and `./v2/guidance` package exports plus the host ambient module declaration for `rcc-llmswitch-core/guidance`.
+- `tests/sharedmodule/tool-guidance-exec-command.spec.ts` now calls direct Rust/NAPI `buildSystemToolGuidanceJson` and `augmentOpenAIToolsJson` via test-only helper `tests/sharedmodule/helpers/tool-guidance-direct-native.ts`.
+- Verification PASS: focused guidance/residue Jest 199/199; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=85`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); exact guidance subpath ref scan; `git diff --check`.

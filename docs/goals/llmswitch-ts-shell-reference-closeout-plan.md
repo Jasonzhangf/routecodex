@@ -218,6 +218,13 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `scripts/verify-rcc-release-install.mjs` no longer imports the deleted dist path from installed packages.
 - Residue and red-test coverage now lock the shell as physically absent while keeping the bound MetadataCenter/no-flat-providerProtocol boundary.
 
+### 2026-07-09 guidance public TS shell deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/guidance/index.ts`.
+- Removed package exports `./guidance` and `./v2/guidance` so the old public TS guidance shell cannot be recreated through package subpaths.
+- Tool guidance tests now call direct Rust/NAPI exports `buildSystemToolGuidanceJson` and `augmentOpenAIToolsJson` through a test-only direct native helper.
+- Residue coverage now locks the guidance TS shell as physically absent.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

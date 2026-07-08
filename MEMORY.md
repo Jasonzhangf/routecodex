@@ -1650,3 +1650,9 @@
 - `sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts` is physically deleted. Do not restore servertool-local MetadataCenter direct-write facades such as `attachStopGatewayContext`, `attachStopMessageCompareContext`, `readStopMessageCompareContext`, or `writeRuntimeControlToBoundMetadataCenter`.
 - Stop-gateway/stop-message compare evidence should use direct Rust/native exports plus the server HTTP `MetadataCenter` API; request-scoped metadata writes remain behind the unified metadata center API/runtime-control writer surface.
 - `verify:metadata-center-dualwrite-api`, metadata-center manifest/write-boundary gates, residue tests, and release-install verifier no longer preserve the deleted dist subpath. Current llmswitch shell audit metric after this deletion is `prodTsShellCount=86`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Guidance public TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/guidance/index.ts` is physically deleted, and package exports `./guidance` / `./v2/guidance` are removed. Tool guidance truth remains Rust/NAPI exports such as `buildSystemToolGuidanceJson`, `augmentOpenAIToolsJson`, and `augmentAnthropicToolsJson`.
+- Tests that need guidance evidence should call direct native helper code, not recreate the public TS shell or package subpath.
+- Current llmswitch shell audit metric after this deletion is `prodTsShellCount=85`, with `nonNativeFileCount=0`.
