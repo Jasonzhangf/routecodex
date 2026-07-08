@@ -98,6 +98,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     const outboundStream = clientRequestedStream;
     const logMetadata = buildHandlerLogMetadata({
       entryEndpoint,
+      requestId,
       headers: req.headers as Record<string, unknown>,
       requestBodyMetadata,
       clientHeaders,

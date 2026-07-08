@@ -1026,6 +1026,7 @@ export function buildHandlerPipelineMetadata(
 
 export function buildHandlerLogMetadata(args: {
   entryEndpoint: string;
+  requestId?: string;
   headers: Record<string, unknown>;
   requestBodyMetadata?: Record<string, unknown>;
   clientMetadata?: Record<string, unknown>;
@@ -1035,6 +1036,7 @@ export function buildHandlerLogMetadata(args: {
 }): Record<string, unknown> {
   return buildInboundLogSessionContext({
     entryEndpoint: args.entryEndpoint,
+    requestId: args.requestId,
     headers: args.headers,
     bodyMetadata: {
       ...(args.requestBodyMetadata ?? {}),

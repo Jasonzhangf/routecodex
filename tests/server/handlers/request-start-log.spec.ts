@@ -143,4 +143,16 @@ describe('logRequestStart', () => {
     expect(rendered.startsWith(String(expectedColor))).toBe(true);
     expect(rendered.startsWith(defaultStartColor)).toBe(false);
   });
+
+  it('builds request-scoped log color key without semantic session when no client session exists', () => {
+    const logMetadata = buildHandlerLogMetadata({
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-start-no-session-color',
+      headers: {}
+    });
+
+    expect(logMetadata.logSessionColorKey).toBe('rcc-session:request:req-start-no-session-color');
+    expect(logMetadata.sessionId).toBeUndefined();
+    expect(logMetadata.conversationId).toBeUndefined();
+  });
 });

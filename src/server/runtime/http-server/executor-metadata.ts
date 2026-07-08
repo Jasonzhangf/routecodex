@@ -45,6 +45,7 @@ const SYNTHETIC_SESSION_PREFIX = 'rcc-session';
 
 export type InboundLogSessionContextInput = {
   entryEndpoint: string;
+  requestId?: string;
   headers?: Record<string, unknown>;
   bodyMetadata?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -518,6 +519,7 @@ function buildSyntheticLogSessionId(args: {
   sessionScopeId?: string;
   workdir?: string;
   clientType?: string;
+  requestId?: string;
 }): string | undefined {
   const explicit = normalizeToken(args.explicitSessionId);
   if (explicit) {
@@ -534,7 +536,8 @@ function buildSyntheticLogSessionId(args: {
     normalizeSessionIdPart(args.workdir)
   ].filter((part): part is string => Boolean(part));
   if (parts.length === 0) {
-    return undefined;
+    const requestId = normalizeSessionIdPart(args.requestId);
+    return requestId ? `${SYNTHETIC_SESSION_PREFIX}:request:${requestId}` : undefined;
   }
   return `${SYNTHETIC_SESSION_PREFIX}:${parts.join(':')}`;
 }
@@ -631,15 +634,24 @@ export function buildInboundLogSessionContext(input: InboundLogSessionContextInp
   const extractedSessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
   const explicitSessionId = normalizeToken(extractedSessionIdentifiers.sessionId);
   const explicitConversationId = normalizeToken(extractedSessionIdentifiers.conversationId);
+  const hasSemanticSessionSource = Boolean(
+    explicitSessionId
+    || explicitConversationId
+    || resolvedSessionDaemonId
+    || resolvedTmuxSessionId
+    || resolvedWorkdir
+    || inferredClientType
+  );
   const logSessionColorKey = buildSyntheticLogSessionId({
     explicitSessionId,
     explicitConversationId,
     clientDaemonId: resolvedSessionDaemonId,
     sessionScopeId: resolvedTmuxSessionId,
     workdir: resolvedWorkdir,
-    clientType: inferredClientType
+    clientType: inferredClientType,
+    requestId: input.requestId
   });
-  const requestSessionId = logSessionColorKey;
+  const requestSessionId = hasSemanticSessionSource ? logSessionColorKey : undefined;
   const requestConversationId = explicitConversationId || requestSessionId;
   return {
     ...(requestSessionId ? { sessionId: requestSessionId } : {}),
@@ -773,6 +785,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const tmuxSource = resolvedTmuxSessionId ? 'inbound' : 'none';
   const inboundLogSessionContext = buildInboundLogSessionContext({
     entryEndpoint: input.entryEndpoint,
+    requestId: input.requestId,
     headers,
     bodyMetadata: {
       ...bodyMeta,

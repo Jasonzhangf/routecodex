@@ -173,6 +173,41 @@ function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sess
   };
 }
 
+function readPlainRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function buildRouterRouteLogSessionContext(
+  input: PipelineExecutionInput,
+  portConfig: PortConfig,
+): Record<string, unknown> {
+  const bodyRecord = readPlainRecord(input.body) ?? {};
+  const bodyMetadata = readPlainRecord(bodyRecord.metadata) ?? {};
+  const clientMetadata =
+    readPlainRecord(bodyRecord.client_metadata)
+    ?? readPlainRecord(bodyRecord.clientMetadata)
+    ?? readPlainRecord(bodyMetadata.client_metadata)
+    ?? readPlainRecord(bodyMetadata.clientMetadata);
+  return buildInboundLogSessionContext({
+    entryEndpoint: input.entryEndpoint,
+    requestId: input.requestId,
+    headers: input.headers,
+    bodyMetadata: {
+      ...bodyMetadata,
+      ...(clientMetadata ? { client_metadata: clientMetadata } : {}),
+    },
+    metadata: readPlainRecord(input.metadata),
+    portContext: {
+      localPort: portConfig.port,
+      matchedPort: portConfig.port,
+      entryPort: portConfig.port,
+      ...(portConfig.routingPolicyGroup ? { routingPolicyGroup: portConfig.routingPolicyGroup } : {}),
+    },
+  });
+}
+
 function readSessionIdForUsageLog(metadata: Record<string, unknown>): string | undefined {
   return readRuntimeRequestTruthIdentifiers(metadata).sessionId;
 }
@@ -198,6 +233,7 @@ import {
 import type { RouteErrorHub } from '../../../error-handling/route-error-hub.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { runHubPipeline } from './executor-pipeline.js';
+import { buildInboundLogSessionContext } from './executor-metadata.js';
 import { convertProviderResponseIfNeeded } from './executor/provider-response-converter.js';
 import { extractUsageFromResult } from './executor/usage-aggregator.js';
 import { deriveFinishReason } from '../../utils/finish-reason.js';
@@ -998,12 +1034,17 @@ export class RouteCodexHttpServer {
       return nextInput;
     }
     const rawPayload = requireDirectPassthroughPayloadObject(input.body);
-    const metadataCenterSnapshot = buildMetadataCenterSnapshot(metadata);
-    const metadataForRoute = {
+    const metadataForRouteBase = {
+      ...buildRouterRouteLogSessionContext(input, portConfig),
       ...metadata,
+    };
+    bindExistingMetadataCenter(metadata, metadataForRouteBase);
+    const metadataCenterSnapshot = buildMetadataCenterSnapshot(metadataForRouteBase);
+    const metadataForRoute = {
+      ...metadataForRouteBase,
       metadataCenterSnapshot,
     };
-    bindExistingMetadataCenter(metadata, metadataForRoute);
+    bindExistingMetadataCenter(metadataForRouteBase, metadataForRoute);
     const routeResult = routeHubPipelineVirtualRouterNative(hubPipelineHandle, rawPayload, metadataForRoute) as {
       target?: Record<string, unknown>;
       decision?: Record<string, unknown>;
@@ -1460,8 +1501,12 @@ export class RouteCodexHttpServer {
         ? [...retryState.allowedProvidersOverride]
         : routingGroupProviders;
 
+    const inputMetadataRecord = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+      ? (input.metadata as Record<string, unknown>)
+      : undefined;
     const metadataForHub: Record<string, unknown> = {
-      ...(input.metadata ?? {}),
+      ...buildRouterRouteLogSessionContext(input, portConfig),
+      ...(inputMetadataRecord ?? {}),
       routecodexLocalPort: portConfig.port,
       entryPort: portConfig.port,
       matchedPort: portConfig.port,
@@ -1470,9 +1515,6 @@ export class RouteCodexHttpServer {
       routecodexRoutingPolicyGroup: portConfig.routingPolicyGroup,
       ...(allowedProviders && allowedProviders.length > 0 ? { allowedProviders } : {}),
     };
-    const inputMetadataRecord = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-      ? (input.metadata as Record<string, unknown>)
-      : undefined;
     const metadataCenter = bindExistingMetadataCenter(inputMetadataRecord, metadataForHub);
     if (directAttempt > 1) {
       if (inputMetadataRecord && inputMetadataRecord !== metadataForHub) {

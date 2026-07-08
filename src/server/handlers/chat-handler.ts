@@ -49,6 +49,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     applySystemPromptOverride(entryEndpoint, payload);
     const logMetadata = buildHandlerLogMetadata({
       entryEndpoint,
+      requestId,
       headers: req.headers as Record<string, unknown>,
       requestBodyMetadata,
       clientHeaders,

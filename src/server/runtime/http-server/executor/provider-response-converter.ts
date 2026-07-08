@@ -25,6 +25,10 @@ import {
   readRuntimeDebugSnapshotProjection,
 } from '../metadata-center/request-truth-readers.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
+import {
+  buildMetadataCenterTransportSnapshot,
+  writeMetadataCenterSlot
+} from '../metadata-center/dualwrite-api.js';
 
 import {
   asFlatRecord,
@@ -123,6 +127,12 @@ function buildBridgeInvocationMetadata(args: {
   if (center) {
     MetadataCenter.bind(bridgeMetadata, center);
   }
+  const metadataCenterSnapshot = buildMetadataCenterTransportSnapshot(bridgeMetadata);
+  if (metadataCenterSnapshot) {
+    bridgeMetadata.metadataCenterSnapshot = metadataCenterSnapshot;
+  } else {
+    delete bridgeMetadata.metadataCenterSnapshot;
+  }
   return bridgeMetadata;
 }
 
@@ -186,29 +196,35 @@ function syncBridgeRuntimeBackToPipelineMetadata(options: {
   } else if (bridgeCenter && pipelineCenter && pipelineCenter !== bridgeCenter) {
     const runtimeControl = bridgeCenter.readRuntimeControl();
     if (runtimeControl.stopless) {
-      pipelineCenter.writeRuntimeControl(
-        'stopless',
-        runtimeControl.stopless,
-        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        'provider response stopless runtime pipeline sync'
-      );
+      writeMetadataCenterSlot({
+        target: pipelineMetadata,
+        family: 'runtime_control',
+        key: 'stopless',
+        value: runtimeControl.stopless,
+        writer: PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        reason: 'provider response stopless runtime pipeline sync'
+      });
     }
     if (runtimeControl.stopMessageCompareContext) {
-      pipelineCenter.writeRuntimeControl(
-        'stopMessageCompareContext',
-        runtimeControl.stopMessageCompareContext,
-        PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        'provider response stop-message compare pipeline sync'
-      );
+      writeMetadataCenterSlot({
+        target: pipelineMetadata,
+        family: 'runtime_control',
+        key: 'stopMessageCompareContext',
+        value: runtimeControl.stopMessageCompareContext,
+        writer: PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
+        reason: 'provider response stop-message compare pipeline sync'
+      });
     }
     const debugSnapshot = bridgeCenter.readDebugSnapshot();
     if (Array.isArray(debugSnapshot.hubStageTop) && debugSnapshot.hubStageTop.length > 0) {
-      pipelineCenter.writeDebugSnapshot(
-        'hubStageTop',
-        debugSnapshot.hubStageTop,
-        PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER,
-        'provider response hub-stage-top debug snapshot sync'
-      );
+      writeMetadataCenterSlot({
+        target: pipelineMetadata,
+        family: 'debug_snapshot',
+        key: 'hubStageTop',
+        value: debugSnapshot.hubStageTop,
+        writer: PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER,
+        reason: 'provider response hub-stage-top debug snapshot sync'
+      });
     }
   }
 }

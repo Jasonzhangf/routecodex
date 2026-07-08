@@ -212,6 +212,7 @@ async function handleImageRequest(
     const clientHeaders = captureClientHeaders(req.headers);
     const logMetadata = buildHandlerLogMetadata({
       entryEndpoint,
+      requestId,
       headers: req.headers as Record<string, unknown>,
       requestBodyMetadata,
       clientHeaders,

@@ -81,7 +81,12 @@ describe('provider-response-converter metadata center providerProtocol contract'
     expect(mockConvertProviderResponse).toHaveBeenCalledWith(expect.objectContaining({
       providerProtocol: 'anthropic-messages',
       context: expect.objectContaining({
-        providerProtocol: 'anthropic-messages'
+        providerProtocol: 'anthropic-messages',
+        metadataCenterSnapshot: expect.objectContaining({
+          runtimeControl: expect.objectContaining({
+            providerProtocol: 'anthropic-messages'
+          })
+        })
       })
     }));
   });

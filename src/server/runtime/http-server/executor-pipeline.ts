@@ -3,6 +3,7 @@ import type { HubPipelineExecutionResult, HubPipelineHandle } from './types.js';
 import { createSnapshotRecorder as bridgeCreateSnapshotRecorder } from '../../../modules/llmswitch/bridge.js';
 import { asRecord } from './provider-utils.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
+import { buildMetadataCenterTransportSnapshot } from './metadata-center/dualwrite-api.js';
 import { resolveEntryProtocolFromEndpointNative } from '../../../modules/llmswitch/bridge/native-exports.js';
 import { executeHubPipelineNative } from '../../../modules/llmswitch/bridge/routing-integrations.js';
 import { readHubPipelineNativeHandle } from './hub-pipeline-handle.js';
@@ -71,6 +72,12 @@ function buildHubPipelineMetadata(
   } else {
     delete pipelineMetadata.__hubStageRecorder;
   }
+  const metadataCenterSnapshot = buildMetadataCenterTransportSnapshot(pipelineMetadata);
+  if (metadataCenterSnapshot) {
+    pipelineMetadata.metadataCenterSnapshot = metadataCenterSnapshot;
+  } else {
+    delete pipelineMetadata.metadataCenterSnapshot;
+  }
   return pipelineMetadata;
 }
 
@@ -97,15 +104,18 @@ export async function runHubPipeline(
 
   const payload = asRecord(input.body);
   const pipelineMetadata = buildHubPipelineMetadata(metadata, stageRecorder);
+  const metadataCenterSnapshot = asRecord(pipelineMetadata.metadataCenterSnapshot);
   const pipelineInput: PipelineExecutionInput & {
     payload: Record<string, unknown>;
     endpoint: string;
     id: string;
+    metadataCenterSnapshot?: Record<string, unknown>;
   } = {
     ...input,
     id: input.requestId,
     endpoint: input.entryEndpoint,
     metadata: pipelineMetadata,
+    ...(metadataCenterSnapshot ? { metadataCenterSnapshot } : {}),
     payload
   };
   const handle = readHubPipelineNativeHandle(hubPipeline);

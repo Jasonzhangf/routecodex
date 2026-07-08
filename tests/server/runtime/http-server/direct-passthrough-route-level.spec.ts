@@ -581,6 +581,100 @@ describe('direct passthrough route-level', () => {
     expect(JSON.stringify(sentPayload)).toContain('data:image/png;base64,AAAA');
   });
 
+  it('router same-protocol direct supplies request-scoped log color key when no client session exists', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    let sentPayload: Record<string, unknown> | undefined;
+    let routeMetadata: Record<string, unknown> | undefined;
+    const providerHandle = {
+      runtimeKey: 'orangeai.key1.glm-5.2',
+      providerId: 'orangeai',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      runtime: {},
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, body: { ok: true } };
+        },
+        processIncomingDirect: async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, body: { ok: true, direct: true } };
+        },
+      },
+    };
+    const route = jest.fn((_payload: unknown, metadata: Record<string, unknown>) => {
+      routeMetadata = metadata;
+      return {
+        target: {
+          providerKey: 'orangeai.key1.glm-5.2',
+          providerType: 'responses',
+          outboundProfile: 'openai-responses',
+          runtimeKey: providerHandle.runtimeKey,
+          modelId: 'glm-5.2',
+        },
+        decision: { routeName: 'longcontext', pool: ['orangeai.key1.glm-5.2'] },
+        diagnostics: {},
+      };
+    });
+    (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', route);
+
+    const directBody = {
+      model: 'gpt-5.5',
+      stream: true,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+    };
+
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5555,
+        host: '0.0.0.0',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_priority_5555',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_no_session_color',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: directBody,
+        metadata: {},
+      },
+    );
+
+    expect(outcome.used).toBe(true);
+    expect(sentPayload).toEqual({
+      model: 'glm-5.2',
+      stream: true,
+      input: directBody.input,
+    });
+    expect(route).toHaveBeenCalledTimes(1);
+    expect(routeMetadata).toEqual(expect.objectContaining({
+      requestId: 'req_router_direct_no_session_color',
+      logSessionColorKey: 'rcc-session:request:req_router_direct_no_session_color',
+      metadataCenterSnapshot: expect.objectContaining({
+        logSessionColorKey: 'rcc-session:request:req_router_direct_no_session_color',
+      }),
+    }));
+    expect(routeMetadata).not.toHaveProperty('sessionId');
+    expect(routeMetadata).not.toHaveProperty('conversationId');
+  });
+
   it('router same-protocol direct does not preflight Responses tool-output wire shape', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

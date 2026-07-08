@@ -194,4 +194,66 @@ describe('executor-pipeline stage recorder injection', () => {
       stopMessageEnabled: true
     });
   });
+
+  it('projects MetadataCenter runtime control into native dispatch snapshot', async () => {
+    const recorder = { record: jest.fn() };
+    createSnapshotRecorderMock.mockResolvedValue(recorder);
+
+    const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
+
+    executeHubPipelineNativeMock.mockReturnValue({
+      providerPayload: { ok: true },
+      target: {
+        providerKey: 'provider.a',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses'
+      },
+      routingDecision: {
+        routeName: 'thinking',
+        providerProtocol: 'openai-responses'
+      },
+      processMode: 'chat',
+      metadata: {}
+    });
+
+    const metadata: Record<string, unknown> = { clientInjectReady: true };
+    MetadataCenter.attach(metadata).writeRuntimeControl(
+      'providerProtocol',
+      'openai-responses',
+      {
+        module: 'tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts',
+        symbol: 'projects MetadataCenter runtime control into native dispatch snapshot',
+        stage: 'test'
+      },
+      'test selected provider protocol'
+    );
+
+    await runHubPipeline(
+      'mock_hub_pipeline_handle',
+      {
+        requestId: 'req_stage_recorder_provider_protocol_snapshot_1',
+        entryEndpoint: '/v1/responses',
+        headers: {},
+        body: { input: 'hi' },
+        metadata: {}
+      } as any,
+      metadata
+    );
+
+    const executeArg = executeHubPipelineNativeMock.mock.calls[0]?.[1] as {
+      metadata?: Record<string, unknown>;
+      metadataCenterSnapshot?: Record<string, unknown>;
+    };
+    expect(executeArg.metadataCenterSnapshot).toMatchObject({
+      runtimeControl: {
+        providerProtocol: 'openai-responses'
+      }
+    });
+    expect(executeArg.metadata?.metadataCenterSnapshot).toMatchObject({
+      runtimeControl: {
+        providerProtocol: 'openai-responses'
+      }
+    });
+    expect(metadata.metadataCenterSnapshot).toBeUndefined();
+  });
 });

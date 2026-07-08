@@ -213,6 +213,7 @@ export async function handleResponses(
     const clientMetadata = readClientMetadata(payload as Record<string, unknown>);
     const preRuntimeLogMetadata = buildHandlerLogMetadata({
       entryEndpoint,
+      requestId,
       headers: req.headers as Record<string, unknown>,
       clientMetadata,
       clientHeaders,
@@ -235,6 +236,7 @@ export async function handleResponses(
     const requestBodyMetadata = preparedRuntime.requestBodyMetadata;
     const requestStartLogMetadata = buildHandlerLogMetadata({
       entryEndpoint,
+      requestId,
       headers: req.headers as Record<string, unknown>,
       requestBodyMetadata,
       clientMetadata,

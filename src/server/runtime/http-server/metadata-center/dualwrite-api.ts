@@ -352,6 +352,59 @@ export function buildMetadataCenterRustSnapshot(source: Record<string, unknown>)
   };
 }
 
+const TRANSPORT_SNAPSHOT_FAMILIES = [
+  'requestTruth',
+  'continuationContext',
+  'runtimeControl',
+  'providerObservation',
+  'responseObservation',
+  'closeoutStatus',
+  'debugSnapshot'
+] as const;
+
+function hasEntries(value: Record<string, unknown> | undefined): value is Record<string, unknown> {
+  return Boolean(value && Object.keys(value).length > 0);
+}
+
+function readStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim());
+}
+
+export function buildMetadataCenterTransportSnapshot(
+  source: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const existingSnapshot = asRecord(source.metadataCenterSnapshot);
+  const rustSnapshot = buildMetadataCenterRustSnapshot(source) as Record<string, unknown>;
+  const snapshot: Record<string, unknown> = {};
+
+  for (const family of TRANSPORT_SNAPSHOT_FAMILIES) {
+    const existingFamily = asRecord(existingSnapshot?.[family]);
+    const rustFamily = asRecord(rustSnapshot[family]);
+    const mergedFamily = {
+      ...(existingFamily ?? {}),
+      ...(rustFamily ?? {})
+    };
+    if (hasEntries(mergedFamily)) {
+      snapshot[family] = mergedFamily;
+    }
+  }
+
+  const excludedProviderKeys = readStringList(source.excludedProviderKeys);
+  const existingExcludedProviderKeys = readStringList(existingSnapshot?.excludedProviderKeys);
+  const effectiveExcludedProviderKeys =
+    excludedProviderKeys.length > 0 ? excludedProviderKeys : existingExcludedProviderKeys;
+  if (effectiveExcludedProviderKeys.length > 0) {
+    snapshot.excludedProviderKeys = effectiveExcludedProviderKeys;
+  }
+
+  return hasEntries(snapshot) ? snapshot : undefined;
+}
+
 export function applyMetadataCenterRustWriteResult(args: {
   target: Record<string, unknown>;
   snapshot: MetadataCenterRustSnapshot;

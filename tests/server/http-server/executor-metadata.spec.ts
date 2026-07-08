@@ -228,6 +228,25 @@ describe('executor metadata session daemon extraction', () => {
     expect(MetadataCenter.read(metadata)?.readRequestTruth().conversationId).toBe(expectedSessionId);
   });
 
+  it('synthesizes request-scoped log session key when client sends no session signals', () => {
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-no-session-signals-1',
+      headers: {},
+      query: {},
+      body: { input: [] },
+      metadata: {}
+    } as any);
+
+    const expectedSessionId = 'rcc-session:request:req-meta-no-session-signals-1';
+    expect(metadata.sessionId).toBeUndefined();
+    expect(metadata.conversationId).toBeUndefined();
+    expect(metadata.logSessionColorKey).toBe(expectedSessionId);
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().sessionId).toBeUndefined();
+    expect(MetadataCenter.read(metadata)?.readRequestTruth().conversationId).toBeUndefined();
+  });
+
   it('builds request session identity from inbound codex scope', () => {
     const turnMetadata = JSON.stringify({
       scope: {
