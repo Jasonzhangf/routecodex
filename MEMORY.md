@@ -1532,3 +1532,31 @@
 - `verify:servertool-rust-only` includes `servertool-routing-instruction-state-native-only` to block TS reimplementation of persistent-key, empty-state, and sync-save markers.
 - StopMessage routing instructions must preserve `stopMessageAiMode` through Rust parse, NAPI serialize/deserialize, and state apply. `resolveRccUserDir` must pass JS env snapshots into Rust because Jest/VM env overrides are not reliable through Rust process env alone.
 - Verified on 2026-07-07 with focused Rust routing-state and stopMessage tests, native hotpath build, `tests/servertool/routing-instructions.spec.ts` (38 passed, 9 skipped), `cargo test -p servertool-core`, `cargo test -p router-hotpath-napi servertool --lib`, `verify:servertool-rust-only`, llmswitch/root TypeScript, function-map/mainline gates, minimal TS surface, rustification audit, and diff check. No live restart/replay or real `~/.rcc` edits were performed.
+
+- 2026-06-29: servertool 完整 Rust 化目标已升级为“薄 TS 壳也要物理拆掉”，不能再把 thin shell 当终态。第一刀已删除 `sharedmodule/llmswitch-core/src/servertool/execution-dispatch-outcome-shell.ts`，运行时与测试改为直接使用 `execution-queue-shell.ts`；`verify-servertool-rust-only` / active audit 改为锁旧 facade 物理缺失。
+- 2026-06-29: 该 dispatch facade 删除 slice 已验证 root `tsc`、focused Jest 40/40、scoped `git diff --check`；全量 `verify:servertool-rust-only` 当前因既有 dirty `backend_route_contract.rs` 缺失与 `outcome_contract.rs` backend-route marker 不一致失败，不属于 dispatch facade slice。
+# 2026-07-08 log color session identity truth
+
+- Verified RouteCodex log color rule: when a request carries `sessionId` plus tmux/log aliases, all request/response/usage/virtual-router-hit coloring must derive from `sessionId` first. `clientTmuxSessionId` / `tmuxSessionId` / RCC tmux aliases are only fallback keys when request `sessionId`, `conversationId`, and `logSessionColorKey` are absent.
+- Red evidence: `tests/sharedmodule/virtual-router-hit-log.spec.ts` previously returned `tmux-session-stable` for `{ sessionId: 'request-session-a', clientTmuxSessionId: 'tmux-session-stable' }`.
+- Green/live evidence: release `0.90.3653` installed globally; `/health` on port 5520 reported `version=0.90.3653`; installed runtime smoke resolved mixed color metadata to `request-session-live` and formatted `[virtual-router-hit]` with that same session color.
+
+# 2026-07-08 log color failed-response closeout
+
+- Additional root cause for remaining three-color screenshots: `colorizeRequestLog(..., { isError: true })` still forced `❌ failed` response logs to red even after request/VR/usage session color was registered. Old request-start/request-log tests also still contained tmux-first expectations, so the gate did not lock Jason's latest requirement.
+- Fix: failed response logs now use the registered request/session color when available; red is only a no-session fallback. Request-start/request-log/usage tests now assert `sessionId` color wins and tmux/route/red colors do not win for registered session logs.
+- Verified and installed: focused Jest 49/49 PASS; root TypeScript PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `verify:vr-no-ts-runtime` PASS; `verify:llmswitch-rustification-audit` PASS; `build:base` PASS; release snapshot installed as global `routecodex/rcc 0.90.3654`; `rcc restart --port 5520 --host 127.0.0.1` PASS; `/health.version` on 5520 is `0.90.3654`; installed runtime smoke showed failed response and `[virtual-router-hit]` ANSI colors both equal the same session color.
+
+# 2026-07-08 log color client_metadata session truth
+
+- Codex `/v1/responses` session truth is top-level `body.client_metadata.session_id` / `thread_id`, not only `body.metadata` and not `turn_id`.
+- Request-start-only extraction is insufficient: executor metadata must read the same data-plane `client_metadata` before VR/usage/response logging so all modules share `sessionId`, `conversationId`, and `logSessionColorKey`.
+- Verified fix in global release `routecodex/rcc 0.90.3658`: focused Jest, root `tsc`, function-map/mainline gates, VR no-TS gate, llmswitch rustification audit, build, global install, managed restart, 5520/5555 health version, and installed-runtime smoke all passed; smoke confirmed request, failed response, and `[virtual-router-hit]` colors all derive from `client_metadata.session_id`.
+
+# 2026-07-08 Hub response empty-result and direct usage model truth
+
+- Marker: hub-response-empty-result-usage-model-20260708.
+- Response-only HubPipeline lib calls such as `provider-response.ts -> executeHubPipelineJson` may legitimately run with empty `{}` routing config. Rust `HubPipelineEngine` must not initialize `VirtualRouterEngineCore` unless the config contains real VR runtime shape (`providers`, `routing`, or `forwarders`); VR facade calls without routing config should fail explicitly as `hub_pipeline_virtual_router_facade_unavailable`.
+- Native TS wrappers must preserve non-string native return/Error object messages. Collapsing a native Error object into `empty result` hides the real Rust error and prevents correct live diagnosis.
+- Router-direct usage model truth is two-field: `usageLogInfo.requestModel` is the client alias/model, and `usageLogInfo.model` is the provider target model after direct-route hooks. Usage rendering should show `requestModel->providerModel`, e.g. `gpt-5.4->gpt-5.5`, not `-->gpt-5.4` after client response model restore.
+- Verified in global release `routecodex/rcc 0.90.3666`: Rust hub_pipeline_lib PASS 67, native hotpath build PASS, focused Jest provider-response/API PASS 24, direct-result/usage logger PASS 39, llmswitch/root `tsc`, function-map/mainline gates, `build:base`, `install:release`, and 5520/5555 `/health` version all PASS. 5555 live `/v1/responses` smoke returned HTTP 200 with no new `executeHubPipelineJson` / `empty result` / `routing configuration missing` logs; 5520 live response showed client model `gpt-5.4` and provider `resolved_model_used=gpt-5.5`, while installed release direct-result/logger smoke rendered `model=gpt-5.4->gpt-5.5`.
