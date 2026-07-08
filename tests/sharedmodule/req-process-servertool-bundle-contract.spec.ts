@@ -1,9 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { normalizeReqInboundShellLikeToolCallsWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
-import { applyReqProcessToolGovernanceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.js';
-
-type NativeGovernanceInput = Parameters<typeof applyReqProcessToolGovernanceWithNative>[0];
+import {
+  applyReqProcessToolGovernanceDirectNative,
+  type NativeReqProcessToolGovernanceInput,
+  type NativeReqProcessToolGovernanceOutput
+} from './helpers/req-process-direct-native.ts';
 
 function buildBaseRequest(userContent = 'hello'): Record<string, unknown> {
   return {
@@ -22,8 +24,8 @@ function runGovernance(overrides?: {
   request?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   hasActiveStopMessageForContinueExecution?: boolean;
-}): ReturnType<typeof applyReqProcessToolGovernanceWithNative> {
-  const input: NativeGovernanceInput = {
+}): NativeReqProcessToolGovernanceOutput {
+  const input: NativeReqProcessToolGovernanceInput = {
     request: (overrides?.request ?? buildBaseRequest()) as Record<string, unknown>,
     rawPayload: {},
     metadata: {
@@ -35,10 +37,10 @@ function runGovernance(overrides?: {
     hasActiveStopMessageForContinueExecution:
       overrides?.hasActiveStopMessageForContinueExecution ?? false,
   };
-  return applyReqProcessToolGovernanceWithNative(input);
+  return applyReqProcessToolGovernanceDirectNative(input);
 }
 
-function readToolNames(result: ReturnType<typeof applyReqProcessToolGovernanceWithNative>): string[] {
+function readToolNames(result: NativeReqProcessToolGovernanceOutput): string[] {
   const tools = Array.isArray(result.processedRequest.tools)
     ? (result.processedRequest.tools as Array<Record<string, unknown>>)
     : [];
@@ -221,8 +223,8 @@ describe('req_process servertool bundle contract', () => {
     expect(serialized).toContain('如果任务已经完成');
   });
 
-  it('injects relay stopless instructions even when tmux client inject is unavailable', () => {
-    const result = applyReqProcessToolGovernanceWithNative({
+  it('keeps standalone req-process governance from owning relay stopless instruction injection', () => {
+    const result = applyReqProcessToolGovernanceDirectNative({
       request: {
         model: 'gpt-5.5',
         input: [
@@ -243,8 +245,16 @@ describe('req_process servertool bundle contract', () => {
       },
       metadataCenterSnapshot: {
         runtimeControl: {
-          stopMessage: {
-            enabled: true
+          stopless: {
+            active: true,
+            flowId: 'stop_message_flow',
+            repeatCount: 1,
+            maxRepeats: 3,
+            triggerHint: 'no_schema',
+            schemaFeedback: {
+              reasonCode: 'stop_schema_missing',
+              missingFields: ['stopreason', 'reason']
+            }
           }
         }
       },
@@ -255,8 +265,9 @@ describe('req_process servertool bundle contract', () => {
 
     expect(Array.isArray(result.processedRequest.input)).toBe(true);
     const serialized = JSON.stringify(result.processedRequest.input);
-    expect(serialized).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
-    expect(serialized).toContain('reasoningStop');
+    expect(serialized).toContain('请直接回复一句“阶段完成”');
+    expect(serialized).not.toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
+    expect(serialized).not.toContain('reasoningStop');
     expect(result.processedRequest.instructions).toBeUndefined();
   });
 });

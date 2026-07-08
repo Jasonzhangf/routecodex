@@ -1284,7 +1284,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_chatprocess_03_governed.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
       - tests/responses/responses-openai-bridge.spec.ts
@@ -1300,7 +1299,7 @@ verification:
       - npm run build:base
     notes:
       - "Validation must prove request-side tool governance, stop hook contract injection, and final request semantic return to `HubReqChatProcess03Governed` stay Rust-owned."
-      - "Validation must also prove the TS req-process surface remains native-wrapper-only and does not regrow message/tool/metadata rewrite logic."
+      - "Retired zero-consumer req-process TS wrapper `native-hub-pipeline-req-process-semantics.ts` must stay physically deleted; req-process tests must use direct Rust/NAPI `applyReqProcessToolGovernanceJson` evidence."
       - "The currently anchored closeout edge for this module is `ServertoolReqHook04RequestFinalized -> HubReqChatProcess03Governed`; additional upstream request-hook edges may remain pending until their exact caller/callee bindings are proven."
 
   - feature_id: servertool.followup_orchestration

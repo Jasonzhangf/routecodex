@@ -27984,3 +27984,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Residue audit now locks the old stop-message auto wrapper path physically absent instead of scanning a live TS wrapper for followup-flow residue.
 - Function/verification maps and rustification audit docs record the wrapper deletion; `no-fallback-diff-rules.json` no longer keeps a catch-return rule for the deleted path.
 - Verification PASS: focused Jest 221/221; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=88`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`).
+
+# 2026-07-09: llmswitch req-process wrapper deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts`.
+- `tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts` now calls direct Rust/NAPI `applyReqProcessToolGovernanceJson` through test-only helper `tests/sharedmodule/helpers/req-process-direct-native.ts`.
+- `tests/sharedmodule/native-governance-apply-patch-line-edit.spec.ts` and residue audit now lock the old wrapper path physically absent.
+- Function/verification maps and rustification audit docs record the wrapper deletion; `no-fallback-diff-rules.json` no longer keeps a catch-return rule for the deleted path.
+- Verification PASS: focused Jest 201/201; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=87`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); `git diff --check`.

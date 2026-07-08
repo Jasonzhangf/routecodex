@@ -2821,8 +2821,9 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired req-process standalone public wrappers must stay internal to Rust mainline', () => {
     const repoRoot = process.cwd();
+    const retiredReqProcessWrapperPath =
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs',
@@ -2837,6 +2838,8 @@ describe('hub pipeline stage residue audit', () => {
       'apply_req_process_route_selection_json',
     ];
     const findings: string[] = [];
+
+    expect(fs.existsSync(path.join(repoRoot, retiredReqProcessWrapperPath))).toBe(false);
 
     for (const relativePath of scannedFiles) {
       const absolutePath = path.join(repoRoot, relativePath);

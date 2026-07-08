@@ -203,6 +203,13 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` locks the old wrapper path as physically absent.
 - Function map and verification map now record that the stop-message auto wrapper must stay deleted and that direct NAPI tests are evidence, not runtime TS ownership.
 
+### 2026-07-09 req-process wrapper deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts`.
+- `tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts` now calls direct Rust/NAPI `applyReqProcessToolGovernanceJson` through test-only helper code.
+- `tests/sharedmodule/native-governance-apply-patch-line-edit.spec.ts` and `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` lock the old wrapper path as physically absent.
+- Function map and verification map now record that direct NAPI tests are evidence, not runtime TS ownership.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

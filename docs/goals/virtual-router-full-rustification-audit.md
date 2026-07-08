@@ -52,7 +52,7 @@
 | native-hub-pipeline-orchestration-semantics-builders.ts | 313 | 12 | 2 |
 | native-hub-pipeline-semantic-mappers.ts | 149 | 7 | 2 |
 | native-followup-mainline-semantics.ts | 196 | 16 | 4 |
-| native-hub-pipeline-req-process-semantics.ts | 196 | 7 | 2 |
+| native-hub-pipeline-req-process-semantics.ts | 已删：2026-07-09 direct `applyReqProcessToolGovernanceJson` test evidence | 0 | 0 |
 | native-shared-conversion-semantics-openai.ts | 197 | 5 | 6 |
 | native-hub-pipeline-target-semantics.ts | 143 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-servertool-core-semantics.ts | 142 | 10 | 0 |

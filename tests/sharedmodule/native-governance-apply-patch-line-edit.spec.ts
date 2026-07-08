@@ -17,14 +17,12 @@ describe('apply_patch native governance ownership', () => {
     expect(fs.existsSync(retiredWrapperPath)).toBe(false);
   });
 
-  it('keeps apply_patch normalization outside the req-process TS wrapper', () => {
+  it('keeps the req-process TS wrapper deleted', () => {
     const reqProcessWrapperPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts'
     );
-    const reqProcessWrapperSource = fs.readFileSync(reqProcessWrapperPath, 'utf8');
 
-    expect(reqProcessWrapperSource).not.toContain('normalizeApplyPatchArgumentsJson');
-    expect(reqProcessWrapperSource).not.toContain('normalizeApplyPatchArgumentsWithNative');
+    expect(fs.existsSync(reqProcessWrapperPath)).toBe(false);
   });
 });
