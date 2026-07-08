@@ -347,6 +347,11 @@ describe('engine-observation-shell', () => {
     );
 
     expect(source).toContain('export async function runServerToolOrchestrationShell(');
+    expect(source).not.toContain('export type EnginePreflightResult');
+    expect(source).not.toContain('export interface ServerToolOrchestrationOptions');
+    expect(source).not.toContain('export interface ServertoolResponseStageShellOptions');
+    expect(source).not.toContain('export interface ServertoolResponseStageShellResult');
+    expect(source).not.toContain('export interface ServerToolOrchestrationResult');
     expect(source).not.toMatch(/export interface ServerToolOrchestrationOptions\s*\{[\s\S]{0,220}providerProtocol:\s*string;/);
     expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
     expect(source).not.toContain('providerProtocol: args.providerProtocol');

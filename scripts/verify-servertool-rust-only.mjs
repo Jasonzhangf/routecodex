@@ -5646,6 +5646,11 @@ function checkServertoolRustOutcomeCloseout() {
     'const orchestrationStart = Date.now()',
     'Date.now() - orchestrationStart',
     'forceLog: forceDetailLog',
+    'export type EnginePreflightResult',
+    'export interface ServerToolOrchestrationOptions',
+    'export interface ServertoolResponseStageShellOptions',
+    'export interface ServertoolResponseStageShellResult',
+    'export interface ServerToolOrchestrationResult',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(

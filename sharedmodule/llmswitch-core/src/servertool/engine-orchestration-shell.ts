@@ -62,7 +62,7 @@ type EnginePreflightOriginalChatResult = Extract<EnginePreflightResult, { kind: 
 type EnginePreflightDirectPassthroughResult = Extract<EnginePreflightResult, { kind: 'return_original_chat_direct_passthrough' }>;
 type EnginePreflightContinueResult = Extract<EnginePreflightResult, { kind: 'continue' }>;
 
-export type EnginePreflightResult =
+type EnginePreflightResult =
   | {
       kind: 'return_original_chat';
       chat: JsonObject;
@@ -84,7 +84,7 @@ type LogStopEntry = (
 
 type LogStopCompare = (stage: 'entry' | 'trigger', flowId?: string) => void;
 
-export interface ServerToolOrchestrationOptions {
+interface ServerToolOrchestrationOptions {
   chat: JsonObject;
   adapterContext: AdapterContext;
   requestId: string;
@@ -94,7 +94,7 @@ export interface ServerToolOrchestrationOptions {
 
 type ChatCompletionLike = JsonObject;
 
-export interface ServertoolResponseStageShellOptions {
+interface ServertoolResponseStageShellOptions {
   payload: ChatCompletionLike;
   adapterContext: AdapterContext;
   requestId: string;
@@ -103,7 +103,7 @@ export interface ServertoolResponseStageShellOptions {
   stageRecorder?: StageRecorder;
 }
 
-export interface ServertoolResponseStageShellResult {
+interface ServertoolResponseStageShellResult {
   payload: ChatCompletionLike;
   executed: boolean;
   flowId?: string;
@@ -342,7 +342,7 @@ export async function runServertoolResponseStageOrchestrationShell(
   return extractServertoolResponseStageOrchestrationShellResultWithNative(output);
 }
 
-export interface ServerToolOrchestrationResult {
+interface ServerToolOrchestrationResult {
   chat: JsonObject;
   executed: boolean;
   flowId?: string;
