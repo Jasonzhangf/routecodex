@@ -1104,9 +1104,9 @@ verification:
     build:
       - npm run verify:llmswitch-core-tsc
     notes:
-      - "Response-runtime Anthropic TS must stay a native wrapper; registry/snapshot restore and reasoning/signature semantics are verified through the full native export. The legacy TS helper shell must remain physically deleted."
+      - "Response-runtime Anthropic TS wrapper must stay physically deleted; registry/snapshot restore and reasoning/signature semantics are verified through the full native export."
       - "`includeToolCallIds` is not a Hub response wrapper contract; scripts and residue gates must not restore the ignored option."
-      - "`AnthropicResponseFromChatOptions` is internal wrapper input only; the public response-runtime barrel must not re-export it."
+      - "`AnthropicResponseFromChatOptions` and `response-runtime-anthropic.ts` must not be restored as runtime TS surface."
 
   - feature_id: hub.response_responses_chat_projection
     change_risk: high

@@ -232,6 +232,13 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `scripts/verify-apply-patch.mjs` now calls the host bridge native export `normalizeAssistantTextToToolCallsJson` instead of loading the deleted llmswitch-core subpath.
 - Residue/red-test coverage now locks both retired source paths as physically absent.
 
+### 2026-07-09 Anthropic response runtime shell deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts`.
+- Hidden-reasoning tests now call direct native response semantics through `tests/sharedmodule/helpers/anthropic-response-direct-native.ts`; this helper is test-only evidence and not a runtime TS owner.
+- `scripts/tests/anthropic-chat-e2e.mjs` and `scripts/tests/anthropic-responses-roundtrip.mjs` now load `dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js` instead of the retired response runtime dist subpath.
+- Function/verification maps and residue/red-test coverage now lock the former response runtime shell as physically absent.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

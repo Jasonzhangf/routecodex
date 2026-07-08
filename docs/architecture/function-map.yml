@@ -1906,13 +1906,14 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_reasoning_registry.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath
+      - tests/sharedmodule/helpers/anthropic-response-direct-native.ts
     forbidden_paths:
       - src/providers
       - src/server
       - sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts
       - sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-helpers.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts
     required_tests:
       - sharedmodule/llmswitch-core/src/conversion/hub/response/__tests__/response-runtime.anthropic-hidden-reasoning.test.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -1922,9 +1923,9 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - "TS response runtime is native invocation and JSON parse glue only; registry consume, payload unwrap, snapshot semantics restore, reasoning signature handling, and empty-output fail-fast belong to Rust."
+      - "The former TS response runtime native invocation glue is deleted; tests/scripts that need Anthropic response projection must call native response semantics directly."
       - "Hub response wrapper must not expose ignored `includeToolCallIds`; tool_call id projection shape is Rust-owned."
-      - "Hub response wrapper option interfaces are internal only; `AnthropicResponseFromChatOptions` must not be exported from the response runtime barrel."
+      - "Hub response wrapper option interfaces and `response-runtime-anthropic.ts` must not be restored as runtime TS surface."
 
   - feature_id: hub.response_responses_chat_projection
     status: active

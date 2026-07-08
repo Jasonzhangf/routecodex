@@ -1,3 +1,11 @@
+# 2026-07-09: Anthropic response runtime shell deleted
+
+- Scope: continue llmswitch-core TS shell closeout by deleting `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts`.
+- Change: hidden-reasoning tests use `tests/sharedmodule/helpers/anthropic-response-direct-native.ts`; e2e/roundtrip scripts load `dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js` instead of the retired dist response-runtime shell.
+- Map update: function/verification maps now mark the old Anthropic response runtime shell forbidden and direct native response semantics as the owner.
+- Verification PASS: focused Jest 195/195 (red/residue), `verify:hub-response-anthropic-native` Rust tests 102/102, sharedmodule/root tsc, `verify:function-map-compile-gate`, shell reference audit (`prodTsShellCount=82`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`), zero-ts closeout, minimal TS surface, rustification audit, exact source/host/package scan for old response-runtime subpath, script syntax checks, and `git diff --check`.
+- Boundary: broad `npm test -- --runInBand ...` was not used as evidence because repo `npm test` prepends unrelated routing-instructions suites that fail on pre-existing deleted servertool/VR/sample assumptions; focused `jest:run --runTestsByPath` passed for this slice.
+
 # 2026-07-09: snapshot-recorder host bridge ref direct-native wired
 
 - Scope: finish current host bridge shell subpath closeout by removing snapshot recorder's llmswitch-core dist facade load.

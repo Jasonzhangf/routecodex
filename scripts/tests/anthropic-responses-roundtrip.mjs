@@ -99,27 +99,39 @@ function loadCodexSample() {
 async function loadConverters() {
   const distRoot = path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist');
   const responsesBridgePath = path.join(distRoot, 'conversion', 'responses', 'responses-openai-bridge.js');
-  const responseRuntimePath = path.join(distRoot, 'conversion', 'hub', 'response', 'response-runtime-anthropic.js');
-  if (!fs.existsSync(responsesBridgePath) || !fs.existsSync(responseRuntimePath)) {
+  const nativeRespPath = path.join(distRoot, 'native', 'router-hotpath', 'native-hub-pipeline-resp-semantics.js');
+  if (!fs.existsSync(responsesBridgePath) || !fs.existsSync(nativeRespPath)) {
     throw new Error('llmswitch-core dist missing. 请先在 sharedmodule/llmswitch-core 运行 npm run build');
   }
   const responsesBridge = await import(pathToFileURL(responsesBridgePath).href);
-  const responseRuntime = await import(pathToFileURL(responseRuntimePath).href);
+  const nativeResp = await import(pathToFileURL(nativeRespPath).href);
   const { buildChatResponseFromResponses, buildResponsesPayloadFromChat } = responsesBridge;
-  const { buildAnthropicResponseFromChat, buildOpenAIChatFromAnthropicMessage } = responseRuntime;
   if (
     typeof buildChatResponseFromResponses !== 'function' ||
     typeof buildResponsesPayloadFromChat !== 'function' ||
-    typeof buildAnthropicResponseFromChat !== 'function' ||
-    typeof buildOpenAIChatFromAnthropicMessage !== 'function'
+    typeof nativeResp.buildAnthropicResponseFromChatFullWithNative !== 'function' ||
+    typeof nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative !== 'function'
   ) {
     throw new Error('conversion helpers missing. 请确认 sharedmodule/llmswitch-core 构建完成');
   }
   return {
     buildChatResponseFromResponses,
     buildResponsesPayloadFromChat,
-    buildAnthropicResponseFromChat,
-    buildOpenAIChatFromAnthropicMessage
+    buildAnthropicResponseFromChat: (chatResponse, options) => {
+      const output = nativeResp.buildAnthropicResponseFromChatFullWithNative({
+        chat_response: JSON.stringify(chatResponse),
+        alias_map: options?.aliasMap ? JSON.stringify(options.aliasMap) : undefined,
+      });
+      const parsed = JSON.parse(output);
+      return JSON.parse(parsed.result);
+    },
+    buildOpenAIChatFromAnthropicMessage: (payload) => {
+      const output = nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative({
+        payload: JSON.stringify(payload),
+      });
+      const parsed = JSON.parse(output);
+      return JSON.parse(parsed.result);
+    }
   };
 }
 

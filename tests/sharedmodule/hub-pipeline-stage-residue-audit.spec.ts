@@ -776,30 +776,8 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
 
-    expect(source).toContain('buildOpenAIChatFromAnthropicMessageFullWithNative');
-    expect(source).not.toContain('buildOpenAIChatResponseFromAnthropicMessageWithNative');
-    expect(source).not.toContain('buildChatResponseFromResponsesWithNative');
-    expect(source).not.toContain('includeToolCallIds');
-    expect(source).not.toContain('AnthropicResponseOptions');
-    expect(source).not.toContain('export interface AnthropicResponseFromChatOptions');
-    expect(source).not.toContain('responses-reasoning-registry');
-    expect(source).not.toContain('cloneJsonRecord');
-    expect(source).not.toContain('stripInternalContinuationRequestId');
-    expect(source).not.toContain('restoreResponsesSemanticsFromSnapshot');
-    expect(source).not.toContain('unwrapAnthropicMessagePayload');
-    expect(source).not.toContain('consumeResponsesReasoning');
-    expect(source).not.toContain('consumeResponsesOutputTextMeta');
-    expect(source).not.toContain('consumeResponsesPayloadSnapshotByAliases');
-    expect(source).not.toContain('consumeResponsesPassthroughByAliases');
-    expect(source).not.toContain('registerResponsesPayloadSnapshot');
-    expect(source).not.toContain('registerResponsesPassthrough');
-    expect(source).not.toContain('__responses_reasoning');
-    expect(source).not.toContain('__responses_output_text_meta');
-    expect(source).not.toContain('__responses_payload_snapshot');
-    expect(source).not.toContain('__responses_passthrough');
-
+    expect(fs.existsSync(filePath)).toBe(false);
     expect(fs.existsSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime.ts'),
     )).toBe(false);

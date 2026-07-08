@@ -57,25 +57,41 @@ function shallowHash(value) {
 
 async function loadCoreHelpers() {
   const distRoot = path.resolve('sharedmodule', 'llmswitch-core', 'dist');
-  const runtimePath = path.join(distRoot, 'conversion', 'hub', 'response', 'response-runtime-anthropic.js');
+  const nativeRespPath = path.join(distRoot, 'native', 'router-hotpath', 'native-hub-pipeline-resp-semantics.js');
   const codecPath = path.join(distRoot, 'conversion', 'codecs', 'anthropic-openai-codec.js');
-  if (!fs.existsSync(runtimePath)) {
-    throw new Error('sharedmodule/llmswitch-core/dist/conversion/hub/response/response-runtime-anthropic.js 不存在，请先运行 npm run build:dev');
+  if (!fs.existsSync(nativeRespPath)) {
+    throw new Error('sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js 不存在，请先运行 npm run build:dev');
   }
   if (!fs.existsSync(codecPath)) {
     throw new Error('sharedmodule/llmswitch-core/dist/conversion/codecs/anthropic-openai-codec.js 不存在');
   }
-  const runtime = await import(pathToFileURL(runtimePath).href);
+  const nativeResp = await import(pathToFileURL(nativeRespPath).href);
   const codec = await import(pathToFileURL(codecPath).href);
-  if (typeof runtime.buildAnthropicResponseFromChat !== 'function' || typeof runtime.buildOpenAIChatFromAnthropicMessage !== 'function') {
-    throw new Error('llmswitch-core 缺少 anthropic response 构造辅助函数');
+  if (
+    typeof nativeResp.buildAnthropicResponseFromChatFullWithNative !== 'function' ||
+    typeof nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative !== 'function'
+  ) {
+    throw new Error('llmswitch-core 缺少 native anthropic response 构造辅助函数');
   }
   if (typeof codec.buildOpenAIChatFromAnthropicFull !== 'function') {
     throw new Error('anthropic-openai-codec 缺少 buildOpenAIChatFromAnthropicFull');
   }
   return {
-    buildAnthropicResponseFromChat: runtime.buildAnthropicResponseFromChat,
-    buildOpenAIChatFromAnthropicMessage: runtime.buildOpenAIChatFromAnthropicMessage,
+    buildAnthropicResponseFromChat: (chatResponse, options) => {
+      const output = nativeResp.buildAnthropicResponseFromChatFullWithNative({
+        chat_response: JSON.stringify(chatResponse),
+        alias_map: options?.aliasMap ? JSON.stringify(options.aliasMap) : undefined,
+      });
+      const parsed = JSON.parse(output);
+      return JSON.parse(parsed.result);
+    },
+    buildOpenAIChatFromAnthropicMessage: (payload) => {
+      const output = nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative({
+        payload: JSON.stringify(payload),
+      });
+      const parsed = JSON.parse(output);
+      return JSON.parse(parsed.result);
+    },
     buildOpenAIChatFromAnthropicFull: codec.buildOpenAIChatFromAnthropicFull
   };
 }

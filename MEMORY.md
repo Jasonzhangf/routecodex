@@ -1320,6 +1320,12 @@
 - The minimal TS surface manifest now tracks 35 current non-native production TS files under `sharedmodule/llmswitch-core/src`; `npm run verify:llmswitch-minimal-ts-surface` enforces that count against source.
 - `sharedmodule/llmswitch-core/src/index.ts` must keep `virtual-router-contracts.ts` as `export type *`, not `export *`. The file is a type-only contract surface and must not be exposed as a runtime VR module.
 - Verified on 2026-07-06 with minimal TS surface gate, rustification audit (`prodTsFileCount=159`, `prodTsLocTotal=28964`, `nonNativeFileCount=35`, `nonNativeLocTotal=4742`), function-map gate, mainline call-map gate, llmswitch-core build, and focused Hub/servertool residue Jest (`180` tests). No managed live restart/replay was claimed for this slice.
+
+# 2026-07-09: Anthropic response runtime TS shell is deleted
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts` is now physically deleted; the 2026-07-06 guidance to import it directly is superseded.
+- Tests/scripts that need Anthropic response conversion must call direct native response semantics (`native-hub-pipeline-resp-semantics` / Rust NAPI full exports), not the retired `response-runtime-anthropic` dist subpath.
+- Function/verification maps now mark `response-runtime-anthropic.ts` as forbidden runtime TS surface; residue/red-test coverage locks the file as absent.
 # 2026-07-06: VR contracts type surface is facade-scoped
 
 - Upper production layers must not import `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` directly.
