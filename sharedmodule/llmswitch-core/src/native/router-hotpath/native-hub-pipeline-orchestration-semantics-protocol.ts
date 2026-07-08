@@ -311,7 +311,10 @@ export function executeHubPipelineWithNative(
   }
   try {
     const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
+    if (typeof raw !== 'string') {
+      return fail(stringifyNativePayloadForError(raw) ?? 'non-string result');
+    }
+    if (!raw) {
       return fail('empty result');
     }
     const parsed = parseLibOutput(raw);
@@ -341,7 +344,10 @@ export function runHubPipelineLibWithNative(
   }
   try {
     const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
+    if (typeof raw !== 'string') {
+      return fail(stringifyNativePayloadForError(raw) ?? 'non-string result');
+    }
+    if (!raw) {
       return fail('empty result');
     }
     const parsed = parseLibOutput(raw);

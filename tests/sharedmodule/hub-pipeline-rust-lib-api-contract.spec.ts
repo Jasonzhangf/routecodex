@@ -14,7 +14,9 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.js',
   () => ({
     isNativeDisabledByEnv: () => false,
-    failNativeRequired: () => { throw new Error('native disabled'); },
+    failNativeRequired: (_capability: string, reason?: string) => {
+      throw new Error(reason ? `native required: ${reason}` : 'native required');
+    },
   })
 );
 
@@ -65,5 +67,26 @@ describe('HubPipeline Rust Lib API contract', () => {
       '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js'
     ).catch(() => ({ runHubPipelineLibWithNative: undefined }));
     expect(fromLib).toBeDefined();
+  });
+
+  it('preserves native Error object messages instead of reporting empty result', () => {
+    nativeBindings['executeHubPipelineJson'] = () => new Error(
+      'hub_pipeline_virtual_router_facade_init_failed: routing configuration missing'
+    );
+
+    expect(() => executeHubPipelineWithNative({
+      request: {
+        requestId: 'req-native-error-object',
+        endpoint: '/v1/responses',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        payload: { id: 'resp-native-error-object', output: [] },
+        metadata: {},
+        stream: false,
+        processMode: 'chat',
+        direction: 'response',
+        stage: 'outbound',
+      },
+    })).toThrow('routing configuration missing');
   });
 });

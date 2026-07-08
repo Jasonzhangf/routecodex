@@ -86,14 +86,19 @@ fn resolve_request_entry_protocol(entry_endpoint: &str, metadata: &Value) -> Str
         .unwrap_or_else(|| resolve_hub_client_protocol(entry_endpoint))
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 pub struct HubPipelineEngine {
     config: HubPipelineConfig,
+    virtual_router_core: Option<VirtualRouterEngineCore>,
 }
 
 impl HubPipelineEngine {
     pub fn new(config: HubPipelineConfig) -> HubPipelineResult<Self> {
-        Ok(Self { config })
+        let virtual_router_core = build_optional_virtual_router_core(&config.virtual_router)?;
+        Ok(Self {
+            config,
+            virtual_router_core,
+        })
     }
 
     pub fn update_virtual_router_config(&mut self, config: Value) -> HubPipelineResult<()> {
@@ -103,6 +108,7 @@ impl HubPipelineEngine {
                 "Virtual router config must be a JSON object",
             ));
         }
+        self.virtual_router_core = build_optional_virtual_router_core(&config)?;
         self.config.virtual_router = config;
         Ok(())
     }
@@ -114,6 +120,84 @@ impl HubPipelineEngine {
                 "Runtime deps must be a JSON object or null",
             ));
         }
+        Ok(())
+    }
+
+    pub fn route_virtual_router(
+        &mut self,
+        request: Value,
+        metadata: Value,
+    ) -> HubPipelineResult<Value> {
+        let metadata_center_snapshot = metadata
+            .get("metadataCenterSnapshot")
+            .cloned()
+            .unwrap_or(Value::Null);
+        with_virtual_router_session_dir_value(&metadata_center_snapshot, || {
+            let Some(router) = self.virtual_router_core.as_mut() else {
+                return Err(HubPipelineError::new(
+                    "hub_pipeline_virtual_router_facade_unavailable",
+                    "Rust HubPipeline virtual router facade requires routing configuration",
+                ));
+            };
+            router
+                .route(unsafe { Env::from_raw(std::ptr::null_mut()) }, &request, &metadata)
+                .map_err(|message| {
+                    HubPipelineError::new(
+                        "hub_pipeline_virtual_router_facade_route_failed",
+                        format!(
+                            "Rust HubPipeline virtual router facade route failed: {}",
+                            message
+                        ),
+                    )
+                })
+        })
+    }
+
+    pub fn diagnose_virtual_router(
+        &mut self,
+        request: Value,
+        metadata: Value,
+    ) -> HubPipelineResult<Value> {
+        let metadata_center_snapshot = metadata
+            .get("metadataCenterSnapshot")
+            .cloned()
+            .unwrap_or(Value::Null);
+        with_virtual_router_session_dir_value(&metadata_center_snapshot, || {
+            let Some(router) = self.virtual_router_core.as_mut() else {
+                return Err(HubPipelineError::new(
+                    "hub_pipeline_virtual_router_facade_unavailable",
+                    "Rust HubPipeline virtual router facade requires routing configuration",
+                ));
+            };
+            Ok(router.diagnose_route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            ))
+        })
+    }
+
+    pub fn virtual_router_status(&mut self) -> HubPipelineResult<Value> {
+        let Some(router) = self.virtual_router_core.as_mut() else {
+            return Err(HubPipelineError::new(
+                "hub_pipeline_virtual_router_facade_unavailable",
+                "Rust HubPipeline virtual router facade requires routing configuration",
+            ));
+        };
+        Ok(router.get_status())
+    }
+
+    pub fn mark_virtual_router_concurrency_scope_busy(
+        &mut self,
+        scope_key: &str,
+    ) -> HubPipelineResult<()> {
+        let Some(router) = self.virtual_router_core.as_mut() else {
+            return Err(HubPipelineError::new(
+                "hub_pipeline_virtual_router_facade_unavailable",
+                "Rust HubPipeline virtual router facade requires routing configuration",
+            ));
+        };
+        router.mark_concurrency_scope_busy(scope_key);
         Ok(())
     }
 
@@ -948,6 +1032,46 @@ impl HubPipelineEngine {
                 details: error.details,
             }),
         })
+    }
+}
+
+fn build_virtual_router_core(config: &Value) -> HubPipelineResult<VirtualRouterEngineCore> {
+    let mut core = VirtualRouterEngineCore::new();
+    core.initialize(config).map_err(|message| {
+        HubPipelineError::new(
+            "hub_pipeline_virtual_router_facade_init_failed",
+            format!(
+                "Rust HubPipeline virtual router facade init failed: {}",
+                message
+            ),
+        )
+    })?;
+    Ok(core)
+}
+
+fn build_optional_virtual_router_core(
+    config: &Value,
+) -> HubPipelineResult<Option<VirtualRouterEngineCore>> {
+    let should_initialize = config.as_object().is_some_and(|object| {
+        object.contains_key("providers")
+            || object.contains_key("routing")
+            || object.contains_key("forwarders")
+    });
+    if !should_initialize {
+        return Ok(None);
+    }
+    build_virtual_router_core(config).map(Some)
+}
+
+fn with_virtual_router_session_dir_value<T>(
+    metadata_center_snapshot: &Value,
+    callback: impl FnOnce() -> HubPipelineResult<T>,
+) -> HubPipelineResult<T> {
+    let session_dir = read_runtime_control_string(metadata_center_snapshot, "sessionDir")
+        .or_else(|| read_runtime_control_string(metadata_center_snapshot, "session_dir"));
+    match session_dir.as_deref() {
+        Some(value) => with_session_dir_override(Some(value), callback),
+        None => callback(),
     }
 }
 

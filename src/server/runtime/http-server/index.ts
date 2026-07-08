@@ -2159,9 +2159,11 @@ export class RouteCodexHttpServer {
         ? ((input.body as any).model as string)
         : undefined;
     const providerModel =
-      normalized.body && typeof normalized.body === 'object' && !Array.isArray(normalized.body)
-        ? this.extractProviderModel(normalized.body as Record<string, unknown>) ?? requestModel
-        : requestModel;
+      typeof auditContext.providerModelId === 'string' && auditContext.providerModelId.trim()
+        ? auditContext.providerModelId.trim()
+        : normalized.body && typeof normalized.body === 'object' && !Array.isArray(normalized.body)
+          ? this.extractProviderModel(normalized.body as Record<string, unknown>) ?? requestModel
+          : requestModel;
     const finishReason =
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
@@ -2221,6 +2223,8 @@ export class RouteCodexHttpServer {
         ...normalized.usageLogInfo ?? {},
         providerKey: auditContext.providerKey,
         model: providerModel,
+        requestModel,
+        providerProtocol: providerHandle.providerProtocol,
         routeName: `router-direct:${auditContext.routingDecision?.routeName ?? 'unknown'}`,
         finishReason,
         usage: usage ? (usage as Record<string, unknown>) : undefined,

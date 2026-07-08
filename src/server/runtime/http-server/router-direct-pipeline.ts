@@ -62,6 +62,8 @@ export interface RouterDirectAuditContext {
   routingDecision?: { routeName?: string; pool?: string[] };
   /** The original client model before direct-route model override, if overridden. */
   originalClientModel?: string;
+  /** The provider model actually sent after direct-route hooks. */
+  providerModelId?: string;
 }
 
 export interface RouterDirectInput {
@@ -193,6 +195,9 @@ export async function executeRouterDirectPipeline(
     target.routeParams,
     providerHandle.runtime,
   );
+  if (typeof hookResult.payload.model === 'string' && hookResult.payload.model.trim()) {
+    auditContext.providerModelId = hookResult.payload.model.trim();
+  }
 
   // Write model override info to metadata center (on the metadata carrier)
   if (hookResult.originalClientModel) {
