@@ -179,6 +179,15 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 snapshot-recorder host bridge ref direct-native wired
+
+- `src/modules/llmswitch/bridge/snapshot-recorder.ts/js` no longer imports `importCoreDist` or loads the llmswitch-core snapshot recorder dist facade.
+- Base recorder creation moved into the host bridge and calls direct `router_hotpath_napi` snapshot hook capabilities for should-record, stage payload normalization, write-option planning, and write execution.
+- MetadataCenter snapshot read remains host bridge IO and is passed into the Rust write-option plan; bridge errorsample/client-tool/empty-response observation logic remains unchanged.
+- Strict reference audit improved to `shellsWithHostTextRefs=2` and `coreModuleSubpathRefs=8`, with `host=[]`; remaining subpath refs are docs/scripts/other categories.
+- Verification passed: focused Jest 192/192, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule tsc, root tsc, JS syntax check, and `git diff --check`.
+- Remaining work: host bridge shell refs are closed; continue with `module-loader.ts`, package exports, internal fan-out, and deletion candidates.
+
 ### 2026-07-09 routing-integrations host bridge shell refs direct-native wired
 
 - `src/modules/llmswitch/bridge/routing-integrations.ts/js` no longer imports `importCoreDist` / `requireCoreDist` or loads `native-hub-pipeline-orchestration-semantics`, `native-virtual-router-bootstrap-config`, or `runtime/virtual-router-host-effects`.

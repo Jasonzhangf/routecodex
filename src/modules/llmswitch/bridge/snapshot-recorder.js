@@ -3,12 +3,10 @@
  *
  * Creates and manages snapshot recorders for HubPipeline.
  */
-import { importCoreDist } from './module-loader.js';
 import { MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES } from './snapshot-recorder-types.js';
 import { appendStageTrace, classifyRuntimeErrorSignal, cloneStageTraceSummary, isRecordableApplyPatchErrorType, logClientToolError, logRuntimeErrorSignal, resetSnapshotRecorderErrorsampleStateForTests, shouldInspectRuntimeError, shouldLogRuntimeErrorSignalToConsole, shouldWriteClientToolErrorsample, summarizeClientToolObservation, writeBridgeErrorsample } from './snapshot-recorder-runtime.js';
 import { detectToolExecutionFailures, shouldLogClientToolErrorToConsole } from './snapshot-recorder-tool-failures.js';
-import { classifyEmptyResponseSignalNative } from './native-exports.js';
-let cachedSnapshotRecorderFactory = null;
+import { classifyEmptyResponseSignalNative, getRouterHotpathJsonBindingSync, shouldRecordSnapshotsNative, writeSnapshotViaHooksNative } from './native-exports.js';
 export { resetSnapshotRecorderErrorsampleStateForTests };
 function asRecord(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -163,20 +161,109 @@ function resolveRequestTailFromPayload(stage, payload) {
 function classifyEmptyResponseSignal(stage, payload) {
     return classifyEmptyResponseSignalNative(stage, payload);
 }
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+function readMetadataCenterSnapshotFromAnyBoundTarget(target) {
+    const row = asRecord(target);
+    if (!row) {
+        return null;
+    }
+    const center = Reflect.get(row, METADATA_CENTER_SYMBOL);
+    const metadataSnapshot = center
+        ? {
+            requestTruth: typeof center.readRequestTruth === 'function' ? center.readRequestTruth() : {},
+            continuationContext: typeof center.readContinuationContext === 'function' ? center.readContinuationContext() : {},
+            runtimeControl: typeof center.readRuntimeControl === 'function' ? center.readRuntimeControl() : {},
+            providerObservation: typeof center.readProviderObservation === 'function' ? center.readProviderObservation() : {}
+        }
+        : undefined;
+    if (metadataSnapshot) {
+        return metadataSnapshot;
+    }
+    const metadata = asRecord(row.metadata);
+    return metadata ? readMetadataCenterSnapshotFromAnyBoundTarget(metadata) : null;
+}
+function callSnapshotNativeJson(capability, args) {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding[capability];
+    if (typeof fn !== 'function') {
+        throw new Error(`[llmswitch-bridge] ${capability} not available`);
+    }
+    const raw = fn(...args);
+    if (typeof raw !== 'string' || !raw) {
+        throw new Error(`[llmswitch-bridge] ${capability} returned empty result`);
+    }
+    return JSON.parse(raw);
+}
+function stringifySnapshotNativeArg(capability, value) {
+    try {
+        return JSON.stringify(value) ?? null;
+    }
+    catch (error) {
+        if (capability === 'normalizeSnapshotStagePayloadJson') {
+            return null;
+        }
+        const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+        throw new Error(`[llmswitch-bridge] ${capability} JSON stringify failed: ${detail}`);
+    }
+}
+function normalizeSnapshotStagePayloadNative(stage, payload) {
+    if (payload === undefined || payload === null) {
+        return null;
+    }
+    const payloadJson = stringifySnapshotNativeArg('normalizeSnapshotStagePayloadJson', payload);
+    if (!payloadJson) {
+        return payload;
+    }
+    return callSnapshotNativeJson('normalizeSnapshotStagePayloadJson', [
+        typeof stage === 'string' ? stage : '',
+        payloadJson
+    ]);
+}
+function buildSnapshotRecorderWriteOptionsNative(input) {
+    const inputJson = stringifySnapshotNativeArg('buildSnapshotRecorderWriteOptionsJson', input);
+    const parsed = callSnapshotNativeJson('buildSnapshotRecorderWriteOptionsJson', [inputJson]);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('[llmswitch-bridge] buildSnapshotRecorderWriteOptionsJson returned invalid payload');
+    }
+    return parsed;
+}
+function createBaseSnapshotRecorder(context, endpoint) {
+    const stageRequestId = typeof context.requestId === 'string' && context.requestId.trim()
+        ? context.requestId.trim()
+        : 'unknown_req';
+    return {
+        record(stage, payload) {
+            if (!shouldRecordSnapshotsNative()) {
+                return;
+            }
+            const normalized = normalizeSnapshotStagePayloadNative(stage, payload);
+            if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
+                return;
+            }
+            try {
+                const writeOptions = buildSnapshotRecorderWriteOptionsNative({
+                    endpoint,
+                    stage,
+                    requestId: stageRequestId,
+                    data: normalized,
+                    providerKey: typeof context.providerId === 'string' ? context.providerId : undefined,
+                    context,
+                    metadataCenterSnapshot: readMetadataCenterSnapshotFromAnyBoundTarget(context)
+                });
+                writeSnapshotViaHooksNative(writeOptions);
+            }
+            catch (err) {
+                console.warn('[snapshot-recorder] write failed (non-blocking):', err instanceof Error ? err.message : String(err));
+            }
+        }
+    };
+}
 /**
  * 为 HubPipeline / provider 响应路径创建阶段快照记录器。
- * 内部通过 llmswitch-core 的 snapshot-recorder 模块实现。
+ * 内部通过 router_hotpath_napi snapshot hooks 实现。
  */
 export async function createSnapshotRecorder(context, endpoint) {
-    if (!cachedSnapshotRecorderFactory) {
-        const mod = await importCoreDist('conversion/hub/snapshot-recorder');
-        const factory = mod.createSnapshotRecorder;
-        if (typeof factory !== 'function') {
-            throw new Error('[llmswitch-bridge] createSnapshotRecorder not available');
-        }
-        cachedSnapshotRecorderFactory = factory;
-    }
-    const recorder = cachedSnapshotRecorderFactory(context, endpoint);
+    const recorder = createBaseSnapshotRecorder(context, endpoint);
     const baseRecord = typeof recorder?.record === 'function' ? recorder.record.bind(recorder) : null;
     if (!baseRecord) {
         return recorder;

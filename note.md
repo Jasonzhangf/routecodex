@@ -1,3 +1,13 @@
+# 2026-07-09: snapshot-recorder host bridge ref direct-native wired
+
+- Scope: finish current host bridge shell subpath closeout by removing snapshot recorder's llmswitch-core dist facade load.
+- Change: `src/modules/llmswitch/bridge/snapshot-recorder.ts/js` now creates its base recorder locally and calls direct `router_hotpath_napi` snapshot hook capabilities for should-record, stage payload normalization, write-option planning, and write execution.
+- Change: MetadataCenter snapshot read remains host bridge IO and is passed into the Rust write-option plan; outer bridge errorsample/client-tool/empty-response observation logic is unchanged.
+- Exact refs: bridge snapshot recorder scan for the old dist facade loader/import/cache strings returned zero matches.
+- Strict reference audit improved to `shellsWithHostTextRefs=2`, `coreModuleSubpathRefs=8`, with `host=[]`; remaining refs are docs/scripts/other categories only.
+- Verification PASS: focused Jest 192/192 (`snapshot-recorder-native-plan`, `hub-pipeline-stage-residue-audit`); `verify:llmswitch-ts-shell-reference-audit`; zero-ts closeout; minimal TS surface; rustification audit; sharedmodule tsc; root tsc; `node --check snapshot-recorder.js`; `git diff --check`.
+- Remaining work: host bridge shell refs are closed; continue with module-loader dead `ts/engine` path, package exports, internal fan-out, and deletion candidates.
+
 # 2026-07-09: routing-integrations host bridge shell refs direct-native wired
 
 - Scope: continue llmswitch-core TS shell reference closeout for `src/modules/llmswitch/bridge/routing-integrations.ts/js`.

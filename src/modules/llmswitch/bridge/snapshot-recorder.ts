@@ -5,10 +5,8 @@
  */
 
 import type { AnyRecord } from './module-loader.js';
-import { importCoreDist } from './module-loader.js';
 import {
   type SnapshotRecorder,
-  type SnapshotRecorderModule,
   type StageTraceEntry,
   MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES
 } from './snapshot-recorder-types.js';
@@ -30,11 +28,12 @@ import {
   detectToolExecutionFailures,
   shouldLogClientToolErrorToConsole
 } from './snapshot-recorder-tool-failures.js';
-import { classifyEmptyResponseSignalNative } from './native-exports.js';
-
-let cachedSnapshotRecorderFactory:
-  | ((context: AnyRecord, endpoint: string) => SnapshotRecorder)
-  | null = null;
+import {
+  classifyEmptyResponseSignalNative,
+  getRouterHotpathJsonBindingSync,
+  shouldRecordSnapshotsNative,
+  writeSnapshotViaHooksNative
+} from './native-exports.js';
 
 export { resetSnapshotRecorderErrorsampleStateForTests };
 
@@ -213,23 +212,124 @@ function classifyEmptyResponseSignal(stage: string, payload: Record<string, unkn
   return classifyEmptyResponseSignalNative(stage, payload);
 }
 
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+type MetadataCenterLike = {
+  readRuntimeControl?: () => Record<string, unknown>;
+  readRequestTruth?: () => Record<string, unknown>;
+  readContinuationContext?: () => Record<string, unknown>;
+  readProviderObservation?: () => Record<string, unknown>;
+};
+
+function readMetadataCenterSnapshotFromAnyBoundTarget(target: unknown): Record<string, unknown> | null {
+  const row = asRecord(target);
+  if (!row) {
+    return null;
+  }
+  const center = Reflect.get(row, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  const metadataSnapshot = center
+    ? {
+        requestTruth: typeof center.readRequestTruth === 'function' ? center.readRequestTruth() : {},
+        continuationContext: typeof center.readContinuationContext === 'function' ? center.readContinuationContext() : {},
+        runtimeControl: typeof center.readRuntimeControl === 'function' ? center.readRuntimeControl() : {},
+        providerObservation: typeof center.readProviderObservation === 'function' ? center.readProviderObservation() : {}
+      }
+    : undefined;
+  if (metadataSnapshot) {
+    return metadataSnapshot;
+  }
+  const metadata = asRecord(row.metadata);
+  return metadata ? readMetadataCenterSnapshotFromAnyBoundTarget(metadata) : null;
+}
+
+function callSnapshotNativeJson(capability: string, args: unknown[]): unknown {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
+  const fn = binding[capability];
+  if (typeof fn !== 'function') {
+    throw new Error(`[llmswitch-bridge] ${capability} not available`);
+  }
+  const raw = fn(...args);
+  if (typeof raw !== 'string' || !raw) {
+    throw new Error(`[llmswitch-bridge] ${capability} returned empty result`);
+  }
+  return JSON.parse(raw) as unknown;
+}
+
+function stringifySnapshotNativeArg(capability: string, value: unknown): string | null {
+  try {
+    return JSON.stringify(value) ?? null;
+  } catch (error) {
+    if (capability === 'normalizeSnapshotStagePayloadJson') {
+      return null;
+    }
+    const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(`[llmswitch-bridge] ${capability} JSON stringify failed: ${detail}`);
+  }
+}
+
+function normalizeSnapshotStagePayloadNative(stage: string, payload: unknown): unknown {
+  if (payload === undefined || payload === null) {
+    return null;
+  }
+  const payloadJson = stringifySnapshotNativeArg('normalizeSnapshotStagePayloadJson', payload);
+  if (!payloadJson) {
+    return payload;
+  }
+  return callSnapshotNativeJson('normalizeSnapshotStagePayloadJson', [
+    typeof stage === 'string' ? stage : '',
+    payloadJson
+  ]);
+}
+
+function buildSnapshotRecorderWriteOptionsNative(input: Record<string, unknown>): Record<string, unknown> {
+  const inputJson = stringifySnapshotNativeArg('buildSnapshotRecorderWriteOptionsJson', input);
+  const parsed = callSnapshotNativeJson('buildSnapshotRecorderWriteOptionsJson', [inputJson]);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] buildSnapshotRecorderWriteOptionsJson returned invalid payload');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function createBaseSnapshotRecorder(context: AnyRecord, endpoint: string): SnapshotRecorder {
+  const stageRequestId = typeof context.requestId === 'string' && context.requestId.trim()
+    ? context.requestId.trim()
+    : 'unknown_req';
+  return {
+    record(stage: string, payload: object): void {
+      if (!shouldRecordSnapshotsNative()) {
+        return;
+      }
+      const normalized = normalizeSnapshotStagePayloadNative(stage, payload);
+      if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
+        return;
+      }
+      try {
+        const writeOptions = buildSnapshotRecorderWriteOptionsNative({
+          endpoint,
+          stage,
+          requestId: stageRequestId,
+          data: normalized as Record<string, unknown>,
+          providerKey: typeof context.providerId === 'string' ? context.providerId : undefined,
+          context,
+          metadataCenterSnapshot: readMetadataCenterSnapshotFromAnyBoundTarget(context)
+        });
+        writeSnapshotViaHooksNative(writeOptions);
+      } catch (err) {
+        console.warn('[snapshot-recorder] write failed (non-blocking):', err instanceof Error ? err.message : String(err));
+      }
+    }
+  } as SnapshotRecorder;
+}
+
 /**
  * 为 HubPipeline / provider 响应路径创建阶段快照记录器。
- * 内部通过 llmswitch-core 的 snapshot-recorder 模块实现。
+ * 内部通过 router_hotpath_napi snapshot hooks 实现。
  */
 export async function createSnapshotRecorder(
   context: AnyRecord,
   endpoint: string
 ): Promise<SnapshotRecorder> {
-  if (!cachedSnapshotRecorderFactory) {
-    const mod = await importCoreDist<SnapshotRecorderModule>('conversion/hub/snapshot-recorder');
-    const factory = mod.createSnapshotRecorder;
-    if (typeof factory !== 'function') {
-      throw new Error('[llmswitch-bridge] createSnapshotRecorder not available');
-    }
-    cachedSnapshotRecorderFactory = factory;
-  }
-  const recorder = cachedSnapshotRecorderFactory(context, endpoint) as any;
+  const recorder = createBaseSnapshotRecorder(context, endpoint) as any;
   const baseRecord = typeof recorder?.record === 'function' ? recorder.record.bind(recorder) : null;
   if (!baseRecord) {
     return recorder;
