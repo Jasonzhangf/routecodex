@@ -46,7 +46,7 @@ function readNativeAutoHookQueueEntries(entries: unknown[]): ServerToolAutoHookD
   });
 }
 
-export const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
+const listAutoServerToolHooks = (): ServerToolAutoHookDescriptor[] => {
   const entries = planServertoolBuiltinAutoHandlerEntriesWithNative().entries as unknown as Array<{
     name: string;
     autoHook?: {

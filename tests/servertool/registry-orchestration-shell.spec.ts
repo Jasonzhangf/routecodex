@@ -17,6 +17,33 @@ const resolveServertoolRegistryHandlerWithNativeMock = jest.fn((input: any) => {
   }
 });
 const planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock = jest.fn();
+const planServertoolAutoHookQueueItemsWithNativeMock = jest.fn((input: any) => ({
+  queueOrder: [
+    { queue: 'A_optional', entries: input?.hooks ?? [] },
+    { queue: 'B_mandatory', entries: [] }
+  ]
+}));
+const runStoplessBuiltinHandlerForRuntimeWithNativeMock = jest.fn(async () => null);
+const resolveAutoHookRuntimeAttemptDecisionWithNativeMock = jest.fn(() => ({
+  traceEvent: {
+    hookId: 'alpha',
+    phase: 'post',
+    priority: 9,
+    queue: 'A_optional',
+    queueIndex: 1,
+    queueTotal: 1,
+    result: 'miss',
+    reason: 'predicate_false'
+  },
+  returnResult: false,
+  rethrowError: false,
+  continueQueue: true
+}));
+const resolveAutoHookCallerFinalizationDecisionWithNativeMock = jest.fn(() => ({
+  returnResult: false,
+  returnNull: true,
+  continueNextQueue: false
+}));
 const createServertoolExecutionLoopStateWithNativeMock = jest.fn(() => ({
   executedToolCalls: [],
   executedIds: [],
@@ -56,10 +83,12 @@ jest.unstable_mockModule(
     applyServertoolExecutionLoopInitialDecisionWithNative:
       applyServertoolExecutionLoopInitialDecisionWithNativeMock,
     applyServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
-    runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(),
-    resolveAutoHookCallerFinalizationDecisionWithNative: jest.fn(),
-    resolveAutoHookRuntimeAttemptDecisionWithNative: jest.fn(),
-    planServertoolAutoHookQueueItemsWithNative: jest.fn(),
+    runStoplessBuiltinHandlerForRuntimeWithNative: runStoplessBuiltinHandlerForRuntimeWithNativeMock,
+    resolveAutoHookCallerFinalizationDecisionWithNative:
+      resolveAutoHookCallerFinalizationDecisionWithNativeMock,
+    resolveAutoHookRuntimeAttemptDecisionWithNative:
+      resolveAutoHookRuntimeAttemptDecisionWithNativeMock,
+    planServertoolAutoHookQueueItemsWithNative: planServertoolAutoHookQueueItemsWithNativeMock,
     planServertoolRegistryBuiltinAutoHookEntriesWithNative:
       planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock,
   })
@@ -71,7 +100,7 @@ const {
   '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js'
 );
 const {
-  listAutoServerToolHooks,
+  runServertoolAutoHookCaller,
 } = await import(
   '../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js'
 );
@@ -107,6 +136,33 @@ describe('registry-orchestration-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     listBuiltinAutoHandlerEntriesMock.mockReturnValue({ entries: [] });
+    planServertoolAutoHookQueueItemsWithNativeMock.mockImplementation((input: any) => ({
+      queueOrder: [
+        { queue: 'A_optional', entries: input?.hooks ?? [] },
+        { queue: 'B_mandatory', entries: [] }
+      ]
+    }));
+    runStoplessBuiltinHandlerForRuntimeWithNativeMock.mockResolvedValue(null);
+    resolveAutoHookRuntimeAttemptDecisionWithNativeMock.mockReturnValue({
+      traceEvent: {
+        hookId: 'alpha',
+        phase: 'post',
+        priority: 9,
+        queue: 'A_optional',
+        queueIndex: 1,
+        queueTotal: 1,
+        result: 'miss',
+        reason: 'predicate_false'
+      },
+      returnResult: false,
+      rethrowError: false,
+      continueQueue: true
+    });
+    resolveAutoHookCallerFinalizationDecisionWithNativeMock.mockReturnValue({
+      returnResult: false,
+      returnNull: true,
+      continueNextQueue: false
+    });
   });
 
   test('queue uses native builtin registry entry and ignores retired ad-hoc lookup plans', async () => {
@@ -155,7 +211,7 @@ describe('registry-orchestration-shell', () => {
     expect(resolveServertoolExecutionLoopInitialDecisionWithNativeMock).not.toHaveBeenCalled();
   });
 
-  test('projects auto-hook descriptors directly through native descriptor planner', () => {
+  test('projects auto-hook descriptors directly through native descriptor planner', async () => {
     const execution = { kind: 'builtin', builtinName: 'alpha' };
     const entry = {
       name: 'alpha',
@@ -176,16 +232,24 @@ describe('registry-orchestration-shell', () => {
       },
     ]);
 
-    expect(listAutoServerToolHooks()).toEqual([
-      {
-        id: 'alpha',
-        phase: 'post',
-        priority: 9,
-        order: 1,
-        registration: entry.registration,
-        execution,
-      },
-    ]);
+    await runServertoolAutoHookCaller({
+      options: {
+        requestId: 'req-alpha',
+        chatResponse: {},
+        adapterContext: {},
+        entryEndpoint: '/v1/chat/completions'
+      } as any,
+      contextBase: {
+        base: {},
+        toolCalls: [],
+        adapterContext: {},
+        requestId: 'req-alpha',
+        entryEndpoint: '/v1/chat/completions'
+      } as any,
+      includeAutoHookIds: null,
+      excludeAutoHookIds: null
+    });
+
     expect(planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock).toHaveBeenCalledWith({
       hooks: [
         {
@@ -198,9 +262,23 @@ describe('registry-orchestration-shell', () => {
         },
       ],
     });
+    expect(planServertoolAutoHookQueueItemsWithNativeMock).toHaveBeenCalledWith({
+      hooks: [
+        {
+          id: 'alpha',
+          phase: 'post',
+          priority: 9,
+          order: 1,
+          registration: entry.registration,
+          execution,
+        },
+      ],
+      includeAutoHookIds: null,
+      excludeAutoHookIds: null
+    });
   });
 
-  test('surfaces native builtin auto-hook entry contract failures without TS sourceIndex rematch', () => {
+  test('surfaces native builtin auto-hook entry contract failures without TS sourceIndex rematch', async () => {
     listBuiltinAutoHandlerEntriesMock.mockReturnValue({ entries: [] });
     planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock.mockImplementation(() => {
       throw new Error(
@@ -208,9 +286,25 @@ describe('registry-orchestration-shell', () => {
       );
     });
 
-    expect(() => listAutoServerToolHooks()).toThrow(
-      'native returned descriptor without builtin hook sourceIndex: 1'
-    );
+    await expect(
+      runServertoolAutoHookCaller({
+        options: {
+          requestId: 'req-alpha-failure',
+          chatResponse: {},
+          adapterContext: {},
+          entryEndpoint: '/v1/chat/completions'
+        } as any,
+        contextBase: {
+          base: {},
+          toolCalls: [],
+          adapterContext: {},
+          requestId: 'req-alpha-failure',
+          entryEndpoint: '/v1/chat/completions'
+        } as any,
+        includeAutoHookIds: null,
+        excludeAutoHookIds: null
+      })
+    ).rejects.toThrow('native returned descriptor without builtin hook sourceIndex: 1');
   });
 
   test('registry orchestration shell owns builtin lookup but not name normalization', async () => {
@@ -264,6 +358,8 @@ describe('registry-orchestration-shell', () => {
 
     expect(source).not.toContain('descriptor.sourceIndex');
     expect(source).not.toContain('native registry auto-hook descriptor missing entry');
+    expect(source).toContain('const listAutoServerToolHooks =');
+    expect(source).not.toContain('export const listAutoServerToolHooks');
     expect(source).toContain('planServertoolRegistryBuiltinAutoHookEntriesWithNative({');
     expect(source).not.toContain('registration: entry.registration as unknown as Record<string, unknown>');
     expect(source).not.toContain('execution: entry.execution as Record<string, unknown>');

@@ -492,7 +492,6 @@ let buildServertoolAutoHookQueueConfig: any;
 let buildServertoolFollowupConfig: any;
 let buildServertoolPendingInjectionConfig: any;
 let normalizeServerToolRegistrationSpec: any;
-let listAutoServerToolHooks: any;
 
 beforeAll(async () => {
   const nativeServertoolOrchestration = await import('rcc-llmswitch-core/native/servertool-wrapper');
@@ -501,8 +500,6 @@ beforeAll(async () => {
   buildServertoolPendingInjectionConfig = () => nativeServertoolOrchestration.planServertoolSkeletonDerivedConfigWithNative().pendingInjectionConfig;
   normalizeServerToolRegistrationSpec = (name: string, options: Record<string, unknown>) =>
     nativeServertoolOrchestration.normalizeServertoolRegistrationSpecWithNative({ name, options });
-  const autoHookCaller = await import('../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js');
-  listAutoServerToolHooks = autoHookCaller.listAutoServerToolHooks;
 
 });
 
@@ -572,19 +569,18 @@ describe('servertool skeleton config', () => {
     });
   });
 
-  test('registry exposes skeleton-owned auto hooks without TS overrides', () => {
-    const hook = listAutoServerToolHooks().find((entry: any) => entry.id === 'stop_message_auto');
-    expect(hook).toBeDefined();
-    expect(hook).toMatchObject({
-      id: 'stop_message_auto',
-      phase: 'default',
-      priority: 40
-    });
-    expect(hook.registration).toMatchObject({
-      name: 'stop_message_auto',
-      trigger: 'auto',
-      executionMode: 'auto_hook'
-    });
+  test('auto-hook registry helper stays internal to caller shell', async () => {
+    const [mod, source] = await Promise.all([
+      import('../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js'),
+      import('node:fs/promises').then((fs) =>
+        fs.readFile('sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts', 'utf8')
+      )
+    ]);
+
+    expect((mod as Record<string, unknown>).listAutoServerToolHooks).toBeUndefined();
+    expect(source).toContain('const listAutoServerToolHooks =');
+    expect(source).not.toContain('export const listAutoServerToolHooks');
+    expect(source).toContain('planServertoolRegistryBuiltinAutoHookEntriesWithNative({');
   });
 
   test('deleted registry shell does not expose test-only registered-name or record listing APIs', async () => {

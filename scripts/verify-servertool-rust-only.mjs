@@ -6569,6 +6569,7 @@ function checkServertoolAutoHookCallerThinShell() {
     'planServertoolAutoHookQueuesWithNative({',
     'args.hooks[entry.sourceIndex]',
     'native auto-hook queue returned invalid sourceIndex',
+    'export const listAutoServerToolHooks',
   ]) {
     if (autoHookCallerShell.includes(marker)) {
       fail(
@@ -6602,9 +6603,15 @@ function checkServertoolAutoHookCallerThinShell() {
       'auto-hook-caller.ts must keep direct runServertoolAutoHookCaller export'
     );
   }
+  if (!autoHookCallerShell.includes('const listAutoServerToolHooks =')) {
+    fail(
+      'servertool-auto-hook-caller-thin-shell',
+      'auto-hook-caller.ts must keep auto-hook registry listing private inside the caller shell'
+    );
+  }
   pass(
     'servertool-auto-hook-caller-thin-shell',
-    'auto-hook-caller.ts keeps direct runServertoolAutoHookCaller export without alias wrapper residue'
+    'auto-hook-caller.ts keeps direct runServertoolAutoHookCaller export without alias wrapper or registry-helper export residue'
   );
 }
 
