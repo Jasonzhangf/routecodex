@@ -28,12 +28,12 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
-      - tests/servertool/progress-log-block.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/engine-selection-block.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -48,12 +48,12 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
       - sharedmodule/llmswitch-core/src/servertool
     contract:
-      - tests/servertool/execution-stage-shell.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/servertool/servertool-cli-result-restore.spec.ts
       - tests/cli/servertool-command.spec.ts
     integration:
-      - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+      - tests/servertool/servertool-cli-result-restore.spec.ts
       - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
     smoke:
       - npm run verify:architecture-ci
@@ -75,19 +75,19 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
-      - tests/servertool/stopless-cli-continuation.spec.ts
-      - tests/servertool/execution-stage-shell.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
-      - tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts
+      - tests/servertool/servertool-cli-result-restore.spec.ts
       - scripts/tests/stopless-invalid-schema-blackbox.mjs
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
-      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
     smoke:
       - npm run verify:stopless-invalid-schema-blackbox
@@ -125,7 +125,7 @@ verification:
       - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
       - "Validation must prove client-visible stopless prose is ordinary assistant text and not `reasoning_text` / `reasoning_content` / `reasoning.summary`; `function_call_output` remains only the next-turn model-side restore shape."
       - "Focused Rust gates: `cargo test -p servertool-core stopless --lib -- --nocapture`, `cargo test -p servertool-core cli_contract --lib -- --nocapture`, and `cargo test -p servertool-core persisted_lookup --lib -- --nocapture`."
-      - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts tests/servertool/execution-stage-shell.spec.ts tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts --runInBand`."
+      - "Focused TS gate: `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-metadata-center.spec.ts tests/servertool/servertool-cli-native-bridge.spec.ts tests/servertool/servertool-cli-result-restore.spec.ts --runInBand`."
 
   - feature_id: server.runtime_key_resolution
     change_risk: medium
@@ -155,11 +155,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
-      - tests/servertool/servertool-auto-hook-trace.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
-      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -174,11 +174,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
-      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -193,11 +193,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
-      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -212,11 +212,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
-      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -231,11 +231,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
-      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -250,11 +250,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
-      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
@@ -270,12 +270,12 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
       - src/modules/llmswitch/bridge/native-exports.ts
     contract:
-      - tests/servertool/execution-dispatch-outcome-shell.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
-      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -291,9 +291,9 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
     contract:
-      - tests/servertool/execution-shell.backend-failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
-      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
@@ -309,9 +309,9 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
-      - tests/servertool/execution-shell.backend-failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
@@ -328,9 +328,9 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
-      - tests/servertool/execution-dispatch-outcome-shell.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
@@ -348,7 +348,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
     contract:
-      - tests/servertool/execution-dispatch-outcome-shell.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
@@ -366,7 +366,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
     contract:
-      - tests/servertool/execution-shell.backend-failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
@@ -383,12 +383,12 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts
-      - sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts
-      - tests/servertool/registry-orchestration-shell.spec.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     contract:
-      - tests/servertool/registry-orchestration-shell.spec.ts
-      - tests/servertool/server-side-tools.auto-hook-config.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
@@ -405,10 +405,10 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
-      - tests/servertool/response-stage-orchestration-shell.spec.ts
-      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
@@ -425,12 +425,12 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
-      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
-      - tests/servertool/server-side-tools.failfast.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
@@ -446,11 +446,11 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
-      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -463,11 +463,11 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
-      - sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/servertool-progress-logging.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -498,15 +498,15 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts
-      - sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts
-      - sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/engine-preflight-shell.spec.ts
-      - tests/servertool/server-side-tools.failfast.spec.ts
-      - tests/servertool/timeout-error-block.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -522,14 +522,14 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs
       - scripts/verify-servertool-rust-only.mjs
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
-      - tests/servertool/execution-queue-shell.spec.ts
-      - tests/servertool/execution-stage-shell.spec.ts
-      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     contract:
-      - tests/servertool/server-side-tools.auto-hook-config.spec.ts
-      - tests/servertool/servertool-auto-hook-trace.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
-      - tests/servertool/server-side-tools.dispatch-native.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -929,7 +929,7 @@ verification:
     contract:
       - tests/server/handlers/handler-response-utils.metadata-center-closeout.spec.ts
       - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
-      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
@@ -978,7 +978,7 @@ verification:
       - tests/servertool/stopless-metadata-center.spec.ts
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
     integration:
-      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
     smoke:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-metadata-center-manifest-code-sync
@@ -1152,20 +1152,22 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/responses_payload.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
     contract:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
+      - npm run verify:servertool-rust-only
       - npm run verify:llmswitch-core-tsc
     build:
       - npm run build:base
     notes:
-      - "TS provider-response remains native invocation and IO callback glue; servertoolRuntimeAction planning, missing-executor error descriptors, 03->04 post-servertool projection, and Responses client payload decisions stay in Rust."
+      - "TS provider-response remains native invocation and IO callback glue; server-side runtime actions are retired; TS provider-response is native invocation and IO callback glue, rejects non-empty servertoolRuntimeActions, and client payload decisions stay in Rust."
 
   - feature_id: hub.response_responses_client_projection
     change_risk: high
@@ -1304,7 +1306,7 @@ verification:
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
     smoke:
       - cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture
       - npm run verify:servertool-rust-only
@@ -1325,12 +1327,12 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
-      - tests/servertool/engine.stopless-session-thin-shell.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
     integration:
-      - tests/servertool/run-server-side-tool-engine-shell.spec.ts
-      - tests/servertool/response-stage-orchestration-shell.spec.ts
-      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -1391,7 +1393,7 @@ verification:
       - tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
     smoke:
       - cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture
       - npm run verify:servertool-rust-only
@@ -1411,7 +1413,7 @@ verification:
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
-      - tests/servertool/response-stage-orchestration-shell.spec.ts
+      - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
       - cargo test -p router-hotpath-napi resp_process_stage1_tool_governance --lib -- --nocapture
@@ -1458,9 +1460,9 @@ verification:
       - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
       - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts
-      - tests/servertool/stopless-cli-continuation.spec.ts
+      - tests/servertool/stopless-metadata-center.spec.ts
     integration:
-      - tests/servertool/execution-stage-shell.spec.ts
+      - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
     smoke:
       - npm run verify:responses-history-protocol-contract

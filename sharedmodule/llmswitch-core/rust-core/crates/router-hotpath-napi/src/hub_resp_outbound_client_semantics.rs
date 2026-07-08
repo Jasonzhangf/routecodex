@@ -8,7 +8,6 @@ pub use crate::hub_resp_outbound_client_semantics_blocks::napi_bindings::{
     normalize_alias_map_json, normalize_responses_tool_call_arguments_for_client_json,
     normalize_responses_usage_json, plan_responses_json_client_dispatch_json,
     plan_responses_payload_from_chat_closeout_json,
-    project_post_servertool_hub_resp_outbound_04_client_semantic_json,
     project_responses_client_body_for_client_json,
     project_responses_client_payload_for_client_json, project_responses_sse_frame_for_client_json,
     resolve_alias_map_from_resp_semantics_json, resolve_alias_map_from_sources_json,

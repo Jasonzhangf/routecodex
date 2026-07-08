@@ -196,39 +196,15 @@ chains:
         semantic_output: "terminal-stop summary projection when schema passes, or client-visible shell `exec_command(routecodex hook run reasoningStop ...)` projection plan when feedback/client execution is required"
         status: anchored
         note: "Anchored by Rust stopless runtime planning in the response hook skeleton; business execution remains a client-visible CLI projection rather than server-side tool execution."
-      - step_id: sth-resp-04
-        from_node: ServertoolRespHook03HookResponseInjected
-        to_node: ServertoolRespHook04FollowupPlanned
-        caller_symbol: plan_resp_chatprocess_03_servertool_runtime_actions
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
-        callee_symbol: inspect_stop_gateway_signal
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-        owner_feature_id: servertool.followup_orchestration
-        semantic_input: "post hook-response projection event plus backend-route/server-side runtime trigger state"
-        semantic_output: "optional origin-snapshot followup effect plan or no-op event"
-        status: anchored
-        note: "Anchored by Rust response Chat Process effect planning: stop-eligible responses emit a `servertoolRuntimeAction` plan from the governed payload, and non-eligible responses are explicit no-op."
-      - step_id: sth-resp-05
-        from_node: ServertoolRespHook04FollowupPlanned
-        to_node: ServertoolRespHook05ReenterDispatched
-        caller_symbol: plan_provider_response_servertool_runtime_actions
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
-        callee_symbol: resolve_provider_response_post_servertool_effect
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
-        owner_feature_id: servertool.followup_orchestration
-        semantic_input: "optional followup effect plan"
-        semantic_output: "optional reenter/clientInject/providerInvoke IO effect plan or no-op event"
-        status: anchored
-        note: "Anchored by Rust post-servertool effect planning. Removed reenter/runtime-executor actions are rejected; valid response-hook runtime plans project back through `HubRespChatProcess03Governed` before normal client projection."
       - step_id: sth-resp-06
-        from_node: ServertoolRespHook05ReenterDispatched
+        from_node: ServertoolRespHook03HookResponseInjected
         to_node: ServertoolRespHook06ProjectionFinalized
         caller_symbol: run_servertool_resp_stopless_hook_skeleton
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
         callee_symbol: build_stopless_auto_cli_projection_from_engine_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "post-intercept/post-followup governed response candidate plus hook events"
+        semantic_input: "post-intercept governed response candidate plus hook events; server-side runtime action bridge retired"
         semantic_output: "final governed response truth with internal tool stripped and client projection handoff selected"
         status: anchored
         note: "Anchored by Rust projection finalization for non-terminal stopless hook results; internal tool semantics are converted to the governed client shell projection before outbound mapping."

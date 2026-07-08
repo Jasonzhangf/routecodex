@@ -904,7 +904,7 @@ describe('provider response Rust native plan', () => {
     ]);
   });
 
-  it('uses Rust servertoolRuntimeAction effect for stop eligible callback path', async () => {
+  it('keeps stop eligible callback path on Rust no-op servertool effects', async () => {
     const recorder = new StubStageRecorder();
     const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'req_provider_response_servertool_stop_guard_1',

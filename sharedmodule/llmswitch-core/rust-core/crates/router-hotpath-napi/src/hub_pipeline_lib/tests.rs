@@ -1181,6 +1181,17 @@ fn stopless_exec_arguments(payload: &serde_json::Value) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
 }
 
+fn assert_no_legacy_servertool_runtime_actions(
+    output: &super::types::HubPipelineExecutionOutput,
+    message: &str,
+) {
+    let serialized = serde_json::to_string(&output.effect_plan).expect("effect plan serializes");
+    assert!(
+        !serialized.contains("servertoolRuntimeAction"),
+        "{message}: {serialized}"
+    );
+}
+
 #[test]
 fn stopless_non_stop_response_resets_error_streak_before_next_missing_schema_stop() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
@@ -1384,11 +1395,9 @@ fn stop_message_enabled_missing_session_id_suppresses_stopless_runtime_action_an
         stopless_metadata_write(&output).is_none(),
         "missing sessionId must not write stopless state"
     );
-    assert!(
-        output.effect_plan.effects.iter().all(|effect| {
-            serde_json::to_value(&effect.kind).ok() != Some(json!("servertoolRuntimeAction"))
-        }),
-        "missing sessionId must suppress legacy servertool runtime action"
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "missing sessionId must suppress legacy servertool runtime action",
     );
     assert!(output.diagnostics.iter().any(|diagnostic| {
         diagnostic.details.as_ref().is_some_and(|details| {
@@ -2284,10 +2293,10 @@ fn response_chat_stop_schema_projects_stopless_cli_before_responses_outbound() {
     assert!(output.effect_plan.effects.iter().any(|effect| {
         serde_json::to_value(&effect.kind).unwrap() == json!("stoplessMetadataCenterWrite")
     }));
-    assert!(!output.effect_plan.effects.iter().any(|effect| {
-        serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-            && effect.payload["action"] == json!("requireResponseHookRuntime")
-    }));
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "stopless CLI projection must not emit legacy servertool runtime action",
+    );
 }
 
 #[test]
@@ -2347,10 +2356,10 @@ fn anthropic_end_turn_stopless_effect_uses_chatprocess_payload() {
     assert!(output.effect_plan.effects.iter().any(|effect| {
         serde_json::to_value(&effect.kind).unwrap() == json!("stoplessMetadataCenterWrite")
     }));
-    assert!(!output.effect_plan.effects.iter().any(|effect| {
-        serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-            && effect.payload["action"] == json!("requireResponseHookRuntime")
-    }));
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "anthropic stopless CLI projection must not emit legacy servertool runtime action",
+    );
 }
 
 #[test]
@@ -2512,17 +2521,12 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
         .iter()
         .filter(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("runtimeStateWrite"))
         .count();
-    let servertool_runtime_action_count = output
-        .effect_plan
-        .effects
-        .iter()
-        .filter(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-        })
-        .count();
     assert_eq!(stream_pipe_count, 1);
     assert_eq!(runtime_state_write_count, 1);
-    assert_eq!(servertool_runtime_action_count, 0);
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "stream planning must not emit legacy servertool runtime action",
+    );
     let effect = output
         .effect_plan
         .effects
@@ -2606,14 +2610,9 @@ fn response_stream_stop_with_missing_session_returns_stream_and_alarm_without_se
         stream_effect.payload["requestId"],
         json!("req-stream-servertool-effect-1")
     );
-    assert!(
-        output
-            .effect_plan
-            .effects
-            .iter()
-            .all(|effect| serde_json::to_value(&effect.kind).unwrap()
-                != json!("servertoolRuntimeAction")),
-        "missing sessionId must suppress legacy servertool runtime action"
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "missing sessionId must suppress legacy servertool runtime action",
     );
     assert!(output.diagnostics.iter().any(|diagnostic| {
         diagnostic.details.as_ref().is_some_and(|details| {
@@ -2676,14 +2675,9 @@ fn anthropic_sse_end_turn_stream_stop_without_stopmessage_runtime_returns_stream
         stream_effect.payload["requestId"],
         json!("req-anthropic-sse-stream-stopless")
     );
-    assert!(
-        output
-            .effect_plan
-            .effects
-            .iter()
-            .all(|effect| serde_json::to_value(&effect.kind).unwrap()
-                != json!("servertoolRuntimeAction")),
-        "stopMessage runtime must be enabled before Rust emits a servertool runtime action"
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "disabled stopMessage runtime must not emit legacy servertool runtime action",
     );
 }
 
@@ -2731,14 +2725,9 @@ fn anthropic_sse_end_turn_stream_stop_with_missing_session_reports_alarm() {
         })
         .unwrap();
 
-    assert!(
-        output
-            .effect_plan
-            .effects
-            .iter()
-            .all(|effect| serde_json::to_value(&effect.kind).unwrap()
-                != json!("servertoolRuntimeAction")),
-        "missing sessionId must suppress legacy servertool runtime action"
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "missing sessionId must suppress legacy servertool runtime action",
     );
     assert!(output.diagnostics.iter().any(|diagnostic| {
         diagnostic.details.as_ref().is_some_and(|details| {
@@ -2779,14 +2768,9 @@ fn response_stop_without_stopmessage_runtime_returns_no_servertool_effect_plan()
         })
         .unwrap();
 
-    assert!(
-        output
-            .effect_plan
-            .effects
-            .iter()
-            .all(|effect| serde_json::to_value(&effect.kind).unwrap()
-                != json!("servertoolRuntimeAction")),
-        "providerInvoker alone must not enable stopMessage/servertool followup runtime"
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "providerInvoker alone must not enable stopMessage/servertool followup runtime",
     );
 }
 
@@ -2829,9 +2813,10 @@ fn response_tool_call_with_runtime_callbacks_returns_servertool_executor_effect_
         })
         .unwrap();
 
-    assert!(!output.effect_plan.effects.iter().any(|effect| {
-        serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-    }));
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "tool call projection must not emit legacy servertool runtime action",
+    );
 }
 
 #[test]
@@ -2873,9 +2858,10 @@ fn responses_tool_call_projects_required_action_without_legacy_runtime_action() 
         })
         .unwrap();
 
-    assert!(output.effect_plan.effects.iter().all(|effect| {
-        serde_json::to_value(&effect.kind).unwrap() != json!("servertoolRuntimeAction")
-    }));
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "responses tool call projection must not emit legacy servertool runtime action",
+    );
     assert_eq!(
         output.payload.unwrap()["required_action"]["type"],
         json!("submit_tool_outputs")
@@ -2924,15 +2910,10 @@ fn responses_reasoning_stop_tool_call_emits_only_stop_runtime_action() {
         })
         .unwrap();
 
-    let servertool_effects: Vec<_> = output
-        .effect_plan
-        .effects
-        .iter()
-        .filter(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-        })
-        .collect();
-    assert_eq!(servertool_effects.len(), 0);
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "reasoningStop terminal projection must not emit legacy servertool runtime action",
+    );
 }
 
 #[test]
@@ -2980,15 +2961,10 @@ fn responses_reasoning_stop_tool_call_survives_requested_client_tool_filter() {
         })
         .unwrap();
 
-    let servertool_effects: Vec<_> = output
-        .effect_plan
-        .effects
-        .iter()
-        .filter(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-        })
-        .collect();
-    assert_eq!(servertool_effects.len(), 0);
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "requested-tool filtering must not emit legacy servertool runtime action",
+    );
     let payload = output.payload.as_ref().expect("payload");
     assert_eq!(payload["status"], json!("completed"));
     assert!(payload.get("required_action").is_none());
@@ -3172,13 +3148,8 @@ fn responses_reasoning_stop_tool_call_emits_stop_runtime_action_without_runtime_
         })
         .unwrap();
 
-    let servertool_effects: Vec<_> = output
-        .effect_plan
-        .effects
-        .iter()
-        .filter(|effect| {
-            serde_json::to_value(&effect.kind).unwrap() == json!("servertoolRuntimeAction")
-        })
-        .collect();
-    assert_eq!(servertool_effects.len(), 0);
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "terminal schema projection must not emit legacy servertool runtime action",
+    );
 }

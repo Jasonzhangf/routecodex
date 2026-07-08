@@ -8,11 +8,12 @@ import {
   executeHubPipelineWithNative,
   buildProviderResponseMetadataSnapshotWithNative,
   normalizeProviderResponseEffectPlanWithNative,
-  planProviderResponseServertoolRuntimeActionsWithNative,
   resolveProviderProtocolWithNative,
-  resolveProviderResponsePostServertoolEffectWithNative,
   type ProviderResponseRuntimeEffectPlan,
 } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+
+// feature_id: hub.response_post_servertool_client_projection
+// canonical_builder: normalize_provider_response_effect_plan
 import {
   publishResponsesRecordPlanWithNative,
   type PublishResponsesRecordPlan,
@@ -33,11 +34,9 @@ import {
   resolveProviderResponseContextSignals,
   type ProviderProtocol
 } from './provider-response-helpers.js';
-import { runServertoolResponseStageOrchestrationShell } from '../../../servertool/engine-orchestration-shell.js';
 import {
   buildProviderSseStreamReadErrorDescriptorWithNative,
   materializeProviderResponseSsePayloadWithNative,
-  projectPostServertoolHubRespOutbound04ClientSemanticWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import {
   applyNativeRuntimeControlWritePlan,
@@ -176,55 +175,21 @@ async function executeProviderResponseNativeServertoolEffects(args: {
     throw new Error('Rust HubPipeline response path returned malformed servertool runtime actions');
   }
   const servertoolRuntimeActions = args.runtimeEffects.servertoolRuntimeActions;
-  const actionPlan = planProviderResponseServertoolRuntimeActionsWithNative({
-    servertoolRuntimeActions
-  });
-  if (actionPlan.error) {
-    throw new Error(actionPlan.error.message);
-  }
-
-  let payload: JsonObject = args.payload;
-  let stage: 'HubRespChatProcess03Governed' | 'unchanged' = 'unchanged';
-  if (actionPlan.executionPlans.length > 0) {
-    for (const executionPlan of actionPlan.executionPlans) {
-      const stopGateway = isRecord(executionPlan.stopGateway) ? executionPlan.stopGateway : undefined;
-      if (stopGateway) {
-        writeRustStopGatewayContextToMetadataCenter({
-          metadata: args.context as unknown as Record<string, unknown>,
-          stopGatewayContext: stopGateway,
-          writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
-          reason: 'rust stop gateway control signal'
-        });
-      }
-      const allowFollowup = executionPlan.allowFollowup === true;
-      const orchestration = await runServertoolResponseStageOrchestrationShell({
-        payload: executionPlan.payload as JsonObject,
-        adapterContext: args.context,
-        requestId: args.requestId,
-        entryEndpoint: args.entryEndpoint,
-        ...(allowFollowup ? { allowFollowup: true } : {}),
-        stageRecorder: args.stageRecorder
+  if (servertoolRuntimeActions.length > 0) {
+    const firstAction = servertoolRuntimeActions.find(isRecord);
+    const stopGateway = isRecord(firstAction?.stopGateway) ? firstAction.stopGateway : undefined;
+    if (stopGateway) {
+      writeRustStopGatewayContextToMetadataCenter({
+        metadata: args.context as unknown as Record<string, unknown>,
+        stopGatewayContext: stopGateway,
+        writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
+        reason: 'rust stop gateway control signal'
       });
-      const postServertoolEffect = resolveProviderResponsePostServertoolEffectWithNative({
-        actionPlan,
-        currentPayload: payload,
-        orchestrationPayload: orchestration.payload,
-        orchestrationExecuted: orchestration.executed
-      });
-      payload = postServertoolEffect.payload as JsonObject;
-      stage = postServertoolEffect.stage;
-      if (postServertoolEffect.shouldProjectClientSemantic) {
-        payload = projectPostServertoolHubRespOutbound04ClientSemanticWithNative({
-          payload,
-          entryEndpoint: args.entryEndpoint,
-          requestId: args.requestId,
-          responseSemantics: args.context as unknown as Record<string, unknown>
-        }) as JsonObject;
-      }
     }
+    throw new Error('Rust HubPipeline returned unsupported servertool runtime actions; server-side tool execution has been removed and CLI-owned tools must be projected by Rust');
   }
 
-  return { payload, stage };
+  return { payload: args.payload, stage: 'unchanged' };
 }
 
 function executeProviderResponseNativeRuntimeStateEffect(args: {
@@ -423,7 +388,7 @@ export async function convertProviderResponse(
     nativeResponsePlan,
   });
 
-  // Step 4: Apply servertool runtime actions via existing TS IO shell.
+  // Step 4: Reject retired server-side tool runtime actions.
   const respProcessEffect = await executeProviderResponseNativeServertoolEffects({
     payload: outboundEffect.rawPayload,
     runtimeEffects: outboundEffect.runtimeEffects,

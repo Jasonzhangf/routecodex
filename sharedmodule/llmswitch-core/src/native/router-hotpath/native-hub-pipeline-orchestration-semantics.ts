@@ -84,7 +84,6 @@ export {
   buildHubPipelineMaterializedRequestPlanWithNative,
   normalizeHubEndpointWithNative,
   resolveSseProtocolWithNative,
-  planProviderResponseServertoolRuntimeActionsWithNative,
   runHubPipelineOrchestrationWithNative
 } from './native-hub-pipeline-orchestration-semantics-protocol.js';
 

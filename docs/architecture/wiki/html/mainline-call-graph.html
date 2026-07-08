@@ -226,8 +226,6 @@
           ServertoolCli04ClientExecuted[&quot;ServertoolCli04ClientExecuted&quot;]
           HubRespOutbound04ClientSemantic[&quot;HubRespOutbound04ClientSemantic&quot;]
           ServertoolRespHook06ProjectionFinalized[&quot;ServertoolRespHook06ProjectionFinalized&quot;]
-          ServertoolRespHook05ReenterDispatched[&quot;ServertoolRespHook05ReenterDispatched&quot;]
-          ServertoolRespHook04FollowupPlanned[&quot;ServertoolRespHook04FollowupPlanned&quot;]
           ServertoolRespHook03HookResponseInjected[&quot;ServertoolRespHook03HookResponseInjected&quot;]
           ServertoolRespHook02SchemaValidated[&quot;ServertoolRespHook02SchemaValidated&quot;]
           ServertoolRespHook01Intercepted[&quot;ServertoolRespHook01Intercepted&quot;]
@@ -235,9 +233,7 @@
           HubRespChatProcess03Governed --&gt;|sth-resp-01| ServertoolRespHook01Intercepted
           ServertoolRespHook01Intercepted --&gt;|sth-resp-02| ServertoolRespHook02SchemaValidated
           ServertoolRespHook02SchemaValidated --&gt;|sth-resp-03| ServertoolRespHook03HookResponseInjected
-          ServertoolRespHook03HookResponseInjected --&gt;|sth-resp-04| ServertoolRespHook04FollowupPlanned
-          ServertoolRespHook04FollowupPlanned --&gt;|sth-resp-05| ServertoolRespHook05ReenterDispatched
-          ServertoolRespHook05ReenterDispatched --&gt;|sth-resp-06| ServertoolRespHook06ProjectionFinalized
+          ServertoolRespHook03HookResponseInjected --&gt;|sth-resp-06| ServertoolRespHook06ProjectionFinalized
           ServertoolRespHook06ProjectionFinalized --&gt;|sth-resp-07| HubRespOutbound04ClientSemantic
           ServertoolRespHook03HookResponseInjected --&gt;|sth-cli-01| ServertoolCli04ClientExecuted
           HubReqInbound02Standardized --&gt;|sth-req-01| ServertoolReqHook01ResultParsed
@@ -252,8 +248,6 @@
           class ServertoolRespHook01Intercepted anchored;
           class ServertoolRespHook02SchemaValidated anchored;
           class ServertoolRespHook03HookResponseInjected anchored;
-          class ServertoolRespHook04FollowupPlanned anchored;
-          class ServertoolRespHook05ReenterDispatched anchored;
           class ServertoolRespHook06ProjectionFinalized anchored;
           class HubRespOutbound04ClientSemantic anchored;
           class ServertoolCli04ClientExecuted anchored;
@@ -270,9 +264,7 @@
         <tr><td>sth-resp-01</td><td><code>HubRespChatProcess03Governed -&gt; ServertoolRespHook01Intercepted</code></td><td>anchored</td><td><code>execute -&gt; run_servertool_resp_stopless_hook_skeleton</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-resp-02</td><td><code>ServertoolRespHook01Intercepted -&gt; ServertoolRespHook02SchemaValidated</code></td><td>anchored</td><td><code>run_servertool_resp_stopless_hook_skeleton -&gt; inspect_stop_gateway_signal</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-resp-03</td><td><code>ServertoolRespHook02SchemaValidated -&gt; ServertoolRespHook03HookResponseInjected</code></td><td>anchored</td><td><code>run_servertool_resp_stopless_hook_skeleton -&gt; run_stopless_auto_handler_runtime_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
-        <tr><td>sth-resp-04</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolRespHook04FollowupPlanned</code></td><td>anchored</td><td><code>plan_resp_chatprocess_03_servertool_runtime_actions -&gt; inspect_stop_gateway_signal</code></td><td></td><td><code>servertool.followup_orchestration</code>&lt;br/&gt;Orchestration logic for server-side tools followup</td></tr>
-        <tr><td>sth-resp-05</td><td><code>ServertoolRespHook04FollowupPlanned -&gt; ServertoolRespHook05ReenterDispatched</code></td><td>anchored</td><td><code>plan_provider_response_servertool_runtime_actions -&gt; resolve_provider_response_post_servertool_effect</code></td><td></td><td><code>servertool.followup_orchestration</code>&lt;br/&gt;Orchestration logic for server-side tools followup</td></tr>
-        <tr><td>sth-resp-06</td><td><code>ServertoolRespHook05ReenterDispatched -&gt; ServertoolRespHook06ProjectionFinalized</code></td><td>anchored</td><td><code>run_servertool_resp_stopless_hook_skeleton -&gt; build_stopless_auto_cli_projection_from_engine_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
+        <tr><td>sth-resp-06</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolRespHook06ProjectionFinalized</code></td><td>anchored</td><td><code>run_servertool_resp_stopless_hook_skeleton -&gt; build_stopless_auto_cli_projection_from_engine_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-resp-07</td><td><code>ServertoolRespHook06ProjectionFinalized -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>finalize_hub_resp_outbound_04_client_semantic -&gt; build_hub_resp_outbound_04_client_payload_for_protocol</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-cli-01</td><td><code>ServertoolRespHook03HookResponseInjected -&gt; ServertoolCli04ClientExecuted</code></td><td>anchored</td><td><code>build_stopless_auto_cli_projection_from_engine_json -&gt; build_stopless_auto_cli_projection_json</code></td><td></td><td><code>hub.servertool_stopless_cli_continuation</code>&lt;br/&gt;stop_message_auto current-turn CLI continuation planning inside Chat Process request/response boundary</td></tr>
         <tr><td>sth-req-01</td><td><code>HubReqInbound02Standardized -&gt; ServertoolReqHook01ResultParsed</code></td><td>anchored</td><td><code>normalize_shell_like_tool_calls_before_governance -&gt; normalize_responses_input_function_calls</code></td><td></td><td><code>hub.req_chatprocess_governance</code>&lt;br/&gt;Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline</td></tr>

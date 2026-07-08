@@ -40,9 +40,6 @@ jest.unstable_mockModule(
         : directMetadataCenterSnapshot ?? nestedMetadataCenterSnapshot ?? null
     })),
     normalizeProviderResponseEffectPlanWithNative: normalizeProviderResponseEffectPlanWithNativeMock,
-    planProviderResponseServertoolRuntimeActionsWithNative: jest.fn(() => ({
-      executionPlans: [],
-    })),
     resolveProviderProtocolWithNative: jest.fn(({ metadataCenterSnapshot }: {
       metadataCenterSnapshot?: { runtimeControl?: Record<string, unknown> } | null;
     }) => ({
@@ -63,19 +60,6 @@ jest.unstable_mockModule(
         runtimeControl: Object.keys(runtimeControl).length > 0 ? runtimeControl : null
       };
     }),
-    resolveProviderResponsePostServertoolEffectWithNative: jest.fn(({
-      currentPayload,
-      orchestrationPayload,
-      orchestrationExecuted
-    }: {
-      currentPayload: Record<string, unknown>;
-      orchestrationPayload: Record<string, unknown>;
-      orchestrationExecuted: boolean;
-    }) => ({
-      payload: orchestrationExecuted ? orchestrationPayload : currentPayload,
-      stage: orchestrationExecuted ? 'HubRespChatProcess03Governed' : 'unchanged',
-      shouldProjectClientSemantic: false,
-    })),
   })
 );
 
@@ -94,8 +78,6 @@ jest.unstable_mockModule(
     normalizeChatUsageWithNative: jest.fn((payload: unknown) => payload),
     normalizeResponsesToolCallArgumentsForClientWithNative: jest.fn((payload: unknown) => payload),
     parseRespFormatEnvelopeWithNative: jest.fn((payload: unknown) => payload),
-    projectPostServertoolHubRespOutbound04ClientSemanticWithNative: jest.fn(({ payload }: { payload: unknown }) => payload)
-    ,
     resolveProviderResponseContextHelpersWithNative: jest.fn(({ context, entryEndpoint }: { context: Record<string, unknown>; entryEndpoint?: string }) => ({
       isServerToolFollowup: false,
       toolSurfaceShadowEnabled: false,
@@ -121,16 +103,6 @@ jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js',
   () => ({
     planChatProcessSessionUsage: planChatProcessSessionUsageMock,
-  })
-);
-
-jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/servertool/response-stage-orchestration-shell.js',
-  () => ({
-    runServertoolResponseStageOrchestrationShell: jest.fn(async ({ payload }: { payload: unknown }) => ({
-      executed: false,
-      payload,
-    })),
   })
 );
 
@@ -340,6 +312,54 @@ describe('provider response metadata center providerProtocol contract', () => {
       entryEndpoint: '/v1/chat/completions',
       wantsStream: false
     })).rejects.toThrow('Rust HubPipeline response path returned malformed servertool runtime actions');
+  });
+
+  it('fails fast when Rust returns retired provider response servertool runtime actions', async () => {
+    normalizeProviderResponseEffectPlanWithNativeMock.mockReturnValueOnce({
+      runtimeStateWrite: {
+        keepForSubmitToolOutputs: false
+      },
+      servertoolRuntimeActions: [{
+        action: 'requireResponseHookRuntime',
+        stopGateway: {
+          observed: true,
+          eligible: true,
+          source: 'responses',
+          reason: 'status_completed'
+        },
+        payload: {
+          id: 'chatcmpl_provider_response_retired_servertool_runtime_action',
+          object: 'chat.completion',
+          choices: []
+        }
+      }]
+    });
+    const context: Record<string, unknown> = {
+      requestId: 'req_provider_response_retired_servertool_runtime_action',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    };
+    const center = MetadataCenter.attach(context);
+    center.writeRequestTruth('requestId', context.requestId, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRequestTruth('entryEndpoint', context.entryEndpoint, TEST_METADATA_WRITER, 'test-request-truth');
+    center.writeRuntimeControl('providerProtocol', 'openai-chat', TEST_METADATA_WRITER, 'test-provider-protocol');
+
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_provider_response_retired_servertool_runtime_action',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'native ok' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false
+    })).rejects.toThrow('server-side tool execution has been removed and CLI-owned tools must be projected by Rust');
   });
 
   it('fails fast when Rust returns malformed provider response stream pipe effect', async () => {

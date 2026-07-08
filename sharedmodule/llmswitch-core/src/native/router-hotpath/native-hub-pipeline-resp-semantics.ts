@@ -45,7 +45,6 @@ export {
   projectSseErrorEventPayloadWithNative,
   projectResponsesSseFrameForClientWithNative,
   buildAnthropicResponseFromChatFullWithNative,  parseJsonObjectCandidateWithNative,
-  projectPostServertoolHubRespOutbound04ClientSemanticWithNative,
   resolveAnthropicChatCompletionOutcomeWithNative,
   resolveAnthropicStopReasonWithNative,
   resolveProviderResponseContextHelpersWithNative,

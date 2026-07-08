@@ -102,8 +102,8 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine-selection-block.ts`
-- `tests/servertool/engine-selection-block.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `docs`
 
 Forbidden paths:
@@ -112,7 +112,7 @@ Forbidden paths:
 - `sharedmodule/llmswitch-core/src/servertool/handlers`
 
 Required tests:
-- `tests/servertool/engine-selection-block.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -151,10 +151,10 @@ Forbidden paths:
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/execution-stage-shell.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
 - `tests/servertool/servertool-cli-result-restore.spec.ts`
 - `tests/cli/servertool-command.spec.ts`
-- `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+- `tests/servertool/servertool-cli-result-restore.spec.ts`
 - `tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts`
 
 Required gates:
@@ -204,9 +204,9 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts`
 - `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
-- `tests/servertool/stopless-cli-continuation.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/stopless-metadata-center.spec.ts`
 - `docs`
 
 Forbidden paths:
@@ -215,11 +215,11 @@ Forbidden paths:
 - `sharedmodule/llmswitch-core/src/servertool/handlers`
 
 Required tests:
-- `tests/servertool/stopless-cli-continuation.spec.ts`
-- `tests/servertool/execution-stage-shell.spec.ts`
+- `tests/servertool/stopless-metadata-center.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
 - `tests/servertool/stop-schema-lifecycle-contract.spec.ts`
 - `tests/responses/responses-openai-bridge.spec.ts`
-- `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
+- `tests/servertool/servertool-cli-result-restore.spec.ts`
 - `scripts/tests/stopless-invalid-schema-blackbox.mjs`
 - `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts`
 - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
@@ -290,16 +290,16 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts`
-- `tests/servertool/servertool-auto-hook-trace.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/servertool-auto-hook-trace.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -329,7 +329,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Forbidden paths:
@@ -338,7 +338,7 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
-- `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -371,7 +371,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Forbidden paths:
@@ -380,7 +380,7 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
-- `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -410,9 +410,9 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
-- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
@@ -420,7 +420,7 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
-- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -450,7 +450,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
 
 Forbidden paths:
 - `src/providers`
@@ -458,7 +458,7 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
-- `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -489,7 +489,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Forbidden paths:
@@ -498,7 +498,7 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
@@ -531,17 +531,17 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -570,15 +570,15 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `tests/servertool/execution-shell.backend-failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/execution-shell.backend-failfast.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
@@ -608,15 +608,15 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
-- `tests/servertool/execution-shell.backend-failfast.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/execution-shell.backend-failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
@@ -646,15 +646,15 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
-- `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
@@ -684,14 +684,14 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/execution-dispatch-outcome-shell.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
@@ -725,14 +725,14 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `tests/servertool/execution-shell.backend-failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/execution-shell.backend-failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
@@ -769,18 +769,18 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.ts`
-- `sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.ts`
-- `tests/servertool/registry-orchestration-shell.spec.ts`
-- `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/registry-orchestration-shell.spec.ts`
-- `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
@@ -811,16 +811,16 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/execution-stage-shell.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/response-stage-orchestration-shell.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
@@ -851,16 +851,16 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
-- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
@@ -892,15 +892,15 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
-- `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Forbidden paths:
 - `src/providers`
 - `src/server/runtime/http-server/executor`
 
 Required tests:
-- `tests/servertool/engine.stopless-session-thin-shell.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
 
 Required gates:
@@ -931,8 +931,8 @@ Canonical builders:
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts`
-- `tests/servertool/servertool-progress-logging.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `docs`
 
 Forbidden paths:
@@ -941,7 +941,7 @@ Forbidden paths:
 - `sharedmodule/llmswitch-core/src/servertool/handlers`
 
 Required tests:
-- `tests/servertool/servertool-progress-logging.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
 
 Required gates:
@@ -984,7 +984,7 @@ Forbidden paths:
 
 Required tests:
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
-- `tests/servertool/stopless-cli-continuation.spec.ts`
+- `tests/servertool/stopless-metadata-center.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -1021,14 +1021,14 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
-- `tests/servertool/execution-queue-shell.spec.ts`
-- `tests/servertool/execution-stage-shell.spec.ts`
-- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/servertool/servertool-cli-native-bridge.spec.ts`
-- `tests/servertool/server-side-tools.dispatch-native.spec.ts`
-- `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
-- `tests/servertool/servertool-auto-hook-trace.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Forbidden paths:
 - `src/providers`
@@ -1037,13 +1037,13 @@ Forbidden paths:
 
 Required tests:
 - `tests/servertool/servertool-active-orchestration-audit.spec.ts`
-- `tests/servertool/execution-queue-shell.spec.ts`
-- `tests/servertool/execution-stage-shell.spec.ts`
-- `tests/servertool/run-server-side-tool-engine-shell.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
-- `tests/servertool/server-side-tools.auto-hook-config.spec.ts`
-- `tests/servertool/servertool-auto-hook-trace.spec.ts`
-- `tests/servertool/server-side-tools.dispatch-native.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-cli-native-bridge.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 
 Required gates:
 - `npm run verify:servertool-rust-only`
@@ -1091,12 +1091,12 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
-- `sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts`
-- `sharedmodule/llmswitch-core/src/servertool/timeout-error-block.ts`
-- `tests/servertool/engine-preflight-shell.spec.ts`
-- `tests/servertool/server-side-tools.failfast.spec.ts`
-- `tests/servertool/timeout-error-block.spec.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `docs`
 
 Forbidden paths:
@@ -1105,8 +1105,8 @@ Forbidden paths:
 - `sharedmodule/llmswitch-core/src/servertool/handlers`
 
 Required tests:
-- `tests/servertool/engine-preflight-shell.spec.ts`
-- `tests/servertool/timeout-error-block.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
+- `tests/servertool/servertool-active-orchestration-audit.spec.ts`
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
 
 Required gates:

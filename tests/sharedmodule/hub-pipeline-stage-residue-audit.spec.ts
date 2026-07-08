@@ -568,11 +568,15 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('__nativeResponsePlan');
     expect(source).toContain('executeProviderResponseNativeOutboundEffects');
     expect(source).toContain('runtimeStateWrite');
-    expect(source).toContain('servertoolRuntimeAction');
-    expect(source).toContain('planProviderResponseServertoolRuntimeActionsWithNative');
+    expect(source).toContain('servertoolRuntimeActions');
     expect(source).toContain('executeProviderResponseNativeServertoolEffects');
     expect(source).toContain('executeProviderResponseNativeRuntimeStateEffect');
+    expect(source).toContain('server-side tool execution has been removed');
     expect(source).toContain('const nativeResponsePlan = runProviderResponseRustHubPipeline(nativeOptions);');
+    expect(source).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');
+    expect(source).not.toContain('resolveProviderResponsePostServertoolEffectWithNative');
+    expect(source).not.toContain('runServertoolResponseStageOrchestrationShell');
+    expect(source).not.toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).not.toContain('shouldRunProviderResponseRustHubPipeline');
     expect(source).not.toContain('if (nativeResponsePlan)');
     expect(source).not.toContain('return false;');
@@ -644,7 +648,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain('materializeProviderResponseSsePayloadWithNative');
     expect(source).toContain('publishResponsesRecordPlanWithNative');
     expect(source).toContain('buildSseFramesFromJsonWithNative');
-    expect(source).toContain('runServertoolResponseStageOrchestrationShell');
+    expect(source).toContain('server-side tool execution has been removed');
+    expect(source).not.toContain('runServertoolResponseStageOrchestrationShell');
     expect(findings).toEqual([]);
   });
 
@@ -1274,21 +1279,9 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool progress log block must not retain zero-consumer event type shell', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts'),
-      'utf8',
-    );
-
-    const findings = collectMatches(source, [
-      {
-        label: 'declares zero-consumer servertool progress event type shell',
-        pattern: /(?:export\s+)?type\s+ServerToolProgressFileEvent\b|(?:export\s+)?interface\s+ServerToolProgressFileEvent\b/,
-      },
-    ]);
-
-    expect(findings).toEqual([]);
-    expect(source).toContain('export function createServertoolProgressLogger');
-    expect(source).toContain('export function appendServertoolMatchSkippedProgressEvent');
+    expect(
+      fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/progress-log-block.ts')),
+    ).toBe(false);
   });
 
   it('stats center shell must not retain zero-consumer bucket or option type shells', () => {
@@ -5032,12 +5025,13 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
     expect(source).toContain('buildProviderResponseMetadataSnapshotWithNative');
-    expect(source).toContain('planProviderResponseServertoolRuntimeActionsWithNative');
-    expect(source).toContain('resolveProviderResponsePostServertoolEffectWithNative');
     expect(source).toContain('resolveProviderProtocolWithNative');
     expect(source).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');
-    expect(source).toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
+    expect(source).toContain('server-side tool execution has been removed');
+    expect(source).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');
+    expect(source).not.toContain('resolveProviderResponsePostServertoolEffectWithNative');
+    expect(source).not.toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
     expect(source).not.toContain('if (orchestration.executed)');
     expect(source).not.toContain('actionPlan.executionPlans.some');
     expect(source).not.toContain('runtimeControl.providerProtocol');

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// feature_id: hub.servertool_orchestration_policy
+
 const FOLLOWUP_ERROR_REASON_MAX_LENGTH: usize = 220;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

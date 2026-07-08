@@ -886,22 +886,6 @@ pub fn normalize_provider_response_effect_plan_json(input_json: String) -> NapiR
     hub_pipeline_lib::effect_plan::normalize_provider_response_effect_plan_json(input_json)
 }
 
-#[napi(js_name = "planProviderResponseServertoolRuntimeActionsJson")]
-pub fn plan_provider_response_servertool_runtime_actions_json(
-    input_json: String,
-) -> NapiResult<String> {
-    hub_pipeline_lib::effect_plan::plan_provider_response_servertool_runtime_actions_json(
-        input_json,
-    )
-}
-
-#[napi(js_name = "resolveProviderResponsePostServertoolEffectJson")]
-pub fn resolve_provider_response_post_servertool_effect_json(
-    input_json: String,
-) -> NapiResult<String> {
-    hub_pipeline_lib::effect_plan::resolve_provider_response_post_servertool_effect_json(input_json)
-}
-
 #[napi(js_name = "resolveProviderProtocolJson")]
 pub fn resolve_provider_protocol_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_blocks::napi_bindings::resolve_provider_protocol_json(input_json)

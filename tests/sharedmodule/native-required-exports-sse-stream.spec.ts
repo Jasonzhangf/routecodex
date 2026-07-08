@@ -14,7 +14,8 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseStreamWithConfigJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseStreamChunkWithConfigJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('buildRespInboundSseErrorDescriptorJson');
-    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('planProviderResponseServertoolRuntimeActionsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('planProviderResponseServertoolRuntimeActionsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveProviderResponsePostServertoolEffectJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runReqOutboundStage3CompatJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runRespInboundStage3CompatJson');
     expect(new Set(REQUIRED_NATIVE_HOTPATH_EXPORTS).size).toBe(REQUIRED_NATIVE_HOTPATH_EXPORTS.length);
@@ -42,80 +43,6 @@ describe('native required exports for sse stream helpers', () => {
       )
     )) as Record<string, unknown>;
     expect(typeof mod.captureReqInboundResponsesContextSnapshotWithNative).toBe('function');
-  });
-
-  test('packaged response-stage orchestration shell imports without missing native analysis exports', async () => {
-    const mod = (await import(
-      path.resolve(
-        process.cwd(),
-        'sharedmodule/llmswitch-core/dist/servertool/response-stage-orchestration-shell.js'
-      )
-    )) as Record<string, unknown>;
-    expect(typeof mod.runServertoolResponseStageOrchestrationShell).toBe('function');
-  });
-
-  test('packaged response-stage shell does not require MetadataCenter binding just to mark runtime orchestration state', async () => {
-    const mod = (await import(
-      path.resolve(
-        process.cwd(),
-        'sharedmodule/llmswitch-core/dist/servertool/response-stage-orchestration-shell.js'
-      )
-    )) as {
-      runServertoolResponseStageOrchestrationShell: (input: {
-        payload: Record<string, unknown>;
-        adapterContext: Record<string, unknown>;
-        requestId: string;
-        entryEndpoint: string;
-        providerProtocol: string;
-      }) => Promise<{ executed: boolean; skipReason?: string; payload: Record<string, unknown> }>;
-    };
-
-    const result = await mod.runServertoolResponseStageOrchestrationShell({
-      payload: {
-        id: 'chatcmpl_test_no_center',
-        object: 'chat.completion',
-        model: 'glm-5.1',
-        choices: [
-          {
-            index: 0,
-            finish_reason: 'tool_calls',
-            message: {
-              role: 'assistant',
-              content: '',
-              tool_calls: [
-                {
-                  id: 'call_test_no_center',
-                  index: 0,
-                  type: 'function',
-                  function: {
-                    name: 'reasoningStop',
-                    arguments: JSON.stringify({
-                      stopreason: 0,
-                      reason: 'done',
-                      has_evidence: 1,
-                      evidence: 'ok',
-                      issue_cause: 'none',
-                      excluded_factors: 'none',
-                      diagnostic_order: '1',
-                      next_step: '',
-                      learned: 'x',
-                      needs_user_input: false,
-                    }),
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      },
-      adapterContext: { sessionId: 'sess_test_no_center' },
-      requestId: 'req_test_no_center',
-      entryEndpoint: '/v1/responses',
-      providerProtocol: 'openai-responses',
-    });
-
-    expect(result.payload).toBeDefined();
-    expect(typeof result.executed).toBe('boolean');
   });
 
   test('native req_inbound capture collapses latest output when an identical tool-call batch repeats', async () => {
@@ -205,15 +132,24 @@ describe('native required exports for sse stream helpers', () => {
             type: 'function_call_output',
             call_id: 'call_servertool_cli_stop_1',
             output:
-              '{"ok":true,"toolName":"stop_message_auto","continuationPrompt":"你必须补齐 stop schema。","schemaGuidance":{"requiredFields":["stopreason","reason"],"stopreasonValues":{"finished":0,"blocked":1,"continueNeeded":2}}}',
+              '{"ok":true,"toolName":"stop_message_auto","continuationPrompt":"你必须补齐 stop schema。","schemaGuidance":{"requiredFields":["stopreason","reason"],"stopreasonValues":{"finished":0,"blocked":1,"continueNeeded":2},"triggerHint":"no_schema"}}',
           },
         ],
       },
     });
 
     const input = Array.isArray(captured.input) ? captured.input : [];
-    expect(input).toHaveLength(1);
+    expect(input).toHaveLength(3);
     expect(input[0]).toMatchObject({
+      type: 'function_call',
+      call_id: 'call_servertool_cli_stop_1',
+      name: 'reasoningStop',
+    });
+    expect(input[1]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'call_servertool_cli_stop_1',
+    });
+    expect(input[2]).toMatchObject({
       role: 'user',
       content: [
         expect.objectContaining({
@@ -222,8 +158,7 @@ describe('native required exports for sse stream helpers', () => {
         }),
       ],
     });
-    expect(JSON.stringify(input)).not.toContain('call_servertool_cli_stop_1');
-    expect(JSON.stringify(input)).not.toContain('function_call_output');
+    expect(JSON.stringify(input)).not.toContain('exec_command');
   });
 
   test('native req_inbound capture preserves user-initiated stop hook tool history', async () => {
@@ -256,22 +191,31 @@ describe('native required exports for sse stream helpers', () => {
             type: 'function_call_output',
             call_id: 'call_user_stop_1',
             output:
-              '{"ok":true,"toolName":"stop_message_auto","continuationPrompt":"继续。"}',
+              '{"ok":true,"toolName":"stop_message_auto","continuationPrompt":"继续。","input":{"flowId":"stop_message_flow","repeatCount":1,"maxRepeats":3,"triggerHint":"no_schema"}}',
           },
         ],
       },
     });
 
     const input = Array.isArray(captured.input) ? captured.input : [];
-    expect(input).toHaveLength(2);
+    expect(input).toHaveLength(3);
     expect(input[0]).toMatchObject({
       type: 'function_call',
       call_id: 'call_user_stop_1',
-      name: 'exec_command',
+      name: 'reasoningStop',
     });
     expect(input[1]).toMatchObject({
       type: 'function_call_output',
       call_id: 'call_user_stop_1',
+    });
+    expect(input[2]).toMatchObject({
+      role: 'user',
+      content: [
+        expect.objectContaining({
+          type: 'input_text',
+          text: expect.stringContaining('继续。'),
+        }),
+      ],
     });
   });
 

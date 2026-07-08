@@ -23,13 +23,14 @@ chains:
       mutation edges must stay anchored to WebUI/apiFetch and shared config
       writer owners; WebUI must not own provider runtime or forwarder selection.
   - chain_id: servertool.hook_skeleton.mainline
-    expected_total_edges: 13
-    min_anchored_edges: 0
+    expected_total_edges: 11
+    min_anchored_edges: 11
     max_partial_edges: 0
-    max_binding_pending_edges: 13
+    max_binding_pending_edges: 0
     note: >
-      Transitional servertool hook skeleton review surface is intentionally
-      binding-pending while Rust owner implementation is still being closed out.
+      Servertool hook skeleton is anchored after retiring the server-side
+      followup/reenter runtime-action edges; CLI projection and next-turn restore
+      remain the only business execution path.
   - chain_id: request.mainline
     expected_total_edges: 6
     min_anchored_edges: 6

@@ -21,8 +21,6 @@ node_ids:
   - ServertoolRespHook01Intercepted
   - ServertoolRespHook02SchemaValidated
   - ServertoolRespHook03HookResponseInjected
-  - ServertoolRespHook04FollowupPlanned
-  - ServertoolRespHook05ReenterDispatched
   - ServertoolRespHook06ProjectionFinalized
 edges:
   - step_id: sth-resp-01
@@ -46,22 +44,8 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
-  - step_id: sth-resp-04
-    from_node: ServertoolRespHook03HookResponseInjected
-    to_node: ServertoolRespHook04FollowupPlanned
-    status: anchored
-    owner_feature_id: servertool.followup_orchestration
-    binding_pending: null
-    split_binding_id: null
-  - step_id: sth-resp-05
-    from_node: ServertoolRespHook04FollowupPlanned
-    to_node: ServertoolRespHook05ReenterDispatched
-    status: anchored
-    owner_feature_id: servertool.followup_orchestration
-    binding_pending: null
-    split_binding_id: null
   - step_id: sth-resp-06
-    from_node: ServertoolRespHook05ReenterDispatched
+    from_node: ServertoolRespHook03HookResponseInjected
     to_node: ServertoolRespHook06ProjectionFinalized
     status: anchored
     owner_feature_id: hub.servertool_stopless_cli_continuation

@@ -827,7 +827,6 @@ impl HubPipelineEngine {
             &metadata_center_snapshot,
             output.request_id.as_str(),
         )?;
-        let stopless_hook_suppresses_runtime_actions = stopless_resp_hook.is_some();
         let governed_payload = if let Some(stopless_hook) = stopless_resp_hook {
             if let Some(write_plan) = stopless_hook.metadata_write_plan {
                 effects.push(HubPipelineEffect {
@@ -889,19 +888,6 @@ impl HubPipelineEngine {
                     HubPipelineError::new("hub_pipeline_resp_chatprocess_03_failed", message)
                 })?;
         let resp_chatprocess_payload = resp_chatprocess_03.payload().clone();
-        if !stopless_hook_suppresses_runtime_actions
-            && !effects.iter().any(|effect| {
-                serde_json::to_value(&effect.kind).ok()
-                    == Some(serde_json::json!("stoplessMetadataCenterWrite"))
-            })
-        {
-            plan_resp_chatprocess_03_servertool_runtime_actions(
-                &mut effects,
-                &normalized_metadata,
-                &resp_chatprocess_payload,
-                output.request_id.as_str(),
-            );
-        }
         diagnostics.push(diagnostic(
             HubPipelineStageId::RespProcessFinalize,
             HubPipelineDiagnosticStatus::Started,
@@ -1371,37 +1357,6 @@ fn has_active_stopless_runtime_control(value: &Value) -> bool {
         .and_then(|stopless| stopless.get("active"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
-}
-
-fn plan_resp_chatprocess_03_servertool_runtime_actions(
-    effects: &mut Vec<HubPipelineEffect>,
-    metadata: &Value,
-    chatprocess_payload: &Value,
-    request_id: &str,
-) {
-    if !is_stop_message_response_runtime_enabled(metadata) {
-        return;
-    }
-    let stop_gateway = inspect_stop_gateway_signal(&chatprocess_payload.to_string())
-        .ok()
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        .unwrap_or(Value::Null);
-    let stop_gateway_eligible = stop_gateway
-        .get("eligible")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if stop_gateway_eligible {
-        effects.push(HubPipelineEffect {
-            kind: HubPipelineEffectKind::ServertoolRuntimeAction,
-            payload: serde_json::json!({
-                "action": "requireResponseHookRuntime",
-                "reason": "stop_eligible_followup",
-                "requestId": request_id,
-                "stopGateway": stop_gateway,
-                "payload": chatprocess_payload.clone(),
-            }),
-        });
-    }
 }
 
 fn is_stop_message_response_runtime_enabled(metadata: &Value) -> bool {
