@@ -16,6 +16,7 @@ import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context
 import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { runWithPortRequestContext } from './port-log-context.js';
+import { readHubPipelineVirtualRouter } from './hub-pipeline-handle.js';
 
 function logRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
@@ -26,31 +27,8 @@ function logRoutesNonBlockingError(stage: string, error: unknown, details?: Reco
   }
 }
 
-function readVirtualRouterRuntime(hubPipeline: unknown): Record<string, unknown> | null {
-  if (!hubPipeline || typeof hubPipeline !== 'object') {
-    return null;
-  }
-  const getVirtualRouter = (hubPipeline as { getVirtualRouter?: () => unknown }).getVirtualRouter;
-  if (typeof getVirtualRouter !== 'function') {
-    return null;
-  }
-  const virtualRouter = getVirtualRouter.call(hubPipeline);
-  if (!virtualRouter || typeof virtualRouter !== 'object') {
-    return null;
-  }
-  return virtualRouter as Record<string, unknown>;
-}
-
 function readVirtualRouterRuntimeStatus(hubPipeline: unknown): unknown | null {
-  const virtualRouter = readVirtualRouterRuntime(hubPipeline);
-  if (!virtualRouter) {
-    return null;
-  }
-  const getStatus = virtualRouter.getStatus;
-  if (typeof getStatus !== 'function') {
-    return null;
-  }
-  return getStatus.call(virtualRouter);
+  return readHubPipelineVirtualRouter(hubPipeline)?.getStatus() ?? null;
 }
 
 function readVirtualRouterRuntimeDryRun(
@@ -58,15 +36,7 @@ function readVirtualRouterRuntimeDryRun(
   request: Record<string, unknown>,
   metadata: Record<string, unknown>
 ): unknown | null {
-  const virtualRouter = readVirtualRouterRuntime(hubPipeline);
-  if (!virtualRouter) {
-    return null;
-  }
-  const diagnoseRoute = virtualRouter.diagnoseRoute;
-  if (typeof diagnoseRoute !== 'function') {
-    return null;
-  }
-  return diagnoseRoute.call(virtualRouter, request, metadata);
+  return readHubPipelineVirtualRouter(hubPipeline)?.diagnoseRoute(request, metadata) ?? null;
 }
 
 interface RouteOptions {

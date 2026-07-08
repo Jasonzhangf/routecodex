@@ -28,8 +28,7 @@ import { registerApiKeyAuthMiddleware, registerDefaultMiddleware } from './middl
 import { resolveRepoRoot } from './llmswitch-loader.js';
 import type {
   HubPipelineConfig,
-  HubPipeline,
-  HubPipelineCtor,
+  HubPipelineHandle,
   ProviderHandle,
   ServerConfigV2,
   ServerStatusV2,
@@ -134,8 +133,6 @@ import {
   resolveSecretValue,
   isSafeSecretReference,
   bootstrapVirtualRouter,
-  ensureHubPipelineCtor,
-  ensureHubPipelineEngineShadow,
   isPipelineReady,
   waitForRuntimeReady,
   shouldStartManagerDaemon,
@@ -211,6 +208,7 @@ import {
   REQUEST_EXECUTOR_NON_BLOCKING_LOG_THROTTLE_MS,
 } from './executor/request-executor-runtime-blocks.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
+import { readHubPipelineVirtualRouter } from './hub-pipeline-handle.js';
 
 const ROUTER_DIRECT_PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;
 const routerDirectProviderSwitchLogState = new Map<string, { lastAtMs: number; suppressed: number }>();
@@ -395,8 +393,8 @@ export class RouteCodexHttpServer {
   private _isInitialized: boolean = false;
   private _isRunning: boolean = false;
 
-  private hubPipeline: HubPipeline | null = null;
-  private hubPipelinesByRoutingPolicyGroup: Map<string, HubPipeline> = new Map();
+  private hubPipeline: HubPipelineHandle | null = null;
+  private hubPipelinesByRoutingPolicyGroup: Map<string, HubPipelineHandle> = new Map();
   private pipelineRuntimeConfigByRoutingPolicyGroup: Map<string, Record<string, unknown>> = new Map();
   private providerHandles: Map<string, ProviderHandle> = new Map();
   private providerKeyToRuntimeKey: Map<string, string> = new Map();
@@ -412,7 +410,6 @@ export class RouteCodexHttpServer {
   private runtimeReadyResolved = false;
   private runtimeReadyError: Error | null = null;
   private moduleDependencies: ModuleDependencies | null = null;
-  private hubPipelineCtor: HubPipelineCtor | null = null;
   private readonly stageLoggingEnabled: boolean;
   private readonly repoRoot: string;
   private currentRouterArtifacts: VirtualRouterArtifacts | null = null;
@@ -426,7 +423,6 @@ export class RouteCodexHttpServer {
   private restartChain: Promise<void> = Promise.resolve();
   private readonly llmsEngineShadowConfig = resolveLlmsEngineShadowConfig();
   private hubPolicyMode: string | null = null;
-  private hubPipelineEngineShadow: HubPipeline | null = null;
   private hubPipelineConfigForShadow: Record<string, unknown> | null = null;
   private sessionDaemonInjectTimer: NodeJS.Timeout | null = null;
   private sessionDaemonInjectTickInFlight = false;
@@ -594,7 +590,7 @@ export class RouteCodexHttpServer {
     return await bootstrapVirtualRouter(this, input);
   }
 
-  private resolveHubPipelineForRoutingPolicyGroup(routingPolicyGroup?: string): HubPipeline | null {
+  private resolveHubPipelineForRoutingPolicyGroup(routingPolicyGroup?: string): HubPipelineHandle | null {
     const group = typeof routingPolicyGroup === 'string' ? routingPolicyGroup.trim() : '';
     if (group) {
       return this.hubPipelinesByRoutingPolicyGroup.get(group) ?? null;
@@ -675,14 +671,6 @@ export class RouteCodexHttpServer {
       virtualRouter: artifacts.config,
       pipelineRuntimeConfig: manifest.pipelineRuntimeConfig,
     };
-  }
-
-  private async ensureHubPipelineCtor(): Promise<HubPipelineCtor> {
-    return await ensureHubPipelineCtor(this);
-  }
-
-  private async ensureHubPipelineEngineShadow(): Promise<HubPipeline> {
-    return await ensureHubPipelineEngineShadow(this);
   }
 
   private isPipelineReady(): boolean {
@@ -1004,9 +992,8 @@ export class RouteCodexHttpServer {
     if (runtimeControl.preselectedRoute) {
       return nextInput;
     }
-    const routingPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
-    const routerEngine = routingPipeline?.getVirtualRouter?.();
-    if (!routerEngine || typeof routerEngine.route !== 'function') {
+    const virtualRouter = readHubPipelineVirtualRouter(this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup));
+    if (!virtualRouter) {
       return nextInput;
     }
     const rawPayload = requireDirectPassthroughPayloadObject(input.body);
@@ -1015,7 +1002,8 @@ export class RouteCodexHttpServer {
       ...metadata,
       metadataCenterSnapshot,
     };
-    const routeResult = routerEngine.route(rawPayload as never, metadataForRoute as never) as {
+    bindExistingMetadataCenter(metadata, metadataForRoute);
+    const routeResult = virtualRouter.route(rawPayload, metadataForRoute) as {
       target?: Record<string, unknown>;
       decision?: Record<string, unknown>;
       diagnostics?: Record<string, unknown>;
@@ -1560,12 +1548,12 @@ export class RouteCodexHttpServer {
       requestId: input.requestId,
       entryEndpoint: input.entryEndpoint,
     });
+    bindExistingMetadataCenter(metadataForHub, routerDirectRouteMetadata);
 
     const rawDirectPayload = requireDirectPassthroughPayloadObject(input.body);
     const inboundProtocol = resolveInboundProtocolFromEntryPath(input.entryEndpoint);
-    const routingPipeline = this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup);
-    const routerEngine = routingPipeline?.getVirtualRouter?.();
-    if (!routerEngine || typeof routerEngine.route !== 'function') {
+    const virtualRouter = readHubPipelineVirtualRouter(this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup));
+    if (!virtualRouter) {
       this.logStage('router-direct.skipped', input.requestId, { reason: 'virtual-router-not-ready' });
       return { used: false, reason: 'virtual-router-not-ready' };
     }
@@ -1576,7 +1564,7 @@ export class RouteCodexHttpServer {
       diagnostics?: Record<string, unknown>;
     };
     try {
-      routeResult = routerEngine.route(rawDirectPayload as never, routerDirectRouteMetadata as never) as typeof routeResult;
+      routeResult = virtualRouter.route(rawDirectPayload, routerDirectRouteMetadata) as typeof routeResult;
     } catch (error) {
       if (isPoolExhaustedPipelineError(error)) {
         this.logStage('router-direct.pool_exhausted', input.requestId, {

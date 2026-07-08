@@ -1,6 +1,125 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { readRuntimeControlProjection } from '../../../../src/server/runtime/http-server/metadata-center/request-truth-readers.js';
 
+type NativeRouteMock = (request: Record<string, unknown>, metadata: Record<string, unknown>) => unknown;
+
+let activeNativeRouteMock: NativeRouteMock | undefined;
+
+const executeHubPipelineNativeMock = jest.fn(() => {
+  throw new Error('router-direct test must not enter native HubPipeline execute');
+});
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => ({
+  bootstrapVirtualRouterConfig: jest.fn(async (input: Record<string, unknown>) => ({ config: input, targetRuntime: {} })),
+  compileRouteCodexRuntimeManifest: jest.fn(async () => ({ pipelineRuntimeConfig: {}, virtualRouterBootstrapInput: {} })),
+  compileRouteCodexRuntimeManifestSync: jest.fn(() => ({ pipelineRuntimeConfig: {}, virtualRouterBootstrapInput: {} })),
+  collectRouteCodexV2ConfigSourceErrorsSync: jest.fn(() => []),
+  normalizeRouteCodexV2RuntimeSourceSync: jest.fn((input: Record<string, unknown>) => input ?? {}),
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: jest.fn(() => undefined),
+  extractRouteCodexMaterializedProviderConfigsSync: jest.fn(() => null),
+  materializeRouteCodexUserConfigFromManifestSync: jest.fn((userConfig: Record<string, unknown>) => userConfig ?? {}),
+  buildRouteCodexProviderProfilesSync: jest.fn(() => ({})),
+  buildRouteCodexForwarderProfilesSync: jest.fn(() => ({})),
+  parseRouteCodexTomlRecord: jest.fn(async () => ({})),
+  parseRouteCodexTomlRecordSync: jest.fn(() => ({})),
+  serializeRouteCodexTomlRecord: jest.fn(async () => ''),
+  serializeRouteCodexTomlRecordSync: jest.fn(() => ''),
+  updateRouteCodexTomlStringScalarInTable: jest.fn(async () => ''),
+  updateRouteCodexTomlStringScalarInTableSync: jest.fn(() => ''),
+  decodeRouteCodexUserConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  decodeRouteCodexProviderConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  detectRouteCodexUserConfigFormatSync: jest.fn(() => 'toml'),
+  detectRouteCodexProviderConfigFormatSync: jest.fn(() => 'toml'),
+  writeRouteCodexUserConfigFileNativeSync: jest.fn(() => undefined),
+  writeRouteCodexProviderConfigFileNativeSync: jest.fn(() => undefined),
+  updateRouteCodexUserConfigStringScalarNativeSync: jest.fn(() => ''),
+  loadRouteCodexConfigNativeSync: jest.fn(() => ({ configPath: '', userConfig: {}, providerProfiles: {} })),
+  coerceRouteCodexProviderConfigV2: jest.fn(async (parsed: unknown) => parsed ?? null),
+  coerceRouteCodexProviderConfigV2Sync: jest.fn((parsed: unknown) => parsed ?? null),
+  planRouteCodexProviderConfigV2FilesSync: jest.fn(() => []),
+  resolveRouteCodexProviderConfigV2IdentitySync: jest.fn((input: any) => ({ providerId: input?.dirId ?? 'provider', provider: input?.provider ?? {} })),
+  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+  resolveRccUserDirNativeSync: jest.fn(() => '/tmp/.rcc'),
+  resolveRccPathNativeSync: jest.fn((segments: string[] = []) => ['/tmp/.rcc', ...segments].join('/')),
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/.rcc/snapshots'),
+  planAuthFileResolutionNativeSync: jest.fn((input: any) => ({ kind: 'literal', value: input?.keyId ?? '', cacheKey: input?.keyId ?? '' })),
+  resolveAuthFileKeyNativeSync: jest.fn((input: any) => ({ kind: 'literal', value: input?.keyId ?? '', cacheKey: input?.keyId ?? '' })),
+  planRouteCodexConfigLoaderPathsNativeSync: jest.fn((input: any) => ({ explicitPath: input?.explicitPath, providerRootDir: input?.routecodexProviderDir ?? input?.rccProviderDir })),
+  planProviderConfigRootNativeSync: jest.fn((rootDir?: string) => ({ rootDir })),
+  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test-config.toml'),
+  createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
+  executeHubPipelineNative: executeHubPipelineNativeMock,
+  updateHubPipelineVirtualRouterConfigNative: jest.fn(),
+  updateHubPipelineEngineDepsNative: jest.fn(),
+  routeHubPipelineVirtualRouterNative: jest.fn((_handle: string, request: Record<string, unknown>, metadata: Record<string, unknown>) => {
+    if (!activeNativeRouteMock) {
+      throw new Error('native HubPipeline VR route mock is not installed');
+    }
+    return activeNativeRouteMock(request, metadata);
+  }),
+  diagnoseHubPipelineVirtualRouterNative: jest.fn(() => ({ diagnostics: {} })),
+  getHubPipelineVirtualRouterStatusNative: jest.fn(() => ({})),
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  disposeHubPipelineNative: jest.fn(),
+  resolveBaseDir: jest.fn(() => process.cwd()),
+}));
+
+jest.unstable_mockModule('../../../../src/server/runtime/http-server/hub-pipeline-handle.js', () => ({
+  createHubPipelineRuntimeHandle: (handle: string) => ({
+    handle,
+    getVirtualRouter: () => ({
+      route: (request: Record<string, unknown>, metadata: Record<string, unknown>) => {
+        if (!activeNativeRouteMock) {
+          throw new Error('native HubPipeline VR route mock is not installed');
+        }
+        return activeNativeRouteMock(request, metadata);
+      },
+      getStatus: () => ({}),
+      diagnoseRoute: () => ({ diagnostics: {} }),
+    }),
+  }),
+  readHubPipelineNativeHandle: (pipeline: unknown) => {
+    if (typeof pipeline === 'string' && pipeline.trim()) {
+      return pipeline;
+    }
+    if (pipeline && typeof pipeline === 'object' && !Array.isArray(pipeline)) {
+      const handle = (pipeline as Record<string, unknown>).handle;
+      if (typeof handle === 'string' && handle.trim()) {
+        return handle;
+      }
+    }
+    return null;
+  },
+  readHubPipelineVirtualRouter: (pipeline: unknown) => {
+    if (pipeline && typeof pipeline === 'object' && !Array.isArray(pipeline)) {
+      const getVirtualRouter = (pipeline as Record<string, unknown>).getVirtualRouter;
+      if (typeof getVirtualRouter === 'function') {
+        return getVirtualRouter.call(pipeline);
+      }
+    }
+    return {
+      route: (request: Record<string, unknown>, metadata: Record<string, unknown>) => {
+        if (!activeNativeRouteMock) {
+          throw new Error('native HubPipeline VR route mock is not installed');
+        }
+        return activeNativeRouteMock(request, metadata);
+      },
+      getStatus: () => ({}),
+      diagnoseRoute: () => ({ diagnostics: {} }),
+    };
+  },
+}));
+
+function installNativeHubPipelineRoute(server: any, routingPolicyGroup: string, route?: NativeRouteMock): void {
+  activeNativeRouteMock = route;
+  executeHubPipelineNativeMock.mockClear();
+  server.hubPipeline = 'mock_hub_pipeline_handle';
+  server.hubPipelinesByRoutingPolicyGroup = new Map([
+    [routingPolicyGroup, 'mock_hub_pipeline_handle'],
+  ]);
+}
+
 describe('direct passthrough route-level', () => {
   it('HTTP BLACKBOX: provider-mode keyless chat binding preserves client model', async () => {
     jest.resetModules();
@@ -294,13 +413,7 @@ describe('direct passthrough route-level', () => {
       diagnostics: {},
     }));
     (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
-      getVirtualRouter: jest.fn(() => ({ route: routerRoute })),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['default', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'default', routerRoute);
 
     const directResult = await (server as any).executeRouterDirectPipelineForPort(
       {
@@ -337,7 +450,7 @@ describe('direct passthrough route-level', () => {
       instructions: 'mutated-system-prompt',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'mutated' }] }],
     });
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
     expect(routerRoute).toHaveBeenCalledTimes(1);
     expect((sentPayload as Record<string, unknown>).previous_response_id).toBeUndefined();
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
@@ -395,13 +508,7 @@ describe('direct passthrough route-level', () => {
     });
 
     (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
 
     const requestBody = {
       model: 'gpt-5.5',
@@ -514,13 +621,7 @@ describe('direct passthrough route-level', () => {
       diagnostics: {},
     }));
     (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
-      getVirtualRouter: jest.fn(() => ({ route: routerRoute })),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['default', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'default', routerRoute);
 
     const directBody = {
       model: 'gpt-5.3-codex',
@@ -556,7 +657,7 @@ describe('direct passthrough route-level', () => {
 
     expect(directResult.used).toBe(true);
     expect(sentPayload).toEqual(directBody);
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
     expect(routerRoute).toHaveBeenCalledTimes(1);
   });
 
@@ -674,23 +775,17 @@ describe('direct passthrough route-level', () => {
       },
     };
     (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => ({ status: 200, body: { object: 'response', id: 'resp_relay_chat_style_tool' } })),
-      getVirtualRouter: jest.fn(() => ({
-        route: jest.fn(() => ({
-          target: {
-            providerKey: 'asxs.crsa.gpt-5.5',
-            providerType: 'responses',
-            outboundProfile: 'openai-responses',
-            runtimeKey: providerHandle.runtimeKey,
-            modelId: 'gpt-5.5',
-          },
-          decision: { routeName: 'thinking', pool: ['asxs.crsa.gpt-5.5'] },
-          diagnostics: {},
-        })),
-      })),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([['gateway_priority_5555', (server as any).hubPipeline]]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey: 'asxs.crsa.gpt-5.5',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: providerHandle.runtimeKey,
+        modelId: 'gpt-5.5',
+      },
+      decision: { routeName: 'thinking', pool: ['asxs.crsa.gpt-5.5'] },
+      diagnostics: {},
+    })));
 
     for (const nestedToolIndex of [0, 3, 11]) {
       directSend.mockClear();
@@ -726,7 +821,7 @@ describe('direct passthrough route-level', () => {
       expect(outcome.used).toBe(true);
       expect(outcome.reason).toBeUndefined();
       expect(directSend).toHaveBeenCalledTimes(1);
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
     }
   });
 
@@ -1074,29 +1169,22 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
-      getVirtualRouter: jest.fn(() => ({ route: jest.fn(() => ({
-        target: {
-          providerKey,
-          providerType: 'openai',
-          outboundProfile: 'openai-responses',
-          runtimeKey,
-          modelId: 'gpt-test',
-        },
-        decision: {
-          routeName: 'thinking',
-          pool: [providerKey],
-          poolId: 'gateway-priority-5555-thinking',
-          reasoning: 'thinking:user-input',
-        },
-        diagnostics: {},
-      })) })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey,
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey,
+        modelId: 'gpt-test',
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: [providerKey],
+        poolId: 'gateway-priority-5555-thinking',
+        reasoning: 'thinking:user-input',
+      },
+      diagnostics: {},
+    })));
     (server as any).providerHandles = new Map([[runtimeKey, {
       runtimeKey,
       providerId: 'direct',
@@ -1139,7 +1227,7 @@ describe('direct passthrough route-level', () => {
       expect(response.status).toBe(200);
       expect(body).toEqual(expect.objectContaining({ id: 'resp_direct_log_blackbox' }));
       expect(directSend).toHaveBeenCalledTimes(1);
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
     } finally {
       console.log = originalLog;
       console.info = originalInfo;
@@ -1172,26 +1260,17 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => ({ status: 200, body: { relayed: true }, metadata: {} })),
-      getVirtualRouter: jest.fn(() => ({
-        route: jest.fn(() => ({
-          target: {
-            providerKey: 'direct.key1.gpt-test',
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: 'direct.key1.gpt-test',
-            modelId: 'gpt-test',
-          },
-          decision: { routeName: 'search', pool: ['direct.key1.gpt-test'] },
-          diagnostics: {},
-        })),
-      })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey: 'direct.key1.gpt-test',
+        providerType: 'openai',
+        outboundProfile: 'openai-chat',
+        runtimeKey: 'direct.key1.gpt-test',
+        modelId: 'gpt-test',
+      },
+      decision: { routeName: 'search', pool: ['direct.key1.gpt-test'] },
+      diagnostics: {},
+    })));
     (server as any).providerHandles = new Map([[
       'direct.key1.gpt-test',
       {
@@ -1255,26 +1334,17 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => ({ status: 200, body: { relayed: true }, metadata: {} })),
-      getVirtualRouter: jest.fn(() => ({
-        route: jest.fn(() => ({
-          target: {
-            providerKey: 'direct.key1.gpt-test',
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: 'direct.key1.gpt-test',
-            modelId: 'gpt-test',
-          },
-          decision: { routeName: 'coding', pool: ['direct.key1.gpt-test'] },
-          diagnostics: {},
-        })),
-      })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', jest.fn(() => ({
+      target: {
+        providerKey: 'direct.key1.gpt-test',
+        providerType: 'openai',
+        outboundProfile: 'openai-chat',
+        runtimeKey: 'direct.key1.gpt-test',
+        modelId: 'gpt-test',
+      },
+      decision: { routeName: 'coding', pool: ['direct.key1.gpt-test'] },
+      diagnostics: {},
+    })));
     (server as any).providerHandles = new Map([[
       'direct.key1.gpt-test',
       {
@@ -1360,24 +1430,17 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct must not execute HubPipeline'); }),
-      getVirtualRouter: jest.fn(() => ({ route: jest.fn(() => ({
-        target: {
-          providerKey,
-          providerType: 'openai',
-          outboundProfile: 'openai-responses',
-          runtimeKey,
-          modelId: 'gpt-5.5',
-        },
-        decision: { routeName: 'coding', pool: [providerKey], reason: 'coding:user-input' },
-        diagnostics: {},
-      })) })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey,
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey,
+        modelId: 'gpt-5.5',
+      },
+      decision: { routeName: 'coding', pool: [providerKey], reason: 'coding:user-input' },
+      diagnostics: {},
+    })));
     (server as any).providerHandles = new Map([[runtimeKey, {
       runtimeKey,
       providerId: 'cc',
@@ -1497,14 +1560,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct recoverable retry must not enter HubPipeline'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -1574,7 +1630,7 @@ describe('direct passthrough route-level', () => {
       excludedProviderKeys: [firstProviderKey],
       routecodexRoutingPolicyGroup: 'gateway_priority_5555',
     }));
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });
 
   it('router-direct excludes failed provider first; cross-protocol VR target then uses relay boundary', async () => {
@@ -1637,14 +1693,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('outer pipeline owns relay handoff after router-direct skip'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_glm_4444', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_glm_4444', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -1718,7 +1767,7 @@ describe('direct passthrough route-level', () => {
       }),
       routecodexRoutingPolicyGroup: 'gateway_glm_4444',
     }));
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });
 
   it('router-direct switches to alternative provider immediately for recoverable 502 when VR has another target', async () => {
@@ -1779,14 +1828,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct recoverable retry must not enter HubPipeline'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -1852,7 +1894,7 @@ describe('direct passthrough route-level', () => {
     expect(route.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
       excludedProviderKeys: [firstProviderKey],
     }));
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });
 
   it('router same-protocol direct uses target.modelId as outbound model instead of inbound alias', async () => {
@@ -1892,14 +1934,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct alias->canonical test must stay direct'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_coding_10000', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_coding_10000', route);
     (server as any).currentRouterArtifacts = {
       targetRuntime: {
         [providerKey]: {
@@ -1967,7 +2002,7 @@ describe('direct passthrough route-level', () => {
     expect(outcome.used).toBe(true);
     expect(sentPayload?.model).toBe('deepseek-v4-pro');
     expect((outcome.response as any)?.data?.model).toBe('deepseek-v4-pro');
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });
 
   it('router-direct reroutes by decision.routePool when decision.pool is narrowed to current provider', async () => {
@@ -2033,14 +2068,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct reroute must not enter HubPipeline'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -2101,7 +2129,7 @@ describe('direct passthrough route-level', () => {
     expect(firstDirectSend).toHaveBeenCalledTimes(1);
     expect(secondDirectSend).toHaveBeenCalledTimes(1);
     expect(route).toHaveBeenCalledTimes(2);
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });
 
   it('router-direct applies Rust default route plan after current route pool is exhausted by provider errors', async () => {
@@ -2203,14 +2231,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct default route plan must stay direct'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_glm_4444', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_glm_4444', route);
     (server as any).providerHandles = new Map([
       ...primaryProviderKeys.map((providerKey, index) => [providerKey, {
         runtimeKey: providerKey,
@@ -2282,7 +2303,7 @@ describe('direct passthrough route-level', () => {
       allowedProviders: [defaultProviderKey],
       routecodexRoutingPolicyGroup: 'gateway_glm_4444',
     }));
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
     jest.useRealTimers();
   });
 
@@ -2342,14 +2363,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct provider error must not enter standard executor'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -2413,7 +2427,7 @@ describe('direct passthrough route-level', () => {
       expect(bodyText).not.toContain('HTTP_401');
       expect(firstDirectSend).toHaveBeenCalledTimes(1);
       expect(secondStandardSend).not.toHaveBeenCalled();
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
       expect(route).toHaveBeenCalledTimes(1);
     } finally {
       await server.stop();
@@ -2494,14 +2508,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct recoverable 502 must stay off standard executor'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -2565,7 +2572,7 @@ describe('direct passthrough route-level', () => {
       expect(bodyText).not.toContain('Upstream provider error');
       expect(firstDirectSend).toHaveBeenCalledTimes(1);
       expect(secondDirectSend).toHaveBeenCalledTimes(1);
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
       expect(route).toHaveBeenCalledTimes(2);
     } finally {
       await server.stop();
@@ -2648,14 +2655,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct returned recoverable 502 must stay off standard executor'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -2720,7 +2720,7 @@ describe('direct passthrough route-level', () => {
       }));
       expect(firstDirectSend).toHaveBeenCalledTimes(1);
       expect(secondDirectSend).toHaveBeenCalledTimes(1);
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
       expect(route).toHaveBeenCalledTimes(2);
     } finally {
       await server.stop();
@@ -2811,14 +2811,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct nested response.status=502 must stay off standard executor'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -2883,7 +2876,7 @@ describe('direct passthrough route-level', () => {
       }));
       expect(firstDirectSend).toHaveBeenCalledTimes(1);
       expect(secondDirectSend).toHaveBeenCalledTimes(1);
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
       expect(route).toHaveBeenCalledTimes(2);
     } finally {
       await server.stop();
@@ -2967,14 +2960,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => { throw new Error('router-direct body error must stay off standard executor'); }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
         runtimeKey: firstProviderKey,
@@ -3039,7 +3025,7 @@ describe('direct passthrough route-level', () => {
       }));
       expect(firstDirectSend).toHaveBeenCalledTimes(1);
       expect(secondDirectSend).toHaveBeenCalledTimes(1);
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
       expect(route).toHaveBeenCalledTimes(2);
     } finally {
       await server.stop();
@@ -3125,16 +3111,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => {
-        throw new Error('mixed-protocol relay must not re-enter bare hubPipeline.execute mock');
-      }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
     jest.spyOn(server as any, 'executePipeline').mockImplementation(executePipeline);
     (server as any).providerHandles = new Map([
       [firstProviderKey, {
@@ -3282,16 +3259,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => {
-        throw new Error('router-direct outboundProfile relay must use executePipeline preselected route path');
-      }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', route);
     jest.spyOn(server as any, 'executePipeline').mockImplementation(executePipeline);
     (server as any).providerHandles = new Map([
       [providerKey, {
@@ -3426,16 +3394,7 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => {
-        throw new Error('alias-runtime reroute must stay off HubPipeline');
-      }),
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
     (server as any).providerHandles = new Map([
       [firstRuntimeKey, {
         runtimeKey: firstRuntimeKey,
@@ -3505,7 +3464,7 @@ describe('direct passthrough route-level', () => {
       }));
       expect(firstDirectSend).toHaveBeenCalledTimes(1);
       expect(secondDirectSend).toHaveBeenCalledTimes(1);
-      expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+      expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
       expect(route).toHaveBeenCalledTimes(2);
     } finally {
       await server.stop();
