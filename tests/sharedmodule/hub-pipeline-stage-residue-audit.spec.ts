@@ -3595,7 +3595,6 @@ describe('hub pipeline stage residue audit', () => {
   it('retired responses tool-call remap public wrapper must stay deleted', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-compat-action-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/mod.rs',
@@ -3621,6 +3620,40 @@ describe('hub pipeline stage residue audit', () => {
       }
     }
 
+    expect(findings).toEqual([]);
+  });
+
+  it('native compat action aggregate TS shell must stay physically deleted', () => {
+    const repoRoot = process.cwd();
+    const shellPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-compat-action-semantics.ts'
+    );
+    const refRoots = [
+      'sharedmodule/llmswitch-core/src',
+      'src',
+      'scripts',
+      'tests',
+      'docs/architecture',
+    ];
+    const findings: string[] = [];
+    for (const root of refRoots) {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) continue;
+      for (const filePath of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
+        const relativePath = path.relative(repoRoot, filePath);
+        if (
+          relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts'
+          || relativePath.startsWith('tests/fixtures/')
+        ) continue;
+        const source = fs.readFileSync(filePath, 'utf8');
+        if (source.includes('native-compat-action-semantics')) {
+          findings.push(relativePath);
+        }
+      }
+    }
+
+    expect(fs.existsSync(shellPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

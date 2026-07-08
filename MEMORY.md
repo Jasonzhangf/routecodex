@@ -1766,3 +1766,9 @@
 - Tests needing Responses<->OpenAI codec evidence should call direct Rust/NAPI exports through helper code. Current direct exports are `runResponsesOpenaiRequestCodecJson` and `runResponsesOpenaiResponseCodecJson`.
 - Responses codec request context is explicit native output from Rust `responses_openai_codec.rs`; hidden TS TTL/context maps are retired shell state, not runtime truth.
 - Current shell audit after this deletion is `prodTsShellCount=67`, `shellsWithProdImporters=62`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Native compat action aggregate TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-compat-action-semantics.ts` is physically deleted. Do not restore it as an aggregate native wrapper or broad compat-action TS call surface.
+- Deleted-wrapper references in historical fixtures are sample text only; active source/tests/scripts/docs architecture surfaces must not reference the retired path except the absent-path residue gate.
+- Current shell audit after this deletion is `prodTsShellCount=66`, `shellsWithProdImporters=62`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.

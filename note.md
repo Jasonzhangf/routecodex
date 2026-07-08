@@ -28142,3 +28142,10 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Removed the old TS `ctxMap` test because request context is now explicit native output, not hidden TS wrapper state.
 - Added `conversion.shared.responses_openai` to function map, verification map, mainline call map, and wiki call graph; residue audit locks the old TS shell path physically absent.
 - Verification PASS: focused Responses codec/residue Jest 197/197; `verify:function-map-compile-gate`; strict shell audit `prodTsShellCount=67`, `shellsWithProdImporters=62`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=67`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; `rustfmt --check` for `responses_openai_codec.rs`; exact source/package ref scan; `git diff --check`.
+
+# 2026-07-09: llmswitch native compat action aggregate shell deletion
+
+- Scope: continued zero-prod/no-host shell deletion pass after responses codec.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-compat-action-semantics.ts`; exact symbol scan showed only the file itself plus residue/docs references, no runtime importer.
+- Removed the deleted file from `docs/architecture/no-fallback-diff-rules.json`; residue audit now locks the aggregate shell path physically absent and ignores historical fixtures that only preserve old sample text.
+- Verification PASS: focused residue Jest 198/198; strict shell audit `prodTsShellCount=66`, `shellsWithProdImporters=62`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=66`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact source/package ref scan; `git diff --check`.
