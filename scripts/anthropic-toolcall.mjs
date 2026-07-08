@@ -101,9 +101,9 @@ async function main() {
     .replace(/\n(?=event:)/g, '\n\n');
   fs.writeFileSync(sseLog, sseText, 'utf-8');
 
-  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
-  const { sseToJson } = await import(sseLibPath);
-  const message = sseToJson({
+  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
+  const { buildJsonFromSseWithNative } = await import(sseLibPath);
+  const message = buildJsonFromSseWithNative({
     protocol: 'anthropic-messages',
     bodyText: sseText,
     requestId: path.basename(base),

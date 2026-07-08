@@ -2270,9 +2270,9 @@ verification:
   - feature_id: sse.public_ts_lib_surface
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/sse/index.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
     contract:
-      - tests/sharedmodule/sse-stream-mode-native.spec.ts
+      - tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts
     integration: []
     smoke:
       - npm run verify:sse-architecture-boundary
@@ -2280,7 +2280,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Public TS library forwards only to unified Rust/NAPI dispatch and is forbidden for runtime imports."
+      - "Retired public TS library `sharedmodule/llmswitch-core/src/sse/index.ts` must stay physically deleted; scripts/tests use `native/router-hotpath/native-sse-runtime` directly."
 
   - feature_id: sse.runtime_rust_dispatch
     change_risk: high

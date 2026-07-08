@@ -106,9 +106,9 @@ async function main() {
   const httpPath = pathToFileURL(path.join(BASEDIR, 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
   const bridgePath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-  const sseLibPath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
+  const sseLibPath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
   const { buildResponsesRequestFromChat, buildChatResponseFromResponses } = await import(bridgePath);
-  const { collectSseBodyText, sseToJson } = await import(sseLibPath);
+  const { collectSseBodyText, buildJsonFromSseWithNative } = await import(sseLibPath);
 
   // headers
   const headers = { 'Content-Type': 'application/json', 'OpenAI-Beta': 'responses-2024-12-17' };
@@ -208,7 +208,7 @@ async function main() {
     const stream = await client.postStream(endpoint, respReq, { ...headers, Accept: 'text/event-stream' });
     const bodyText = await collectSseBodyText(stream);
     fs.writeFileSync(sseLog, bodyText, 'utf-8');
-    json = sseToJson({
+    json = buildJsonFromSseWithNative({
       protocol: 'openai-responses',
       bodyText,
       requestId: path.basename(outBase),

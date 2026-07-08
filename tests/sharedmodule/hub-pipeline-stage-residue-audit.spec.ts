@@ -4266,29 +4266,29 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(filePath)).toBe(false);
   });
 
-  it('SSE public barrel must not expose retired bidirectional facade', () => {
+  it('SSE public barrel shell must stay physically deleted', () => {
     const repoRoot = process.cwd();
-    const files = [
-      'sharedmodule/llmswitch-core/src/sse/index.ts',
-    ];
+    const filePath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/sse/index.ts');
     const findings: string[] = [];
-
-    for (const relativePath of files) {
-      const fullPath = path.join(repoRoot, relativePath);
-      if (!fs.existsSync(fullPath)) {
-        continue;
-      }
-      const source = fs.readFileSync(fullPath, 'utf8');
-      const matches = collectMatches(source, [
-        { label: 'exports retired bidirectional factory', pattern: /\bcreateBidirectionalConverters\b/ },
-        { label: 'exports retired bidirectional singleton', pattern: /\bbidirectionalConverters\b/ },
-        { label: 'keeps retired auto-detect conversion facade', pattern: /\bautoConvert\b/ },
-      ]);
-      for (const match of matches) {
-        findings.push(`${relativePath}:${match}`);
+    for (const root of ['sharedmodule/llmswitch-core/src', 'src', 'scripts', 'tests', 'docs/architecture']) {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) continue;
+      for (const candidate of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
+        const relativePath = path.relative(repoRoot, candidate);
+        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') continue;
+        if (relativePath === 'tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts') continue;
+        if (relativePath === 'scripts/architecture/verify-sse-architecture-boundary.mjs') continue;
+        if (relativePath === 'docs/architecture/function-map.yml') continue;
+        if (relativePath === 'docs/architecture/verification-map.yml') continue;
+        if (relativePath === 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts') continue;
+        const source = fs.readFileSync(candidate, 'utf8');
+        if (source.includes('sse/index.ts') || source.includes('dist/sse/index.js') || source.includes('sse/index.js')) {
+          findings.push(relativePath);
+        }
       }
     }
 
+    expect(fs.existsSync(filePath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

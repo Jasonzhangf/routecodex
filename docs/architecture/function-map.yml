@@ -3850,23 +3850,23 @@ owners:
       - "CLI surface is dispatch only; must not own business logic. All actions go through http-server or manager modules."
 
   - feature_id: sse.public_ts_lib_surface
-    status: active
-    summary: "SSE public TS library surface forwarding only to Rust/NAPI runtime dispatch"
-    owner_kind: server_projection
-    owner_scope: "file-scoped public TS library only; forbidden for Hub Pipeline, provider-response, server runtime, provider runtime, and Virtual Router imports"
-    owner_module: sharedmodule/llmswitch-core/src/sse/index.ts
+    status: retired
+    summary: "Retired SSE public TS library surface; scripts and tests call the native SSE runtime bridge directly"
+    owner_kind: retired_ts_shell
+    owner_scope: "old public TS library shell is physically deleted; Hub/runtime/scripts use native-sse-runtime direct owner"
+    owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
     canonical_types:
       - NativeSseRuntimeProtocol
       - NativeSseFramesInput
       - NativeSseJsonInput
     canonical_builders:
-      - sseCodecPublicSurfaceFeatureAnchor
-      - jsonToSseFrames
-      - sseToJson
+      - buildSseFramesFromJsonWithNative
+      - buildJsonFromSseWithNative
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/sse/index.ts
-      - docs/goals/sse-runtime-rust-only-closeout-plan.md
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+      - tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts
     forbidden_paths:
+      - sharedmodule/llmswitch-core/src/sse/index.ts
       - src/providers/core/runtime
       - src/server
       - sharedmodule/llmswitch-core/src/conversion/hub
@@ -3875,13 +3875,13 @@ owners:
     forbidden_mentions_allowlist:
       - NativeSseRuntimeProtocol
     required_tests:
-      - tests/sharedmodule/sse-stream-mode-native.spec.ts
+      - tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
-    migration_target: ts_public_lib
+    migration_target: rust
     notes:
-      - "Public TS SSE library may only forward to unified Rust/NAPI runtime dispatch; Hub runtime must not import it."
+      - "Old `sharedmodule/llmswitch-core/src/sse/index.ts` public shell is physically deleted; do not restore `sseToJson` / `jsonToSseFrames` aliases or `dist/sse/index.js` script imports."
 
   - feature_id: sse.runtime_rust_dispatch
     status: active
@@ -3901,6 +3901,7 @@ owners:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
       - docs/goals/sse-runtime-rust-only-closeout-plan.md
     forbidden_paths:
+      - sharedmodule/llmswitch-core/src/sse/index.ts
       - sharedmodule/llmswitch-core/src/sse/json-to-sse
       - sharedmodule/llmswitch-core/src/sse/sse-to-json
       - sharedmodule/llmswitch-core/src/sse/registry

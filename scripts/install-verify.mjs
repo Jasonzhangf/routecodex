@@ -76,7 +76,7 @@ function loadManualSample(kind) {
 async function importResponsesSseModule() {
   if (responsesSseModule) return responsesSseModule;
   const npmSpecifiers = [
-    'rcc-llmswitch-core/dist/sse/index.js'
+    'rcc-llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js'
   ];
   const resolvedNpmSpecifiers = npmSpecifiers
     .map((specifier) => {
@@ -114,11 +114,11 @@ async function parseResponsesSsePayload(rawText) {
     throw new Error('Responses SSE 响应为空');
   }
   const mod = await importResponsesSseModule();
-  if (typeof mod.sseToJson !== 'function') {
-    throw new Error('llmswitch-core public SSE lib 缺少 sseToJson 导出');
+  if (typeof mod.buildJsonFromSseWithNative !== 'function') {
+    throw new Error('llmswitch-core native SSE runtime 缺少 buildJsonFromSseWithNative 导出');
   }
   const normalized = rawText.endsWith('\n\n') ? rawText : `${rawText}\n\n`;
-  const parsed = mod.sseToJson({
+  const parsed = mod.buildJsonFromSseWithNative({
     protocol: 'openai-responses',
     bodyText: normalized,
     requestId: `install-verify-${Date.now()}`

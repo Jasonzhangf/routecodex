@@ -82,9 +82,9 @@ async function runResponses(providerId) {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
+  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
   const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-  const { collectSseBodyText, sseToJson } = await import(sseLibPath);
+  const { collectSseBodyText, buildJsonFromSseWithNative } = await import(sseLibPath);
   const { buildChatResponseFromResponses } = await import(bridgePath);
 
   ensureDir(RESP_OUT_DIR);
@@ -98,7 +98,7 @@ async function runResponses(providerId) {
   const stream = await client.postStream(endpoint, body, { ...headers, Accept: 'text/event-stream' });
   const bodyText = await collectSseBodyText(stream);
   fs.writeFileSync(sseLog, bodyText, 'utf-8');
-  const json = sseToJson({
+  const json = buildJsonFromSseWithNative({
     protocol: 'openai-responses',
     bodyText,
     requestId: path.basename(base),
@@ -147,9 +147,9 @@ async function runAnthropic(providerId='glm-anthropic') {
   }
   const sseText = events.map(ev => `event: ${ev.event}\n`+`data: ${JSON.stringify(ev.data)}\n\n`).join('');
   fs.writeFileSync(sseLog, sseText, 'utf-8');
-  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
-  const { sseToJson } = await import(sseLibPath);
-  const message = sseToJson({
+  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
+  const { buildJsonFromSseWithNative } = await import(sseLibPath);
+  const message = buildJsonFromSseWithNative({
     protocol: 'anthropic-messages',
     bodyText: sseText,
     requestId: path.basename(base),

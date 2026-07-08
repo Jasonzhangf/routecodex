@@ -1717,3 +1717,9 @@
 - `sharedmodule/llmswitch-core/src/conversion/codecs/openai-openai-codec.ts` is physically deleted. Do not restore `OpenAIOpenAIConversionCodec` or the wrapper-local request context map as runtime TS state.
 - Tests/scripts needing OpenAI<->OpenAI codec evidence should call direct Rust/NAPI `runOpenaiOpenaiRequestCodecJson` and `runOpenaiOpenaiResponseCodecJson`.
 - Current shell audit after this deletion is `prodTsShellCount=74`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: SSE public index TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/sse/index.ts` is physically deleted. Do not restore the public `sseToJson` / `jsonToSseFrames` aliases or `dist/sse/index.js` script dependency.
+- Scripts/tests needing SSE conversion should call `sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js` or source `native-sse-runtime.ts` directly and use `buildJsonFromSseWithNative` / `buildSseFramesFromJsonWithNative` / `collectSseBodyText`.
+- Current shell audit after this deletion is `prodTsShellCount=73`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.

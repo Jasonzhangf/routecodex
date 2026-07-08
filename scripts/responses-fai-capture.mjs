@@ -75,8 +75,8 @@ async function main() {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/index.js')).href;
-  const { collectSseBodyText, sseToJson } = await import(sseLibPath);
+  const sseLibPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js')).href;
+  const { collectSseBodyText, buildJsonFromSseWithNative } = await import(sseLibPath);
 
   const headers = { 'Content-Type':'application/json', 'OpenAI-Beta':'responses-2024-12-17', 'Authorization':`Bearer ${apiKey}`, 'User-Agent': 'RouteCodex/2.0 (+https://github.com/routecodex)'};
   const client = new HttpClient({ baseUrl, timeout:300000 });
@@ -105,7 +105,7 @@ async function main() {
       const stream = await client.postStream(endpoint, body, { ...headers, Accept:'text/event-stream' });
       const reqId = `fai_probe_${Date.now()}_${i}`;
       const bodyText = await collectSseBodyText(stream);
-      const json = sseToJson({
+      const json = buildJsonFromSseWithNative({
         protocol: 'openai-responses',
         bodyText,
         requestId: reqId,

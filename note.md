@@ -28086,3 +28086,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Removed the stale request-context map test because it only covered deleted TS wrapper state, not Rust runtime truth.
 - Residue audit locks the old codec source path and generated `.d.ts` absent; guidance docs now name the Rust/NAPI codec exports instead of the TS file.
 - Verification PASS: focused codec/residue Jest 194/194; script syntax checks; exact source ref scan only found residue absent assertions; strict shell audit `prodTsShellCount=74`; zero-ts closeout; minimal TS surface; rustification audit `nonNativeFileCount=0`; sharedmodule/root `tsc`; function-map compile gate; `git diff --check`.
+
+# 2026-07-09: llmswitch SSE public index shell deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/sse/index.ts`.
+- Script consumers now import `sharedmodule/llmswitch-core/dist/native/router-hotpath/native-sse-runtime.js` and call `buildJsonFromSseWithNative` / `collectSseBodyText` directly instead of the retired `dist/sse/index.js` public shell aliases.
+- Function/verification maps mark `sse.public_ts_lib_surface` retired and anchor its owner to `native-sse-runtime.ts`; residue tests lock the old shell path absent.
+- Verification PASS: `NODE_OPTIONS=--experimental-vm-modules` focused SSE runtime Jest 4/4; focused SSE index/residue Jest 197/197; script syntax checks; `verify:sse-architecture-boundary`; `verify:function-map-compile-gate`; sharedmodule/root `tsc`; strict shell audit `prodTsShellCount=73`, `shellsWithProdImporters=64`; zero-ts closeout; minimal TS surface; rustification audit `nonNativeFileCount=0`; `git diff --check`.

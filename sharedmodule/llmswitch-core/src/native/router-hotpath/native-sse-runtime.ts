@@ -7,6 +7,8 @@ import {
 } from './native-hub-pipeline-resp-semantics-shared.js';
 
 // feature_id: sse.runtime_rust_dispatch
+// feature_id: sse.public_ts_lib_surface
+// Retired public SSE TS shell owner: src/sse/index.ts stays deleted; use this native bridge directly.
 export type NativeSseRuntimeProtocol =
   | 'openai-chat'
   | 'openai-responses'
