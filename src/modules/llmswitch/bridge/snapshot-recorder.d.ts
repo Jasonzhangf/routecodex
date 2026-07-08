@@ -9,7 +9,7 @@ import { resetSnapshotRecorderErrorsampleStateForTests } from './snapshot-record
 export { resetSnapshotRecorderErrorsampleStateForTests };
 /**
  * 为 HubPipeline / provider 响应路径创建阶段快照记录器。
- * 内部通过 llmswitch-core 的 snapshot-recorder 模块实现。
+ * 内部通过 router_hotpath_napi snapshot hooks 实现。
  */
 export declare function createSnapshotRecorder(context: AnyRecord, endpoint: string): Promise<SnapshotRecorder>;
 export type { SnapshotRecorder };

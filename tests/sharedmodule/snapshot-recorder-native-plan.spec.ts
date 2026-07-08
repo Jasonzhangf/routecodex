@@ -16,21 +16,27 @@ const buildSnapshotRecorderWriteOptionsWithNativeMock = jest.fn((input: Record<s
 const writeSnapshotViaHooksWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-snapshot-hooks.js',
+  '../../src/modules/llmswitch/bridge/native-exports.js',
   () => ({
-    shouldRecordSnapshotsWithNative: () => true,
-    normalizeSnapshotStagePayloadWithNative: (_stage: string, payload: unknown) => payload,
-    buildSnapshotRecorderWriteOptionsWithNative: buildSnapshotRecorderWriteOptionsWithNativeMock,
-    writeSnapshotViaHooksWithNative: writeSnapshotViaHooksWithNativeMock,
+    shouldRecordSnapshotsNative: () => true,
+    writeSnapshotViaHooksNative: writeSnapshotViaHooksWithNativeMock,
+    getRouterHotpathJsonBindingSync: () => ({
+      normalizeSnapshotStagePayloadJson: (_stage: string, payloadJson: string) => payloadJson,
+      buildSnapshotRecorderWriteOptionsJson: (inputJson: string) => JSON.stringify(
+        buildSnapshotRecorderWriteOptionsWithNativeMock(JSON.parse(inputJson) as Record<string, unknown>),
+      ),
+    }),
+    classifyEmptyResponseSignalNative: () => null,
+    detectToolExecutionFailuresNative: () => [],
   })
 );
 
 const { createSnapshotRecorder } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.js'
+  '../../src/modules/llmswitch/bridge/snapshot-recorder.js'
 );
 
 describe('snapshot recorder native write option plan', () => {
-  it('delegates entry protocol, entry port, group request, and runtime metadata projection to native', () => {
+  it('delegates entry protocol, entry port, group request, and runtime metadata projection to native', async () => {
     const context: Record<string, unknown> = {
       requestId: 'req_snapshot_recorder',
       providerId: 'provider.key1',
@@ -49,7 +55,8 @@ describe('snapshot recorder native write option plan', () => {
       'test port scope'
     );
 
-    createSnapshotRecorder(context as never, '/v1/messages').record('req_inbound', { ok: true });
+    const recorder = await createSnapshotRecorder(context, '/v1/messages');
+    recorder.record('req_inbound', { ok: true });
 
     expect(buildSnapshotRecorderWriteOptionsWithNativeMock).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: '/v1/messages',

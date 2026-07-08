@@ -42,12 +42,6 @@ declare module 'rcc-llmswitch-core/conversion/hub/types/chat-envelope' {
   }
 }
 
-declare module 'rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js' {
-  import type { StageRecorder } from 'rcc-llmswitch-core/conversion/hub/format-adapters/index';
-  import type { AdapterContext } from 'rcc-llmswitch-core/conversion/hub/types/chat-envelope';
-  export function createSnapshotRecorder(context: AdapterContext, endpoint: string): StageRecorder;
-}
-
 declare module 'rcc-llmswitch-core/v2/runtime/virtual-router-hit-log' {
   export function resolveSessionColor(sessionId?: string): string | undefined;
   export function resolveSessionLogColorKey(input?: Record<string, unknown> | null): string | undefined;

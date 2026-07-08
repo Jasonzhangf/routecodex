@@ -1299,29 +1299,15 @@ describe('hub pipeline stage residue audit', () => {
     ).toBe(false);
   });
 
-  it('snapshot stage recorder must not restore TS hotpath trimming semantics', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts'),
-      'utf8',
-    );
-
-    const findings = collectMatches(source, [
-      { label: 'restores TS snapshot hotpath trim helper', pattern: /trimSnapshotHotpathPayloadForNative/ },
-      { label: 'restores TS snapshot sanitize helper', pattern: /sanitizeSnapshotHotpathPayload|pruneSnapshotHotpathPayload/ },
-      { label: 'restores identity snapshot hotpath wrapper', pattern: /return\s+payload\s*;/ },
-      { label: 'restores TS snapshot entry protocol resolver', pattern: /resolveEntryProtocol/ },
-      { label: 'restores TS snapshot entry port resolver', pattern: /resolveEntryPort|Number\.parseInt\(portScope/ },
-      { label: 'restores TS snapshot group request resolver', pattern: /clientRequestId[\s\S]{0,120}groupRequestId/ },
-    ]);
-
-    expect(findings).toEqual([]);
-    expect(source).toContain('normalizeSnapshotStagePayloadWithNative(stage, payload)');
-    expect(source).toContain('buildSnapshotRecorderWriteOptionsWithNative');
+  it('sharedmodule snapshot recorder runtime shell must stay physically deleted', () => {
+    expect(
+      fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts')),
+    ).toBe(false);
   });
 
-  it('snapshot stage recorder must only expose factory bridge API', () => {
+  it('host snapshot stage recorder must only expose factory bridge API', () => {
     const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts'),
+      path.join(process.cwd(), 'src/modules/llmswitch/bridge/snapshot-recorder.ts'),
       'utf8',
     );
     const coverageScript = fs.readFileSync(
@@ -1338,7 +1324,7 @@ describe('hub pipeline stage residue audit', () => {
     }
 
     expect(findings).toEqual([]);
-    expect(source).toContain('export function createSnapshotRecorder');
+    expect(source).toContain('export async function createSnapshotRecorder');
   });
 
   it('legacy concrete TS format adapter implementations must be physically removed', () => {

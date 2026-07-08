@@ -14,6 +14,13 @@
 - Verification PASS: focused bridge Jest 2/2 plus residue/red checks 195/195, sharedmodule/root tsc, `verify:function-map-compile-gate`, shell reference audit (`prodTsShellCount=81`, `zeroProdNoHostCount=11`), zero-ts closeout, minimal TS surface, rustification audit, exact source/host/package scan for old standardized bridge subpath, and `git diff --check`.
 - Boundary: full `tests/sharedmodule/chat-semantics-stage1.spec.ts` still has unrelated VR config failures (`routing configuration missing`) in request-pipeline tests; the direct chat↔standardized bridge tests passed.
 
+# 2026-07-09: Sharedmodule snapshot recorder runtime shell deleted
+
+- Scope: delete `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts`; exact refs show no production importer and only test/map/doc/ambient references remain.
+- Change: `tests/sharedmodule/snapshot-recorder-native-plan.spec.ts` now validates the host bridge `src/modules/llmswitch/bridge/snapshot-recorder.ts` direct native snapshot hook path instead of importing the retired sharedmodule shell.
+- Change: removed obsolete ambient module for `rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js`.
+- Verification PASS: focused Jest 194/194 (`snapshot-recorder-native-plan`, `hub-pipeline-stage-residue-audit`), sharedmodule/root tsc, `verify:function-map-compile-gate`, shell reference audit (`prodTsShellCount=80`, `zeroProdNoHostCount=10`), zero-ts closeout, minimal TS surface, rustification audit, exact source/host/package scan for old snapshot-recorder subpath, and `git diff --check`.
+
 # 2026-07-09: snapshot-recorder host bridge ref direct-native wired
 
 - Scope: finish current host bridge shell subpath closeout by removing snapshot recorder's llmswitch-core dist facade load.

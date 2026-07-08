@@ -2289,12 +2289,13 @@ owners:
       - src/utils
       - src/debug/snapshot
       - src/providers/core/utils
-      - sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts
+      - src/modules/llmswitch/bridge/snapshot-recorder.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - docs/architecture
     forbidden_paths:
       - src/providers/profile
       - src/client
+      - sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts
     required_tests:
       - tests/utils/snapshot-stage-policy.spec.ts
       - tests/providers/core/utils/snapshot-writer.release-gating.spec.ts
@@ -2308,8 +2309,8 @@ owners:
     notes:
       - "Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch."
       - "Provider samples must not persist request metadata/internal carriers; only explicit non-sensitive meta fields may be written."
-      - "Hub `snapshot-recorder.ts` public surface is factory-only (`createSnapshotRecorder`); internal recorder options/class must not be exported."
-      - "Hub snapshot recorder is TS observation glue only; payload normalization/trimming semantics must remain native-owned."
+      - "Host bridge `snapshot-recorder.ts` public surface is factory-only (`createSnapshotRecorder`); internal recorder options/class must not be exported."
+      - "Sharedmodule snapshot recorder runtime shell is deleted; host bridge owns IO/observation while payload normalization/trimming semantics remain native-owned."
 
   - feature_id: snapshot.provider_error_buffer
     status: active

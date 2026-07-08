@@ -1496,7 +1496,7 @@ verification:
     change_risk: high
     unit:
       - src/utils/snapshot-stage-policy.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts
+      - src/modules/llmswitch/bridge/snapshot-recorder.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs
     contract:
       - tests/utils/snapshot-stage-policy.spec.ts
@@ -1513,7 +1513,8 @@ verification:
       - npm run build:base
     notes:
       - "Changes to `--snap` defaults, selector routing, or module-snap naming must rerun both selector tests and snapshot path isolation tests."
-      - "Hub `snapshot-recorder.ts` may only expose `createSnapshotRecorder` as factory bridge API; internal recorder options/class and TS hotpath trim/sanitize helpers are dead code residue."
+      - "Host bridge `snapshot-recorder.ts` may only expose `createSnapshotRecorder` as factory bridge API; internal recorder options/class and TS hotpath trim/sanitize helpers are dead code residue."
+      - "Sharedmodule `conversion/hub/snapshot-recorder.ts` must stay physically deleted; direct native snapshot hook calls are the only runtime semantics owner."
 
   - feature_id: snapshot.provider_error_buffer
     change_risk: medium

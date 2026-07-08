@@ -245,6 +245,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Chat semantics tests now call direct native req inbound/outbound conversion helpers through `tests/sharedmodule/helpers/standardized-bridge-direct-native.ts`.
 - Function/verification maps now keep only the still-consumed ChatEnvelope/StandardizedRequest declaration files as TS bridge surface and forbid restoring the runtime wrapper.
 
+### 2026-07-09 Sharedmodule snapshot recorder runtime shell deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts`.
+- Snapshot recorder native plan test now exercises `src/modules/llmswitch/bridge/snapshot-recorder.ts`, which owns host IO/observation and delegates snapshot stage normalization, write-option planning, should-record policy, and write execution to direct native snapshot hook capabilities.
+- Removed the obsolete host ambient declaration for the retired sharedmodule dist snapshot-recorder subpath.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

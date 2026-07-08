@@ -1332,6 +1332,12 @@
 - `sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts` is physically deleted.
 - Remaining ChatEnvelope/StandardizedRequest TS surface is declaration-only (`types/chat-envelope.d.ts`, `types/standardized.d.ts`); conversion behavior belongs to native req inbound/outbound semantics.
 - Tests that need chat↔standardized conversion evidence must use direct native helpers, not restore the old runtime wrapper.
+
+# 2026-07-09: Sharedmodule snapshot recorder runtime TS shell is deleted
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts` is physically deleted.
+- Snapshot recorder runtime behavior lives in the host bridge `src/modules/llmswitch/bridge/snapshot-recorder.ts` for IO/observation only; snapshot normalization, write planning, policy, and write execution are direct native snapshot hook capabilities.
+- The obsolete ambient module for `rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js` is removed; do not restore that dist subpath.
 # 2026-07-06: VR contracts type surface is facade-scoped
 
 - Upper production layers must not import `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` directly.
