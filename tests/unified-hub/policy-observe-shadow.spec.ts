@@ -1,11 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { bootstrapVirtualRouterConfig, getHubPipelineCtor } from '../../src/modules/llmswitch/bridge.js';
-
-type HubPipelineCtor = new (config: any) => {
-  execute: (request: any) => Promise<any>;
-};
+import { bootstrapVirtualRouterConfig } from '../../src/modules/llmswitch/bridge.js';
+import { NativeHubPipelineTestWrapper as HubPipeline } from '../../../helpers/native-hub-pipeline-test-wrapper.js';
 
 function loadFixture(name: string): Record<string, unknown> {
   const p = path.resolve(process.cwd(), 'tests/fixtures/unified-hub', name);
@@ -75,10 +72,6 @@ function buildVirtualRouterConfig() {
   };
 }
 
-async function createHubPipelineCtor(): Promise<HubPipelineCtor> {
-  return (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
-}
-
 async function runOnce(args: {
   requestId: string;
   mode: 'off' | 'observe';
@@ -86,7 +79,6 @@ async function runOnce(args: {
   routeHint: string;
   payload: any;
 }) {
-  const HubPipeline = await createHubPipelineCtor();
   const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
   const pipeline = new HubPipeline({
     virtualRouter: artifacts.config,

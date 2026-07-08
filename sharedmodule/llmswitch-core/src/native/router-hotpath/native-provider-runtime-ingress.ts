@@ -2,7 +2,7 @@ import {
   type ProviderErrorEvent,
   type ProviderSuccessEvent,
 } from './virtual-router-contracts.js';
-import { failNativeRequired } from './native-router-hotpath-policy.js';
+import { failNativeRequired } from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 
 export type {

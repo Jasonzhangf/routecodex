@@ -7,7 +7,30 @@ import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { resolveCorePackageDir } from '../core-loader.js';
-import { importCoreDist, resolveImplForSubpath } from './module-loader.js';
+import { importCoreDist, requireCoreDist } from './module-loader.js';
+let cachedNativeHubPipelineOrchestrationSemantics = null;
+let cachedVirtualRouterRouteHostEffectsModule = null;
+function getNativeHubPipelineOrchestrationSemantics() {
+    if (!cachedNativeHubPipelineOrchestrationSemantics) {
+        cachedNativeHubPipelineOrchestrationSemantics =
+            requireCoreDist('native/router-hotpath/native-hub-pipeline-orchestration-semantics');
+    }
+    return cachedNativeHubPipelineOrchestrationSemantics;
+}
+function getVirtualRouterRouteHostEffectsModule() {
+    if (!cachedVirtualRouterRouteHostEffectsModule) {
+        cachedVirtualRouterRouteHostEffectsModule =
+            requireCoreDist('runtime/virtual-router-host-effects');
+    }
+    return cachedVirtualRouterRouteHostEffectsModule;
+}
+function requireNativeHubPipelineFn(name) {
+    const fn = getNativeHubPipelineOrchestrationSemantics()[name];
+    if (typeof fn !== 'function') {
+        throw new Error(`[llmswitch-bridge] ${String(name)} not available`);
+    }
+    return fn;
+}
 function getImportMetaUrlUnsafe() {
     try {
         return Function('return import.meta.url')();
@@ -49,16 +72,17 @@ export function compileRouteCodexRuntimeManifestSync(input) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) {
         throw new Error('[llmswitch-bridge] RouteCodex runtime config compiler returned invalid payload');
     }
-    if (output.manifestVersion !== 'routecodex.runtime-config.v1' ||
-        !output.virtualRouterBootstrapInput ||
-        typeof output.virtualRouterBootstrapInput !== 'object' ||
-        Array.isArray(output.virtualRouterBootstrapInput) ||
-        !output.pipelineRuntimeConfig ||
-        typeof output.pipelineRuntimeConfig !== 'object' ||
-        Array.isArray(output.pipelineRuntimeConfig)) {
+    const manifest = output;
+    if (manifest.manifestVersion !== 'routecodex.runtime-config.v1' ||
+        !manifest.virtualRouterBootstrapInput ||
+        typeof manifest.virtualRouterBootstrapInput !== 'object' ||
+        Array.isArray(manifest.virtualRouterBootstrapInput) ||
+        !manifest.pipelineRuntimeConfig ||
+        typeof manifest.pipelineRuntimeConfig !== 'object' ||
+        Array.isArray(manifest.pipelineRuntimeConfig)) {
         throw new Error('[llmswitch-bridge] RouteCodex runtime config compiler returned invalid manifest');
     }
-    return output;
+    return manifest;
 }
 export function collectRouteCodexV2ConfigSourceErrorsSync(userConfig) {
     const binding = loadNativeBindingForConfigCodec();
@@ -274,15 +298,16 @@ function validatePersistedConfigFileOutput(output, label) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) {
         throw new Error(`[llmswitch-bridge] ${label} writer returned invalid payload`);
     }
-    if (typeof output.path !== 'string' ||
-        output.format !== 'toml' ||
-        typeof output.raw !== 'string' ||
-        !output.parsed ||
-        typeof output.parsed !== 'object' ||
-        Array.isArray(output.parsed)) {
+    const persisted = output;
+    if (typeof persisted.path !== 'string' ||
+        persisted.format !== 'toml' ||
+        typeof persisted.raw !== 'string' ||
+        !persisted.parsed ||
+        typeof persisted.parsed !== 'object' ||
+        Array.isArray(persisted.parsed)) {
         throw new Error(`[llmswitch-bridge] ${label} writer returned invalid shape`);
     }
-    return output;
+    return persisted;
 }
 export function writeRouteCodexUserConfigFileNativeSync(input) {
     const binding = loadNativeBindingForConfigCodec();
@@ -343,16 +368,17 @@ export function loadRouteCodexConfigNativeSync(input = {}) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) {
         throw new Error('[llmswitch-bridge] RouteCodex config loader returned invalid payload');
     }
-    if (typeof output.configPath !== 'string' ||
-        !output.userConfig ||
-        typeof output.userConfig !== 'object' ||
-        Array.isArray(output.userConfig) ||
-        !output.providerProfiles ||
-        typeof output.providerProfiles !== 'object' ||
-        Array.isArray(output.providerProfiles)) {
+    const loaded = output;
+    if (typeof loaded.configPath !== 'string' ||
+        !loaded.userConfig ||
+        typeof loaded.userConfig !== 'object' ||
+        Array.isArray(loaded.userConfig) ||
+        !loaded.providerProfiles ||
+        typeof loaded.providerProfiles !== 'object' ||
+        Array.isArray(loaded.providerProfiles)) {
         throw new Error('[llmswitch-bridge] RouteCodex config loader returned invalid shape');
     }
-    return output;
+    return loaded;
 }
 export async function coerceRouteCodexProviderConfigV2(parsed, fallbackProviderId) {
     return coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId);
@@ -397,12 +423,13 @@ export function planRouteCodexProviderConfigV2FilesSync(fileNames) {
         if (!file || typeof file !== 'object' || Array.isArray(file)) {
             throw new Error('[llmswitch-bridge] RouteCodex provider config file planner returned invalid file entry');
         }
-        if (typeof file.fileName !== 'string' || typeof file.isBaseFile !== 'boolean') {
+        const record = file;
+        if (typeof record.fileName !== 'string' || typeof record.isBaseFile !== 'boolean') {
             throw new Error('[llmswitch-bridge] RouteCodex provider config file planner returned invalid file shape');
         }
         return {
-            fileName: file.fileName,
-            isBaseFile: file.isBaseFile
+            fileName: record.fileName,
+            isBaseFile: record.isBaseFile
         };
     });
 }
@@ -412,19 +439,20 @@ export function resolveRouteCodexProviderConfigV2IdentitySync(input) {
     if (typeof fn !== 'function') {
         throw new Error('[llmswitch-bridge] resolveRouteCodexProviderConfigV2IdentityJson not available');
     }
-    const output = parseNativeJsonResult(fn(JSON.stringify(input)));
+    const output = JSON.parse(String(fn(JSON.stringify(input))));
     if (!output || typeof output !== 'object' || Array.isArray(output)) {
         throw new Error('[llmswitch-bridge] RouteCodex provider config identity resolver returned invalid payload');
     }
-    if (typeof output.providerId !== 'string' ||
-        !output.provider ||
-        typeof output.provider !== 'object' ||
-        Array.isArray(output.provider)) {
+    const record = output;
+    if (typeof record.providerId !== 'string' ||
+        !record.provider ||
+        typeof record.provider !== 'object' ||
+        Array.isArray(record.provider)) {
         throw new Error('[llmswitch-bridge] RouteCodex provider config identity resolver returned invalid shape');
     }
     return {
-        providerId: output.providerId,
-        provider: output.provider
+        providerId: record.providerId,
+        provider: record.provider
     };
 }
 export function loadRouteCodexProviderConfigsV2FromRootSync(rootDir) {
@@ -518,17 +546,18 @@ export function planAuthFileResolutionNativeSync(input) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) {
         throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid payload');
     }
-    if (output.kind !== 'literal' && output.kind !== 'authFile') {
+    const plan = output;
+    if (plan.kind !== 'literal' && plan.kind !== 'authFile') {
         throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid kind');
     }
-    if (output.kind === 'literal' && typeof output.value !== 'string') {
+    if (plan.kind === 'literal' && typeof plan.value !== 'string') {
         throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid literal value');
     }
-    if (output.kind === 'authFile' &&
-        (typeof output.filePath !== 'string' || typeof output.cacheKey !== 'string')) {
+    if (plan.kind === 'authFile' &&
+        (typeof plan.filePath !== 'string' || typeof plan.cacheKey !== 'string')) {
         throw new Error('[llmswitch-bridge] AuthFile resolver returned invalid authFile plan');
     }
-    return output;
+    return plan;
 }
 export function resolveAuthFileKeyNativeSync(input) {
     const binding = loadNativeBindingForConfigCodec();
@@ -547,13 +576,14 @@ export function resolveAuthFileKeyNativeSync(input) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) {
         throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid payload');
     }
-    if ((output.kind !== 'literal' && output.kind !== 'authFile') || typeof output.value !== 'string') {
+    const resolved = output;
+    if ((resolved.kind !== 'literal' && resolved.kind !== 'authFile') || typeof resolved.value !== 'string') {
         throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid shape');
     }
-    if (typeof output.cacheKey !== 'undefined' && typeof output.cacheKey !== 'string') {
+    if (typeof resolved.cacheKey !== 'undefined' && typeof resolved.cacheKey !== 'string') {
         throw new Error('[llmswitch-bridge] AuthFile key resolver returned invalid cache key');
     }
-    return output;
+    return resolved;
 }
 export function planRouteCodexConfigLoaderPathsNativeSync(input) {
     const binding = loadNativeBindingForConfigCodec();
@@ -569,13 +599,14 @@ export function planRouteCodexConfigLoaderPathsNativeSync(input) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) {
         throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid payload');
     }
-    if (typeof output.explicitPath !== 'undefined' && typeof output.explicitPath !== 'string') {
+    const plan = output;
+    if (typeof plan.explicitPath !== 'undefined' && typeof plan.explicitPath !== 'string') {
         throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid explicitPath');
     }
-    if (typeof output.providerRootDir !== 'undefined' && typeof output.providerRootDir !== 'string') {
+    if (typeof plan.providerRootDir !== 'undefined' && typeof plan.providerRootDir !== 'string') {
         throw new Error('[llmswitch-bridge] RouteCodex config loader path planner returned invalid providerRootDir');
     }
-    return output;
+    return plan;
 }
 export function planProviderConfigRootNativeSync(rootDir) {
     const binding = loadNativeBindingForConfigCodec();
@@ -587,10 +618,11 @@ export function planProviderConfigRootNativeSync(rootDir) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) {
         throw new Error('[llmswitch-bridge] Provider config root planner returned invalid payload');
     }
-    if (typeof output.rootDir !== 'undefined' && typeof output.rootDir !== 'string') {
+    const plan = output;
+    if (typeof plan.rootDir !== 'undefined' && typeof plan.rootDir !== 'string') {
         throw new Error('[llmswitch-bridge] Provider config root planner returned invalid rootDir');
     }
-    return output;
+    return plan;
 }
 function safeBridgeCwd() {
     try {
@@ -664,32 +696,149 @@ function parseDetectedConfigFormatOutput(output, kind) {
     }
     return 'toml';
 }
-const cachedHubPipelineCtorByImpl = {
-    ts: null,
-    engine: null
-};
-export async function getHubPipelineCtor() {
-    const impl = resolveImplForSubpath('conversion/hub/pipeline/hub-pipeline');
-    if (!cachedHubPipelineCtorByImpl[impl]) {
-        const mod = await importCoreDist('conversion/hub/pipeline/hub-pipeline', impl);
-        const Ctor = mod.HubPipeline;
-        if (typeof Ctor !== 'function') {
-            throw new Error('[llmswitch-bridge] HubPipeline constructor not available');
-        }
-        cachedHubPipelineCtorByImpl[impl] = Ctor;
+// ---------------------------------------------------------------------------
+// Native handle-mode HubPipeline entry points.
+// Server runtime stores opaque handles and calls the native engine directly.
+// ---------------------------------------------------------------------------
+export function createHubPipelineNative(config) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        throw new Error('[llmswitch-bridge] createHubPipelineNative requires a JSON object config');
     }
-    return cachedHubPipelineCtorByImpl[impl];
+    const createHubPipelineEngineJson = requireNativeHubPipelineFn('createHubPipelineEngineJson');
+    const result = createHubPipelineEngineJson(JSON.stringify(config));
+    let parsed;
+    try {
+        parsed = JSON.parse(result);
+    }
+    catch (error) {
+        throw new Error(`[llmswitch-bridge] createHubPipelineNative returned invalid payload: ${String(error)}`);
+    }
+    const handle = parsed?.handle;
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] createHubPipelineNative returned invalid handle');
+    }
+    return handle;
 }
-export async function getHubPipelineCtorForImpl(impl) {
-    if (!cachedHubPipelineCtorByImpl[impl]) {
-        const mod = await importCoreDist('conversion/hub/pipeline/hub-pipeline', impl);
-        const Ctor = mod.HubPipeline;
-        if (typeof Ctor !== 'function') {
-            throw new Error('[llmswitch-bridge] HubPipeline constructor not available');
-        }
-        cachedHubPipelineCtorByImpl[impl] = Ctor;
+export function executeHubPipelineNative(handle, request) {
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] executeHubPipelineNative requires non-empty handle');
     }
-    return cachedHubPipelineCtorByImpl[impl];
+    if (!request || typeof request !== 'object' || Array.isArray(request)) {
+        throw new Error('[llmswitch-bridge] executeHubPipelineNative requires JSON object request');
+    }
+    const hubPipelineExecuteJson = requireNativeHubPipelineFn('hubPipelineExecuteJson');
+    const raw = hubPipelineExecuteJson(handle, JSON.stringify(request));
+    try {
+        return JSON.parse(raw);
+    }
+    catch (error) {
+        throw new Error(`[llmswitch-bridge] executeHubPipelineNative returned invalid payload: ${String(error)}`);
+    }
+}
+export function updateHubPipelineVirtualRouterConfigNative(handle, config) {
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] updateHubPipelineVirtualRouterConfigNative requires non-empty handle');
+    }
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        throw new Error('[llmswitch-bridge] updateHubPipelineVirtualRouterConfigNative requires JSON object config');
+    }
+    const updateHubPipelineVirtualRouterConfigJson = requireNativeHubPipelineFn('updateHubPipelineVirtualRouterConfigJson');
+    updateHubPipelineVirtualRouterConfigJson(handle, JSON.stringify(config));
+}
+export function updateHubPipelineEngineDepsNative(handle, deps) {
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] updateHubPipelineEngineDepsNative requires non-empty handle');
+    }
+    if (!deps || typeof deps !== 'object' || Array.isArray(deps)) {
+        throw new Error('[llmswitch-bridge] updateHubPipelineEngineDepsNative requires JSON object deps');
+    }
+    const updateHubPipelineEngineDepsJson = requireNativeHubPipelineFn('updateHubPipelineEngineDepsJson');
+    updateHubPipelineEngineDepsJson(handle, JSON.stringify(deps));
+}
+export function routeHubPipelineVirtualRouterNative(handle, request, metadata) {
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] routeHubPipelineVirtualRouterNative requires non-empty handle');
+    }
+    if (!request || typeof request !== 'object' || Array.isArray(request)) {
+        throw new Error('[llmswitch-bridge] routeHubPipelineVirtualRouterNative requires JSON object request');
+    }
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        throw new Error('[llmswitch-bridge] routeHubPipelineVirtualRouterNative requires JSON object metadata');
+    }
+    const hubPipelineVirtualRouterRouteJson = requireNativeHubPipelineFn('hubPipelineVirtualRouterRouteJson');
+    const hostEffectsModule = getVirtualRouterRouteHostEffectsModule();
+    const createHostEffects = hostEffectsModule.createVirtualRouterRouteHostEffects;
+    const injectRuntimeMetadata = hostEffectsModule.injectVirtualRouterRuntimeMetadata;
+    if (typeof createHostEffects !== 'function') {
+        throw new Error('[llmswitch-bridge] createVirtualRouterRouteHostEffects not available');
+    }
+    if (typeof injectRuntimeMetadata !== 'function') {
+        throw new Error('[llmswitch-bridge] injectVirtualRouterRuntimeMetadata not available');
+    }
+    const routeHostEffects = createHostEffects({ request, metadata });
+    const nativeMetadata = injectRuntimeMetadata(metadata);
+    const raw = hubPipelineVirtualRouterRouteJson(handle, JSON.stringify(request), JSON.stringify(nativeMetadata));
+    try {
+        const parsed = JSON.parse(raw);
+        routeHostEffects.finalize(parsed, () => null);
+        return parsed;
+    }
+    catch (error) {
+        throw new Error(`[llmswitch-bridge] routeHubPipelineVirtualRouterNative returned invalid payload: ${String(error)}`);
+    }
+}
+export function diagnoseHubPipelineVirtualRouterNative(handle, request, metadata) {
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] diagnoseHubPipelineVirtualRouterNative requires non-empty handle');
+    }
+    if (!request || typeof request !== 'object' || Array.isArray(request)) {
+        throw new Error('[llmswitch-bridge] diagnoseHubPipelineVirtualRouterNative requires JSON object request');
+    }
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        throw new Error('[llmswitch-bridge] diagnoseHubPipelineVirtualRouterNative requires JSON object metadata');
+    }
+    const hubPipelineVirtualRouterDiagnoseRouteJson = requireNativeHubPipelineFn('hubPipelineVirtualRouterDiagnoseRouteJson');
+    const raw = hubPipelineVirtualRouterDiagnoseRouteJson(handle, JSON.stringify(request), JSON.stringify(metadata));
+    try {
+        return JSON.parse(raw);
+    }
+    catch (error) {
+        throw new Error(`[llmswitch-bridge] diagnoseHubPipelineVirtualRouterNative returned invalid payload: ${String(error)}`);
+    }
+}
+export function getHubPipelineVirtualRouterStatusNative(handle) {
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] getHubPipelineVirtualRouterStatusNative requires non-empty handle');
+    }
+    const hubPipelineVirtualRouterStatusJson = requireNativeHubPipelineFn('hubPipelineVirtualRouterStatusJson');
+    const raw = hubPipelineVirtualRouterStatusJson(handle);
+    try {
+        return JSON.parse(raw);
+    }
+    catch (error) {
+        throw new Error(`[llmswitch-bridge] getHubPipelineVirtualRouterStatusNative returned invalid payload: ${String(error)}`);
+    }
+}
+export function markHubPipelineVirtualRouterConcurrencyScopeBusyNative(handle, scopeKey) {
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] markHubPipelineVirtualRouterConcurrencyScopeBusyNative requires non-empty handle');
+    }
+    const hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson = requireNativeHubPipelineFn('hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson');
+    hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson(handle, String(scopeKey ?? ''));
+}
+export function markHubPipelineVirtualRouterConcurrencyScopeIdleNative(handle, scopeKey) {
+    if (typeof handle !== 'string' || !handle) {
+        throw new Error('[llmswitch-bridge] markHubPipelineVirtualRouterConcurrencyScopeIdleNative requires non-empty handle');
+    }
+    const hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson = requireNativeHubPipelineFn('hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson');
+    hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson(handle, String(scopeKey ?? ''));
+}
+export function disposeHubPipelineNative(handle) {
+    if (typeof handle !== 'string' || !handle) {
+        return;
+    }
+    const disposeHubPipelineEngineJson = requireNativeHubPipelineFn('disposeHubPipelineEngineJson');
+    disposeHubPipelineEngineJson(handle);
 }
 export function resolveBaseDir() {
     const env = String(process.env.ROUTECODEX_BASEDIR || process.env.RCC_BASEDIR || '').trim();
@@ -707,3 +856,4 @@ export function resolveBaseDir() {
     }
     return process.cwd();
 }
+//# sourceMappingURL=routing-integrations.js.map

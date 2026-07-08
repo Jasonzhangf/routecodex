@@ -32,15 +32,11 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integratio
 }));
 
 const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
-const { bootstrapVirtualRouterConfig, getHubPipelineCtor } = await import('../../../src/modules/llmswitch/bridge.js');
+const { bootstrapVirtualRouterConfig } = await import('../../../src/modules/llmswitch/bridge.js');
+const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../../../tests/helpers/native-hub-pipeline-test-wrapper.js');
 const { createRequestExecutor } = await import('../../../src/server/runtime/http-server/request-executor.js');
 const { StatsManager } = await import('../../../src/server/runtime/http-server/stats-manager.js');
 const { MetadataCenter } = await import('../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
-
-type HubPipelineCtor = new (config: any) => {
-  execute: (request: any) => Promise<any>;
-  dispose?: () => void;
-};
 
 type ProviderHandle = {
   runtimeKey: string;
@@ -187,7 +183,6 @@ async function runStoplessDualPortScenario(args: {
       default: [{ id: 'default-primary', mode: 'priority', targets: ['primary.gpt-test'] }]
     }
   } as any) as any;
-  const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
   const pipeline = new HubPipeline({
     virtualRouter: artifacts.config,
     policy: { mode: 'off' }

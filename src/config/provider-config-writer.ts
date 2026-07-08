@@ -2,7 +2,7 @@
 import type { ProviderConfigFormat } from './provider-config-codec.js';
 import { detectProviderConfigFormat } from './provider-config-codec.js';
 import { serializeTomlRecord } from './toml-basic.js';
-import { writeRouteCodexProviderConfigFileNativeSync } from '../modules/llmswitch/bridge.js';
+import { writeRouteCodexProviderConfigFileNativeSync } from '../modules/llmswitch/bridge/routing-integrations.js';
 
 type UnknownRecord = Record<string, unknown>;
 

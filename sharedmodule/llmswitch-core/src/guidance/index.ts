@@ -3,7 +3,7 @@
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from '../native/router-hotpath/native-router-hotpath-policy.js';
+} from '../native/router-hotpath/native-router-hotpath-loader.js';
 import {
   parseJson,
   parseString,

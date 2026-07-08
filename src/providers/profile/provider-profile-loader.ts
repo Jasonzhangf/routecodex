@@ -12,7 +12,7 @@ import type { ApiKeyEntry, ApiKeyAuthConfig } from './provider-profile.js';
 import {
   buildRouteCodexForwarderProfilesSync,
   buildRouteCodexProviderProfilesSync,
-} from '../../modules/llmswitch/bridge.js';
+} from '../../modules/llmswitch/bridge/routing-integrations.js';
 
 type UnknownRecord = Record<string, unknown>;
 

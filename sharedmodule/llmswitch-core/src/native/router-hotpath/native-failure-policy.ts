@@ -7,7 +7,7 @@
 
 import {
   failNativeRequired,
-} from './native-router-hotpath-policy.js';
+} from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBinding } from './native-router-hotpath-loader.js';
 
 type NativeBinding = Record<string, unknown>;

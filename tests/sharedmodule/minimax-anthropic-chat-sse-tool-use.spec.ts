@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import fs from 'node:fs';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
-import { convertProviderResponse } from '../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js';
+import { convertProviderResponse } from '../../src/modules/llmswitch/bridge/provider-response-converter-host.js';
 
 async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];

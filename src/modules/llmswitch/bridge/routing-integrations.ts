@@ -8,8 +8,8 @@ import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { resolveCorePackageDir } from '../core-loader.js';
-import { importCoreDist, requireCoreDist, resolveImplForSubpath } from './module-loader.js';
-import type { AnyRecord, LlmsImpl } from './module-loader.js';
+import { importCoreDist, requireCoreDist } from './module-loader.js';
+import type { AnyRecord } from './module-loader.js';
 
 type NativeHubPipelineOrchestrationSemantics = {
   createHubPipelineEngineJson?: (inputJson: string) => string;
@@ -17,10 +17,31 @@ type NativeHubPipelineOrchestrationSemantics = {
   hubPipelineExecuteJson?: (handle: string, requestJson: string) => string;
   updateHubPipelineEngineDepsJson?: (handle: string, depsJson: string) => void;
   updateHubPipelineVirtualRouterConfigJson?: (handle: string, configJson: string) => void;
+  hubPipelineVirtualRouterRouteJson?: (handle: string, requestJson: string, metadataJson: string) => string;
+  hubPipelineVirtualRouterDiagnoseRouteJson?: (handle: string, requestJson: string, metadataJson: string) => string;
+  hubPipelineVirtualRouterStatusJson?: (handle: string) => string;
+  hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson?: (handle: string, scopeKey: string) => void;
+  hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson?: (handle: string, scopeKey: string) => void;
+};
+
+type VirtualRouterRouteHostEffectsModule = {
+  createVirtualRouterRouteHostEffects?: (args: {
+    request: AnyRecord;
+    metadata: AnyRecord;
+  }) => {
+    finalize: (
+      result: { target: AnyRecord; decision: AnyRecord },
+      getStopMessageState: (metadata: AnyRecord) => unknown
+    ) => void;
+  };
+  injectVirtualRouterRuntimeMetadata?: (metadata: AnyRecord) => AnyRecord;
 };
 
 let cachedNativeHubPipelineOrchestrationSemantics:
   | NativeHubPipelineOrchestrationSemantics
+  | null = null;
+let cachedVirtualRouterRouteHostEffectsModule:
+  | VirtualRouterRouteHostEffectsModule
   | null = null;
 
 function getNativeHubPipelineOrchestrationSemantics(): NativeHubPipelineOrchestrationSemantics {
@@ -31,6 +52,14 @@ function getNativeHubPipelineOrchestrationSemantics(): NativeHubPipelineOrchestr
       );
   }
   return cachedNativeHubPipelineOrchestrationSemantics;
+}
+
+function getVirtualRouterRouteHostEffectsModule(): VirtualRouterRouteHostEffectsModule {
+  if (!cachedVirtualRouterRouteHostEffectsModule) {
+    cachedVirtualRouterRouteHostEffectsModule =
+      requireCoreDist<VirtualRouterRouteHostEffectsModule>('runtime/virtual-router-host-effects');
+  }
+  return cachedVirtualRouterRouteHostEffectsModule;
 }
 
 function requireNativeHubPipelineFn<T extends Function>(
@@ -895,48 +924,9 @@ function parseDetectedConfigFormatOutput(output: unknown, kind: string): 'toml' 
   return 'toml';
 }
 
-type HubPipelineModule = {
-  HubPipeline?: new (config: AnyRecord) => AnyRecord;
-};
-
-type HubPipelineCtorAny = new (config: AnyRecord) => AnyRecord;
-
-const cachedHubPipelineCtorByImpl: Record<LlmsImpl, HubPipelineCtorAny | null> = {
-  ts: null,
-  engine: null
-};
-
-export async function getHubPipelineCtor(): Promise<HubPipelineCtorAny> {
-  const impl = resolveImplForSubpath('conversion/hub/pipeline/hub-pipeline');
-  if (!cachedHubPipelineCtorByImpl[impl]) {
-    const mod = await importCoreDist<HubPipelineModule>('conversion/hub/pipeline/hub-pipeline', impl);
-    const Ctor = mod.HubPipeline;
-    if (typeof Ctor !== 'function') {
-      throw new Error('[llmswitch-bridge] HubPipeline constructor not available');
-    }
-    cachedHubPipelineCtorByImpl[impl] = Ctor;
-  }
-  return cachedHubPipelineCtorByImpl[impl]!;
-}
-
-export async function getHubPipelineCtorForImpl(impl: LlmsImpl): Promise<HubPipelineCtorAny> {
-  if (!cachedHubPipelineCtorByImpl[impl]) {
-    const mod = await importCoreDist<HubPipelineModule>('conversion/hub/pipeline/hub-pipeline', impl);
-    const Ctor = mod.HubPipeline;
-    if (typeof Ctor !== 'function') {
-      throw new Error('[llmswitch-bridge] HubPipeline constructor not available');
-    }
-    cachedHubPipelineCtorByImpl[impl] = Ctor;
-  }
-  return cachedHubPipelineCtorByImpl[impl]!;
-}
-
 // ---------------------------------------------------------------------------
 // Native handle-mode HubPipeline entry points.
-// Preferred for server runtime: server stores opaque handle, calls
-// executeHubPipelineNative / disposeHubPipelineNative, and never imports the
-// TS HubPipeline class. TS HubPipeline class is kept only for legacy callers
-// (getHubPipelineCtor / getHubPipelineCtorForImpl above).
+// Server runtime stores opaque handles and calls the native engine directly.
 // ---------------------------------------------------------------------------
 
 export function createHubPipelineNative(config: AnyRecord): string {
@@ -1002,6 +992,99 @@ export function updateHubPipelineEngineDepsNative(handle: string, deps: AnyRecor
     (handle: string, depsJson: string) => void
   >('updateHubPipelineEngineDepsJson');
   updateHubPipelineEngineDepsJson(handle, JSON.stringify(deps));
+}
+
+export function routeHubPipelineVirtualRouterNative(handle: string, request: AnyRecord, metadata: AnyRecord): AnyRecord {
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] routeHubPipelineVirtualRouterNative requires non-empty handle');
+  }
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new Error('[llmswitch-bridge] routeHubPipelineVirtualRouterNative requires JSON object request');
+  }
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new Error('[llmswitch-bridge] routeHubPipelineVirtualRouterNative requires JSON object metadata');
+  }
+  const hubPipelineVirtualRouterRouteJson = requireNativeHubPipelineFn<
+    (handle: string, requestJson: string, metadataJson: string) => string
+  >('hubPipelineVirtualRouterRouteJson');
+  const hostEffectsModule = getVirtualRouterRouteHostEffectsModule();
+  const createHostEffects = hostEffectsModule.createVirtualRouterRouteHostEffects;
+  const injectRuntimeMetadata = hostEffectsModule.injectVirtualRouterRuntimeMetadata;
+  if (typeof createHostEffects !== 'function') {
+    throw new Error('[llmswitch-bridge] createVirtualRouterRouteHostEffects not available');
+  }
+  if (typeof injectRuntimeMetadata !== 'function') {
+    throw new Error('[llmswitch-bridge] injectVirtualRouterRuntimeMetadata not available');
+  }
+  const routeHostEffects = createHostEffects({ request, metadata });
+  const nativeMetadata = injectRuntimeMetadata(metadata);
+  const raw = hubPipelineVirtualRouterRouteJson(handle, JSON.stringify(request), JSON.stringify(nativeMetadata));
+  try {
+    const parsed = JSON.parse(raw) as AnyRecord;
+    routeHostEffects.finalize(
+      parsed as { target: AnyRecord; decision: AnyRecord },
+      () => null
+    );
+    return parsed;
+  } catch (error) {
+    throw new Error(`[llmswitch-bridge] routeHubPipelineVirtualRouterNative returned invalid payload: ${String(error)}`);
+  }
+}
+
+export function diagnoseHubPipelineVirtualRouterNative(handle: string, request: AnyRecord, metadata: AnyRecord): AnyRecord {
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] diagnoseHubPipelineVirtualRouterNative requires non-empty handle');
+  }
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new Error('[llmswitch-bridge] diagnoseHubPipelineVirtualRouterNative requires JSON object request');
+  }
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new Error('[llmswitch-bridge] diagnoseHubPipelineVirtualRouterNative requires JSON object metadata');
+  }
+  const hubPipelineVirtualRouterDiagnoseRouteJson = requireNativeHubPipelineFn<
+    (handle: string, requestJson: string, metadataJson: string) => string
+  >('hubPipelineVirtualRouterDiagnoseRouteJson');
+  const raw = hubPipelineVirtualRouterDiagnoseRouteJson(handle, JSON.stringify(request), JSON.stringify(metadata));
+  try {
+    return JSON.parse(raw) as AnyRecord;
+  } catch (error) {
+    throw new Error(`[llmswitch-bridge] diagnoseHubPipelineVirtualRouterNative returned invalid payload: ${String(error)}`);
+  }
+}
+
+export function getHubPipelineVirtualRouterStatusNative(handle: string): AnyRecord {
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] getHubPipelineVirtualRouterStatusNative requires non-empty handle');
+  }
+  const hubPipelineVirtualRouterStatusJson = requireNativeHubPipelineFn<(handle: string) => string>(
+    'hubPipelineVirtualRouterStatusJson'
+  );
+  const raw = hubPipelineVirtualRouterStatusJson(handle);
+  try {
+    return JSON.parse(raw) as AnyRecord;
+  } catch (error) {
+    throw new Error(`[llmswitch-bridge] getHubPipelineVirtualRouterStatusNative returned invalid payload: ${String(error)}`);
+  }
+}
+
+export function markHubPipelineVirtualRouterConcurrencyScopeBusyNative(handle: string, scopeKey: string): void {
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] markHubPipelineVirtualRouterConcurrencyScopeBusyNative requires non-empty handle');
+  }
+  const hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson = requireNativeHubPipelineFn<
+    (handle: string, scopeKey: string) => void
+  >('hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson');
+  hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson(handle, String(scopeKey ?? ''));
+}
+
+export function markHubPipelineVirtualRouterConcurrencyScopeIdleNative(handle: string, scopeKey: string): void {
+  if (typeof handle !== 'string' || !handle) {
+    throw new Error('[llmswitch-bridge] markHubPipelineVirtualRouterConcurrencyScopeIdleNative requires non-empty handle');
+  }
+  const hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson = requireNativeHubPipelineFn<
+    (handle: string, scopeKey: string) => void
+  >('hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson');
+  hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson(handle, String(scopeKey ?? ''));
 }
 
 export function disposeHubPipelineNative(handle: string): void {

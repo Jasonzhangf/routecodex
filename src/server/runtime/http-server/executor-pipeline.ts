@@ -1,9 +1,11 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
-import type { HubPipeline } from './types.js';
+import type { HubPipelineExecutionResult, HubPipelineHandle } from './types.js';
 import { createSnapshotRecorder as bridgeCreateSnapshotRecorder } from '../../../modules/llmswitch/bridge.js';
 import { asRecord } from './provider-utils.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import { resolveEntryProtocolFromEndpointNative } from '../../../modules/llmswitch/bridge/native-exports.js';
+import { executeHubPipelineNative } from '../../../modules/llmswitch/bridge/routing-integrations.js';
+import { readHubPipelineNativeHandle } from './hub-pipeline-handle.js';
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 
@@ -47,12 +49,12 @@ export type HubPipelineResult = {
   metadata: Record<string, unknown>;
 };
 
-export function ensureHubPipeline(getHubPipeline: () => HubPipeline | null): HubPipeline {
+export function ensureHubPipeline(getHubPipeline: () => HubPipelineHandle | null): HubPipelineHandle {
   const pipeline = getHubPipeline();
-  if (!pipeline) {
+  if (!readHubPipelineNativeHandle(pipeline)) {
     throw new Error('Hub pipeline runtime is not initialized');
   }
-  return pipeline;
+  return pipeline as HubPipelineHandle;
 }
 
 function buildHubPipelineMetadata(
@@ -73,7 +75,7 @@ function buildHubPipelineMetadata(
 }
 
 export async function runHubPipeline(
-  hubPipeline: HubPipeline,
+  hubPipeline: HubPipelineHandle,
   input: PipelineExecutionInput,
   metadata: Record<string, unknown>
 ): Promise<HubPipelineResult> {
@@ -106,7 +108,14 @@ export async function runHubPipeline(
     metadata: pipelineMetadata,
     payload
   };
-  const result = await hubPipeline.execute(pipelineInput);
+  const handle = readHubPipelineNativeHandle(hubPipeline);
+  if (!handle) {
+    throw new Error('Hub pipeline runtime is not initialized');
+  }
+  const result = executeHubPipelineNative(
+    handle,
+    pipelineInput as unknown as Record<string, unknown>
+  ) as unknown as HubPipelineExecutionResult;
   if (!result.providerPayload || !result.target?.providerKey) {
     throw Object.assign(new Error('Virtual router did not produce a provider target'), {
       code: 'ERR_NO_PROVIDER_TARGET',

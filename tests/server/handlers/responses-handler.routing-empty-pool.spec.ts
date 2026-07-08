@@ -6,15 +6,8 @@ import { Readable } from 'node:stream';
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
 import { HubRequestExecutor } from '../../../src/server/runtime/http-server/request-executor.js';
 import { StatsManager } from '../../../src/server/runtime/http-server/stats-manager.js';
-import { bootstrapVirtualRouterConfig, getHubPipelineCtor } from '../../../src/modules/llmswitch/bridge.js';
-
-type HubPipelineCtor = new (config: any) => {
-  execute: (request: any) => Promise<any>;
-  getVirtualRouter: () => {
-    markConcurrencyScopeBusy: (scopeKey: string) => void;
-  };
-  dispose: () => void;
-};
+import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge.js';
+import { NativeHubPipelineTestWrapper as HubPipeline } from '../../../helpers/native-hub-pipeline-test-wrapper.js';
 
 async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
   const server = await new Promise<ReturnType<express.Express['listen']>>((resolve) => {
@@ -93,7 +86,6 @@ function buildAnthropicVirtualRouterConfig() {
 
 describe('responses handler virtual-router empty-pool guard', () => {
   it('retries HTTP /v1/responses when provider SSE stream terminates during bridge materialization', async () => {
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const providerCalls: string[] = [];
@@ -203,7 +195,6 @@ describe('responses handler virtual-router empty-pool guard', () => {
   });
 
   it('reroutes HTTP /v1/responses after primary provider 503 instead of retrying the same provider', async () => {
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const providerCalls: string[] = [];
@@ -418,7 +409,6 @@ describe('responses handler virtual-router empty-pool guard', () => {
   });
 
   it('rejects unsupported client stopMessage metadata at /v1/responses boundary', async () => {
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildAnthropicVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const providerPayloads: Array<Record<string, unknown>> = [];
@@ -513,7 +503,6 @@ describe('responses handler virtual-router empty-pool guard', () => {
   });
 
   it('rejects unsupported client excludedProviderKeys metadata at /v1/responses boundary', async () => {
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const app = express();
@@ -565,7 +554,6 @@ describe('responses handler virtual-router empty-pool guard', () => {
   });
 
   it('keeps default route non-empty under busy marks and surfaces downstream runtime resolution failure instead of empty-pool', async () => {
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     pipeline.getVirtualRouter().markConcurrencyScopeBusy('primary.key1.gpt-test');
@@ -630,7 +618,6 @@ describe('responses handler virtual-router empty-pool guard', () => {
   });
 
   it('normalizes chat image_url parts to responses input_image before provider wire send', async () => {
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const providerPayloads: Array<Record<string, unknown>> = [];

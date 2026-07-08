@@ -130,9 +130,7 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loa
     })
   }),
   importCoreDist: async (subpath: string) => {
-    if (subpath === 'conversion/hub/response/provider-response') {
-      return { convertProviderResponse: mockConvertProviderResponse };
-    }
+    void subpath;
     return {};
   },
   resolveImplForSubpath: () => 'ts',
@@ -149,9 +147,7 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loa
     })
   }),
   importCoreDist: async (subpath: string) => {
-    if (subpath === 'conversion/hub/response/provider-response') {
-      return { convertProviderResponse: mockConvertProviderResponse };
-    }
+    void subpath;
     return {};
   },
   resolveImplForSubpath: () => 'ts',

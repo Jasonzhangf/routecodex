@@ -558,7 +558,7 @@ describe('hub pipeline stage residue audit', () => {
   it('provider response mainline must invoke Rust HubPipeline total entry before TS residue stages', () => {
     const filePath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+      'src/modules/llmswitch/bridge/provider-response-converter-host.ts',
     );
     const source = fs.readFileSync(filePath, 'utf8');
 
@@ -608,7 +608,7 @@ describe('hub pipeline stage residue audit', () => {
   it('provider response TS shell must be classified as native IO shell only', () => {
     const filePath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+      'src/modules/llmswitch/bridge/provider-response-converter-host.ts',
     );
     const manifestPath = path.join(process.cwd(), 'docs/loops/rustification/minimal-ts-surface.json');
     const source = fs.readFileSync(filePath, 'utf8');
@@ -620,7 +620,7 @@ describe('hub pipeline stage residue audit', () => {
         forbiddenSemantics?: string[];
       }>;
     };
-    const manifestEntry = manifest.entries?.find((entry) => entry.path === 'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
+    const manifestEntry = manifest.entries?.find((entry) => entry.path === 'src/modules/llmswitch/bridge/provider-response-converter-host.ts');
     const findings = collectMatches(source, [
       { label: 'ts-local-provider-response-plan-type-owner', pattern: /interface\s+ProviderResponsePlan\b|type\s+ProviderResponsePlan\b/ },
       { label: 'ts-local-response-shape-detector', pattern: /function\s+(?:detect|is|has)[A-Za-z0-9_]*ProviderResponse[A-Za-z0-9_]*\s*\(/ },
@@ -632,17 +632,8 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts-local-fallback-owner', pattern: /\bfallback\b|\bcompat\b|best[- ]?effort/i },
     ]);
 
-    expect(manifestEntry).toEqual(expect.objectContaining({
-      classification: 'ts_io_shell_ok',
-      ownerFeature: 'hub.response_provider_sse_materialization',
-    }));
-    expect(manifestEntry?.forbiddenSemantics).toEqual(expect.arrayContaining([
-      'provider response parsing',
-      'response governance',
-      'client projection',
-      'effect planning',
-      'fallback',
-    ]));
+    expect(manifest.entries ?? []).toEqual([]);
+    expect(manifestEntry).toBeUndefined();
     expect(source).toContain('executeHubPipelineWithNative');
     expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
     expect(source).toContain('materializeProviderResponseSsePayloadWithNative');
@@ -656,7 +647,7 @@ describe('hub pipeline stage residue audit', () => {
   it('provider response SSE marker materialization must stay Rust-owned', () => {
     const filePath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+      'src/modules/llmswitch/bridge/provider-response-converter-host.ts',
     );
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
@@ -1238,7 +1229,7 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(fs.existsSync(retiredPath)).toBe(false);
     expect(staleImports).toEqual([]);
-    expect(fs.readFileSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/src/servertool/types.ts'), 'utf8')).toContain(
+    expect(fs.readFileSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/src/servertool/types.d.ts'), 'utf8')).toContain(
       'export interface StageRecorder',
     );
   });
@@ -1254,7 +1245,7 @@ describe('hub pipeline stage residue audit', () => {
 
   it('hub json type surface must stay type-only without runtime helper exports', () => {
     const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts'),
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/json.d.ts'),
       'utf8',
     );
 
@@ -1284,53 +1275,16 @@ describe('hub pipeline stage residue audit', () => {
     ).toBe(false);
   });
 
-  it('stats center shell must not retain zero-consumer bucket or option type shells', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/telemetry/stats-center.ts'),
-      'utf8',
-    );
-
-    const findings = collectMatches(source, [
-      { label: 'declares RouterStatsBucket shell', pattern: /(?:export\s+)?interface\s+RouterStatsBucket\b/ },
-      { label: 'declares RouterStatsSnapshot shell', pattern: /(?:export\s+)?interface\s+RouterStatsSnapshot\b/ },
-      { label: 'declares ProviderStatsBucket shell', pattern: /(?:export\s+)?interface\s+ProviderStatsBucket\b/ },
-      { label: 'declares ProviderStatsSnapshot shell', pattern: /(?:export\s+)?interface\s+ProviderStatsSnapshot\b/ },
-      { label: 'declares StatsCenterOptions shell', pattern: /(?:export\s+)?interface\s+StatsCenterOptions\b/ },
-    ]);
-
-    expect(findings).toEqual([]);
+  it('stats center shell must stay physically deleted', () => {
+    expect(
+      fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/telemetry/stats-center.ts')),
+    ).toBe(false);
   });
 
   it('runtime user data paths shell must not export legacy read-only helpers', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/runtime/user-data-paths.ts'),
-      'utf8',
-    );
-
-    const findings = collectMatches(source, [
-      {
-        label: 'exports legacy RouteCodex user dir helper',
-        pattern: /export\s+function\s+resolveLegacyRouteCodexUserDir\b/,
-      },
-      {
-        label: 'exports legacy RouteCodex path helper',
-        pattern: /export\s+function\s+resolveLegacyRouteCodexPath\b/,
-      },
-      {
-        label: 'exports redundant read-path helper',
-        pattern: /export\s+function\s+resolveRccPathForRead\b/,
-      },
-      {
-        label: 'exports unused snapshot dir helper',
-        pattern: /export\s+function\s+resolveRccSnapshotsDir\b/,
-      },
-      {
-        label: 'exports unused snapshot dir env helper',
-        pattern: /export\s+function\s+resolveRccSnapshotsDirFromEnv\b/,
-      },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(
+      fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/runtime/user-data-paths.ts')),
+    ).toBe(false);
   });
 
   it('snapshot stage recorder must not restore TS hotpath trimming semantics', () => {
@@ -1994,8 +1948,7 @@ describe('hub pipeline stage residue audit', () => {
     );
     const checkedFiles = [
       'hub-pipeline-execute-request-stage.ts',
-      'hub-pipeline.ts',
-    ];
+          ];
     const findings: string[] = [];
     for (const relativePath of checkedFiles) {
       const source = fs.readFileSync(path.join(pipelineRoot, relativePath), 'utf8');
@@ -3764,25 +3717,12 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('hub stage timing must not restore test-only measure wrapper API', () => {
-    const timingSource = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts'),
-      'utf8',
-    );
-    const topSummaryTest = fs.readFileSync(
-      path.join(process.cwd(), 'tests/sharedmodule/hub-stage-timing-top-summary.spec.ts'),
-      'utf8',
-    );
-    const findings = collectMatches(timingSource, [
-      { label: 'exports test-only measureHubStage wrapper', pattern: /export\s+async\s+function\s+measureHubStage\b/ },
-      { label: 'keeps private measure execution template', pattern: /function\s+measureHubStageExecution\b/ },
-    ]);
-
-    if (/\bmeasureHubStage\b/.test(topSummaryTest)) {
-      findings.push('top summary test consumes measureHubStage wrapper');
-    }
-
-    expect(findings).toEqual([]);
-    expect(timingSource).toContain('feature_id: hub.stage_timing_observation');
+    expect(
+      fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts')),
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(process.cwd(), 'tests/sharedmodule/hub-stage-timing-top-summary.spec.ts')),
+    ).toBe(false);
   });
 
   it('active source and tests must not import removed session identifier wrapper', () => {
@@ -4098,46 +4038,44 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('HubPipeline runtime ingress hooks must not swallow native lifecycle failures', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'keeps non-blocking HubPipeline lifecycle logger', pattern: /logHubPipelineNonBlockingError|failed \(non-blocking\)/ },
+    const deletedHubPipelinePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+      'hub-pipeline' + '.ts',
+    );
+    const runtimeSetupSource = fs.readFileSync(
+      path.join(process.cwd(), 'src/server/runtime/http-server/http-server-runtime-setup.ts'),
+      'utf8',
+    );
+    const bridgeSource = fs.readFileSync(
+      path.join(process.cwd(), 'src/modules/llmswitch/bridge/routing-integrations.ts'),
+      'utf8',
+    );
+    const findings = collectMatches(`${runtimeSetupSource}\n${bridgeSource}`, [
       { label: 'swallows native runtime ingress unregister failure', pattern: /catch\s*\([^)]*\)\s*\{[\s\S]*?unregisterProviderRuntimeIngress/ },
       { label: 'keeps deleted provider runtime ingress dispose marker', pattern: /dispose\.provider-runtime-ingress\.unregister/ },
     ]);
 
+    expect(fs.existsSync(deletedHubPipelinePath)).toBe(false);
+    expect(runtimeSetupSource).toContain('createHubPipelineNative');
+    expect(runtimeSetupSource).toContain('disposeHubPipelineNative');
+    expect(bridgeSource).toContain('disposeHubPipelineEngineJson');
     expect(findings).toEqual([]);
   });
 
   it('HubPipeline deleted type shell must not be re-exported or restored', () => {
+    const deletedHubPipelinePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+      'hub-pipeline' + '.ts',
+    );
     const retiredTypesPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts',
     );
-    const barrelSource = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts'),
-      'utf8',
-    );
-    const forbidden = [
-      'HubPolicyMode',
-      'HubPolicyConfig',
-      'HubShadowCompareRequestConfig',
-      'HubToolSurfaceMode',
-      'HubToolSurfaceConfig',
-      'HubPipelineRequestMetadata',
-    ];
-    const findings: string[] = [];
-    const exportBlock = barrelSource.match(/export type\s*\{[\s\S]*?\}\s*from\s*["']\.\/hub-pipeline-types\.js["'];/)?.[0] ?? '';
 
-    for (const name of forbidden) {
-      if (exportBlock.includes(name)) {
-        findings.push(`barrel re-exports nested type ${name}`);
-      }
-    }
-
+    expect(fs.existsSync(deletedHubPipelinePath)).toBe(false);
     expect(fs.existsSync(retiredTypesPath)).toBe(false);
-    expect(findings).toEqual([]);
-    expect(barrelSource).not.toContain('./hub-pipeline-types.js');
   });
 
   it('HubPipeline compat types must not restore retired profile/mapping type shells', () => {
@@ -4157,7 +4095,7 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('ChatEnvelope type surface must not export zero-consumer nested semantic shells', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts');
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const forbidden = [
       'ChatRole',
@@ -4195,7 +4133,7 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('ServerTool type surface must not restore zero-consumer nested execution shells', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/types.ts');
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/types.d.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const forbidden = [
       'TriggerMode',
@@ -4219,7 +4157,7 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('StandardizedRequest type surface must not export zero-consumer nested field shells', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts');
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const forbidden = [
       'ToolCall',
@@ -4257,7 +4195,7 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('provider response may only invoke native session usage plan without restoring TS usage semantics', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
+    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-converter-host.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'restores retired session token estimator export', pattern: /estimateSessionBoundTokens/ },
@@ -4652,7 +4590,6 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.js',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.d.ts',
-      'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.d.ts',
@@ -4670,7 +4607,7 @@ describe('hub pipeline stage residue audit', () => {
   it('responses conversation store scope isolation keys must be native-owned', () => {
     const repoRoot = process.cwd();
     const storeSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts'),
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.ts'),
       'utf8'
     );
 
@@ -4685,7 +4622,7 @@ describe('hub pipeline stage residue audit', () => {
   it('responses conversation store TS surface must stay a native-plan IO shell', () => {
     const repoRoot = process.cwd();
     const storeSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts'),
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.ts'),
       'utf8'
     );
 
@@ -4847,15 +4784,29 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('llmswitch-core src must not keep side-by-side TS emit artifacts', () => {
+    const allowedGeneratedDeclarations = new Set([
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/json.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts',
+      'sharedmodule/llmswitch-core/src/servertool/types.d.ts',
+    ]);
     const generatedArtifacts = walkFiles(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
       ['.js', '.d.ts', '.js.map'],
-    ).map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
+    )
+      .map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'))
+      .filter((relativePath) => !allowedGeneratedDeclarations.has(relativePath));
 
     expect(generatedArtifacts.sort()).toEqual([]);
   });
 
   it('Hub and Virtual Router source truth dirs must not keep side-by-side TS emit artifacts', () => {
+    const allowedGeneratedDeclarations = new Set([
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/json.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts',
+    ]);
     const artifactRoots = [
       'sharedmodule/llmswitch-core/src/conversion/hub',
       [
@@ -4869,7 +4820,10 @@ describe('hub pipeline stage residue audit', () => {
 
     for (const relativeRoot of artifactRoots) {
       for (const fullPath of walkFiles(path.join(process.cwd(), relativeRoot), ['.js', '.d.ts', '.js.map'])) {
-        generatedArtifacts.push(path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
+        const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
+        if (!allowedGeneratedDeclarations.has(relativePath)) {
+          generatedArtifacts.push(relativePath);
+        }
       }
     }
 
@@ -4877,10 +4831,15 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool source truth dir must not keep side-by-side TS emit artifacts', () => {
+    const allowedGeneratedDeclarations = new Set([
+      'sharedmodule/llmswitch-core/src/servertool/types.d.ts',
+    ]);
     const generatedArtifacts = walkFiles(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool'),
       ['.js', '.d.ts', '.js.map'],
-    ).map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
+    )
+      .map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'))
+      .filter((relativePath) => !allowedGeneratedDeclarations.has(relativePath));
 
     expect(generatedArtifacts.sort()).toEqual([]);
   });
@@ -5013,7 +4972,7 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool response SSE projection must use post-governance client semantic truth', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
+    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-converter-host.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'uses stale native streamEffect payload after servertool governance', pattern: /streamEffect\.payload/ },
@@ -5058,22 +5017,29 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('hub pipeline request providerProtocol selection must stay native-owned', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'calls stale request providerProtocol resolver before route selection', pattern: /resolveHubPipelineRequestProviderProtocolWithNative/ },
-      { label: 'selects providerProtocol from runtimeControl in TS', pattern: /runtimeControl\?\.[\s\n]*providerProtocol/ },
-      { label: 'fallbacks providerProtocol from metadata in TS', pattern: /metadata\.providerProtocol[\s\S]{0,80}\?\?/ },
-      { label: 'throws providerProtocol missing from TS selector', pattern: /HubPipeline requires metadata center runtime_control\.providerProtocol/ },
-    ]);
+    const deletedHubPipelinePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+      'hub-pipeline' + '.ts',
+    );
+    const nativeWrapperSource = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+      ),
+      'utf8',
+    );
 
-    expect(source).toContain('buildHubPipelineMaterializedRequestPlanWithNative');
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(deletedHubPipelinePath)).toBe(false);
+    expect(nativeWrapperSource).toContain('buildHubPipelineMaterializedRequestPlanWithNative');
   });
 
   it('hub pipeline materialized request control plan must stay native-owned', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
+    const deletedHubPipelinePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
+      'hub-pipeline' + '.ts',
+    );
     const nativeWrapperPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
@@ -5084,19 +5050,10 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
     );
     const requiredExportsSource = fs.readFileSync(requiredExportsPath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'TS owns hubEntry mode alias decision', pattern: /__hubEntry|chat-process|chatprocess/ },
-      { label: 'TS owns hub policy override extraction', pattern: /__hubPolicyOverride/ },
-      { label: 'TS owns hub shadow compare extraction', pattern: /__hubShadowCompare/ },
-      { label: 'TS owns hub snapshot disable extraction', pattern: /__disableHubSnapshots/ },
-      { label: 'TS owns direction normalization', pattern: /direction:\s*metadataRecord\.direction|direction:\s*args\.metadata\.direction|metadataRecord\.direction\s*===\s*["']response["']/ },
-      { label: 'TS owns stage normalization', pattern: /stage:\s*metadataRecord\.stage|stage:\s*args\.metadata\.stage|metadataRecord\.stage\s*===\s*["']outbound["']/ },
-      { label: 'TS owns processMode materialization', pattern: /processMode:\s*["']chat["']/ },
-    ]);
 
+    expect(fs.existsSync(deletedHubPipelinePath)).toBe(false);
     expect(nativeWrapperSource).toContain('buildHubPipelineMaterializedRequestPlanWithNative');
     expect(requiredExportsSource).toContain('buildHubPipelineMaterializedRequestPlanJson');
-    expect(findings).toEqual([]);
   });
 
   it('provider response orchestration must not grow duplicate V2 owner', () => {
@@ -5119,7 +5076,7 @@ describe('hub pipeline stage residue audit', () => {
   it('virtual router contracts must stay type-only bridge surface', () => {
     const contractsPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts',
     );
     const sourceRoots = [
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
@@ -5140,7 +5097,7 @@ describe('hub pipeline stage residue audit', () => {
         if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
           continue;
         }
-        if (relativePath === 'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts') {
+        if (relativePath === 'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts') {
           continue;
         }
         const source = fs.readFileSync(fullPath, 'utf8');

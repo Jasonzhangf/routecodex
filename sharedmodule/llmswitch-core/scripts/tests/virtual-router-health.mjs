@@ -11,27 +11,20 @@ async function importModule(relativePath) {
 }
 
 let reportProviderErrorToRouterPolicyRef;
-let setVirtualRouterPolicyRuntimeRouterHooksRef;
 let VirtualRouterErrorRef;
 
 async function main() {
-  const { VirtualRouterEngine } = await importModule('router/virtual-router/engine.js');
+  const { VirtualRouterEngine } = await importModule('native/router-hotpath/native-virtual-router-runtime.js');
   const {
     reportProviderErrorToRouterPolicy,
-    setVirtualRouterPolicyRuntimeRouterHooks
-  } = await importModule('router/virtual-router/provider-runtime-ingress.js');
-  const { VirtualRouterError } = await importModule('native/router-hotpath/native-router-hotpath-policy.js');
+  } = await importModule('native/router-hotpath/native-provider-runtime-ingress.js');
+  const { VirtualRouterError } = await importModule('native/router-hotpath/native-router-hotpath-loader.js');
   reportProviderErrorToRouterPolicyRef = reportProviderErrorToRouterPolicy;
-  setVirtualRouterPolicyRuntimeRouterHooksRef = setVirtualRouterPolicyRuntimeRouterHooks;
   VirtualRouterErrorRef = VirtualRouterError;
 
   const engine = new VirtualRouterEngine();
   engine.initialize(buildTestConfig());
-  setVirtualRouterPolicyRuntimeRouterHooksRef(engine, {
-    handleProviderError: (event) => {
-      engine.handleProviderError(event);
-    }
-  });
+  engine.registerProviderRuntimeIngress();
 
   const request = buildRequest();
   const metadata = buildMetadata();
@@ -147,10 +140,21 @@ function buildRequest() {
 function buildMetadata() {
   return {
     requestId: 'req_health_demo',
+    sessionId: 'req_health_demo',
     entryEndpoint: '/v1/chat/completions',
     processMode: 'chat',
     stream: false,
-    direction: 'request'
+    direction: 'request',
+    metadataCenterSnapshot: {
+      requestId: 'req_health_demo',
+      sessionId: 'req_health_demo',
+      runtimeControl: {
+        entryEndpoint: '/v1/chat/completions',
+        processMode: 'chat',
+        stream: false,
+        direction: 'request'
+      }
+    }
   };
 }
 

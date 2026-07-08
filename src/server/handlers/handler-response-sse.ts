@@ -21,6 +21,7 @@ import { logPipelineStage } from '../utils/stage-logger.js';
 import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
+import { normalizeUsage, type UsageMetrics } from '../runtime/http-server/executor/usage-aggregator.js';
 import { buildSseErrorEventFrame } from '../utils/http-error-mapper.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
@@ -121,6 +122,43 @@ function parseClientSseProjectionFrame(frame: string): {
     eventName: eventLine?.slice('event:'.length).trim() || undefined,
     data: parsed as Record<string, unknown>,
   };
+}
+
+function readSseFrameUsage(parsed: { eventName?: string; data: Record<string, unknown> } | undefined): {
+  usage?: UsageMetrics;
+  finishReason?: string;
+} {
+  if (!parsed) {
+    return {};
+  }
+  const data = parsed.data;
+  const response = data.response && typeof data.response === 'object' && !Array.isArray(data.response)
+    ? data.response as Record<string, unknown>
+    : undefined;
+  const message = data.message && typeof data.message === 'object' && !Array.isArray(data.message)
+    ? data.message as Record<string, unknown>
+    : undefined;
+  const delta = data.delta && typeof data.delta === 'object' && !Array.isArray(data.delta)
+    ? data.delta as Record<string, unknown>
+    : undefined;
+  const sourceProtocol =
+    parsed.eventName?.startsWith('message_') || String(data.type ?? '').startsWith('message_')
+      ? 'anthropic'
+      : parsed.eventName?.startsWith('response.') || String(data.type ?? '').startsWith('response.')
+        ? 'openai-responses'
+        : undefined;
+  const usage = normalizeUsage(response?.usage ?? data.usage ?? message?.usage, { sourceProtocol });
+  const finishReasonRaw =
+    delta?.stop_reason
+    ?? data.stop_reason
+    ?? response?.finish_reason
+    ?? response?.finishReason
+    ?? data.finish_reason
+    ?? data.finishReason;
+  const finishReason = typeof finishReasonRaw === 'string' && finishReasonRaw.trim()
+    ? finishReasonRaw.trim()
+    : undefined;
+  return { usage, finishReason };
 }
 
 function shouldProjectClientSseFrame(eventName: string | undefined): boolean {
@@ -676,8 +714,19 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     });
   };
 
+  let sseFinishReason: string | undefined;
   const writeProjectedClientSseFrame = (frame: string) => {
     const parsed = parseClientSseProjectionFrame(frame);
+    const usageFrame = readSseFrameUsage(parsed);
+    if (usageFrame.usage && result.usageLogInfo) {
+      result.usageLogInfo.usage = usageFrame.usage as unknown as Record<string, unknown>;
+    }
+    if (usageFrame.finishReason) {
+      sseFinishReason = usageFrame.finishReason;
+      if (result.usageLogInfo) {
+        result.usageLogInfo.finishReason = usageFrame.finishReason;
+      }
+    }
     if (
       !parsed
       || !isResponsesSseEndpoint(entryEndpoint)
@@ -792,7 +841,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     flushPendingSseFrames(true);
     clearTimers();
     recordSseTransportStreamEnd(requestLabel, {
-      finishReason: undefined,
+      finishReason: sseFinishReason,
     });
     ended = true;
     if (!res.writableEnded && !res.destroyed) {

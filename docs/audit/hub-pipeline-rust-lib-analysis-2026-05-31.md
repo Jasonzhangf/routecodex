@@ -295,7 +295,7 @@ cargo test -p router-hotpath-napi servertool
 cd sharedmodule/llmswitch-core
 node scripts/tests/coverage-hub-req-inbound-format-parse.mjs
 # retired 2026-06-09: coverage-hub-req-inbound-semantic-lift.mjs targeted deleted TS stage dist owner; req_inbound semantic lift is now covered by Rust tests and Hub residue gates.
-node scripts/tests/coverage-hub-req-process-route-select.mjs
+node scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs
 node scripts/tests/coverage-hub-req-outbound-format-build.mjs
 node scripts/tests/coverage-hub-resp-inbound-format-parse.mjs
 node scripts/tests/coverage-hub-resp-process-stage2-finalize.mjs

@@ -11,10 +11,9 @@ import {
 } from '../../../config/user-config-loader.js';
 import {
   bootstrapVirtualRouterConfig,
-  getHubPipelineCtor,
   resolvePrimaryRouteCodexRoutingPolicyGroupSync
-} from '../../../modules/llmswitch/bridge.js';
-import type { HubPipeline, HubPipelineCtor, VirtualRouterArtifacts } from './types.js';
+} from '../../../modules/llmswitch/bridge/routing-integrations.js';
+import type { VirtualRouterArtifacts } from './types.js';
 import { resolveProviderIdentity } from './provider-utils.js';
 import { initializeRouteErrorHub as initializeRouteErrorHubImpl } from '../../../error-handling/route-error-hub.js';
 import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
@@ -403,54 +402,6 @@ export function isSafeSecretReference(_server: any, value: string): boolean {
 export async function bootstrapVirtualRouter(_server: any, input: UnknownObject): Promise<VirtualRouterArtifacts> {
   const artifacts = (await bootstrapVirtualRouterConfig(input as Record<string, unknown>)) as unknown as VirtualRouterArtifacts;
   return artifacts;
-}
-
-export async function ensureHubPipelineCtor(server: any): Promise<HubPipelineCtor> {
-  if (server.hubPipelineCtor) {
-    return server.hubPipelineCtor;
-  }
-  const ctorFactory = await getHubPipelineCtor();
-  server.hubPipelineCtor = ctorFactory as unknown as HubPipelineCtor;
-  return server.hubPipelineCtor;
-}
-
-export async function ensureHubPipelineEngineShadow(server: any): Promise<HubPipeline> {
-  if (server.hubPipelineEngineShadow) {
-    return server.hubPipelineEngineShadow;
-  }
-  if (!server.hubPipelineConfigForShadow) {
-    throw new Error('Hub pipeline shadow config is not initialized');
-  }
-
-  const baseConfig = server.hubPipelineConfigForShadow as unknown as Record<string, unknown>;
-  const shadowConfig: Record<string, unknown> = { ...baseConfig };
-
-  const routingStateStore = baseConfig.routingStateStore as
-    | { loadSync?: (key: string) => unknown | null; saveAsync?: (key: string, state: unknown | null) => void }
-    | undefined;
-  if (routingStateStore && typeof routingStateStore.loadSync === 'function') {
-    shadowConfig.routingStateStore = {
-      loadSync: routingStateStore.loadSync.bind(routingStateStore),
-      saveAsync: () => {}
-    };
-  }
-
-  const bridge = (await import('../../../modules/llmswitch/bridge.js')) as {
-    getHubPipelineCtorForImpl?: (impl: 'engine') => Promise<unknown>;
-  };
-  const getCtor = bridge.getHubPipelineCtorForImpl;
-  if (typeof getCtor !== 'function') {
-    throw new Error('llmswitch bridge does not expose getHubPipelineCtorForImpl');
-  }
-  const ctorFactory = await getCtor('engine');
-  const hubCtor = ctorFactory as unknown as HubPipelineCtor;
-  if (!('virtualRouter' in shadowConfig)) {
-    throw new Error('HubPipeline shadow config missing virtualRouter');
-  }
-  server.hubPipelineEngineShadow = new hubCtor(
-    shadowConfig as unknown as { virtualRouter: unknown; [key: string]: unknown }
-  ) as unknown as HubPipeline;
-  return server.hubPipelineEngineShadow;
 }
 
 export function isPipelineReady(server: any): boolean {

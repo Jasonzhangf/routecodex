@@ -10,7 +10,7 @@ import {
   materializeRouteCodexUserConfigFromManifestSync,
   normalizeRouteCodexV2RuntimeSourceSync,
   resolvePrimaryRouteCodexRoutingPolicyGroupSync
-} from '../modules/llmswitch/bridge.js';
+} from '../modules/llmswitch/bridge/routing-integrations.js';
 
 export type UnknownRecord = Record<string, unknown>;
 export type VirtualRouterInput = UnknownRecord;

@@ -1,10 +1,11 @@
 /**
  * Runtime Integrations Bridge
  *
- * Snapshot hooks, responses conversation helpers, SSE converter, and
+ * Snapshot hooks, responses conversation helpers, native SSE runtime, and
  * provider runtime ingress hooks.
  */
 import { importCoreDist } from "./module-loader.js";
+import { captureResponsesRequestContext, recordResponsesResponse, resumeResponsesConversation as resumeResponsesConversationHost, lookupResponsesContinuationByResponseId as lookupResponsesContinuationByResponseIdHost, resumeLatestResponsesContinuationByScope as resumeLatestResponsesContinuationByScopeHost, materializeLatestResponsesContinuationByScope as materializeLatestResponsesContinuationByScopeHost, rebindResponsesConversationRequestId as rebindResponsesConversationRequestIdHost, clearResponsesConversationByRequestId as clearResponsesConversationByRequestIdHost, finalizeResponsesConversationRequestRetention as finalizeResponsesConversationRequestRetentionHost, clearAllResponsesConversationState as clearAllResponsesConversationStateHost, resetResponsesConversationStateForRestartSimulation as resetResponsesConversationStateForRestartSimulationHost, clearUnresolvedResponsesConversationRequests as clearUnresolvedResponsesConversationRequestsHost, } from "./responses-conversation-store-host.js";
 let cachedSnapshotHooksModule = null;
 async function getSnapshotHooksModule() {
     if (!cachedSnapshotHooksModule) {
@@ -33,197 +34,50 @@ export async function writeSnapshotViaHooks(channelOrOptions, payload) {
     }
     await writer(options);
 }
-function readGlobalResponsesConversationStore() {
-    const store = globalThis
-        .__rccResponsesConversationStore;
-    return store && typeof store === "object" && !Array.isArray(store)
-        ? store
-        : null;
-}
-let cachedResponsesConversationModule = null;
-async function getResponsesConversationModule() {
-    if (!cachedResponsesConversationModule) {
-        cachedResponsesConversationModule =
-            await importCoreDist("conversion/shared/responses-conversation-store");
-    }
-    return cachedResponsesConversationModule;
-}
 export async function captureResponsesRequestContextForRequest(args) {
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.captureRequestContext === "function") {
-        globalStore.captureRequestContext(args);
-        return;
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.captureResponsesRequestContext;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] captureResponsesRequestContext not available");
-    }
-    fn(args);
+    captureResponsesRequestContext(args);
 }
 export async function recordResponsesResponseForRequest(args) {
-    const globalStore = readGlobalResponsesConversationStore();
-    const fn = typeof globalStore?.recordResponse === "function"
-        ? globalStore.recordResponse.bind(globalStore)
-        : () => undefined;
-    const mod = typeof globalStore?.recordResponse === "function"
-        ? null
-        : await getResponsesConversationModule();
-    const resolvedFn = typeof globalStore?.recordResponse === "function"
-        ? fn
-        : mod?.recordResponsesResponse;
-    if (typeof resolvedFn !== "function") {
-        throw new Error("[llmswitch-bridge] recordResponsesResponse not available");
-    }
-    resolvedFn(args);
+    recordResponsesResponse(args);
 }
 export async function resumeResponsesConversation(responseId, submitPayload, options) {
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.resumeConversation === "function") {
-        return await globalStore.resumeConversation(responseId, submitPayload, options);
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.resumeResponsesConversation;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] resumeResponsesConversation not available");
-    }
-    return await fn(responseId, submitPayload, options);
+    return resumeResponsesConversationHost(responseId, submitPayload, options);
 }
 export async function lookupResponsesContinuationByResponseId(responseId, options) {
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.lookupContinuationByResponseId === 'function') {
-        return globalStore.lookupContinuationByResponseId(responseId, options);
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.lookupResponsesContinuationByResponseId;
-    if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] lookupResponsesContinuationByResponseId not available');
-    }
-    return fn(responseId, options);
+    return lookupResponsesContinuationByResponseIdHost(responseId, options);
 }
 export async function rebindResponsesConversationRequestId(oldId, newId) {
     if (!oldId || !newId || oldId === newId) {
         return;
     }
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.rebindRequestId === "function") {
-        globalStore.rebindRequestId(oldId, newId);
-        return;
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.rebindResponsesConversationRequestId;
-    if (typeof fn === "function") {
-        fn(oldId, newId);
-    }
+    rebindResponsesConversationRequestIdHost(oldId, newId);
 }
 export async function clearResponsesConversationByRequestId(requestId) {
     if (!requestId) {
         return;
     }
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.clearRequest === "function") {
-        globalStore.clearRequest(requestId);
-        return;
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.clearResponsesConversationByRequestId;
-    if (typeof fn === "function") {
-        fn(requestId);
-    }
+    clearResponsesConversationByRequestIdHost(requestId);
 }
 export async function finalizeResponsesConversationRequestRetention(requestId, options) {
     if (!requestId) {
         return;
     }
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.finalizeResponsesConversationRequestRetention ===
-        "function") {
-        globalStore.finalizeResponsesConversationRequestRetention(requestId, options);
-        return;
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.finalizeResponsesConversationRequestRetention;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] finalizeResponsesConversationRequestRetention not available");
-    }
-    fn(requestId, options);
+    finalizeResponsesConversationRequestRetentionHost(requestId, options);
 }
 export async function resumeLatestResponsesContinuationByScope(args) {
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.resumeLatestContinuationByScope === "function") {
-        return globalStore.resumeLatestContinuationByScope(args);
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.resumeLatestResponsesContinuationByScope;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] resumeLatestResponsesContinuationByScope not available");
-    }
-    return fn(args);
+    return resumeLatestResponsesContinuationByScopeHost(args);
 }
 export async function materializeLatestResponsesContinuationByScope(args) {
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.materializeLatestContinuationByScope === "function") {
-        return globalStore.materializeLatestContinuationByScope(args);
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.materializeLatestResponsesContinuationByScope;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] materializeLatestResponsesContinuationByScope not available");
-    }
-    return fn(args);
+    return materializeLatestResponsesContinuationByScopeHost(args);
 }
 export async function clearAllResponsesConversationState() {
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.clearAll === "function") {
-        globalStore.clearAll();
-        return;
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.clearAllResponsesConversationState;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] clearAllResponsesConversationState not available");
-    }
-    fn();
+    clearAllResponsesConversationStateHost();
 }
 export async function clearUnresolvedResponsesConversationRequests() {
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.clearUnresolvedRequests === "function") {
-        return globalStore.clearUnresolvedRequests();
-    }
-    if (globalStore?.requestMap instanceof Map &&
-        typeof globalStore.detachEntry === "function") {
-        let cleared = 0;
-        for (const entry of [...globalStore.requestMap.values()]) {
-            if (typeof entry.lastResponseId === "string" && entry.lastResponseId.trim()) {
-                continue;
-            }
-            globalStore.detachEntry(entry);
-            cleared += 1;
-        }
-        if (typeof globalStore.pruneIndexes === "function") {
-            globalStore.pruneIndexes();
-        }
-        return cleared;
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.clearUnresolvedResponsesConversationRequests;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] clearUnresolvedResponsesConversationRequests not available");
-    }
-    return fn();
+    return clearUnresolvedResponsesConversationRequestsHost();
 }
 export async function resetResponsesConversationStateForRestartSimulation() {
-    const globalStore = readGlobalResponsesConversationStore();
-    if (typeof globalStore?.clearAll === "function") {
-        globalStore.clearAll();
-        return;
-    }
-    const mod = await getResponsesConversationModule();
-    const fn = mod.resetResponsesConversationStateForRestartSimulation;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] resetResponsesConversationStateForRestartSimulation not available");
-    }
-    fn();
+    resetResponsesConversationStateForRestartSimulationHost();
 }
 let cachedNativeSseRuntimeModule = null;
 async function getNativeSseRuntimeModule() {
@@ -262,16 +116,8 @@ export async function preloadCriticalBridgeRuntimeModules() {
         throw new Error("[llmswitch-bridge] preload failed: writeSnapshotViaHooks not available");
     }
     loaded.push("conversion/snapshot-utils");
-    const responsesConversationModule = await getResponsesConversationModule();
-    if (typeof responsesConversationModule.resumeResponsesConversation !==
-        "function" ||
-        typeof responsesConversationModule.resumeLatestResponsesContinuationByScope !==
-            "function" ||
-        typeof responsesConversationModule.materializeLatestResponsesContinuationByScope !==
-            "function") {
-        throw new Error("[llmswitch-bridge] preload failed: responses conversation helpers not available");
-    }
-    loaded.push("conversion/shared/responses-conversation-store");
+    await resumeLatestResponsesContinuationByScopeHost({ payload: {}, entryKind: "responses" });
+    loaded.push("bridge/responses-conversation-store-host");
     const nativeSseRuntimeModule = await getNativeSseRuntimeModule();
     if (typeof nativeSseRuntimeModule.collectSseBodyText !== "function" ||
         typeof nativeSseRuntimeModule.buildJsonFromSseWithNative !== "function") {
@@ -302,3 +148,4 @@ export async function reportProviderSuccessToRouterPolicy(event) {
     }
     return fn(event);
 }
+//# sourceMappingURL=runtime-integrations.js.map

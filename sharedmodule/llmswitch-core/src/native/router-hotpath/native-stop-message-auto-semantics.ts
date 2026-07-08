@@ -10,7 +10,7 @@
  */
 
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
-import { failNativeRequired } from './native-router-hotpath-policy.js';
+import { failNativeRequired } from './native-router-hotpath-loader.js';
 
 // ── Types (re-exported for TS consumers) ─────────────────────────────────────
 

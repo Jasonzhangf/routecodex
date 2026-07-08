@@ -304,7 +304,7 @@ const {
   responsesConversationStore,
   resumeLatestResponsesContinuationByScope,
   resumeResponsesConversation,
-} = await import('../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js');
+} = await import('../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js');
 
 const TEST_METADATA_ORIGIN = {
   module: 'tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts',

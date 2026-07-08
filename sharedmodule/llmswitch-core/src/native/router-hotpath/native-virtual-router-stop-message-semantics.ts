@@ -1,8 +1,8 @@
 import {
   failNativeRequired
-} from './native-router-hotpath-policy.js';
+} from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import { resolveRccUserDir } from '../../runtime/user-data-paths.js';
+import { resolveRccUserDirWithNative as resolveRccUserDir } from './native-shared-conversion-semantics-core.js';
 
 export type StopMessageResolvedNativeParseOutput =
   | {

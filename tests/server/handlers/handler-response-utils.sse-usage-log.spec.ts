@@ -23,6 +23,29 @@ async function importHandlerWithUsageMock(logUsageSummary: ReturnType<typeof jes
   jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/usage-logger.js', () => ({
     logUsageSummary
   }));
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => ({
+    buildResponsesRequestLogContextForHttp: ({ metadata, usageLogInfo }: any) => ({
+      ...(metadata && typeof metadata === 'object' ? metadata : {}),
+      ...(usageLogInfo && typeof usageLogInfo === 'object' ? usageLogInfo : {})
+    }),
+    prepareResponsesJsonClientDispatchPlanForHttp: async ({ body }: any) => ({
+      clientBody: body,
+      sanitizedBody: body
+    })
+  }));
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', () => ({
+    buildClientSseKeepaliveFrameForHttp: () => ': keepalive\n\n',
+    createResponsesSseClientProjectionStateForHttp: () => ({
+      pendingApplyPatchArgumentDeltas: {},
+      applyPatchCallIds: [],
+      emittedApplyPatchDoneCallIds: []
+    }),
+    projectResponsesSseFrameForClientForHttp: ({ frame, state }: any) => ({
+      emit: true,
+      frame,
+      state
+    })
+  }));
   jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
     isSnapshotsEnabled: () => false,
     writeServerSnapshot: async () => undefined

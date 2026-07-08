@@ -111,12 +111,11 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
       const packageDir = ${JSON.stringify(packageDir)};
       const candidates = [
         'dist/modules/llmswitch/bridge/native-exports.js',
+        'dist/modules/llmswitch/bridge/routing-integrations.js',
         'sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js',
         'sharedmodule/llmswitch-core/dist/servertool/metadata-center-carrier.js',
-        'sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline.js',
         'node_modules/rcc-llmswitch-core/dist/native/servertool-wrapper.js',
         'node_modules/rcc-llmswitch-core/dist/servertool/metadata-center-carrier.js',
-        'node_modules/rcc-llmswitch-core/dist/conversion/hub/pipeline/hub-pipeline.js',
       ];
       for (const relativePath of candidates) {
         await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
@@ -144,8 +143,12 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
           }
         }
       }
-      const loader = await import(new URL('dist/modules/llmswitch/core-loader.js', 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
-      await loader.importCoreModule('conversion/hub/pipeline/hub-pipeline', 'ts');
+      const routing = await import(new URL('dist/modules/llmswitch/bridge/routing-integrations.js', 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
+      for (const exportName of ['createHubPipelineNative', 'executeHubPipelineNative', 'disposeHubPipelineNative']) {
+        if (typeof routing[exportName] !== 'function') {
+          throw new Error('dist/modules/llmswitch/bridge/routing-integrations.js missing function export ' + exportName);
+        }
+      }
     `, { cwd: packageDir });
 
     return {

@@ -502,6 +502,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "hubPipelineVirtualRouterDiagnoseRouteJson",
   "hubPipelineVirtualRouterStatusJson",
   "hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson",
+  "hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson",
   "VirtualRouterEngineProxy",
   "ensureProtocolStateJson",
   "getProtocolStateJson",

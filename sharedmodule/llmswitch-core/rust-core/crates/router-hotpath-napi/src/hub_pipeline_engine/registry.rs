@@ -202,3 +202,19 @@ pub fn hub_pipeline_virtual_router_mark_concurrency_scope_busy_json(
         .mark_virtual_router_concurrency_scope_busy(&scope_key)
         .map_err(|e| napi::Error::from_reason(format!("{}: {}", e.code, e.message)))
 }
+
+#[napi(js_name = "hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson")]
+pub fn hub_pipeline_virtual_router_mark_concurrency_scope_idle_json(
+    handle: String,
+    scope_key: String,
+) -> NapiResult<()> {
+    let mut reg = ENGINE_REGISTRY
+        .lock()
+        .map_err(|e| napi::Error::from_reason(format!("Lock error: {}", e)))?;
+    let engine = reg.get_mut(&handle).ok_or_else(|| {
+        napi::Error::from_reason(format!("HubPipeline handle not found: {}", handle))
+    })?;
+    engine
+        .mark_virtual_router_concurrency_scope_idle(&scope_key)
+        .map_err(|e| napi::Error::from_reason(format!("{}: {}", e.code, e.message)))
+}

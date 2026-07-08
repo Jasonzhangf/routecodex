@@ -1,54 +1,237 @@
 import type { Readable } from 'node:stream';
-import type { AdapterContext } from '../types/chat-envelope.js';
-import type { JsonObject } from '../types/json.js';
-// StageRecorder inline: record(stage: string, payload: object): void
-type StageRecorder = { record(stage: string, payload: object): void };
-import { recordStage } from '../pipeline/stages/utils.js';
-import {
-  executeHubPipelineWithNative,
-  buildProviderResponseMetadataSnapshotWithNative,
-  normalizeProviderResponseEffectPlanWithNative,
-  resolveProviderProtocolWithNative,
-  type ProviderResponseRuntimeEffectPlan,
-} from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
-
-// feature_id: hub.response_post_servertool_client_projection
-// canonical_builder: normalize_provider_response_effect_plan
-import {
-  publishResponsesRecordPlanWithNative,
-  type PublishResponsesRecordPlan,
-} from '../../../native/router-hotpath/native-shared-conversion-semantics.js';
-import { logHubStageTiming } from '../pipeline/hub-stage-timing.js';
-import { ensureRuntimeMetadata } from '../../runtime-metadata.js';
+import { requireCoreDist } from './module-loader.js';
 import {
   recordResponsesResponse,
   finalizeResponsesConversationRequestRetention,
-} from '../../shared/responses-conversation-store.js';
-import { planChatProcessSessionUsage } from '../../../native/router-hotpath/native-virtual-router-routing-state.js';
-import {
-  buildReadableFromSseFrames,
-  buildSseFramesFromJsonWithNative,
-  type NativeSseRuntimeProtocol,
-} from '../../../native/router-hotpath/native-sse-runtime.js';
-import {
-  resolveProviderResponseContextSignals,
-  type ProviderProtocol
-} from './provider-response-helpers.js';
-import {
-  buildProviderSseStreamReadErrorDescriptorWithNative,
-  materializeProviderResponseSsePayloadWithNative,
-} from '../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
-import {
-  applyNativeRuntimeControlWritePlan,
-  projectNativeMetadataWritePlanToRuntimeControlWritePlan
-} from '../metadata-center-runtime-control-writer.js';
+} from './responses-conversation-store-host.js';
 
-import {
-  readBoundMetadataCenter,
-  readContinuationContextFromBoundMetadataCenter,
-  readRequestTruthFromBoundMetadataCenter,
-  readRuntimeControlFromBoundMetadataCenter,
-} from '../metadata-center-runtime-control-writer.js';
+type AdapterContext = Record<string, unknown>;
+type JsonObject = Record<string, unknown>;
+type StageRecorder = { record(stage: string, payload: object): void };
+type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
+type NativeSseRuntimeProtocol = string;
+
+type ProviderResponseRuntimeEffectPlan = {
+  servertoolRuntimeActions?: unknown[];
+  stoplessMetadataCenterWrite?: unknown;
+  runtimeStateWrite?: unknown;
+  streamPipe?: unknown;
+  [key: string]: unknown;
+};
+
+type PublishResponsesRecordPlan = {
+  recordArgs: {
+    requestId: string;
+    response: Record<string, unknown>;
+    sessionId?: string;
+    conversationId?: string;
+    providerKey?: string;
+    matchedPort?: number;
+    routingPolicyGroup?: string;
+    routeHint?: string;
+  } | null;
+  finalizeArgs: {
+    requestId: string;
+    keepForSubmitToolOutputs: boolean;
+  } | null;
+  usageArgs: {
+    usage?: unknown;
+  } | null;
+};
+
+type NativeHubPipelineProtocolModule = {
+  executeHubPipelineWithNative?: (input: {
+    config: Record<string, unknown>;
+    request: Record<string, unknown>;
+  }) => {
+    success: boolean;
+    requestId: string;
+    payload?: unknown;
+    error?: { code?: string; message?: string };
+    effectPlan: { effects: unknown[] };
+    diagnostics: Array<Record<string, unknown>>;
+  };
+  buildProviderResponseMetadataSnapshotWithNative?: (input: unknown) => {
+    metadataCenterSnapshot?: Record<string, unknown> | null;
+  };
+  normalizeProviderResponseEffectPlanWithNative?: (input: { effects: unknown[] }) => ProviderResponseRuntimeEffectPlan;
+  resolveProviderProtocolWithNative?: (input: unknown) => { providerProtocol: string };
+};
+
+type NativeSharedSemanticsModule = {
+  publishResponsesRecordPlanWithNative?: (args: {
+    requestId: string;
+    response: unknown;
+    context: unknown;
+    runtimeStateWrite: unknown;
+    entryEndpoint: string;
+  }) => PublishResponsesRecordPlan;
+};
+
+type RuntimeMetadataModule = {
+  ensureRuntimeMetadata?: (carrier: Record<string, unknown>) => JsonObject;
+};
+
+type NativeRoutingStateModule = {
+  planChatProcessSessionUsage?: (input: { context: Record<string, unknown>; usage?: Record<string, unknown> }) => unknown;
+};
+
+type NativeSseRuntimeModule = {
+  buildReadableFromSseFrames?: (frames: string[]) => Readable;
+  buildSseFramesFromJsonWithNative?: (input: {
+    protocol: string;
+    response: unknown;
+    requestId: string;
+    model: string;
+  }) => { frames: string[] };
+};
+
+type ProviderResponseHelpersModule = {
+  resolveProviderResponseContextSignals?: (
+    context: AdapterContext,
+    entryEndpoint?: string
+  ) => { clientProtocol: 'openai-chat' | 'openai-responses' | 'anthropic-messages' };
+};
+
+type NativeRespSemanticsModule = {
+  buildProviderSseStreamReadErrorDescriptorWithNative?: (input: {
+    message: string;
+    code?: string;
+    upstreamCode?: string;
+  }) => {
+    message: string;
+    code?: string;
+    upstreamCode?: string;
+    statusCode?: number;
+    retryable?: boolean;
+    requestExecutorProviderErrorStage?: string;
+  };
+  materializeProviderResponseSsePayloadWithNative?: (input: {
+    payload: unknown;
+    streamBodyText?: string;
+  }) => Record<string, unknown>;
+};
+
+type MetadataCenterRuntimeControlWriterModule = {
+  applyNativeRuntimeControlWritePlan?: (args: {
+    metadata: Record<string, unknown>;
+    runtimeControl: Record<string, unknown>;
+    writer: { module: string; symbol: string; stage: string };
+    reason: string;
+  }) => void;
+  projectNativeMetadataWritePlanToRuntimeControlWritePlan?: (plan: unknown) => {
+    runtimeControl?: Record<string, unknown>;
+  };
+  readBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
+  readContinuationContextFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
+  readRequestTruthFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
+  readRuntimeControlFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
+};
+
+type StageUtilsModule = {
+  recordStage?: (recorder: StageRecorder | undefined, stageId: string, payload: unknown) => void;
+};
+
+function requireModuleFn<TModule extends object, TFunction extends Function>(
+  module: TModule,
+  name: keyof TModule,
+  label: string
+): TFunction {
+  const fn = module[name];
+  if (typeof fn !== 'function') {
+    throw new Error(`[provider-response-converter-host] ${label}.${String(name)} not available`);
+  }
+  return fn as unknown as TFunction;
+}
+
+function requireCoreModuleFn<TModule extends object, TFunction extends (...args: any[]) => any>(
+  subpath: string,
+  name: keyof TModule,
+  label: string
+): TFunction {
+  return ((...args: Parameters<TFunction>): ReturnType<TFunction> => {
+    const module = requireCoreDist<TModule>(subpath);
+    const fn = requireModuleFn<TModule, TFunction>(module, name, label);
+    return fn(...args) as ReturnType<TFunction>;
+  }) as TFunction;
+}
+
+const executeHubPipelineWithNative = requireCoreModuleFn<
+  NativeHubPipelineProtocolModule,
+  NonNullable<NativeHubPipelineProtocolModule['executeHubPipelineWithNative']>
+>('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'executeHubPipelineWithNative', 'native protocol');
+const buildProviderResponseMetadataSnapshotWithNative = requireCoreModuleFn<
+  NativeHubPipelineProtocolModule,
+  NonNullable<NativeHubPipelineProtocolModule['buildProviderResponseMetadataSnapshotWithNative']>
+>('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'buildProviderResponseMetadataSnapshotWithNative', 'native protocol');
+const normalizeProviderResponseEffectPlanWithNative = requireCoreModuleFn<
+  NativeHubPipelineProtocolModule,
+  NonNullable<NativeHubPipelineProtocolModule['normalizeProviderResponseEffectPlanWithNative']>
+>('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'normalizeProviderResponseEffectPlanWithNative', 'native protocol');
+const resolveProviderProtocolWithNative = requireCoreModuleFn<
+  NativeHubPipelineProtocolModule,
+  NonNullable<NativeHubPipelineProtocolModule['resolveProviderProtocolWithNative']>
+>('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'resolveProviderProtocolWithNative', 'native protocol');
+const publishResponsesRecordPlanWithNative = requireCoreModuleFn<
+  NativeSharedSemanticsModule,
+  NonNullable<NativeSharedSemanticsModule['publishResponsesRecordPlanWithNative']>
+>('native/router-hotpath/native-shared-conversion-semantics', 'publishResponsesRecordPlanWithNative', 'native shared semantics');
+const ensureRuntimeMetadata = requireCoreModuleFn<
+  RuntimeMetadataModule,
+  NonNullable<RuntimeMetadataModule['ensureRuntimeMetadata']>
+>('conversion/runtime-metadata', 'ensureRuntimeMetadata', 'runtime metadata');
+const planChatProcessSessionUsage = requireCoreModuleFn<
+  NativeRoutingStateModule,
+  NonNullable<NativeRoutingStateModule['planChatProcessSessionUsage']>
+>('native/router-hotpath/native-virtual-router-routing-state', 'planChatProcessSessionUsage', 'native routing state');
+const buildReadableFromSseFrames = requireCoreModuleFn<
+  NativeSseRuntimeModule,
+  NonNullable<NativeSseRuntimeModule['buildReadableFromSseFrames']>
+>('native/router-hotpath/native-sse-runtime', 'buildReadableFromSseFrames', 'native sse runtime');
+const buildSseFramesFromJsonWithNative = requireCoreModuleFn<
+  NativeSseRuntimeModule,
+  NonNullable<NativeSseRuntimeModule['buildSseFramesFromJsonWithNative']>
+>('native/router-hotpath/native-sse-runtime', 'buildSseFramesFromJsonWithNative', 'native sse runtime');
+const resolveProviderResponseContextSignals = requireCoreModuleFn<
+  ProviderResponseHelpersModule,
+  NonNullable<ProviderResponseHelpersModule['resolveProviderResponseContextSignals']>
+>('conversion/hub/response/provider-response-helpers', 'resolveProviderResponseContextSignals', 'provider response helpers');
+const buildProviderSseStreamReadErrorDescriptorWithNative = requireCoreModuleFn<
+  NativeRespSemanticsModule,
+  NonNullable<NativeRespSemanticsModule['buildProviderSseStreamReadErrorDescriptorWithNative']>
+>('native/router-hotpath/native-hub-pipeline-resp-semantics', 'buildProviderSseStreamReadErrorDescriptorWithNative', 'native resp semantics');
+const materializeProviderResponseSsePayloadWithNative = requireCoreModuleFn<
+  NativeRespSemanticsModule,
+  NonNullable<NativeRespSemanticsModule['materializeProviderResponseSsePayloadWithNative']>
+>('native/router-hotpath/native-hub-pipeline-resp-semantics', 'materializeProviderResponseSsePayloadWithNative', 'native resp semantics');
+const applyNativeRuntimeControlWritePlan = requireCoreModuleFn<
+  MetadataCenterRuntimeControlWriterModule,
+  NonNullable<MetadataCenterRuntimeControlWriterModule['applyNativeRuntimeControlWritePlan']>
+>('conversion/hub/metadata-center-runtime-control-writer', 'applyNativeRuntimeControlWritePlan', 'metadata writer');
+const projectNativeMetadataWritePlanToRuntimeControlWritePlan = requireCoreModuleFn<
+  MetadataCenterRuntimeControlWriterModule,
+  NonNullable<MetadataCenterRuntimeControlWriterModule['projectNativeMetadataWritePlanToRuntimeControlWritePlan']>
+>('conversion/hub/metadata-center-runtime-control-writer', 'projectNativeMetadataWritePlanToRuntimeControlWritePlan', 'metadata writer');
+const readBoundMetadataCenter = requireCoreModuleFn<
+  MetadataCenterRuntimeControlWriterModule,
+  NonNullable<MetadataCenterRuntimeControlWriterModule['readBoundMetadataCenter']>
+>('conversion/hub/metadata-center-runtime-control-writer', 'readBoundMetadataCenter', 'metadata writer');
+const readContinuationContextFromBoundMetadataCenter = requireCoreModuleFn<
+  MetadataCenterRuntimeControlWriterModule,
+  NonNullable<MetadataCenterRuntimeControlWriterModule['readContinuationContextFromBoundMetadataCenter']>
+>('conversion/hub/metadata-center-runtime-control-writer', 'readContinuationContextFromBoundMetadataCenter', 'metadata writer');
+const readRequestTruthFromBoundMetadataCenter = requireCoreModuleFn<
+  MetadataCenterRuntimeControlWriterModule,
+  NonNullable<MetadataCenterRuntimeControlWriterModule['readRequestTruthFromBoundMetadataCenter']>
+>('conversion/hub/metadata-center-runtime-control-writer', 'readRequestTruthFromBoundMetadataCenter', 'metadata writer');
+const readRuntimeControlFromBoundMetadataCenter = requireCoreModuleFn<
+  MetadataCenterRuntimeControlWriterModule,
+  NonNullable<MetadataCenterRuntimeControlWriterModule['readRuntimeControlFromBoundMetadataCenter']>
+>('conversion/hub/metadata-center-runtime-control-writer', 'readRuntimeControlFromBoundMetadataCenter', 'metadata writer');
+const recordStage = requireCoreModuleFn<
+  StageUtilsModule,
+  NonNullable<StageUtilsModule['recordStage']>
+>('conversion/hub/pipeline/stages/utils', 'recordStage', 'stage utils');
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -431,7 +614,6 @@ export async function convertProviderResponse(
       : streamPipe.payload;
   hubRespOutbound04ClientSemantic = streamClientSemantic;
   const sseCodec = streamPipe.codec as NativeSseRuntimeProtocol | string;
-  logHubStageTiming(requestId, 'resp_outbound.stage2_codec_stream', 'start', { clientProtocol: sseCodec });
   const frameResult = buildSseFramesFromJsonWithNative({
     protocol: sseCodec,
     response: hubRespOutbound04ClientSemantic,
@@ -439,7 +621,6 @@ export async function convertProviderResponse(
     model: "",
   });
   const stream = buildReadableFromSseFrames(frameResult.frames);
-  logHubStageTiming(requestId, 'resp_outbound.stage2_codec_stream', 'completed', { clientProtocol: sseCodec });
   recordStage(options.stageRecorder, 'chat_process.resp.stage9.client_remap', hubRespOutbound04ClientSemantic);
   recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
     passthrough: false,

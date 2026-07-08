@@ -8,7 +8,7 @@ import {
 import {
   isNativeDisabledByEnv,
   makeNativeRequiredError
-} from './native-router-hotpath-policy.js';
+} from './native-router-hotpath-loader.js';
 import {
   loadNativeRouterHotpathBinding,
   parseVirtualRouterNativeError

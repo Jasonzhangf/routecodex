@@ -17,6 +17,77 @@ const TEST_METADATA_WRITER = {
   stage: 'test_setup',
 } as const;
 
+type NativeRouteMock = (request: Record<string, unknown>, metadata: Record<string, unknown>) => unknown;
+
+let activeNativeRouteMock: NativeRouteMock | undefined;
+
+const executeHubPipelineNativeMock = jest.fn(() => {
+  throw new Error('router-direct test must not enter native HubPipeline execute');
+});
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => ({
+  bootstrapVirtualRouterConfig: jest.fn(async (input: Record<string, unknown>) => ({ config: input, targetRuntime: {} })),
+  compileRouteCodexRuntimeManifest: jest.fn(async () => ({ pipelineRuntimeConfig: {}, virtualRouterBootstrapInput: {} })),
+  compileRouteCodexRuntimeManifestSync: jest.fn(() => ({ pipelineRuntimeConfig: {}, virtualRouterBootstrapInput: {} })),
+  collectRouteCodexV2ConfigSourceErrorsSync: jest.fn(() => []),
+  normalizeRouteCodexV2RuntimeSourceSync: jest.fn((input: Record<string, unknown>) => input ?? {}),
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: jest.fn(() => undefined),
+  extractRouteCodexMaterializedProviderConfigsSync: jest.fn(() => null),
+  materializeRouteCodexUserConfigFromManifestSync: jest.fn((userConfig: Record<string, unknown>) => userConfig ?? {}),
+  buildRouteCodexProviderProfilesSync: jest.fn(() => ({})),
+  buildRouteCodexForwarderProfilesSync: jest.fn(() => ({})),
+  parseRouteCodexTomlRecord: jest.fn(async () => ({})),
+  parseRouteCodexTomlRecordSync: jest.fn(() => ({})),
+  serializeRouteCodexTomlRecord: jest.fn(async () => ''),
+  serializeRouteCodexTomlRecordSync: jest.fn(() => ''),
+  updateRouteCodexTomlStringScalarInTable: jest.fn(async () => ''),
+  updateRouteCodexTomlStringScalarInTableSync: jest.fn(() => ''),
+  decodeRouteCodexUserConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  decodeRouteCodexProviderConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  detectRouteCodexUserConfigFormatSync: jest.fn(() => 'toml'),
+  detectRouteCodexProviderConfigFormatSync: jest.fn(() => 'toml'),
+  writeRouteCodexUserConfigFileNativeSync: jest.fn(() => undefined),
+  writeRouteCodexProviderConfigFileNativeSync: jest.fn(() => undefined),
+  updateRouteCodexUserConfigStringScalarNativeSync: jest.fn(() => ''),
+  loadRouteCodexConfigNativeSync: jest.fn(() => ({ configPath: '', userConfig: {}, providerProfiles: {} })),
+  coerceRouteCodexProviderConfigV2: jest.fn(async (parsed: unknown) => parsed ?? null),
+  coerceRouteCodexProviderConfigV2Sync: jest.fn((parsed: unknown) => parsed ?? null),
+  planRouteCodexProviderConfigV2FilesSync: jest.fn(() => []),
+  resolveRouteCodexProviderConfigV2IdentitySync: jest.fn((input: any) => ({ providerId: input?.dirId ?? 'provider', provider: input?.provider ?? {} })),
+  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+  resolveRccUserDirNativeSync: jest.fn(() => '/tmp/.rcc'),
+  resolveRccPathNativeSync: jest.fn((segments: string[] = []) => ['/tmp/.rcc', ...segments].join('/')),
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/.rcc/snapshots'),
+  planAuthFileResolutionNativeSync: jest.fn((input: any) => ({ kind: 'literal', value: input?.keyId ?? '', cacheKey: input?.keyId ?? '' })),
+  resolveAuthFileKeyNativeSync: jest.fn((input: any) => ({ kind: 'literal', value: input?.keyId ?? '', cacheKey: input?.keyId ?? '' })),
+  planRouteCodexConfigLoaderPathsNativeSync: jest.fn((input: any) => ({ explicitPath: input?.explicitPath, providerRootDir: input?.routecodexProviderDir ?? input?.rccProviderDir })),
+  planProviderConfigRootNativeSync: jest.fn((rootDir?: string) => ({ rootDir })),
+  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test-config.toml'),
+  createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
+  executeHubPipelineNative: executeHubPipelineNativeMock,
+  updateHubPipelineVirtualRouterConfigNative: jest.fn(),
+  updateHubPipelineEngineDepsNative: jest.fn(),
+  routeHubPipelineVirtualRouterNative: jest.fn((_handle: string, request: Record<string, unknown>, metadata: Record<string, unknown>) => {
+    if (!activeNativeRouteMock) {
+      throw new Error('native HubPipeline VR route mock is not installed');
+    }
+    return activeNativeRouteMock(request, metadata);
+  }),
+  diagnoseHubPipelineVirtualRouterNative: jest.fn(() => ({ diagnostics: {} })),
+  getHubPipelineVirtualRouterStatusNative: jest.fn(() => ({})),
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  disposeHubPipelineNative: jest.fn(),
+  resolveBaseDir: jest.fn(() => process.cwd()),
+}));
+
+function installNativeHubPipelineRoute(server: any, routingPolicyGroup: string, route?: NativeRouteMock): void {
+  activeNativeRouteMock = route;
+  server.hubPipelinesByRoutingPolicyGroup = new Map([
+    [routingPolicyGroup, 'mock_hub_pipeline_handle'],
+  ]);
+}
+
 describe('direct server contract', () => {
   it('RED-GREEN: provider-direct forwards the original request body without stream/model repair', async () => {
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
@@ -170,9 +241,6 @@ describe('direct server contract', () => {
     } as any);
 
     let sentPayload: Record<string, unknown> | undefined;
-    const executeSpy = jest.fn(async () => {
-      throw new Error('router-direct must not enter hub execute');
-    });
     const route = jest.fn(() => ({
       target: {
         providerKey,
@@ -196,14 +264,7 @@ describe('direct server contract', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: executeSpy,
-      getVirtualRouter: jest.fn(() => ({ route })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_coding_10000', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_coding_10000', route);
     (server as any).providerHandles = new Map([
       [providerKey, {
         runtimeKey: providerKey,
@@ -261,7 +322,7 @@ describe('direct server contract', () => {
     expect(sentPayload?.model).toBe('DeepSeek-V4-Pro');
     expect(sentPayload?.tools).toBe(tools);
     expect((outcome.response as any)?.data?.model).toBe('DeepSeek-V4-Pro');
-    expect(executeSpy).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });
 
   it('RED-GREEN: router-direct sends current raw responses body instead of prepared local continuation body', async () => {
@@ -291,28 +352,19 @@ describe('direct server contract', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(async () => {
-        throw new Error('router-direct must not enter hub execute');
-      }),
-      getVirtualRouter: jest.fn(() => ({
-        route: jest.fn(() => ({
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-responses',
-            runtimeKey: providerKey,
-            modelId: 'gpt-5.5',
-          },
-          decision: { routeName: 'longcontext', pool: [providerKey], reason: 'longcontext:token-threshold' },
-          diagnostics: {},
-        })),
-      })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_direct_5520', (server as any).hubPipeline],
-    ]);
+    const route = jest.fn(() => ({
+      target: {
+        providerKey,
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: providerKey,
+        modelId: 'gpt-5.5',
+      },
+      decision: { routeName: 'longcontext', pool: [providerKey], reason: 'longcontext:token-threshold' },
+      diagnostics: {},
+    }));
+
+    installNativeHubPipelineRoute(server, 'gateway_direct_5520', route);
     (server as any).providerHandles = new Map([
       [providerKey, {
         runtimeKey: providerKey,
@@ -367,7 +419,7 @@ describe('direct server contract', () => {
     expect(sentPayload).not.toBe(preparedBody);
     expect(sentPayload?.input).toEqual([rawInputItem]);
     expect(sentPayload?.input).not.toEqual([preparedLocalContinuationItem]);
-    expect((server as any).hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });
 
   it('RED-GREEN: router-direct relay sends prepared hub body to Hub instead of current raw body', async () => {
@@ -396,9 +448,7 @@ describe('direct server contract', () => {
       execute: jest.fn(),
       updateVirtualRouterConfig: jest.fn(),
     };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_direct_5520', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_direct_5520');
     jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
       used: false,
       reason: 'target_outbound_profile_requires_hub_relay',
@@ -512,19 +562,12 @@ describe('direct server contract', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(),
-      getVirtualRouter: jest.fn(() => ({
-        route: jest.fn(() => ({
-          decision: { routeName: 'longcontext', pool: [] },
-          diagnostics: {},
-        })),
-      })),
-      updateVirtualRouterConfig: jest.fn(),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_direct_5520', (server as any).hubPipeline],
-    ]);
+    const route = jest.fn(() => ({
+      decision: { routeName: 'longcontext', pool: [] },
+      diagnostics: {},
+    }));
+
+    installNativeHubPipelineRoute(server, 'gateway_direct_5520', route);
 
     const outcome = await (server as any).executeRouterDirectPipelineForPort(
       {

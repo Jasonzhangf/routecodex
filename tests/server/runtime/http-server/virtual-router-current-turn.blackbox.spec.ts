@@ -13,7 +13,7 @@ jest.unstable_mockModule('../../../../src/server/runtime/http-server/executor/pr
 }));
 
 const { handleResponses } = await import('../../../../src/server/handlers/responses-handler.js');
-const { HubPipeline } = await import('../../../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts');
+const { HubPipeline } = await import('../../../helpers/native-hub-pipeline-test-wrapper.js');
 
 type RouteCapture = {
   routeName?: string;

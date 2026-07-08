@@ -127,7 +127,7 @@ describe('servertool active orchestration audit', () => {
 
   it('provider response shell fails fast instead of executing server-side tools', () => {
     const source = fs.readFileSync(
-      repoPath('sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts'),
+      repoPath('src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
       'utf8',
     );
 

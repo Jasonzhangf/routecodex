@@ -8,6 +8,7 @@ import { MetadataCenter } from '../../../../src/server/runtime/http-server/metad
 const mockRebindResponsesConversationRequestId = jest.fn(async () => {
   throw new Error('rebind failed');
 });
+const mockExecuteHubPipelineNative = jest.fn();
 
 const mockBridgeModule = () => ({
   loadRoutingInstructionStateSync: () => null,
@@ -32,13 +33,26 @@ const mockBridgeModule = () => ({
   reportProviderErrorToRouterPolicy: jest.fn(async (event: unknown) => event),
   reportProviderSuccessToRouterPolicy: jest.fn(async (event: unknown) => event),
   bootstrapVirtualRouterConfig: jest.fn(),
-  getHubPipelineCtor: jest.fn(),
-  getHubPipelineCtorForImpl: jest.fn(),
+  createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
+  executeHubPipelineNative: jest.fn(async () => ({ metadata: {} })),
+  updateHubPipelineVirtualRouterConfigNative: jest.fn(),
+  updateHubPipelineEngineDepsNative: jest.fn(),
+  routeHubPipelineVirtualRouterNative: jest.fn(async () => ({ diagnostics: {} })),
+  diagnoseHubPipelineVirtualRouterNative: jest.fn(async () => ({ diagnostics: {} })),
+  getHubPipelineVirtualRouterStatusNative: jest.fn(async () => ({})),
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  disposeHubPipelineNative: jest.fn(),
   resolveBaseDir: jest.fn(),
   mapChatToolsToBridgeJson: jest.fn(async () => []),
   buildAnthropicResponseFromChatJson: jest.fn(async () => ({})),
   injectMcpToolsForChatJson: jest.fn(async () => []),
   injectMcpToolsForResponsesJson: jest.fn(async () => []),
+  convertResponsesRequestToChatNative: jest.fn((payload: unknown) => ({ payload })),
+  evaluateResponsesDirectRouteDecisionNative: jest.fn(async () => ({ mode: 'passthrough' })),
+  hasDeclaredApplyPatchToolNative: jest.fn(() => false),
+  projectSseErrorEventPayloadNative: jest.fn(() => ({})),
+  classifyProviderFailure: jest.fn(() => ({ code: 'UNKNOWN', retryable: false })),
+  getNetworkErrorCodes: jest.fn(() => []),
   deriveFinishReasonNative: jest.fn(() => undefined),
   importCoreDist: jest.fn(async (subpath?: string) => {
     if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
@@ -52,6 +66,85 @@ const mockBridgeModule = () => ({
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+
+const mockRoutingIntegrationsModule = () => ({
+  bootstrapVirtualRouterConfig: jest.fn(async (input: unknown) => ({ config: input, runtime: {}, targetRuntime: {} })),
+  compileRouteCodexRuntimeManifest: jest.fn(async () => ({
+    manifestVersion: 'routecodex.runtime-config.v1',
+    virtualRouterBootstrapInput: {},
+    pipelineRuntimeConfig: {}
+  })),
+  compileRouteCodexRuntimeManifestSync: jest.fn(() => ({
+    manifestVersion: 'routecodex.runtime-config.v1',
+    virtualRouterBootstrapInput: {},
+    pipelineRuntimeConfig: {}
+  })),
+  collectRouteCodexV2ConfigSourceErrorsSync: jest.fn(() => []),
+  normalizeRouteCodexV2RuntimeSourceSync: jest.fn((input: unknown) => input ?? {}),
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: jest.fn(() => 'default'),
+  extractRouteCodexMaterializedProviderConfigsSync: jest.fn(() => null),
+  materializeRouteCodexUserConfigFromManifestSync: jest.fn((userConfig: unknown) => userConfig ?? {}),
+  buildRouteCodexProviderProfilesSync: jest.fn(() => ({})),
+  buildRouteCodexForwarderProfilesSync: jest.fn(() => ({})),
+  parseRouteCodexTomlRecord: jest.fn(async () => ({})),
+  parseRouteCodexTomlRecordSync: jest.fn(() => ({})),
+  serializeRouteCodexTomlRecord: jest.fn(async () => ''),
+  serializeRouteCodexTomlRecordSync: jest.fn(() => ''),
+  updateRouteCodexTomlStringScalarInTable: jest.fn(async (input: any) => input?.raw ?? ''),
+  updateRouteCodexTomlStringScalarInTableSync: jest.fn((input: any) => input?.raw ?? ''),
+  decodeRouteCodexUserConfigTextSync: jest.fn(() => ({ format: 'toml', parsed: {} })),
+  decodeRouteCodexProviderConfigTextSync: jest.fn(() => ({ format: 'toml', parsed: {} })),
+  detectRouteCodexUserConfigFormatSync: jest.fn(() => 'toml'),
+  detectRouteCodexProviderConfigFormatSync: jest.fn(() => 'toml'),
+  writeRouteCodexUserConfigFileNativeSync: jest.fn((input: any) => ({
+    path: input?.configPath ?? '',
+    format: 'toml',
+    raw: '',
+    parsed: input?.parsed ?? {}
+  })),
+  writeRouteCodexProviderConfigFileNativeSync: jest.fn((input: any) => ({
+    path: input?.configPath ?? '',
+    format: 'toml',
+    raw: '',
+    parsed: input?.parsed ?? {}
+  })),
+  updateRouteCodexUserConfigStringScalarNativeSync: jest.fn((input: any) => ({
+    path: input?.configPath ?? '',
+    format: 'toml',
+    raw: '',
+    parsed: {}
+  })),
+  loadRouteCodexConfigNativeSync: jest.fn(() => ({ configPath: '', userConfig: {}, providerProfiles: {} })),
+  coerceRouteCodexProviderConfigV2: jest.fn(async (parsed: unknown) => parsed ?? null),
+  coerceRouteCodexProviderConfigV2Sync: jest.fn((parsed: unknown) => parsed ?? null),
+  planRouteCodexProviderConfigV2FilesSync: jest.fn(() => []),
+  resolveRouteCodexProviderConfigV2IdentitySync: jest.fn((input: any) => ({ providerId: input?.dirId ?? 'provider', provider: input?.provider ?? {} })),
+  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+  planAuthFileResolutionNativeSync: jest.fn((input: any) => ({ kind: 'literal', value: input?.keyId ?? '', cacheKey: input?.keyId ?? '' })),
+  resolveAuthFileKeyNativeSync: jest.fn((input: any) => ({ kind: 'literal', value: input?.keyId ?? '', cacheKey: input?.keyId ?? '' })),
+  planProviderConfigRootNativeSync: jest.fn((rootDir?: string) => ({ rootDir })),
+  planRouteCodexConfigLoaderPathsNativeSync: jest.fn((input: any) => ({ explicitPath: input?.explicitPath, providerRootDir: input?.routecodexProviderDir ?? input?.rccProviderDir })),
+  resolveRouteCodexConfigPathNativeSync: jest.fn(() => ''),
+  resolveRccUserDirNativeSync: jest.fn(() => '/tmp/.rcc'),
+  resolveRccPathNativeSync: jest.fn((segments: string[] = []) => ['/tmp/.rcc', ...segments].join('/')),
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/.rcc/snapshots'),
+  createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
+  executeHubPipelineNative: mockExecuteHubPipelineNative,
+  updateHubPipelineVirtualRouterConfigNative: jest.fn(),
+  updateHubPipelineEngineDepsNative: jest.fn(),
+  routeHubPipelineVirtualRouterNative: jest.fn(async () => ({ diagnostics: {} })),
+  diagnoseHubPipelineVirtualRouterNative: jest.fn(async () => ({ diagnostics: {} })),
+  getHubPipelineVirtualRouterStatusNative: jest.fn(async () => ({})),
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  disposeHubPipelineNative: jest.fn(),
+  resolveBaseDir: jest.fn(() => process.cwd()),
+});
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', mockRoutingIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.ts', mockRoutingIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', mockBridgeModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.ts', mockBridgeModule);
 
 
 const mockProviderRequestContextModule = () => ({
@@ -70,6 +163,7 @@ describe('HubRequestExecutor requestId rebind', () => {
   it('reroutes recoverable responses conversation requestId rebind failures when another provider remains in the route pool', async () => {
     jest.resetModules();
     mockRebindResponsesConversationRequestId.mockReset();
+    mockExecuteHubPipelineNative.mockReset();
     mockRebindResponsesConversationRequestId
       .mockRejectedValueOnce(Object.assign(new Error('rebind failed'), {
         code: 'HTTP_502',
@@ -137,11 +231,10 @@ describe('HubRequestExecutor requestId rebind', () => {
       metadata: {}
     };
 
-    const fakePipeline: HubPipeline = {
-      execute: jest.fn()
-        .mockResolvedValueOnce(pipelineResult1)
-        .mockResolvedValueOnce(pipelineResult2)
-    };
+    mockExecuteHubPipelineNative
+      .mockReturnValueOnce(pipelineResult1)
+      .mockReturnValueOnce(pipelineResult2);
+    const fakePipeline = 'mock_hub_pipeline_handle' as unknown as HubPipeline;
 
     const deps = {
       runtimeManager: {
@@ -174,7 +267,11 @@ describe('HubRequestExecutor requestId rebind', () => {
       requestId: 'req_test',
       entryEndpoint: '/v1/responses',
       headers: {},
-      body: { model: 'mimo-v2.5-pro', messages: [{ role: 'user', content: 'ping' }] },
+      body: {
+        model: 'mimo-v2.5-pro',
+        input: [{ role: 'user', content: 'ping' }],
+        messages: [{ role: 'user', content: 'ping' }]
+      },
       metadata: { stream: false, inboundStream: false }
     };
 
@@ -192,6 +289,7 @@ describe('HubRequestExecutor requestId rebind', () => {
   it('passes serverToolsEnabled=false when nested followup metadata disables stopMessage', async () => {
     jest.resetModules();
     mockRebindResponsesConversationRequestId.mockImplementationOnce(async () => undefined);
+    mockExecuteHubPipelineNative.mockReset();
 
     const { HubRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor.js');
 
@@ -222,9 +320,8 @@ describe('HubRequestExecutor requestId rebind', () => {
       metadata: {}
     };
 
-    const fakePipeline: HubPipeline = {
-      execute: jest.fn().mockResolvedValue(pipelineResult)
-    };
+    mockExecuteHubPipelineNative.mockReturnValue(pipelineResult);
+    const fakePipeline = 'mock_hub_pipeline_handle' as unknown as HubPipeline;
 
     const deps = {
       runtimeManager: {
@@ -265,7 +362,7 @@ describe('HubRequestExecutor requestId rebind', () => {
       requestId: 'req_nested_stop_disabled',
       entryEndpoint: '/v1/responses',
       headers: {},
-      body: { model: 'gpt-5.5', input: 'continue' },
+      body: { model: 'gpt-5.5', input: [{ role: 'user', content: 'continue' }] },
       metadata
     });
 

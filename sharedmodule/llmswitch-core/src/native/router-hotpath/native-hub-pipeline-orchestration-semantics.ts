@@ -1,5 +1,7 @@
 import { readNativeFunction } from './native-shared-conversion-semantics-core.js';
 
+// feature_id: hub.runtime_ingress_bridge
+
 export interface NativeHubPipelineOrchestrationInput {
   requestId: string;
   endpoint: string;
@@ -162,5 +164,13 @@ export function hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson(
   scopeKey: string
 ): void {
   const fn = requireNativeHotpathFn<NativeFunction2<string, string, void>>('hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson');
+  fn(handle, scopeKey);
+}
+
+export function hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson(
+  handle: string,
+  scopeKey: string
+): void {
+  const fn = requireNativeHotpathFn<NativeFunction2<string, string, void>>('hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson');
   fn(handle, scopeKey);
 }

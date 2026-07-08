@@ -2,7 +2,7 @@ import { parseChatProcessMediaStripPayload } from './native-router-hotpath-analy
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from './native-router-hotpath-policy.js';
+} from './native-router-hotpath-loader.js';
 // feature_id: hub.req_inbound_responses_context_capture
 // This bridge file re-exports the Rust canonical builders
 // (`capture_req_inbound_responses_context_snapshot`,

@@ -109,7 +109,7 @@ Round 3 adds only one extra rule:
 
 ## Hook / Continuation Isolation Boundary
 
-The hook skeleton is a request/response processing surface, not a continuation owner. Continuation store/restore (responses `submit_tool_outputs`, `previous_response_id`, relay/materialize, direct vs relay ownership) belongs to the Responses continuation owner defined in `docs/design/responses-continuation-storage-ownership.md` and lives in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs` plus `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`.
+The hook skeleton is a request/response processing surface, not a continuation owner. Continuation store/restore (responses `submit_tool_outputs`, `previous_response_id`, relay/materialize, direct vs relay ownership) belongs to the Responses continuation owner defined in `docs/design/responses-continuation-storage-ownership.md` and lives in `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs` plus `src/modules/llmswitch/bridge/responses-conversation-store-host.ts`.
 
 Hard rules:
 

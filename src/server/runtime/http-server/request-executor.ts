@@ -1,6 +1,6 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
-import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
+import type { HubPipelineHandle, ProviderHandle, ProviderProtocol } from './types.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
@@ -30,6 +30,11 @@ import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
 import { writeMetadataCenterSlot } from './metadata-center/dualwrite-api.js';
 import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
+import {
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative
+} from '../../../modules/llmswitch/bridge/routing-integrations.js';
+import { readHubPipelineNativeHandle } from './hub-pipeline-handle.js';
 
 // Import from new executor submodules
 import {
@@ -432,7 +437,7 @@ export type RequestExecutorDeps = {
     resolveRuntimeKey(providerKey?: string, metadata?: Record<string, unknown>): string | undefined;
     getHandleByRuntimeKey(runtimeKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined;
   };
-  getHubPipeline(routingPolicyGroup?: string): HubPipeline | null;
+  getHubPipeline(routingPolicyGroup?: string): HubPipelineHandle | null;
   getRoutingTiers?(routingPolicyGroup: string, routeName: string): Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
   getModuleDependencies(): ModuleDependencies;
   executeNestedInput?: (input: PipelineExecutionInput) => Promise<PipelineExecutionResult>;
@@ -643,13 +648,11 @@ export class HubRequestExecutor implements RequestExecutor {
   private installTrafficGovernorConcurrencyCallback(): void {
     this.trafficGovernor.setConcurrencyBusyCallback?.((scopeKey, busy) => {
       try {
-        const vr = this.deps.getHubPipeline()?.getVirtualRouter?.();
-        if (vr) {
-          if (typeof scopeKey !== 'string' || !scopeKey.trim()) {
-            return;
-          }
-          if (busy) vr.markConcurrencyScopeBusy(scopeKey);
-          else vr.markConcurrencyScopeIdle(scopeKey);
+        const handle = readHubPipelineNativeHandle(this.deps.getHubPipeline());
+        if (handle) {
+          if (typeof scopeKey !== 'string' || !scopeKey.trim()) return;
+          if (busy) markHubPipelineVirtualRouterConcurrencyScopeBusyNative(handle, scopeKey);
+          else markHubPipelineVirtualRouterConcurrencyScopeIdleNative(handle, scopeKey);
         }
       } catch { /* non-blocking */ }
     });

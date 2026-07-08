@@ -1,7 +1,7 @@
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from './native-router-hotpath-policy.js';
+} from './native-router-hotpath-loader.js';
 import {
   parseNativeJsonObjectOrFail,
   parseNativeJsonValueOrFail,

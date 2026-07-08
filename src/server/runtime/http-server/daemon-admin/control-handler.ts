@@ -257,8 +257,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         policy,
         policyHash
       },
-      stats: typeof options.getStatsSnapshot === 'function' ? options.getStatsSnapshot() : undefined,
-      llmsStats: llmsBridge.getLlmsStatsSnapshot?.() ?? undefined
+      stats: typeof options.getStatsSnapshot === 'function' ? options.getStatsSnapshot() : undefined
     };
     res.status(200).json(snapshot);
   });

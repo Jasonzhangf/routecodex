@@ -18,7 +18,7 @@ Canonical sources:
 - `docs/chat-process-continuation-state-contract.md`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/responses_resume.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
-- `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
+- `src/modules/llmswitch/bridge/responses-conversation-store-host.ts`
 
 Key owners:
 

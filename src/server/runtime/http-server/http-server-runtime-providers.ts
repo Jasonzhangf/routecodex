@@ -1,6 +1,7 @@
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { emitProviderErrorAndWait } from '../../../providers/core/utils/provider-error-reporter.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
+import { disposeHubPipelineNative } from '../../../modules/llmswitch/bridge/routing-integrations.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
 import { resolveProviderRoutingScope } from './provider-routing-scope.js';
@@ -343,7 +344,9 @@ export function disposeHubPipelines(server: any): void {
   }
   for (const pipeline of hubPipelines) {
     try {
-      pipeline.dispose?.();
+      if (typeof pipeline === 'string') {
+        disposeHubPipelineNative(pipeline);
+      }
     } catch (error) {
       logRuntimeProvidersNonBlockingError('dispose.hub_pipeline_runtime_ingress', error);
     }

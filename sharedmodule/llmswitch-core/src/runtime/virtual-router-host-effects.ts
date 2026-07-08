@@ -5,7 +5,6 @@ import type {
   StopMessageStateSnapshot,
   TargetMetadata
 } from '../native/router-hotpath/native-virtual-router-runtime.js';
-import { resolveRccUserDir } from './user-data-paths.js';
 import { parseRoutingInstructionKindsWithNative } from '../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
 import { parseResolvedStopMessageInstructionWithNative } from '../native/router-hotpath/native-virtual-router-stop-message-semantics.js';
 import {
@@ -13,9 +12,10 @@ import {
 } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import { formatVirtualRouterHit, createVirtualRouterHitRecord, resolveSessionLogColorKey, type VirtualRouterHitLogConfig } from './virtual-router-hit-log.js';
 import type { RoutingInstruction } from '../native/router-hotpath/native-virtual-router-routing-state.js';
-import { failNativeRequired } from '../native/router-hotpath/native-router-hotpath-policy.js';
+import { failNativeRequired } from '../native/router-hotpath/native-router-hotpath-loader.js';
 import {
   parseRecord,
+  resolveRccUserDirWithNative as resolveRccUserDir,
   readNativeFunction,
   safeStringify
 } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';

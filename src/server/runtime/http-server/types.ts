@@ -1,5 +1,3 @@
-import type { Readable } from 'node:stream';
-import type { PipelineExecutionInput } from '../../handlers/types.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { PortConfig } from './port-config-types.js';
 
@@ -98,26 +96,7 @@ export interface HubPipelineExecutionResult {
   metadata: Record<string, unknown>;
 }
 
-export interface HubPipeline {
-  execute(
-    request: PipelineExecutionInput & { payload: Record<string, unknown> | { readable?: Readable } | Readable }
-  ): Promise<HubPipelineExecutionResult>;
-  updateVirtualRouterConfig(config: unknown): void;
-  getVirtualRouter?(): {
-    route(request: Record<string, unknown>, metadata: Record<string, unknown>): {
-      target?: Record<string, unknown>;
-      decision?: Record<string, unknown>;
-      diagnostics?: Record<string, unknown>;
-    };
-    markConcurrencyScopeBusy(scopeKey: string): void;
-    markConcurrencyScopeIdle(scopeKey: string): void;
-    resetProviderQuota?(providerKey: string): unknown;
-    recoverProviderQuota?(providerKey: string): unknown;
-    disableProviderQuota?(providerKey: string, mode: 'cooldown' | 'blacklist', durationMs: number): unknown;
-  };
-}
+export type { HubPipelineHandle } from './hub-pipeline-handle.js';
 
 // HubPipelineConfig replaced by Record<string,unknown> - config goes directly via NAPI
 export type HubPipelineConfig = Record<string, unknown>;
-
-export type HubPipelineCtor = new (config: HubPipelineConfig) => HubPipeline;

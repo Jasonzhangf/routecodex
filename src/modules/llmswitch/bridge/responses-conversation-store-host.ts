@@ -1,47 +1,349 @@
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-import { ProviderProtocolError } from '../provider-protocol-error.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  assertResponsesConversationStoreNativeAvailable,
-  buildConversationScopePlan,
-  collectPendingToolCallIds,
-  convertOutputToInputItems,
-  materializeContinuationPayload,
-  planAttachEntryScopes,
-  planCapturePendingCleanup,
-  planCapturedEntry,
-  planConversationPreflight,
-  planContinuationLookupByResponseId,
-  planContinuationMeta,
-  planConversationRetention,
-  planPersistedEntry,
-  planPersistenceEligibility,
-  planRebindRequestId,
-  planReleaseRequestPayload,
-  planRecordScopeCleanup,
-  planRecordContinuationFlag,
-  planRecordScopeEntryMatch,
-  planResumeEntryMatch,
-  planStoreSweep,
-  planStoreTokens,
-  planScopeContinuationMatch,
-  restoreContinuationPayload,
-  resumeConversationPayload,
-  type AnyRecord,
-  type CaptureContextArgs,
-  type ConversationEntry,
-  type ContinuationLookupOptions,
-  type RecordResponseArgs,
-  type ResponsesStoreLookupResult,
-  type ResponsesContinuationEntryKind,
-  type RestoreByScopeArgs,
-  type ResumeOptions,
-  type ResumeResult,
-} from './responses-conversation-store-native.js';
+import { requireCoreDist } from './module-loader.js';
+
+type AnyRecord = Record<string, unknown>;
+type ResponsesContinuationEntryKind = 'responses' | 'chat' | 'messages';
+type ProviderProtocolErrorCategory = 'EXTERNAL_ERROR' | 'TOOL_ERROR' | 'INTERNAL_ERROR';
+
+class ProviderProtocolError extends Error {
+  readonly code: string;
+  readonly protocol?: string;
+  readonly providerType?: string;
+  readonly category: ProviderProtocolErrorCategory;
+  readonly details?: Record<string, unknown>;
+
+  constructor(
+    message: string,
+    options: {
+      code: string;
+      protocol?: string;
+      providerType?: string;
+      category?: string;
+      details?: Record<string, unknown>;
+    }
+  ) {
+    super(message);
+    this.name = 'ProviderProtocolError';
+    this.code = options.code;
+    this.protocol = options.protocol;
+    this.providerType = options.providerType;
+    this.category =
+      options.category === 'TOOL_ERROR' || options.category === 'INTERNAL_ERROR' || options.category === 'EXTERNAL_ERROR'
+        ? options.category
+        : 'EXTERNAL_ERROR';
+    this.details = options.details;
+  }
+}
+
+interface CaptureContextArgs {
+  requestId?: string;
+  payload: AnyRecord;
+  context: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  providerKey?: string;
+  entryKind?: ResponsesContinuationEntryKind;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+  routeHint?: string;
+}
+
+interface RecordResponseArgs {
+  requestId?: string;
+  response: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  providerKey?: string;
+  entryKind?: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+  allowScopeContinuation?: boolean;
+  routeHint?: string;
+}
+
+interface ResumeOptions {
+  requestId?: string;
+  entryKind?: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}
+
+interface RestoreByScopeArgs {
+  payload: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  requestId?: string;
+  entryKind?: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}
+
+interface ResumeResult {
+  payload: AnyRecord;
+  meta: AnyRecord;
+}
+
+interface ContinuationLookupOptions {
+  entryKind?: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+}
+
+interface ResponsesStoreLookupResult {
+  responseId: string;
+  providerKey?: string;
+  continuationOwner?: 'direct' | 'relay';
+  entryKind?: ResponsesContinuationEntryKind;
+  requestId?: string;
+}
+
+interface ConversationEntry {
+  requestId: string;
+  basePayload: AnyRecord;
+  input: AnyRecord[];
+  allowContinuation?: boolean;
+  releasedInputPrefix?: AnyRecord[];
+  releasedPendingToolCallIds?: string[];
+  inputPrefixDigest?: string;
+  inputItemCount?: number;
+  tools?: AnyRecord[];
+  providerKey?: string;
+  entryKind?: ResponsesContinuationEntryKind;
+  continuationOwner?: 'direct' | 'relay';
+  createdAt: number;
+  updatedAt: number;
+  lastResponseId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  scopeKeys: string[];
+  portScopeKey?: string;
+}
+
+type ScopeContinuationMatchCandidate = {
+  scopeKey: string;
+  requestId?: string;
+  lastResponseId?: string;
+  allowContinuation?: boolean;
+  continuationOwner?: 'direct' | 'relay';
+};
+
+type ResponsesConversationStoreNativeModule = {
+  assertResponsesConversationStoreNativeAvailable?: () => void;
+  buildConversationScopePlan?: (input: unknown) => { keys: string[]; portScopeKey?: string };
+  collectPendingToolCallIds?: (input: AnyRecord[]) => string[];
+  convertOutputToInputItems?: (response: unknown) => AnyRecord[];
+  materializeContinuationPayload?: (
+    entry: ConversationEntry,
+    payload: AnyRecord,
+    requestId?: string,
+    scopeKey?: string
+  ) => ResumeResult | null;
+  restoreContinuationPayload?: (
+    entry: ConversationEntry,
+    payload: AnyRecord,
+    requestId?: string,
+    scopeKey?: string
+  ) => ResumeResult | null;
+  resumeConversationPayload?: (
+    entry: ConversationEntry,
+    responseId: string,
+    submitPayload: AnyRecord,
+    requestId?: string
+  ) => ResumeResult;
+  planAttachEntryScopes?: (input: {
+    requestId: string;
+    scopeKeys: string[];
+    candidates: Array<{ scopeKey?: string; requestId?: string }>;
+  }) => { action: string; reason: string; scopeKeys: string[]; detachRequestIds: string[] };
+  planCapturePendingCleanup?: (input: {
+    requestId: string;
+    scopeKeys: string[];
+    candidates: Array<{ requestId?: string; lastResponseId?: string; scopeKeys?: string[] }>;
+  }) => { action: string; reason: string; detachRequestIds: string[] };
+  planCapturedEntry?: (input: unknown) => { action: 'entry' | 'skip'; reason: string; entry?: ConversationEntry };
+  planConversationPreflight?: (input: unknown) => {
+    action: 'continue' | 'skip' | 'throw';
+    reason: string;
+    code?: string;
+    requestId?: string;
+    responseId?: string;
+    toolOutputCount?: number;
+  };
+  planContinuationLookupByResponseId?: (input: unknown) => {
+    action: 'none' | 'select';
+    reason: string;
+    responseId?: string;
+    providerKey?: string;
+    continuationOwner?: 'direct' | 'relay';
+    entryKind?: ResponsesContinuationEntryKind;
+    requestId?: string;
+  };
+  planContinuationMeta?: (input: { meta?: unknown; entry: ConversationEntry }) => {
+    action: 'meta';
+    reason: string;
+    meta: AnyRecord;
+  };
+  planConversationRetention?: (
+    entry: ConversationEntry,
+    options: { keepForSubmitToolOutputs?: boolean } | undefined
+  ) => { action: 'noop' | 'clear' | 'release'; reason: string; lastResponseId?: string };
+  planPersistedEntry?: (input: {
+    mode: 'serialize' | 'deserialize';
+    entry: unknown;
+    nowMs?: number;
+  }) => { action: 'entry' | 'skip'; reason: string; entry?: ConversationEntry };
+  planPersistenceEligibility?: (
+    entry: ConversationEntry,
+    options: { mode: 'load' | 'flush'; nowMs?: number; ttlMs?: number }
+  ) => { action: 'persist' | 'skip'; reason: string; lastResponseId?: string };
+  planRebindRequestId?: (input: {
+    oldId?: string;
+    newId?: string;
+    oldEntryExists: boolean;
+    newEntryExists: boolean;
+  }) => { action: 'noop' | 'rebind'; reason: string; oldId?: string; newId?: string };
+  planReleaseRequestPayload?: (entry: ConversationEntry) => {
+    basePayload: AnyRecord;
+    releasedInputPrefix: AnyRecord[];
+    releasedPendingToolCallIds: string[];
+    input: AnyRecord[];
+  };
+  planRecordScopeCleanup?: (input: {
+    requestId: string;
+    scopeKeys: string[];
+    candidates: Array<{ requestId?: string; lastResponseId?: string; scopeKeys?: string[] }>;
+  }) => { action: string; reason: string; detachRequestIds: string[] };
+  planRecordContinuationFlag?: (input: {
+    allowContinuation?: boolean;
+    pendingToolCallIds?: string[];
+  }) => { allowContinuation: boolean; reason: string; pendingToolCallCount: number };
+  planRecordScopeEntryMatch?: (input: {
+    scopeKeys: string[];
+    candidates: ScopeContinuationMatchCandidate[];
+  }) => { action: 'none' | 'select'; reason: string; scopeKey?: string; requestId?: string };
+  planResumeEntryMatch?: (input: unknown) => {
+    action: 'none' | 'select' | 'ambiguous';
+    reason: string;
+    source?: 'response_index' | 'request_map' | 'scope';
+    requestId?: string;
+    lastResponseId?: string;
+    scopeKey?: string;
+    matchCount?: number;
+  };
+  planStoreSweep?: (input: {
+    mode: 'clear_unresolved' | 'prune_expired';
+    nowMs?: number;
+    ttlMs?: number;
+    candidates: Array<{ requestId?: string; lastResponseId?: string; updatedAt?: number }>;
+  }) => { action: string; reason: string; detachRequestIds: string[] };
+  planStoreTokens?: (input: unknown) => {
+    providerKey?: string;
+    sessionId?: string;
+    conversationId?: string;
+    entryKind: ResponsesContinuationEntryKind;
+    continuationOwner?: 'direct' | 'relay';
+  };
+  planScopeContinuationMatch?: (input: {
+    mode: 'resume' | 'materialize';
+    candidates: ScopeContinuationMatchCandidate[];
+    options?: { continuationOwner?: 'direct' | 'relay' };
+  }) => {
+    action: 'none' | 'restore' | 'materialize';
+    reason: string;
+    scopeKey?: string;
+    dedupeKey?: string;
+    requestId?: string;
+    lastResponseId?: string;
+    matchCount?: number;
+  };
+};
+
+function getResponsesConversationStoreNative(): ResponsesConversationStoreNativeModule {
+  return requireCoreDist<ResponsesConversationStoreNativeModule>(
+    'conversion/shared/responses-conversation-store-native'
+  );
+}
+
+function requireResponsesStoreNativeFn<TFunction extends Function>(
+  name: keyof ResponsesConversationStoreNativeModule
+): TFunction {
+  const responsesConversationStoreNative = getResponsesConversationStoreNative();
+  const fn = responsesConversationStoreNative[name];
+  if (typeof fn !== 'function') {
+    throw new Error(`[responses-conversation-store-host] ${String(name)} not available`);
+  }
+  return fn as unknown as TFunction;
+}
+
+function lazyResponsesStoreNativeFn<TFunction extends Function>(
+  name: keyof ResponsesConversationStoreNativeModule
+): TFunction {
+  return ((...args: unknown[]) => {
+    const fn = requireResponsesStoreNativeFn<TFunction>(name) as unknown as (...innerArgs: unknown[]) => unknown;
+    return fn(...args);
+  }) as unknown as TFunction;
+}
+
+const assertResponsesConversationStoreNativeAvailable =
+  lazyResponsesStoreNativeFn<() => void>('assertResponsesConversationStoreNativeAvailable');
+const buildConversationScopePlan =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['buildConversationScopePlan']>>('buildConversationScopePlan');
+const collectPendingToolCallIds =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['collectPendingToolCallIds']>>('collectPendingToolCallIds');
+const convertOutputToInputItems =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['convertOutputToInputItems']>>('convertOutputToInputItems');
+const materializeContinuationPayload =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['materializeContinuationPayload']>>('materializeContinuationPayload');
+const planAttachEntryScopes =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planAttachEntryScopes']>>('planAttachEntryScopes');
+const planCapturePendingCleanup =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planCapturePendingCleanup']>>('planCapturePendingCleanup');
+const planCapturedEntry =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planCapturedEntry']>>('planCapturedEntry');
+const planConversationPreflight =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planConversationPreflight']>>('planConversationPreflight');
+const planContinuationLookupByResponseId =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planContinuationLookupByResponseId']>>('planContinuationLookupByResponseId');
+const planContinuationMeta =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planContinuationMeta']>>('planContinuationMeta');
+const planConversationRetention =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planConversationRetention']>>('planConversationRetention');
+const planPersistedEntry =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planPersistedEntry']>>('planPersistedEntry');
+const planPersistenceEligibility =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planPersistenceEligibility']>>('planPersistenceEligibility');
+const planRebindRequestId =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planRebindRequestId']>>('planRebindRequestId');
+const planReleaseRequestPayload =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planReleaseRequestPayload']>>('planReleaseRequestPayload');
+const planRecordScopeCleanup =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planRecordScopeCleanup']>>('planRecordScopeCleanup');
+const planRecordContinuationFlag =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planRecordContinuationFlag']>>('planRecordContinuationFlag');
+const planRecordScopeEntryMatch =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planRecordScopeEntryMatch']>>('planRecordScopeEntryMatch');
+const planResumeEntryMatch =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planResumeEntryMatch']>>('planResumeEntryMatch');
+const planStoreSweep =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planStoreSweep']>>('planStoreSweep');
+const planStoreTokens =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planStoreTokens']>>('planStoreTokens');
+const planScopeContinuationMatch =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['planScopeContinuationMatch']>>('planScopeContinuationMatch');
+const restoreContinuationPayload =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['restoreContinuationPayload']>>('restoreContinuationPayload');
+const resumeConversationPayload =
+  lazyResponsesStoreNativeFn<NonNullable<ResponsesConversationStoreNativeModule['resumeConversationPayload']>>('resumeConversationPayload');
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
 
 const TTL_MS = 1000 * 60 * 30; // 30min
 const PERSIST_SCHEMA_VERSION = 1;
@@ -144,7 +446,7 @@ function ensureMetaProviderKey(meta: AnyRecord | undefined, entry: ConversationE
 
 function collectScopeMatchCandidates(scopeIndex: Map<string, ConversationEntry>, scopeKeys: string[]) {
   const entriesByScopeKey = new Map<string, ConversationEntry>();
-  const candidates: Array<Parameters<typeof planScopeContinuationMatch>[0]['candidates'][number]> = [];
+  const candidates: ScopeContinuationMatchCandidate[] = [];
   for (const scopeKey of scopeKeys) {
     const entry = scopeIndex.get(scopeKey);
     if (!entry) continue;
@@ -291,6 +593,17 @@ class ResponsesConversationStore {
     });
     if (capturePreflight.action !== 'continue') return;
     const requestId = capturePreflight.requestId ?? args.requestId;
+    if (!requestId) {
+      throw new ProviderProtocolError('Responses conversation request capture requires request id', {
+        code: 'MALFORMED_REQUEST',
+        protocol: 'openai-responses',
+        providerType: 'responses',
+        details: {
+          context: 'responses-conversation-store.captureRequestContext',
+          reason: 'missing_request_id'
+        }
+      });
+    }
     this.prune();
     assertResponsesConversationStoreNativeAvailable();
     const existing = this.requestMap.get(requestId);
@@ -874,8 +1187,13 @@ class ResponsesConversationStore {
     if (this.pruneTimer) return;
     const PRUNE_INTERVAL_MS = 60_000; // 1min
     this.pruneTimer = setInterval(() => {
-      this.prune();
+      try {
+        this.prune();
+      } catch (error) {
+        logResponsesStoreNonBlockingError('prune.timer', error);
+      }
     }, PRUNE_INTERVAL_MS);
+    this.pruneTimer.unref?.();
   }
 
   private stopPruneTimer(): void {

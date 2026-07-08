@@ -1,8 +1,7 @@
 /**
  * State Integrations Bridge
  *
- * Routing state, session identifier extraction, stats center, and
- * clock task store compatibility wrappers.
+ * Routing state and session identifier compatibility wrappers.
  */
 export declare function loadRoutingInstructionStateSync(key: string): unknown | null;
 export declare function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void;
@@ -13,9 +12,4 @@ type SessionIdentifiers = {
 };
 export declare function extractSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers;
 export declare function extractContinuationContextSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers;
-type StatsCenterLike = {
-    recordProviderUsage(ev: unknown): void;
-};
-export declare function getStatsCenterSafe(): StatsCenterLike;
-export declare function getLlmsStatsSnapshot(): unknown | null;
 export {};

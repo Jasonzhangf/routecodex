@@ -31,7 +31,6 @@ const directWriteCallPattern = /\b(?:\w+\.)?write(?:RequestTruth|ContinuationCon
 const allowedDirectWriteFiles = new Set([
   'src/server/runtime/http-server/metadata-center/dualwrite-api.ts',
   'sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts',
-  'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts',
   'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts',
 ]);
 

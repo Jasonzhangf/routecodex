@@ -108,6 +108,7 @@ function shouldPreferSourceInJest(subpath: string, impl: LlmsImpl): boolean {
   }
   const jestDistOnlyPrefixes = [
     'native/router-hotpath/native-failure-policy',
+    'native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol',
     'native/router-hotpath/native-virtual-router-routing-state'
   ];
   if (matchesPrefix(subpath, jestDistOnlyPrefixes)) {

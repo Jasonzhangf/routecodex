@@ -5,7 +5,7 @@ import {
   coerceRouteCodexProviderConfigV2Sync,
   decodeRouteCodexProviderConfigTextSync,
   detectRouteCodexProviderConfigFormatSync,
-} from '../modules/llmswitch/bridge.js';
+} from '../modules/llmswitch/bridge/routing-integrations.js';
 import type { ProviderConfigV2 } from './provider-v2-loader.js';
 
 export type ProviderConfigFormat = 'toml';

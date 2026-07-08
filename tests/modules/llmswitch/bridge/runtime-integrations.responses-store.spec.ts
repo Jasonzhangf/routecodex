@@ -35,21 +35,18 @@ describe("llmswitch bridge runtime-integrations responses store authority", () =
       recordResponse: globalRecord,
       resumeConversation: globalResume,
       resumeLatestContinuationByScope: globalResumeByScope,
+      getDebugStats: () => ({}),
+      startPruneTimer: () => {},
     };
 
     jest.unstable_mockModule(
       "../../../../src/modules/llmswitch/bridge/module-loader.js",
       () => ({
+        requireCoreDist: jest.fn((subpath: string) => {
+          throw new Error(`unexpected requireCoreDist: ${subpath}`);
+        }),
         importCoreDist: jest.fn(async (subpath: string) => {
-          if (subpath !== "conversion/shared/responses-conversation-store") {
-            throw new Error(`unexpected subpath: ${subpath}`);
-          }
-          return {
-            captureResponsesRequestContext: importCapture,
-            recordResponsesResponse: importRecord,
-            resumeResponsesConversation: importResume,
-            resumeLatestResponsesContinuationByScope: importResumeByScope,
-          };
+          throw new Error(`unexpected importCoreDist: ${subpath}`);
         }),
       }),
     );

@@ -57,14 +57,20 @@ export {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync,
-  extractSessionIdentifiersFromMetadata,
-  getStatsCenterSafe,
-  getLlmsStatsSnapshot
+  extractSessionIdentifiersFromMetadata
 } from './state-integrations.js';
 export {
   bootstrapVirtualRouterConfig,
-  getHubPipelineCtor,
-  getHubPipelineCtorForImpl,
+  createHubPipelineNative,
+  executeHubPipelineNative,
+  updateHubPipelineVirtualRouterConfigNative,
+  updateHubPipelineEngineDepsNative,
+  routeHubPipelineVirtualRouterNative,
+  diagnoseHubPipelineVirtualRouterNative,
+  getHubPipelineVirtualRouterStatusNative,
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative,
+  disposeHubPipelineNative,
   resolveBaseDir
 } from './routing-integrations.js';
 

@@ -7,12 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
-import { bootstrapVirtualRouterConfig, clearAllResponsesConversationState, getHubPipelineCtor, resetResponsesConversationStateForRestartSimulation } from '../../../src/modules/llmswitch/bridge.js';
-
-type HubPipelineCtor = new (config: any) => {
-  execute: (request: any) => Promise<any>;
-  dispose?: () => void;
-};
+import { bootstrapVirtualRouterConfig, clearAllResponsesConversationState, resetResponsesConversationStateForRestartSimulation } from '../../../src/modules/llmswitch/bridge.js';
+import { NativeHubPipelineTestWrapper as HubPipeline } from '../../../helpers/native-hub-pipeline-test-wrapper.js';
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);
@@ -152,7 +148,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         search: [{ id: 'search-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -236,7 +231,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         search: [{ id: 'search-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -346,7 +340,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -475,7 +468,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -588,7 +580,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -697,7 +688,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -809,7 +799,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -930,7 +919,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -1056,7 +1044,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -1203,7 +1190,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -1295,7 +1281,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }
@@ -1395,7 +1380,6 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }

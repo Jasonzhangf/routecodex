@@ -2,7 +2,7 @@ import {
   type VirtualRouterBootstrapInput,
   type VirtualRouterBootstrapResult
 } from './virtual-router-contracts.js';
-import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-policy.js';
+import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-loader.js';
 import { callNativeJson } from './native-router-hotpath.js';
 
 export type {

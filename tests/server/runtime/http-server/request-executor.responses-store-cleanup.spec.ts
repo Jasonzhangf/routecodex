@@ -12,7 +12,7 @@ import {
   clearResponsesConversationByRequestId,
   responsesConversationStore,
   resumeLatestResponsesContinuationByScope,
-} from '../../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
+} from '../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
 
 function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandle {
   return {

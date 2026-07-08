@@ -233,54 +233,48 @@ function buildVirtualRouterConfig() {
   };
 }
 
-async function importHubPipelineCtor() {
-  // Use the locally linked rcc-llmswitch-core (symlinked to sharedmodule/llmswitch-core).
+async function importHubPipelineNative() {
   const repoRoot = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..');
-  const hubPath = path.join(repoRoot, 'sharedmodule', 'llmswitch-core', 'dist', 'conversion', 'hub', 'pipeline', 'hub-pipeline.js');
-  const mod = await import(url.pathToFileURL(hubPath).href);
-  if (typeof mod.HubPipeline !== 'function') {
-    throw new Error('HubPipeline ctor not found in built llmswitch-core dist. Run `npm run llmswitch:build` or `cd sharedmodule/llmswitch-core && npm run build`.');
+  const bridgePath = path.join(repoRoot, 'src', 'modules', 'llmswitch', 'bridge', 'routing-integrations.js');
+  const mod = await import(url.pathToFileURL(bridgePath).href);
+  for (const name of [
+    'bootstrapVirtualRouterConfig',
+    'createHubPipelineNative',
+    'executeHubPipelineNative',
+    'disposeHubPipelineNative',
+  ]) {
+    if (typeof mod[name] !== 'function') {
+      throw new Error(`${name} not found in bridge routing-integrations.js. Run \`npx tsc --pretty false --incremental false\` first.`);
+    }
   }
-  return mod.HubPipeline;
-}
-
-async function bootstrapVirtualRouterConfig(rawConfig) {
-  const repoRoot = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..');
-  const bootstrapPath = path.join(
-    repoRoot,
-    'sharedmodule',
-    'llmswitch-core',
-    'dist', 'native', 'router-hotpath', 'native-virtual-router-bootstrap-config.js'
-  );
-  const mod = await import(url.pathToFileURL(bootstrapPath).href);
-  if (typeof mod.bootstrapVirtualRouterConfig !== 'function') {
-    throw new Error('bootstrapVirtualRouterConfig not found in built llmswitch-core dist.');
-  }
-  return mod.bootstrapVirtualRouterConfig(rawConfig);
+  return mod;
 }
 
 async function runOnce({ requestId, candidateMode, baselineMode, entryEndpoint, routeHint, payload }) {
-  const HubPipeline = await importHubPipelineCtor();
-  const artifacts = await bootstrapVirtualRouterConfig(buildVirtualRouterConfig());
-  const pipeline = new HubPipeline({
+  const hub = await importHubPipelineNative();
+  const artifacts = await hub.bootstrapVirtualRouterConfig(buildVirtualRouterConfig());
+  const handle = hub.createHubPipelineNative({
     virtualRouter: artifacts.config,
     policy: { mode: candidateMode }
   });
   const providerProtocol = normalizeEntryProviderProtocol(entryEndpoint);
-  const result = await pipeline.execute({
-    id: requestId,
-    endpoint: entryEndpoint,
-    payload,
-    metadata: {
-      entryEndpoint,
-      providerProtocol,
-      routeHint,
-      __hubShadowCompare: {
-        baselineMode
+  try {
+    return hub.executeHubPipelineNative(handle, {
+      id: requestId,
+      endpoint: entryEndpoint,
+      payload,
+      metadata: {
+        entryEndpoint,
+        providerProtocol,
+        routeHint,
+        __hubShadowCompare: {
+          baselineMode
+        }
       }
-    }
-  });
-  return result;
+    });
+  } finally {
+    hub.disposeHubPipelineNative(handle);
+  }
 }
 
 function writeCompareErrorSample(opts) {

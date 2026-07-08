@@ -1,8 +1,7 @@
 /**
  * State Integrations Bridge
  *
- * Routing state, session identifier extraction, stats center, and
- * clock task store compatibility wrappers.
+ * Routing state and session identifier compatibility wrappers.
  */
 import { requireCoreDist } from './module-loader.js';
 import { formatUnknownError } from '../../../utils/common-utils.js';
@@ -98,43 +97,5 @@ export function extractContinuationContextSessionIdentifiersFromMetadata(meta) {
     }
     catch (error) {
         throw buildStateIntegrationFailure('session_identifiers.extract_continuation.invoke', error);
-    }
-}
-let cachedStatsCenter = undefined;
-export function getStatsCenterSafe() {
-    if (cachedStatsCenter) {
-        return cachedStatsCenter;
-    }
-    if (cachedStatsCenter === null) {
-        throw buildStateIntegrationFailure('stats_center.load.cached_unavailable', 'stats center unavailable');
-    }
-    try {
-        const mod = requireCoreDist('telemetry/stats-center');
-        const fn = mod?.getStatsCenter;
-        const center = typeof fn === 'function' ? fn() : null;
-        if (center && typeof center.recordProviderUsage === 'function') {
-            cachedStatsCenter = center;
-            return center;
-        }
-        throw buildStateIntegrationFailure('stats_center.api_unavailable', 'getStatsCenter not available');
-    }
-    catch (error) {
-        cachedStatsCenter = null;
-        throw buildStateIntegrationFailure('stats_center.load', error);
-    }
-}
-export function getLlmsStatsSnapshot() {
-    try {
-        const mod = requireCoreDist('telemetry/stats-center');
-        const get = mod?.getStatsCenter;
-        const center = typeof get === 'function' ? get() : null;
-        const snap = center && typeof center === 'object' ? center.getSnapshot : null;
-        if (typeof snap !== 'function') {
-            throw buildStateIntegrationFailure('stats_center.snapshot.api_unavailable', 'getSnapshot not available');
-        }
-        return snap.call(center);
-    }
-    catch (error) {
-        throw buildStateIntegrationFailure('stats_center.snapshot.invoke', error);
     }
 }

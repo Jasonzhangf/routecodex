@@ -11,12 +11,8 @@
 import type { AnyRecord } from './module-loader.js';
 import {
   importCoreDist,
-  rebindResponsesConversationRequestId,
   requireCoreDist,
-} from './index.js';
-import {
-  clearResponsesConversationByRequestId,
-} from './runtime-integrations.js';
+} from './module-loader.js';
 import {
   planResponsesJsonClientDispatchNative,
   projectResponsesClientPayloadForClientNative,
@@ -114,6 +110,7 @@ export async function rebindResponsesConversationRequestIdForHttp(
   oldId?: string,
   newId?: string
 ): Promise<void> {
+  const { rebindResponsesConversationRequestId } = await import('./runtime-integrations.js');
   await rebindResponsesConversationRequestId(oldId, newId);
 }
 export function requireResponsesHandlerCoreDist<TModule extends object>(

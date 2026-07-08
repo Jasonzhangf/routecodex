@@ -28,7 +28,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -75,8 +75,8 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/stopless-metadata-center.spec.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
@@ -155,7 +155,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
@@ -174,7 +174,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -193,7 +193,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -212,7 +212,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -231,7 +231,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -250,7 +250,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -270,7 +270,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - src/modules/llmswitch/bridge/native-exports.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -309,7 +309,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
@@ -328,7 +328,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
@@ -383,8 +383,8 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -405,7 +405,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -425,7 +425,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -446,7 +446,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -463,7 +463,7 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -498,9 +498,9 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -834,7 +834,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
     contract:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
     integration:
       - src/server/runtime/http-server/routes.ts
     smoke:
@@ -1032,7 +1032,7 @@ verification:
   - feature_id: hub.runtime_ingress_bridge
     change_risk: medium
     unit:
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
+      - src/server/runtime/http-server/http-server-runtime-setup.ts
     contract:
       - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -1067,8 +1067,8 @@ verification:
   - feature_id: hub.chat_envelope_type_surface
     change_risk: low
     unit:
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts
       - sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -1082,23 +1082,6 @@ verification:
     notes:
       - "Public TS ChatEnvelope/StandardizedRequest types are limited to externally consumed bridge declarations."
       - "Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases are residue and must remain module-internal."
-
-  - feature_id: hub.stage_timing_observation
-    change_risk: low
-    unit:
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
-    contract:
-      - tests/sharedmodule/hub-stage-timing-top-summary.spec.ts
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    integration:
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    smoke:
-      - npm run verify:function-map-compile-gate
-    build:
-      - npm run verify:llmswitch-core-tsc
-    notes:
-      - "Timing top-summary writes only runtime metadata observation, never Hub request/response data payload."
-      - "Retired `measureHubStage` wrappers are test-only residue and must not return."
 
   - feature_id: hub.response_anthropic_client_projection
     change_risk: high
@@ -1153,7 +1136,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -1217,7 +1200,7 @@ verification:
     notes:
       - "Provider SSE marker/bodyText materialization and read-error descriptor semantics must stay Rust-owned; TS provider-response shell may only read Node streams and invoke native."
       - "`ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are not public imports; keep them module-internal while preserving `convertProviderResponse`."
-      - "Provider-response-local hub stage top attach/normalize/merge helpers are dead residue and must stay deleted; `hub-stage-timing.ts` owns context attachment."
+      - "Provider-response-local hub stage top attach/normalize/merge helpers are dead residue and must stay deleted; the Rust Hub Pipeline timing/effect path owns context attachment."
 
   - feature_id: hub.response_provider_context_helpers
     change_risk: medium
@@ -1245,7 +1228,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
       - src/cli/config/init-provider-catalog.ts
       - src/provider-sdk/provider-inspect.ts
       - src/provider-sdk/provider-runtime-inference.ts
@@ -1431,7 +1414,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
+      - src/server/runtime/http-server/http-server-runtime-setup.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
     integration:
@@ -1446,7 +1429,7 @@ verification:
       - "Must verify requestId format `req_{total}_{daily}` is generated by Rust only; TS must not compose locally."
       - "Must verify daily counter resets when local date string changes; no UTC drift."
       - "Must verify global counter survives restart via ~/.rcc/state/global-request-counter.json."
-      - "Must verify standalone TS chat-process-session-usage shell remains physically deleted and provider-response.ts only invokes native planChatProcessSessionUsage."
+      - "Must verify standalone TS chat-process-session-usage shell remains physically deleted and provider-response host boundary only invokes native planChatProcessSessionUsage."
 
   - feature_id: hub.chat_process_responses_continuation
     change_risk: high
@@ -2295,8 +2278,8 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - src/server/runtime/http-server/http-server-runtime-setup.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
     contract:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts

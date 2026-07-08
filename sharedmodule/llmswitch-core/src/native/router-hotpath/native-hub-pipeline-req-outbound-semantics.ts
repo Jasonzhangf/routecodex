@@ -1,7 +1,7 @@
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from './native-router-hotpath-policy.js';
+} from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 import type { JsonObject } from '../../conversion/hub/types/json.js';

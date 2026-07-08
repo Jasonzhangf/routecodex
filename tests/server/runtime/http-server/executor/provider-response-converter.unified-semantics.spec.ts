@@ -283,9 +283,6 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loa
     normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
   }),
   importCoreDist: async (subpath: string) => {
-    if (subpath === 'conversion/hub/response/provider-response') {
-      return { convertProviderResponse: mockConvertProviderResponse };
-    }
     if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
       return {
         normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
@@ -300,9 +297,6 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loa
     normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
   }),
   importCoreDist: async (subpath: string) => {
-    if (subpath === 'conversion/hub/response/provider-response') {
-      return { convertProviderResponse: mockConvertProviderResponse };
-    }
     if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
       return {
         normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
@@ -482,7 +476,6 @@ describe('provider-response-converter unified semantics handoff', () => {
       },
       sseStream: PassThrough.from([
         'data: {"id":"chatcmpl_direct_toolcall_strip_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}\n\n',
-        'data: {"id":"chatcmpl_direct_toolcall_strip_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{"content":"现在真相清楚了。让我读最后一块关键证据。"},"finish_reason":null}]}\n\n',
         'data: {"id":"chatcmpl_direct_toolcall_strip_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_direct_strip_1","type":"function","function":{"name":"search_content","arguments":""}}]},"finish_reason":null}]}\n\n',
         'data: {"id":"chatcmpl_direct_toolcall_strip_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"glob\\":\\"**/*.rs\\",\\"pattern\\":\\"build_client_exec_cli_projection\\",\\"context\\":5}"}}]},"finish_reason":null}]}\n\n',
         'data: {"id":"chatcmpl_direct_toolcall_strip_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{"content":""},"finish_reason":"tool_calls"}]}\n\n',
@@ -563,7 +556,7 @@ describe('provider-response-converter unified semantics handoff', () => {
         ]
       },
       sseStream: PassThrough.from([
-        'data: {"id":"chatcmpl_direct_toolcall_args_seed_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_direct_args_seed_1","type":"function","function":{"name":"search_content"}}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl_direct_toolcall_args_seed_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_direct_args_seed_1","type":"function","function":{"name":"search_content","arguments":""}}]},"finish_reason":null}]}\n\n',
         'data: {"id":"chatcmpl_direct_toolcall_args_seed_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"glob\\":\\"**/*.rs\\",\\"pattern\\":\\"ClientExecCliProjectionOutput\\",\\"context\\":5}"}}]},"finish_reason":null}]}\n\n',
         'data: {"id":"chatcmpl_direct_toolcall_args_seed_1","object":"chat.completion.chunk","created":1,"model":"glm-5.2","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n',
         'data: [DONE]\n\n'
@@ -607,7 +600,7 @@ describe('provider-response-converter unified semantics handoff', () => {
     expect(text).toContain('"function":{"name":"search_content","arguments":""}');
   });
 
-  it('forwards unified continuation/audit semantics into bridge conversion and returns bridge-remapped client body', async () => {
+  it('does not forward executor-local continuation/audit semantics into bridge conversion', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -707,31 +700,12 @@ describe('provider-response-converter unified semantics handoff', () => {
     const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, any>;
     expect(bridgeArgs?.providerProtocol).toBe('anthropic-messages');
     expect(bridgeArgs?.entryEndpoint).toBe('/v1/responses');
-    expect(bridgeArgs?.requestSemantics).toMatchObject({
-      continuation: {
-        chainId: 'req_chain_converter_1',
-        stickyScope: 'request_chain',
-        resumeFrom: {
-          previousResponseId: 'resp_prev_converter_1'
-        }
-      },
-      audit: {
-        protocolMapping: {
-          unsupported: [
-            expect.objectContaining({
-              field: 'response_format',
-              reason: 'structured_output_not_supported'
-            })
-          ]
-        }
-      }
-    });
+    expect(bridgeArgs?.requestSemantics).toBeUndefined();
 
     expect((result as any).body).toMatchObject({
       object: 'response',
-      previous_response_id: 'resp_prev_converter_1',
-      observed_chain_id: 'req_chain_converter_1',
-      observed_unsupported_count: 1,
+      previous_response_id: null,
+      observed_unsupported_count: 0,
       observed_captured_has_messages: true
     });
   });
@@ -1198,7 +1172,7 @@ describe('provider-response-converter unified semantics handoff', () => {
     }
 
     const { convertProviderResponse: coreConvertProviderResponse } = await import(
-      '../../../../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
+      '../../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js'
     );
     mockConvertProviderResponse.mockImplementation(async (args) => coreConvertProviderResponse(args as any));
 
@@ -1563,7 +1537,7 @@ describe('provider-response-converter unified semantics handoff', () => {
     });
   });
 
-  it('forwards requestSemantics unchanged instead of backfilling clientToolsRaw from entryOriginRequest in host converter', async () => {
+  it('does not forward requestSemantics or backfill clientToolsRaw from entryOriginRequest in host converter', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1632,11 +1606,11 @@ describe('provider-response-converter unified semantics handoff', () => {
     );
 
     const bridgeArgs = mockConvertProviderResponse.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(bridgeArgs?.requestSemantics).toBe(requestSemantics);
+    expect(bridgeArgs?.requestSemantics).toBeUndefined();
     expect((bridgeArgs?.requestSemantics as any)?.tools?.clientToolsRaw).toBeUndefined();
   });
 
-  it('reprojects direct chat tool-call SSE without host-side visible-content backfill', async () => {
+  it('leaves direct chat tool-call SSE projection to the bridge owner', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -1704,9 +1678,8 @@ describe('provider-response-converter unified semantics handoff', () => {
       },
     );
 
-    expect(mockReprojectDirectChatToolCallStreamForHttp).toHaveBeenCalledTimes(1);
-    const reprojectionArgs = mockReprojectDirectChatToolCallStreamForHttp.mock.calls[0]?.[0] as Record<string, any>;
-    expect(reprojectionArgs?.body?.choices?.[0]?.message?.content).toBeNull();
+    expect(mockReprojectDirectChatToolCallStreamForHttp).not.toHaveBeenCalled();
+    expect(converted.sseStream).toBe(providerSse);
     expect((converted.body as any)?.choices?.[0]?.message?.content).toBeNull();
   });
 

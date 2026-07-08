@@ -1,9 +1,140 @@
 import { jest } from '@jest/globals';
 
-const BRIDGE_MODULE_PATH = '../../../../src/modules/llmswitch/bridge.ts';
 const PROVIDER_V2_LOADER_PATH = '../../../../src/config/provider-v2-loader.ts';
 const BOOTSTRAP_MODULE_PATH = '../../../../src/server/runtime/http-server/http-server-bootstrap.ts';
+const ROUTING_INTEGRATIONS_PATH = '../../../../src/modules/llmswitch/bridge/routing-integrations.js';
+const RUNTIME_INTEGRATIONS_PATH = '../../../../src/modules/llmswitch/bridge/runtime-integrations.js';
 const RUNTIME_MANIFEST_SYMBOL = Symbol.for('routecodex.runtimeConfigManifest');
+
+const mockCreateHubPipelineNative = jest.fn((config: Record<string, unknown>) => {
+  const routeNames = Object.keys((config.virtualRouter as { routing?: Record<string, unknown> } | undefined)?.routing ?? {});
+  return `hp_${routeNames.join('_') || 'primary'}_${mockCreateHubPipelineNative.mock.calls.length}`;
+});
+const mockExecuteHubPipelineNative = jest.fn(() => ({ requestId: 'req_mock', metadata: {} }));
+const mockUpdateHubPipelineVirtualRouterConfigNative = jest.fn();
+const mockUpdateHubPipelineEngineDepsNative = jest.fn();
+const mockRouteHubPipelineVirtualRouterNative = jest.fn(() => ({
+  target: { providerKey: 'asxs.crsa.gpt-5.4-mini' },
+  decision: { routeName: 'default', providerKey: 'asxs.crsa.gpt-5.4-mini' },
+  diagnostics: {},
+}));
+const mockDiagnoseHubPipelineVirtualRouterNative = jest.fn(() => ({ ok: true }));
+const mockGetHubPipelineVirtualRouterStatusNative = jest.fn(() => ({ routes: {} }));
+const mockMarkHubPipelineVirtualRouterConcurrencyScopeBusyNative = jest.fn();
+const mockDisposeHubPipelineNative = jest.fn();
+
+function unwrapProviderConfigs(providerConfigs: Record<string, unknown> = {}): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(providerConfigs).map(([providerId, value]) => {
+      const record = value && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : {};
+      return [providerId, record.provider ?? record];
+    })
+  );
+}
+
+jest.unstable_mockModule(ROUTING_INTEGRATIONS_PATH, () => ({
+  bootstrapVirtualRouterConfig: (input: Record<string, unknown>) => input,
+  compileRouteCodexRuntimeManifest: async (input: any) => {
+    const routingPolicyGroups = input?.userConfig?.virtualrouter?.routingPolicyGroups ?? {};
+    const group =
+      input?.options?.routingPolicyGroup
+      ?? (routingPolicyGroups.default ? 'default' : Object.keys(routingPolicyGroups)[0])
+      ?? 'gateway_priority_5520';
+    const routingPolicyGroup = routingPolicyGroups?.[group] ?? {};
+    const providers = unwrapProviderConfigs(input?.providerConfigs ?? {});
+    const virtualRouterBootstrapInput = {
+      providers,
+      routing: routingPolicyGroup.routing ?? {},
+    };
+    return {
+      manifestVersion: 'routecodex.runtime-config.v1',
+      routingPolicyGroup: group,
+      virtualRouterBootstrapInput,
+      pipelineRuntimeConfig: {
+        applyPatch: { mode: 'client', allow: ['apply_patch'] },
+        routingProviderIds: Object.keys(providers),
+        routingTiersByRoute: virtualRouterBootstrapInput.routing,
+      },
+      providerIds: Object.keys(providers),
+      forwarderIds: [],
+    };
+  },
+  collectRouteCodexV2ConfigSourceErrorsSync: () => [],
+  normalizeRouteCodexV2RuntimeSourceSync: (userConfig: Record<string, unknown>) => userConfig,
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: () => undefined,
+  extractRouteCodexMaterializedProviderConfigsSync: (userConfig: Record<string, unknown>) => {
+    const virtualrouter = userConfig?.virtualrouter;
+    if (!virtualrouter || typeof virtualrouter !== 'object' || Array.isArray(virtualrouter)) {
+      return null;
+    }
+    const providers = (virtualrouter as Record<string, unknown>).providers;
+    return providers && typeof providers === 'object' && !Array.isArray(providers)
+      ? providers
+      : null;
+  },
+  materializeRouteCodexUserConfigFromManifestSync: (userConfig: Record<string, unknown>) => userConfig,
+  buildRouteCodexProviderProfilesSync: () => ({}),
+  buildRouteCodexForwarderProfilesSync: () => ({}),
+  parseRouteCodexTomlRecord: async () => ({}),
+  parseRouteCodexTomlRecordSync: () => ({}),
+  serializeRouteCodexTomlRecord: async () => '',
+  serializeRouteCodexTomlRecordSync: () => '',
+  updateRouteCodexTomlStringScalarInTable: async () => '',
+  updateRouteCodexTomlStringScalarInTableSync: () => '',
+  decodeRouteCodexUserConfigTextSync: () => ({ format: 'toml', parsed: {} }),
+  decodeRouteCodexProviderConfigTextSync: () => ({ format: 'toml', parsed: {} }),
+  detectRouteCodexUserConfigFormatSync: () => 'toml',
+  detectRouteCodexProviderConfigFormatSync: () => 'toml',
+  writeRouteCodexUserConfigFileNativeSync: () => undefined,
+  writeRouteCodexProviderConfigFileNativeSync: () => undefined,
+  updateRouteCodexUserConfigStringScalarNativeSync: () => '',
+  loadRouteCodexConfigNativeSync: () => ({}),
+  coerceRouteCodexProviderConfigV2: async (input: Record<string, unknown>) => input,
+  coerceRouteCodexProviderConfigV2Sync: (input: Record<string, unknown>) => input,
+  planRouteCodexProviderConfigV2FilesSync: () => [],
+  resolveRouteCodexProviderConfigV2IdentitySync: () => ({ providerId: 'mock', alias: undefined }),
+  loadRouteCodexProviderConfigsV2FromRootSync: () => ({}),
+  planAuthFileResolutionNativeSync: () => ({ candidates: [] }),
+  resolveAuthFileKeyNativeSync: () => undefined,
+  planProviderConfigRootNativeSync: () => ({ rootDir: '', candidates: [] }),
+  planRouteCodexConfigLoaderPathsNativeSync: () => ({ candidates: [] }),
+  resolveRouteCodexConfigPathNativeSync: () => '/tmp/routecodex-test-config.toml',
+  resolveRccPathNativeSync: (segments: string[] = []) => ['/tmp/.rcc', ...segments].join('/'),
+  resolveRccSnapshotsDirNativeSync: () => '/tmp/.rcc/snapshots',
+  resolveRccUserDirNativeSync: () => '/tmp/.rcc',
+  resolveBaseDir: () => process.cwd(),
+  createHubPipelineNative: mockCreateHubPipelineNative,
+  executeHubPipelineNative: mockExecuteHubPipelineNative,
+  updateHubPipelineVirtualRouterConfigNative: mockUpdateHubPipelineVirtualRouterConfigNative,
+  updateHubPipelineEngineDepsNative: mockUpdateHubPipelineEngineDepsNative,
+  routeHubPipelineVirtualRouterNative: mockRouteHubPipelineVirtualRouterNative,
+  diagnoseHubPipelineVirtualRouterNative: mockDiagnoseHubPipelineVirtualRouterNative,
+  getHubPipelineVirtualRouterStatusNative: mockGetHubPipelineVirtualRouterStatusNative,
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: mockMarkHubPipelineVirtualRouterConcurrencyScopeBusyNative,
+  disposeHubPipelineNative: mockDisposeHubPipelineNative,
+}));
+
+jest.unstable_mockModule(RUNTIME_INTEGRATIONS_PATH, () => ({
+  writeSnapshotViaHooks: async () => undefined,
+  preloadCriticalBridgeRuntimeModules: async () => ({ loaded: [] }),
+  captureResponsesRequestContextForRequest: async () => undefined,
+  recordResponsesResponseForRequest: async () => undefined,
+  resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
+  lookupResponsesContinuationByResponseId: async () => null,
+  resumeLatestResponsesContinuationByScope: async () => null,
+  materializeLatestResponsesContinuationByScope: async () => null,
+  rebindResponsesConversationRequestId: async () => undefined,
+  clearResponsesConversationByRequestId: async () => undefined,
+  finalizeResponsesConversationRequestRetention: async () => undefined,
+  clearAllResponsesConversationState: async () => undefined,
+  resetResponsesConversationStateForRestartSimulation: async () => undefined,
+  clearUnresolvedResponsesConversationRequests: async () => 0,
+  buildResponsesJsonFromSseStreamWithNative: async () => ({}),
+  reportProviderErrorToRouterPolicy: async () => undefined,
+  reportProviderSuccessToRouterPolicy: async () => undefined,
+}));
 
 function withRuntimeManifest(routerInput: any, pipelineRuntimeConfig: Record<string, unknown> = {}): any {
   Object.defineProperty(routerInput, RUNTIME_MANIFEST_SYMBOL, {
@@ -23,6 +154,18 @@ function withRuntimeManifest(routerInput: any, pipelineRuntimeConfig: Record<str
 }
 
 describe('http server runtime setup provider merge', () => {
+  beforeEach(() => {
+    mockCreateHubPipelineNative.mockClear();
+    mockExecuteHubPipelineNative.mockClear();
+    mockUpdateHubPipelineVirtualRouterConfigNative.mockClear();
+    mockUpdateHubPipelineEngineDepsNative.mockClear();
+    mockRouteHubPipelineVirtualRouterNative.mockClear();
+    mockDiagnoseHubPipelineVirtualRouterNative.mockClear();
+    mockGetHubPipelineVirtualRouterStatusNative.mockClear();
+    mockMarkHubPipelineVirtualRouterConcurrencyScopeBusyNative.mockClear();
+    mockDisposeHubPipelineNative.mockClear();
+  });
+
   afterEach(() => {
     jest.resetModules();
     jest.restoreAllMocks();
@@ -30,7 +173,6 @@ describe('http server runtime setup provider merge', () => {
 
   it('injects referenced provider-v2 configs into virtual router providers during setup', async () => {
     const capturedInputs: any[] = [];
-    const capturedHubConfigs: any[] = [];
 
     jest.unstable_mockModule(PROVIDER_V2_LOADER_PATH, () => ({
       loadProviderConfigsV2: async () => ({
@@ -46,34 +188,6 @@ describe('http server runtime setup provider merge', () => {
           },
         },
       }),
-    }));
-
-    jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
-      bootstrapVirtualRouterConfig: (input: any) => input,
-      compileRouteCodexRuntimeManifest: async (input: any) => {
-        const group = input?.options?.routingPolicyGroup ?? 'gateway_priority_5520';
-        const routingPolicyGroup = input?.userConfig?.virtualrouter?.routingPolicyGroups?.[group] ?? {};
-        return {
-          manifestVersion: 'routecodex.runtime-config.v1',
-          routingPolicyGroup: group,
-          virtualRouterBootstrapInput: {
-            providers: input?.providerConfigs,
-            routing: routingPolicyGroup.routing ?? {},
-          },
-          pipelineRuntimeConfig: { applyPatch: { mode: 'client' } },
-          providerIds: Object.keys(input?.providerConfigs ?? {}),
-          forwarderIds: [],
-        };
-      },
-      getHubPipelineCtor: async () => class HubPipelineMock { constructor(_config: any) {} updateVirtualRouterConfig(): void {} },
-      preloadCriticalBridgeRuntimeModules: async () => ({ loaded: [] }),
-      loadRoutingInstructionStateSync: () => null,
-      saveRoutingInstructionStateAsync: async () => {},
-      saveRoutingInstructionStateSync: () => {},
-      extractSessionIdentifiersFromMetadata: () => ({}),
-      getStatsCenterSafe: () => null,
-      getLlmsStatsSnapshot: () => ({}),
-      clearUnresolvedResponsesConversationRequests: async () => 0,
     }));
 
     const { setupRuntime } = await import('../../../../src/server/runtime/http-server/http-server-runtime-setup.ts');
@@ -110,7 +224,6 @@ describe('http server runtime setup provider merge', () => {
       config: { configPath: 'test-config.json' },
       managerDaemon: { getModule: () => undefined },
       hubPipeline: null,
-      hubPipelineCtor: null,
       currentRouterArtifacts: null,
       routingProviderScope: null,
       hubPolicyMode: 'off',
@@ -120,13 +233,6 @@ describe('http server runtime setup provider merge', () => {
         capturedInputs.push(JSON.parse(JSON.stringify(input)));
         return { config: input, runtime: {}, targetRuntime: {} };
       },
-      ensureHubPipelineCtor: async () =>
-        class HubPipelineMock {
-          constructor(config: any) {
-            capturedHubConfigs.push(config);
-          }
-          updateVirtualRouterConfig(): void {}
-        },
       isQuotaRoutingEnabled: () => false,
       initializeProviderRuntimes: async () => {},
       initializeRouteErrorHub: async () => {},
@@ -142,8 +248,10 @@ describe('http server runtime setup provider merge', () => {
     expect(capturedInputs[0]?.providers?.inline).toBeUndefined();
     expect(capturedInputs[0]?.providers?.openai).toBeDefined();
     expect(capturedInputs[0]?.providers?.openai?.auth?.type).toBe('apiKey');
-    expect(capturedHubConfigs).toHaveLength(1);
-    expect(capturedHubConfigs[0]?.pipelineRuntimeConfig).toMatchObject({
+    expect(mockCreateHubPipelineNative).toHaveBeenCalledTimes(1);
+    const primaryHubConfig = mockCreateHubPipelineNative.mock.calls[0]?.[0] as any;
+    expect(typeof server.hubPipeline?.getVirtualRouter).toBe('function');
+    expect(primaryHubConfig?.pipelineRuntimeConfig).toMatchObject({
       applyPatch: { mode: 'client', allow: ['apply_patch'] },
       routingProviderIds: ['openai'],
       routingTiersByRoute: {
@@ -318,18 +426,12 @@ describe('http server runtime setup provider merge', () => {
         getModule: () => undefined,
       },
       hubPipeline: null,
-      hubPipelineCtor: null,
       currentRouterArtifacts: null,
       routingProviderScope: null,
       hubPolicyMode: 'off',
       ensureProviderProfilesFromUserConfig: () => {},
       resolveRouterBootstrapConfig: async () => withRuntimeManifest({ routing: { default: [] } }, { applyPatch: { mode: 'client' } }),
       bootstrapVirtualRouter: async () => providerRuntimeArtifacts,
-      ensureHubPipelineCtor: async () =>
-        class HubPipelineMock {
-          constructor(_config: any) {}
-          updateVirtualRouterConfig(): void {}
-        },
       isQuotaRoutingEnabled: () => false,
       initializeProviderRuntimes: async () => {},
       initializeRouteErrorHub: async () => {},
@@ -474,7 +576,6 @@ describe('http server runtime setup provider merge', () => {
         getModule: () => undefined,
       },
       hubPipeline: null,
-      hubPipelineCtor: null,
       currentRouterArtifacts: null,
       routingProviderScope: null,
       hubPolicyMode: 'off',
@@ -512,11 +613,6 @@ describe('http server runtime setup provider merge', () => {
         }
         return primaryArtifacts;
       },
-      ensureHubPipelineCtor: async () =>
-        class HubPipelineMock {
-          constructor(_config: any) {}
-          updateVirtualRouterConfig(): void {}
-        },
       isQuotaRoutingEnabled: () => false,
       initializeProviderRuntimes: async (artifacts: any) => {
         capturedArtifacts.push(artifacts);
@@ -532,6 +628,8 @@ describe('http server runtime setup provider merge', () => {
     capturedScopes.push(server.routingProviderScope);
 
     expect(capturedArtifacts).toHaveLength(1);
+    expect(typeof server.hubPipeline?.getVirtualRouter).toBe('function');
+    expect(typeof server.hubPipelinesByRoutingPolicyGroup.get('gateway_priority_5520')?.getVirtualRouter).toBe('function');
     expect(capturedArtifacts[0]?.config?.routing).toMatchObject({
       provider: [
         expect.objectContaining({ targets: ['tokenrelay.key1.deepseek-v4-pro'] }),
@@ -641,18 +739,12 @@ describe('http server runtime setup provider merge', () => {
       config: { configPath: 'test-config.json' },
       managerDaemon: { getModule: () => undefined },
       hubPipeline: null,
-      hubPipelineCtor: null,
       currentRouterArtifacts: null,
       routingProviderScope: null,
       hubPolicyMode: 'off',
       ensureProviderProfilesFromUserConfig: () => {},
       resolveRouterBootstrapConfig: async () => withRuntimeManifest({ routing: { default: [] } }, { applyPatch: { mode: 'client' } }),
       bootstrapVirtualRouter: async () => providerRuntimeArtifacts,
-      ensureHubPipelineCtor: async () =>
-        class HubPipelineMock {
-          constructor(_config: any) {}
-          updateVirtualRouterConfig(): void {}
-        },
       isQuotaRoutingEnabled: () => false,
       initializeProviderRuntimes: async () => {},
       initializeRouteErrorHub: async () => {},

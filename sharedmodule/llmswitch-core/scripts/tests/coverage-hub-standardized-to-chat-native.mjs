@@ -12,9 +12,8 @@ const nativeReqOutboundUrl = pathToFileURL(
   path.join(
     repoRoot,
     'dist',
-    'router',
-    'virtual-router',
-    'engine-selection',
+    'native',
+    'router-hotpath',
     'native-hub-pipeline-req-outbound-semantics.js'
   )
 ).href;

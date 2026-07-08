@@ -4,12 +4,8 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
-import { bootstrapVirtualRouterConfig, getHubPipelineCtor } from '../../../src/modules/llmswitch/bridge.js';
-
-type HubPipelineCtor = new (config: any) => {
-  execute: (request: any) => Promise<any>;
-  dispose?: () => void;
-};
+import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge.js';
+import { NativeHubPipelineTestWrapper as HubPipeline } from '../../../helpers/native-hub-pipeline-test-wrapper.js';
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);
@@ -46,7 +42,6 @@ describe('responses HTTP provider outbound reasoning filter blackbox', () => {
         responses: [{ id: 'responses-cc', targets: ['cc.gpt-5.5'] }]
       }
     } as any) as any;
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const pipeline = new HubPipeline({
       virtualRouter: artifacts.config,
       policy: { mode: 'off' }

@@ -5,7 +5,7 @@ jest.unstable_mockModule(
   "../../../src/modules/llmswitch/bridge.js",
   async () => {
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     return {
       createResponsesJsonToSseConverter: jest.fn(async () => ({
         convertResponseToJsonToSse: jest.fn(async () =>
@@ -424,7 +424,7 @@ describe("sendPipelineResponse responses store integration", () => {
     ).mockClear();
     (bridge.rebindResponsesConversationRequestId as jest.Mock).mockClear();
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     for (const requestId of requestIds) {
       store.clearResponsesConversationByRequestId(requestId);
     }
@@ -434,7 +434,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const providerRequestId =
       "openai-responses-openai.key1-gpt-5.4-none-20260523T102906604-222183-867";
     const routerRequestId =
@@ -574,7 +574,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId =
       "openai-responses-router-gpt-5.3-codex-native-sse-premature-persist";
     const responseId = "resp_native_sse_premature_persist_1";
@@ -697,7 +697,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId = "openai-responses-router-gpt-5.3-codex-store-false-continuation";
     const responseId = "resp_store_false_continuation_1";
     const callId = "call_store_false_continuation_1";
@@ -820,7 +820,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId = "openai-responses-sdfv.key1-gpt-5.4-live-shape-direct-sse";
     const responseId = "resp_04c9be1feb153bec016a1539bb89a08196b1c2349ac465d6a3";
     const callId = "call_MxyUdrGqvHYTLLSUlXNp2FQu";
@@ -972,7 +972,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId = "openai-responses-router-gpt-5.3-codex-native-sse-store";
     const responseId = "resp_native_sse_store_1";
     const callId = "call_native_sse_store_1";
@@ -1061,7 +1061,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId =
       "openai-responses-router-gpt-5.3-codex-native-sse-metadata-only-store";
     const responseId = "resp_native_sse_metadata_only_store_1";
@@ -1208,7 +1208,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId =
       "openai-responses-router-gpt-5.3-codex-native-sse-tail-store";
     const responseId = "resp_native_sse_tail_store_1";
@@ -1325,7 +1325,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId =
       "openai-responses-router-gpt-5.3-codex-native-sse-no-final-delimiter";
     const responseId = "resp_native_sse_no_final_delimiter_1";
@@ -1444,7 +1444,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId =
       "openai-responses-router-gpt-5.3-codex-native-sse-existing-inbound-store";
     const providerRequestId =
@@ -1630,7 +1630,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const routerRequestId = "openai-responses-router-gpt-5.3-codex-store-false-no-retain";
     const responseId = "resp_store_false_no_retain_1";
     const callId = "call_store_false_no_retain_1";
@@ -1709,7 +1709,7 @@ describe("sendPipelineResponse responses store integration", () => {
       await import("../../../src/server/handlers/handler-response-utils.js");
     const bridge = await import("../../../src/modules/llmswitch/bridge.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const routerRequestId = "openai-responses-router-gpt-5.3-codex-json-error-cleanup";
     const providerRequestId = "openai-responses-provider-gpt-5.3-codex-json-error-cleanup";
 
@@ -1769,7 +1769,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const routerRequestId = "openai-responses-router-gpt-5.3-codex-json-resume";
     const responseId = "resp_provider_json_resume_1";
     const callId = "native:run_command:3";
@@ -1852,7 +1852,7 @@ describe("sendPipelineResponse responses store integration", () => {
 
   it("repairs missing response id secondary index from retained request entry before submit_tool_outputs resume", async () => {
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId = "openai-responses-router-index-repair";
     const responseId = "resp_index_repair_1";
     const callId = "call_index_repair_1";
@@ -1962,7 +1962,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const routerRequestId =
       "openai-responses-router-gpt-5.3-codex-string-input-submit";
     const responseId = "resp_provider_string_input_submit_1";
@@ -2172,7 +2172,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const routerRequestId =
       "openai-responses-router-gpt-5.3-codex-orphan-cleanup";
     const providerRequestId =
@@ -2298,7 +2298,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const routerRequestId =
       "openai-responses-router-gpt-5.3-codex-20260523T212223310-222654-435";
     const providerRequestId =
@@ -2477,7 +2477,7 @@ describe("sendPipelineResponse responses store integration", () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
     const store =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js");
+      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const requestId = "openai-responses-router-gpt-5.3-codex-json-stop-release";
     const sessionId = "rcc-json-stop-release";
 

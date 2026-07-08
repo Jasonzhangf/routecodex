@@ -44,6 +44,44 @@ export function parseString(raw: string): string | null {
   return typeof parsed === 'string' ? parsed : null;
 }
 
+export function callNativeString(capability: string, input: Record<string, unknown>): string {
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`[virtual-router-native-hotpath] native ${capability} is required but unavailable`);
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    throw new Error(`[virtual-router-native-hotpath] native ${capability} is required but unavailable: json stringify failed`);
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      throw new Error('empty result');
+    }
+    const parsed = parseString(raw);
+    if (typeof parsed !== 'string' || !parsed) {
+      throw new Error('invalid payload');
+    }
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(`[virtual-router-native-hotpath] native ${capability} is required but unavailable: ${reason}`);
+  }
+}
+
+export function resolveRccUserDirWithNative(homeDir?: string): string {
+  return callNativeString('resolveRccUserDirJson', {
+    homeDir,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  });
+}
+
+export function resolveRccPathWithNative(...segments: string[]): string {
+  return callNativeString('resolveRccPathJson', { segments });
+}
+
 export function parseStringArray(raw: string): string[] | null {
   const parsed = parseArray(raw);
   if (!parsed) {

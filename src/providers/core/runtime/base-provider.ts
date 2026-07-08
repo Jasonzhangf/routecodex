@@ -15,8 +15,6 @@ import {
   buildRuntimeFromProviderContext
 } from '../utils/provider-error-reporter.js';
 import { classifyProviderError } from './provider-error-classifier.js';
-import { getStatsCenterSafe as getStatsCenterSafeFromBridge } from '../../../modules/llmswitch/bridge.js';
-import type { ProviderUsageEvent } from '../../../modules/llmswitch/bridge.js';
 import {
   createProviderContext,
   extractUsageTokensFromResponse,
@@ -24,10 +22,6 @@ import {
   reattachRuntimeMetadata,
   truncateLogMessage
 } from './base-provider-runtime-helpers.js';
-
-type StatsCenterLike = {
-  recordProviderUsage(ev: ProviderUsageEvent): void;
-};
 
 function cloneProviderHttpTelemetryError(error: Error): Error {
   const cloned = new Error(error.message);
@@ -169,12 +163,6 @@ export abstract class BaseProvider implements IProviderV2 {
 
     const context = this.createContext(request as UnknownObject);
     const runtimeMetadata = context.runtimeMetadata;
-    let stats: StatsCenterLike | undefined;
-    try {
-      stats = getStatsCenterSafeFromBridge() as StatsCenterLike;
-    } catch (statsError) {
-      this.dependencies.logger?.logModule(this.getLogId(), 'stats-center-unavailable', { error: statsError });
-    }
     let processedRequest: UnknownObject | undefined;
 
     try {
@@ -196,50 +184,10 @@ export abstract class BaseProvider implements IProviderV2 {
 
       const endTime = Date.now();
       await emitProviderSuccessAndWait(buildRuntimeFromProviderContext(context));
-      try {
-        const usage = extractUsageTokensFromResponse(finalResponse);
-        const event: ProviderUsageEvent = {
-          requestId: context.requestId,
-          timestamp: endTime,
-          providerKey: context.providerKey || runtimeMetadata?.providerKey || this.getRuntimeProfile()?.providerKey || this.providerType,
-          runtimeKey: this.getRuntimeProfile()?.runtimeKey,
-          providerType: context.providerType,
-          modelId: context.model,
-          routeName: context.routeName,
-          entryEndpoint: typeof context.metadata?.entryEndpoint === 'string' ? context.metadata.entryEndpoint : undefined,
-          success: true,
-          latencyMs: endTime - context.startTime,
-          promptTokens: usage.promptTokens,
-          completionTokens: usage.completionTokens,
-          totalTokens: usage.totalTokens
-        };
-        stats?.recordProviderUsage(event);
-      } catch {
-        // ignore stats errors
-      }
 
       return finalResponse;
     } catch (error) {
       this.errorCount++;
-      const endTime = Date.now();
-      try {
-        const event: ProviderUsageEvent = {
-          requestId: context.requestId,
-          timestamp: endTime,
-          providerKey: context.providerKey || runtimeMetadata?.providerKey || this.getRuntimeProfile()?.providerKey || this.providerType,
-          runtimeKey: this.getRuntimeProfile()?.runtimeKey,
-          providerType: context.providerType,
-          modelId: context.model,
-          routeName: context.routeName,
-          entryEndpoint: typeof context.metadata?.entryEndpoint === 'string' ? context.metadata.entryEndpoint : undefined,
-          success: false,
-          latencyMs: endTime - context.startTime
-        };
-        stats?.recordProviderUsage(event);
-      } catch {
-        // ignore stats errors
-      }
-
       await this.handleRequestError(error, context);
       throw error;
     }

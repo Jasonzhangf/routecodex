@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
-import { HubPipeline } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.js';
+import { HubPipeline } from '../helpers/native-hub-pipeline-test-wrapper.js';
 import { executeRequestStagePipeline } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.js';
 import { buildRequestMetadata } from '../../src/server/runtime/http-server/executor-metadata.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';

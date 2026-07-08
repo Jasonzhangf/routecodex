@@ -88,7 +88,7 @@ jest.unstable_mockModule(
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js',
+  '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js',
   () => ({
     captureResponsesRequestContext: jest.fn(),
     finalizeResponsesConversationRequestRetention: jest.fn(),
@@ -130,10 +130,10 @@ jest.unstable_mockModule(
 );
 
 const { convertProviderResponse } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
+  '../../src/modules/llmswitch/bridge/provider-response-converter-host.js'
 );
 const { recordResponsesResponse } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js'
+  '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js'
 );
 
 const TEST_METADATA_WRITER = {

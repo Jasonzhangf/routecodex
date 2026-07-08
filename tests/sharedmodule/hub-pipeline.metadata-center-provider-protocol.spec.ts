@@ -48,9 +48,7 @@ jest.unstable_mockModule(
   }),
 );
 
-const { HubPipeline } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.js'
-);
+const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../helpers/native-hub-pipeline-test-wrapper.js');
 
 const TEST_METADATA_WRITER = {
   module: 'tests/sharedmodule/hub-pipeline.metadata-center-provider-protocol.spec.ts',

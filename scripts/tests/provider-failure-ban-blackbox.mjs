@@ -6,6 +6,9 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import {
+  getHubPipelineVirtualRouterStatusNative
+} from '../../dist/modules/llmswitch/bridge/routing-integrations.js';
 
 const BLACKBOX_MODEL_ID = 'gpt-5.3-codex';
 
@@ -76,7 +79,11 @@ function buildResponsesOkBody(text) {
 function readRoutingGroupHealth(routeCodex, routingPolicyGroup) {
   const groupPipelines = routeCodex?.hubPipelinesByRoutingPolicyGroup;
   const pipeline = groupPipelines instanceof Map ? groupPipelines.get(routingPolicyGroup) : undefined;
-  return pipeline?.getVirtualRouter?.()?.getStatus?.()?.health ?? [];
+  if (typeof pipeline !== 'string' || !pipeline.trim()) {
+    return [];
+  }
+  const status = getHubPipelineVirtualRouterStatusNative(pipeline);
+  return Array.isArray(status?.health) ? status.health : [];
 }
 
 async function createMockUpstream({ status, body, onHit }) {

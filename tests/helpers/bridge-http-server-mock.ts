@@ -211,20 +211,15 @@ export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMo
     }),
     getNetworkErrorCodes: () => [],
     bootstrapVirtualRouterConfig: async (input: unknown) => ({ config: input, targetRuntime: {} }),
-    getHubPipelineCtor: async () =>
-      class HubPipelineMock {
-        updateVirtualRouterConfig(): void {}
-        async execute(): Promise<any> {
-          return { metadata: {} };
-        }
-      },
-    getHubPipelineCtorForImpl: async () =>
-      class HubPipelineMock {
-        updateVirtualRouterConfig(): void {}
-        async execute(): Promise<any> {
-          return { metadata: {} };
-        }
-      },
+    createHubPipelineNative: () => 'mock_hub_pipeline_handle',
+    executeHubPipelineNative: async () => ({ metadata: {} }),
+    updateHubPipelineVirtualRouterConfigNative: () => {},
+    updateHubPipelineEngineDepsNative: () => {},
+    routeHubPipelineVirtualRouterNative: async () => ({ diagnostics: {} }),
+    diagnoseHubPipelineVirtualRouterNative: async () => ({ diagnostics: {} }),
+    getHubPipelineVirtualRouterStatusNative: async () => ({}),
+    markHubPipelineVirtualRouterConcurrencyScopeBusyNative: () => {},
+    disposeHubPipelineNative: () => {},
     ...overrides
   };
 }

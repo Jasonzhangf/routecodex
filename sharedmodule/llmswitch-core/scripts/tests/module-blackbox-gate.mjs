@@ -10,9 +10,10 @@ const MODULE_COMMANDS = {
     ['node', ['scripts/tests/virtual-router-native-parity.mjs']]
   ],
   'hub-pipeline': [
-    ['node', ['scripts/tests/hub-pipeline-smoke.mjs']],
-    ['node', ['scripts/tests/hub-response-chain.mjs']],
-    ['node', ['scripts/tests/provider-response-chain-order.mjs']]
+    ['node', ['scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs']],
+    ['node', ['scripts/tests/coverage-hub-standardized-to-chat-native.mjs']],
+    ['node', ['scripts/tests/coverage-hub-req-outbound-compat.mjs']],
+    ['node', ['scripts/tests/coverage-native-hub-pipeline-resp-semantics.mjs']]
   ]
 };
 

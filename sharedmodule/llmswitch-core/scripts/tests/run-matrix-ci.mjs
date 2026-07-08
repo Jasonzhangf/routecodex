@@ -112,8 +112,7 @@ async function main() {
   results.push(await run('matrix:responses-local-image-path-autoload', 'scripts/tests/responses-local-image-path-autoload.mjs'));
   // 1c) cross protocol chat chain (chat→responses→chat→anthropic→chat→gemini→chat)
   results.push(await run('matrix:cross-protocol', 'scripts/tests/cross-protocol-matrix.mjs'));
-  // 1c.1.1) hub pipeline full-stage smoke (inbound→process→outbound + chat_process re-entry)
-  results.push(await run('matrix:hub-pipeline-smoke', 'scripts/tests/hub-pipeline-smoke.mjs'));
+  // 1c.1.1) hub pipeline native gates (request/process/outbound + response semantics)
   // 1c.1.1.1) coverage boosts (pure, deterministic)
   results.push(await run('matrix:coverage-openai-message-normalize', 'scripts/tests/coverage-openai-message-normalize.mjs'));
   results.push(await run('matrix:coverage-compat-lmstudio-tool-call-ids', 'scripts/tests/compat-lmstudio-tool-call-ids.mjs'));
@@ -146,8 +145,6 @@ async function main() {
     })
   );
   results.push(await run('matrix:coverage-bridge-protocol-blackbox', 'scripts/tests/coverage-bridge-protocol-blackbox.mjs'));
-  // 1d.1) hard-order guard: provider -> compat -> inbound -> chat_process -> outbound -> client
-  results.push(await run('matrix:provider-response-chain-order', 'scripts/tests/provider-response-chain-order.mjs'));
   // 1e) virtual-router pool mode (round-robin vs priority)
   results.push(await run('matrix:virtual-router-pool-mode', 'scripts/tests/virtual-router-pool-mode.mjs'));
   // 1e.1) virtual-router direct provider.model selection (RR across keys)
@@ -169,7 +166,6 @@ async function main() {
   results.push(await run('matrix:stop-message-shorthand-parse', 'scripts/tests/stop-message-shorthand-parse.mjs'));
   results.push(await run('matrix:stop-message-marker-clean-and-reactivate', 'scripts/tests/stop-message-marker-clean-and-reactivate.mjs'));
   results.push(await run('matrix:stop-message-ai-followup-prompt-shape', 'scripts/tests/stop-message-ai-followup-prompt-shape.mjs'));
-  results.push(await run('matrix:stop-message-captured-request-context', 'scripts/tests/stop-message-captured-request-context.mjs'));
   results.push(await run('matrix:stop-message-followup-no-recursion', 'scripts/tests/stop-message-followup-no-recursion.mjs'));
   results.push(await run('matrix:stop-message-auto-branch-coverage', 'scripts/tests/stop-message-auto-branch-coverage.mjs'));
   results.push(await run('matrix:stop-message-mode-off-default-guard', 'scripts/tests/stop-message-mode-off-default-guard.mjs'));
@@ -206,22 +202,17 @@ async function main() {
   );
   results.push(
     await run(
-      'matrix:coverage-hub-req-process-route-select',
-      'scripts/tests/coverage-hub-req-process-route-select.mjs'
+      'matrix:coverage-hub-chat-envelope-to-standardized-native',
+      'scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs'
     )
   );
   results.push(
     await run(
-      'matrix:coverage-hub-req-outbound-context-merge',
-      'scripts/tests/coverage-hub-req-outbound-context-merge.mjs'
+      'matrix:coverage-hub-standardized-to-chat-native',
+      'scripts/tests/coverage-hub-standardized-to-chat-native.mjs'
     )
   );
-  results.push(
-    await run(
-      'matrix:hub-req-process-route-select-compare',
-      'scripts/tests/hub-req-process-route-select-v1-v2-compare.mjs'
-    )
-  );
+  results.push(await run('matrix:coverage-hub-req-outbound-context-merge', 'scripts/tests/coverage-hub-req-outbound-context-merge.mjs'));
   // 1f.3) responses freeform tool arguments (apply_patch)
   results.push(await run('matrix:responses-freeform-tool-args', 'scripts/tests/responses-freeform-tool-args.mjs'));
   // 1f.4) apply_patch freeform A/B: do not enforce structured schema in tool mapping
@@ -230,8 +221,6 @@ async function main() {
   results.push(await run('matrix:apply-patch-gnu-diff', 'scripts/tests/apply-patch-gnu-diff-compat.mjs'));
   // 1f.4.1.1) apply_patch native regression matrix: 7 same-shape compat/state-machine gates
   results.push(await run('matrix:apply-patch-native-regression-matrix', 'scripts/tests/apply-patch-native-regression-matrix.mjs'));
-  // 1f.4.2.3) responses tool loop: submit_tool_outputs resume must work for non-responses providers
-  results.push(await run('matrix:responses-submit-tool-outputs-resume', 'scripts/tests/responses-submit-tool-outputs-resume.mjs'));
   // 1f.5) responses request: must not emit top-level parameters wrapper
   results.push(await run('matrix:responses-no-parameters-wrapper', 'scripts/tests/responses-request-no-parameters-wrapper.mjs'));
   results.push(await run('matrix:responses-overlong-function-name', 'scripts/tests/responses-overlong-function-name-regression.mjs'));

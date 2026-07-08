@@ -1,4 +1,4 @@
-import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
+import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 

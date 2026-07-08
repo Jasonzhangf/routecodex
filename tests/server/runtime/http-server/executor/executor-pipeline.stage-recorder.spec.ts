@@ -2,9 +2,30 @@ import { jest } from '@jest/globals';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const createSnapshotRecorderMock = jest.fn();
+const executeHubPipelineNativeMock = jest.fn();
+const resolveEntryProtocolFromEndpointNativeMock = jest.fn((entryEndpoint: string) => {
+  if (entryEndpoint === '/v1/chat/completions') {
+    return 'openai-chat';
+  }
+  if (entryEndpoint === '/v1/responses') {
+    return 'openai-responses';
+  }
+  if (entryEndpoint === '/v1/messages') {
+    return 'anthropic-messages';
+  }
+  throw new Error(`Unsupported hub pipeline entry endpoint: ${entryEndpoint}`);
+});
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () => ({
   createSnapshotRecorder: createSnapshotRecorderMock
+}));
+
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => ({
+  executeHubPipelineNative: executeHubPipelineNativeMock
+}));
+
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  resolveEntryProtocolFromEndpointNative: resolveEntryProtocolFromEndpointNativeMock
 }));
 
 describe('executor-pipeline stage recorder injection', () => {
@@ -24,6 +45,8 @@ describe('executor-pipeline stage recorder injection', () => {
 
   beforeEach(() => {
     createSnapshotRecorderMock.mockReset();
+    executeHubPipelineNativeMock.mockReset();
+    resolveEntryProtocolFromEndpointNativeMock.mockClear();
   });
 
   it('injects bridge stage recorder into hub pipeline metadata', async () => {
@@ -32,21 +55,19 @@ describe('executor-pipeline stage recorder injection', () => {
 
     const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
 
-    const hubPipeline = {
-      execute: jest.fn().mockResolvedValue({
-        providerPayload: { ok: true },
-        target: {
-          providerKey: 'provider.a',
-          providerType: 'openai',
-          outboundProfile: 'openai-chat'
-        },
-        processMode: 'chat',
-        metadata: {}
-      })
-    };
+    executeHubPipelineNativeMock.mockReturnValue({
+      providerPayload: { ok: true },
+      target: {
+        providerKey: 'provider.a',
+        providerType: 'openai',
+        outboundProfile: 'openai-chat'
+      },
+      processMode: 'chat',
+      metadata: {}
+    });
 
     await runHubPipeline(
-      hubPipeline as any,
+      'mock_hub_pipeline_handle',
       {
         requestId: 'req_stage_recorder_1',
         entryEndpoint: '/v1/chat/completions',
@@ -64,7 +85,7 @@ describe('executor-pipeline stage recorder injection', () => {
       },
       '/v1/chat/completions'
     );
-    const executeArg = hubPipeline.execute.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> };
+    const executeArg = executeHubPipelineNativeMock.mock.calls[0]?.[1] as { metadata?: Record<string, unknown> };
     expect(executeArg.metadata?.clientInjectReady).toBe(true);
     expect(executeArg.metadata?.__hubStageRecorder).toBe(recorder);
   });
@@ -75,21 +96,19 @@ describe('executor-pipeline stage recorder injection', () => {
 
     const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
 
-    const hubPipeline = {
-      execute: jest.fn().mockResolvedValue({
-        providerPayload: { ok: true },
-        target: {
-          providerKey: 'provider.a',
-          providerType: 'openai',
-          outboundProfile: 'openai-chat'
-        },
-        processMode: 'chat',
-        metadata: {}
-      })
-    };
+    executeHubPipelineNativeMock.mockReturnValue({
+      providerPayload: { ok: true },
+      target: {
+        providerKey: 'provider.a',
+        providerType: 'openai',
+        outboundProfile: 'openai-chat'
+      },
+      processMode: 'chat',
+      metadata: {}
+    });
 
     await runHubPipeline(
-      hubPipeline as any,
+      'mock_hub_pipeline_handle',
       {
         requestId: 'req_stage_recorder_entry_truth_1',
         entryEndpoint: '/v1/responses',
@@ -112,12 +131,8 @@ describe('executor-pipeline stage recorder injection', () => {
   it('fails fast when hub pipeline entry endpoint is unsupported', async () => {
     const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
 
-    const hubPipeline = {
-      execute: jest.fn()
-    };
-
     await expect(runHubPipeline(
-      hubPipeline as any,
+      'mock_hub_pipeline_handle',
       {
         requestId: 'req_stage_recorder_bad_entry_1',
         entryEndpoint: '/v1/unknown',
@@ -128,7 +143,7 @@ describe('executor-pipeline stage recorder injection', () => {
       {}
     )).rejects.toThrow('Unsupported hub pipeline entry endpoint: /v1/unknown');
 
-    expect(hubPipeline.execute).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });
 
   it('preserves MetadataCenter binding without mutating relay metadata', async () => {
@@ -137,18 +152,16 @@ describe('executor-pipeline stage recorder injection', () => {
 
     const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
 
-    const hubPipeline = {
-      execute: jest.fn().mockResolvedValue({
-        providerPayload: { ok: true },
-        target: {
-          providerKey: 'provider.a',
-          providerType: 'openai',
-          outboundProfile: 'openai-chat'
-        },
-        processMode: 'chat',
-        metadata: {}
-      })
-    };
+    executeHubPipelineNativeMock.mockReturnValue({
+      providerPayload: { ok: true },
+      target: {
+        providerKey: 'provider.a',
+        providerType: 'openai',
+        outboundProfile: 'openai-chat'
+      },
+      processMode: 'chat',
+      metadata: {}
+    });
 
     const metadata: Record<string, unknown> = { clientInjectReady: true };
     MetadataCenter.attach(metadata).writeRuntimeControl(
@@ -162,7 +175,7 @@ describe('executor-pipeline stage recorder injection', () => {
     );
 
     await runHubPipeline(
-      hubPipeline as any,
+      'mock_hub_pipeline_handle',
       {
         requestId: 'req_stage_recorder_no_clone_1',
         entryEndpoint: '/v1/chat/completions',
@@ -173,7 +186,7 @@ describe('executor-pipeline stage recorder injection', () => {
       metadata
     );
 
-    const executeArg = hubPipeline.execute.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> };
+    const executeArg = executeHubPipelineNativeMock.mock.calls[0]?.[1] as { metadata?: Record<string, unknown> };
     expect(executeArg.metadata).not.toBe(metadata);
     expect(metadata.__hubStageRecorder).toBeUndefined();
     expect(executeArg.metadata?.__hubStageRecorder).toBe(recorder);

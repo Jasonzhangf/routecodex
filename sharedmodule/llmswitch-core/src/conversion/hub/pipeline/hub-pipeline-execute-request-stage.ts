@@ -1,10 +1,8 @@
 import type { VirtualRouterRuntime } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
-import type {
-  HubPipelineConfig,
-  HubPipelineNodeResult,
-  HubPipelineResult,
-  NormalizedRequest,
-} from "./hub-pipeline.js";
+type HubPipelineConfig = Record<string, unknown>;
+type HubPipelineNodeResult = Record<string, unknown>;
+type HubPipelineResult = Record<string, unknown>;
+type NormalizedRequest = Record<string, unknown>;
 import {
   buildRequestStageMetadataDispatchWithNative,
   buildRequestStageHubPipelineResultWithNative,
@@ -12,7 +10,6 @@ import {
   buildRequestStageRuntimeControlWritePlanWithNative,
   runHubPipelineLibWithNative
 } from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
-import { attachHubStageTopSummary } from "./hub-stage-timing.js";
 import { applyNativeRuntimeControlWritePlan, readRuntimeControlFromBoundMetadataCenter, readRequestTruthFromBoundMetadataCenter, readContinuationContextFromBoundMetadataCenter } from "../metadata-center-runtime-control-writer.js";
 
 
@@ -103,11 +100,6 @@ export async function executeRequestStagePipeline(args: any): Promise<any> {
     sourceMetadata: normalized.metadata,
     outputMetadata,
   });
-  attachHubStageTopSummary({
-    requestId: normalized.id,
-    metadata: outputMetadata,
-  });
-
   return buildRequestStageHubPipelineResultWithNative({
     requestId: normalized.id,
     resultPlan,

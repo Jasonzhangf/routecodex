@@ -44,7 +44,7 @@ jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-ho
   buildHubPipelineMaterializedRequestPlanWithNative: nativeCalls.materializeRequest,
 }));
 
-const { HubPipeline } = await import('../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.js');
+const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../helpers/native-hub-pipeline-test-wrapper.js');
 
 describe('HubPipeline runtime ingress wiring', () => {
   beforeEach(() => {
@@ -190,7 +190,7 @@ describe('HubPipeline runtime ingress wiring', () => {
   it('keeps HubPipeline native engine bridge owner names queryable by function map', async () => {
     const fs = await import('node:fs');
     const source = fs.readFileSync(
-      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts',
+      'src/modules/llmswitch/bridge/routing-integrations.ts',
       'utf8',
     );
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { VirtualRouterEngine } from '../../dist/native/router-hotpath/native-virtual-router-runtime.js';
 import { bootstrapVirtualRouterConfig } from '../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js';
-import { VirtualRouterError } from '../../dist/native/router-hotpath/native-router-hotpath-policy.js';
+import { VirtualRouterError } from '../../dist/native/router-hotpath/native-router-hotpath-loader.js';
 
 function createRequest(content, model) {
   return {
@@ -19,7 +19,17 @@ function createMetadata(requestId, sessionId) {
     entryEndpoint: '/v1/chat/completions',
     processMode: 'chat',
     stream: false,
-    direction: 'request'
+    direction: 'request',
+    metadataCenterSnapshot: {
+      requestId,
+      ...(sessionId ? { sessionId } : {}),
+      runtimeControl: {
+        entryEndpoint: '/v1/chat/completions',
+        processMode: 'chat',
+        stream: false,
+        direction: 'request'
+      }
+    }
   };
 }
 

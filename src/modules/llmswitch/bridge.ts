@@ -80,9 +80,7 @@ export {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync,
-  extractSessionIdentifiersFromMetadata,
-  getStatsCenterSafe,
-  getLlmsStatsSnapshot
+  extractSessionIdentifiersFromMetadata
 } from './bridge/state-integrations.js';
 export {
   bootstrapVirtualRouterConfig,
@@ -121,8 +119,16 @@ export {
   resolveRccPathNativeSync,
   resolveRccSnapshotsDirNativeSync,
   resolveRccUserDirNativeSync,
-  getHubPipelineCtor,
-  getHubPipelineCtorForImpl,
+  createHubPipelineNative,
+  executeHubPipelineNative,
+  updateHubPipelineVirtualRouterConfigNative,
+  updateHubPipelineEngineDepsNative,
+  routeHubPipelineVirtualRouterNative,
+  diagnoseHubPipelineVirtualRouterNative,
+  getHubPipelineVirtualRouterStatusNative,
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative,
+  disposeHubPipelineNative,
   resolveBaseDir
 } from './bridge/routing-integrations.js';
 

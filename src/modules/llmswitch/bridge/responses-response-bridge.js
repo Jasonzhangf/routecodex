@@ -1,4 +1,4 @@
-import { importCoreDist, rebindResponsesConversationRequestId, requireCoreDist, } from './index.js';
+import { importCoreDist, requireCoreDist, } from './module-loader.js';
 import { projectResponsesClientPayloadForClientNative, } from './native-exports.js';
 import { readRuntimeRequestTruthIdentifiers, } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
@@ -65,6 +65,7 @@ export function buildResponsesRequestLogContextForHttp(args) {
     };
 }
 export async function rebindResponsesConversationRequestIdForHttp(oldId, newId) {
+    const { rebindResponsesConversationRequestId } = await import('./runtime-integrations.js');
     await rebindResponsesConversationRequestId(oldId, newId);
 }
 export function normalizeResponsesJsonBodyForHttp(args) {

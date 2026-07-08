@@ -38,7 +38,6 @@ import {
   planResponsesBridgePolicyActionsWithNative
 } from '../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
 
-import { logHubStageTiming } from '../hub/pipeline/hub-stage-timing.js';
 import {
   buildSlimBridgeDecisionMetadata,
   buildSlimResponsesBridgeContext,
@@ -291,7 +290,6 @@ export function buildChatRequestFromResponses(
       ? resumedInput
       : context.input;
 
-  logHubStageTiming(requestId, 'req_inbound.responses.convert_input_to_messages', 'start');
   const convertStart = Date.now();
   let messages = convertBridgeInputToChatMessages({
     input: inputForMessages,
@@ -303,10 +301,7 @@ export function buildChatRequestFromResponses(
       typeof (payload as Record<string, unknown>).previous_response_id === 'string'
       && ((payload as Record<string, unknown>).previous_response_id as string).trim().length > 0
   });
-  logHubStageTiming(requestId, 'req_inbound.responses.convert_input_to_messages', 'completed', {
-    elapsedMs: Date.now() - convertStart,
-    forceLog: true
-  });
+  void convertStart;
   const policyActions = planResponsesBridgePolicyActionsWithNative({
     stage: 'request_inbound',
     actions: resolveBridgePolicyActionsWithNative(
@@ -316,7 +311,6 @@ export function buildChatRequestFromResponses(
     messages
   });
   if (policyActions?.length) {
-    logHubStageTiming(requestId, 'req_inbound.responses.inbound_policy', 'start');
     const policyStart = Date.now();
     const actionState = runNativeResponsesBridgePipeline({
       stage: 'request_inbound',
@@ -329,10 +323,7 @@ export function buildChatRequestFromResponses(
       rawRequest: payload
     });
     messages = actionState.messages;
-    logHubStageTiming(requestId, 'req_inbound.responses.inbound_policy', 'completed', {
-      elapsedMs: Date.now() - policyStart,
-      forceLog: true
-    });
+    void policyStart;
   }
   if (Array.isArray(context.originalSystemMessages) && context.originalSystemMessages.length) {
     const preservedSystems = context.originalSystemMessages

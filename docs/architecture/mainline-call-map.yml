@@ -523,9 +523,9 @@ chains:
         from_node: ChatProcRespContinuation06ResponseGoverned
         to_node: ChatProcRespContinuation07CanonicalSaved
         caller_symbol: convertProviderResponse
-        caller_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+        caller_file: src/modules/llmswitch/bridge/provider-response-converter-host.ts
         callee_symbol: recordResponsesResponse
-        callee_file: sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts
+        callee_file: src/modules/llmswitch/bridge/responses-conversation-store-host.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "finalized client-visible response truth after response governance/projection, including response.id, required_action, projected tool calls, and merged tool definitions"
         semantic_output: "canonical continuation truth saved for the next legal restore/materialize"
@@ -1116,9 +1116,9 @@ chains:
         from_node: MetaReq05ProviderObservationProjected
         to_node: MetaResp06ResponseObserved
         caller_symbol: convertProviderResponse
-        caller_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+        caller_file: src/modules/llmswitch/bridge/provider-response-converter-host.ts
         callee_symbol: readRequestTruthFromBoundMetadataCenter
-        callee_file: sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+        callee_file: src/modules/llmswitch/bridge/provider-response-converter-host.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "provider response plus provider observation plus request-scoped metadata carrier"
         semantic_output: "response closeout derives `finishReason` and uses MetadataCenter-backed request truth for lifecycle persistence without reopening request truth"

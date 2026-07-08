@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import {
   decodeRouteCodexUserConfigTextSync,
   detectRouteCodexUserConfigFormatSync,
-} from '../modules/llmswitch/bridge.js';
+} from '../modules/llmswitch/bridge/routing-integrations.js';
 
 export type UserConfigFormat = 'toml';
 export type UnknownRecord = Record<string, unknown>;

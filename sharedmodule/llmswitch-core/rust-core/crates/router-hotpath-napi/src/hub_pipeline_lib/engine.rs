@@ -205,6 +205,20 @@ impl HubPipelineEngine {
         Ok(())
     }
 
+    pub fn mark_virtual_router_concurrency_scope_idle(
+        &mut self,
+        scope_key: &str,
+    ) -> HubPipelineResult<()> {
+        let Some(router) = self.virtual_router_core.as_mut() else {
+            return Err(HubPipelineError::new(
+                "hub_pipeline_virtual_router_facade_unavailable",
+                "Rust HubPipeline virtual router facade requires routing configuration",
+            ));
+        };
+        router.mark_concurrency_scope_idle(scope_key);
+        Ok(())
+    }
+
     fn select_route(
         &self,
         request: &Value,

@@ -11,6 +11,20 @@ import type {
 } from "../../../types/llmswitch-local-types.js";
 import { importCoreDist } from "./module-loader.js";
 import type { AnyRecord } from "./module-loader.js";
+import {
+  captureResponsesRequestContext,
+  recordResponsesResponse,
+  resumeResponsesConversation as resumeResponsesConversationHost,
+  lookupResponsesContinuationByResponseId as lookupResponsesContinuationByResponseIdHost,
+  resumeLatestResponsesContinuationByScope as resumeLatestResponsesContinuationByScopeHost,
+  materializeLatestResponsesContinuationByScope as materializeLatestResponsesContinuationByScopeHost,
+  rebindResponsesConversationRequestId as rebindResponsesConversationRequestIdHost,
+  clearResponsesConversationByRequestId as clearResponsesConversationByRequestIdHost,
+  finalizeResponsesConversationRequestRetention as finalizeResponsesConversationRequestRetentionHost,
+  clearAllResponsesConversationState as clearAllResponsesConversationStateHost,
+  resetResponsesConversationStateForRestartSimulation as resetResponsesConversationStateForRestartSimulationHost,
+  clearUnresolvedResponsesConversationRequests as clearUnresolvedResponsesConversationRequestsHost,
+} from "./responses-conversation-store-host.js";
 
 type SnapshotHooksModule = {
   writeSnapshotViaHooks?: (options: AnyRecord) => Promise<void> | void;
@@ -55,174 +69,6 @@ export async function writeSnapshotViaHooks(
   await writer(options);
 }
 
-type ResponsesConversationStoreLike = {
-  captureRequestContext?: (args: {
-    requestId: string;
-    payload: AnyRecord;
-    context: AnyRecord;
-    sessionId?: string;
-    conversationId?: string;
-    providerKey?: string;
-    entryKind?: 'responses' | 'chat' | 'messages';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-    routeHint?: string;
-  }) => void;
-  recordResponse?: (args: {
-    requestId: string;
-    response: AnyRecord;
-    sessionId?: string;
-    conversationId?: string;
-    providerKey?: string;
-    entryKind?: 'responses' | 'chat' | 'messages';
-    continuationOwner?: 'direct' | 'relay';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-    allowScopeContinuation?: boolean;
-    routeHint?: string;
-  }) => void;
-  resumeConversation?: (
-    responseId: string,
-    submitPayload: AnyRecord,
-    options?: {
-      requestId?: string;
-      entryKind?: 'responses' | 'chat' | 'messages';
-      continuationOwner?: 'direct' | 'relay';
-      matchedPort?: number;
-      routingPolicyGroup?: string;
-    },
-  ) => { payload: AnyRecord; meta: AnyRecord };
-  lookupContinuationByResponseId?: (responseId: string, options?: {
-    entryKind?: 'responses' | 'chat' | 'messages';
-    continuationOwner?: 'direct' | 'relay';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-  }) => {
-    responseId: string;
-    providerKey?: string;
-    continuationOwner?: 'direct' | 'relay';
-    entryKind?: 'responses' | 'chat' | 'messages';
-    requestId?: string;
-  } | null;
-  resumeLatestContinuationByScope?: (args: {
-    payload: AnyRecord;
-    sessionId?: string;
-    conversationId?: string;
-    requestId?: string;
-    entryKind?: 'responses' | 'chat' | 'messages';
-    continuationOwner?: 'direct' | 'relay';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-  }) => { payload: AnyRecord; meta: AnyRecord } | null;
-  materializeLatestContinuationByScope?: (args: {
-    payload: AnyRecord;
-    sessionId?: string;
-    conversationId?: string;
-    requestId?: string;
-    entryKind?: 'responses' | 'chat' | 'messages';
-    continuationOwner?: 'direct' | 'relay';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-  }) => { payload: AnyRecord; meta: AnyRecord } | null;
-  clearRequest?: (requestId?: string) => void;
-  releaseRequestPayload?: (requestId?: string) => void;
-  finalizeResponsesConversationRequestRetention?: (
-    requestId?: string,
-    options?: { keepForSubmitToolOutputs?: boolean },
-  ) => void;
-  clearAll?: () => void;
-  clearUnresolvedRequests?: () => number;
-  requestMap?: Map<string, { lastResponseId?: unknown }>;
-  detachEntry?: (entry: { lastResponseId?: unknown }) => void;
-  pruneIndexes?: () => void;
-  rebindRequestId?: (oldId: string, newId: string) => void;
-};
-
-type ResponsesConversationModule = {
-  captureResponsesRequestContext?: (args: {
-    requestId: string;
-    payload: AnyRecord;
-    context: AnyRecord;
-    sessionId?: string;
-    conversationId?: string;
-    entryKind?: 'responses' | 'chat' | 'messages';
-    routeHint?: string;
-  }) => void;
-  recordResponsesResponse?: (args: {
-    requestId: string;
-    response: AnyRecord;
-    entryKind?: 'responses' | 'chat' | 'messages';
-    routeHint?: string;
-  }) => void;
-  resumeResponsesConversation?: (
-    responseId: string,
-    submitPayload: AnyRecord,
-    options?: { requestId?: string; entryKind?: 'responses' | 'chat' | 'messages'; continuationOwner?: 'direct' | 'relay'; matchedPort?: number; routingPolicyGroup?: string },
-  ) => Promise<{ payload: AnyRecord; meta: AnyRecord }>;
-  lookupResponsesContinuationByResponseId?: (responseId: string, options?: {
-    entryKind?: 'responses' | 'chat' | 'messages';
-    continuationOwner?: 'direct' | 'relay';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-  }) => {
-    responseId: string;
-    providerKey?: string;
-    continuationOwner?: 'direct' | 'relay';
-    entryKind?: 'responses' | 'chat' | 'messages';
-    requestId?: string;
-  } | null;
-  resumeLatestResponsesContinuationByScope?: (args: {
-    payload: AnyRecord;
-    sessionId?: string;
-    conversationId?: string;
-    requestId?: string;
-    entryKind?: 'responses' | 'chat' | 'messages';
-    continuationOwner?: 'direct' | 'relay';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-  }) => { payload: AnyRecord; meta: AnyRecord } | null;
-  materializeLatestResponsesContinuationByScope?: (args: {
-    payload: AnyRecord;
-    sessionId?: string;
-    conversationId?: string;
-    requestId?: string;
-    entryKind?: 'responses' | 'chat' | 'messages';
-    continuationOwner?: 'direct' | 'relay';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-  }) => { payload: AnyRecord; meta: AnyRecord } | null;
-  rebindResponsesConversationRequestId?: (oldId: string, newId: string) => void;
-  clearResponsesConversationByRequestId?: (requestId?: string) => void;
-  finalizeResponsesConversationRequestRetention?: (
-    requestId?: string,
-    options?: { keepForSubmitToolOutputs?: boolean },
-  ) => void;
-  clearAllResponsesConversationState?: () => void;
-  resetResponsesConversationStateForRestartSimulation?: () => void;
-  clearUnresolvedResponsesConversationRequests?: () => number;
-};
-
-function readGlobalResponsesConversationStore(): ResponsesConversationStoreLike | null {
-  const store = (globalThis as Record<string, unknown>)
-    .__rccResponsesConversationStore;
-  return store && typeof store === "object" && !Array.isArray(store)
-    ? (store as ResponsesConversationStoreLike)
-    : null;
-}
-
-let cachedResponsesConversationModule: ResponsesConversationModule | null =
-  null;
-
-async function getResponsesConversationModule(): Promise<ResponsesConversationModule> {
-  if (!cachedResponsesConversationModule) {
-    cachedResponsesConversationModule =
-      await importCoreDist<ResponsesConversationModule>(
-        "conversion/shared/responses-conversation-store",
-      );
-  }
-  return cachedResponsesConversationModule;
-}
-
 export async function captureResponsesRequestContextForRequest(args: {
   requestId: string;
   payload: AnyRecord;
@@ -235,27 +81,7 @@ export async function captureResponsesRequestContextForRequest(args: {
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<void> {
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.captureRequestContext === "function") {
-    globalStore.captureRequestContext(args);
-    return;
-  }
-  const mod = await getResponsesConversationModule();
-  const fn = mod.captureResponsesRequestContext;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] captureResponsesRequestContext not available",
-    );
-  }
-  fn(args);
-  if (process.env.RESPONSES_DEBUG === '1') {
-    const store = (mod as { responsesConversationStore?: unknown }).responsesConversationStore;
-    const stats =
-      store && typeof (store as { getDebugStats?: unknown }).getDebugStats === 'function'
-        ? (store as { getDebugStats: () => unknown }).getDebugStats()
-        : null;
-    console.log('[runtime-integrations] capture core store', args.requestId, stats);
-  }
+  captureResponsesRequestContext(args);
 }
 
 export async function recordResponsesResponseForRequest(args: {
@@ -271,17 +97,7 @@ export async function recordResponsesResponseForRequest(args: {
   routingPolicyGroup?: string;
   allowScopeContinuation?: boolean;
 }): Promise<void> {
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.recordResponse === "function") {
-    globalStore.recordResponse(args);
-    return;
-  }
-  const mod = await getResponsesConversationModule();
-  const resolvedFn = mod.recordResponsesResponse;
-  if (typeof resolvedFn !== "function") {
-    throw new Error("[llmswitch-bridge] recordResponsesResponse not available");
-  }
-  resolvedFn(args);
+  recordResponsesResponse(args);
 }
 
 export async function resumeResponsesConversation(
@@ -289,18 +105,7 @@ export async function resumeResponsesConversation(
   submitPayload: AnyRecord,
   options?: { requestId?: string; entryKind?: 'responses' | 'chat' | 'messages'; continuationOwner?: 'direct' | 'relay'; matchedPort?: number; routingPolicyGroup?: string },
 ): Promise<{ payload: AnyRecord; meta: AnyRecord }> {
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.resumeConversation === "function") {
-    return globalStore.resumeConversation(responseId, submitPayload, options);
-  }
-  const mod = await getResponsesConversationModule();
-  const fn = mod.resumeResponsesConversation;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] resumeResponsesConversation not available",
-    );
-  }
-  return await fn(responseId, submitPayload, options);
+  return resumeResponsesConversationHost(responseId, submitPayload, options);
 }
 
 export async function lookupResponsesContinuationByResponseId(
@@ -313,16 +118,7 @@ export async function lookupResponsesContinuationByResponseId(
   entryKind?: 'responses' | 'chat' | 'messages';
   requestId?: string;
 } | null> {
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.lookupContinuationByResponseId === "function") {
-    return globalStore.lookupContinuationByResponseId(responseId, options);
-  }
-  const mod = await getResponsesConversationModule();
-  const fn = mod.lookupResponsesContinuationByResponseId;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] lookupResponsesContinuationByResponseId not available');
-  }
-  return fn(responseId, options);
+  return lookupResponsesContinuationByResponseIdHost(responseId, options);
 }
 
 export async function rebindResponsesConversationRequestId(
@@ -332,16 +128,7 @@ export async function rebindResponsesConversationRequestId(
   if (!oldId || !newId || oldId === newId) {
     return;
   }
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.rebindRequestId === "function") {
-    globalStore.rebindRequestId(oldId, newId);
-    return;
-  }
-  const mod = await getResponsesConversationModule();
-  const fn = mod.rebindResponsesConversationRequestId;
-  if (typeof fn === "function") {
-    fn(oldId, newId);
-  }
+  rebindResponsesConversationRequestIdHost(oldId, newId);
 }
 
 export async function clearResponsesConversationByRequestId(
@@ -350,16 +137,7 @@ export async function clearResponsesConversationByRequestId(
   if (!requestId) {
     return;
   }
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.clearRequest === "function") {
-    globalStore.clearRequest(requestId);
-    return;
-  }
-  const mod = await getResponsesConversationModule();
-  const fn = mod.clearResponsesConversationByRequestId;
-  if (typeof fn === "function") {
-    fn(requestId);
-  }
+  clearResponsesConversationByRequestIdHost(requestId);
 }
 
 export async function finalizeResponsesConversationRequestRetention(
@@ -369,19 +147,7 @@ export async function finalizeResponsesConversationRequestRetention(
   if (!requestId) {
     return;
   }
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.finalizeResponsesConversationRequestRetention === "function") {
-    globalStore.finalizeResponsesConversationRequestRetention(requestId, options);
-    return;
-  }
-  const mod = await getResponsesConversationModule();
-  const fn = mod.finalizeResponsesConversationRequestRetention;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] finalizeResponsesConversationRequestRetention not available",
-    );
-  }
-  fn(requestId, options);
+  finalizeResponsesConversationRequestRetentionHost(requestId, options);
 }
 
 export async function resumeLatestResponsesContinuationByScope(args: {
@@ -394,18 +160,7 @@ export async function resumeLatestResponsesContinuationByScope(args: {
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.resumeLatestContinuationByScope === "function") {
-    return globalStore.resumeLatestContinuationByScope(args);
-  }
-  const mod = await getResponsesConversationModule();
-  const fn = mod.resumeLatestResponsesContinuationByScope;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] resumeLatestResponsesContinuationByScope not available",
-    );
-  }
-  return fn(args);
+  return resumeLatestResponsesContinuationByScopeHost(args);
 }
 
 export async function materializeLatestResponsesContinuationByScope(args: {
@@ -418,51 +173,19 @@ export async function materializeLatestResponsesContinuationByScope(args: {
   matchedPort?: number;
   routingPolicyGroup?: string;
 }): Promise<{ payload: AnyRecord; meta: AnyRecord } | null> {
-  const globalStore = readGlobalResponsesConversationStore();
-  if (typeof globalStore?.materializeLatestContinuationByScope === "function") {
-    return globalStore.materializeLatestContinuationByScope(args);
-  }
-  const mod = await getResponsesConversationModule();
-  const fn = mod.materializeLatestResponsesContinuationByScope;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] materializeLatestResponsesContinuationByScope not available",
-    );
-  }
-  return fn(args);
+  return materializeLatestResponsesContinuationByScopeHost(args);
 }
 
 export async function clearAllResponsesConversationState(): Promise<void> {
-  const mod = await getResponsesConversationModule();
-  const fn = mod.clearAllResponsesConversationState;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] clearAllResponsesConversationState not available",
-    );
-  }
-  fn();
+  clearAllResponsesConversationStateHost();
 }
 
 export async function clearUnresolvedResponsesConversationRequests(): Promise<number> {
-  const mod = await getResponsesConversationModule();
-  const fn = mod.clearUnresolvedResponsesConversationRequests;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] clearUnresolvedResponsesConversationRequests not available",
-    );
-  }
-  return fn();
+  return clearUnresolvedResponsesConversationRequestsHost();
 }
 
 export async function resetResponsesConversationStateForRestartSimulation(): Promise<void> {
-  const mod = await getResponsesConversationModule();
-  const fn = mod.resetResponsesConversationStateForRestartSimulation;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] resetResponsesConversationStateForRestartSimulation not available",
-    );
-  }
-  fn();
+  resetResponsesConversationStateForRestartSimulationHost();
 }
 
 type NativeSseRuntimeModule = {
@@ -546,20 +269,8 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{
   }
   loaded.push("conversion/snapshot-utils");
 
-  const responsesConversationModule = await getResponsesConversationModule();
-  if (
-    typeof responsesConversationModule.resumeResponsesConversation !==
-      "function" ||
-    typeof responsesConversationModule.resumeLatestResponsesContinuationByScope !==
-      "function" ||
-    typeof responsesConversationModule.materializeLatestResponsesContinuationByScope !==
-      "function"
-  ) {
-    throw new Error(
-      "[llmswitch-bridge] preload failed: responses conversation helpers not available",
-    );
-  }
-  loaded.push("conversion/shared/responses-conversation-store");
+  await resumeLatestResponsesContinuationByScopeHost({ payload: {}, entryKind: "responses" });
+  loaded.push("bridge/responses-conversation-store-host");
 
   const nativeSseRuntimeModule = await getNativeSseRuntimeModule();
   if (

@@ -18,7 +18,7 @@ import type {
   VirtualRouterConfig,
   VirtualRouterHealthStore
 } from './virtual-router-contracts.js';
-import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-policy.js';
+import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-loader.js';
 import {
   createVirtualRouterEngineProxy,
   type NativeVirtualRouterEngineProxy
@@ -29,7 +29,7 @@ import {
   VIRTUAL_ROUTER_ERROR_PREFIX
 } from './native-router-hotpath-loader.js';
 import { callNativeJson } from './native-router-hotpath.js';
-import { failNativeRequired } from './native-router-hotpath-policy.js';
+import { failNativeRequired } from './native-router-hotpath-loader.js';
 
 export type {
   ClassificationResult,

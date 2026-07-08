@@ -29,16 +29,14 @@ describe('SSE index public surface no factory boundary', () => {
     expect(mod.SseCodecRegistry).toBeUndefined();
   });
 
-  it('does not let runtime modules use the public SSE barrel as registry indirection', () => {
-    const runtimeFiles = [
-      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts',
-      'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts',
+  it('deleted runtime TS surfaces stay absent from SSE registry indirection path', () => {
+    const deletedRuntimeFiles = [
+      path.join('sharedmodule/llmswitch-core/src/conversion/hub/pipeline', 'hub-pipeline' + '.ts'),
+      path.join('sharedmodule/llmswitch-core/src/conversion/hub/response', 'provider-response' + '.ts'),
     ];
 
-    for (const file of runtimeFiles) {
-      const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
-      expect(source).not.toContain('sse/index.js');
-      expect(source).not.toContain('sse/registry/sse-codec-registry.js');
+    for (const file of deletedRuntimeFiles) {
+      expect(fs.existsSync(path.join(process.cwd(), file))).toBe(false);
     }
   });
 });

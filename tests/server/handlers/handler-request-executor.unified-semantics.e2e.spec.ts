@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 
 const { convertProviderResponse: coreConvertProviderResponse } = await import(
-  '../../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js'
+  '../../../src/modules/llmswitch/bridge/provider-response-converter-host.js'
 );
 
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));

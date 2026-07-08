@@ -7,7 +7,6 @@ import type {
   VirtualRouterContextRoutingConfig
 } from '../native/router-hotpath/native-virtual-router-runtime.js';
 import type { RoutingInstructionState } from '../native/router-hotpath/native-virtual-router-routing-state.js';
-import type { VirtualRouterHitEvent } from '../telemetry/stats-center.js';
 
 // feature_id: vr.hit_log_projection
 
@@ -52,6 +51,24 @@ export type VirtualRouterHitRecord = {
   selectionPenalty?: number;
   stopMessage: StopMessageRuntimeSummary;
 };
+
+export interface VirtualRouterHitEvent {
+  requestId: string;
+  timestamp: number;
+  entryEndpoint: string;
+  routeName: string;
+  pool: string;
+  providerKey: string;
+  runtimeKey?: string;
+  providerType?: string;
+  modelId?: string;
+  reason?: string;
+  requestTokens?: number;
+  selectionPenalty?: number;
+  stopMessageActive?: boolean;
+  stopMessageMode?: 'on' | 'off' | 'auto' | 'unset';
+  stopMessageRemaining?: number;
+}
 
 export type VirtualRouterHitEventMeta = {
   requestId: string;

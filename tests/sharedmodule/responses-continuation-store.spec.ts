@@ -15,7 +15,7 @@ import {
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
   responsesConversationStore
-} from '../../sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.js';
+} from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
 import { buildChatRequestFromResponses } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 import { buildResponsesRequestContextForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.ts';
 

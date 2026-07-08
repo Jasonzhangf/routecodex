@@ -10,9 +10,8 @@ const moduleUrl = pathToFileURL(
   path.join(
     repoRoot,
     'dist',
-    'router',
-    'virtual-router',
-    'engine-selection',
+    'native',
+    'router-hotpath',
     'native-hub-pipeline-resp-semantics.js'
   )
 ).href;

@@ -4,7 +4,7 @@ import { detectUserConfigFormat } from './user-config-codec.js';
 import {
   updateRouteCodexUserConfigStringScalarNativeSync,
   writeRouteCodexUserConfigFileNativeSync
-} from '../modules/llmswitch/bridge.js';
+} from '../modules/llmswitch/bridge/routing-integrations.js';
 
 export interface PersistedUserConfigFile {
   path: string;

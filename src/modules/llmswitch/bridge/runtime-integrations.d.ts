@@ -1,7 +1,7 @@
 /**
  * Runtime Integrations Bridge
  *
- * Snapshot hooks, responses conversation helpers, SSE converter, and
+ * Snapshot hooks, responses conversation helpers, native SSE runtime, and
  * provider runtime ingress hooks.
  */
 import type { ProviderErrorEvent, ProviderSuccessEvent } from "../../../types/llmswitch-local-types.js";

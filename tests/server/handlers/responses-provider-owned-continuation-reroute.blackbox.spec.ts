@@ -37,8 +37,15 @@ const mockBridgeWithStoplessStateStubs = async () => {
       return {};
     }),
     bootstrapVirtualRouterConfig: routing.bootstrapVirtualRouterConfig,
-    getHubPipelineCtor: routing.getHubPipelineCtor,
-    getHubPipelineCtorForImpl: routing.getHubPipelineCtorForImpl,
+    createHubPipelineNative: routing.createHubPipelineNative,
+    executeHubPipelineNative: routing.executeHubPipelineNative,
+    disposeHubPipelineNative: routing.disposeHubPipelineNative,
+    updateHubPipelineVirtualRouterConfigNative: routing.updateHubPipelineVirtualRouterConfigNative,
+    updateHubPipelineEngineDepsNative: routing.updateHubPipelineEngineDepsNative,
+    routeHubPipelineVirtualRouterNative: routing.routeHubPipelineVirtualRouterNative,
+    diagnoseHubPipelineVirtualRouterNative: routing.diagnoseHubPipelineVirtualRouterNative,
+    getHubPipelineVirtualRouterStatusNative: routing.getHubPipelineVirtualRouterStatusNative,
+    markHubPipelineVirtualRouterConcurrencyScopeBusyNative: routing.markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
     resolveBaseDir: routing.resolveBaseDir,
   };
 };
@@ -53,14 +60,10 @@ const express = (await import('express')).default;
 const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
 const { HubRequestExecutor } = await import('../../../src/server/runtime/http-server/request-executor.js');
 const { StatsManager } = await import('../../../src/server/runtime/http-server/stats-manager.js');
-const { bootstrapVirtualRouterConfig, getHubPipelineCtor } = await import('../../../src/modules/llmswitch/bridge.js');
+const { bootstrapVirtualRouterConfig } = await import('../../../src/modules/llmswitch/bridge.js');
+const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../../../tests/helpers/native-hub-pipeline-test-wrapper.js');
 
 type AddressInfo = import('node:net').AddressInfo;
-type HubPipelineCtor = new (config: any) => {
-  execute: (request: any) => Promise<any>;
-  dispose: () => void;
-};
-
 async function withServer<T>(app: ReturnType<typeof express>, run: (baseUrl: string) => Promise<T>): Promise<T> {
   const server = await new Promise<ReturnType<ReturnType<typeof express>['listen']>>((resolve) => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
@@ -121,7 +124,6 @@ describe('responses provider-owned continuation reroute blackbox', () => {
   });
 
   it('does not replay tool-result continuations on an alternative provider after provider.send throws', async () => {
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const providerCalls: string[] = [];
@@ -264,7 +266,6 @@ describe('responses provider-owned continuation reroute blackbox', () => {
   });
 
   it('reroutes relay submit_tool_outputs continuation away from responsesResume.providerKey on 429', async () => {
-    const HubPipeline = (await getHubPipelineCtor()) as unknown as HubPipelineCtor;
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const providerCalls: string[] = [];

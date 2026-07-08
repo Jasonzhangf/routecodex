@@ -5,13 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 const nativeModuleUrl = pathToFileURL(
-  path.join(
-    repoRoot,
-    'dist',
-    'native',
-    'router-hotpath',
-    'native-hub-pipeline-req-outbound-semantics.js'
-  )
+  path.join(repoRoot, 'dist', 'native', 'router-hotpath', 'native-hub-pipeline-req-outbound-semantics.js')
 ).href;
 
 async function importNativeFresh(tag) {
@@ -36,21 +30,6 @@ async function main() {
       }
     });
     assert.equal(result.nativeApplied, true);
-  }
-
-  {
-    const result = runReqOutboundStage3CompatWithNative({
-      payload: {
-        model: 'gpt-test',
-        messages: [{ role: 'user', content: 'hello-native-profile' }]
-      },
-      adapterContext: {
-        requestId: 'req_outbound_compat_cov_native_2',
-        providerProtocol: 'openai-chat',
-        compatibilityProfile: 'tabglm-claude-code'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
     assert.equal(result.appliedProfile, undefined);
   }
 
@@ -59,38 +38,59 @@ async function main() {
       payload: {
         model: 'gpt-test',
         max_tokens: 200,
-        instructions: '<b>native-c4m</b>',
+        instructions: '<b>native-crs</b>',
+        temperature: 0.2,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: { type: 'object', properties: { cmd: { type: 'string' } } }
+            }
+          }
+        ],
         input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] }]
       },
       adapterContext: {
-        requestId: 'req_outbound_compat_cov_native_3',
+        requestId: 'req_outbound_compat_cov_native_2',
         providerProtocol: 'openai-responses',
-        compatibilityProfile: 'responses:c4m'
+        compatibilityProfile: 'responses:crs'
       }
     });
     assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'responses:c4m');
-    assert.equal(result.payload.max_tokens, undefined);
-    assert.equal(result.payload.instructions, undefined);
-    assert.equal(result.payload.input?.[0]?.role, 'system');
+    assert.equal(result.appliedProfile, 'responses:crs');
+    assert.equal(result.payload.max_tokens, 200);
+    assert.equal(result.payload.instructions, '<b>native-crs</b>');
+    assert.equal(result.payload.temperature, undefined);
+    assert.equal(result.payload.tools?.[0]?.type, 'function');
+    assert.equal(result.payload.tools?.[0]?.name, 'exec_command');
+    assert.equal(result.payload.tools?.[0]?.function, undefined);
+    assert.equal(result.payload.input?.[0]?.role, 'user');
   }
 
   {
     const result = runReqOutboundStage3CompatWithNative({
       payload: {
-        system: [{ type: 'text', text: 'legacy system' }],
-        messages: [{ role: 'user', content: 'hello' }]
+        model: 'gpt-4.1',
+        tool_choice: { type: 'function', function: { name: 'exec_command' } },
+        input: [
+          { type: 'function_call', call_id: 'shell#1', name: 'exec_command', arguments: { cmd: 'pwd' } },
+          { type: 'function_call_output', id: 'result-item-1', output: 'ok' }
+        ]
       },
       adapterContext: {
-        requestId: 'req_outbound_compat_cov_native_4',
-        providerProtocol: 'anthropic-messages',
-        compatibilityProfile: 'chat:claude-code'
+        requestId: 'req_outbound_compat_cov_native_3',
+        providerProtocol: 'openai-responses',
+        compatibilityProfile: 'chat:lmstudio'
       }
     });
     assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'chat:claude-code');
-    assert.equal(result.payload.system?.[0]?.text, "You are Claude Code, Anthropic's official CLI for Claude.");
-    assert.equal(result.payload.messages?.[0]?.role, 'user');
+    assert.equal(result.appliedProfile, 'chat:lmstudio');
+    assert.equal(result.payload.tool_choice, undefined);
+    assert.equal(result.payload.input?.[0]?.call_id, 'call_shell_1');
+    assert.equal(result.payload.input?.[0]?.id, 'fc_shell_1');
+    assert.equal(result.payload.input?.[1]?.call_id, 'call_result-item-1');
+    assert.equal(result.payload.input?.[1]?.id, 'fc_result-item-1');
   }
 
   {
@@ -108,7 +108,7 @@ async function main() {
         ]
       },
       adapterContext: {
-        requestId: 'req_outbound_compat_cov_native_gemini_1',
+        requestId: 'req_outbound_compat_cov_native_4',
         providerProtocol: 'gemini-chat',
         compatibilityProfile: 'chat:gemini',
         routeId: 'search-primary'
@@ -118,29 +118,27 @@ async function main() {
     assert.equal(result.appliedProfile, 'chat:gemini');
     assert.equal(result.payload.web_search, undefined);
     assert.equal(result.payload.tools?.[0]?.functionDeclarations?.[0]?.name, 'web_search');
+    assert.equal(result.payload.tools?.[1]?.googleSearch?.dynamicRetrievalConfig?.mode, 'MODE_DYNAMIC');
   }
 
   {
     const result = runReqOutboundStage3CompatWithNative({
       payload: {
-        model: 'gpt-4.1',
-        tool_choice: { type: 'function', function: { name: 'exec_command' } },
-        input: [
-          { type: 'function_call', call_id: 'shell#1', name: 'exec_command', arguments: { cmd: 'pwd' } },
-          { type: 'function_call_output', id: 'output-1', output: 'ok' }
-        ]
+        id: 'dead-profile-request',
+        max_tokens: 200,
+        instructions: 'must not be transformed by removed profile',
+        input: []
       },
       adapterContext: {
-        requestId: 'req_outbound_compat_cov_native_6',
+        requestId: 'req_outbound_compat_cov_native_dead_profile',
         providerProtocol: 'openai-responses',
-        compatibilityProfile: 'chat:lmstudio'
+        compatibilityProfile: 'responses:c4m'
       }
     });
     assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'chat:lmstudio');
-    assert.equal(result.payload.tool_choice, undefined);
-    assert.equal(result.payload.input?.[0]?.call_id, 'call_shell_1');
-    assert.equal(result.payload.input?.[0]?.id, 'fc_shell_1');
+    assert.equal(result.appliedProfile, undefined);
+    assert.equal(result.payload.max_tokens, 200);
+    assert.equal(result.payload.instructions, 'must not be transformed by removed profile');
   }
 
   {
@@ -156,98 +154,69 @@ async function main() {
       }
     });
     assert.equal(result.nativeApplied, true);
-  }
-
-  {
-    const result = runRespInboundStage3CompatWithNative({
-      payload: {
-        id: 'resp-native-2',
-        object: 'response',
-        output: []
-      },
-      adapterContext: {
-        requestId: 'req_resp_inbound_compat_cov_native_2',
-        providerProtocol: 'openai-responses',
-        compatibilityProfile: 'chat:iflow'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
     assert.equal(result.appliedProfile, undefined);
   }
 
   {
     const result = runRespInboundStage3CompatWithNative({
       payload: {
-        id: 'resp-native-3',
-        status: 'completed',
+        object: 'response',
+        id: 'resp_lmstudio_1',
         output: [
           {
             type: 'message',
             role: 'assistant',
-            content: [{ type: 'output_text', text: 'native-choice' }]
+            content: [
+              {
+                type: 'output_text',
+                text: '• waiting...\\n<|tool_calls_section_begin|>\\n<|tool_call_begin|> functions.exec_command:66 <|tool_call_argument_begin|> {"cmd":"pwd"} <|tool_call_end|>\\n<|tool_calls_section_end|>\\n'
+              }
+            ]
+          }
+        ]
+      },
+      adapterContext: {
+        requestId: 'req_resp_inbound_compat_cov_native_2',
+        providerProtocol: 'openai-responses',
+        compatibilityProfile: 'chat:lmstudio'
+      }
+    });
+    assert.equal(result.nativeApplied, true);
+    assert.equal(result.appliedProfile, 'chat:lmstudio');
+    assert.equal(result.payload.output?.[0]?.type, 'function_call');
+    assert.equal(result.payload.output?.[0]?.name, 'exec_command');
+    assert.equal(result.payload.output?.[0]?.call_id, 'call_1');
+    assert.equal(result.payload.output?.[0]?.id, 'fc_1');
+  }
+
+  {
+    const result = runRespInboundStage3CompatWithNative({
+      payload: {
+        object: 'response',
+        id: 'resp_minimax_tool_text_1',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [
+              {
+                type: 'output_text',
+                text: '<function_calls>{"tool_calls":[{"name":"exec_command","arguments":{"cmd":"pwd"}}]}</function_calls>'
+              }
+            ]
           }
         ]
       },
       adapterContext: {
         requestId: 'req_resp_inbound_compat_cov_native_3',
         providerProtocol: 'openai-responses',
-        compatibilityProfile: 'responses:output2choices-test'
+        compatibilityProfile: 'chat:minimax'
       }
     });
     assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'responses:output2choices-test');
-    assert.equal(result.payload.choices?.[0]?.message?.content, 'native-choice');
-    assert.equal(result.payload.request_id, 'req_resp_inbound_compat_cov_native_3');
-  }
-
-  {
-    const result = runRespInboundStage3CompatWithNative({
-      payload: {
-        id: 'resp-native-4',
-        output_text: 'ok'
-      },
-      adapterContext: {
-        requestId: 'req_resp_inbound_compat_cov_native_4',
-        providerProtocol: 'openai-responses',
-        compatibilityProfile: 'responses:c4m'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'responses:c4m');
-    assert.equal(result.rateLimitDetected, undefined);
-  }
-
-  {
-    const result = runRespInboundStage3CompatWithNative({
-      payload: {
-        id: 'resp-native-5',
-        output_text: 'The Codex-For.ME service is available, but you have reached the request limit'
-      },
-      adapterContext: {
-        requestId: 'req_resp_inbound_compat_cov_native_5',
-        providerProtocol: 'openai-responses',
-        compatibilityProfile: 'responses:c4m'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'responses:c4m');
-    assert.equal(result.rateLimitDetected, true);
-  }
-
-  {
-    const result = runRespInboundStage3CompatWithNative({
-      payload: {
-        id: 'resp-native-6',
-        output: []
-      },
-      adapterContext: {
-        requestId: 'req_resp_inbound_compat_cov_native_6',
-        providerProtocol: 'anthropic-messages',
-        compatibilityProfile: 'chat:claude-code'
-      }
-    });
-    assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'chat:claude-code');
+    assert.equal(result.appliedProfile, 'chat:minimax');
+    assert.equal(result.payload.output?.[0]?.type, 'function_call');
+    assert.equal(result.payload.output?.[0]?.name, 'exec_command');
   }
 
   console.log('✅ coverage-hub-req-outbound-compat passed');

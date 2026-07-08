@@ -1,4 +1,4 @@
-import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-policy.js';
+import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-loader.js';
 import { parseJson, readNativeFunction, safeStringify } from './native-shared-conversion-semantics-core.js';
 
 function parseToolDefinitionArray(raw: string): Array<Record<string, unknown>> | null {

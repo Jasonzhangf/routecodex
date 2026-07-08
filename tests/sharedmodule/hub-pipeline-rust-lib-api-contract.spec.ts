@@ -11,7 +11,7 @@ jest.unstable_mockModule(
 
 // Mock native router hotpath policy
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-policy.js',
+  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js',
   () => ({
     isNativeDisabledByEnv: () => false,
     failNativeRequired: (_capability: string, reason?: string) => {

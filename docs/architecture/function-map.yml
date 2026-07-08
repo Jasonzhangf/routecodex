@@ -58,7 +58,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - docs
     forbidden_paths:
@@ -142,12 +142,12 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
       - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/stopless-metadata-center.spec.ts
       - docs
     forbidden_paths:
@@ -225,7 +225,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -257,7 +257,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -292,7 +292,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -324,7 +324,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
@@ -357,7 +357,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     forbidden_paths:
       - src/providers
       - src/server/runtime/http-server/executor
@@ -389,7 +389,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -424,7 +424,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - src/modules/llmswitch/bridge/native-exports.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
@@ -487,7 +487,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -518,7 +518,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -620,8 +620,8 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
@@ -655,7 +655,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -688,7 +688,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
@@ -722,7 +722,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -754,7 +754,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - docs
     forbidden_paths:
@@ -893,9 +893,9 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/native-exports.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
+      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -1777,12 +1777,12 @@ owners:
 
   - feature_id: hub.runtime_ingress_bridge
     status: active
-    summary: "HubPipeline TS lifecycle bridge for native Hub engine handle, Virtual Router runtime ingress, and deps wiring"
+    summary: "Hub Pipeline native handle bridge for engine lifecycle, Virtual Router runtime ingress, and deps wiring"
     owner_kind: ts_bridge
-    owner_scope: "HubPipeline TS lifecycle bridge for native Hub engine handle, Virtual Router runtime ingress, and deps wiring"
+    owner_scope: "Hub Pipeline native handle bridge for engine lifecycle, Virtual Router runtime ingress, and deps wiring"
     owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts
     canonical_types:
-      - HubPipeline
+      - HubPipelineHandle
     canonical_builders:
       - createHubPipelineEngineJson
       - hubPipelineExecuteJson
@@ -1790,7 +1790,7 @@ owners:
       - updateHubPipelineVirtualRouterConfigJson
       - updateHubPipelineEngineDepsJson
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
+      - src/server/runtime/http-server/http-server-runtime-setup.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine
       - tests/sharedmodule
@@ -1807,10 +1807,10 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "TS owns only lifecycle glue that calls native Hub engine handle and Virtual Router runtime ingress/deps APIs."
+      - "TS owns only lifecycle glue that passes native Hub engine handles and calls Virtual Router runtime ingress/deps APIs."
       - "Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback."
       - "Route selection, health, cooldown, and dependency semantics remain in Rust/native owners."
-      - "HubPipeline nested policy/tool-surface/request-metadata type shells are internal only; public barrel exports only live pipeline bridge types."
+      - "HubPipeline object construction is retired; server/runtime stores native handle strings only."
 
   - feature_id: hub.request_stage_pipeline_bridge
     status: active
@@ -1860,10 +1860,10 @@ owners:
       - chatEnvelopeToStandardized
       - standardizedToChatEnvelope
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts
+      - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts
       - sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
       - tests/sharedmodule
     forbidden_paths:
       - src/providers/core/runtime
@@ -1883,36 +1883,6 @@ owners:
     notes:
       - "ChatEnvelope and StandardizedRequest TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned."
       - "Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases must stay module-internal and absent from the public type surface."
-
-  - feature_id: hub.stage_timing_observation
-    status: active
-    summary: "Hub stage timing observation glue for logs and top-summary attachment"
-    owner_kind: ts_runtime_owner
-    owner_scope: "Hub stage timing observation glue for logs and top-summary attachment"
-    owner_module: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
-    canonical_types:
-      - HubStageTopSummaryEntry
-    canonical_builders:
-      - logHubStageTiming
-      - clearHubStageTiming
-      - peekHubStageTopSummary
-      - attachHubStageTopSummary
-    allowed_paths:
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-stage-timing.ts
-      - tests/sharedmodule
-    forbidden_paths:
-      - src/providers/core/runtime
-      - src/server/runtime/http-server/executor
-    required_tests:
-      - tests/sharedmodule/hub-stage-timing-top-summary.spec.ts
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-    required_gates:
-      - npm run verify:function-map-compile-gate
-      - npm run verify:llmswitch-core-tsc
-    migration_target: rust
-    notes:
-      - "Stage timing is observation/control metadata glue only; it must not mutate Hub data payloads."
-      - "Test-only `measureHubStage` wrappers are retired; tests should exercise the production `logHubStageTiming` API directly."
 
   - feature_id: hub.response_anthropic_client_projection
     status: active
@@ -2003,7 +1973,7 @@ owners:
     status: active
     summary: "Retired post-servertool response runtime-action bridge; provider-response fails fast when Rust returns servertoolRuntimeActions"
     owner_kind: rust_ssot
-    owner_scope: "Rust response effect normalization and servertool runtime-action retirement"
+    owner_scope: "File-scoped Rust response effect normalization and servertool runtime-action retirement"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
     canonical_types:
       - HubRespChatProcess03Governed
@@ -2014,7 +1984,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     forbidden_paths:
@@ -2089,7 +2059,7 @@ owners:
       - build_provider_sse_stream_read_error_descriptor
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath
     forbidden_paths:
       - src/providers
@@ -2109,7 +2079,7 @@ owners:
     notes:
       - "TS may read Node Readable streams and pass bytes to native; marker classification, bodyText/raw selection, missing-body fail-fast, and stream-read error descriptor semantics belong to Rust."
       - "`ProviderResponseConversionOptions` / `ProviderResponseConversionResult` are zero-consumer callback signature detail aliases and must stay module-internal; public TS response entry remains `convertProviderResponse`."
-      - "Dead provider-response-local `attachHubStageTopToContext` / `HubStageTopEntry` normalize/merge helpers were removed; hub stage top context attachment is owned by `hub-stage-timing.ts`."
+      - "Dead provider-response-local `attachHubStageTopToContext` / `HubStageTopEntry` normalize/merge helpers were removed; hub stage top context attachment is owned by the Rust Hub Pipeline timing/effect path."
 
   - feature_id: hub.response_provider_context_helpers
     status: active
@@ -2242,7 +2212,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts
+      - src/server/runtime/http-server/http-server-runtime-setup.ts
     forbidden_paths:
       - src/providers
       - src/server/handlers
@@ -2256,7 +2226,7 @@ owners:
     notes:
       - "All requestId generation must go through plan_chat_process_session_usage_json; TS must never locally compose `req_N_N`."
       - "Global counter file lives at ~/.rcc/state/global-request-counter.json; daily count resets when local date string changes."
-      - "Standalone TS `chat-process-session-usage.ts` shell is physically deleted; provider-response.ts may only invoke native `planChatProcessSessionUsage` and must not own scope resolution, token normalization, timestamping, or routing-state writes."
+      - "Standalone TS `chat-process-session-usage.ts` shell is physically deleted; provider-response host boundary may only invoke native `planChatProcessSessionUsage` and must not own scope resolution, token normalization, timestamping, or routing-state writes."
 
   - feature_id: tool.apply_patch_freeform_contract
     status: active
@@ -3695,7 +3665,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/modules/llmswitch/bridge
       - docs/architecture
       - tests/sharedmodule/responses-continuation-store.spec.ts
@@ -4327,7 +4297,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
       - src/cli/config/init-provider-catalog.ts
       - src/provider-sdk/provider-inspect.ts
       - src/provider-sdk/provider-runtime-inference.ts
@@ -4436,7 +4406,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts
     forbidden_paths:
-      - sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts
+      - src/modules/llmswitch/bridge/responses-conversation-store-host.ts
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - tests/sharedmodule/responses-continuation-store.spec.ts

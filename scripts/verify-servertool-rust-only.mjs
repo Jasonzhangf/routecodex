@@ -172,7 +172,7 @@ function checkDeletedServerSideToolRuntimeAbsent() {
 function checkNoActiveRuntimeRefs() {
   const files = activeRuntimeRoots.flatMap((root) => collectFiles(root));
   const allow = new Set([
-    repoPath('sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts'),
+    repoPath('src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
     repoPath('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts'),
   ]);
   for (const file of files) {
@@ -200,7 +200,7 @@ function checkNoActiveRuntimeRefs() {
 }
 
 function checkProviderResponseFailFastShell() {
-  const path = repoPath('sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts');
+  const path = repoPath('src/modules/llmswitch/bridge/provider-response-converter-host.ts');
   const source = readRequired(path);
   assertContains('provider-response-servertool-failfast', path, source, 'executeProviderResponseNativeServertoolEffects');
   assertContains('provider-response-servertool-failfast', path, source, 'server-side tool execution has been removed');
@@ -211,7 +211,7 @@ function checkProviderResponseFailFastShell() {
   for (const marker of deletedTsBridgeSymbols) {
     assertNotContains('provider-response-servertool-failfast', path, source, marker);
   }
-  pass('provider-response-servertool-failfast', 'provider-response has no server-side executor bridge');
+  pass('provider-response-servertool-failfast', 'provider-response host boundary has no server-side executor bridge');
 }
 
 function checkNativeExportSurface() {

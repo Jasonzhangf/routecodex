@@ -1,5 +1,5 @@
 import type { RouterMetadataInput } from './virtual-router-contracts.js';
-import { failNativeRequired } from './native-router-hotpath-policy.js';
+import { failNativeRequired } from './native-router-hotpath-loader.js';
 import {
   parseJson,
   parseRecord,

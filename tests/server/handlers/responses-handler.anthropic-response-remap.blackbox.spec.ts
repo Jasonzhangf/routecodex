@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
-import { convertProviderResponse } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.js';
+import { convertProviderResponse } from '../../../src/modules/llmswitch/bridge/provider-response-converter-host.js';
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);

@@ -3,7 +3,7 @@
  * 处理AuthFile机制的密钥解析
  */
 
-import { resolveAuthFileKeyNativeSync } from '../modules/llmswitch/bridge.js';
+import { resolveAuthFileKeyNativeSync } from '../modules/llmswitch/bridge/routing-integrations.js';
 import { resolveRccAuthDir } from './user-data-paths.js';
 
 export class AuthFileResolver {
