@@ -28062,3 +28062,10 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `tests/sharedmodule/hub-rust-pipeline-shadow.spec.ts` now imports the protocol wrapper path, and residue audit locks the retired aggregate wrapper path as physically absent.
 - Function/verification maps move `hub.runtime_ingress_bridge` ownership to `src/modules/llmswitch/bridge/routing-integrations.ts` plus Rust `hub_pipeline_engine`.
 - Verification PASS: focused Jest 205/205; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=77`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); `node --check src/modules/llmswitch/bridge/routing-integrations.js`; `git diff --check`.
+
+# 2026-07-09: llmswitch Hub metadata-policy wrapper deletion
+
+- Scope: continued zero-prod/no-host shell deletion pass after the aggregate runtime ingress wrapper deletion.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts`.
+- The only live references were the wrapper file itself, parser-observability test, and residue audit; tests now assert the old metadata-policy parser wrapper path is absent instead of preserving parser behavior for a retired shell.
+- Verification PASS: focused Jest 209/209; sharedmodule/root `tsc`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=76`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`prodTsFileCount=76`, `nonNativeFileCount=0`); exact old path scan only found absent-path assertions; `git diff --check`.

@@ -103,22 +103,13 @@ describe('native semantics parser observability', () => {
     warnSpy.mockRestore();
   });
 
-  it('logs metadata policy parser JSON failures before fail-fasting native capability', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const mod = await importWithNativeParseFailureMock<{
-      resolveStopMessageRouterMetadataWithNative: (
-        metadata: Record<string, unknown> | undefined
-      ) => Record<string, unknown>;
-    }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.js',
-      'resolveStopMessageRouterMetadataJson'
+  it('keeps retired metadata policy parser wrapper deleted', () => {
+    const retiredWrapperPath = new URL(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts',
+      import.meta.url
     );
 
-    expect(() => mod.resolveStopMessageRouterMetadataWithNative({})).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseStopMessageRouterMetadata failed (non-blocking)');
-
-    warnSpy.mockRestore();
+    expect(() => fs.statSync(retiredWrapperPath)).toThrow();
   });
 
   it('logs protocol parser JSON failures before fail-fasting native capability', async () => {

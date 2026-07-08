@@ -1699,3 +1699,9 @@
 - `hub.runtime_ingress_bridge` owner is now `src/modules/llmswitch/bridge/routing-integrations.ts` plus Rust `hub_pipeline_engine`; host bridge tests should mock `native-exports.getRouterHotpathJsonBindingSync()` / direct `router_hotpath_napi` capabilities, not the retired sharedmodule wrapper.
 - `routing-integrations.ts/js` should reuse the single host native binding loader from `native-exports`; do not reintroduce a second local native `.node` loader for HubPipeline handle calls.
 - Current shell audit after this deletion is `prodTsShellCount=77`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Hub metadata-policy parser TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts` is physically deleted. Do not restore `resolveStopMessageRouterMetadataWithNative` or its wrapper-local parser/logging behavior as a runtime TS shell.
+- Tests should lock the path as absent; parser observability should not keep retired zero-consumer wrappers alive.
+- Current shell audit after this deletion is `prodTsShellCount=76`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
