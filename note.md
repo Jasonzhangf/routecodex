@@ -28052,3 +28052,13 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Deleted `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.ts` and `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer/normalize.ts`.
 - Text markup tests now call direct Rust/NAPI capabilities through `tests/sharedmodule/helpers/text-markup-direct-native.ts`; `scripts/verify-apply-patch.mjs` now uses host bridge `normalizeAssistantTextToToolCallsJson`.
 - Verification PASS: focused text-markup/residue Jest 206/206; sharedmodule/root `tsc`; exact source/script ref scan for deleted subpaths; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=83`, `shellsWithProdImporters=69`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`).
+
+# 2026-07-09: llmswitch Hub runtime ingress aggregate wrapper deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts`.
+- `src/modules/llmswitch/bridge/routing-integrations.ts/js` now uses the existing `native-exports.getRouterHotpathJsonBindingSync()` direct `router_hotpath_napi` binding instead of a local duplicate native loader or the retired aggregate wrapper.
+- Runtime ingress tests now mock the direct native binding surface through `src/modules/llmswitch/bridge/native-exports.js`; they no longer mock `native-hub-pipeline-orchestration-semantics.js`.
+- `tests/sharedmodule/hub-rust-pipeline-shadow.spec.ts` now imports the protocol wrapper path, and residue audit locks the retired aggregate wrapper path as physically absent.
+- Function/verification maps move `hub.runtime_ingress_bridge` ownership to `src/modules/llmswitch/bridge/routing-integrations.ts` plus Rust `hub_pipeline_engine`.
+- Verification PASS: focused Jest 205/205; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=77`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); `node --check src/modules/llmswitch/bridge/routing-integrations.js`; `git diff --check`.

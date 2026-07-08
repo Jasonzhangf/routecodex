@@ -1783,7 +1783,7 @@ owners:
     summary: "Hub Pipeline native handle bridge for engine lifecycle, Virtual Router runtime ingress, and deps wiring"
     owner_kind: ts_bridge
     owner_scope: "Hub Pipeline native handle bridge for engine lifecycle, Virtual Router runtime ingress, and deps wiring"
-    owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts
+    owner_module: src/modules/llmswitch/bridge/routing-integrations.ts
     canonical_types:
       - HubPipelineHandle
     canonical_builders:
@@ -1794,13 +1794,14 @@ owners:
       - updateHubPipelineEngineDepsJson
     allowed_paths:
       - src/server/runtime/http-server/http-server-runtime-setup.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine
       - tests/sharedmodule
     forbidden_paths:
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
       - sharedmodule/llmswitch-core/src/router
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts
     forbidden_mentions_allowlist:
       - HubPipeline
     required_tests:
@@ -1810,6 +1811,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
+      - "Runtime ingress handle owner is the host bridge direct native binding plus Rust hub_pipeline_engine; the old aggregate TS wrapper `native-hub-pipeline-orchestration-semantics.ts` is physically deleted and must not be restored."
       - "TS owns only lifecycle glue that passes native Hub engine handles and calls Virtual Router runtime ingress/deps APIs."
       - "Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback."
       - "Route selection, health, cooldown, and dependency semantics remain in Rust/native owners."

@@ -4,9 +4,8 @@
  * Virtual router bootstrap + hub pipeline constructor + host base dir resolver.
  */
 import path from 'path';
-import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { resolveCorePackageDir } from '../core-loader.js';
+import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 let cachedNativeHubPipelineOrchestrationSemantics = null;
 function getNativeHubPipelineOrchestrationSemantics() {
     if (!cachedNativeHubPipelineOrchestrationSemantics) {
@@ -30,7 +29,6 @@ function getImportMetaUrlUnsafe() {
         return undefined;
     }
 }
-const nodeRequire = createRequire(getImportMetaUrlUnsafe() || path.join(process.cwd(), 'package.json'));
 function parseNativeJsonResult(raw) {
     const text = String(raw);
     if (text.startsWith('Error: ')) {
@@ -721,9 +719,7 @@ export function resolveRouteCodexConfigPathNativeSync(options = {}) {
     return output;
 }
 function loadNativeBindingForConfigCodec() {
-    const coreDir = resolveCorePackageDir();
-    const nativePath = path.join(coreDir, 'dist', 'native', 'router_hotpath_napi.node');
-    return nodeRequire(nativePath);
+    return getRouterHotpathJsonBindingSync();
 }
 function parseNativeTomlRecord(raw) {
     const parsed = JSON.parse(raw);

@@ -2506,8 +2506,9 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired hub orchestration public NAPI wrappers must not be restored without runtime consumers', () => {
     const repoRoot = process.cwd();
+    const retiredAggregateWrapperPath =
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
@@ -2598,6 +2599,8 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const findings: string[] = [];
 
+    expect(fs.existsSync(path.join(repoRoot, retiredAggregateWrapperPath))).toBe(false);
+
     for (const relativePath of scannedFiles) {
       const absolutePath = path.join(repoRoot, relativePath);
       if (!fs.existsSync(absolutePath)) {
@@ -2660,8 +2663,9 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired mappable semantics public wrapper must stay private to Rust process-mode internals', () => {
     const repoRoot = process.cwd();
+    const retiredAggregateWrapperPath =
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs',
@@ -2672,6 +2676,8 @@ describe('hub pipeline stage residue audit', () => {
       'find_mappable_semantics_keys_json',
     ];
     const findings: string[] = [];
+
+    expect(fs.existsSync(path.join(repoRoot, retiredAggregateWrapperPath))).toBe(false);
 
     for (const relativePath of scannedFiles) {
       const absolutePath = path.join(repoRoot, relativePath);

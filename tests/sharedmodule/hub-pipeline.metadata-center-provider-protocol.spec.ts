@@ -11,40 +11,22 @@ const nativeCalls = {
   diagnoseRoute: jest.fn<(handle: string, requestJson: string, metadataJson: string) => string>(),
   getStatus: jest.fn<(handle: string) => string>(),
   markConcurrencyScopeBusy: jest.fn<(handle: string, scopeKey: string) => void>(),
-  materializeRequest: jest.fn<(input: {
-    endpoint: string;
-    providerProtocol: string;
-    metadata: Record<string, unknown>;
-    metadataCenterSnapshot?: Record<string, unknown> | null;
-    payload: Record<string, unknown>;
-    payloadStream: boolean;
-  }) => {
-    endpoint: string;
-    entryEndpoint: string;
-    providerProtocol: string;
-    metadata: Record<string, unknown>;
-    metadataCenterSnapshot?: Record<string, unknown> | null;
-    processMode: 'chat';
-    direction: 'request';
-    stage: 'inbound';
-    stream: boolean;
-    disableSnapshots: boolean;
-  }>(),
 };
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.js',
+  '../../src/modules/llmswitch/bridge/native-exports.js',
   () => ({
-    createHubPipelineEngineJson: nativeCalls.create,
-    hubPipelineExecuteJson: nativeCalls.execute,
-    disposeHubPipelineEngineJson: nativeCalls.dispose,
-    updateHubPipelineVirtualRouterConfigJson: nativeCalls.updateConfig,
-    updateHubPipelineEngineDepsJson: nativeCalls.updateDeps,
-    hubPipelineVirtualRouterRouteJson: nativeCalls.route,
-    hubPipelineVirtualRouterDiagnoseRouteJson: nativeCalls.diagnoseRoute,
-    hubPipelineVirtualRouterStatusJson: nativeCalls.getStatus,
-    hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson: nativeCalls.markConcurrencyScopeBusy,
-    buildHubPipelineMaterializedRequestPlanWithNative: nativeCalls.materializeRequest,
+    getRouterHotpathJsonBindingSync: () => ({
+      createHubPipelineEngineJson: nativeCalls.create,
+      hubPipelineExecuteJson: nativeCalls.execute,
+      disposeHubPipelineEngineJson: nativeCalls.dispose,
+      updateHubPipelineVirtualRouterConfigJson: nativeCalls.updateConfig,
+      updateHubPipelineEngineDepsJson: nativeCalls.updateDeps,
+      hubPipelineVirtualRouterRouteJson: nativeCalls.route,
+      hubPipelineVirtualRouterDiagnoseRouteJson: nativeCalls.diagnoseRoute,
+      hubPipelineVirtualRouterStatusJson: nativeCalls.getStatus,
+      hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson: nativeCalls.markConcurrencyScopeBusy,
+    }),
   }),
 );
 
@@ -63,21 +45,9 @@ describe('HubPipeline metadata center request-route contract', () => {
     }
     nativeCalls.create.mockReturnValue(JSON.stringify({ handle: 'hp_metadata_center_test' }));
     nativeCalls.execute.mockReturnValue(JSON.stringify({ requestId: 'req_1', success: true, metadata: {}, nodeResults: [] }));
-    nativeCalls.materializeRequest.mockImplementation((input) => ({
-      endpoint: input.endpoint,
-      entryEndpoint: input.endpoint,
-      providerProtocol: 'openai-responses',
-      metadata: input.metadata,
-      ...(input.metadataCenterSnapshot ? { metadataCenterSnapshot: input.metadataCenterSnapshot } : {}),
-      processMode: 'chat',
-      direction: 'request',
-      stage: 'inbound',
-      stream: false,
-      disableSnapshots: false,
-    }));
   });
 
-  it('passes bound MetadataCenter snapshot into the native engine before provider route selection', async () => {
+  it('keeps bound MetadataCenter private unless server layer supplies a transport snapshot', async () => {
     const metadata: Record<string, unknown> = {
       entryEndpoint: '/v1/responses',
       direction: 'request',
@@ -104,22 +74,16 @@ describe('HubPipeline metadata center request-route contract', () => {
         metadata
       } as any);
 
-      expect(nativeCalls.materializeRequest).toHaveBeenCalledWith(expect.objectContaining({
-        providerProtocol: '',
-        metadataCenterSnapshot: expect.objectContaining({
-          runtimeControl: expect.objectContaining({
-            routeHint: 'thinking',
-          }),
-        }),
-      }));
-      expect(JSON.parse(nativeCalls.execute.mock.calls[0]![1])).toMatchObject({
-        providerProtocol: 'openai-responses',
-        metadataCenterSnapshot: {
-          runtimeControl: {
-            routeHint: 'thinking',
-          },
+      const nativeRequest = JSON.parse(nativeCalls.execute.mock.calls[0]![1]);
+      expect(nativeRequest).toMatchObject({
+        metadata: {
+          entryEndpoint: '/v1/responses',
+          direction: 'request',
+          stage: 'inbound',
         },
       });
+      expect(nativeRequest.metadata.__metadataCenter).toBeUndefined();
+      expect(nativeRequest.metadata.metadataCenterSnapshot).toBeUndefined();
     } finally {
       pipeline.dispose();
     }

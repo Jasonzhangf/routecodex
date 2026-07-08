@@ -6,17 +6,11 @@ describe('llmswitch bridge routing-integrations native error projection', () => 
   });
 
   it('throws native HubPipeline Error payload directly instead of wrapping it as invalid JSON', async () => {
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/module-loader.js', () => ({
-      importCoreDist: jest.fn(),
-      requireCoreDist: jest.fn((subpath: string) => {
-        if (subpath === 'native/router-hotpath/native-hub-pipeline-orchestration-semantics') {
-          return {
-            hubPipelineExecuteJson: jest.fn(() => (
-              'Error: hub_pipeline_missing_provider_protocol: HubPipeline requires metadata center runtime_control.providerProtocol'
-            )),
-          };
-        }
-        throw new Error(`unexpected requireCoreDist: ${subpath}`);
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+      getRouterHotpathJsonBindingSync: () => ({
+        hubPipelineExecuteJson: jest.fn(() => (
+          'Error: hub_pipeline_missing_provider_protocol: HubPipeline requires metadata center runtime_control.providerProtocol'
+        )),
       }),
     }));
 

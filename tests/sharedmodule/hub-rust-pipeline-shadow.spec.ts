@@ -1,7 +1,7 @@
 /**
  * HubPipeline Rust Shadow Test
  * Phase 1 Slice 0: Verify Rust runHubPipelineJson can process real fixture payloads.
- * Uses existing native-hub-pipeline-orchestration-semantics.ts wrapper.
+ * Uses the protocol wrapper; the aggregate orchestration semantics wrapper is retired.
  */
 import { describe, expect, test } from '@jest/globals';
 import fs from 'node:fs';
@@ -27,12 +27,20 @@ interface HubPipelineOutput {
   error?: { code?: string; message?: string };
 }
 
-let _semantics: typeof import('../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics.js') | null = null;
+let _semantics: typeof import('../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js') | null = null;
 
 async function getSemantics() {
   if (!_semantics) {
     const p = pathToFileURL(
-      path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'native', 'router-hotpath', 'native-hub-pipeline-orchestration-semantics.js')
+      path.join(
+        process.cwd(),
+        'sharedmodule',
+        'llmswitch-core',
+        'dist',
+        'native',
+        'router-hotpath',
+        'native-hub-pipeline-orchestration-semantics-protocol.js',
+      )
     ).href;
     _semantics = await import(p);
   }

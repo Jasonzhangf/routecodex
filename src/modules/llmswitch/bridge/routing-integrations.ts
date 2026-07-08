@@ -5,11 +5,11 @@
  */
 
 import path from 'path';
-import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { resolveCorePackageDir } from '../core-loader.js';
 import type { AnyRecord } from './module-loader.js';
+import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 
+// feature_id: hub.runtime_ingress_bridge
 type NativeHubPipelineOrchestrationSemantics = {
   createHubPipelineEngineJson?: (inputJson: string) => string;
   disposeHubPipelineEngineJson?: (handle: string) => void;
@@ -52,8 +52,6 @@ function getImportMetaUrlUnsafe(): string | undefined {
     return undefined;
   }
 }
-
-const nodeRequire = createRequire(getImportMetaUrlUnsafe() || path.join(process.cwd(), 'package.json'));
 
 function parseNativeJsonResult(raw: unknown): unknown {
   const text = String(raw);
@@ -926,9 +924,7 @@ export function resolveRouteCodexConfigPathNativeSync(options: {
 }
 
 function loadNativeBindingForConfigCodec(): AnyRecord {
-  const coreDir = resolveCorePackageDir();
-  const nativePath = path.join(coreDir, 'dist', 'native', 'router_hotpath_napi.node');
-  return nodeRequire(nativePath) as AnyRecord;
+  return getRouterHotpathJsonBindingSync() as unknown as AnyRecord;
 }
 
 function parseNativeTomlRecord(raw: string): AnyRecord {

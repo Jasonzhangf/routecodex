@@ -10,38 +10,36 @@ const nativeCalls = {
   diagnoseRoute: jest.fn<(handle: string, requestJson: string, metadataJson: string) => string>(),
   getStatus: jest.fn<(handle: string) => string>(),
   markConcurrencyScopeBusy: jest.fn<(handle: string, scopeKey: string) => void>(),
-  materializeRequest: jest.fn<(input: {
-    endpoint: string;
-    providerProtocol: string;
-    metadata: Record<string, unknown>;
-    metadataCenterSnapshot?: Record<string, unknown> | null;
-    payload: Record<string, unknown>;
-    payloadStream: boolean;
-  }) => {
-    endpoint: string;
-    entryEndpoint: string;
-    providerProtocol: string;
-    metadata: Record<string, unknown>;
-    metadataCenterSnapshot?: Record<string, unknown> | null;
-    processMode: 'chat';
-    direction: 'request' | 'response';
-    stage: 'inbound' | 'outbound';
-    stream: boolean;
-    disableSnapshots: boolean;
-  }>(),
 };
 
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.js', () => ({
-  createHubPipelineEngineJson: nativeCalls.create,
-  hubPipelineExecuteJson: nativeCalls.execute,
-  disposeHubPipelineEngineJson: nativeCalls.dispose,
-  updateHubPipelineVirtualRouterConfigJson: nativeCalls.updateConfig,
-  updateHubPipelineEngineDepsJson: nativeCalls.updateDeps,
-  hubPipelineVirtualRouterRouteJson: nativeCalls.route,
-  hubPipelineVirtualRouterDiagnoseRouteJson: nativeCalls.diagnoseRoute,
-  hubPipelineVirtualRouterStatusJson: nativeCalls.getStatus,
-  hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson: nativeCalls.markConcurrencyScopeBusy,
-  buildHubPipelineMaterializedRequestPlanWithNative: nativeCalls.materializeRequest,
+jest.unstable_mockModule('../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  getRouterHotpathJsonBindingSync: () => ({
+    createHubPipelineEngineJson: nativeCalls.create,
+    hubPipelineExecuteJson: nativeCalls.execute,
+    disposeHubPipelineEngineJson: nativeCalls.dispose,
+    updateHubPipelineVirtualRouterConfigJson: nativeCalls.updateConfig,
+    updateHubPipelineEngineDepsJson: nativeCalls.updateDeps,
+    hubPipelineVirtualRouterRouteJson: nativeCalls.route,
+    hubPipelineVirtualRouterDiagnoseRouteJson: nativeCalls.diagnoseRoute,
+    hubPipelineVirtualRouterStatusJson: nativeCalls.getStatus,
+    hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson: nativeCalls.markConcurrencyScopeBusy,
+    resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/rcc-test')),
+    parseRoutingInstructionKindsJson: jest.fn(() => JSON.stringify([])),
+    buildStopMessageMarkerParseLogJson: jest.fn(() => JSON.stringify(null)),
+    emitStopMessageMarkerParseLogJson: jest.fn(() => JSON.stringify({ ok: true })),
+    cleanStopMessageMarkersInPlaceJson: jest.fn((requestJson: string) => requestJson),
+    resolveVirtualRouterStopMessageScopeJson: jest.fn(() => JSON.stringify(null)),
+    resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify(null)),
+    createVirtualRouterHitRecordJson: jest.fn(() => JSON.stringify({
+      timestamp: '2026-07-09T00:00:00.000Z',
+      requestId: 'req_direct',
+      sessionId: '',
+      route: 'default',
+      providerKey: 'primary.key1.gpt-test',
+      hitReason: 'test',
+    })),
+    formatVirtualRouterHitJson: jest.fn(() => '[virtual-router-hit] test'),
+  }),
 }));
 
 const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../helpers/native-hub-pipeline-test-wrapper.js');
@@ -60,18 +58,6 @@ describe('HubPipeline runtime ingress wiring', () => {
     }));
     nativeCalls.diagnoseRoute.mockReturnValue(JSON.stringify({ ok: true }));
     nativeCalls.getStatus.mockReturnValue(JSON.stringify({ routes: {}, health: {}, forwarders: {} }));
-    nativeCalls.materializeRequest.mockImplementation((input) => ({
-      endpoint: input.endpoint,
-      entryEndpoint: input.endpoint,
-      providerProtocol: input.providerProtocol,
-      metadata: input.metadata,
-      ...(input.metadataCenterSnapshot ? { metadataCenterSnapshot: input.metadataCenterSnapshot } : {}),
-      processMode: 'chat',
-      direction: 'request',
-      stage: 'inbound',
-      stream: input.payloadStream,
-      disableSnapshots: false,
-    }));
   });
 
   it('creates and disposes the native HubPipeline engine handle', () => {
@@ -103,9 +89,9 @@ describe('HubPipeline runtime ingress wiring', () => {
     expect(() => pipeline.dispose()).toThrow('native dispose rejected');
   });
 
-  it('uses native materialized request plan before executing', async () => {
+  it('passes request payload directly into the native HubPipeline engine', async () => {
     const pipeline = new HubPipeline({ virtualRouter: {} });
-    await pipeline.execute({
+    const request = {
       id: 'req_native_protocol',
       endpoint: '/v1/responses',
       payload: { model: 'gpt-test' },
@@ -115,45 +101,15 @@ describe('HubPipeline runtime ingress wiring', () => {
           runtimeControl: { providerProtocol: 'openai-responses' },
         },
       },
-    });
+    };
+    await pipeline.execute(request);
 
-    expect(nativeCalls.materializeRequest).toHaveBeenCalledWith({
-      endpoint: '/v1/responses',
-      providerProtocol: 'responses',
-      metadata: {
-        providerProtocol: 'responses',
-        metadataCenterSnapshot: {
-          runtimeControl: { providerProtocol: 'openai-responses' },
-        },
-      },
-      metadataCenterSnapshot: {
-        runtimeControl: { providerProtocol: 'openai-responses' },
-      },
-      payload: { model: 'gpt-test' },
-      payloadStream: false,
-    });
     const requestJson = JSON.parse(nativeCalls.execute.mock.calls[0]![1]);
-    expect(requestJson.providerProtocol).toBe('responses');
-    expect(requestJson.metadataCenterSnapshot).toEqual({
-      runtimeControl: { providerProtocol: 'openai-responses' },
-    });
+    expect(requestJson).toEqual(request);
   });
 
-  it('does not require selected providerProtocol before request-route selection', async () => {
+  it('does not require selected providerProtocol before entering the native engine', async () => {
     const pipeline = new HubPipeline({ virtualRouter: {} });
-    nativeCalls.materializeRequest.mockImplementationOnce((input) => ({
-      endpoint: input.endpoint,
-      entryEndpoint: input.endpoint,
-      providerProtocol: 'openai-responses',
-      metadata: input.metadata,
-      ...(input.metadataCenterSnapshot ? { metadataCenterSnapshot: input.metadataCenterSnapshot } : {}),
-      processMode: 'chat',
-      direction: 'request',
-      stage: 'inbound',
-      stream: false,
-      disableSnapshots: false,
-    }));
-
     await pipeline.execute({
       id: 'req_route_before_provider_protocol',
       endpoint: '/v1/responses',
@@ -166,7 +122,13 @@ describe('HubPipeline runtime ingress wiring', () => {
     });
 
     expect(nativeCalls.execute).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(nativeCalls.execute.mock.calls[0]![1]).providerProtocol).toBe('openai-responses');
+    expect(JSON.parse(nativeCalls.execute.mock.calls[0]![1])).toMatchObject({
+      metadata: {
+        entryEndpoint: '/v1/responses',
+        direction: 'request',
+        stage: 'inbound',
+      },
+    });
   });
 
   it('exposes virtual router operations through the native HubPipeline handle', () => {
@@ -181,7 +143,15 @@ describe('HubPipeline runtime ingress wiring', () => {
     expect(route.decision?.providerKey).toBe('primary.key1.gpt-test');
     expect(diagnostics).toEqual({ ok: true });
     expect(status).toEqual({ routes: {}, health: {}, forwarders: {} });
-    expect(nativeCalls.route).toHaveBeenCalledWith('hp_test', JSON.stringify({ model: 'gpt-test' }), JSON.stringify({ requestId: 'req_direct' }));
+    expect(nativeCalls.route).toHaveBeenCalledWith(
+      'hp_test',
+      JSON.stringify({ model: 'gpt-test' }),
+      expect.stringContaining('"requestId":"req_direct"'),
+    );
+    expect(JSON.parse(nativeCalls.route.mock.calls[0]![2])).toMatchObject({
+      requestId: 'req_direct',
+      __rt: { rccUserDir: '/tmp/rcc-test' },
+    });
     expect(nativeCalls.diagnoseRoute).toHaveBeenCalledWith('hp_test', JSON.stringify({ model: 'gpt-test' }), JSON.stringify({ requestId: 'req_diag' }));
     expect(nativeCalls.getStatus).toHaveBeenCalledWith('hp_test');
     expect(nativeCalls.markConcurrencyScopeBusy).toHaveBeenCalledWith('hp_test', 'primary.key1.gpt-test');

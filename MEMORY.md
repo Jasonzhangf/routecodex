@@ -1692,3 +1692,10 @@
 - `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.ts` and `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer/normalize.ts` are physically deleted. Do not restore them as public `conversion/shared/text-markup-normalizer` subpaths.
 - Text tool-call extraction and assistant-text normalization truth remains Rust/NAPI (`extract*Tool*FromTextJson`, `normalizeAssistantTextToToolCallsJson`). Tests should call direct native helper code; host scripts should use the host bridge native export.
 - Current llmswitch shell audit metric after this deletion is `prodTsShellCount=83`, `shellsWithProdImporters=69`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Hub runtime ingress aggregate TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts` is physically deleted. Do not restore it as an aggregate runtime ingress wrapper or mock target.
+- `hub.runtime_ingress_bridge` owner is now `src/modules/llmswitch/bridge/routing-integrations.ts` plus Rust `hub_pipeline_engine`; host bridge tests should mock `native-exports.getRouterHotpathJsonBindingSync()` / direct `router_hotpath_napi` capabilities, not the retired sharedmodule wrapper.
+- `routing-integrations.ts/js` should reuse the single host native binding loader from `native-exports`; do not reintroduce a second local native `.node` loader for HubPipeline handle calls.
+- Current shell audit after this deletion is `prodTsShellCount=77`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
