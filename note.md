@@ -27943,3 +27943,14 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - Removed these retired facades from `coverage-bridge-protocol-blackbox.mjs`; residue audit now locks source files as physically deleted.
   - Verification: `prodTsShellCount=94`, `nonNativeFileCount=0`; sharedmodule/root tsc, `verify:llmswitch-ts-shell-reference-audit`, zero-ts, minimal TS surface, rustification audit, residue audit 191/191, diff check.
 - Next blocker: `native-{chat,anthropic,gemini}-sse-event-payload.ts` have no prod importers, but they are still named in function/verification maps and tests import their dist wrappers / assert source path. They are not safe to delete until maps/tests are moved to Rust NAPI direct verification.
+
+# 2026-07-09: llmswitch SSE event-payload wrapper deletion
+
+- Scope: continue `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` after module-loader and zero-import facade commits.
+- Commit `f08420d refactor(llmswitch): delete SSE event wrappers`:
+  - Deleted `native-chat-sse-event-payload.ts`, `native-anthropic-sse-event-payload.ts`, and `native-gemini-sse-event-payload.ts`.
+  - Moved chat/anthropic/gemini JSON->SSE tests from old TS wrapper imports to direct `router_hotpath_napi.node` calls.
+  - Function map and verification map now state these JSON->SSE sequence owners are direct Rust/NAPI; TS is stream IO shell only.
+  - Residue audit locks the three wrapper source paths as physically deleted and scans source roots for revival references.
+- Verification PASS: focused SSE/residue Jest 220/220; `verify:sse-architecture-boundary`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=91`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); sharedmodule/root `tsc`; exact source ref scan for deleted wrapper paths; `git diff --check`.
+- Follow-up caution: `native-virtual-router-bootstrap-providers.ts` is zero-prod but not safe to delete in this pass. Direct Rust NAPI did not satisfy the existing auth-alias regression expectations, so the attempted deletion was reverted before commit; do not remove that wrapper until the Rust bootstrap contract and tests are reconciled.
