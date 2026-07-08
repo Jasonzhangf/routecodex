@@ -1076,7 +1076,7 @@ verification:
       - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts
       - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
+      - tests/sharedmodule/helpers/standardized-bridge-direct-native.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/chat-semantics-stage1.spec.ts
@@ -1651,7 +1651,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
+      - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
@@ -1686,7 +1686,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
@@ -1702,7 +1702,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
@@ -1718,7 +1718,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:

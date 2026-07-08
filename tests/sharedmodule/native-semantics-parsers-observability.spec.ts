@@ -128,22 +128,13 @@ describe('native semantics parser observability', () => {
     warnSpy.mockRestore();
   });
 
-  it('logs req outbound parser JSON failures before fail-fasting native capability', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const mod = await importWithNativeParseFailureMock<{
-      applyClaudeThinkingToolSchemaCompatWithNative: (payload: Record<string, unknown>) => Record<string, unknown>;
-    }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js',
-      'applyClaudeThinkingToolSchemaCompatJson'
+  it('keeps retired req outbound aggregate parser wrapper deleted', () => {
+    const retiredWrapperPath = new URL(
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
+      import.meta.url
     );
 
-    expect(() => mod.applyClaudeThinkingToolSchemaCompatWithNative({ tools: [] })).toThrow(
-      'native applyClaudeThinkingToolSchemaCompatJson execution failed: invalid payload'
-    );
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseJsonObject parse failed (non-blocking)');
-
-    warnSpy.mockRestore();
+    expect(() => fs.statSync(retiredWrapperPath)).toThrow();
   });
 
   it('logs req inbound parser JSON failures before fail-fasting native capability', async () => {

@@ -1868,7 +1868,6 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts
       - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
       - tests/sharedmodule
       - tests/sharedmodule/helpers/standardized-bridge-direct-native.ts
@@ -2556,10 +2555,11 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
     forbidden_paths:
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
       - src/providers/core/runtime
       - src/server/runtime/http-server
       - src/modules/llmswitch

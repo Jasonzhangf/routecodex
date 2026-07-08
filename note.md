@@ -28103,3 +28103,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Tests now use `tests/sharedmodule/helpers/sse-direct-native.ts` or mock `src/modules/llmswitch/bridge/native-exports.js` direct binding capabilities instead of importing/mocking the retired wrapper path.
 - Function/mainline/verification maps now record Rust `sse_runtime_dispatch.rs` plus host bridge direct NAPI callers (`provider-response-converter-host.ts`, `runtime-integrations.ts`) as the runtime owners; retired public-surface contract is anchored to the script helper only as deleted-shell evidence.
 - Verification PASS: focused SSE/provider-response/residue Jest 209/209; `verify:sse-architecture-boundary`; `verify:function-map-compile-gate`; strict shell audit `prodTsShellCount=72`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`; zero-ts closeout; minimal TS surface; rustification audit `nonNativeFileCount=0`; sharedmodule/root `tsc`; script syntax checks; `git diff --check`.
+
+# 2026-07-09: llmswitch req_outbound aggregate wrapper deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts`.
+- Test helpers now call direct `router_hotpath_napi.node` exports for req outbound compat and standardized->chat envelope evidence: `buildNativeReqOutboundCompatAdapterContextJson`, `runReqOutboundStage3CompatJson`, `runRespInboundStage3CompatJson`, and `standardizedToChatEnvelopeJson`.
+- Architecture gates no longer read the retired wrapper source. They check required native exports and assert the old wrapper path stays physically absent.
+- `tests/sharedmodule/chat-semantics-stage1.spec.ts` now provides explicit minimal Virtual Router config, provider route, and MetadataCenter snapshot to match current Rust fail-fast contracts.
+- Verification PASS: focused Jest 220/220; req_outbound Responses/OpenAI rust-only architecture gates; `verify:function-map-compile-gate`; strict shell audit `prodTsShellCount=71`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`; zero-ts closeout; minimal TS surface; rustification audit `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact old wrapper ref scan only found forbidden/absent gate references; `git diff --check`.

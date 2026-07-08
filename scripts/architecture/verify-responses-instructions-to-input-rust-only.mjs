@@ -10,7 +10,7 @@ function read(relPath) {
 
 const rustRequestCompat = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs');
 const reqProfiles = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs');
-const nativeReqOutboundBridge = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts');
+const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
 const functionMap = read('docs/architecture/function-map.yml');
 const verificationMap = read('docs/architecture/verification-map.yml');
 
@@ -48,8 +48,12 @@ if (fs.existsSync(path.join(root, 'sharedmodule/llmswitch-core/src/conversion/hu
   failures.push('compat-engine TS runtime shell must stay physically deleted');
 }
 
-if (!nativeReqOutboundBridge.includes('runReqOutboundStage3CompatJson')) {
-  failures.push('native req-outbound bridge missing runReqOutboundStage3CompatJson');
+if (!requiredExports.includes('runReqOutboundStage3CompatJson')) {
+  failures.push('native required exports missing runReqOutboundStage3CompatJson');
+}
+
+if (fs.existsSync(path.join(root, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts'))) {
+  failures.push('native-hub-pipeline-req-outbound-semantics TS wrapper must stay physically deleted');
 }
 
 const forbiddenRuntimeFiles = [

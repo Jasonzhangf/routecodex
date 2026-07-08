@@ -133,7 +133,32 @@ describe('Chat semantics stage 1 bridge', () => {
     metadataOverrides?: Record<string, unknown>
   ) {
     const result = runHubPipelineLibWithNative({
-      config: { virtualRouter: {} },
+      config: {
+        virtualRouter: {
+          providers: {
+            'test.key1.gpt-test': {
+              providerKey: 'test.key1.gpt-test',
+              providerType: 'openai',
+              providerProtocol: 'openai-chat',
+              runtimeKey: 'test.key1',
+              modelId: 'gpt-test',
+              enabled: true,
+              outboundProfile: 'openai-chat',
+              endpoint: 'mock://test',
+              auth: { type: 'apikey', apiKey: 'test-key' },
+            },
+          },
+          routes: {},
+          routing: {
+            default: [{
+              id: 'default',
+              priority: 100,
+              mode: 'priority',
+              targets: ['test.key1.gpt-test'],
+            }],
+          },
+        },
+      },
       request: {
         requestId: 'req-sem-process',
         endpoint: '/v1/chat/completions',
@@ -147,6 +172,15 @@ describe('Chat semantics stage 1 bridge', () => {
             target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
             decision: { routeName: 'test/preselected' },
             diagnostics: {},
+          },
+        },
+        metadataCenterSnapshot: {
+          requestTruth: {
+            requestId: 'req-sem-process',
+            entryEndpoint: '/v1/chat/completions',
+          },
+          runtimeControl: {
+            providerProtocol: 'openai-chat',
           },
         },
         stream: false,

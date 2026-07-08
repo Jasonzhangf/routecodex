@@ -359,15 +359,15 @@ chains:
       - step_id: req-05
         from_node: HubReqOutbound05ProviderSemantic
         to_node: ProviderReqOutbound06WirePayload
-        caller_symbol: runReqOutboundStage3CompatWithNative
-        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
-        callee_symbol: run_req_outbound_stage3_compat_json
+        caller_symbol: execute
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: run_req_outbound_stage3_compat
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
         owner_feature_id: responses.request_compat_normalization
         semantic_input: "provider-neutral outbound semantic"
         semantic_output: "provider-compatible wire-ready semantic payload"
         status: anchored
-        note: "Req-05 is anchored at the native/Rust compat boundary: TS normalizes only the optional profile token and invokes `runReqOutboundStage3CompatWithNative`, while `run_req_outbound_stage3_compat_json` owns provider wire compatibility. Locked by `verify:responses-request-compat-rust-only` and `build:base`."
+        note: "Req-05 is anchored inside the Rust HubPipeline engine: `execute(...)` invokes `run_req_outbound_stage3_compat(...)` directly, and the JSON NAPI entrypoint is only test/script evidence. The retired TS wrapper `native-hub-pipeline-req-outbound-semantics.ts` must stay physically deleted. Locked by `verify:responses-request-compat-rust-only` and `build:base`."
 
   - chain_id: responses.direct_passthrough.mainline
     summary: "Responses same-protocol direct keeps the current request body as provider wire, uses Virtual Router only for target selection, and must not preflight, sanitize, repair, or replay historical tool shape in the server layer."

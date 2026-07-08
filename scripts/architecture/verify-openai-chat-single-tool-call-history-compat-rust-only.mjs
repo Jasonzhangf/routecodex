@@ -61,7 +61,6 @@ const forbiddenRuntimeFiles = [
   'src/providers/core/runtime/responses-provider.ts',
   'src/server/runtime/http-server/index.ts',
   'src/server/runtime/http-server/executor/provider-request-context.ts',
-  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
 ];
 
 for (const relPath of forbiddenRuntimeFiles) {
@@ -78,6 +77,10 @@ for (const relPath of forbiddenRuntimeFiles) {
 
 if (fs.existsSync(path.join(root, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts'))) {
   failures.push('compat-engine TS runtime shell must stay physically deleted');
+}
+
+if (fs.existsSync(path.join(root, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts'))) {
+  failures.push('native-hub-pipeline-req-outbound-semantics TS wrapper must stay physically deleted');
 }
 
 if (failures.length > 0) {

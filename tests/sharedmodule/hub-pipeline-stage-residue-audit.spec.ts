@@ -3081,10 +3081,11 @@ describe('hub pipeline stage residue audit', () => {
       repoRoot,
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-parsers.ts'
     );
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts'),
-      'utf8'
+    const aggregateWrapperPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts'
     );
+    const source = fs.readFileSync(path.join(repoRoot, 'tests/sharedmodule/helpers/compat-engine-direct-native.ts'), 'utf8');
     const forbiddenPatterns = [
       { label: 'imports deleted parser facade', pattern: /native-hub-pipeline-req-outbound-semantics-parsers/u },
       { label: 'payload object validation', pattern: /const payloadRaw = row\.payload/u },
@@ -3098,6 +3099,7 @@ describe('hub pipeline stage residue audit', () => {
       .map(({ label }) => label);
 
     expect(fs.existsSync(parserPath)).toBe(false);
+    expect(fs.existsSync(aggregateWrapperPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 
@@ -3626,9 +3628,9 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const retiredFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics-types.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
     ];
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',

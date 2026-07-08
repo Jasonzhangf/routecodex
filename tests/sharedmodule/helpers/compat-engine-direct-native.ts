@@ -1,16 +1,39 @@
 import type { AdapterContext } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import { readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.js';
-import {
-  buildNativeReqOutboundCompatAdapterContextWithNative,
-  runReqOutboundStage3CompatWithNative,
-  runRespInboundStage3CompatWithNative,
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js';
 import { normalizeProviderProtocolTokenWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 
 // Native evidence anchors: run_req_outbound_stage3_compat_json,
 // normalize_responses_function_tools, normalize_responses_tool_parameters,
 // apply_responses_instructions_to_input, apply_responses_crs_request_compat.
+// feature_id: responses.request_compat_normalization
+// canonical_builders: run_req_outbound_stage3_compat_json
+
+const nodeRequire = createRequire(import.meta.url);
+const nativeBinding = nodeRequire(
+  path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+) as Record<string, unknown>;
+
+function nativeFn(name: string): (...args: unknown[]) => unknown {
+  const fn = nativeBinding[name];
+  if (typeof fn !== 'function') {
+    throw new Error(`${name} native export is required`);
+  }
+  return fn as (...args: unknown[]) => unknown;
+}
+
+function parseNativeRecord(raw: unknown, capability: string): Record<string, unknown> {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error(`${capability} returned invalid payload`);
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${capability} returned non-object payload`);
+  }
+  return parsed as Record<string, unknown>;
+}
 
 export interface CompatApplicationResult {
   payload: JsonObject;
@@ -34,9 +57,12 @@ export function buildNativeReqOutboundCompatAdapterContextDirectNative(adapterCo
   const row = (adapterContext ?? {}) as Record<string, unknown>;
   const metadataCenterSnapshot =
     readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(row)?.metadataCenterSnapshot;
-  return buildNativeReqOutboundCompatAdapterContextWithNative({
-    metadataCenterSnapshot: metadataCenterSnapshot ?? null,
-  });
+  return parseNativeRecord(
+    nativeFn('buildNativeReqOutboundCompatAdapterContextJson')(JSON.stringify({
+      metadataCenterSnapshot: metadataCenterSnapshot ?? null,
+    })),
+    'buildNativeReqOutboundCompatAdapterContextJson'
+  );
 }
 
 export function applyRequestCompatDirectNative(
@@ -45,11 +71,14 @@ export function applyRequestCompatDirectNative(
   options?: { adapterContext?: AdapterContext },
 ): CompatApplicationResult {
   normalizeProviderProtocolTokenWithNative('openai-responses');
-  const nativeCompat = runReqOutboundStage3CompatWithNative({
+  const nativeCompat = parseNativeRecord(nativeFn('runReqOutboundStage3CompatJson')(JSON.stringify({
     payload,
     explicitProfile: normalizeProfileId(profileId),
     adapterContext: buildNativeReqOutboundCompatAdapterContextDirectNative(options?.adapterContext),
-  });
+  })), 'runReqOutboundStage3CompatJson') as unknown as {
+    payload: JsonObject;
+    appliedProfile?: string;
+  };
   return toCompatResult(nativeCompat.payload, nativeCompat.appliedProfile);
 }
 
@@ -59,10 +88,13 @@ export function applyResponseCompatDirectNative(
   options?: { adapterContext?: AdapterContext },
 ): CompatApplicationResult {
   normalizeProviderProtocolTokenWithNative('openai-responses');
-  const nativeCompat = runRespInboundStage3CompatWithNative({
+  const nativeCompat = parseNativeRecord(nativeFn('runRespInboundStage3CompatJson')(JSON.stringify({
     payload,
     explicitProfile: normalizeProfileId(profileId),
     adapterContext: buildNativeReqOutboundCompatAdapterContextDirectNative(options?.adapterContext),
-  });
+  })), 'runRespInboundStage3CompatJson') as unknown as {
+    payload: JsonObject;
+    appliedProfile?: string;
+  };
   return toCompatResult(nativeCompat.payload, nativeCompat.appliedProfile);
 }

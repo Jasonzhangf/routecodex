@@ -1730,3 +1730,11 @@
 - Script evidence uses `scripts/helpers/sse-direct-native.mjs`; test evidence uses `tests/sharedmodule/helpers/sse-direct-native.ts`; both load `sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node` and call `buildSseFramesFromJsonJson` / `buildJsonFromSseJson` directly.
 - Runtime ownership remains Rust `sse_runtime_dispatch.rs`; host IO callsites are `src/modules/llmswitch/bridge/provider-response-converter-host.ts` for JSON->SSE frames and `src/modules/llmswitch/bridge/runtime-integrations.ts` for SSE->JSON body collection/materialization.
 - Current shell audit after this deletion is `prodTsShellCount=72`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Req outbound aggregate TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts` is physically deleted. Do not restore `runReqOutboundStage3CompatWithNative`, `runRespInboundStage3CompatWithNative`, `buildNativeReqOutboundCompatAdapterContextWithNative`, `standardizedToChatEnvelopeWithNative`, or `applyClaudeThinkingToolSchemaCompatWithNative` as sharedmodule runtime wrapper exports.
+- Tests needing req_outbound compat or standardized->chat envelope evidence should call direct `router_hotpath_napi.node` exports through test-only helpers. Current direct exports are `buildNativeReqOutboundCompatAdapterContextJson`, `runReqOutboundStage3CompatJson`, `runRespInboundStage3CompatJson`, and `standardizedToChatEnvelopeJson`.
+- Req-05 mainline owner is Rust `hub_pipeline_lib/engine.rs::execute` -> `req_outbound_stage3_compat::run_req_outbound_stage3_compat`; JSON NAPI entrypoints are evidence surfaces, not runtime TS owners.
+- Chat semantics tests using Rust HubPipeline must provide explicit minimal Virtual Router config, default provider route, and `metadataCenterSnapshot.runtimeControl.providerProtocol`; Rust VR correctly fail-fasts on missing routing config, missing metadataCenterSnapshot, or empty provider pool.
+- Current shell audit after this deletion is `prodTsShellCount=71`, `shellsWithProdImporters=64`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
