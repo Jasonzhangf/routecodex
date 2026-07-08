@@ -444,10 +444,6 @@ describe('direct server contract', () => {
         }],
       },
     };
-    (server as any).hubPipeline = {
-      execute: jest.fn(),
-      updateVirtualRouterConfig: jest.fn(),
-    };
     installNativeHubPipelineRoute(server, 'gateway_direct_5520');
     jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
       used: false,

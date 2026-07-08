@@ -16,7 +16,11 @@ import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context
 import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { runWithPortRequestContext } from './port-log-context.js';
-import { readHubPipelineVirtualRouter } from './hub-pipeline-handle.js';
+import {
+  diagnoseHubPipelineVirtualRouterNative,
+  getHubPipelineVirtualRouterStatusNative,
+} from '../../../modules/llmswitch/bridge/routing-integrations.js';
+import { readHubPipelineNativeHandle } from './hub-pipeline-handle.js';
 
 function logRoutesNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   try {
@@ -28,7 +32,8 @@ function logRoutesNonBlockingError(stage: string, error: unknown, details?: Reco
 }
 
 function readVirtualRouterRuntimeStatus(hubPipeline: unknown): unknown | null {
-  return readHubPipelineVirtualRouter(hubPipeline)?.getStatus() ?? null;
+  const handle = readHubPipelineNativeHandle(hubPipeline);
+  return handle ? getHubPipelineVirtualRouterStatusNative(handle) : null;
 }
 
 function readVirtualRouterRuntimeDryRun(
@@ -36,7 +41,8 @@ function readVirtualRouterRuntimeDryRun(
   request: Record<string, unknown>,
   metadata: Record<string, unknown>
 ): unknown | null {
-  return readHubPipelineVirtualRouter(hubPipeline)?.diagnoseRoute(request, metadata) ?? null;
+  const handle = readHubPipelineNativeHandle(hubPipeline);
+  return handle ? diagnoseHubPipelineVirtualRouterNative(handle, request, metadata) : null;
 }
 
 interface RouteOptions {

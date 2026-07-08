@@ -16,10 +16,7 @@ import {
   updateHubPipelineEngineDepsNative,
   updateHubPipelineVirtualRouterConfigNative
 } from '../../../modules/llmswitch/bridge/routing-integrations.js';
-import {
-  createHubPipelineRuntimeHandle,
-  readHubPipelineNativeHandle,
-} from './hub-pipeline-handle.js';
+import { readHubPipelineNativeHandle } from './hub-pipeline-handle.js';
 
 type RoutingProviderScope = {
   providerKeys: string[];
@@ -79,10 +76,10 @@ async function rebuildRoutingPolicyGroupHubPipelines(args: {
     const existingHandle = readHubPipelineNativeHandle(existing);
     if (existingHandle) {
       updateHubPipelineVirtualRouterConfigNative(existingHandle, config.virtualRouter as Record<string, unknown>);
-      next.set(group, createHubPipelineRuntimeHandle(existingHandle));
+      next.set(group, existingHandle);
     } else {
       const handle = createHubPipelineNative(config as unknown as Record<string, unknown>);
-      next.set(group, createHubPipelineRuntimeHandle(handle));
+      next.set(group, handle);
     }
   }
   for (const [group, pipeline] of previous.entries()) {
@@ -356,7 +353,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
     hubConfig.routingStateStore = routingStateStore;
   }
   if (!server.hubPipeline) {
-    server.hubPipeline = createHubPipelineRuntimeHandle(createHubPipelineNative(hubConfig as unknown as Record<string, unknown>));
+    server.hubPipeline = createHubPipelineNative(hubConfig as unknown as Record<string, unknown>);
   } else {
     const existing = readHubPipelineNativeHandle(server.hubPipeline);
     if (existing) {
@@ -372,7 +369,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
         });
       }
       updateHubPipelineVirtualRouterConfigNative(existing, bootstrapArtifacts.config as unknown as Record<string, unknown>);
-      server.hubPipeline = createHubPipelineRuntimeHandle(existing);
+      server.hubPipeline = existing;
     }
   }
 

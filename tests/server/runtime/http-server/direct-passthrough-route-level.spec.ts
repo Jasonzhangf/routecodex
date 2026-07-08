@@ -66,48 +66,11 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integ
 }));
 
 jest.unstable_mockModule('../../../../src/server/runtime/http-server/hub-pipeline-handle.js', () => ({
-  createHubPipelineRuntimeHandle: (handle: string) => ({
-    handle,
-    getVirtualRouter: () => ({
-      route: (request: Record<string, unknown>, metadata: Record<string, unknown>) => {
-        if (!activeNativeRouteMock) {
-          throw new Error('native HubPipeline VR route mock is not installed');
-        }
-        return activeNativeRouteMock(request, metadata);
-      },
-      getStatus: () => ({}),
-      diagnoseRoute: () => ({ diagnostics: {} }),
-    }),
-  }),
   readHubPipelineNativeHandle: (pipeline: unknown) => {
     if (typeof pipeline === 'string' && pipeline.trim()) {
       return pipeline;
     }
-    if (pipeline && typeof pipeline === 'object' && !Array.isArray(pipeline)) {
-      const handle = (pipeline as Record<string, unknown>).handle;
-      if (typeof handle === 'string' && handle.trim()) {
-        return handle;
-      }
-    }
     return null;
-  },
-  readHubPipelineVirtualRouter: (pipeline: unknown) => {
-    if (pipeline && typeof pipeline === 'object' && !Array.isArray(pipeline)) {
-      const getVirtualRouter = (pipeline as Record<string, unknown>).getVirtualRouter;
-      if (typeof getVirtualRouter === 'function') {
-        return getVirtualRouter.call(pipeline);
-      }
-    }
-    return {
-      route: (request: Record<string, unknown>, metadata: Record<string, unknown>) => {
-        if (!activeNativeRouteMock) {
-          throw new Error('native HubPipeline VR route mock is not installed');
-        }
-        return activeNativeRouteMock(request, metadata);
-      },
-      getStatus: () => ({}),
-      diagnoseRoute: () => ({ diagnostics: {} }),
-    };
   },
 }));
 
@@ -118,6 +81,43 @@ function installNativeHubPipelineRoute(server: any, routingPolicyGroup: string, 
   server.hubPipelinesByRoutingPolicyGroup = new Map([
     [routingPolicyGroup, 'mock_hub_pipeline_handle'],
   ]);
+  server.pipelineRuntimeConfigByRoutingPolicyGroup = new Map([
+    [routingPolicyGroup, { routingProviderIds: readProviderIdsForRoutingPolicyGroup(server, routingPolicyGroup) }],
+  ]);
+}
+
+function readProviderIdsForRoutingPolicyGroup(server: any, routingPolicyGroup: string): string[] {
+  const group = server.userConfig?.virtualrouter?.routingPolicyGroups?.[routingPolicyGroup];
+  const routing = group && typeof group === 'object' && !Array.isArray(group)
+    ? (group as Record<string, unknown>).routing
+    : undefined;
+  const ids = new Set<string>();
+  if (routing && typeof routing === 'object' && !Array.isArray(routing)) {
+    for (const tiers of Object.values(routing as Record<string, unknown>)) {
+      if (!Array.isArray(tiers)) {
+        continue;
+      }
+      for (const tier of tiers) {
+        if (!tier || typeof tier !== 'object' || Array.isArray(tier)) {
+          continue;
+        }
+        const targets = (tier as Record<string, unknown>).targets;
+        if (!Array.isArray(targets)) {
+          continue;
+        }
+        for (const target of targets) {
+          if (typeof target !== 'string') {
+            continue;
+          }
+          const providerId = target.split('.').map((part) => part.trim()).find(Boolean);
+          if (providerId) {
+            ids.add(providerId);
+          }
+        }
+      }
+    }
+  }
+  return [...ids].sort();
 }
 
 describe('direct passthrough route-level', () => {
@@ -171,6 +171,9 @@ describe('direct passthrough route-level', () => {
         }),
       },
     }]]);
+    (server as any).providerKeyToRuntimeKey = new Map([
+      ['opencode-zen-free.deepseek-v4-flash-free', runtimeKey],
+    ]);
 
     await (server as any).initialize();
     (server as any).runtimeReadyResolved = true;
@@ -257,6 +260,9 @@ describe('direct passthrough route-level', () => {
         }),
       },
     }]]);
+    (server as any).providerKeyToRuntimeKey = new Map([
+      ['opencode-zen-free.deepseek-v4-flash-free', runtimeKey],
+    ]);
 
     await (server as any).initialize();
     (server as any).runtimeReadyResolved = true;
@@ -854,10 +860,17 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey: 'cc.key1.gpt-5.5',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'cc.key1.gpt-5.5',
+        modelId: 'gpt-5.5',
+      },
+      decision: { routeName: 'thinking', pool: ['cc.key1.gpt-5.5'], reason: 'thinking:test' },
+      diagnostics: {},
+    })));
 
   });
 
@@ -896,10 +909,17 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey: 'cc.key1.gpt-5.5',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'cc.key1.gpt-5.5',
+        modelId: 'gpt-5.5',
+      },
+      decision: { routeName: 'thinking', pool: ['cc.key1.gpt-5.5'], reason: 'thinking:test' },
+      diagnostics: {},
+    })));
 
     const directSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
       used: true,
@@ -974,10 +994,17 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey: 'orangeai.key1.glm-5.2',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'orangeai.key1.glm-5.2',
+        modelId: 'glm-5.2',
+      },
+      decision: { routeName: 'longcontext', pool: ['orangeai.key1.glm-5.2'], reason: 'longcontext:test' },
+      diagnostics: {},
+    })));
 
     const result = await (server as any).executePortAwarePipeline(5555, {
       requestId: 'req_router_direct_must_skip_relay_owned_scope_materialize',
@@ -1046,10 +1073,17 @@ describe('direct passthrough route-level', () => {
         }],
       },
     };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5520', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', jest.fn(() => ({
+      target: {
+        providerKey: 'cc.key1.gpt-5.5',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'cc.key1.gpt-5.5',
+        modelId: 'gpt-5.5',
+      },
+      decision: { routeName: 'thinking', pool: ['cc.key1.gpt-5.5'], reason: 'thinking:test' },
+      diagnostics: {},
+    })));
 
     const result = await (server as any).executePortAwarePipeline(5520, {
       requestId: 'openai-responses-router-gpt-5.5-tools-stopmessage',
@@ -1098,10 +1132,17 @@ describe('direct passthrough route-level', () => {
         },
       },
     };
-    (server as any).hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline]
-    ]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey: 'mimo.key1.model-a',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'mimo.key1.model-a',
+        modelId: 'model-a',
+      },
+      decision: { routeName: 'default', pool: ['mimo.key1.model-a'], reason: 'default:test' },
+      diagnostics: {},
+    })));
     const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({ status: 200, body: { ok: true } } as any);
 
     await (server as any).executePortAwarePipeline(5555, {

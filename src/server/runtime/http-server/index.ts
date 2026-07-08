@@ -208,7 +208,8 @@ import {
   REQUEST_EXECUTOR_NON_BLOCKING_LOG_THROTTLE_MS,
 } from './executor/request-executor-runtime-blocks.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
-import { readHubPipelineVirtualRouter } from './hub-pipeline-handle.js';
+import { routeHubPipelineVirtualRouterNative } from '../../../modules/llmswitch/bridge/routing-integrations.js';
+import { readHubPipelineNativeHandle } from './hub-pipeline-handle.js';
 
 const ROUTER_DIRECT_PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;
 const routerDirectProviderSwitchLogState = new Map<string, { lastAtMs: number; suppressed: number }>();
@@ -992,8 +993,8 @@ export class RouteCodexHttpServer {
     if (runtimeControl.preselectedRoute) {
       return nextInput;
     }
-    const virtualRouter = readHubPipelineVirtualRouter(this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup));
-    if (!virtualRouter) {
+    const hubPipelineHandle = readHubPipelineNativeHandle(this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup));
+    if (!hubPipelineHandle) {
       return nextInput;
     }
     const rawPayload = requireDirectPassthroughPayloadObject(input.body);
@@ -1003,7 +1004,7 @@ export class RouteCodexHttpServer {
       metadataCenterSnapshot,
     };
     bindExistingMetadataCenter(metadata, metadataForRoute);
-    const routeResult = virtualRouter.route(rawPayload, metadataForRoute) as {
+    const routeResult = routeHubPipelineVirtualRouterNative(hubPipelineHandle, rawPayload, metadataForRoute) as {
       target?: Record<string, unknown>;
       decision?: Record<string, unknown>;
       diagnostics?: Record<string, unknown>;
@@ -1552,8 +1553,8 @@ export class RouteCodexHttpServer {
 
     const rawDirectPayload = requireDirectPassthroughPayloadObject(input.body);
     const inboundProtocol = resolveInboundProtocolFromEntryPath(input.entryEndpoint);
-    const virtualRouter = readHubPipelineVirtualRouter(this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup));
-    if (!virtualRouter) {
+    const hubPipelineHandle = readHubPipelineNativeHandle(this.resolveHubPipelineForRoutingPolicyGroup(portConfig.routingPolicyGroup));
+    if (!hubPipelineHandle) {
       this.logStage('router-direct.skipped', input.requestId, { reason: 'virtual-router-not-ready' });
       return { used: false, reason: 'virtual-router-not-ready' };
     }
@@ -1564,7 +1565,7 @@ export class RouteCodexHttpServer {
       diagnostics?: Record<string, unknown>;
     };
     try {
-      routeResult = virtualRouter.route(rawDirectPayload, routerDirectRouteMetadata) as typeof routeResult;
+      routeResult = routeHubPipelineVirtualRouterNative(hubPipelineHandle, rawDirectPayload, routerDirectRouteMetadata) as typeof routeResult;
     } catch (error) {
       if (isPoolExhaustedPipelineError(error)) {
         this.logStage('router-direct.pool_exhausted', input.requestId, {

@@ -52,6 +52,7 @@
     "verify:mempalace-scan-artifacts": "node scripts/ci/mempalace-scan-artifact-audit.mjs",
     "verify:llmswitch-rustification-audit": "node scripts/ci/llmswitch-rustification-audit.mjs",
     "verify:llmswitch-minimal-ts-surface": "node scripts/ci/verify-llmswitch-minimal-ts-surface.mjs",
+    "verify:llmswitch-zero-ts-closeout": "node scripts/ci/verify-llmswitch-zero-ts-closeout.mjs",
     "verify:vr-no-ts-runtime": "node scripts/architecture/verify-vr-no-ts-runtime.mjs",
     "verify:vr-no-fallback-semantics": "node scripts/architecture/verify-vr-no-fallback-semantics.mjs",
     "verify:file-line-limit": "node scripts/ci/check-file-line-limit.mjs",
