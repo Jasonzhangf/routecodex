@@ -179,6 +179,15 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 routing-integrations host bridge shell refs direct-native wired
+
+- `src/modules/llmswitch/bridge/routing-integrations.ts/js` no longer imports `importCoreDist` / `requireCoreDist` or loads `native-hub-pipeline-orchestration-semantics`, `native-virtual-router-bootstrap-config`, or `runtime/virtual-router-host-effects`.
+- HubPipeline handle calls and VR bootstrap now call direct `router_hotpath_napi` binding functions.
+- Virtual router route host effects are local host IO/object mutation only; marker parsing, stop-scope resolution, marker cleanup planning, session color key, hit record/format, forced stop label, and `rccUserDir` resolution call direct Rust NAPI capabilities.
+- Strict reference audit improved to `shellsWithHostTextRefs=3` and `coreModuleSubpathRefs=10`; host bridge refs now list only `snapshot-recorder.ts/js -> conversion/hub/snapshot-recorder`.
+- Verification passed: focused Jest 210/210, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule tsc, root tsc, JS syntax check, and `git diff --check`.
+- Remaining work: close `snapshot-recorder.ts/js`, then proceed to module-loader/package/internal fan-out and deletion candidates.
+
 ### 2026-07-09 native-exports host bridge shell loaders direct-native wired
 
 - `src/modules/llmswitch/bridge/native-exports.ts/js` no longer imports `importCoreDist` / `requireCoreDist` from `module-loader.ts/js`.

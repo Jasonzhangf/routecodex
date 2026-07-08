@@ -1,3 +1,13 @@
+# 2026-07-09: routing-integrations host bridge shell refs direct-native wired
+
+- Scope: continue llmswitch-core TS shell reference closeout for `src/modules/llmswitch/bridge/routing-integrations.ts/js`.
+- Change: removed host bridge loading of `native/router-hotpath/native-hub-pipeline-orchestration-semantics`, `native/router-hotpath/native-virtual-router-bootstrap-config`, and `runtime/virtual-router-host-effects`.
+- Change: HubPipeline handle calls and VR bootstrap now call direct `router_hotpath_napi` binding functions; route host effects are local host IO while marker parsing, stop scope, marker cleanup, session color key, hit record creation, hit formatting, stop status label, and `rccUserDir` resolution remain Rust NAPI-owned.
+- Exact refs: routing-integrations scan for the three old subpaths and `importCoreDist/requireCoreDist` returned zero old path matches.
+- Strict reference audit improved from `shellsWithHostTextRefs=6`, `coreModuleSubpathRefs=16` to `shellsWithHostTextRefs=3`, `coreModuleSubpathRefs=10`; host bridge refs now list only `snapshot-recorder.ts/js -> conversion/hub/snapshot-recorder`.
+- Verification PASS: focused Jest 210/210 (`routing-integrations`, `routecodex-config-loader-rust`, `virtual-router-hit-log`, `hub-pipeline-stage-residue-audit`); `verify:llmswitch-ts-shell-reference-audit`; zero-ts closeout; minimal TS surface; rustification audit; sharedmodule tsc; root tsc; `node --check routing-integrations.js`; `git diff --check`.
+- Remaining work: `snapshot-recorder.ts/js` still holds the only host bridge shell subpath ref in the strict audit output.
+
 # 2026-07-09: native-exports host bridge shell loaders direct-native wired
 
 - Scope: continue llmswitch-core TS shell reference closeout for `src/modules/llmswitch/bridge/native-exports.ts/js`.
