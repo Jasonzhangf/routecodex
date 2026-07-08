@@ -1215,10 +1215,6 @@ describe('hub pipeline stage residue audit', () => {
   it('format-adapters public surface must stay deleted after StageRecorder type owner merge', () => {
     const repoRoot = process.cwd();
     const retiredPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/format-adapters/index.ts');
-    const hubPipelineTypesSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts'),
-      'utf8',
-    );
 
     const liveSourceRoots = [
       path.join(repoRoot, 'sharedmodule/llmswitch-core/src'),
@@ -1237,10 +1233,18 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(fs.existsSync(retiredPath)).toBe(false);
     expect(staleImports).toEqual([]);
-    expect(hubPipelineTypesSource).not.toContain('export interface StageRecorder');
     expect(fs.readFileSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/src/servertool/types.ts'), 'utf8')).toContain(
       'export interface StageRecorder',
     );
+  });
+
+  it('HubPipeline zero-consumer pipeline type shell must stay physically deleted', () => {
+    const retiredPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts',
+    );
+
+    expect(fs.existsSync(retiredPath)).toBe(false);
   });
 
   it('hub json type surface must stay type-only without runtime helper exports', () => {
@@ -2250,13 +2254,7 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(hubRoot, relativePath)));
 
-    const pipelineTypesPath = path.join(hubRoot, 'pipeline/hub-pipeline-types.ts');
-    const pipelineTypesSource = fs.readFileSync(pipelineTypesPath, 'utf8');
-    const findings = collectMatches(pipelineTypesSource, [
-      { label: 'imports TS tool-surface engine type', pattern: /tool-surface\/tool-surface-engine/ },
-    ]);
-
-    expect({ existingFiles, findings }).toEqual({ existingFiles: [], findings: [] });
+    expect(existingFiles).toEqual([]);
   });
 
   it('legacy TS virtual router tool-signal classifier must be physically removed', () => {
@@ -4117,10 +4115,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('HubPipeline type barrel must not export zero-consumer nested config shells', () => {
-    const typesSource = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts'),
-      'utf8',
+  it('HubPipeline deleted type shell must not be re-exported or restored', () => {
+    const retiredTypesPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts',
     );
     const barrelSource = fs.readFileSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts'),
@@ -4138,21 +4136,14 @@ describe('hub pipeline stage residue audit', () => {
     const exportBlock = barrelSource.match(/export type\s*\{[\s\S]*?\}\s*from\s*["']\.\/hub-pipeline-types\.js["'];/)?.[0] ?? '';
 
     for (const name of forbidden) {
-      const exportedDeclaration = new RegExp(`export\\s+(?:type|interface)\\s+${name}\\b`);
-      if (exportedDeclaration.test(typesSource)) {
-        findings.push(`exported nested type ${name}`);
-      }
       if (exportBlock.includes(name)) {
         findings.push(`barrel re-exports nested type ${name}`);
       }
     }
 
+    expect(fs.existsSync(retiredTypesPath)).toBe(false);
     expect(findings).toEqual([]);
-    expect(typesSource).not.toContain('export interface HubPipelineConfig');
-    expect(typesSource).not.toContain('export interface HubPipelineRequest');
-    expect(typesSource).not.toContain('export interface HubPipelineResult');
-    expect(typesSource).not.toContain('export interface NormalizedRequest');
-    expect(typesSource).toContain('export type ProviderProtocol');
+    expect(barrelSource).not.toContain('./hub-pipeline-types.js');
   });
 
   it('HubPipeline compat types must not restore retired profile/mapping type shells', () => {

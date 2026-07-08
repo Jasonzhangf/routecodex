@@ -18,28 +18,27 @@ The current "thin shell" state is an intermediate checkpoint, not the final targ
 
 ## Current Audit Snapshot
 
-Observed from source/doc-only audit on 2026-07-07 after the latest public-barrel shrink slice:
+Observed from source/doc-only audit on 2026-07-08 after the latest zero-consumer type-shell deletion slice:
 
 - `npm run verify:llmswitch-minimal-ts-surface -- --json`: PASS.
-- `minimal-ts-surface.json` has 13 entries and now also gates public-barrel shrink rules:
-  - 10 current non-native production TS files.
+- `minimal-ts-surface.json` has 12 entries and now also gates public-barrel/type-shell shrink rules:
+  - 9 current non-native production TS files.
   - 3 explicit native-linked TS shells.
 - `sharedmodule/llmswitch-core/src/index.ts` no longer publicly exports `convertProviderResponse` or `telemetry/stats-center`; the minimal TS surface gate rejects their reintroduction and rejects runtime `export *` of `virtual-router-contracts`.
 - `npm run verify:llmswitch-rustification-audit -- --json`: PASS.
 - Current audit metrics:
-- `prodTsFileCount`: 126
-- `prodTsLocTotal`: 27379
-  - `nonNativeFileCount`: 10
-  - `nonNativeLocTotal`: 2432
+- `prodTsFileCount`: 122
+- `prodTsLocTotal`: 27304
+  - `nonNativeFileCount`: 9
+  - `nonNativeLocTotal`: 2427
 - Categories:
-  - `type_shell_ok`: 6
+  - `type_shell_ok`: 5
   - `ts_io_shell_ok`: 4
   - `diagnostic_io_ok`: 1
-  - `native_shell_ok`: 1
+  - `native_shell_ok`: 2
 - Current manifest entries:
   - `conversion/hub/response/provider-response.ts` (`ts_io_shell_ok`, native-linked)
   - `conversion/shared/responses-conversation-store.ts` (`ts_io_shell_ok`)
-  - `conversion/hub/pipeline/hub-pipeline-types.ts` (`type_shell_ok`)
   - `conversion/hub/pipeline/hub-stage-timing.ts` (`diagnostic_io_ok`)
   - `conversion/hub/types/chat-envelope.ts` (`type_shell_ok`)
   - `conversion/hub/types/json.ts` (`type_shell_ok`)
@@ -52,6 +51,7 @@ Observed from source/doc-only audit on 2026-07-07 after the latest public-barrel
 - Current hard reference locks:
 - `sharedmodule/llmswitch-core/src/index.ts` still publicly exports native bootstrap/provider ingress/failure policy and type-only VR contracts; provider-response and stats-center root exports are removed and gated.
   - `src/types/llmswitch-core.d.ts` still declares public modules for `provider-response.js`, `virtual-router-contracts.js`, `native-router-hotpath-policy.js`, and `stats-center.js`.
+  - `conversion/hub/pipeline/hub-pipeline-types.ts` has been physically deleted after source/test/script import audit found no runtime/source consumers; residue gate blocks restoration and re-export.
   - `scripts/lib/build-core-utils.mjs` still requires dist outputs for `conversion/hub/response/provider-response.js` and `conversion/shared/responses-conversation-store.js`.
   - `responses.continuation.mainline` edge `rct-06` is still `convertProviderResponse -> recordResponsesResponse`, so store deletion is blocked until the canonical save edge no longer names TS caller/callee.
   - `src/modules/llmswitch/bridge/response-converter.ts` loads `conversion/hub/response/provider-response` as the host response conversion bridge.
@@ -149,7 +149,7 @@ Source/test/script import audit on 2026-07-07:
 | --- | ---: | --- |
 | `provider-response.ts` | 10 direct import/export locks plus bridge dynamic load | Cannot delete until `response-converter.ts` and public barrel stop loading it. |
 | `responses-conversation-store.ts` | 7 direct import locks plus required dist output | Cannot delete until `rct-06` no longer calls the TS store and tests move to native/server boundary. |
-| `hub-pipeline-types.ts` | 6 direct import locks, mostly servertool shells | Servertool shell types must move to generated/native or local host boundary types. |
+| `hub-pipeline-types.ts` | 0 active source/test/script import locks; physically deleted | Keep deleted with residue gate; old generated declaration blocker was stale. |
 | `hub-stage-timing.ts` | 4 direct import locks | Diagnostic owner must move before stage timing can disappear. |
 | `chat-envelope.ts` | 24 direct import locks | Broad servertool/test type dependency; delete only after generated declarations or local test fixtures replace it. |
 | `json.ts` | 36 direct import locks | Base type dependency; needs generated/common boundary replacement first. |

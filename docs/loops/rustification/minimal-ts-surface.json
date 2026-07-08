@@ -26,18 +26,6 @@
       ]
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-types.ts",
-      "classification": "type_shell_ok",
-      "ownerFeature": "hub.pipeline_contract_surface",
-      "minimumTsRole": "Type declarations for TS host/Rust bridge boundaries.",
-      "cannotShrinkFurtherBecause": "Current Node package compiles TS callers against these structural types; further removal requires a separate Rust-generated declaration pipeline, not Hub runtime migration.",
-      "forbiddenSemantics": [
-        "pipeline execution",
-        "route selection",
-        "payload mutation"
-      ]
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts",
       "classification": "native_shell_ok",
       "ownerFeature": "hub.runtime_ingress_bridge",
